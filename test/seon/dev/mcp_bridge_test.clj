@@ -1,767 +1,273 @@
 (ns seon.dev.mcp-bridge-test
-  (:require [clojure.data.json :as json]
-            [clojure.core.server :as core.server]
+  "The MCP bridge as pure transport, driven through an explicit world value:
+  discovery and prepl are fakes (or a silent socket), never a JVM."
+  (:require [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.cluster]
-            [seon.error.refusal]
-            [seon.schema]
-            [seon.config]
-            [seon.test-support]
-            [clojure.test :refer [deftest is testing]])
-  (:import [java.io PushbackReader]
-           [java.util.concurrent TimeUnit TimeoutException]))
+            [clojure.test :refer [deftest is]]
+            [seon.dev.mcp :as mcp])
+  (:import [java.net ServerSocket]
+           [java.util.concurrent TimeUnit]))
 
-(def ^:private project-root
-  (io/file (System/getProperty "user.dir")))
+(def ^:private source-file (io/file "script/seon/dev/mcp.clj"))
 
-(def ^:private server-source
-  (io/file project-root "script/seon/dev/mcp.clj"))
+(def ^:private live-advertisement
+  {:seon.boot/cluster-name "default" :seon.boot/pid 11
+   :seon.boot/start-instant #inst "2026-09-28T00:00:00Z"
+   :seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1})
 
-(def ^:private launcher
-  (io/file project-root "bin/mcp-server"))
+(def ^:private jvm-tools
+  (json/generate-string [{:name "eval_clj" :description "from the JVM" :inputSchema {:type "object"}}]))
 
-(def ^:private loaded-bridge
-  (delay (load-file (.getPath server-source))))
+(def ^:private empty-result "{\"content\":[],\"isError\":false}")
 
-(defn- bridge-var
-  [var-symbol]
-  @loaded-bridge
-  (or (ns-resolve 'seon.dev.mcp var-symbol)
-      (throw (ex-info "The MCP bridge var did not resolve."
-                      {:seon.dev.mcp-test/symbol var-symbol}))))
-
-(defn- result-data
-  [result]
-  (json/read-str (get-in result [:content 0 :text]) :key-fn keyword))
-
-(defn- current-process-start-date
+(defn- temp-root
+  "A fresh operator root directory."
+  {:malli/schema [:=> [:cat] :string]}
   []
-  (java.util.Date/from
-   (.get (.startInstant (.info (java.lang.ProcessHandle/current))))))
+  (str (java.nio.file.Files/createTempDirectory
+        "mcp-bridge" (make-array java.nio.file.attribute.FileAttribute 0))))
 
-(defn- advertisement
-  [cluster pid start-instant]
-  {:seon.boot/cluster-name cluster
-   :seon.boot/prepl-host "127.0.0.1"
-   :seon.boot/prepl-port 31337
-   :seon.boot/pid pid
-   :seon.boot/start-instant start-instant})
-
-(defn- delete-known-files!
-  [files]
-  (doseq [file (reverse files)]
-    (when (.exists ^java.io.File file)
-      (is (.delete ^java.io.File file)
-          "Could not delete MCP fixture path"))))
-
-(defn- reap-process-handle!
-  [^java.lang.ProcessHandle handle]
-  (when (.isAlive handle)
-    (.destroy handle))
-  (try
-    (.get (.onExit handle) 10 TimeUnit/SECONDS)
-    (catch TimeoutException _
-      (.destroyForcibly handle)
-      (.get (.onExit handle) 10 TimeUnit/SECONDS)))
+(defn- delete-root!
+  "Delete a root `temp-root` made, never following symlinks."
+  {:malli/schema [:=> [:cat :string] :nil]}
+  [root]
+  (doseq [file (reverse (file-seq (io/file root)))
+          :when (not (java.nio.file.Files/isSymbolicLink (.toPath ^java.io.File file)))]
+    (.delete ^java.io.File file))
   nil)
 
-(defn- reap-process!
-  [^Process process]
-  (reap-process-handle! (.toHandle process)))
+(defn- fake-world
+  "A world under `root` advertising `advertisements`, whose JVM answers
+  `jvm-tools` to the tool list and `call-result` to a call; each form it
+  receives is appended to the volatile at `::sent`."
+  {:malli/schema [:=> [:cat :string [:vector :map] [:maybe :string]] :map]}
+  [root advertisements call-result]
+  (let [sent (volatile! [])]
+    {::sent sent
+     ::mcp/root root
+     ::mcp/advertisements (fn [_] advertisements)
+     ::mcp/prepl (fn [_ form _]
+                   (vswap! sent conj form)
+                   (if (str/includes? form "/tools)") jvm-tools call-result))}))
 
-(defn- rpc-responses
-  [requests]
-  (let [process (.start
-                 (doto (ProcessBuilder.
-                        ^java.util.List [(.getPath launcher)])
-                   (.directory project-root)))
-        _stderr (future (slurp (.getErrorStream process)))]
-    (with-open [writer (io/writer (.getOutputStream process))]
-      (doseq [request requests]
-        (.write writer (json/write-str request))
-        (.write writer "\n"))
-      (.flush writer))
-    (let [responses (->> (slurp (.getInputStream process))
-                         str/split-lines
-                         (mapv #(json/read-str % :key-fn keyword)))
-          completed? (.waitFor process 10 TimeUnit/SECONDS)]
-      (when-not completed? (.destroyForcibly process))
-      (is completed?)
-      (is (= 0 (when completed? (.exitValue process))))
-      responses)))
-
-(defn- namespace-form
+(defn- source-symbols
+  "Every symbol in the bridge source, with the `operator` alias expanded."
+  {:malli/schema [:=> [:cat] [:set :symbol]]}
   []
-  (with-open [reader (PushbackReader. (io/reader server-source))]
-    (loop []
-      (let [form (read {:eof nil :read-cond :allow} reader)]
-        (cond
-          (nil? form) nil
-          (and (seq? form) (= 'ns (first form))) form
-          :else (recur))))))
+  (with-open [reader (java.io.PushbackReader. (io/reader source-file))]
+    (binding [*ns* (the-ns 'seon.dev.mcp)]
+      (->> (repeatedly #(read {:eof ::eof :read-cond :allow} reader))
+           (take-while #(not= ::eof %))
+           (mapcat #(filter symbol? (tree-seq coll? seq %)))
+           (map #(if (= "operator" (namespace %)) (symbol "seon.operator" (name %)) %))
+           set))))
 
-(defn- require-targets
-  [form]
-  (->> (drop 2 form)
-       (filter #(and (seq? %) (= :require (first %))))
-       (mapcat rest)
-       (map #(if (sequential? %) (first %) %))
-       vec))
+;;; ---------------------------------------------------------------------------
+;;; The static boundary
+;;; ---------------------------------------------------------------------------
 
-(deftest bridge-requires-no-application-namespace
-  (let [targets (require-targets (namespace-form))
-        application-targets
-        (filterv #(str/starts-with? (str %) "seon.") targets)]
-    (is (seq targets))
-    (is (= [] application-targets)
-        "The REPL bridge must not require application namespaces")))
+(def ^:private allowed-seon-symbols
+  "Every seon.* name the bridge source may contain: its own namespace, the
+  entrance namespace whose `tools` and `call` it sends, and the operator
+  discovery functions it calls on the babashka side."
+  #{'seon.dev.mcp 'seon.mcp 'seon.operator
+    'seon.operator/advertisements 'seon.operator/prepl-value! 'seon.operator/canonical-root})
 
-(deftest bridge-loads-with-only-the-tooling-classpath
-  (testing "Babashka does not need bb.edn, src/, or src-old/"
-    (let [process
-          (.start
-           (doto
-            (ProcessBuilder.
-             ^java.util.List
-             ["bb" "--classpath" "script" "-e"
-              "(require 'seon.dev.mcp) (println :bridge-loaded)"])
-             (.directory project-root)
-             (.redirectErrorStream true)))
-          completed? (.waitFor process 10 TimeUnit/SECONDS)
-          _ (when-not completed? (.destroyForcibly process))
-          output (slurp (.getInputStream process))]
-      (is completed? "Babashka bridge load exceeded ten seconds.")
-      (is (= 0 (when completed? (.exitValue process))))
-      (is (str/includes? output ":bridge-loaded")))))
+(deftest the-bridge-names-only-the-entrance-and-operator-discovery
+  (is (= #{}
+         (into #{} (remove allowed-seon-symbols)
+               (filter #(str/starts-with? (str %) "seon.") (source-symbols))))
+      "The bridge source names no seon symbol beyond the entrance and operator discovery."))
 
-(deftest bridge-content-has-no-second-truncation-budget
-  (let [large (apply str (repeat 20000 "x"))
-        payload {:seon.dev.mcp/events [{:tag :ret :val large}]}
-        encoded ((bridge-var 'content-text) payload)
-        decoded (json/read-str encoded :key-fn keyword)]
-    (is (= large (get-in decoded [:seon.dev.mcp/events 0 :val]))
-        "the bridge carries the value whole: no second truncation budget")))
+(deftest the-bridge-sends-exactly-the-two-entrance-forms
+  (is (= "((requiring-resolve 'seon.mcp/tools))" (#'mcp/tools-form))
+      "The tool list is asked of seon.mcp/tools.")
+  (is (= '((requiring-resolve 'seon.mcp/call) "{\"name\":\"x\"}")
+         (read-string (#'mcp/call-form "{\"name\":\"x\"}")))
+      "A call hands the request JSON string to seon.mcp/call."))
 
-(deftest jvm-mode-reads-through-the-one-reader
-  ;; The bridge holds no reader: the JVM form reads with `seon.sci.reader/read`
-  ;; in the target namespace and throws the reader's own refusal.
-  (let [namespace-symbol (symbol (str "mcp.reader-" (random-uuid)))
-        original (ns-name *ns*)
-        run (fn [source]
-              (try (eval (read-string ((bridge-var 'jvm-evaluation-form) source namespace-symbol true)))
-                   (catch Throwable thrown
-                     (let [cause (or (ex-cause thrown) thrown)]
-                       [(ex-message cause) (ex-data cause)]))))]
-    (try
-      (is (= ["Evaluation accepts exactly one form; the second form starts at line 2, column 3. Wrap sequences in `(do ...)`."
-              {:seon.sci.reader/line 2 :seon.sci.reader/column 3 :seon.sci.reader/source "{:a 1}"}]
-             (run "(+ 1 2)\r\n  {:a 1}")))
-      (is (= :seon.sci.reader/form (:seon.error/member (second (run "(+ 1 2")))))
-      (is (= "Your reply had no form; only comments/prose. Send a form." (first (run "  ;; only"))))
-      (is (= [(keyword (str namespace-symbol) "k") '(clojure.core/map java.lang.String)]
-             (run "[::k `(map String)]"))
-          "auto-resolved keywords and syntax-quote resolve in the target namespace")
-      (is (= :invalid-form (:seon.dev.mcp/failure (ex-data (try ((bridge-var 'source!) 1)
-                                                                 (catch clojure.lang.ExceptionInfo e e)))))
-          "a non-string never crosses")
-      (finally (in-ns original) (when (find-ns namespace-symbol) (remove-ns namespace-symbol))))))
+(deftest babashka-loads-the-bridge-from-the-launcher-classpath
+  (let [process (.start (doto (ProcessBuilder.
+                               ^java.util.List ["bb" "--config" "/dev/null" "--classpath" "script:src:resources"
+                                                "-e" "(require 'seon.dev.mcp) (println :bridge-loaded)"])
+                          (.redirectErrorStream true)))
+        completed? (.waitFor process 10 TimeUnit/SECONDS)]
+    (when-not completed? (.destroyForcibly process))
+    (is completed? "Babashka loads the bridge within ten seconds.")
+    (is (str/includes? (slurp (.getInputStream process)) ":bridge-loaded")
+        "The bridge namespace loads on the launcher's classpath.")))
 
-(defn- write-advertisement!
-  "Advertise `value` the way a cluster does: data/clusters/<dir>/prepl.edn."
-  [root dir value]
-  (let [file (io/file root "data/clusters" dir "prepl.edn")]
-    (io/make-parents file)
-    (spit file (pr-str value))
-    file))
+;;; ---------------------------------------------------------------------------
+;;; JSON-RPC
+;;; ---------------------------------------------------------------------------
 
-(defn- delete-fixture-root!
-  [^java.io.File root]
-  (doseq [file (reverse (file-seq root))
-          :when (not (java.nio.file.Files/isSymbolicLink (.toPath ^java.io.File file)))]
-    (.delete ^java.io.File file)))
+(deftest initialize-advertises-list-changed
+  (let [root (temp-root)
+        world (fake-world root [] nil)
+        {out ::mcp/out} (mcp/handle world (mcp/initial-state world)
+                                    {"jsonrpc" "2.0" "id" 1 "method" "initialize" "params" {}})]
+    (delete-root! root)
+    (is (true? (get-in (first out) ["result" "capabilities" "tools" "listChanged"]))
+        "The server tells the client its tool list can change.")))
 
-(deftest missing-advertisements-never-consult-old-writer-port-files
-  (let [fixture-root (io/file project-root "tmp"
-                              (str "mcp-endpoint-" (random-uuid)))
-        data-dir (io/file fixture-root "data")
-        clusters-dir (io/file data-dir "clusters")
-        cluster-dir (io/file clusters-dir "fixture")
-        tmp-dir (io/file fixture-root "tmp")
-        old-port-file (io/file tmp-dir "seon-writer-repl-port-fixture")
-        known-paths [fixture-root data-dir clusters-dir cluster-dir
-                     tmp-dir old-port-file]]
-    (try
-      (is (.mkdirs cluster-dir))
-      (is (.mkdirs tmp-dir))
-      (spit old-port-file "31337\n")
-      (let [outcome
-            (try
-              ((bridge-var 'read-clj-endpoint)
-               (.getCanonicalPath fixture-root) "fixture")
-              (catch clojure.lang.ExceptionInfo error error))]
-        (is (instance? clojure.lang.ExceptionInfo outcome))
-        (is (= :repl-unavailable
-               (:seon.dev.mcp/failure (ex-data outcome))))
-        (is (= :missing
-               (:seon.dev.mcp/advertisement-state (ex-data outcome))))
-        (is (= (str "Start the cluster with: bin/seon --root "
-                    (.getCanonicalPath fixture-root)
-                    " start fixture.")
-               (:seon.dev.mcp/remedy (ex-data outcome)))))
-      (finally
-        (delete-known-files! known-paths)))))
+(deftest an-unparseable-line-answers-a-parse-error
+  (let [root (temp-root)
+        world (fake-world root [] nil)
+        {out ::mcp/out} (mcp/handle-line world (mcp/initial-state world) "not json")]
+    (delete-root! root)
+    (is (= -32700 (get-in (first out) ["error" "code"])) "A malformed line is a JSON-RPC parse error.")))
 
-(deftest discovery-reports-only-live-advertisements-and-observes-each
-  ;; A dead process's advertisement is absent; an unreachable live one is
-  ;; unknown; a reachable one whose cluster layer is not running is degraded.
-  (let [fixture-root (io/file project-root "tmp" (str "mcp-status-" (random-uuid)))
-        root (.getCanonicalPath (doto fixture-root .mkdirs))
-        pid (.pid (java.lang.ProcessHandle/current))
-        started (current-process-start-date)
-        server-name (str "mcp-status-" (random-uuid))
-        server (core.server/start-server {:name server-name :accept 'clojure.core.server/io-prepl
-                                          :address "127.0.0.1" :port 0})]
-    (try
-      (write-advertisement! root "reachable" (assoc (advertisement "reachable" pid started)
-                                                    :seon.boot/prepl-port (.getLocalPort server)))
-      (write-advertisement! root "unreachable" (assoc (advertisement "unreachable" pid started)
-                                                      :seon.boot/prepl-port 1))
-      (write-advertisement! root "stale" (advertisement "stale" pid (java.util.Date. 0)))
-      (let [by-cluster (into {} (map (juxt :seon.dev.mcp/cluster :seon.dev.mcp/state))
-                             ((bridge-var 'discovery-entities) root))]
-        (is (= {"reachable" :degraded "unreachable" :unknown} by-cluster)))
-      (finally
-        (core.server/stop-server server-name)
-        (delete-fixture-root! fixture-root)))))
-(deftest runtime-status-is-scoped-and-deduplicated
-  (let [root (.getCanonicalPath
-              (io/file project-root "tmp" (str "mcp-status-face-"
-                                                (random-uuid))))
-        selected "selected"
-        selected-entity {:seon.dev.mcp/root root
-                      :seon.dev.mcp/cluster selected
-                      :seon.dev.mcp/state :alive
-                      :seon.dev.mcp/source :advertisement}
-        unrelated-entity {:seon.dev.mcp/root root
-                       :seon.dev.mcp/cluster "unrelated"
-                       :seon.dev.mcp/state :alive
-                       :seon.dev.mcp/source :advertisement}
-        observations (atom [])
-        result
-        (with-redefs-fn
-          {(bridge-var 'discovery-entities)
-           (fn [_] [selected-entity selected-entity unrelated-entity])
-           (bridge-var 'runtime-observation)
-           (fn [_ cluster]
-             (swap! observations conj cluster)
-             {:seon.dev.mcp/health :observed})
-           (bridge-var 'read-clj-endpoint)
-           (fn [_ _] {:port 1})
-           (bridge-var 'clj-sessions)
-           (atom {[root selected "selected-session"] {:endpoint {:port 1}}
-                  [root selected "gone-session"] {:endpoint {:port 0}}
-                  [root "unrelated" "unrelated-session"] {:endpoint {:port 1}}})}
-          #((bridge-var 'execute-runtime-status)
-            {:root root :cluster selected}))
-        data (result-data result)
-        entities (:seon.dev.mcp/clusters data)]
-    (is (= "cluster-health-flow" (name (:seon.dev.mcp/view data))))
-    (is (= [selected] @observations))
-    (is (= 1 (count entities)))
-    (is (= selected (:seon.dev.mcp/cluster (first entities))))
-    (is (= 2 (:seon.dev.mcp/observation-count (first entities))))
-    (is (= ["selected-session"] (:seon.dev.mcp/sessions data))
-        "a session to a JVM its cluster no longer advertises is released, not listed")
-    (is (not (str/includes? (get-in result [:content 0 :text])
-                            "unrelated")))))
+(deftest a-notification-answers-nothing
+  (let [root (temp-root)
+        world (fake-world root [] nil)
+        {out ::mcp/out} (mcp/handle world (mcp/initial-state world)
+                                    {"jsonrpc" "2.0" "method" "notifications/initialized"})]
+    (delete-root! root)
+    (is (= [] out) "A notification has no reply.")))
 
-(deftest transport-errors-echo-the-attempted-evaluation-coordinates
-  (let [result
-        (with-redefs-fn
-          {(bridge-var 'current-clj-session!)
-           (fn [& _]
-             (throw (ex-info "fixture transport failed"
-                             {:seon.dev.mcp/failure :transport-fixture})))}
-          #((bridge-var 'execute-clj-eval)
-            {:root (.getCanonicalPath project-root)
-             :cluster "fixture"
-             :namespace "mcp.fixture.target"
-             :mode "sci"
-             :session_id "coordinates"
-             :code "(+ 1 2)"}))
-        data (result-data result)]
-    (is (true? (:isError result)))
-    (is (= "sci" (:seon.dev.mcp/mode data)))
-    (is (= "mcp.fixture.target" (:seon.dev.mcp/namespace data)))
-    (is (= "fixture" (:seon.dev.mcp/cluster data)))
-    (is (= "coordinates" (:seon.dev.mcp/session-id data)))
-    (is (= "(+ 1 2)" (:seon.dev.mcp/form data)))
-    (is (= "transport-fixture" (:seon.dev.mcp/failure data)))))
+(deftest an-unknown-method-with-an-id-is-method-not-found
+  (let [root (temp-root)
+        world (fake-world root [] nil)
+        {out ::mcp/out} (mcp/handle world (mcp/initial-state world)
+                                    {"jsonrpc" "2.0" "id" 3 "method" "resources/list"})]
+    (delete-root! root)
+    (is (= -32601 (get-in (first out) ["error" "code"])) "An unserved method is method-not-found.")))
 
-(deftest evaluation-response-reports-the-exact-caller-source-once
-  (let [source "  (+ 20 22)\n"]
-    (doseq [mode ["jvm" "sci"]
-            exception? [false true]]
-      (let [writer (java.io.StringWriter.)
-            transport-form (atom nil)
-            raw-events
-            (if exception?
-              [{:tag :ret :val "fixture failure" :exception true}]
-              [{:tag :out :val "fixture output"}
-               {:tag :ret :val "42" :ns "user"}])
-            result
-            (with-redefs-fn
-              {(bridge-var 'current-clj-session!)
-               (fn [& _]
-                 {:writer writer
-                  :endpoint {:seon.dev.mcp/cluster-state :alive}})
-               (bridge-var 'collect-prepl-response!)
-               (fn [_ _]
-                 (let [generated (str/trim (str writer))]
-                   (reset! transport-form generated)
-                   (mapv #(assoc % :form generated) raw-events)))}
-              #((bridge-var 'execute-clj-eval)
-                {:root (.getCanonicalPath project-root)
-                 :cluster "fixture"
-                 :mode mode
-                 :code source}))
-            data (result-data result)
-            events (:seon.dev.mcp/events data)]
-        (is (= exception? (boolean (:isError result))))
-        (is (not= source @transport-form)
-            "the test must exercise a generated transport wrapper")
-        (is (= (count raw-events) (count events)))
-        (is (= source (:seon.dev.mcp/form data)))
-        (is (every? #(not (contains? % :form)) events)
-            "events retain their prepl structure on")))))
+;;; ---------------------------------------------------------------------------
+;;; Tool list
+;;; ---------------------------------------------------------------------------
 
-(deftest duplicate-live-cluster-identities-fail-with-candidates
-  (let [fixture-root (io/file project-root "tmp" (str "mcp-ambiguous-" (random-uuid)))
-        root (.getCanonicalPath (doto fixture-root .mkdirs))
-        candidate (assoc (advertisement "same" (.pid (java.lang.ProcessHandle/current))
-                                        (current-process-start-date))
-                         :seon.boot/prepl-port 1)]
-    (try
-      (write-advertisement! root "same" candidate)
-      (write-advertisement! root "same-copy" candidate)
-      (let [outcome (try ((bridge-var 'read-clj-endpoint) root "same")
-                         (catch clojure.lang.ExceptionInfo error error))]
-        (is (= :ambiguous-cluster (:seon.dev.mcp/failure (ex-data outcome))))
-        (is (= 2 (count (:seon.dev.mcp/candidates (ex-data outcome))))))
-      (finally (delete-fixture-root! fixture-root)))))
-(deftest namespace-coordinate-shapes-both-evaluation-modes
-  (let [namespace-symbol 'mcp.chosen.namespace
-        original-namespace (ns-name *ns*)
-        evaluation ((bridge-var 'source!)
-                    "(do (def answer 41) [(inc answer) (ns-name *ns*)])")
-        jvm-form ((bridge-var 'remote-evaluation-form)
-                  evaluation "jvm" "fixture" namespace-symbol)
-        sci-form ((bridge-var 'remote-evaluation-form)
-                   (assoc evaluation :seon.dev.mcp/namespace? true) "sci" "fixture" namespace-symbol)]
-    (try
-      (is (= [42 namespace-symbol] (eval (read-string jvm-form))))
-      (is (= 41 (var-get (ns-resolve namespace-symbol 'answer))))
-      ;; The SCI form is read as the data it is.
-      (let [parts (set (tree-seq coll? seq (read-string sci-form)))]
-        (is (contains? parts [:seon.ns/name '(quote mcp.chosen.namespace)])
-            "the run names its namespace coordinate")
-        (is (= #{'seon.cluster.agent/evaluate-source! 'seon.turn/code-sources}
-               (into #{} (filter #{'seon.cluster.agent/evaluate-source! 'seon.turn/code-sources}) parts))
-            "SCI without a branch is one ordinary run of root, not a bridge evaluator"))
-      (finally
-        (in-ns original-namespace)
-        (when (find-ns namespace-symbol)
-          (remove-ns namespace-symbol))))))
+(deftest the-tool-list-comes-from-the-live-jvm
+  (let [root (temp-root)
+        world (fake-world root [live-advertisement] nil)
+        {out ::mcp/out} (mcp/handle world (mcp/initial-state world)
+                                    {"jsonrpc" "2.0" "id" 2 "method" "tools/list"})]
+    (delete-root! root)
+    (is (= (json/parse-string jvm-tools) (get-in (first out) ["result" "tools"]))
+        "tools/list answers the JVM's tools exactly.")))
 
-(deftest root-and-namespace-coordinates-cross-a-real-io-prepl
-  (let [fixture-root (io/file project-root "tmp" (str "mcp-live-root-" (random-uuid)))
-        root (.getCanonicalPath (doto fixture-root .mkdirs))
-        cluster "live"
-        server-name (symbol (str "mcp-live-" (random-uuid)))
-        server (core.server/start-server
-                {:name server-name
-                 :accept 'clojure.core.server/io-prepl
-                 :address "127.0.0.1"
-                 :port 0})
-        live-advertisement
-        (assoc (advertisement cluster
-                              (.pid (java.lang.ProcessHandle/current))
-                              (current-process-start-date))
-               :seon.boot/prepl-port (.getLocalPort server))
-        session-key [root cluster "default"]]
-    (try
-      (let [result
-            (do (write-advertisement! root cluster live-advertisement)
-                ((bridge-var 'execute-clj-eval)
-                 {:root root
-                  :cluster cluster
-                  :namespace "mcp.live.chosen"
-                  :mode "jvm"
-                  :code "[(ns-name *ns*) (+ 40 2)]"}))
-            data (result-data result)]
-        (is (not (:isError result)))
-        (is (= root (:seon.dev.mcp/root data)))
-        (is (= "mcp.live.chosen" (:seon.dev.mcp/namespace data)))
-        (is (= "[mcp.live.chosen 42]"
-               (get-in data [:seon.dev.mcp/events 0 :val])))
-        (is (= "mcp.live.chosen"
-               (get-in data [:seon.dev.mcp/events 0 :ns]))))
-      (finally
-        ((bridge-var 'close-clj-session!) session-key)
-        (core.server/stop-server server-name)
-        (delete-fixture-root! fixture-root)
-        (when (find-ns 'mcp.live.chosen)
-          (remove-ns 'mcp.live.chosen))))))
+(deftest a-fetched-tool-list-is-cached-for-a-jvm-down-start
+  (let [root (temp-root)
+        live (fake-world root [live-advertisement] nil)
+        _ (mcp/sync-tools live (mcp/initial-state live))
+        tools (::mcp/tools (mcp/initial-state (fake-world root [] nil)))]
+    (delete-root! root)
+    (is (= jvm-tools tools) "With no live JVM the last fetched list is served.")))
 
-(deftest registrations-use-one-jvm-neutral-server-name
-  (let [claude-registration (slurp (io/file project-root ".mcp.json"))
-        codex-registration (slurp (io/file project-root ".codex/config.toml"))]
-    (is (str/ends-with? (get-in (json/read-str claude-registration) ["mcpServers" "seon" "command"]) "bin/mcp-server")
-        "Claude's registration names the one server, seon, launched by bin/mcp-server")
-    (is (str/includes? codex-registration "[mcp_servers.seon]"))
-    (is (str/includes? codex-registration "bin/mcp-server\""))
-    (is (not (str/includes? claude-registration "cljs")))
-    (is (not (str/includes? codex-registration "cljs")))))
+(deftest with-no-jvm-and-no-cache-the-static-list-is-served
+  (let [root (temp-root)
+        tools (json/parse-string (::mcp/tools (mcp/initial-state (fake-world root [] nil))))]
+    (delete-root! root)
+    (is (= #{"eval_clj" "runtime_status"} (into #{} (map #(get % "name")) tools))
+        "The static list names the tools a caller needs to learn the start remedy.")))
 
-(deftest ^{:seon.test/golden "A tool's description is the prose an MCP client shows its model; the advertised semantics are that text."}
-  tool-discovery-advertises-only-live-jvm-operations
-  (let [[initialized listed]
-        (rpc-responses
-         [{:jsonrpc "2.0" :id 1 :method "initialize" :params {}}
-          {:jsonrpc "2.0" :id 2 :method "tools/list" :params {}}])
-        eval-tool (some #(when (= "eval_clj" (:name %)) %)
-                        (get-in listed [:result :tools]))]
-    (is (= "seon" (get-in initialized [:result :serverInfo :name])))
-    (is (= #{"eval_clj" "runtime_status" "get_value" "branch"}
-           (into #{} (map :name) (get-in listed [:result :tools]))))
-    (is (not (contains? (get-in eval-tool [:inputSchema :properties])
-                        :max_output_tokens)))
-    (is (str/includes? (:description eval-tool)
-                       "ONE ORDINARY RUN OF ROOT")
-        "branchless SCI is described as the agent run it is")
-    (is (not (str/includes? (:description eval-tool) "MUTATES the cluster's shared SCI ctx"))
-        "the retired shared-context evaluation is no longer advertised")
-    (is (str/includes? (:description eval-tool)
-                       "agent/orchestrator context"))
-    (is (str/includes? (:description eval-tool)
-                       "(seon.cluster.boot/connection \"default\")"))
-    (is (= ["jvm" "sci"]
-           (get-in eval-tool [:inputSchema :properties :mode :enum])))
-    (is (contains? (get-in eval-tool [:inputSchema :properties]) :root))
-    (is (contains? (get-in eval-tool [:inputSchema :properties]) :namespace))
-    (is (str/includes? (get-in eval-tool [:inputSchema :properties :code
-                                          :description])
-                       "SCI without a branch evaluates every form in order as one run"))))
+(deftest a-replaced-jvm-sends-list-changed-before-the-result
+  (let [root (temp-root)
+        world (fake-world root [(assoc live-advertisement :seon.boot/pid 22)] empty-result)
+        state (assoc (mcp/initial-state world)
+                     ::mcp/identity (select-keys live-advertisement [:seon.boot/pid :seon.boot/start-instant])
+                     ::mcp/tools "[]")
+        {out ::mcp/out} (mcp/handle world state {"jsonrpc" "2.0" "id" 7 "method" "tools/call"
+                                                 "params" {"name" "eval_clj" "arguments" {}}})]
+    (delete-root! root)
+    (is (= "notifications/tools/list_changed" (get (first out) "method"))
+        "A different JVM identity with a different list notifies the client first.")))
 
-(deftest deleted-tool-name-is-an-unknown-tool
-  (let [[response]
-        (rpc-responses
-         [{:jsonrpc "2.0"
-           :id 1
-           :method "tools/call"
-           :params {:name "eval_cljs" :arguments {:code "(+ 1 2)"}}}])
-        result (:result response)]
-    (is (true? (:isError result)))
-    (is (str/includes? (get-in result [:content 0 :text])
-                       "Unknown tool: eval_cljs"))))
+(deftest the-same-jvm-is-not-asked-for-its-tools-again
+  (let [root (temp-root)
+        world (fake-world root [live-advertisement] empty-result)
+        [state _] (mcp/sync-tools world (mcp/initial-state world))
+        _ (mcp/handle world state {"jsonrpc" "2.0" "id" 7 "method" "tools/call"
+                                   "params" {"name" "eval_clj" "arguments" {}}})]
+    (delete-root! root)
+    (is (= 1 (count (filter #(str/includes? % "/tools)") @(::sent world))))
+        "Tools are fetched once per JVM identity.")))
 
-(deftest parent-watchdog-observes-the-captured-parent-exit
-  (let [fixture-root (io/file project-root "tmp"
-                              (str "mcp-parent-" (random-uuid)))
-        fifo (io/file fixture-root "mcp-input.fifo")
-        child-error (io/file fixture-root "mcp-error.log")
-        parent-error (io/file fixture-root "parent-error.log")
-        known-paths [fixture-root fifo child-error parent-error]
-        child-handle* (atom nil)
-        fifo-output* (atom nil)
-        parent* (atom nil)]
-    (try
-      (is (.mkdirs fixture-root))
-      (let [mkfifo (.start
-                    (doto (ProcessBuilder.
-                           ^java.util.List ["mkfifo" (.getPath fifo)])
-                      (.directory project-root)))
-            completed? (.waitFor mkfifo 5 TimeUnit/SECONDS)]
-        (when-not completed? (.destroyForcibly mkfifo))
-        (is completed? "mkfifo did not complete.")
-        (is (= 0 (when completed? (.exitValue mkfifo)))))
-      (let [fifo-output-future (future (io/output-stream fifo))
-            helper-form
-            (str
-             "(require '[clojure.java.io :as io]) "
-             "(let [builder (doto (ProcessBuilder. ^java.util.List ["
-             (pr-str (.getPath launcher)) "]) "
-             "(.directory (java.io.File. "
-             (pr-str (.getPath project-root)) ")) "
-             "(.redirectInput (java.io.File. " (pr-str (.getPath fifo)) ")) "
-             "(.redirectError (java.io.File. "
-             (pr-str (.getPath child-error)) "))) "
-             "child (.start builder) "
-             "reader (io/reader (.getInputStream child))] "
-             "(println (.pid child)) (flush) "
-             "(println (.readLine reader)) (flush) "
-             "(deref (promise)))")
-            parent (.start
-                    (doto (ProcessBuilder.
-                           ^java.util.List
-                           ["clojure" "-M:dev:test" "-e" helper-form])
-                      (.directory project-root)
-                      (.redirectError parent-error)))
-            _ (reset! parent* parent)
-            parent-reader (io/reader (.getInputStream parent))
-            pid-line-future (future (.readLine parent-reader))
-            pid-line (deref pid-line-future 10000 ::timeout)
-            _ (is (not= ::timeout pid-line)
-                  "The helper did not report the MCP child pid")
-            child-pid (when (string? pid-line) (parse-long pid-line))
-            child-optional (when child-pid
-                             (java.lang.ProcessHandle/of child-pid))
-            child-handle (when (and child-optional
-                                    (.isPresent child-optional))
-                           (.get child-optional))
-            fifo-output (deref fifo-output-future 5000 ::timeout)]
-        (reset! child-handle* child-handle)
-        (is child-handle "no child ProcessHandle")
-        (is (not= ::timeout fifo-output) "FIFO writer did not attach.")
-        (reset! fifo-output* fifo-output)
-        (when (and child-handle (not= ::timeout fifo-output))
-          (let [fifo-writer (io/writer fifo-output)
-                request {:jsonrpc "2.0" :id 1
-                         :method "initialize" :params {}}]
-            (.write fifo-writer (json/write-str request))
-            (.write fifo-writer "\n")
-            (.flush fifo-writer)
-            (let [response-line-future (future (.readLine parent-reader))
-                  response-line (deref response-line-future 5000 ::timeout)]
-              (is (not= ::timeout response-line)
-                  "MCP child did not become ready")
-              (when (string? response-line)
-                (is (= "seon"
-                       (get-in (json/read-str response-line :key-fn keyword)
-                               [:result :serverInfo :name]))))))
-          (is (.isAlive parent))
-          (is (.isAlive ^java.lang.ProcessHandle child-handle))
-          (let [observed-parent (.parent ^java.lang.ProcessHandle child-handle)]
-            (is (.isPresent observed-parent))
-            (is (= (.pid parent) (.pid (.get observed-parent)))))
-          (.destroyForcibly parent)
-          (is (.waitFor parent 3 TimeUnit/SECONDS)
-              "The helper parent did not exit.")
-          (.get (.onExit ^java.lang.ProcessHandle child-handle)
-                3 TimeUnit/SECONDS)
-          (is (not (.isAlive ^java.lang.ProcessHandle child-handle)))))
-      (finally
-        (when-let [parent @parent*]
-          (reap-process! parent))
-        (when-let [child-handle @child-handle*]
-          (reap-process-handle! child-handle))
-        (when-let [fifo-output @fifo-output*]
-          (when-not (= ::timeout fifo-output)
-            (.close ^java.io.OutputStream fifo-output)))
-        (delete-known-files! known-paths)))
-    (is (not (.exists fixture-root))
-        "the parent-watchdog fixture root was deleted after exact child exit")))
+;;; ---------------------------------------------------------------------------
+;;; tools/call
+;;; ---------------------------------------------------------------------------
 
-(clojure.test/deftest read-only-intent-crosses-both-evaluation-forms
-  (require 'seon.operator)
-  (let [remote (bridge-var 'remote-evaluation-form)
-        consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
-        mark seon.cluster/project-next-prepl-value!]
-    (doseq [mode ["jvm" "sci"] intent [true false]
-            :let [source (remote {:seon.dev.mcp/form '(+ 1 2)
-                                  :seon.dev.mcp/source "(+ 1 2)"
-                                  :seon.dev.mcp/read-only? intent}
-                                 mode "default" 'user)
-                  form (read-string source)
-                  original (ns-name *ns*)]]
-      ;; JVM mode carries its intent into `seon.operator.prepl/evaluate`,
-      ;; which marks it before evaluating the caller's form.
-      (try (eval (if (= "jvm" mode) form (second form)))
-           (finally (in-ns original)))
-      (clojure.test/is (= {:seon.dev.mcp/read-only? intent}
-                         (select-keys (consume) [:seon.dev.mcp/read-only?]))))
-    (mark)))
+(deftest a-call-forwards-the-request-unchanged
+  (let [root (temp-root)
+        world (fake-world root [live-advertisement] empty-result)
+        params {"name" "eval_clj" "arguments" {"code" "(+ 1 2)" "mode" "sci"}}
+        _ (mcp/call-tool world params)
+        form (read-string (last @(::sent world)))]
+    (delete-root! root)
+    (is (= params (json/parse-string (second form))) "The JVM receives the MCP params as given.")))
 
-(clojure.test/deftest discovery-census-returns-an-unprojected-observation
-  ;; The census asks `:seon.dev.mcp/project? false`; a projected return would
-  ;; wrap the observation and read as degraded for a running cluster.
-  (let [cluster (first (sort (keys @@(ns-resolve 'seon.cluster (symbol "running-instances")))))
-        fixture-root (io/file project-root "tmp" (str "mcp-census-" (random-uuid)))
-        root (.getCanonicalPath (doto fixture-root .mkdirs))
-        server-name (str "mcp-census-" (random-uuid))
-        server (clojure.core.server/start-server
-                {:name server-name :accept 'seon.operator.prepl/io-prepl
-                 :args [:cluster-name cluster]
-                 :address "127.0.0.1" :port 0})]
-    (try
-      (is (some? cluster) "a running cluster answers the census")
-      (write-advertisement! root cluster (assoc (advertisement cluster (.pid (java.lang.ProcessHandle/current))
-                                                               (current-process-start-date))
-                                                :seon.boot/prepl-port (.getLocalPort server)))
-      (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-entities) root))))
-      (finally
-        (clojure.core.server/stop-server server-name)
-        (delete-fixture-root! fixture-root)))))
+(deftest a-call-answers-the-jvms-result
+  (let [root (temp-root)
+        result {"content" [{"type" "text" "text" "3"}] "isError" false}
+        world (fake-world root [live-advertisement] (json/generate-string result))]
+    (is (= result (mcp/call-tool world {"name" "eval_clj" "arguments" {"code" "(+ 1 2)"}}))
+        "The CallToolResult is the JVM's own.")
+    (delete-root! root)))
 
-(deftest runtime-status-prints-the-observations-declared-ai-face
-  ;; MCP runtime_status and `bin/seon status` print one face: the observation's
-  ;; declared `seon.cluster/runtime-observation-ai`, never the whole value.
-  (let [cluster (first (sort (keys @@(ns-resolve 'seon.cluster (symbol "running-instances")))))
-        fixture-root (io/file project-root "tmp" (str "mcp-face-" (random-uuid)))
-        root (.getCanonicalPath (doto fixture-root .mkdirs))
-        server-name (str "mcp-face-" (random-uuid))
-        server (clojure.core.server/start-server
-                {:name server-name :accept 'seon.operator.prepl/io-prepl
-                 :args [:cluster-name cluster]
-                 :address "127.0.0.1" :port 0})]
-    (try
-      (is (some? cluster) "a running cluster answers runtime_status")
-      (write-advertisement! root cluster (assoc (advertisement cluster (.pid (java.lang.ProcessHandle/current))
-                                                               (current-process-start-date))
-                                                :seon.boot/prepl-port (.getLocalPort server)))
-      (let [face ((bridge-var 'runtime-observation) root cluster)]
-        (is (= cluster (:seon.dev.mcp/cluster face)))
-        (is (#{:observed :faulted :unknown} (:seon.dev.mcp/health face)))
-        (is (not-any? #(contains? face %) [:seon.dev.mcp/open-fault-count
-                                            :seon.dev.mcp/replaced-root-count
-                                            :seon.dev.mcp/profile])
-            "the face names totals inside each family, not the whole value's members")
-        (when-let [faults (:seon.dev.mcp/open-faults face)]
-          (is (<= (count (:seon.dev.mcp/top faults)) 5))
-          (is (not-any? :seon.error/message (:seon.dev.mcp/top faults)))))
-      (testing "discovery reads health alone and still classifies the live cluster"
-        (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-entities) root)))))
-      (finally
-        (clojure.core.server/stop-server server-name)
-        (delete-fixture-root! fixture-root)))))
+(deftest a-call-with-no-live-jvm-names-the-start-remedy
+  (let [root (temp-root)
+        result (mcp/call-tool (fake-world root [] nil) {"name" "eval_clj" "arguments" {"cluster" "other"}})]
+    (delete-root! root)
+    (is (true? (get result "isError")) "A call with no JVM is an error result.")
+    (is (str/includes? (get-in result ["content" 0 "text"]) "start other")
+        "The text names the start command for the cluster.")))
 
-(deftest an-unreadable-prepl-value-keeps-its-raw-text-beside-the-reader-error
-  (let [event {:tag :ret :val "#object[java.lang.Object 0x1]" :ns "user"}
-        decoded ((bridge-var 'decoded-projection-event) event)]
-    (is (= "#object[java.lang.Object 0x1]" (:val decoded)) "the raw text is never replaced")
-    (is (string? (:seon.dev.mcp/reader-error decoded)) "the reader's failure rides beside it")))
+(deftest a-call-routes-to-the-only-live-cluster
+  (let [root (temp-root)
+        seen (volatile! [])
+        world (assoc (fake-world root [(assoc live-advertisement :seon.boot/cluster-name "solo")] nil)
+                     ::mcp/prepl (fn [advertisement _ _]
+                                   (vswap! seen conj (:seon.boot/cluster-name advertisement))
+                                   empty-result))
+        _ (mcp/call-tool world {"name" "eval_clj" "arguments" {}})]
+    (delete-root! root)
+    (is (= ["solo"] @seen) "Without a named cluster the only live one is used.")))
 
-(deftest a-lane-owns-its-branch-create-define-call-retire
-  ;; The wanted behaviour: a lane's hosted agent keeps its defs across runs on
-  ;; its branch, and retiring it leaves the cluster's context and roster untouched.
-  (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
-        cluster (first (sort (keys instances)))
-        store (:seon.store/store (get instances cluster))
-        roster (:seon.agent/routing (:seon.turn.loop/cluster (get instances cluster)))
-        consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
-        branch (str "lane-mcp-test-" (random-uuid))
-        ;; A fresh name per run: a symbol this file spells would be reached by
-        ;; this very test, and the defn's entry gate would run it inside itself.
-        probe (str "lane-probe-" (subs (str (random-uuid)) 0 8))
-        run (fn [action b] (eval (read-string ((bridge-var 'branch-form) cluster action b))))
-        sci (fn [source & [on-branch]]
-              ;; The prepl evaluates the bridge's form with no custody bound; a test
-              ;; member's custody would refuse the hosted branch's writes.
-              (let [form ((bridge-var 'run-form) source cluster nil false on-branch)
-                    result (try ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
-                                (finally (consume)))]
-                (or (-> result :seon.dev.mcp/evaluations last :seon.eval/shown)
-                    (:seon.error/message result))))
-        printed (fn [source on-branch]
-                  (let [form ((bridge-var 'run-form) source cluster nil false on-branch)]
-                    (try (-> ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
-                             :seon.dev.mcp/evaluations first :seon.cluster.eval/output)
-                         (finally (consume)))))
-        held #(some? (get-in @roster [:seon.agent/children (keyword branch)]))]
-    (is (some? store) "a running cluster supplies the store")
-    (try
-      (is (:seon.cluster/created? (run "create" branch)))
-      (is (:seon.error/message (run "create" branch)) "an existing name refuses; never shared silently")
-      (is (= (str "#'user/" probe)
-             (sci (str "(defn " probe " \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))") branch)))
-      (is (= "42" (sci (str "(" probe " 1)") branch)) "the hosted agent's next run on the branch calls the def")
-      (is (= "hi\n" (printed "(println \"hi\")" branch)) "the run's receipts carry what it printed")
-      (let [started (fn [source namespace-symbol]
-                      (let [form ((bridge-var 'run-form) source cluster namespace-symbol false branch)
-                            result (try ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
-                                        (finally (consume)))]
-                        [(-> result :seon.dev.mcp/evaluations last :seon.eval/shown) (:seon.dev.mcp/namespace result)]))
-            fresh (str "mcp.lane-fresh-" (subs (str (random-uuid)) 0 8))]
-        (sci "(in-ns 'seon.id)" branch)
-        (is (= ["\"seon.id\"" "seon.id"] (started "(str *ns*)" nil))
-            "a run with no namespace starts where the last ended and reports that namespace")
-        (is (= [(pr-str fresh) fresh] (started "(str *ns*)" (symbol fresh)))
-            "a requested namespace the branch has not seen is where the run starts, as in-ns")
-        (is (= ["\"user\"" "user"] (started "(str *ns*)" 'user))
-            "a requested namespace is honored after a run that moved elsewhere"))
-      (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) (symbol "user" probe)))
-          "the shared context never sees it")
-      (is (contains? (:my.agent/roster (run "list" nil)) (keyword branch)))
-      (is (:my.agent/retired? (run "retire" branch)))
-      (is (not (held)) "retire released the host's execution")
-      (is (not (contains? (:my.agent/roster (run "list" nil)) (keyword branch))))
-      (is (:seon.error/message (run "retire" (name (get-in @(:seon.db/connection (:seon.turn.loop/cluster (get instances cluster))) [:config :branch]))))
-          "the cluster's own branch refuses")
-      (finally
-        (run "retire" branch)))))
+(deftest a-refused-connection-rediscovers-once
+  (let [root (temp-root)
+        attempts (volatile! 0)
+        world (assoc (fake-world root [live-advertisement] nil)
+                     ::mcp/prepl (fn [_ _ _]
+                                   (if (= 1 (vswap! attempts inc))
+                                     (throw (java.net.ConnectException. "Connection refused"))
+                                     empty-result)))
+        result (mcp/call-tool world {"name" "eval_clj" "arguments" {}})]
+    (delete-root! root)
+    (is (false? (get result "isError")) "A refused connection is retried after rediscovery.")))
 
-(deftest results-carry-the-printed-value-and-the-authored-form
-  ;; Keywords and symbols read as themselves, name metadata crosses to the
-  ;; JVM, and a branch reply carries its value, never the generated form.
-  ;; The bridge reprints nothing: SCI's shown text is the value verbatim, and
-  ;; a JVM return keeps the bytes the cluster printed.
-  (let [shown (bridge-var 'shown-event)
-        jvm {:tag :ret :val (pr-str {:seon.dev.mcp/value {:k :a.b/c :s 'd/e}})}]
-    (is (= {:tag :ret :val "{:k :a.b/c, :s \"x\"}" :seon.sci.eval/ending-ns 'user}
-           (shown {:tag :ret :val (pr-str {:seon.dev.mcp/value {:seon.sci.eval/ending-ns 'user
-                                                                :seon.dev.mcp/text "{:k :a.b/c, :s \"x\"}"}})})))
-    (is (= jvm (shown jvm)))
-    (is (= {:tag :out :val "o"} (shown {:tag :out :val "o"}))))
-  (let [namespace-symbol (symbol (str "mcp.meta-" (random-uuid)))
-        original (ns-name *ns*)
-        source "(do (defn ^{:probe/x 1} f \"doc\" [x] x) (:probe/x (meta #'f)))"
-        form ((bridge-var 'remote-evaluation-form)
-              ((bridge-var 'source!) source) "jvm" "fixture" namespace-symbol)]
-    (try
-      (is (= 1 (eval (read-string form))))
-      (finally (in-ns original) (remove-ns namespace-symbol))))
-  (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
-        cluster (first (sort (keys instances)))
-        data (result-data ((bridge-var 'execute-branch)
-                                  {:root @(bridge-var 'project-root) :cluster cluster :action "list"}))]
-    (is (set? (:my.agent/roster (read-string (:seon.dev.mcp/value data)))))
-    (is (not (contains? data :seon.dev.mcp/events)))))
+(deftest a-failure-after-sending-is-not-retried
+  (let [root (temp-root)
+        attempts (volatile! 0)
+        world (assoc (fake-world root [live-advertisement] nil)
+                     ::mcp/prepl (fn [_ _ _] (vswap! attempts inc) (throw (ex-info "closed" {}))))
+        _ (mcp/call-tool world {"name" "eval_clj" "arguments" {}})]
+    (delete-root! root)
+    (is (= 1 @attempts) "A request that may have reached the JVM is never sent twice.")))
 
-(deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-run-reply-is-the-response-the-agents-context-reads
-  ;; Each evaluation answers with its `:seon.repl/response` — the bytes its
-  ;; agent's next context reads for it — and nothing the bridge composes: no
-  ;; separate :out/:err events, no second error window. An evaluation with no
-  ;; response yet answers with its stored shown text or error.
-  (let [events ((bridge-var 'run-events)
-                [{:tag :ret :val (pr-str {:seon.turn/id "r"
-                                          :seon.dev.mcp/evaluations
-                                          [{:seon.eval/shown "42" :seon.cluster.eval/error "refused: probe"
-                                            :seon.cluster.eval/output "hi\n" :seon.cluster.eval/ordinal 0
-                                            :seon.repl/response "#:seon.repl{:out \"hi\\n\", :error \"refused: probe\"}"}
-                                           {:seon.eval/shown "2" :seon.cluster.eval/ordinal 1}]})}])]
-    (is (= [[:ret "#:seon.repl{:out \"hi\\n\", :error \"refused: probe\"}" 0 true]
-            [:ret "2" 1 nil]]
-           (mapv (juxt :tag :val :seon.cluster.eval/ordinal :exception) events)))
-    (is (not-any? (comp #{:out :err} :tag) events))))
+(deftest a-jvm-exception-shows-the-jvms-cause
+  (let [root (temp-root)
+        world (assoc (fake-world root [live-advertisement] nil)
+                     ::mcp/prepl (fn [_ _ _]
+                                   (throw (ex-info "PREPL evaluation failed."
+                                                   {:seon.error/offending
+                                                    {:val (tagged-literal 'error {:cause "Could not locate seon/mcp.clj"})}}))))
+        result (mcp/call-tool world {"name" "eval_clj" "arguments" {}})]
+    (delete-root! root)
+    (is (str/includes? (get-in result ["content" 0 "text"]) "Could not locate seon/mcp.clj")
+        "The error text carries the JVM's cause, not only the prepl's summary.")))
 
-(deftest ^{:seon/tasks #{"18051e0ee3e2"}} the-bridge-keeps-no-error-cursor
-  ;; The bridge holds no observation state of its own: a restart loses nothing,
-  ;; because every window derives from stored settlement transactions.
-  (bridge-var 'run-events)
-  (is (not-any? #(ns-resolve 'seon.dev.mcp %) '[window-bases window-form branch-errors! max-window-errors])))
-
-(deftest ^{:seon/tasks #{"18051e0ee3e2"}} a-bridge-failure-is-the-one-error-shape
-  ;; A repl-unavailable reply printed `Throwable->map`, every frame of every
-  ;; link: a ~100-frame babashka stack (2026-09-27). It is the one error shape.
-  (let [data ((bridge-var 'failure) {:seon.dev.mcp/cluster "c"} :transport
-              (ex-info "outer" {:probe/value 7} (ex-info "inner" {:probe/cause :sentinel})))]
-    (is (= :transport (:seon.dev.mcp/failure data)))
-    (is (= ["c" "outer"] ((juxt :seon.dev.mcp/cluster :seon.error/message) data)))
-    (is (= [["outer" {:probe/value 7}] ["inner" {:probe/cause :sentinel}]]
-           (mapv (juxt :seon.error/message :seon.error/data) (:seon.error/chain data)))
-        "each link's ex-data survives as native EDN")
-    (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/base) data))
-    (is (every? seon.error.refusal/first-party-frame?
-                (mapcat :seon.error/frames (:seon.error/chain data)))
-        "no dependency or host frame is carried")))
+(deftest a-silent-jvm-times-out-as-an-error-result
+  ;; A real listening socket that never answers (the connection completes in
+  ;; its backlog), read by the real operator prepl: the bound is timeout_ms
+  ;; plus the bridge's grace (about 2 s).
+  (with-open [server (ServerSocket. 0)]
+    (let [root (temp-root)
+          world (assoc (mcp/live-world root)
+                       ::mcp/advertisements
+                       (fn [_] [(assoc live-advertisement :seon.boot/prepl-port (.getLocalPort server))]))
+          result (mcp/call-tool world {"name" "eval_clj" "arguments" {"timeout_ms" 1}})]
+      (delete-root! root)
+      (is (true? (get result "isError")) "A timeout is an error result, never a hang.")
+      (is (str/includes? (get-in result ["content" 0 "text"]) "no result within")
+          "The text says the call timed out and its outcome is unknown."))))

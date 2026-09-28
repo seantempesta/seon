@@ -4,7 +4,6 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.dev.mcp :as mcp]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.process :as process]
@@ -143,10 +142,13 @@
               (is (str/includes? (slurp input) "html"))))
           (is (= "default" (evaluate! root "(:seon.cluster/name (seon.db/pull (seon.db/db (seon.cluster.boot/connection \"default\")) [:seon.cluster/name] [:seon.cluster/name \"default\"]))")))
           (is (= 4 (evaluate! root "(+ 2 2)")))
-          ;; One ordinary run of root through the bridge's form: its settled shown text.
-          (let [sci (client/prepl-value! early (#'mcp/run-form "(+ 1 1)" "default" nil true nil "boot-test")
-                                         event-ms)]
-            (is (= "2" (-> sci :seon.dev.mcp/evaluations last :seon.eval/shown))))
+          ;; One ordinary run of root through the MCP entrance the bridge sends.
+          (let [sci (client/prepl-value!
+                     early (str "((requiring-resolve 'seon.mcp/call) "
+                                (pr-str "{\"name\":\"eval_clj\",\"arguments\":{\"code\":\"(+ 1 1)\",\"mode\":\"sci\"}}") ")")
+                     event-ms)]
+            (is (and (string? sci) (str/includes? sci "\"isError\":false"))
+                "A root run through seon.mcp/call answers a successful CallToolResult."))
           (let [partial (evaluate! root
                          "(with-redefs [seon.cluster/serve! (fn [& _] (throw (ex-info \"injected web failure\" {})))] (try (seon.cluster.boot/start! {:seon.boot/root (get-in (get @seon.operator.runtime/running-instances \"default\") [:seon.boot/config :seon.boot/root]) :seon.boot/cluster-name \"partial\"}) (catch Throwable e (seon.cluster.boot/readiness (get @seon.operator.runtime/running-instances (:seon.boot/cluster-name (ex-data e)))))))" 120000)]
             (is (some #{:seon.render.web/served} (:seon.boot/missing-layers partial)))

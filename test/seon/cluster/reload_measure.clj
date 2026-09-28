@@ -72,8 +72,6 @@
                          (walk/postwalk-replace
                           {"default" cluster}
                           '(do
-                            (seon.cluster/project-next-prepl-value!
-                             {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
                             (let [database (seon.db/db (seon.cluster.boot/connection "default"))
                                   transaction (seon.db/q '[:find ?tx . :where
                                                           [?c :seon.cluster/name "default"]

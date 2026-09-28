@@ -1,931 +1,261 @@
 (ns seon.dev.mcp
-  "Serve the source-independent development REPL MCP boundary."
+  "The MCP stdio server as pure transport. Tool names, descriptions, schemas
+  and every call's result come from the cluster JVM's entrance through two
+  forms: `((requiring-resolve 'seon.mcp/tools))` and
+  `((requiring-resolve 'seon.mcp/call) \"<request json>\")`, each answering a
+  JSON string. The bridge names no other JVM symbol, so a bridge from an old
+  commit keeps working across JVM restarts at newer ones; when the JVM it
+  listed tools from is replaced, it re-reads them and sends
+  `notifications/tools/list_changed`."
   (:require [cheshire.core :as json]
-            [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.string :as str])
-  (:import [java.io BufferedReader PushbackReader]
-           [java.net InetSocketAddress Socket SocketTimeoutException]))
+            [clojure.string :as str]
+            [seon.operator :as operator])
+  (:import [java.io BufferedReader]
+           [java.nio.file Files StandardCopyOption]))
 
-;; This process is deliberately below the application. It asks the fresh
-;; operator for its root-scoped observations and speaks io-prepl; it never
-;; loads src/ or src-old/ into the bridge process. Discovery happens on every
-;; call so an already-running MCP process observes cluster starts, stops, and
-;; replacements without a restart.
+;;; ---------------------------------------------------------------------------
+;;; The world: discovery and prepl are values, so tests pass fakes.
+;;; ---------------------------------------------------------------------------
 
-(def project-root
-  ;; The managed root: the operator names it on every cluster JVM it launches
-  ;; (`-Dseon.operator.root`, script/seon/operator.clj). A JVM running an
-  ;; archive has `data/source/<sha>/` as its working directory, which holds no
-  ;; advertisements; the working directory is only the last resort, for a
-  ;; bridge process launched from the checkout itself.
-  (or (System/getenv "SEON_PROJECT_ROOT")
-      (System/getProperty "seon.operator.root")
-      (System/getProperty "user.dir")))
-
-(def own-cluster
-  (or (some-> (System/getenv "SEON_CLUSTER_DIR") io/file .getName)
-      "default"))
+(def entrance
+  "The JVM namespace holding `tools` and `call`."
+  'seon.mcp)
 
 (def default-timeout-ms 30000)
-(def connect-timeout-ms 5000)
-(def server-info {:name "seon" :version "0.4.0"})
 
-;; [root cluster session-id] -> one stateful io-prepl socket and its endpoint.
-(defonce clj-sessions (atom {}))
-(def stdout-lock (Object.))
-(def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
-(defonce reload-state (atom {}))
+(def grace-ms
+  "Added to a call's own `timeout_ms`, so an entrance that honours the bound
+  answers before the bridge gives up on the connection."
+  2000)
 
-(defn- content-text
-  {:seon.fn/projection-boundary :none}
-  [value]
-  (if (string? value)
-    value
-    (json/generate-string value)))
+(defn live-world
+  "The operator discovery and prepl the bridge runs against, under `root`."
+  [root]
+  {::root root
+   ::advertisements operator/advertisements
+   ::prepl (fn [advertisement form bound-ms]
+             (operator/prepl-value! advertisement form bound-ms nil bound-ms))})
 
-(defn- log-info
-  [& arguments]
+(defn- jvm-identity [advertisement]
+  (select-keys advertisement [:seon.boot/pid :seon.boot/start-instant]))
+
+(defn- route
+  "The cluster a request names (else the only live one, else \"default\") and
+  its live advertisement, if any."
+  [{::keys [root advertisements]} cluster]
+  (let [live (advertisements root)
+        cluster (or cluster
+                    (when (= 1 (count live)) (:seon.boot/cluster-name (first live)))
+                    "default")]
+    {::cluster cluster
+     ::advertisement (some #(when (= cluster (:seon.boot/cluster-name %)) %) live)}))
+
+(defn- jvm-string!
+  "Evaluate `form` on the advertised JVM; its value must be a string."
+  [{::keys [prepl]} advertisement form bound-ms]
+  (let [value (prepl advertisement form bound-ms)]
+    (if (string? value)
+      value
+      (throw (ex-info (str "The entrance answered " (type value) ", not a JSON string.") {})))))
+
+(defn- failure-text
+  "What went wrong: the JVM's own cause when the prepl answered an exception
+  (`#error` reads as a tagged literal), else the bridge's message."
+  [failure]
+  (let [value (get-in (ex-data failure) [:seon.error/offending :val])
+        value (if (tagged-literal? value) (:form value) value)]
+    (or (when (map? value) (some #(when (string? %) %) [(:seon.error/message value) (:cause value)]))
+        (ex-message failure)
+        (str (class failure)))))
+
+(defn- tools-form [] (str "((requiring-resolve '" entrance "/tools))"))
+
+(defn- call-form [request-json]
+  ;; pr-str writes the request as one EDN string literal on the wire.
+  (str "((requiring-resolve '" entrance "/call) "
+       #_{:clj-kondo/ignore [:discouraged-var]} (pr-str request-json) ")"))
+
+;;; ---------------------------------------------------------------------------
+;;; Tool list: fetched from the JVM, cached beside the cluster's advertisement.
+;;; ---------------------------------------------------------------------------
+
+(def static-tools
+  "The list served with no live JVM and no cached list: enough to call a tool
+  and read the start remedy."
+  (json/generate-string
+   (for [tool ["eval_clj" "runtime_status"]]
+     {:name tool
+      :description "No live Seon JVM answered yet; a call returns how to start one."
+      :inputSchema {:type "object"
+                    :properties {:code {:type "string"} :cluster {:type "string"}}}})))
+
+(defn- cache-file [root cluster]
+  (io/file root "data" "clusters" cluster "mcp-tools.json"))
+
+(defn- write-cache! [root cluster tools-json]
+  (let [target (cache-file root cluster)
+        staging (io/file (str target ".tmp"))]
+    (io/make-parents target)
+    (spit staging tools-json)
+    (Files/move (.toPath staging) (.toPath target)
+                (into-array [StandardCopyOption/REPLACE_EXISTING StandardCopyOption/ATOMIC_MOVE]))))
+
+(defn initial-state
+  "Before any JVM answers: the home cluster's cached list, else the static one."
+  [{::keys [root]}]
+  (let [cached (cache-file root "default")]
+    {::identity nil
+     ::tools (if (.isFile cached) (slurp cached) static-tools)}))
+
+(defn- log
+  "One diagnostic line on stderr: the transport's own text, never a value."
+  [& parts]
   (binding [*out* *err*]
-    (apply println "[mcp INFO]" arguments)
+    #_{:clj-kondo/ignore [:discouraged-var]} (apply println "[seon mcp]" parts)
     (flush)))
 
-(defn- log-debug
-  [& arguments]
-  (when *debug*
-    (binding [*out* *err*]
-      (apply println "[mcp DEBUG]" arguments)
-      (flush))))
+(defn sync-tools
+  "`[state changed?]` after checking the home JVM against the tools' source.
 
-(defn- log-error
-  [& arguments]
-  (binding [*out* *err*]
-    (apply println "[mcp ERR ]" arguments)
-    (flush)))
-
-(defn- mcp-success
-  [value]
-  {:content [{:type "text"
-              :text (content-text value)}]})
-
-(defn- mcp-error
-  [data]
-  {:content [{:type "text"
-              :text (content-text data)}]
-   :isError true})
-
-(defn- failure
-  "A bridge failure as the one error shape (`seon.error.refusal/diagnostic`,
-  resolved from the tooling classpath the bridge runs on, `bin/mcp-server`):
-  `request`'s fields, the failure's declared kind (its ex-data's, else
-  `kind`), and the whole cause chain — class, message and ex-data per link,
-  with only first-party frames. Bounded by construction: `Throwable->map`
-  here printed every frame of every link, a ~100-frame babashka stack for a
-  repl-unavailable reply."
-  {:malli/schema [:=> [:cat :map :keyword :seon.error/throwable] :seon.error/base]}
-  [request kind ^Throwable throwable]
-  (merge request
-         ((requiring-resolve 'seon.error.refusal/diagnostic)
-          {:seon.error/at (java.util.Date.)
-           :seon.error/layer :seon.dev.mcp/bridge
-           :seon.error/operation 'seon.dev.mcp/handle-request
-           :seon.error/message (or (ex-message throwable) (.getName (class throwable)))
-           :seon.error/throwable throwable})
-         {:seon.dev.mcp/failure (or (:seon.dev.mcp/failure (ex-data throwable)) kind)}))
+  A different live JVM's list is fetched, cached and served; changed? means
+  the served list differs."
+  [{::keys [root] :as world} state]
+  (let [{::keys [cluster advertisement]} (route world nil)
+        jvm (some-> advertisement jvm-identity)]
+    (if (or (nil? jvm) (= jvm (::identity state)))
+      [state false]
+      (try
+        (let [tools (jvm-string! world advertisement (tools-form) default-timeout-ms)]
+          (json/parse-string tools)
+          (try (write-cache! root cluster tools)
+               (catch Exception failure (log "tool cache not written:" (ex-message failure))))
+          [(assoc state ::identity jvm ::tools tools) (not= tools (::tools state))])
+        (catch Exception failure
+          ;; The identity stays unrecorded, so the next request fetches again.
+          (log "tools not fetched from" cluster ":" (failure-text failure))
+          [state false])))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Operator-derived discovery
+;;; tools/call
 ;;; ---------------------------------------------------------------------------
 
-(def ^:private cluster-name-pattern
-  #"\A[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})\z")
+(defn- error-result [text]
+  {"content" [{"type" "text" "text" text}] "isError" true})
 
-(defn- valid-cluster?
-  [cluster]
-  (boolean (and (string? cluster)
-                (re-matches cluster-name-pattern cluster))))
+(defn- start-remedy [root cluster]
+  (str "No live Seon JVM for cluster " cluster " under " root
+       ": run bin/seon --root " root " start " cluster "."))
 
-(defn- canonical-root
-  [root]
-  (.getCanonicalPath (io/file (or root project-root))))
+(defn- connect-refused? [failure]
+  (some #(instance? java.net.ConnectException %) (take-while some? (iterate ex-cause failure))))
 
-(defn- advertised-entities
-  "Each live advertisement under `root`, unprobed. An evaluation's endpoint
-  needs only the advertised prepl; asking the JVM for health on every call cost
-  a whole runtime observation (~180 ms, ~585 MB allocated on default,
-  perf-profile 2026-09-26), and every advertised state was eligible anyway."
-  [root]
-  (require 'seon.operator)
-  (let [root (canonical-root root)]
-    (mapv
-     (fn [advertisement]
-       (let [cluster (:seon.boot/cluster-name advertisement)]
-         {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster
-          :seon.dev.mcp/path (str (io/file root "data/clusters" cluster "prepl.edn"))
-          :seon.dev.mcp/state :advertised
-          :seon.dev.mcp/advertisement advertisement :seon.dev.mcp/source :advertisement}))
-     ((ns-resolve 'seon.operator 'advertisements) root))))
+(defn call-tool
+  "One tools/call forwarded unchanged to the routed JVM's entrance.
 
-(defn- discovery-entities
-  [root]
-  (mapv
-   (fn [{cluster :seon.dev.mcp/cluster advertisement :seon.dev.mcp/advertisement :as entity}]
-     (let [;; Discovery needs only health; the whole observation stays in the JVM.
-           health
-           (try
-             ((ns-resolve 'seon.operator 'prepl-value!) advertisement
-              (pr-str `(do
-                         (~'seon.cluster/project-next-prepl-value!
-                          {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
-                         (:seon.dev.mcp/health
-                          (~'seon.cluster/mcp-runtime-observation ~cluster)))))
-             (catch Exception _ nil))]
-       (assoc entity :seon.dev.mcp/state (if health
-                                        (if (#{:observed :faulted} health) :alive :degraded)
-                                        :unknown))))
-   (advertised-entities root)))
-
-(defn- start-remedy
-  [root cluster]
-  (str "Start the cluster with: bin/seon --root " root " start " cluster "."))
-
-(defn- endpoint-error
-  [entity]
-  (let [root (:seon.dev.mcp/root entity)
-        cluster (:seon.dev.mcp/cluster entity)
-        state (:seon.dev.mcp/state entity)]
-    (ex-info
-     (str "No live CLJ REPL is available for cluster '" cluster
-          "'; its advertisement is " (name state) ". "
-          (start-remedy root cluster))
-     (cond-> {:seon.dev.mcp/failure :repl-unavailable
-              :seon.dev.mcp/root root
-              :seon.dev.mcp/cluster cluster
-              :seon.dev.mcp/advertisement-state state
-              :seon.dev.mcp/advertisement-file (:seon.dev.mcp/path entity)
-              :seon.dev.mcp/remedy (start-remedy root cluster)}
-       (:seon.dev.mcp/error entity)
-       (assoc :seon.dev.mcp/advertisement-error
-              (:seon.dev.mcp/error entity))))))
-
-(defn- read-clj-endpoint
-  [root cluster]
-  (when-not (valid-cluster? cluster)
-    (throw (ex-info "Invalid cluster name."
-                    {:seon.dev.mcp/failure :invalid-cluster
-                     :seon.dev.mcp/cluster cluster})))
-  (let [root (canonical-root root)
-        entities (advertised-entities root)
-        candidates (filterv #(= cluster (:seon.dev.mcp/cluster %)) entities)]
-    (case (count candidates)
-      1 (let [{state :seon.dev.mcp/state
-               source :seon.dev.mcp/source
-               advertisement :seon.dev.mcp/advertisement}
-              (first candidates)]
-          {:host (:seon.boot/prepl-host advertisement)
-           :port (:seon.boot/prepl-port advertisement)
-           :pid (:seon.boot/pid advertisement)
-           :start-instant (:seon.boot/start-instant advertisement)
-           :seon.dev.mcp/root root
-           :seon.dev.mcp/cluster-state state
-           :seon.dev.mcp/source source})
-      0 (throw
-         (endpoint-error
-          (or (some #(when (= cluster (:seon.dev.mcp/cluster %)) %)
-                    entities)
-              {:seon.dev.mcp/root root
-               :seon.dev.mcp/cluster cluster
-               :seon.dev.mcp/path
-               (.getPath (io/file root "data" "clusters" cluster "prepl.edn"))
-               :seon.dev.mcp/state :missing})))
-      (throw
-       (ex-info
-        (str "Cluster '" cluster "' is ambiguous in operator root " root ".")
-        {:seon.dev.mcp/failure :ambiguous-cluster
-         :seon.dev.mcp/root root
-         :seon.dev.mcp/cluster cluster
-         :seon.dev.mcp/candidates
-         (mapv #(select-keys % [:seon.dev.mcp/root
-                                :seon.dev.mcp/cluster
-                                :seon.dev.mcp/state
-                                :seon.dev.mcp/advertisement])
-               candidates)})))))
-
-;;; ---------------------------------------------------------------------------
-;;; io-prepl transport
-;;; ---------------------------------------------------------------------------
-
-(defn- close-clj-session!
-  [key]
-  (when-let [{:keys [socket]} (get @clj-sessions key)]
-    (swap! clj-sessions dissoc key)
-    (try
-      (.close ^Socket socket)
-      (catch Throwable _
-        nil))))
-
-(defn- open-clj-session!
-  [root cluster session-id endpoint]
-  (let [socket (Socket.)]
-    (try
-      (.connect socket
-                (InetSocketAddress. ^String (:host endpoint)
-                                    (int (:port endpoint)))
-                connect-timeout-ms)
-      (let [session {:socket socket
-                     :reader (PushbackReader. (io/reader socket))
-                     :writer (io/writer socket)
-                     :endpoint endpoint
-                     :root root
-                     :cluster cluster
-                     :session-id session-id}]
-        (swap! clj-sessions assoc [root cluster session-id] session)
-        session)
-      (catch Throwable throwable
-        (try (.close socket) (catch Throwable _ nil))
-        (throw throwable)))))
-
-(defn- current-clj-session!
-  [root cluster session-id]
-  (let [key [root cluster session-id]
-        endpoint (read-clj-endpoint root cluster)
-        cached (get @clj-sessions key)]
-    (cond
-      (and cached (= endpoint (:endpoint cached)))
-      cached
-
-      cached
-      (do
-        (close-clj-session! key)
-        (if (= "default" session-id)
-          (open-clj-session! root cluster session-id endpoint)
-          (throw
-           (ex-info "Named CLJ session ended with the cluster restart."
-                    {:seon.dev.mcp/failure :session-lost
-                     :seon.dev.mcp/cluster cluster
-                     :seon.dev.mcp/session-id session-id
-                     :seon.dev.mcp/retry-with-new-session true}))))
-
-      :else
-      (open-clj-session! root cluster session-id endpoint))))
-
-(defn- source!
-  ;; The one reader owns forms and their refusals; the bridge carries text.
-  [code]
-  (when-not (string? code)
-    (throw (ex-info "CLJ evaluation requires a string form."
-                    {:seon.dev.mcp/failure :invalid-form})))
-  {:seon.dev.mcp/source code})
-
-(defn- collect-prepl-response!
-  [{:keys [socket reader]} timeout-ms]
-  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-    (loop [events []]
-      (let [remaining-ms (- deadline (System/currentTimeMillis))]
-        (when-not (pos? remaining-ms)
-          (throw (SocketTimeoutException. "io-prepl deadline exceeded")))
-        (.setSoTimeout ^Socket socket (int remaining-ms))
-        (let [event (edn/read {:eof ::eof} reader)]
-          (cond
-            (= ::eof event)
-            (throw (ex-info "Cluster closed the io-prepl session."
-                            {:seon.dev.mcp/failure :transport-closed}))
-
-            (not (map? event))
-            (throw (ex-info "Cluster emitted malformed io-prepl data."
-                            {:seon.dev.mcp/failure :malformed-prepl
-                             :seon.dev.mcp/value (pr-str event)}))
-
-            (= :ret (:tag event))
-            (conj events event)
-
-            :else
-            (recur (conj events event))))))))
-
-(defn- decoded-projection-event
-  [event]
-  (if (and (= :ret (:tag event)) (string? (:val event)))
-    ;; An unreadable :val keeps its raw text beside the reader's failure.
-    (let [[parsed cause] (try [(edn/read-string (:val event))]
-                              (catch Throwable cause [nil cause]))]
-      (cond
-        cause (assoc event :seon.dev.mcp/reader-error
-                     (str (.getName (class cause)) ": " (ex-message cause)))
-        (and (map? parsed) (contains? parsed :seon.dev.mcp/value)) (assoc event :val parsed)
-        :else event))
-    event))
-
-(defn- shown-event
-  ;; The agent path already printed its value: an SCI evaluation's shown text
-  ;; (`:seon.dev.mcp/text`) becomes the event's value beside its evaluation
-  ;; keys, and every other `:val` keeps the printed bytes the JVM sent. The
-  ;; bridge reprints nothing.
-  ;; Diagnostics the projection attached beside the value travel with it.
-  [event]
-  (let [projected (:val (decoded-projection-event event))
-        value (:seon.dev.mcp/value projected)]
-    (if (string? (:seon.dev.mcp/text value))
-      (merge event (dissoc value :seon.dev.mcp/text)
-             (select-keys projected [:seon.render.value/diagnostics])
-             {:val (:seon.dev.mcp/text value)})
-      event)))
-
-(defn- one-shot-events!
-  [root cluster remote-form timeout-ms]
-  (let [session-id (str "value-" (random-uuid))
-        key [root cluster session-id]
-        {:keys [writer] :as session}
-        (current-clj-session! root cluster session-id)]
-    (try
-      (.write ^java.io.Writer writer (str remote-form "\n"))
-      (.flush ^java.io.Writer writer)
-      (mapv decoded-projection-event
-            (collect-prepl-response! session timeout-ms))
-      (finally
-        (close-clj-session! key)))))
-
-(defn- terminal-projection
-  [events]
-  (some #(when (= :ret (:tag %)) (:val %)) events))
-
-(defn- namespace-symbol!
-  [namespace-name]
-  (let [namespace-name (or namespace-name "user")
-        value (try
-                (edn/read-string namespace-name)
-                (catch Throwable _ nil))]
-    (when-not (and (symbol? value)
-                   (nil? (namespace value))
-                   (= namespace-name (str value)))
-      (throw
-       (ex-info "Namespace must be one unqualified Clojure namespace symbol."
-                {:seon.dev.mcp/failure :invalid-namespace
-                 :seon.dev.mcp/namespace namespace-name})))
-    value))
-
-(defn- evaluation-mode!
-  [mode]
-  (let [mode (or mode "jvm")]
-    (when-not (contains? #{"jvm" "sci"} mode)
-      (throw
-       (ex-info "Evaluation mode must be 'jvm' or 'sci'."
-                {:seon.dev.mcp/failure :invalid-mode
-                 :seon.dev.mcp/mode mode})))
-    mode))
-
-(defn- jvm-evaluation-form
-  "The prepl form that evaluates the caller's SOURCE in `namespace-symbol`:
-  `seon.operator.prepl/evaluate` reads it with the one reader and evaluates
-  it. The call is compiled in the prepl wire's own namespace (a top-level
-  `do` compiles each form in turn), so no frame of this wrapper is first
-  party and a fault names the caller's form or nothing."
-  {:malli/schema [:=> [:cat :string :symbol :boolean] :string]}
-  [source namespace-symbol read-only?]
-  (pr-str
-   `(do
-      (in-ns '~'seon.operator.prepl)
-      (~'seon.operator.prepl/evaluate {:seon.dev.mcp/source ~source
-                                       :seon.dev.mcp/namespace '~namespace-symbol
-                                       :seon.dev.mcp/read-only? ~read-only?}))))
-
-(defn- run-form
-  "The prepl form that evaluates `source` as one ordinary agent run
-  (`seon.cluster.agent/evaluate-source!`), segmented as code, and answers the
-  settled run with its receipts in order. Without a branch the agent is root on
-  the cluster's own branch; with one it is the branch's hosted agent
-  (`seon.cluster.host/host!`, created as `mcp/<branch>` on first use). The
-  run starts in the agent's assigned namespace; the run writer refuses an
-  explicit other one by name, so code moves with `in-ns`, as at a REPL."
-  {:malli/schema [:=> [:cat :string :string [:maybe :symbol] :boolean [:maybe :string]] :string]}
-  [source cluster namespace-symbol read-only? branch]
-  ;; One syntax-quote builds the custody branch and its body, so `handle#` and
-  ;; `instance#` name the same bindings in both.
-  (pr-str
-   `(do
-      ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
-       {:seon.dev.mcp/project? false :seon.dev.mcp/read-only? ~read-only?})
-      (let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
-            handle# (:seon.turn.loop/cluster instance#)]
-        (if-not (:seon.agent/routing handle#)
-          {:seon.error/at (java.util.Date.)
-           :seon.error/layer :seon.dev.mcp/evaluation
-           :seon.error/operation 'seon.cluster.agent/evaluate-source!
-           :seon.error/message ~(str "Cluster '" cluster "' has a live JVM REPL, but its agents are not armed; "
-                                     "SCI evaluation is unavailable.")
-           :seon.dev.mcp/cluster ~cluster}
-          (let [custody# (if ~(some? branch)
-                           (select-keys
-                            ((requiring-resolve 'seon.cluster.host/host!)
-                             {:seon.turn.loop/cluster (assoc handle# :seon.store/store (:seon.store/store instance#))
-                              :seon.agent/branch ~(some-> branch keyword)
-                              :seon.agent/id ~(str "mcp/" branch)
-                              :seon.ns/name '~(or namespace-symbol 'user)})
-                            [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
-                           {:seon.turn.loop/cluster handle# :seon.agent/routing (:seon.agent/routing handle#)
-                            :seon.agent/id "root"})
-                result# ((requiring-resolve 'seon.cluster.agent/evaluate-source!)
-                         (cond-> (assoc custody# :seon.agent/segmenter 'seon.turn/code-sources
-                                        :seon.cluster.reply/text ~source)
-                           '~namespace-symbol (assoc :seon.turn/starting-ns [:seon.ns/name '~namespace-symbol])))]
-            (if (or (:seon.error/at result#) (not (:seon.db/db result#)))
-              result#
-              ;; Each evaluation answers with the response its agent's next
-              ;; context reads, read on the database value the run's settlement
-              ;; left (`seon.cluster.agent/run-observation`), never on a later
-              ;; connection value.
-              (assoc (dissoc result# :seon.db/db :seon.db/durable) :seon.dev.mcp/evaluations
-                     ((requiring-resolve 'seon.cluster.agent/run-observation)
-                      result# (:seon.agent/id custody#) ~cluster)
-                     ;; the namespace the run started in, read from its run: a
-                     ;; run with no requested one starts where the last ended
-                     :seon.dev.mcp/namespace
-                     (some-> ((requiring-resolve 'seon.db/pull) (:seon.db/db result#)
-                              [{:seon.turn/starting-ns [:seon.ns/name]}] [:seon.turn/id (:seon.turn/id result#)])
-                             :seon.turn/starting-ns :seon.ns/name str)))))))))
-
-(defn- run-namespace
-  "The namespace a root run started in, from its terminal value, else nil."
-  {:malli/schema [:=> [:cat [:vector :map]] [:maybe :string]]}
-  [events]
-  (let [terminal (some #(when (= :ret (:tag %)) %) events)]
-    (:seon.dev.mcp/namespace (try (edn/read-string (:val terminal)) (catch Throwable _ nil)))))
-
-(defn- run-events
-  "The prepl events of a root run: one per settled evaluation whose value is the
-  response the agent's own context reads for it (`:seon.repl/response` — its
-  output, value, error and branch faults, printed by the one REPL grammar), and
-  an error flagged as the event's exception. An evaluation with no response yet
-  answers with its stored shown text or error."
-  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
-  [events]
-  (let [terminal (some #(when (= :ret (:tag %)) %) events)
-        value (try (edn/read-string (:val terminal)) (catch Throwable _ nil))]
-    (if-let [evaluations (:seon.dev.mcp/evaluations value)]
-      (into (filterv #(not= :ret (:tag %)) events)
-            (map (fn [{shown :seon.eval/shown error :seon.cluster.eval/error response :seon.repl/response
-                       ordinal :seon.cluster.eval/ordinal}]
-                   (cond-> {:tag :ret :val (or response shown error) :seon.cluster.eval/ordinal ordinal
-                            :seon.turn/id (:seon.turn/id value)}
-                     error (assoc :exception true))))
-            evaluations)
-      (cond->> events
-        (:seon.error/at value) (mapv #(if (identical? % terminal) (assoc % :exception true) %))))))
-
-(defn- remote-evaluation-form
-  [{:seon.dev.mcp/keys [source read-only? branch namespace?]} mode cluster namespace-symbol]
-  (case mode
-    "jvm" (jvm-evaluation-form source namespace-symbol (true? read-only?))
-    "sci" (run-form source cluster (when namespace? namespace-symbol) (true? read-only?) branch)))
-
-(defn- branch-name!
-  "A lane names its branch; blank, non-string or colon-led names refuse."
-  [branch]
-  (when-not (and (string? branch) (not (str/blank? branch))
-                 (not (str/starts-with? branch ":")))
-    (throw (ex-info "A branch name is required, without a leading colon."
-                    {:seon.dev.mcp/failure :invalid-branch
-                     :seon.dev.mcp/branch branch})))
-  branch)
-
-(defn- branch-form
-  "Create (off the cluster head's commit), list or retire one named branch
-  through the one entrance agents use, `my.agent/create-branch!`,
-  `my.agent/branches` and `my.agent/retire-branch!`, with the cluster's
-  store, connection and routing as the context."
-  {:malli/schema [:=> [:cat :string :string [:maybe :string]] :string]}
-  [cluster action branch]
-  (pr-str
-   `(let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
-          handle# (:seon.turn.loop/cluster instance#)
-          context# {:seon.store/store (:seon.store/store instance#)
-                    :seon.db/connection (:seon.db/connection handle#)
-                    :seon.agent/routing (:seon.agent/routing handle#)}
-          request# {:seon.store/branch ~(some-> branch keyword)}
-          call# (fn [sym# & args#] (apply (requiring-resolve sym#) args#))]
-      (cond
-        (nil? handle#) {:seon.error/at (java.util.Date.) :seon.error/layer :seon.dev.mcp/branch
-                        :seon.error/operation '~(symbol "seon.dev.mcp" (str "branch-" action))
-                        :seon.error/message "The cluster layer is not running." :seon.dev.mcp/cluster ~cluster}
-        (= "list" ~action) (call# 'my.agent/branches context#)
-        (= "create" ~action) (call# 'my.agent/create-branch! request# context#)
-        :else (call# 'my.agent/retire-branch! request# context#)))))
-
-(defn- execute-branch
-  [{:keys [root cluster action timeout_ms] branch :name}]
-  (let [root (canonical-root root)
-        cluster (or cluster own-cluster)
-        request {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster :seon.dev.mcp/action action}]
-    (try
-      (when-not (contains? #{"create" "list" "retire"} action)
-        (throw (ex-info "Action must be create, list or retire." {:seon.dev.mcp/failure :invalid-action})))
-      (let [events (one-shot-events! root cluster
-                                     (branch-form cluster action (when (not= "list" action) (branch-name! branch)))
-                                     (min 120000 (max 1 (or timeout_ms default-timeout-ms))))
-            terminal (some #(when (= :ret (:tag %)) %) events)
-            value (try (edn/read-string (:val terminal)) (catch Throwable _ nil))
-            response (assoc request :seon.dev.mcp/value (:val terminal))]
-        (if (or (:exception terminal) (not (map? value)) (:seon.error/at value))
-          (mcp-error (cond-> (assoc response :seon.dev.mcp/failure :branch)
-                       (:exception terminal) (assoc :seon.dev.mcp/events (mapv #(dissoc % :form) events))))
-          (mcp-success response)))
-      (catch Throwable throwable
-        (mcp-error (failure request :branch throwable))))))
-
-(defn- execute-clj-eval
-  {:seon/tasks #{"f64757aef0e6"}}
-  [{:keys [code root cluster mode session_id timeout_ms] :as request}]
-  (let [root (canonical-root root)
-        cluster (or cluster own-cluster)
-        session-id (or session_id "default")
-        timeout-ms (min 120000 (max 1 (or timeout_ms default-timeout-ms)))
-        key [root cluster session-id]
-        validation (try
-                     {:seon.dev.mcp/evaluation
-                      (source! code)
-                      :seon.dev.mcp/namespace-symbol
-                      (namespace-symbol! (:namespace request))
-                      :seon.dev.mcp/mode
-                      (let [selected (evaluation-mode! mode)
-                            branch (:branch request)]
-                        (when branch
-                          (branch-name! branch)
-                          (when (not= selected "sci")
-                            (throw (ex-info "Branch selection requires SCI mode."
-                                            {:seon.dev.mcp/failure :invalid-branch}))))
-                        selected)}
-                     (catch Throwable throwable
-                       {::invalid throwable}))]
-    (if-let [throwable (::invalid validation)]
-      (mcp-error
-       (failure {:seon.dev.mcp/runtime "clj"
-                 :seon.dev.mcp/root root
-                 :seon.dev.mcp/cluster cluster
-                 :seon.dev.mcp/session-id session-id
-                 :seon.dev.mcp/form code}
-                :invalid-form throwable))
-      (let [mode (:seon.dev.mcp/mode validation)
-            namespace-symbol (:seon.dev.mcp/namespace-symbol validation)]
-        (try
-          (let [remote-form
-              (remote-evaluation-form
-               (assoc (:seon.dev.mcp/evaluation validation)
-                      :seon.dev.mcp/read-only? (true? (:read_only request))
-                      :seon.dev.mcp/branch (:branch request)
-                      :seon.dev.mcp/namespace? (some? (:namespace request)))
-               mode cluster namespace-symbol)
-              {:keys [writer endpoint] :as session}
-              (current-clj-session! root cluster session-id)]
-          (.write ^java.io.Writer writer (str remote-form "\n"))
-          (.flush ^java.io.Writer writer)
-          (let [collected (collect-prepl-response! session timeout-ms)
-                root-run? (= "sci" mode)
-                events (mapv (fn [event]
-                               (-> event
-                                   (cond-> (not root-run?) shown-event)
-                                   ;; SCI's namespace is the response's; the
-                                   ;; host prepl *ns* would mislabel it.
-                                   (cond-> (= "sci" mode) (dissoc :ns))
-                                   (dissoc :form)))
-                             (if root-run? (run-events collected) collected))
-                terminal (some #(when (= :ret (:tag %)) %) (reverse events))
-                response {:seon.dev.mcp/runtime "clj"
-                          :seon.dev.mcp/root root
-                          :seon.dev.mcp/cluster cluster
-                          :seon.dev.mcp/cluster-state
-                          (:seon.dev.mcp/cluster-state endpoint)
-                          :seon.dev.mcp/mode mode
-                          ;; a run reports the namespace it actually used
-                          :seon.dev.mcp/namespace (or (when root-run? (run-namespace collected))
-                                                      (str namespace-symbol))
-                          :seon.dev.mcp/session-id session-id
-                          :seon.dev.mcp/form code
-                          :seon.dev.mcp/events events}]
-            (if (or (:exception terminal) (some :exception events))
-              (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
-              (mcp-success response))))
-        (catch SocketTimeoutException _
-          (close-clj-session! key)
-          (mcp-error {:seon.dev.mcp/failure :timeout
-                      :seon.dev.mcp/runtime "clj"
-                      :seon.dev.mcp/root root
-                      :seon.dev.mcp/cluster cluster
-                      :seon.dev.mcp/mode mode
-                      :seon.dev.mcp/namespace (str namespace-symbol)
-                      :seon.dev.mcp/session-id session-id
-                      :seon.dev.mcp/form code
-                      :seon.dev.mcp/timeout-ms timeout-ms}))
-        (catch Throwable throwable
-          (close-clj-session! key)
-          (mcp-error
-           (failure {:seon.dev.mcp/runtime "clj"
-                     :seon.dev.mcp/root root
-                     :seon.dev.mcp/cluster cluster
-                     :seon.dev.mcp/mode mode
-                     :seon.dev.mcp/namespace (str namespace-symbol)
-                     :seon.dev.mcp/session-id session-id
-                     :seon.dev.mcp/form code}
-                    :transport throwable))))))))
-
-(defn- session-ids
-  "The ids of `root`'s `cluster` sessions open to `endpoint`, the JVM its
-  advertisement names now (nil when none is advertised). A session open to
-  any other endpoint talks to a JVM that is gone: it is released here, since
-  a caller's going away is invisible to this shared bridge and its peer's
-  going away is not. Lanes named ~35 such sessions after restarts
-  (2026-09-27), each listed as active."
-  [root cluster endpoint]
-  (let [owned (filterv (fn [[session-root session-cluster _]]
-                        (and (= root session-root) (= cluster session-cluster)))
-                      (keys @clj-sessions))
-        [live gone] ((juxt filter remove)
-                     #(and endpoint (= endpoint (:endpoint (get @clj-sessions %)))) owned)]
-    (run! close-clj-session! gone)
-    (vec (sort (map #(nth % 2) live)))))
-
-(defn- runtime-observation
-  [root cluster]
+  Every failure is a CallToolResult with isError, never an exception."
+  [world {tool "name" arguments "arguments" :as params}]
   (try
-    (let [projected
-          (terminal-projection
-           (one-shot-events!
-            root cluster
-            (pr-str
-             `(do
-                ((requiring-resolve
-                  'seon.cluster/project-next-prepl-value!)
-                 {:seon.dev.mcp/read-only? true})
-                ;; The observation's declared AI face, the one `bin/seon status` prints.
-                ((requiring-resolve 'seon.cluster/runtime-observation-ai)
-                 {:seon.render/value
-                  ((requiring-resolve 'seon.cluster/mcp-runtime-observation) ~cluster)
-                  ;; A render unit carries the database it renders against.
-                  :seon.db/db ((requiring-resolve 'seon.db/db)
-                               ((requiring-resolve 'seon.cluster.boot/connection) ~cluster))})))
-            default-timeout-ms))]
-      (or (:seon.dev.mcp/value projected) projected))
-    (catch Throwable throwable
-      (failure {:seon.dev.mcp/cluster cluster
-                :seon.dev.mcp/health :unknown
-                :seon.dev.mcp/flow :unknown}
-               :observation throwable))))
-
-(defn- execute-runtime-status
-  [{:keys [root cluster]}]
-  (let [root (canonical-root root)
-        entities (discovery-entities root)
-        selected (or cluster own-cluster)
-        selected-entities (filterv #(= selected (:seon.dev.mcp/cluster %)) entities)
-        selected-entity
-        (when-let [entity (first selected-entities)]
-          (cond-> entity
-            (< 1 (count selected-entities))
-            (assoc :seon.dev.mcp/observation-count
-                   (count selected-entities))))]
-    (mcp-success
-     {:seon.dev.mcp/root root
-      :seon.dev.mcp/view :cluster-health-flow
-      :seon.dev.mcp/clusters
-      (if selected-entity
-        [(if (contains? #{:alive :degraded :unknown}
-                        (:seon.dev.mcp/state selected-entity))
-           (assoc selected-entity :seon.dev.mcp/runtime
-                  (runtime-observation root selected))
-           (assoc selected-entity :seon.dev.mcp/runtime
-                  {:seon.dev.mcp/health :unknown
-                   :seon.dev.mcp/flow :unknown}))]
-        [])
-      :seon.dev.mcp/selected-cluster selected
-      :seon.dev.mcp/sessions
-      (session-ids root selected
-                   ;; no advertisement: no live JVM for any session to reach
-                   (try (read-clj-endpoint root selected) (catch clojure.lang.ExceptionInfo _ nil)))})))
-
-(defn- hex-digit?
-  [character]
-  (or (<= (int \0) (int character) (int \9))
-      (<= (int \a) (int character) (int \f))
-      (<= (int \A) (int character) (int \F))))
-
-(defn- digest!
-  [content-digest]
-  (when-not (and (string? content-digest)
-                 (= 64 (count content-digest))
-                 (every? hex-digit? content-digest))
-    (throw (ex-info "Digest must be 64 hexadecimal characters."
-                    {:seon.dev.mcp/failure :invalid-digest})))
-  content-digest)
-
-(defn- path!
-  [path]
-  (let [parsed (try
-                 (edn/read-string (or path "[]"))
-                 (catch Throwable _ ::unreadable))]
-    (when-not (vector? parsed)
-      (throw (ex-info "Path must be one EDN vector."
-                      {:seon.dev.mcp/failure :invalid-path})))
-    parsed))
-
-(defn- execute-get-value
-  [{:keys [root cluster digest path offset timeout_ms]}]
-  (let [root (canonical-root root)
-        cluster (or cluster own-cluster)
-        content-digest (digest! digest)
-        path (path! path)
-        offset (max 0 (long (or offset 0)))
-        timeout-ms (min 120000 (max 1 (or timeout_ms default-timeout-ms)))
-        events
-        (one-shot-events!
-         root cluster
-         (pr-str
-          `(do
-             ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
-              {:seon.dev.mcp/read-only? true})
-             ((requiring-resolve 'seon.cluster/mcp-get-value)
-              ~cluster ~content-digest ~path ~offset)))
-         timeout-ms)
-        terminal (some #(when (= :ret (:tag %)) %) events)
-        response {:seon.dev.mcp/runtime "clj"
-                  :seon.dev.mcp/root root
-                  :seon.dev.mcp/cluster cluster
-                  :seon.dev.mcp/source-digest content-digest
-                  :seon.render.data/path path
-                  :seon.render.data/offset offset
-                  :seon.dev.mcp/events events}]
-    (if (:exception terminal)
-      (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
-      (mcp-success response))))
-
-(def tools
-  [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program entity on the cluster. The run starts where root's previous run ended (as *ns* persists at a REPL), else in root's assigned namespace; move with (in-ns ...) in the code. With a branch (made by the `branch` tool), SCI is one ordinary run of that branch's hosted agent (seon.cluster.host/host!, created as mcp/<branch> on the branch at first use, in this call's namespace, default user), answered the same way; its defs are entities on the branch, never on the cluster, until `branch` retire closes its admission and releases it. A value the floor printer cuts under the token budget settles into the selected cluster's blob tier and returns its digest; each cut prints the form that reads its rest, over (seon.cluster/mcp-value cluster digest), and get_value pages it. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
-    :inputSchema {:type "object"
-                  :properties {:code {:type "string" :description "Clojure code. JVM mode and SCI with a branch evaluate exactly one form (wrap a sequence in (do ...)); SCI without a branch evaluates every form in order as one run."}
-                               :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
-                               :cluster {:type "string" :description "Cluster name within root. Defaults to this MCP server's own cluster; ambiguous live matches fail with their candidate list."}
-                               :namespace {:type "string" :description "Clojure namespace for either mode. Defaults to user; a missing JVM namespace is created and refers clojure.core."}
-                               :read_only {:type "boolean" :description "Declare that this evaluation changes no runtime code or mutable state; preserves retained pages. Omitted or false conservatively invalidates them."}
-                               :mode {:type "string" :enum ["jvm" "sci"] :description "jvm evaluates in the host io-prepl; sci without a branch is an ordinary run of root; with a branch, a run of the branch's hosted agent. Defaults to jvm."}
-                               :branch {:type "string" :description "SCI only: a branch the `branch` tool created, without a leading colon. The evaluation is a run of the branch's hosted agent; omission makes it a run of root on the cluster."}
-                               :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
-                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
-                  :required ["code"]}}
-
-   {:name "runtime_status"
-    :description "Report one selected cluster's deduplicated health/readiness, bounded problem counts, Flow proc observations, and active stateful io-prepl sessions. A proc that does not answer within the configured ping window is unknown, never healthy."
-    :inputSchema {:type "object"
-                  :properties {:root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
-                               :cluster {:type "string" :description "Selected cluster. Defaults to this MCP server's cluster."}}
-                  :required []}}
-
-   {:name "branch"
-    :description "Own a lane branch of a cluster: create one off the cluster head's commit (seon.cluster.registry/branch!), list the store's roster, or retire one (retire its hosted agent: admission closes in one transaction, its graphs join, its execution releases; then seon.cluster.registry/retire-branch!). A name is required for create and retire; the cluster's own branch, an existing name on create, and a branch agents hold on retire refuse as declared errors."
-    :inputSchema {:type "object"
-                  :properties {:action {:type "string" :enum ["create" "list" "retire"]}
-                               :name {:type "string" :description "Branch name without a leading colon; required for create and retire."}
-                               :root {:type "string" :description "Operator root path. Defaults to the repository root."}
-                               :cluster {:type "string" :description "Cluster whose head and store the branch uses. Defaults to this MCP server's cluster."}
-                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
-                  :required ["action"]}}
-
-   {:name "get_value"
-    :description "Drill an oversized eval result previously stored in the selected cluster's blob tier. The path is a get-in path and offset pages the selected collection."
-    :inputSchema {:type "object"
-                  :properties {:digest {:type "string" :description "The SHA-256 digest returned by eval_clj."}
-                               :path {:type "string" :description "An EDN get-in path into the stored value. Defaults to []."}
-                               :offset {:type "integer" :minimum 0}
-                               :root {:type "string" :description "Operator root path. Defaults to the repository root."}
-                               :cluster {:type "string" :description "Cluster holding the blob. Defaults to this MCP server's cluster."}
-                               :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
-                  :required ["digest"]}}])
-
-(defn- execute-tool
-  [name arguments]
-  (let [arguments (reduce-kv (fn [result key value]
-                               (assoc result (keyword key) value))
-                             {}
-                             (or arguments {}))]
-    (case name
-      "eval_clj" (execute-clj-eval arguments)
-      "runtime_status" (execute-runtime-status arguments)
-      "get_value" (execute-get-value arguments)
-      "branch" (execute-branch arguments)
-      (throw (ex-info (str "Unknown tool: " name)
-                      {:seon.dev.mcp/tool name})))))
+    (let [world (cond-> world (string? (get arguments "root"))
+                  (assoc ::root (operator/canonical-root (get arguments "root"))))
+          root (::root world)
+          form (call-form (json/generate-string params))
+          timeout (get arguments "timeout_ms")
+          bound (+ grace-ms (if (pos-int? timeout) timeout default-timeout-ms))
+          attempt (fn []
+                    (let [{::keys [cluster advertisement]} (route world (get arguments "cluster"))]
+                      (if advertisement
+                        {::cluster cluster ::advertisement advertisement
+                         ::value (jvm-string! world advertisement form bound)}
+                        {::cluster cluster})))
+          ;; A refused connection sent nothing: the JVM was replaced between
+          ;; discovery and connect, so discover again once.
+          outcome (try (attempt)
+                       (catch Exception failure
+                         (if (connect-refused? failure) (attempt) (throw failure))))]
+      (if-let [value (::value outcome)]
+        (json/parse-string value)
+        (error-result (start-remedy root (::cluster outcome)))))
+    (catch Exception failure
+      (let [{timed-out :seon.operator/timeout-ms cluster :seon.boot/cluster-name pid :seon.boot/pid}
+            (:seon.error/offending (ex-data failure))]
+        (error-result
+         (if timed-out
+           (str "Tool " tool " on cluster " cluster " (JVM pid " pid ")"
+                " gave no result within " timed-out " ms; its connection is closed and the"
+                " evaluation's outcome in the JVM is unknown. Retry with a larger timeout_ms,"
+                " or inspect the JVM with runtime_status.")
+           (str "Tool " tool " failed in the MCP bridge (" (failure-text failure) ")."
+                " Check the JVM with bin/seon status; start it with bin/seon start.")))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; JSON-RPC
 ;;; ---------------------------------------------------------------------------
 
-(defn- send-response
-  {:seon.fn/external-sink :ai-visible-text
-   :seon.fn/projection-boundary :none}
-  [response]
-  (let [encoded (json/generate-string response)]
-    (log-debug "<<" encoded)
-    (locking stdout-lock
-      (println encoded)
-      (flush))))
+(def list-changed {"jsonrpc" "2.0" "method" "notifications/tools/list_changed"})
 
-(defn- send-result
-  [id result]
-  (send-response {:jsonrpc "2.0" :id id :result result}))
+(defn handle
+  "One JSON-RPC message answered as `{::state state ::out [messages]}`.
 
-(defn- send-error
-  [id code message]
-  (send-response {:jsonrpc "2.0"
-                  :id id
-                  :error {:code code :message message}}))
-
-(defn- handle-request
-  [{:keys [method params id] :as request}]
-  (log-debug ">>" (pr-str request))
-  (try
+  Pure but for the world's discovery and prepl."
+  [world state {:strs [id method params]}]
+  (let [reply (fn [state result & before]
+                {::state state ::out (conj (vec before) {"jsonrpc" "2.0" "id" id "result" result})})]
     (case method
       "initialize"
-      (send-result id {:protocolVersion "2024-11-05"
-                       :capabilities {:tools {:listChanged true}}
-                       :serverInfo server-info})
+      (reply state {"protocolVersion" (get params "protocolVersion" "2024-11-05")
+                    "capabilities" {"tools" {"listChanged" true}}
+                    "serverInfo" {"name" "seon" "version" "0.5.0"}})
 
-      "notifications/initialized"
-      nil
+      "ping" (reply state {})
 
       "tools/list"
-      (send-result id {:tools tools})
+      (let [[state _] (sync-tools world state)]
+        (reply state {"tools" (json/parse-string (::tools state))}))
 
       "tools/call"
-      (let [{:keys [name arguments]} params]
-        (let [result (execute-tool name arguments)
-              error (:error @reload-state)]
-          (send-result id (cond-> result
-                            error (update :content conj
-                                          {:type "text" :text (content-text error)})))
-          (when error (swap! reload-state dissoc :error))))
+      (let [[state changed?] (sync-tools world state)
+            result (call-tool world params)]
+        (if changed? (reply state result list-changed) (reply state result)))
 
-      (when id
-        (send-error id -32601 (str "Method not found: " method))))
-    (catch Throwable throwable
-      (log-error "request failed:" (ex-message throwable))
-      (when id
-        (let [reload-error (:error @reload-state)]
-          (send-result id (mcp-error (merge (failure {} :request throwable) reload-error)))
-          (when reload-error (swap! reload-state dissoc :error)))))))
+      {::state state
+       ::out (if (some? id)
+               [{"jsonrpc" "2.0" "id" id "error" {"code" -32601 "message" (str "Method not found: " method)}}]
+               [])})))
 
-(def parent-handle
+(defn handle-line
+  "`handle` for one input line; an unparseable line answers a parse error."
+  [world state line]
+  (try
+    (handle world state (json/parse-string line))
+    (catch Exception failure
+      {::state state
+       ::out [{"jsonrpc" "2.0" "id" nil
+               "error" {"code" -32700 "message" (str "Parse error: " (ex-message failure))}}]})))
+
+(defn- exit-with-parent!
+  "End this process when the client that launched it exits."
+  []
   (let [parent (.parent (java.lang.ProcessHandle/current))]
     (when (.isPresent parent)
-      (.get parent))))
-
-(defn- start-parent-watchdog!
-  []
-  (when parent-handle
-    (try
-      (let [exit
-            (.thenRun
-             (.onExit ^java.lang.ProcessHandle parent-handle)
-             (reify Runnable
-               (run [_] (System/exit 0))))]
-        (.exceptionally
-         exit
-         (reify java.util.function.Function
-           (apply [_ throwable]
-             (log-error "watchdog failed:" (ex-message throwable))
-             nil))))
-      (catch Throwable throwable
-        (log-error "watchdog failed:" (ex-message throwable))))))
+      (.thenRun (.onExit ^java.lang.ProcessHandle (.get parent))
+                (reify Runnable (run [_] (System/exit 0)))))))
 
 (defn -main
   "Serve newline-delimited MCP JSON-RPC on standard I/O."
   [& _]
-  (log-info "Seon MCP server starting; project=" project-root)
-  (start-parent-watchdog!)
-  (let [reader (BufferedReader. *in*)
-        source (io/file project-root "script/seon/dev/mcp.clj")
-        state reload-state handler (atom @#'handle-request)]
-    (reset! state {:checked 0 :modified (.lastModified source) :tools tools})
-    (loop []
+  (exit-with-parent!)
+  (let [world (live-world (.getCanonicalPath (io/file (or (System/getenv "SEON_PROJECT_ROOT")
+                                                      (System/getProperty "user.dir")))))
+        reader (BufferedReader. *in*)]
+    (log "serving; root" (::root world))
+    (loop [state (initial-state world)]
       (when-let [line (.readLine reader)]
-        (when-not (str/blank? line)
-          (try
-            (let [now (System/currentTimeMillis)]
-              (when (>= (- now (:checked @state)) 1000)
-                (let [modified (.lastModified source)]
-                  (swap! state assoc :checked now)
-                  (when (not= modified (:modified @state))
-                    (let [roots (when-let [n (find-ns 'seon.dev.mcp)] (into {} (map (fn [[_ v]] [v @v]) (ns-interns n))))]
-                     (try
-                      (require 'seon.dev.mcp :reload)
-                      (doseq [[sym value] {'reload-state state 'clj-sessions clj-sessions}] (alter-var-root (ns-resolve 'seon.dev.mcp sym) (constantly value)))
-                      (let [new-tools @(ns-resolve 'seon.dev.mcp 'tools)]
-                       (when (not= (:tools @state) new-tools) (send-response {:jsonrpc "2.0" :method "notifications/tools/list_changed"}))
-                       (swap! state assoc :modified modified :tools new-tools :error nil))
-                      (reset! handler @(ns-resolve 'seon.dev.mcp 'handle-request))
-                      (log-info "reloaded" (.getPath source))
-                      (catch Throwable throwable
-                        (doseq [[v root] roots] (alter-var-root v (constantly root)))
-                        (log-error "reload failed:" (.getPath source) (ex-message throwable))
-                        (swap! state assoc :error (failure {:seon.dev.mcp/file (.getPath source)} :reload throwable))))))))
-              (@handler (json/parse-string line true)))
-            (catch Throwable throwable
-              (log-error "parse error:" (ex-message throwable))
-              (send-error nil -32700 "Parse error"))))
-        (recur)))))
+        (if (str/blank? line)
+          (recur state)
+          (let [{::keys [state out]} (handle-line world state line)]
+            (doseq [message out]
+              ;; The transport's own JSON-RPC line, one per message.
+              #_{:clj-kondo/ignore [:discouraged-var]} (println (json/generate-string message)))
+            (flush)
+            (recur state)))))))

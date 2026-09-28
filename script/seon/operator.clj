@@ -265,8 +265,6 @@
 (defn- request-form [request]
   (pr-str `(do
              (require '~'seon.cluster.boot)
-             (when-let [mark# (ns-resolve '~'seon.cluster '~'project-next-prepl-value!)]
-               (mark# {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}))
              (~'seon.cluster.boot/request! '~request))))
 
 (defn connected! [request]

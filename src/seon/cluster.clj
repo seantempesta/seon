@@ -20,7 +20,6 @@
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
             [clojure.set :as set]
-            [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
             [seon.cluster.instruction :as instruction]
             [seon.cluster.process :as cluster.process]
@@ -55,14 +54,9 @@
              :refer [root-store-holder running-instances]]
                         [seon.oversight :as oversight]
             [seon.problems :as problems]
-            [seon.render :as render]
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
-            [seon.sci.admit :as admit]
-            [seon.render.walk :as render.walk]
-            [seon.print :as print]
-            [clojure.walk :as walk]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
             [taoensso.timbre :as log]
@@ -227,11 +221,9 @@
   (constantly nil))
 
 ;;; ---------------------------------------------------------------------------
-;;; MCP result projection — installed at the cluster io-prepl boundary.
+;;; Loaded-code identity: a host evaluation that changed it re-renders pages
+;;; (`seon.mcp`); the cluster instance a runtime observation reads.
 ;;; ---------------------------------------------------------------------------
-
-(defonce ^:private mcp-projection
-  (ThreadLocal.))
 
 (defn identity-hash-map?
   "True for a java.util.IdentityHashMap."
@@ -263,326 +255,9 @@
                  (not (identical? current (.get mappings namespace-object))))
                now-mappings)))))
 
-(defn project-next-prepl-value!
-  "Mark the next PREPL return with explicit projection and read-only intent.
-  Unspecified intent conservatively announces possible runtime changes.
-  No JVM-wide profile window rides a host evaluation: its counters include
-  every other lane's concurrent work, so they cannot say what this
-  evaluation did (task c7bc0c506aa4); the event's own `ms` is its time."
-  {:malli/schema [:function
-                  [:=> [:cat] :nil]
-                  [:=> [:cat [:or :boolean
-                              [:map
-                               [:seon.dev.mcp/evaluation? {:optional true} :boolean]
-                               [:seon.dev.mcp/project? {:optional true} :boolean]
-                               [:seon.dev.mcp/read-only? {:optional true} :boolean]]]] :nil]]}
-  ([] (project-next-prepl-value! false))
-  ([request]
-   (let [request (if (map? request) request {:seon.dev.mcp/evaluation? request})]
-     (.set mcp-projection
-           (cond-> request
-             ;; Only an evaluation that may change code pays for the mark.
-             (not (:seon.dev.mcp/read-only? request))
-             (assoc ::loaded-code-mark (loaded-code-mark)))))
-   nil))
-
-(defn- consume-mcp-projection!
-  []
-  (let [project? (.get mcp-projection)]
-    (.remove mcp-projection)
-    project?))
-
 (defn- mcp-instance
   [cluster-name]
   (get @running-instances cluster-name))
-
-(defn- mcp-effective
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective]]
-                  [:or :nil :seon.config/effective :seon.config/error
-                   :seon.db/error-result :seon.schema/validation-refusal]]}
-  [cluster-name bootstrap-effective]
-  (let [instance (mcp-instance cluster-name)
-        connection (:seon.boot/cluster-connection instance)
-        projection-state
-        (get-in instance
-                [:seon.sci.eval/ctx :seon.sci.eval/projection-state])]
-    (if connection
-      (if projection-state
-        (schema/call-with-projection-state
-         projection-state
-         #(config/effective (db/db connection) cluster-name))
-        {:seon.error/at (Date.)
-          :seon.error/layer :seon.dev.mcp/configuration
-          :seon.error/operation 'seon.cluster/mcp-effective
-          :seon.schema/expected-value :seon.schema/projection
-          :seon.schema/refused-value :seon.error/unknown
-          :seon.error/message "The MCP config read has no cluster projection state."
-          :seon.error/expected :seon.sci.eval/projection-state
-          :seon.error/data {:seon.boot/cluster-name cluster-name}})
-      bootstrap-effective)))
-
-(defn- mcp-plain
-  "`value` by plain Clojure printing under `effective`'s result bounds, beside the
-  diagnostics of the render path that could not project it. The floor's fallback:
-  a failed projection never replaces the value (AGENTS.md, the REPL path is total)."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]
-                       [:vector :seon.error/base] [:or :nil :seon.config/effective]]
-                  [:map [:seon.dev.mcp/value [:map [:seon.dev.mcp/text :string]]] [:seon.dev.mcp/windowed? :boolean]
-                   [:seon.render.value/diagnostics [:vector :seon.error/base]]]]}
-  [value diagnostics effective]
-  {:seon.dev.mcp/value {:seon.dev.mcp/text (binding [*print-length* (:seon.config.eval.result/max-nodes effective)
-                                                  *print-level* (:seon.config.eval.result/max-depth effective)]
-                                          (pr-str value))}
-   :seon.dev.mcp/windowed? false
-   :seon.render.value/diagnostics diagnostics})
-
-(defn- mcp-project
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective] :seon.schema/value]
-     [:map [:seon.dev.mcp/value :seon.schema/value] [:seon.dev.mcp/windowed? :boolean]]]
-    [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective]
-          :seon.schema/value :boolean :boolean]
-     [:map [:seon.dev.mcp/value :seon.schema/value] [:seon.dev.mcp/windowed? :boolean]]]]}
-  ([cluster-name bootstrap-effective value]
-   (mcp-project cluster-name bootstrap-effective value false false))
-  ([cluster-name bootstrap-effective value evaluation? exception?]
-   (try
-     (let [instance (mcp-instance cluster-name)
-           connection (:seon.boot/cluster-connection instance)
-           configured (mcp-effective cluster-name bootstrap-effective)
-           ;; A refused configuration read never replaces the value: it prints
-           ;; under the bootstrap configuration the prepl started with, and the
-           ;; refusal rides beside it.
-           refused (when (or (:seon.config/error-key configured) (:seon.db/invalid-read configured)
-                             (:seon.schema/expected-value configured))
-                     configured)
-           effective (if refused bootstrap-effective configured)
-           caps (config/result-caps effective)
-           diagnostics (filterv some? [refused (when (:seon.config/error-key caps) caps)])
-           ;; A thrown evaluation is the one error shape: class, message,
-           ;; ex-data and first-party frames per cause link.
-           value (if (and exception? (instance? Throwable value))
-                   (seon.error.refusal/diagnostic (Date.) :seon.dev.mcp/evaluation 'clojure.core/eval
-                                                  {:seon.error/throwable value})
-                   value)]
-       (cond-> (cond
-         (:seon.config/error-key caps)
-         (mcp-plain value diagnostics bootstrap-effective)
-
-         (and evaluation? (not exception?) (string? (:seon.eval/shown value)))
-         {:seon.dev.mcp/value
-          (assoc (select-keys value [:seon.cluster.eval/ns
-                                    :seon.sci.eval/ending-ns
-                                    :seon.sci.admit/record
-                                    :seon.cluster.eval/error
-                                    :seon.cluster.eval/output])
-                 :seon.dev.mcp/text (:seon.eval/shown value))
-          :seon.dev.mcp/windowed? false}
-
-         :else
-         ;; ONE BUDGET, IN ESTIMATED TOKENS: the floor selects the held value
-         ;; under the MCP profile, and only a value it cut is stored, so each
-         ;; cut's continuation reads the rest from the blob. A value shown
-         ;; whole commits nothing, however large its print-node artifact.
-         (let [instance-projection
-               (some-> (:seon.sci.eval/ctx instance)
-                       env/of
-                       :seon.schema/projection)
-               profile (assoc (render/agent-render-profile effective)
-                              :seon.render.profile/id :seon.render.profile/mcp)
-               selected (fn [value profile]
-                          (render.value/prepare
-                           (cond-> {:seon.render/value value
-                                    :seon.render/profile profile
-                                    :seon.render.value/root [:seon.dev.mcp/value]
-                                    :seon.sci.admit/caps caps}
-                             ;; A JVM evaluation has no evaluation world: the unit's
-                             ;; required database is the cluster's own, handed here.
-                             connection (assoc :seon.db/db (db/db connection)))))
-               held (selected value (assoc profile :seon.print/requery-refusal
-                                           (if connection
-                                             "the value was shown whole"
-                                             "the cluster has no database connection")))
-               admitted (when (and connection (:seon.render.value/truncated? held))
-                          (admit/admit-value
-                           (cond-> {:seon.sci.admit/value value
-                                    :seon.sci.admit/interrupt-fn (fn [])
-                                    :seon.sci.admit/caps caps}
-                             instance-projection
-                             (assoc :seon.schema/projection instance-projection))))
-               ;; An admission over its storage bound stored nothing: the held
-               ;; value's page stands, and the reason rides beside it.
-               artifact (when (and admitted (not (:seon.sci.admit/reason admitted)))
-                          (render.value/artifact admitted))
-               content (some-> artifact render.value/artifact-edn)
-               content-digest (some-> content blob/digest)
-               ;; The first page and every continuation select ONE backing
-               ;; (one-render-path §3g): a stored value's page is selected
-               ;; from the artifact `get_value` continues, so a cut's path and
-               ;; offset address the value it was cut from.
-               projection (if artifact
-                            (selected (render.value/artifact-value artifact)
-                                      (assoc profile :seon.print/requery-id
-                                             (list 'seon.cluster/mcp-value cluster-name content-digest)))
-                            held)
-               projected-node (:seon.render.value/tree projection)
-               ;; THE BLOB IS THE WHOLE RECORD. `get_value` reads it by digest,
-               ;; so a windowed result commits NO transaction: a probe advances
-               ;; no basis. An unreferenced blob goes with the next GC sweep.
-               stored-digest (when artifact (blob/put! connection content))]
-           (cond-> {:seon.dev.mcp/value
-                    (if (:seon.error/at projection)
-                      projection
-                      ;; A cut is data an agent reads: its one text and
-                      ;; continuation form, as the agent's own reply prints it
-                      ;; (`print/elided-text`), never the node's bookkeeping.
-                      (walk/postwalk #(if (and (map? %) (= :seon.print/elided (:seon.print/face %)))
-                                        (print/elided-text %)
-                                        %)
-                                     (admit/semantic-value projected-node)))
-                    :seon.dev.mcp/windowed? (boolean artifact)}
-             artifact
-             (assoc :seon.blob/digest content-digest
-                    :seon.blob/size (count content)
-                    :seon.dev.mcp/retrievable? (boolean stored-digest))
-
-             (:seon.sci.admit/reason admitted)
-             (assoc :seon.dev.mcp/remainder
-                    (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes]))
-
-             (and (:seon.render.value/truncated? held) (nil? connection))
-             (assoc :seon.dev.mcp/remainder
-                    "The cluster has no database connection; the remainder is not retrievable."))))
-         (and (seq diagnostics) (not (:seon.config/error-key caps)))
-         (assoc :seon.render.value/diagnostics diagnostics)))
-     ;; The ordinary render path itself failed: the value prints plainly, the
-     ;; failure's whole cause beside it.
-     (catch Throwable failure
-       (mcp-plain value
-                  [(seon.error.refusal/diagnostic (Date.) :seon.dev.mcp/projection `mcp-project
-                                                  {:seon.error/throwable failure})]
-                  bootstrap-effective)))))
-
-(defn mcp-valf
-  "Project marked MCP returns with caller-supplied exception recognition."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]
-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean] :string]
-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean [:sequential :seon.flow/channel]] :string]]}
-  ([cluster-name bootstrap-effective value]
-   (mcp-valf cluster-name bootstrap-effective value false))
-  ([cluster-name bootstrap-effective value exception?]
-   (mcp-valf cluster-name bootstrap-effective value exception?
-             (keep #(get-in % [:seon.render.web/view
-                               :seon.render.web/runtime-eval-channel])
-                   (vals @running-instances))))
-  ([cluster-name bootstrap-effective value exception? runtime-eval-channels]
-   (let [projection (consume-mcp-projection!)]
-     (try
-       ;; A host evaluation that defined, redefined or unmapped a Var may
-       ;; change what any cohosted cluster's pages render; one that changed no
-       ;; loaded code (the evidence, not the flag) keeps every cached page.
-       (when (some-> (::loaded-code-mark projection) loaded-code-changed?)
-         (doseq [channel runtime-eval-channels]
-           (async/offer! channel
-                         :seon.render.web/runtime-eval)))
-       (admit/canonical-edn
-        (if (and projection (get projection :seon.dev.mcp/project? true))
-          (mcp-project cluster-name bootstrap-effective value
-                       (true? (:seon.dev.mcp/evaluation? projection)) exception?)
-          value))
-       (catch Throwable failure
-         ;; Never re-enter admission or a failed producer: the Throwable floor
-         ;; renders the whole bounded cause chain from the Throwable alone.
-         (pr-str (render.value/floor failure)))))))
-
-(defn mcp-value
-  "The value an MCP reply stored under `content-digest`, read back from its
-  artifact: the source every cut of that reply continues from. The reader's
-  refusal when the blob holds no value artifact.
-
-  ## Examples
-
-      (drop 5 (get-in (seon.cluster/mcp-value \"default\" \"2133…\") [0 :seon.error/frames]))"
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest]
-                  [:or :seon.render.value/unreadable-artifact-error
-                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                          :seon.schema.admission/reason "A stored MCP value is any evaluation result."
-                          :gen/elements [nil false 0 "" :k [] {}]}]]]}
-  [cluster-name content-digest]
-  (let [connection (:seon.boot/cluster-connection (mcp-instance cluster-name))
-        content (when connection (blob/get connection content-digest))
-        artifact (when content (render.value/read-artifact content))]
-    (cond
-      (nil? content)
-      (let [reason (if connection
-                     (str "No blob is stored under " content-digest ".")
-                     (str "Cluster " cluster-name " has no database connection."))]
-        (assoc (seon.error.refusal/diagnostic (Date.) :seon.render.value/artifact 'seon.cluster/mcp-value
-                                              {:seon.error/message reason
-                                               :seon.error/expected :seon.render.value/artifact
-                                               :seon.error/data {:seon.blob/digest content-digest}})
-               :seon.render.value/unreadable-artifact reason))
-      (:seon.render.value/unreadable-artifact artifact) artifact
-      :else (render.value/artifact-value artifact))))
-
-(defn mcp-get-value
-  "Read and drill one stored MCP value artifact without mutating REPL state."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest :seon.render.data/path :int] :seon.schema/value]}
-  [cluster-name content-digest path offset]
-  (if-let [connection (:seon.boot/cluster-connection
-                       (mcp-instance cluster-name))]
-    (let [effective (mcp-effective cluster-name nil)]
-      (if (or (:seon.config/error-key effective)
-              (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-        effective
-        ;; A page is the one continuation owner's selection at the path and
-        ;; absolute offset (design §3g), over the artifact the first page was
-        ;; selected from: the same text an agent reads, with the cut's
-        ;; coordinates beside it. This adapter reads nothing itself.
-        (let [projection (render.walk/continue
-                          {:seon.render.walk/continuation-node [:seon.blob/digest content-digest]
-                           :seon.db/connection connection
-                           ;; a render unit carries the database it renders against
-                           :seon.db/db (db/db connection)
-                           :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}
-                           :seon.render/profile (assoc (render/agent-render-profile effective)
-                                                       :seon.render.profile/id :seon.render.profile/mcp
-                                                       :seon.print/requery-refusal "continue with get_value at this digest and path from the next-offset")
-                           :seon.sci.admit/caps (config/result-caps effective)})
-              tree (:seon.render.value/tree projection)
-              cut (some #(when (and (map? %) (= :seon.print/elided (:seon.print/face %))
-                                    (= path (:seon.render.data/path %)))
-                           %)
-                        (tree-seq coll? seq tree))
-              ;; An uncut string page is the whole remainder from `offset`
-              ;; (the floor names a string's length only on its cut): its end
-              ;; is the offset plus what it shows, and an empty remainder at
-              ;; a positive offset is at or past the end.
-              remainder (when (and (nil? cut) (= :seon.print/string (:seon.print/face tree)))
-                          (count (:seon.print/value tree)))
-              total (or (:seon.render.data/total tree) (:seon.render.data/total cut)
-                        (when (and remainder (pos? remainder)) (+ offset remainder)))
-              beyond-end? (if total
-                            (and (>= offset total) (pos? total))
-                            (and (some? remainder) (pos? offset)))]
-          (if (:seon.error/at projection)
-            (assoc projection :seon.blob/digest content-digest)
-            (cond-> {:seon.dev.mcp/text (:seon.render.value/text projection)
-                     :seon.render.data/path path
-                     :seon.render.data/offset offset
-                     :seon.render.value/beyond-end? (boolean beyond-end?)}
-              total (assoc :seon.render.data/total total)
-              cut (assoc :seon.render.data/next-offset (:seon.render.data/next-offset cut)))))))
-    {:seon.dev.mcp/remainder-not-retrievable content-digest
-     :seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.cluster/operation
-     :seon.error/operation 'seon.cluster/mcp-get-value
-     :seon.error/message
-     "The cluster has no database connection; the remainder is not retrievable."
-     :seon.blob/digest content-digest}))
 
 (defn- program-function-files
   "Symbol and relative source path of every `defn`/`defn-` row in `database`.
