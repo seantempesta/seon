@@ -29,11 +29,14 @@
             [datalog.parser.type :as parser.type]
             [clojure.test.check.generators :as gen]
             [seon.cache]
+            [seon.batch :as batch]
+            [seon.cluster.process :as process]
             [seon.env :as env]
             [seon.error.refusal :as error.refusal]
             [seon.id :as id]
             [seon.print :as print]
             [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [malli.registry :as mr]
             [seon.schema.internal :as internal])
@@ -3518,15 +3521,39 @@
                   :seon.error/actual-description "a value already assigned to an entity"
                   :seon.error/fix "Update the existing owner, or choose an unused value."}]))}))))
 
-(defn- stamp-receipt
-  [transaction]
-  (if (nil? *receipt*)
-    transaction
-    (let [stamp #(-> (into (vec *open*) %)
-                     (conj [:db/add "datomic.tx" ::receipt *receipt*]))]
-      (if (map? transaction)
-        (update transaction :tx-data stamp)
-        {:tx-data (stamp transaction)}))))
+(defn- stamp-transaction
+  "Attach writer observations once, including the first schema-installing write.
+  Process and agent names are historical observations, not living entity refs.
+  A caller may name its operation; otherwise the first named transaction function
+  identifies it, or `transact!` does. No agent is invented for a system caller."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction
+                       [:maybe :map] :seon.db.process/id] :seon.store/transaction]}
+  [database transaction world process-id]
+  (let [request (if (map? transaction) transaction {:tx-data transaction})
+        attributes [:seon.db.transaction/process :seon.db.transaction/operation :seon.db.transaction/agent]
+        missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
+        forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
+        projection (when forms (schema/declaration-projection forms))
+        declarations (when forms
+                       (into (schema.datahike/malli->datahike-schema-in projection missing)
+                             (when (get (dbi/-schema database) :seon.schema/key)
+                               (schema/canonical-schema-entities projection forms))))
+        operation (or (:seon.db.transaction/operation request)
+                      (some (fn [op]
+                              (when (and (vector? op) (= :db.fn/call (first op)))
+                                (let [f (second op)]
+                                  (cond (qualified-symbol? f) f
+                                        (var? f) (symbol (str (ns-name (:ns (meta f)))) (str (:name (meta f))))))))
+                            (:tx-data request))
+                      'seon.db/transact!)
+        agent (or (:seon.db.transaction/agent request) (:seon.agent/id world))
+        stamp (cond-> {:db/id :db/current-tx
+                        :seon.db.transaction/process process-id
+                        :seon.db.transaction/operation operation}
+                agent (assoc :seon.db.transaction/agent agent)
+                *receipt* (assoc ::receipt *receipt*))]
+    (assoc request :tx-data (conj (into (into (vec declarations) (when *receipt* *open*))
+                                       (:tx-data request)) stamp))))
 
 (defn absent-call
   "`tx-data` when `lookup-ref` names no entity in `database`, else nothing.
@@ -5734,7 +5761,9 @@
                 (if (seq configured-bounds)
                   (apply min configured-bounds)
                   declared-bound)
-                request (prepared-write projection database (stamp-receipt transaction))
+                request (prepared-write projection database
+                                        (stamp-transaction database transaction batch/*world*
+                                                           (process/id (process/current-identity))))
                 timeout (Object.)
                 ;; One deadline covers admission and acknowledgement: the
                 ;; writer's put! into its transaction queue runs inside the
@@ -5998,6 +6027,12 @@
   and applicable entity form; unknown attributes include installed candidates.
   Datahike owns native schema declarations, reference resolution, uniqueness,
   and transaction-function execution, retaining its refusal classifications.
+
+  Each commit records its process generation, operation and calling agent when
+  one exists. A request map may supply :seon.db.transaction/operation and
+  :seon.db.transaction/agent; otherwise the first named transaction function
+  (or seon.db/transact!) and the evaluation's agent supply them. These observed
+  names remain readable after their subjects retire. Attribution adds no commit.
 
   With the connection omitted, return :seon.db/tx and :seon.db/datoms as
   [entity attribute value added?] vectors. Entities use installed identity

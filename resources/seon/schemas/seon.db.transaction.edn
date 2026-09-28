@@ -1,0 +1,7 @@
+#:seon.db.transaction
+{:process [:string {:min 1 :seon.db/index true
+                    :description "Observed writer process generation (pid and start instant); retained after the process exits."}]
+ :operation [:qualified-symbol {:seon.db/index true
+                               :description "Caller-named operation, first named transaction function, or seon.db/transact! for an unnamed plain write."}]
+ :agent [:string {:min 1 :seon.db/index true
+                  :description "Observed calling agent id; absent for a system write with no agent world."}]}

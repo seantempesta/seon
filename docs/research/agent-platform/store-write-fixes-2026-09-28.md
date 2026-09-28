@@ -253,3 +253,73 @@ findings. Drill `46a71e5a9972` passed: base 228.735 s, move 29.954 s,
 candidate from scratch 173.276 s, total 510.522 s. The unchanged cluster MCP
 region remains the entrance lane/root's boundary. Source/resource/test delta is
 +41/−53 lines; this slice contains no turn, SCI, schema-owner or MCP edits.
+
+## Transaction attribution at the writer
+
+`db/transact!` and `transact-applied!` now share `stamp-transaction` in their
+existing validated writer path. It folds receipt/open facts and provenance into
+the same transaction. Every committed write names the process generation and
+operation; an agent id is recorded when the caller supplies one or the evaluation
+world carries one. System callers have no fabricated agent. A request's explicit
+`:seon.db.transaction/operation` wins; otherwise the first named transaction
+function identifies the operation, falling back to `seon.db/transact!` for plain
+writes. These are historical name observations, not refs keeping retired subjects
+alive. The three indexed attributes make attribution queryable.
+
+Work is O(N) to find the first named transaction function (O(1) with a named
+operation), three native-schema lookups, and one map per transaction. Bootstrap
+adds missing native attributes and their canonical schema rows in this same
+write. Subsequent writes derive none of those rows. This avoids Datahike
+`flush-tx-meta`'s requirement that metadata attributes already exist in db-before
+(`reference-code/datahike/src/datahike/db/transaction.cljc:904`, pinned
+`591c825d6a47869486a56723532d6665f51ba636`). The writer's unchanged final-report
+validator checks the result. No second commit, caller scan or stack inspection.
+
+REPL proof, pid 85484: the first write on a disposable branch committed 27
+datoms including schema bootstrap and two system provenance fields, in 116 ms;
+the next preparation returned one map. This called the exact `prepared-write`
+validator seam after the caller precheck, where production stamps. An initial
+probe mistakenly fed the stamp through the caller's precheck and was correctly
+refused for not-yet-installed attributes. Another probe mistakenly dereferenced
+the synchronous Datahike `transact` result; the corrected probe is preserved in
+`provenance-bootstrap.json`. Both branches were retired in finally clauses.
+
+Paired committed branches, same real lint updates and same pulled answers;
+three fields present (process, named operation, observed agent). Final measurements:
+
+| Inputs | Commits before / after | Datoms before / after | Node bytes before / after | ms before / after |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 / 1 | 2 / 5 | 555,598 / 756,751 | 54.156 / 48.109 |
+| 10 | 1 / 1 | 11 / 14 | 2,592,476 / 2,736,262 | 58.655 / 51.225 |
+| 100 | 1 / 1 | 101 / 104 | 5,315,841 / 5,481,628 | 106.868 / 92.441 |
+
+Attribution has a real storage cost: three datoms and roughly 144–201 KB of
+rewritten nodes on this basis, with no extra commit. It is not a latency
+optimization. Earlier one-input trials were noisy (including +28 ms); three
+repeated trials passing the already-held database had medians 44.972/50.444 ms,
++12.2%. The final paired series regressed neither threshold. The six-case final
+probe took 2.466 s including schema admission, branches and index marking; each
+measured ordinary write remained below 107 ms. Heap allocation was not measured.
+All probes and raw envelopes live under `tmp/astra-store-fixes-20260928/` as
+`provenance-{candidate.clj,probe.clj,bootstrap.json,final.json,repeat-held.json}`.
+
+Root's focused tests, not run here:
+
+- `seon.transaction-provenance-test/every-write-records-one-writer-at-one-ten-and-one-hundred-inputs`
+- `seon.transaction-provenance-test/unnamed-system-writes-do-not-invent-an-agent`
+- `seon.db-test/a-custody-switch-to-another-connection-carries-no-receipt`
+
+Archive `1a5d201ac` plus the four owned files: final lint 0 errors, 1,671
+warnings, 7.298 s; contract compilation 496 files, 4.722 s, only the same ten
+foreign documentation-script findings. The body/schema drill is recorded below;
+the public API docstring was clarified after its candidate was captured.
+
+Drill `6e8951fc082c` passed all steps: base 236.838 s, move 89.132 s,
+candidate from scratch 182.384 s; driver total 986.207 s across launch
+attempts. The candidate's last from-scratch boot is 23% below this drill's
+base, not evidence of a general boot speedup. During the long launch a thread
+sample was in the existing `program/definition-digest` canonical-print path;
+this attribution slice does not fix that separately measured boot cost.
+Source/resource/test delta +94/−15 lines. Foreign boundary: turn/SCI, schema
+and MCP work is excluded; no central test run was started. `db.clj` remains
+held for the requested transaction-report data patch.

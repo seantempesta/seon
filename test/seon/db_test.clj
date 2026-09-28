@@ -2264,17 +2264,17 @@
      (test-support/with-database
       (fn [other]
         (let [receipt [:seon.cluster.eval/id "custody-receipt"]
-              stamp #(#'db/stamp-receipt [])]
+              stamp #(get (last (:tx-data (#'db/stamp-transaction (db/db connection) [] nil "test-process"))) ::db/receipt)]
           (is (not (identical? connection other)))
           (with-bindings {#'db/*conn* connection #'db/*receipt* receipt}
-            (is (= {:tx-data [[:db/add "datomic.tx" ::db/receipt receipt]]} (stamp))
+            (is (= receipt (stamp))
                 "the evaluation's own custody stamps its receipt")
-            (is (= {:tx-data [[:db/add "datomic.tx" ::db/receipt receipt]]}
+            (is (= receipt
                    (db/call-with-custody {:seon.db/connection connection} stamp))
                 "the same connection keeps it")
-            (is (= [] (db/call-with-custody {:seon.db/connection other} stamp))
+            (is (nil? (db/call-with-custody {:seon.db/connection other} stamp))
                 "another connection's custody carries none")
-            (is (= [] (db/call-with-custody {} stamp))
+            (is (nil? (db/call-with-custody {} stamp))
                 "no custody carries none"))))))))
 
 (deftest an-issue-deletion-by-its-creator-is-not-an-authority-change
