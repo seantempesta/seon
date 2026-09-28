@@ -26,6 +26,7 @@
   cannot leak a listening port or a live proc into the next test."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
+            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test.check :as tc]
@@ -63,7 +64,9 @@
             [starfederation.datastar.clojure.api :as datastar]
             [seon.program :as program]
             [sci.core :as sci])
-  (:import [java.util.concurrent CompletableFuture CountDownLatch]
+  (:import [org.jsoup Jsoup]
+           [org.jsoup.nodes Element]
+           [java.util.concurrent CompletableFuture CountDownLatch]
            [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
             HttpResponse$BodyHandlers]))
@@ -87,6 +90,85 @@
 (defn- web-private
   [function-name]
   (deref (ns-resolve 'seon.render.web function-name)))
+
+(defn dom
+  "The served HTML as its document: a page test asserts on the element and
+  attribute its behavior is about, never on the bytes around them."
+  [^String html]
+  (Jsoup/parse html))
+
+(defn element
+  "The first element `css` selects in `html`, or nil."
+  ^Element [html css]
+  (.selectFirst (dom html) ^String css))
+
+(defn texts
+  "The text of every element `css` selects in `html`."
+  [html css]
+  (mapv #(.text ^Element %) (.select (dom html) ^String css)))
+
+(defn elements
+  "Every hiccup element in `h`, depth first."
+  [h]
+  (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq h)))
+
+(defn leaves
+  "The leaves a hiccup value shows (strings, symbols, numbers), attributes skipped."
+  [h]
+  (cond (and (vector? h) (keyword? (first h))) (mapcat leaves (remove map? (rest h)))
+        (sequential? h) (mapcat leaves h)
+        (nil? h) []
+        :else [h]))
+
+(defn painted
+  "The elements a response delivered as one document: every
+  `datastar-patch-elements` payload in order, or the page itself when the
+  response is a document rather than a feed."
+  [body]
+  (let [payloads (keep #(when (str/starts-with? % "data: elements ") (subs % 15))
+                       (str/split-lines body))]
+    (dom (if (seq payloads) (str/join "\n" payloads) body))))
+
+(defn shows?
+  "Whether the painted elements show `text`: what a reader sees, not markup."
+  [sse text]
+  (str/includes? (.text (painted sse)) text))
+
+(defn stream-strip
+  "The last painted stream strip as data: nil when none was painted, {} when
+  empty, else its live reply text and token count."
+  [sse]
+  (when-let [strip (last (.select (painted sse) "#surface-stream"))]
+    (if-let [reply (.selectFirst strip ".seon-stream-reply")]
+      {:text (.text (.selectFirst reply ".seon-stream-text"))
+       :tokens (parse-long (.text (.selectFirst reply ".seon-stream-count")))}
+      {})))
+
+(defn href
+  "A link as data: its path and its decoded query parameters."
+  [link]
+  (let [uri (URI. link)]
+    {:path (.getPath uri)
+     :query (into {} (map #(mapv (fn [part] (java.net.URLDecoder/decode ^String part "UTF-8"))
+                                 (str/split % #"=" 2)))
+                  (some-> (.getRawQuery uri) (str/split #"&")))}))
+
+(defn data-links
+  "Every `/data` link in the page's data panel, as data."
+  [html]
+  (->> (.select (dom html) ".seon-data-panel a[href^=/data]")
+       (mapv #(href (.attr ^Element % "href")))))
+
+(defn labelled
+  "The debug header's fields as data: each `<span>label</span><code>value</code>`
+  pair, label to shown value."
+  [html]
+  (into {}
+        (keep (fn [^Element span]
+                (when-let [code (.nextElementSibling span)]
+                  (when (= "code" (.tagName code))
+                    [(.text span) (.text code)]))))
+        (.select (dom html) "span")))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Fixture
@@ -393,7 +475,7 @@ handle))}}
   (let [paint (read-patches! stream 1)]
     (is (= 1 (patches paint))
         "the feed sends one proc-framed keyframe event")
-    (is (str/includes? paint "surface-stream")
+    (is (some? (stream-strip paint))
         "the proc-framed keyframe carries the stable stream surface")
     paint))
 
@@ -412,11 +494,11 @@ handle))}}
   ;; tab then looks alive while receiving nothing.
   (with-server
     (fn [_connection server _context]
-      (let [body (.body (fetch server "/"))]
-        (is (< (.indexOf body "</main>") (.indexOf body "data-init"))
-            "the opener is after every surface, not inside one")
-        (is (str/includes? body "retryMaxCount: Infinity"))
-        (is (str/includes? body "openWhenHidden: false"))))))
+      (let [opener (element (.body (fetch server "/")) "[data-init]")]
+        (is (= {:morph-target nil :parent "body"}
+               {:morph-target (.closest opener "main, [id^=surface-], .seon-walk-unit")
+                :parent (.tagName (.parent opener))})
+            "the opener is a child of the body, inside no surface")))))
 
 (deftest an-agent-page-is-the-same-mechanism-as-root
   ;; Root is an agent. If this test ever needs a root-specific branch,
@@ -428,15 +510,16 @@ handle))}}
                           {:seon.agent/id "agent-b"
                            :seon.cluster/name "web-test"
                            :seon.ns/name 'my.agents.agent-b}))
-      (let [root (.body (fetch server "/"))
-            other (.body (fetch server "/agent/agent-b"))]
-        (is (str/includes? root "<title>seon · root</title>"))
-        (is (str/includes? root "<code>my.agents.root</code>"))
-        (is (str/includes? other "<title>seon · agent-b</title>"))
-        (is (str/includes? other "<code>my.agents.agent-b</code>"))
-        ;; narration face retired (results-as-data); the ns-code checks
-        ;; above prove the alias selected agent-b's own walk root
-        (is (str/includes? other "data-walk-path=\"[]\""))))))
+      ;; One route, one page shape: each agent's page names that agent and
+      ;; walks from its own root namespace.
+      (let [page (fn [path]
+                   (let [html (.body (fetch server path))]
+                     {:title (first (texts html "title"))
+                      :namespace (some #{"my.agents.root" "my.agents.agent-b"} (texts html "code"))
+                      :walk-root? (some? (element html "[data-walk-path=\"[]\"]"))}))]
+        (is (= [{:title "seon · root" :namespace "my.agents.root" :walk-root? true}
+                {:title "seon · agent-b" :namespace "my.agents.agent-b" :walk-root? true}]
+               [(page "/") (page "/agent/agent-b")]))))))
 
 (deftest static-resources-come-off-the-classpath
   (with-server
@@ -444,11 +527,9 @@ handle))}}
       (is (= 200 (.statusCode (fetch server "/js/datastar.js"))))
       (let [stylesheet (fetch server "/css/input.css")]
         (is (= 200 (.statusCode stylesheet)))
-        (doseq [selector [".seon-print-summary"
-                          ".seon-print-table"
-                          ".seon-render-unavailable"]]
-          (is (str/includes? (.body stylesheet) selector)
-              "has a rule in the served stylesheet")))
+        (is (= [] (remove #(str/includes? (.body stylesheet) %)
+                          [".seon-print-summary" ".seon-print-table" ".seon-render-unavailable"]))
+            "every semantic class has a rule in the served stylesheet"))
       (testing "and path traversal is refused by construction"
         (is (= 404 (.statusCode (fetch server "/css/../../secret"))))))))
 
@@ -483,10 +564,11 @@ handle))}}
             "no transaction was committed")
         (is (= [] (cluster.agent/assigned-to @connection namespace-name))
             "no agent was created")
-        (is (str/includes? (.body known) "id=\"create-namespace-owner\"")
-            "the page offers the explicit create control")
-        (is (str/includes? (.body known)
-                           (str "action=\"/agent/" namespace-name "/context\"")))))))
+        (is (= (str "/agent/" namespace-name "/context")
+               (some-> (element (.body known) "#create-namespace-owner")
+                       (.closest "form")
+                       (.attr "action")))
+            "the page offers the explicit create control, posting to the namespace's agent")))))
 
 (deftest a-request-that-throws-answers-its-error-value-never-a-stack-trace
   ;; Class regression (2026-09-27): POST action=system-turn answered HTTP 500
@@ -499,9 +581,12 @@ handle))}}
                               :seon.error/operation 'seon.turn/record-evaluated-tx
                               :seon.error/message "The record refused its request."})
             response (#'web/failure-response {:seon.store/connection-object connection} failure)]
-        (is (= 500 (:status response)))
-        (is (= "text/html; charset=utf-8" (get-in response [:headers "content-type"])))
-        (is (str/includes? (:body response) "The record refused its request."))
+        (is (= {:status 500 :content-type "text/html; charset=utf-8"}
+               {:status (:status response)
+                :content-type (get-in response [:headers "content-type"])}))
+        ;; The body is the error value's face: its message is shown, and no
+        ;; stack frame reaches the page.
+        (is (str/includes? (.text (dom (:body response))) "The record refused its request."))
         (is (not (re-find #"\n\s+at |\.java:\d+\)" (:body response)))
             "no stack frame reaches the body")))))
 
@@ -578,10 +663,9 @@ handle))}}
             "inspection commits no transaction")
         (is (nil? (cluster.agent/steward-of @connection namespace-name))
             "inspection does not create an agent")
-        (is (str/includes? body "id=\"debug-inspection-header\""))
-        (is (str/includes? body (str "viewer</span><code>" namespace-name)))
-        (is (str/includes? body (str "subject</span><code>[:seon.ns/name " namespace-name "]")))
-        (is (str/includes? body "debug=true")
+        (is (some? (element body "#debug-inspection-header"))
+            "the page is the inspection page")
+        (is (str/includes? (.attr (element body "[data-init]") "data-init") "debug=true")
             "the existing feed receives the experiment request")))))
 
 (deftest debug-header-identifies-the-handed-program-and-projection
@@ -614,21 +698,15 @@ handle))}}
         (is (= (:seon.schema.projection/fingerprint projection)
                (:seon.schema.projection/fingerprint program-identity))
             "the fingerprint comes from the handed SCI context projection")
-        (is (str/includes? header
-                           (str "indexed source digest</span><code>&quot;"
-                                (:seon.source/digest program-identity)
-                                "&quot;"))
-            "the digest is labelled as indexed source, not current loaded code")
-        (is (str/includes?
-             header
-             (str "schema projection fingerprint</span><code>"
-                  (:seon.schema.projection/fingerprint program-identity)))
-            "the exact context projection fingerprint is visible")
-        (is (and (str/includes? header "aria-label=\"Rendered output\"")
-                 (str/includes? header "aria-current=\"page\"")
-                 (str/includes? header ">HTML</a>")
-                 (str/includes? header "output=%3Aseon.render%2Fai"))
-            "HTML and AI remain ordinary links with the selected output exposed")))))
+        (is (= {"indexed source digest" (:seon.source/digest program-identity)
+                "schema projection fingerprint" (:seon.schema.projection/fingerprint program-identity)}
+               (update-vals (select-keys (labelled header) ["indexed source digest" "schema projection fingerprint"])
+                            edn/read-string))
+            "the header shows the indexed source digest and the context projection fingerprint")
+        (is (= {"HTML" "page" "AI" ""}
+               (into {} (map (fn [^Element link] [(.text link) (.attr link "aria-current")]))
+                     (.select (dom header) "nav[aria-label=Rendered output] a")))
+            "HTML and AI are ordinary links, the selected output marked current")))))
 
 (deftest debug-reference-links-select-another-entity-and-preserve-the-view
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
@@ -644,26 +722,15 @@ handle))}}
                  :seon.render.data/outgoing-cursor {:old :outgoing}
                  :seon.render.data/incoming-cursor {:old :incoming}}
         link (web-private 'debug-subject-link)
-        href (fn [subject]
-               (java.net.URLDecoder/decode
-                (get-in (link request subject subject) [1 :href]) "UTF-8"))
-        entity-href (href 20)
-        renderer-href (href [:seon.fn/sym "my.render/card"])]
-    (is (str/includes? entity-href "subject=20")
-        "a referenced entity id selects that entity")
-    (is (str/includes? renderer-href "subject=[:seon.fn/sym \"my.render/card\"]")
-        "a render function link selects its program entity")
-    (doseq [link-href [entity-href renderer-href]]
-      (is (str/starts-with? link-href "/ns/my.viewer/debug?")
-          "navigation keeps the viewing namespace")
-      (is (every? #(str/includes? link-href %)
-                  ["output=:seon.render/ai" "limit=17"
-                   "maxRefAttributes=19" "maxResultWeight=23"
-                   "maxWork=29"])
-          "navigation preserves output and bounds and resets the value cursor")
-      (is (not (or (str/includes? link-href "outgoingCursor=")
-                   (str/includes? link-href "incomingCursor=")))
-          "a new subject never carries snapshot-bound page cursors"))))
+        subject-href (fn [subject] (href (get-in (link request subject subject) [1 :href])))
+        preserved {"output" ":seon.render/ai" "limit" "17" "maxRefAttributes" "19"
+                   "maxResultWeight" "23" "maxWork" "29"}]
+    (is (= {20 {:path "/ns/my.viewer/debug" :query (assoc preserved "subject" "20")}
+            [:seon.fn/sym "my.render/card"]
+            {:path "/ns/my.viewer/debug"
+             :query (assoc preserved "subject" "[:seon.fn/sym \"my.render/card\"]")}}
+           (into {} (map (juxt identity subject-href)) [20 [:seon.fn/sym "my.render/card"]]))
+        "a link selects its subject in the viewing namespace, keeps output and bounds, and carries no page cursor")))
 
 (deftest declared-units-are-components-in-schema-order
   (support/with-database
@@ -744,29 +811,22 @@ handle))}}
          (experiment 'my.render/html [:p "selected HTML"]
                      'my.render/other-html)}
         previews
-        (str (hiccup/->string
-              ((web-private 'experiment-preview-html)
-               :seon.render/ai (:seon.render/ai experiments) (db/db connection)))
-             (hiccup/->string
-              ((web-private 'experiment-preview-html)
-               :seon.render/html (:seon.render/html experiments) (db/db connection))))
+        (mapv #((web-private 'experiment-preview-html) % (get experiments %) (db/db connection))
+              [:seon.render/ai :seon.render/html])
         renderers
-        (hiccup/->string
-         ((web-private 'applicable-renderers-html)
-          {:seon.render.debug/viewer-namespace 'my.viewer} experiments))]
-    (is (and (str/includes? previews "selected AI")
-             (str/includes? previews "selected HTML"))
-        "each projection shows the value its selected render function produced")
-    (is (and (str/includes? renderers "my.render/ai")
-             (str/includes? renderers "my.render/html"))
-        "the disclosure names the selected render function of both projections")
-    (is (and (str/includes? renderers "compatible alternatives")
-             (str/includes? renderers "my.render/other-ai")
-             (str/includes? renderers "my.render/other-html")))
-    (is (not (str/includes? renderers "my.render/rejected"))
-        "rejected candidates are absent rather than empty entities")
-    (is (not (str/includes? previews "my.render/other-ai"))
-        "an alternative is named but never rendered beside the selected value")))))
+        ((web-private 'applicable-renderers-html)
+         {:seon.render.debug/viewer-namespace 'my.viewer} experiments)
+        links (fn [css-class]
+                (->> (elements renderers)
+                     (filter #(= css-class (:class (second %))))
+                     first elements
+                     (filter #(= :a (first %)))
+                     (mapv last)))]
+    (is (= '[my.render/other-ai my.render/other-html]
+           (links "seon-debug-alternative-renderers"))
+        "compatible alternatives are listed; a rejected candidate is absent")
+    (is (= [[:pre "selected AI"] [:p "selected HTML"]] (mapv last previews))
+        "each preview is exactly its selected render function's value, no alternative beside it")))))
 
 (deftest selected-ai-experiment-reuses-the-canonical-executed-call
   (support/with-database
@@ -813,12 +873,10 @@ handle))}}
                (get-in experiment [:seon.render/previews selected])))
         (is (= selected-entry
                (get-in experiment [:seon.render/entries selected])))
-        (let [html (hiccup/->string
-                    ((web-private 'experiment-preview-html)
-                     :seon.render/ai experiment (db/db connection)))]
-          (is (and (str/includes? html "Agent &quot;juniper&quot;\nNamespace")
-                   (not (str/includes? html "&quot;Agent")))
-              "the paired AI preview presents multiline terminal text without EDN quotes"))))))))
+        (is (= [:pre "Agent \"juniper\"\nNamespace my.agents.juniper"]
+               (last ((web-private 'experiment-preview-html)
+                      :seon.render/ai experiment (db/db connection))))
+            "the paired AI preview presents multiline terminal text as itself, not its EDN")))))))
 
 (deftest debug-selected-renderer-metadata-is-outside-preview
   ;; A preview renders against a database value (a6ec14a8c).
@@ -844,33 +902,17 @@ handle))}}
             {:seon.sci.eval/function-source "(defn ai [x] x)"}}}}}
         request {:seon.render.debug/viewer-namespace 'my.viewer
                  :seon.render.debug/details? true}
-        preview (hiccup/->string
-                 ((web-private 'experiment-preview-html)
-                  :seon.render/ai experiment (db/db connection)))
-        details (hiccup/->string
-                 ((web-private 'debug-selected-renderer-details)
-                  request :seon.render/ai experiment))
-        page (hiccup/->string
-              [:div preview
-               ((web-private 'applicable-renderers-html)
-                request {:seon.render/ai experiment
-                         :seon.render/html
-                         {:seon.render/selection
-                          {:seon.render.selection/stages []}}})])]
-    (is (= 1 (count (re-seq #"exact agent-visible text" preview)))
-        "the AI preview contains the renderer output exactly once")
-    (is (not-any? #(str/includes? preview %)
-                  ["Applicable render functions" "my.render/ai"
-                   "function definition" "database read dependencies"
-                   "declared contract"])
-        "renderer metadata is not a child of the AI preview")
-    (is (every? #(str/includes? details %)
-                ["my.render/ai" "function definition"
-                 "database read dependencies"])
-        "the separate renderer disclosure retains its evidence")
-    (is (< (.indexOf page "exact agent-visible text")
-           (.indexOf page "Applicable render functions"))
-        "render-function evidence is a sibling below the paired previews")))))
+        preview ((web-private 'experiment-preview-html)
+                 :seon.render/ai experiment (db/db connection))
+        details ((web-private 'debug-selected-renderer-details)
+                 request :seon.render/ai experiment)
+        classes (fn [h] (set (keep #(:class (second %)) (elements h))))]
+    (is (= [:pre "exact agent-visible text"] (last preview))
+        "the AI preview is the renderer output alone: no renderer metadata inside it")
+    (is (= #{"seon-debug-read-dependencies" "seon-debug-function-definition"}
+           (into #{} (filter #{"seon-debug-read-dependencies" "seon-debug-function-definition"})
+                 (classes details)))
+        "the separate renderer disclosure retains its evidence")))))
 
 (deftest inspecting-the-page-writes-no-run-evaluation-or-fault-facts
   ;; Ruling 2026-09-06: preview results live in the invocation cache. A person
@@ -938,18 +980,13 @@ handle))}}
                {:seon.render.call/declaration-row
                 {:seon.sci.eval/function-source
                  "(defn render-card [x] (<unsafe> x))"}}}
-        present (hiccup/->string (render-definition entry))
-        missing (hiccup/->string
-                 (render-definition
-                  {:seon.render.call/static-evidence
-                   {:seon.render.call/declaration-row {}}}))]
-    (is (and (str/includes? present "function definition")
-             (str/includes? present
-                            "(defn render-card [x] (&lt;unsafe&gt; x))"))
-        "the stored declaration source is visible and escaped as code")
-    (is (not (str/includes? present "<unsafe>"))
-        "stored source cannot become markup")
-    (is (str/includes? missing "No source is stored for this function.")
+        present (render-definition entry)
+        missing (render-definition
+                 {:seon.render.call/static-evidence
+                  {:seon.render.call/declaration-row {}}})]
+    (is (= [:pre [:code "(defn render-card [x] (<unsafe> x))"]] (last present))
+        "the stored declaration source is shown as code text, which the serializer escapes")
+    (is (= "seon-debug-renderer-source-missing" (:class (second missing)))
         "an absent stored definition is explicit rather than blank or fabricated")))
 
 (deftest debug-renderer-definition-accepts-the-acquired-program-entity
@@ -957,14 +994,13 @@ handle))}}
     (fn [connection]
       (let [ctx (support/fork-cluster-ctx connection)
             entity (sci.kernel/program-function ctx 'seon.plan/render-item-html)
-            html (hiccup/->string
-                  ((web-private 'debug-renderer-definition)
-                   {:seon.render.call/static-evidence
-                    {:seon.render.call/declaration-row entity}}))]
+            definition ((web-private 'debug-renderer-definition)
+                        {:seon.render.call/static-evidence
+                         {:seon.render.call/declaration-row entity}})]
         (is (string? (:seon.sci.eval/function-source entity))
             "the acquired kernel entity carries the normalized source key")
-        (is (str/includes? html "(defn render-item-html")
-            "the disclosure consumes the actual acquired program entity")))))
+        (is (= [:pre [:code (:seon.sci.eval/function-source entity)]] (last definition))
+            "the disclosure shows the actual acquired program entity's source")))))
 
 (deftest debug-graph-model-preserves-datom-identity-and-direction
   (let [request {:seon.render.debug/viewer-namespace 'my.viewer
@@ -1005,19 +1041,20 @@ handle))}}
              (pr-str [:fixture 8 :fixture/ref 42 103])}
            (into #{} (map #(get-in % [:data :id])) edges)))
     (is (every? #(= ":fixture/ref" (get-in % [:data :attribute])) edges))
-    (is (str/includes? html "outgoing partial, incoming complete"))
-    (is (and (str/includes? html "<div")
-             (str/includes? html "class=\"seon-debug-graph-canvas\"")
-             (str/includes? html "role=\"img\"")
-             (not (str/includes? html "<canvas")))
+    (is (= "Loaded 4 reference assertions; outgoing partial, incoming complete."
+           (.text (element html "[data-graph-status]")))
+        "the status reports each direction's completeness")
+    (is (= {:tag "div" :canvases 0}
+           (let [container (element html "[data-graph-canvas]")]
+             {:tag (.tagName container) :canvases (count (.select container "canvas"))}))
         "Cytoscape receives an ordinary container for its child canvases")
-    (is (and (str/includes? html "data-graph-status")
-             (str/includes? html "data-graph-detail")
-             (str/includes? html
-                            "Select a reference assertion for details."))
+    (is (= "Select a reference assertion for details."
+           (.text (element html "[data-graph-detail]")))
         "bounded acquisition status remains separate from interaction detail")
-    (is (str/includes? html "\\u003c\\/script>\\u003cselected>"))
-    (is (not (str/includes? html "</script><selected>")))))
+    (is (= {:model? true :injected []}
+           {:model? (some? (element html "script[data-graph-model]"))
+            :injected (vec (.select (dom html) "selected"))})
+        "a value holding </script> stays inside the model script and never becomes markup")))
 
 (deftest canonical-debug-feed-repaints-when-the-subject-changes
   (with-server
@@ -1035,9 +1072,8 @@ handle))}}
           (support/transacted! connection
                                [{:seon.ns/name namespace-name
                                  :seon.ns/doc "debug-live-subject-marker"}])
-          (is (str/includes?
-               (read-until! stream "debug-live-subject-marker")
-               "debug-live-subject-marker")
+          (is (shows? (read-until! stream "debug-live-subject-marker")
+                      "debug-live-subject-marker")
               "the existing feed repaints from the new database value")
           (finally (.close stream)))))))
 
@@ -1159,35 +1195,46 @@ handle))}}
                                                         [::web/calls "page-key"])))
                 "only the changed blocks re-derive; the rest stay retained"))))))))
 
+(defn- disclosure
+  "A read-dependency disclosure as data: its summary line, its basis line and
+  the evidence values it shows (each `[:pre (pr-str value)]` read back)."
+  [rendered]
+  (let [shown (fn [tag] (->> (elements rendered) (filter #(= tag (first %)))))]
+    {:summary (apply str (leaves (first (shown :summary))))
+     :basis (some #(when (= "seon-debug-read-basis" (:class (second %))) (apply str (leaves %)))
+                  (elements rendered))
+     :evidence (mapv #(edn/read-string (last %)) (shown :pre))
+     :notes (mapv #(apply str (leaves %)) (remove #(map? (second %)) (shown :p)))}))
+
 (deftest debug-compatible-candidate-discloses-retained-read-dependencies
-  (let [rendered
-        ((web-private 'debug-read-dependencies-html)
-         {:seon.render.call/basis-transaction 42
-          :seon.render.call/read-evidence
-          [{:seon.db/source-argument-position 0
-            :datahike.read/dependency-plan
-            {:datahike.query.dependency/sources
-             [{:datahike.query.source/symbol '$
-               :datahike.query.source/argument-position 0
-               :datahike.query.source/attributes #{:my.plan.item/title}}]}
-            :datahike.read/revision
-            {:datahike.read/attributes #{:my.plan.item/title}
-             :datahike.read/cache-eligible? false}}]})
-        html (hiccup/->string rendered)]
-    (is (str/includes? html "database read dependencies · 1 evidence entry"))
-    (is (str/includes? html "render basis transaction 42"))
-    (is (str/includes? html ":datahike.read/dependency-plan"))
-    (is (str/includes? html ":datahike.read/revision"))))
+  (let [evidence {:seon.db/source-argument-position 0
+              :datahike.read/dependency-plan
+              {:datahike.query.dependency/sources
+               [{:datahike.query.source/symbol '$
+                 :datahike.query.source/argument-position 0
+                 :datahike.query.source/attributes #{:my.plan.item/title}}]}
+              :datahike.read/revision
+              {:datahike.read/attributes #{:my.plan.item/title}
+               :datahike.read/cache-eligible? false}}
+        rendered ((web-private 'debug-read-dependencies-html)
+                  {:seon.render.call/basis-transaction 42
+                   :seon.render.call/read-evidence [evidence]})]
+    (is (= {:summary "database read dependencies · 1 evidence entry"
+            :basis "render basis transaction 42"
+            :evidence [evidence]}
+           (select-keys (disclosure rendered) [:summary :basis :evidence]))
+        "the disclosure shows the render basis and each retained evidence entry as its value")))
 
 (deftest debug-read-dependencies-distinguishes-empty-from-absent
-  (let [render ((web-private 'debug-read-dependencies-html)
-                {:seon.render.call/basis-transaction 7
-                 :seon.render.call/read-evidence []})
+  (let [none ((web-private 'debug-read-dependencies-html)
+               {:seon.render.call/basis-transaction 7
+                :seon.render.call/read-evidence []})
         absent ((web-private 'debug-read-dependencies-html) {})]
-    (is (str/includes? (hiccup/->string render)
-                       "No database read evidence was retained."))
-    (is (str/includes? (hiccup/->string absent)
-                       "database read dependencies unavailable"))))
+    (is (= [{:summary "database read dependencies · 0 evidence entries"
+             :notes ["No database read evidence was retained."]}
+            {:summary "database read dependencies unavailable"
+             :notes ["Read evidence is absent from this retained render entry."]}]
+           (mapv #(select-keys (disclosure %) [:summary :notes]) [none absent])))))
 
 (deftest unrelated-transaction-reuses-debug-observation-and-render-call
   (with-server
@@ -1281,10 +1328,8 @@ handle))}}
                   ;; buffer, so it cannot replace the pending code signal.
                   (is (async/offer! (:render-channel context)
                                     :seon.cluster.wake/render))
-                  (is (str/includes?
-                       (read-until! stream
-                                    (str "runtime-eval-phase-" next-phase))
-                       (str "runtime-eval-phase-" next-phase))))
+                  (is (shows? (read-until! stream (str "runtime-eval-phase-" next-phase))
+                              (str "runtime-eval-phase-" next-phase))))
                 (is (= 3 @calls)
                     "the initial paint and both code changes rederive once")
                 (finally (.close stream))))))))))
@@ -1341,9 +1386,8 @@ handle))}}
                     "the closed page was not derived for the code event")
                 (let [reopened (open-feed server (feed-url "my.plan"))]
                   (try
-                    (is (str/includes?
-                         (read-until! reopened "my.plan-runtime-phase-1")
-                         "my.plan-runtime-phase-1")
+                    (is (shows? (read-until! reopened "my.plan-runtime-phase-1")
+                                "my.plan-runtime-phase-1")
                         "reopen derives current code at an unchanged database basis")
                     (is (= (inc initial-calls) (get @calls 'my.plan))
                         "the closed page's old package was not reused")
@@ -1365,9 +1409,8 @@ handle))}}
                       "a code event with no watchers publishes an empty cache"))
                 (let [reopened (open-feed server (feed-url "my.plan"))]
                   (try
-                    (is (str/includes?
-                         (read-until! reopened "my.plan-runtime-phase-2")
-                         "my.plan-runtime-phase-2")
+                    (is (shows? (read-until! reopened "my.plan-runtime-phase-2")
+                                "my.plan-runtime-phase-2")
                         "a new subscriber after an unwatched event derives current code")
                     (is (= (+ 2 initial-calls) (get @calls 'my.plan))
                         "no package survived the zero-watcher code event")
@@ -1422,7 +1465,7 @@ handle))}}
       (let [second-stream (open-feed server (str "/feed/" agent-id))]
         (try
           (let [repaint (read-complete-paint! second-stream connection)]
-            (is (str/includes? repaint "def current true")
+            (is (shows? repaint "def current true")
                 "at the CURRENT basis, not the one the first tab saw"))
           (finally (.close second-stream)))))))
 
@@ -1626,10 +1669,10 @@ handle))}}
               (try
                 (in-root '(deliver pass-released true))
                 (let [paint (read-complete-paint! fresh connection)]
-                  (is (str/includes? paint "def connected true")
+                  (is (shows? paint "def connected true")
                       "the initial paint is derived at or after the basis
                        this tab connected at")
-                  (is (not (str/includes? paint "def superseded true"))
+                  (is (not (shows? paint "def superseded true"))
                       "the in-flight pass that published first was refused"))
                 (finally (.close fresh))))
             (finally
@@ -1666,7 +1709,7 @@ handle))}}
       (let [fresh (open-feed server (str "/feed/" agent-id))]
         (try
           (let [repaint (read-complete-paint! fresh connection)]
-            (is (str/includes? repaint "def after-drop true")
+            (is (shows? repaint "def after-drop true")
                 "at the CURRENT basis — reconnect is repaint, and the
                  in-flight partial was superseded, never replayed"))
           (finally (.close fresh))))
@@ -1712,8 +1755,7 @@ handle))}}
                              [{:seon.turn/id run-b :seon.turn/agent [:seon.agent/id "agent-b"] :seon.turn/opened-tx "datomic.tx"}]))
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
-          (is (not (str/includes? (read-complete-paint! tab connection)
-                                  "A half reply"))
+          (is (= {} (stream-strip (read-complete-paint! tab connection)))
               "the fact-only initial paint has no partial")
           (await-ping! context
                        #(= 1 (:seon.render.web/watched-agents %))
@@ -1724,9 +1766,9 @@ handle))}}
                          :seon.turn/id run-a
                          :seon.ai/partial {:seon.ai/text "A half reply"
                                            :seon.ai/tokens 3}})
-          (let [partial (read-until! tab "A half reply")]
-            (is (str/includes? partial "A half reply"))
-            (is (str/includes? partial ">3<")))
+          (is (= {:text "A half reply" :tokens 3}
+                 (stream-strip (read-until! tab "A half reply")))
+              "the partial is painted with its token count")
 
           ;; This is the displacing value from the audit ordering. It
           ;; changes B's transient entry but cannot carry semantics for A.
@@ -1749,7 +1791,7 @@ handle))}}
                        #(zero? (:seon.render.web/streaming-agents %))
                        [:terminal-fact-cleared-partials])
           (let [settled (read-until! tab "id=\"surface-stream\"></div>")]
-            (is (not (str/includes? settled "A half reply"))
+            (is (= {} (stream-strip settled))
                 "A's stale half-reply cannot survive the terminal fact"))
           (is (= 0 (streaming-agents context))
               "the fact-only interest pass retained no channel state")
@@ -1787,16 +1829,14 @@ handle))}}
                          :seon.turn/id run-id
                          :seon.ai/partial {:seon.ai/text "not durable"
                                            :seon.ai/tokens 2}})
-          (is (str/includes? (read-until! first-tab "not durable")
-                             "not durable"))
+          (is (= {:text "not durable" :tokens 2}
+                 (stream-strip (read-until! first-tab "not durable"))))
           (.close first-tab))
         (let [reconnected (open-feed server (str "/feed/" agent-id))]
           (try
             (let [repaint (read-complete-paint! reconnected connection)]
-              (is (str/includes? repaint "id=\"surface-stream\"></div>")
-                  "reconnect repainted the fact-only stream strip")
-              (is (not (str/includes? repaint "not durable"))
-                  "the in-flight partial was never restored"))
+              (is (= {} (stream-strip repaint))
+                  "reconnect repainted the fact-only stream strip: the in-flight partial was never restored"))
             (await-ping! context
                          #(zero? (:seon.render.web/streaming-agents %))
                          [:reconnect-dropped-partials])
@@ -1885,9 +1925,9 @@ handle))}}
           (let [response (fetch server "/data")
                 root (.body response)]
             (is (= 200 (.statusCode response)))
-            (is (str/includes? root "seon-data-panel"))
-            (is (str/includes? root "showing 1")
-                "a window, and it says so")))
+            (is (= "[]" (some-> (element root ".seon-data-panel [data-seon-path]")
+                                (.attr "data-seon-path")))
+                "the panel shows the floor's root")))
         (is (seq @seen-contexts)
             "recursive producer selection consults the SCI context")
         (is (every? #(identical? (:ctx context) %) @seen-contexts)
@@ -1895,7 +1935,8 @@ handle))}}
       (testing "a stale or mangled cursor shows the root rather than failing"
         (let [response (fetch server "/data?path=%7Bbroken&offset=nope")]
           (is (= 200 (.statusCode response)))
-          (is (str/includes? (.body response) "seon-data-panel")))))))
+          (is (= "[]" (some-> (element (.body response) ".seon-data-panel [data-seon-path]")
+                              (.attr "data-seon-path")))))))))
 
 (deftest data-resolves-an-entity-root-and-preserves-it-in-floor-links
   (with-server
@@ -1908,14 +1949,13 @@ handle))}}
             body (.body response)
             default-body (.body (fetch server "/data"))]
         (is (= 200 (.statusCode response)))
-        (is (str/includes? body "seon-data-panel"))
-        (is (str/includes? body "alice")
-            "the pulled entity renders (the declared-producer face is the
-            filed registered-render-producers S2 issue, not re-pinned here)")
-        (is (str/includes? default-body ":seon.ai.attempt/at")
+        (is (str/includes? (.text (element body ".seon-data-panel")) "alice")
+            "the pulled entity renders in the panel")
+        (is (some-> (element default-body ".seon-data-panel [data-seon-path=\"[]\"]")
+                    (.hasClass "seon-print-vector"))
             "without entity the schema vector remains the drill root")
-        (is (str/includes? body
-                           "entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D")
+        (is (= #{"[:seon.cluster.agent/id \"alice\"]"}
+               (set (map #(get-in % [:query "entity"]) (data-links body))))
             "every floor handle preserves the selected entity root")))))
 
 (deftest data-selects-a-stored-value-artifact-by-digest
@@ -1931,8 +1971,10 @@ handle))}}
             response (fetch server (str "/data?value=" digest))
             body (.body response)]
         (is (= 200 (.statusCode response)))
-        (is (str/includes? body ":alpha"))
-        (is (str/includes? body (str "value=" digest)))))))
+        (is (some #{":alpha"} (texts body ".seon-data-panel .seon-print-keyword"))
+            "the stored value is the panel's root")
+        (is (= #{digest} (set (map #(get-in % [:query "value"]) (data-links body))))
+            "every floor handle keeps the stored value selected")))))
 
 (deftest data-serves-a-five-megabyte-attribute-as-one-page-that-continues
   ;; One-render-path §3 (owner-adopted 2026-09-26; supersedes the 2026-09-07
@@ -1957,11 +1999,13 @@ handle))}}
           (is (= 200 (.statusCode response)))
           (is (< (count body) (* 1024 1024))
               "one page, never a second unbounded selection")
-          (is (re-find #"href=\"[^\"]*offset=\d+" body)
-              "the cut is an expander at its next offset")
-          (is (str/includes? body "seon-data-panel"))
-          (is (str/includes? body (str "entity=" entity))
-              "and it retains a handle back to the same root"))))))
+          (is (= [{:entity [:seon.ns/name namespace-name] :offset? true}]
+                 (mapv (fn [{:keys [query]}]
+                         {:entity (edn/read-string (get query "entity"))
+                          :offset? (pos-int? (some-> (get query "offset") parse-long))})
+                       (->> (.select (dom body) ".seon-data-panel a.seon-print-elision")
+                            (mapv #(href (.attr ^Element % "href"))))))
+              "the cut is one expander at its next offset, with a handle back to the same root"))))))
 
 (deftest a-five-megabyte-value-is-one-bounded-selection-in-both-faces
   ;; One-render-path §3 (owner-adopted 2026-09-26, Astra F1): both faces are
@@ -2019,8 +2063,7 @@ handle))}}
                                    :seon.render/value wide
                                    :seon.render.call/id
                                    [::ai-bound-wide namespace-name])
-               wide-ai (render/render-ai wide-request)
-               wide-html (hiccup/->string (render/render-html wide-request))]
+               wide-ai (render/render-ai wide-request)]
            (is (string? wide-ai))
            (is (< (count wide-ai) (count (pr-str wide)))
                "a wide collection is cut for AI under the same profile")
@@ -2030,7 +2073,7 @@ handle))}}
              ;; symbol and, when the value has a source, its continuation.
              (is (= (count wide)
                     (+ (count (filter number? shown)) (parse-long (subs (str cut) 1))))))
-           (is (not (str/includes? wide-html ">4999<"))
+           (is (not-any? #{4999 "4999"} (leaves (render/render-html wide-request)))
                "and HTML shows the same cut collection")))))))
 
 (deftest each-agent-has-an-isolated-debug-route
@@ -2044,13 +2087,12 @@ handle))}}
       (let [agent-page (.body (fetch server "/agent/root"))
             root (.body (fetch server "/agent/root/debug?prompt=true"))
             alice (.body (fetch server "/agent/alice/debug"))]
-        (is (str/includes? agent-page "/agent/root/debug")
+        (is (some #{"/agent/root/debug"} (map #(.attr ^Element % "href") (.select (dom agent-page) "a")))
             "the always-available debug view is linked from the curated page")
-        (is (str/includes? root "seon-session-page"))
-        (is (str/includes? root "No turns recorded."))
-        (is (str/includes? root "id=\"surface-debug-session_2f_root\""))
-        (is (str/includes? alice "id=\"surface-debug-session_2f_alice\""))
-        (is (not= root alice) "the stable root address includes the agent"))
+        (is (= [true true]
+               [(some? (element root "#surface-debug-session_2f_root"))
+                (some? (element alice "#surface-debug-session_2f_alice"))])
+            "each agent's debug page is its own session surface"))
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
 
 (deftest an-undeclared-incoming-reference-is-reachable-from-the-page
@@ -2066,10 +2108,12 @@ handle))}}
                                       agent-id [] "&maxRefAttributes=200"))]
         (try
           (let [paint (read-until! stream "id=\"debug-graph\"")]
-            (is (str/includes? paint "reference graph")
-                "incoming references remain in the graph")
-            (is (str/includes? paint "\"attribute\":\":seon.db\\/user\"")
-                "the transaction's provenance reference is one of them"))
+            (is (some #{":seon.db/user"}
+                      (->> (.select (painted paint) "script[data-graph-model]")
+                           last .data json/read-str
+                           (#(get-in % ["elements" "edges"]))
+                           (map #(get-in % ["data" "attribute"]))))
+                "the transaction's provenance reference is one of the graph's incoming edges"))
           (finally (.close stream)))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -2120,8 +2164,7 @@ handle))}}
             (is (= 422 (.statusCode response)))
             (is (= basis-before (:max-tx @connection))
                 "a refusal commits nothing, so route! has no report to paint")
-            (is (not (str/includes? (.body response)
-                                    "datastar-patch-elements"))
+            (is (zero? (patches (.body response)))
                 "the HTTP refusal is text, never a competing morph"))
           (finally (.close stream)))))))
 
@@ -2393,10 +2436,11 @@ handle))}}
                                 {"datastar-request" "true"})
                 body (.body response)]
             (is (= 200 (.statusCode response)))
-            (is (str/includes? body "id=\"surface-debug-session_2f_root\""))
-            (doseq [evidence ["fixture prompt acquisition refused" "seon.error/value"]]
-              (is (str/includes? body evidence)))
-            (is (not (str/includes? body "Loading the selected turn")))))
+            (is (= {:surface? true :refusal? true :loading? false}
+                   {:surface? (some? (.selectFirst (painted body) "#surface-debug-session_2f_root"))
+                    :refusal? (shows? body "fixture prompt acquisition refused")
+                    :loading? (shows? body "Loading the selected turn")})
+                "the session surface shows the acquisition refusal in place of the loading panel")))
         (doseq [failure [(IllegalStateException. "unrelated runtime failure")
                          (ex-info "unrelated typed failure" {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-test/fixture :seon.error/operation 'seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel :seon.render/refused-member :seon.render/output})]]
           (with-redefs [render/acquire-context! (fn [_] (throw failure))]
@@ -2416,13 +2460,13 @@ handle))}}
         (is (= before @connection) "ten preview loads write no facts")
         (is (= 200 (.statusCode response))
             "every algorithm value render receives the handle's deadline and caps")
-        (is (str/includes? body "Session"))
-        (is (str/includes? body "No turns recorded."))
-        (is (str/includes? body "System turn"))
-        (is (str/includes? body "Virtual turn"))
-        (is (str/includes? body "Compact"))))))
+        (is (= #{"system-turn" "virtual-turn" "compact"}
+               (set (map #(.attr ^Element % "value")
+                         (.select (dom body) ".seon-session-actions input[name=action]"))))
+            "the rendered session offers its three system actions")))))
 
-(deftest next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake
+(deftest ^{:seon.test/golden "The colourised reader is presentation: each saved emission's HTML appears in the page in acquisition order, and the wake's shown text is the agent-visible transcript."}
+  next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake
   (with-server
     (fn [connection server _context]
       (let [check-page
@@ -2456,10 +2500,9 @@ handle))}}
                 (is (seq inputs))
                 (is (and (every? some? positions) (apply <= positions))
                     "The colourised reader contains every saved emission in acquisition order")
-                (is (str/includes? raw
-                                   (hiccup/->string
-                                    [:code (str/join "\n\n" (map repl/render-ai entries))]))
-                    "The raw toggle preserves the exact acquired AI bytes")
+                (is (some #{(str/join "\n\n" (map repl/render-ai entries))}
+                          (map #(.wholeText ^Element %) (.select (painted raw) "code")))
+                    "The raw toggle shows the exact acquired AI text as one code block")
                 body))
             unlink-retired-edges
             (fn []
