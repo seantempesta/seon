@@ -334,3 +334,27 @@
         (when (and original (not (.isFile entry)))
           (java.nio.file.Files/write (.toPath entry) ^bytes original
                                      (make-array java.nio.file.OpenOption 0)))))))
+
+(deftest a-cache-entry-answers-by-content-not-by-path
+  ;; CLASS: a cache entry invalidated by where its source lived. Each commit
+  ;; runs from its own archive (data/source/<sha>), and the old one is pruned:
+  ;; the first analysis after a move rebuilt every entry it used from the
+  ;; classpath (466 entries named a pruned archive; 41 rebuilt, 5.9 s against
+  ;; 2.8 s for an 18-file analysis, disposable root 2026-09-27).
+  (let [directory (fixture-directory (str (random-uuid)))
+        source (write-fixture! directory "probe_moved.clj" "(ns probe-moved)\n(defn f [x] x)\n")]
+    (try
+      (let [cache-root (::analyzer/cache-root
+                        (#'analyzer/invoke-kondo {:lint [source]
+                                                  :cache-dir (.getCanonicalPath (io/file directory "cache"))}))
+            entry (kondo.cache/cache-file cache-root :clj 'probe-moved)
+            ;; the archive the entry was written from is gone
+            _ (spit entry (.replace ^String (slurp entry) source "/pruned/archive/probe_moved.clj"))
+            result {:analysis {:namespace-definitions [{:name 'probe-moved :filename source}]
+                               :namespace-usages [{:to 'probe-moved}]}}
+            stale #(::analyzer/stale (#'analyzer/stale-cache-entries cache-root false result))]
+        (is (empty? (stale)) "the same bytes answer, wherever they were read from")
+        (spit source "(ns probe-moved)\n(defn f [x y] x)\n")
+        (is (= [::analyzer/source-absent] (mapv ::analyzer/reason (stale)))
+            "other bytes rebuild the entry"))
+      (finally (test-support/delete-recursively! directory)))))
