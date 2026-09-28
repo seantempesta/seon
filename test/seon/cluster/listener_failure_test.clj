@@ -11,15 +11,25 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.flow :as flow]
             [seon.test-support :as test-support]))
 
-(defn- world
-  [connection cluster-name]
+(defn- with-world
+  "Call `f` with the cluster's world, which holds its own work launcher (the
+  failed hand-off is recorded through it, `seon.flow/hand-off-fault!`), and
+  stop the launcher after, even when `f` throws."
+  [connection cluster-name f]
   (test-support/apply-config! connection cluster-name {})
-  (env/environment {:seon.boot/cluster-name cluster-name
-                    :seon.db/connection connection
-                    :seon.sci.admit/caps (config/result-caps
-                                          (config/effective (db/db connection) cluster-name))}))
+  (let [effective (config/effective (db/db connection) cluster-name)
+        members {:seon.boot/cluster-name cluster-name
+                 :seon.db/connection connection
+                 :seon.sci.admit/caps (config/result-caps effective)}
+        launcher (flow/start-work-launcher!
+                  {:seon.env/environment (env/environment members)
+                   ::flow/configuration (select-keys effective flow/flow-workload-attributes)})]
+    (try
+      (f (env/environment (assoc members :seon.flow/work-launcher launcher)))
+      (finally (flow/stop-work-launcher! launcher)))))
 
 (defn- faults
   "Every stored occurrence: its count and its whole evidence text."
@@ -54,8 +64,8 @@
 (deftest a-failed-listener-is-one-stored-fault-and-retires-only-its-own-registration
   (test-support/with-database
    (fn [connection]
+     (with-world connection "listener-failure" (fn [environment]
      (let [cluster-name "listener-failure"
-           environment (world connection cluster-name)
            baseline (recorded connection)
            registry (:listeners (meta connection))
            failing (fn [_] (throw (IllegalStateException. "hand-off refused")))]
@@ -84,4 +94,4 @@
          (is (identical? replacement (get @registry ::replaced))
              "a replacement registered under the failed key survives retirement")
          (is (= (+ 2 baseline) (recorded connection)) "no fault recorded itself again")
-         (d/unlisten connection ::replaced))))))
+         (d/unlisten connection ::replaced))))))))

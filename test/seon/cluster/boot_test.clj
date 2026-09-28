@@ -515,7 +515,7 @@
        ;; registered only for this request; removed in `finally`
        (swap! runtime/running-instances assoc cluster-name
               (-> (select-keys live [:seon.boot/config :seon.boot/advertisement
-                                     :seon.boot/prepl-server :seon.boot/executors])
+                                     :seon.boot/prepl-server])
                   (assoc-in [:seon.boot/config :seon.boot/cluster-name] cluster-name)
                   (assoc :seon.boot/cluster-connection connection)))
        (try

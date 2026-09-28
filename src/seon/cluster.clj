@@ -16,6 +16,7 @@
   `stop!` idempotently unwinds only the addressed instance and releases
   the shared store when its last holder stops."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.impl.dispatch :as async.dispatch]
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow.core]
             [clojure.core.server]
@@ -50,8 +51,7 @@
             [seon.cache :as cache]
             [seon.id :as id]
             [seon.test.cache :as test.cache]
-            [seon.operator.runtime :as operator.runtime
-             :refer [root-store-holder running-instances]]
+            [seon.operator.runtime :refer [root-store-holder running-instances]]
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
@@ -347,16 +347,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The instance lifecycle
 ;;; ---------------------------------------------------------------------------
-
-(defn root-executors
-  "The process root's two shared executors.
-
-  Flow resolves this stable public entry point from its protected owner. The
-  executor holder itself lives in `seon.operator.runtime`, outside every
-  cluster program graph."
-  {:malli/schema [:=> [:cat] :seon.boot/executors]}
-  []
-  (operator.runtime/root-executors))
 
 (defn- operator-root
   "The process root whose `data/store` this cluster root branches from.
@@ -3249,7 +3239,8 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/projection-state]
                   :seon.flow/executor]}
   [projection-state]
-  (let [^Executor delegate (:io (root-executors))]
+  ;; core.async's memoized process `:io` executor (`impl/dispatch.clj`)
+  (let [^Executor delegate (async.dispatch/executor-for :io)]
     (reify Executor
       (execute [_ command]
         (.execute

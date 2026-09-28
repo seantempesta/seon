@@ -21,7 +21,7 @@
             [konserve.filestore :as filestore]
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
-            [seon.fault :as fault]
+            [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.print.value :as print.value]
@@ -685,16 +685,16 @@
   nil)
 
 (defn- listener-failed!
-  "Record one failed listener hand-off on the cluster world captured at install.
+  "Hand one failed listener hand-off to the cluster captured at install
+  (`seon.flow/hand-off-fault!`): the writer's notification thread only
+  submits, the cluster's work launcher records it in that world.
 
   Datahike already retired the failed registration by identity
   (`reference-code/datahike/src/datahike/writer.cljc`, `retire-listener!`), so
   this fault's own transaction cannot re-invoke it: no recursion. The stored
   fault names the listener, its retirement and the commit it failed on; the
-  original is its cause. `fault!`'s panic (stored, or not stored when the
-  write failed) is this boundary's declared case: no graph owns a listener,
-  so it prints both throwables whole to stderr and returns, letting Datahike
-  notify the remaining listeners."
+  original is its cause. A fault the launcher does not admit or cannot store
+  is printed whole on stderr, and Datahike notifies the remaining listeners."
   {:malli/schema [:=> [:cat :seon.env/environment :seon.db.process/id :map] :nil]}
   [environment process {:keys [listener-key exception tx-report retired?]}]
   (let [commit-id (get-in tx-report [:tx-meta :db/commitId])
@@ -704,15 +704,9 @@
                           ::commit-id commit-id
                           ::basis-t (db/basis-t (:db-after tx-report))}
                          exception)]
-    (try
-      (fault/fault! environment failure {:seon.error/layer :seon.db/listener
-                                         :seon.error/operation `listener-failed!
-                                         :seon.db.process/id process})
-      (catch Throwable panic
-        (fault/print-unrecorded! {:seon.error/message (ex-message panic)
-                                  :seon.error/operation `listener-failed!
-                                  :seon.fault/recorded (:seon.fault/recorded (ex-data panic))}
-                                 [panic failure])))
+    (flow/hand-off-fault! environment failure {:seon.error/layer :seon.db/listener
+                                               :seon.error/operation `listener-failed!
+                                               :seon.db.process/id process})
     nil))
 
 (defn listen-failures!

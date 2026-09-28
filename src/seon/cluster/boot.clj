@@ -415,7 +415,7 @@
 
 (defn listening-instance
   "One instance's structural members: its bootstrap config, the listener it
-  advertises, this process's identity and the root executors. Every layer is
+  advertises and this process's identity. Every layer is
   added to this value as boot acquires it; a test world that stands in for a
   running cluster builds its instance here too, so it is a declared instance."
   {:malli/schema [:=> [:cat :seon.boot/config [:fn seon.cluster/socket-server?]]
@@ -427,8 +427,7 @@
           {:seon.boot/cluster-name (:seon.boot/cluster-name config)
            :seon.boot/prepl-host (:seon.boot/prepl-host config)
            :seon.boot/prepl-port (.getLocalPort ^java.net.ServerSocket listener)})
-   :seon.boot/prepl-server listener
-   :seon.boot/executors (cluster/root-executors)})
+   :seon.boot/prepl-server listener})
 
 (def boot-layers
   "The layers a ready instance holds, in the order boot acquires them."

@@ -12,7 +12,7 @@
   ;; and a republication adding nothing changes nothing.
   (let [live (get @runtime/running-instances "default")
         listening (select-keys live [:seon.boot/config :seon.boot/advertisement
-                                     :seon.boot/prepl-server :seon.boot/executors])
+                                     :seon.boot/prepl-server])
         stepped (reduce (fn [[prior at] layer]
                           [(boot/boot-timeline prior (assoc prior layer (get live layer)) at) (+ at 100)])
                         [(boot/boot-timeline nil listening 1) 101]

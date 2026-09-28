@@ -29,20 +29,6 @@
              [:seon.boot/prepl-port :seon.boot/prepl-port]
              [:seon.boot/log-dir :seon.boot/log-dir]
              [:seon.boot/store-dir :seon.boot/store-dir]],
-            :executors
-            [:map
-             [:compute
-              [:fn
-               {:error/message
-                "must be a java.util.concurrent Executor for compute work"
-                :gen/gen seon.flow/executor-generator}
-               seon.flow/executor?]]
-             [:io
-              [:fn
-               {:error/message
-                "must be a java.util.concurrent Executor for I/O work"
-                :gen/gen seon.flow/executor-generator}
-               seon.flow/executor?]]],
             :instance-ctx
             [:and {:description "A boot instance's cluster context: absent during a partial boot (the REPL opens before the store), so it is never supplied from the calling evaluation's world."}
              :seon.sci.eval/ctx]
@@ -56,7 +42,6 @@
                 "must be a java.net.ServerSocket serving the cluster io-prepl"
                 :gen/gen seon.cluster/socket-server-generator}
                seon.cluster/socket-server?]]
-             [:seon.boot/executors :seon.boot/executors]
              [:seon.store/store {:optional true} :seon.store/store]
              [:seon.boot/cluster-connection
               {:optional true}
