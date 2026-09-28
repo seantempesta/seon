@@ -4181,7 +4181,9 @@
                                     (get-in request [:seon.fn/manifest :seon.fn.manifest/relative-roots])) directory
                                 (mapv #(fs/absolute-path directory %) (sort caller-paths))
                                 database
-                                analyzer/cache-directory)
+                                ;; the cache the request analyzes with (a rehearsal's
+                                ;; copy), never silently the shared one
+                                (or (::analyzer/cache-root request) analyzer/cache-directory))
                      findings (into [] (comp (mapcat :seon.fn.file/rows) (filter :seon.lint/id)) artifacts)
                      previous (require-committed! (file-entities database (vec caller-paths) :seon.lint/file)
                                                   :seon.fn/population)

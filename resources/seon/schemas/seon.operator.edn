@@ -37,6 +37,9 @@
                   {:optional true}
                   [:vector :string]]
                  [:seon.operator/destination {:optional true} :string]
+                 [:seon.source/directory
+                  {:optional true :description "A candidate program's archive directory, rehearsed by :check."}
+                  :string]
                  [:seon.store/destroy? {:optional true} :boolean]
                  [:seon.boot/prepl-server
                   {:optional true}
@@ -67,7 +70,8 @@
                  :reset
                  :logs
                  :config-apply
-                 :export],
+                 :export
+                 :check],
                 :observation
                 [:map
                  [:seon.boot/cluster-name :seon.boot/cluster-name]

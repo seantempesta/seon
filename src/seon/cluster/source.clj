@@ -570,7 +570,12 @@
         (throw (ex-info (:seon.error/message refusal) refusal failure))))))
 
 (defn publish!
-  "Reconcile and atomically publish on the current source database history."
+  "Reconcile and atomically publish on the current source database history.
+
+  `:seon.source/branch` names the branch the publication installs; absent, it
+  is `current-src`. Any other branch is created from the scratch commit, so a
+  rehearsal (`seon.cluster/rehearse-source!`) runs this whole path and leaves
+  `current-src` where it was."
   {:malli/schema [:=> [:cat :seon.source/publish-request]
                   :seon.source/publish-result]}
   [{:keys [:seon.store/store :seon.db/process]
@@ -586,8 +591,10 @@
     ;; The writer of publication's own scratch writes (schema and seal), an
     ;; explicit value so a caller supplies another without redefining a Var.
     transact! :seon.db/writer
+    target :seon.source/branch
     :or {progress! (constantly nil)
-         transact! db/transact!}}]
+         transact! db/transact!
+         target current-branch}}]
   (let [published (current store)
         moved? (and requested-commit published
                     (not= requested-commit (:seon.source/commit-id published)))
@@ -690,7 +697,7 @@
              {:seon.source/digest source-digest}))
             (progress! "publication branch head")
             (let [installed
-            (if expected-commit
+            (if (and expected-commit (= target current-branch))
               ;; The scratch commit is deliberately NOT a parent. Published
               ;; history follows the prior `current-src` commit, keeping the
               ;; scratch outside descendant-retirement safety.
@@ -702,11 +709,11 @@
                     {:seon.cluster/keys [created?]}
                     (registry/branch! {:seon.store/store store
                                        :seon.cluster.registry/from scratch
-                                       :seon.store/branch current-branch})]
+                                       :seon.store/branch target})]
                 (when-not created?
                   (refuse! ::stale-publication
-                           "another publisher created current-src first"
-                           {:seon.source/branch current-branch
+                           (str "another publisher created " (name target) " first")
+                           {:seon.source/branch target
                             :seon.source/commit-id scratch-commit}))
                 scratch-commit))]
             (cond-> {:seon.source/built? true
@@ -729,7 +736,7 @@
           (registry/retire-branch! {:seon.store/store store
                                     :seon.store/branch scratch})
           (cond-> (merge outcome
-                          {:seon.source/branch current-branch
+                          {:seon.source/branch target
                            :seon.source/digest source-digest})
             expected-commit (assoc :seon.source/expected-commit-id expected-commit))))
         (catch Throwable failure

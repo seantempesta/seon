@@ -45,7 +45,9 @@
             [seon.error.refusal]
             [seon.flow :as flow]
             [seon.fn :as seon.fn]
+            [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
+            [babashka.fs]
             [seon.instrument :as instrument]
             [seon.profile :as profile]
             [seon.cache :as cache]
@@ -1226,7 +1228,8 @@
     paths :seon.fn/changed-paths
     prior-database :seon.source/previous-database
     classes :seon.source/change-classes
-    inputs :seon.source/relative-file-digests}]
+    inputs :seon.source/relative-file-digests
+    cache-root :seon.fn.analyzer/cache-root}]
   (let [forms (schema.edn/packaged-forms)]
     (schema/call-with-forms
      forms
@@ -1288,6 +1291,7 @@
                       :seon.db/process
                       [:seon.db.process/id boot-process-identity]}
                analyzed (assoc :seon.program/rows analyzed)
+               cache-root (assoc :seon.fn.analyzer/cache-root cache-root)
                directory (assoc :seon.fn/root directory)
                roots (assoc :seon.fn/roots roots)
                manifest (assoc :seon.fn/manifest manifest)
@@ -1319,6 +1323,7 @@
                             :seon.fn/roots (or roots seon.fn/source-roots)
                             :seon.fn/changed-paths reapply
                             :seon.source/previous-database (db/db connection)}
+                     cache-root (assoc :seon.fn.analyzer/cache-root cache-root)
                      directory (assoc :seon.fn/root directory))
                    report-source-progress!))
                 result (if (and result reapplied)
@@ -1630,7 +1635,9 @@
          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
           [:seon.source/changed-paths [:vector :string]]
           [::loaded-files {:optional true} :seon.source/relative-file-digests]
-          [::rederive {:optional true} [:set :string]]]]
+          [::rederive {:optional true} [:set :string]]
+          [:seon.source/branch {:optional true} :seon.source/branch]
+          [:seon.fn.analyzer/cache-root {:optional true} :string]]]
     :seon.source/publish-result]}
   [root store roots]
   (let [published (current-publication store nil)
@@ -1706,11 +1713,12 @@
         (try
           (let [paths (when database selected)
                 analyzed (seon.fn/analyze-entities
-                          (cond-> {:seon.fn/root directory
-                                   :seon.fn/roots (:seon.fn/roots roots)
-                                   :seon.fn/changed-paths selected
-                                   :seon.fn.analyzer/sources captured
-                                   :seon.source/relative-file-digests inputs}
+                          (cond-> (merge (select-keys roots [:seon.fn.analyzer/cache-root])
+                                         {:seon.fn/root directory
+                                          :seon.fn/roots (:seon.fn/roots roots)
+                                          :seon.fn/changed-paths selected
+                                          :seon.fn.analyzer/sources captured
+                                          :seon.source/relative-file-digests inputs})
                             database (assoc :seon.source/previous-database database)))
                 projection (schema/handed-projection)
                 declared (set (keys (:seon.schema.projection/forms projection)))
@@ -1763,6 +1771,7 @@
                                                   " inputs"))
                   result (source/publish!
                           (cond->
+                          (merge (select-keys roots [:seon.source/branch])
                           {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
                            :seon.source/digest digest :seon.source/populate `populate-source!
                            :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
@@ -1770,12 +1779,13 @@
                            :seon.source/relative-file-digests inputs
                            :seon.source/progress! report-source-progress!
                            :seon.source/populate-request
-                           (cond-> {:seon.program/rows analyzed :seon.fn/root directory
-                                    :seon.fn/roots (:seon.fn/roots roots)
-                                    :seon.source/relative-file-digests inputs}
+                           (cond-> (merge (select-keys roots [:seon.fn.analyzer/cache-root])
+                                          {:seon.program/rows analyzed :seon.fn/root directory
+                                           :seon.fn/roots (:seon.fn/roots roots)
+                                           :seon.source/relative-file-digests inputs})
                              database (assoc :seon.source/previous-database database)
                              paths (assoc :seon.fn/changed-paths paths
-                                          :seon.source/change-classes classes))}
+                                          :seon.source/change-classes classes))})
                             ;; The analysis above derives from this head; the
                             ;; publisher refuses if another publication moved it.
                             published (assoc :seon.source/expected-commit-id
@@ -2712,6 +2722,137 @@
                 result))))
          (finally
            (release-root-store! store-dir))))))
+
+;;; Will this program boot? A boot publishes the files that differ from the
+;;; published program and the cluster adopts that publication; both refuse
+;;; committed files boot cannot install (a tag naming a task no file declares,
+;;; a task file that is not one vector, an entity its schema refuses). The
+;;; rehearsal runs those same steps in the running JVM on two disposable
+;;; branches of the live store.
+
+(defn- rehearsal-adoption!
+  "Adopt `published`'s changes onto `fork`, a new branch of `cluster-name`'s
+  branch, exactly as `development-source-refresh!` writes the cluster's
+  entities (its reload, arming and record belong to the JVM and are not run);
+  answer the adopted identity count. The adoption's head guard is handed
+  `current-src`'s commit, which the rehearsal leaves in place."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/published :seon.boot/cluster-name
+                       :seon.store/branch]
+                  :int]}
+  [held published cluster-name fork]
+  (registry/branch! {:seon.store/store held :seon.store/branch fork
+                     :seon.cluster.registry/from (registry/cluster-branch cluster-name)})
+  (let [connection (store/open-branch! held fork)
+        published-database (source/database held (:seon.source/commit-id published))]
+    (try
+      (let [prior (db/pull (db/db connection) [:seon.source/commit-id] [:seon.cluster/name cluster-name])
+            _ (when (or (:seon.db/invalid-read prior) (:seon.error/at prior))
+                (refused! "The adopted source commit could not be read." prior))
+            prior-commit (:seon.source/commit-id prior)]
+        ;; A cluster that adopted this commit is converged, as
+        ;; `development-source-refresh!` answers it.
+        (if (= prior-commit (:seon.source/commit-id published))
+          0
+          (let [identities (published-changes held published prior-commit published-database)]
+            (db/call-with-custody {:seon.db/connection connection}
+                                  ;; `published` names only the head guard's
+                                  ;; commit: `current-src`'s, which stays put
+                                  #(adopt-entities! connection (merge published (source/current held))
+                                                    identities published-database))
+            (count identities))))
+      (finally
+        (d/release-materialized-db published-database)
+        (store/release-branch! connection)))))
+
+(defn- candidate-resources
+  "A class loader answering `seon/schemas` resources from `directory`'s
+  `resources` and everything else from `parent`: the candidate's schema
+  population as its own JVM's classpath would serve it
+  (`schema.edn/packaged-forms` reads through `io/resource`, keyed by the URL)."
+  {:malli/schema [:=> [:cat :string :seon.test/class-loader] :seon.test/class-loader]}
+  [directory ^ClassLoader parent]
+  (proxy [ClassLoader] [parent]
+    (getResource [^String resource-name]
+      (if (str/starts-with? resource-name "seon/schemas")
+        (let [file (io/file directory "resources" resource-name)]
+          (when (.exists file) (io/as-url file)))
+        (.getResource parent resource-name)))))
+
+(defn rehearse-source!
+  "Answer whether `directory`'s program (a candidate commit's archive) boots on
+  this store: its publication and `cluster-name`'s adoption of it, run as boot
+  runs them, onto disposable branches unlinked before the answer.
+
+  The files that differ from the published program publish through
+  `full-source-refresh!` onto a new branch (`source/publish!`'s
+  `:seon.source/branch`), reading the candidate's schema resources
+  ([[candidate-resources]]) and analyzing with a copy of this JVM's analyzer
+  cache, so neither the shared cache nor `current-src` changes. The cluster's
+  entities then adopt it on a fork of its branch (`rehearsal-adoption!`). A
+  refusal is returned as the error value boot would have stopped on.
+
+  Known issues: host code does not reload, so a candidate's changed boot or
+  publication code is not exercised (a boot write naming an attribute the
+  cluster adopts only after boot passes here and refuses at boot).
+
+  Costs: proportional to the files that differ from the published program,
+  plus one copy of the analyzer cache (about 6 MB, 0.2 s). Measured
+  2026-09-28 on default, unarmed rehearsal code: HEAD 1.6 s, one changed test
+  file 5.1 s, three changed files with a schema resource 6.5 s."
+  {:malli/schema [:=> [:cat :seon.boot/root :string :seon.boot/cluster-name]
+                  [:or
+                   [:map [:seon.source/commit-id :seon.source/commit-id]
+                    [:seon.source/built? :boolean]
+                    [::adopted-identities :int]
+                    [::phase-ms [:map-of :keyword :int]]]
+                   [:and :seon.error/base [:map [:seon.error/layer [:= :seon.source/publication]]]]]]}
+  [root directory cluster-name]
+  (let [began (System/nanoTime)
+        ms #(quot (- (System/nanoTime) began) 1000000)
+        store-dir (:seon.boot/store-dir (resolve-bootstrap {:seon.boot/root root}))
+        held (acquire-root-store! store-dir)
+        token (random-uuid)
+        published-branch (keyword (str "rehearsal-" token))
+        fork (keyword (str "rehearsal-" token "-" cluster-name))
+        ;; Beside, never inside, the archive's `.clj-kondo/.cache`: a launched
+        ;; archive links that path to the root's shared cache.
+        cache-root (str (io/file directory (str ".rehearsal-" token)))
+        thread (Thread/currentThread)
+        loader (.getContextClassLoader thread)]
+    (try
+      (babashka.fs/copy-tree analyzer/cache-directory cache-root)
+      (.setContextClassLoader thread (candidate-resources directory loader))
+      (schema/call-with-projection
+       (schema/declaration-projection (schema.edn/packaged-forms))
+       (fn []
+         (let [published (full-source-refresh!
+                          root held (assoc (publication-roots)
+                                           :seon.fn/root directory
+                                           :seon.source/changed-paths []
+                                           ::loaded-files (loaded-files held)
+                                           :seon.source/branch published-branch
+                                           :seon.fn.analyzer/cache-root cache-root))]
+           (if (:seon.error/at published)
+             published
+             (let [published-ms (ms)
+                   adopted (rehearsal-adoption! held published cluster-name fork)]
+               (assoc (select-keys published [:seon.source/commit-id :seon.source/built?])
+                      ::adopted-identities adopted
+                      ::phase-ms {::published-ms published-ms
+                                  ::adopted-ms (- (ms) published-ms)}))))))
+      (catch Exception failure
+        (seon.error.refusal/diagnostic
+         {:seon.error/at (Date.) :seon.error/layer :seon.source/publication
+          :seon.error/operation `rehearse-source! :seon.error/message (ex-message failure)
+          :seon.error/throwable failure}))
+      (finally
+        (.setContextClassLoader thread loader)
+        (try
+          (doseq [branch [fork published-branch]
+                  :when (contains? (registry/roster held) branch)]
+            (registry/retire-branch! {:seon.store/store held :seon.store/branch branch}))
+          (fs/delete-recursively! directory cache-root)
+          (finally (release-root-store! store-dir)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes

@@ -172,6 +172,30 @@ During a cut use the installed focused authority, not a suite per commit:
   (`host-exclusions`, `:1927`); declared-long members are excluded unless the request
   opts in, and an exclusion is never green.
 
+### Will it boot? Before every commit
+
+A boot publishes the files that differ from the published program and default
+adopts them; either refusing stops the boot (a `:seon/tasks` tag naming a task no
+file declares, a task file that is not one vector, a schema resource the population
+refuses). Lint and the contract compile check cannot see these. Before committing
+source, test, schema or task files, run the same publication and adoption in the
+running JVM on disposable branches (`seon.cluster/rehearse-source!`, `src/seon/cluster.clj`;
+`current-src`, default's branch and the shared analyzer cache are untouched):
+
+- `bin/seon check PATH...` rehearses HEAD plus those working-tree files (the paths
+  you pass to `git commit --only`); no paths rehearses HEAD. It answers the rehearsal
+  commit id, adopted identity count and phase times, or the refusal boot would stop
+  on. It exists once root applies `tmp/boot-reliability/patches/01-boot-check-request.patch`
+  and default runs that commit.
+- Until then: `tmp/boot-reliability/candidate.sh PATH...` prints the candidate
+  archive directory, then over MCP (jvm mode)
+  `(seon.cluster/rehearse-source! "<root>/data/clusters" "<archive>" "default")`.
+
+Measured 2026-09-28: HEAD 1.6-6 s, one changed file 4-5 s, a `seon.cluster` change
+30 s (its dependents re-derive, as boot's publication would). Not covered: host code
+does not reload, so a changed boot or publication function is not exercised (64cb9e80f's
+boot write of an attribute adopted only after boot passes the check).
+
 Record actual program identity, arming precondition, execution/reuse counts,
 assertions, failures, errors and refusal/timeout categories. Zero executions with
 valid recorded green evidence is reuse, not a fresh proof. Fixture-excluded or

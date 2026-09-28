@@ -68,7 +68,7 @@
   (let [manifest (:seon.config/manifest options)]
     (case (:seon.operator/command options)
       :export (operator-export-bound-ms manifest)
-      (:init :reset) (operator-boot-bound-ms manifest)
+      (:init :reset :check) (operator-boot-bound-ms manifest)
       (operator-silence-backstop-ms manifest))))
 
 (defn diagnostic
@@ -1473,6 +1473,59 @@
 
 (declare failure-cause)
 
+;;; Will this tree boot? (owner 2026-09-28: HEAD refused to boot twice in one
+;;; hour; only a boot saw it.) The candidate is a commit object whose tree is
+;;; HEAD's with the named working-tree files, archived as `start --head`
+;;; archives HEAD; the running JVM publishes and adopts it on disposable
+;;; branches of the live store (`seon.cluster/rehearse-source!`). No JVM boots.
+
+(defn- candidate-revision!
+  "HEAD's commit, or with `paths` a commit object whose tree is HEAD's with
+  those working-tree files (written through a temporary index; HEAD, the
+  shared index and the working tree are untouched)."
+  {:malli/schema [:=> [:cat :string [:vector :string]] :string]}
+  [repository paths]
+  (let [sha (str/trim (command! ["git" "rev-parse" "--verify" "HEAD^{commit}"] repository 30000))]
+    (if (empty? paths)
+      sha
+      (let [index (str (fs/create-temp-file {:prefix "seon-check-index"}))
+            environment {"GIT_INDEX_FILE" index}]
+        (try
+          (command! ["git" "read-tree" sha] repository 30000 environment)
+          (command! (into ["git" "add" "--"] paths) repository 60000 environment)
+          (let [tree (str/trim (command! ["git" "write-tree"] repository 30000 environment))]
+            (if (= tree (str/trim (command! ["git" "rev-parse" (str sha "^{tree}")] repository 30000)))
+              sha
+              (str/trim (command! ["git" "commit-tree" tree "-p" sha "-m"
+                                   (str "check: HEAD + " (str/join " " paths))]
+                                  repository 30000))))
+          (finally (fs/delete-if-exists index)))))))
+
+(defn check!
+  "Answer whether HEAD plus `:seon.operator/paths` boots on this root's store,
+  in its running JVM: the candidate's archive is published and adopted there
+  on disposable branches. A candidate that is not HEAD has its archive deleted
+  after; HEAD's is kept for the `start --head` that follows."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [request]
+  (let [began (System/nanoTime)
+        root (:seon.operator/managed-root request)
+        repository (committed-repository)
+        head (str/trim (command! ["git" "rev-parse" "--verify" "HEAD^{commit}"] repository 30000))
+        sha (candidate-revision! repository (get request :seon.operator/paths []))
+        {source-root :seon.operator/source-root :as source} (committed-source! root sha)
+        archive-ms (elapsed-ms began)]
+    (try
+      (assoc (connected! (assoc request :seon.source/directory source-root
+                                :seon.boot/cluster-name (get request :seon.boot/cluster-name "default")))
+             :seon.source/git-sha sha
+             :seon.operator/phases {:seon.operator/archive-ms archive-ms
+                                    :seon.operator/total-ms (elapsed-ms began)})
+      (finally
+        (when (and (:seon.operator/source-built? source) (not= sha head)
+                   (not (contains? (held-sources) source-root)))
+          (fs/delete-tree source-root))))))
+
 (defn request! [request]
   (try
     (case (:seon.operator/command request)
@@ -1493,6 +1546,7 @@
       :nuke (do (when-not (:seon.operator/force? request)
                   (fail! "Nuclear rebuild requires --force." request))
                 (nuke! request))
+      :check (check! request)
       :logs (let [path (io/file (:seon.operator/managed-root request) "data/clusters"
                                 (:seon.boot/cluster-name request) "logs/seon.log")]
               (when-not (.isFile path) (fail! "Requested log is unavailable." request))
@@ -1554,6 +1608,8 @@
             :export (if (= 1 (count positionals))
                       (assoc request :seon.operator/destination (.getCanonicalPath (io/file (first positionals))))
                       (fail! "Use export PATH." request))
+            :check (assoc request :seon.operator/paths
+                          (mapv #(.getCanonicalPath (io/file %)) positionals))
             (:status :down :nuke)
             (do (when (seq positionals) (fail! "Command takes no cluster name." request))
                 (when (and (#{:reset :nuke} command) (not (:seon.operator/force? request)))
@@ -1654,7 +1710,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH | check [PATH...]"}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.
