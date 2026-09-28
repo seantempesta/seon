@@ -149,8 +149,8 @@
         "a def carries the note, naming the var")
     (is (str/includes? def-response "transact the data into the database.\"")
         "the note ends by saying what persists")
-    (is (str/includes? defn-response
-                       "hello was not installed: every function needs a :malli/schema contract to become part of the program."))
+    (is (not (str/includes? defn-response ":note"))
+        "an uncontracted defn is admitted: its Var render, not a note, names the missing contract")
     (is (not (str/includes?
               (repl/response
                (emission "(defn hello {:malli/schema [:=> [:cat] :int]} [] 42)"))

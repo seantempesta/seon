@@ -133,15 +133,7 @@
              " restarts. Nothing defined with def is persisted, atoms"
              " included; they are for temporary data-modeling experiments."
              " To keep something, write a function, schema, or test, or"
-             " transact the data into the database.")
-          (and (#{'defn 'defn- 'clojure.core/defn 'clojure.core/defn-}
-                (first form))
-               (not (:malli/schema (meta (second form))))
-               (not (:malli/schema
-                     (first (drop-while string? (nnext form))))))
-          (str (second form)
-               " was not installed: every function needs a :malli/schema"
-               " contract to become part of the program."))))))
+             " transact the data into the database."))))))
 
 (defn value-text
   "Return the saved shown text unchanged."
