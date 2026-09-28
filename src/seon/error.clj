@@ -1650,10 +1650,13 @@
      {:seon.error/fact fact
       :seon.error/ref [:seon.error/signature signature]
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
-      :seon.error/value (merge (value fact)
-                               (distinguishing-members (:seon.schema/projection request)
-                                                       (:seon.error/declared-schema fact)
-                                                       (:seon.error/source request)))
+      ;; the declared schema rides as the value's metadata, the key render
+      ;; selection reads (`seon.render`'s declared stage)
+      :seon.error/value (with-meta (merge (value fact)
+                                          (distinguishing-members (:seon.schema/projection request)
+                                                                  (:seon.error/declared-schema fact)
+                                                                  (:seon.error/source request)))
+                          {:seon.error/declared-schema (:seon.error/declared-schema fact)})
       :seon.blob/staged-writes staged
       :seon.db/tx-data tx}))))
   ([cluster database declared-schema source at attribution]

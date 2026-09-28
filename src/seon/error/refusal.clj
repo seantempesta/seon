@@ -643,11 +643,15 @@
 (defn attributed
   "`error` with the common part every recorded failure carries supplied where
   it states none: the blame rule's [[producer]] and the calling world's
-  reference ([[world-reference]]). What the producer stated wins."
+  reference ([[world-reference]]). What the producer stated wins, its
+  metadata included."
   {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]] :map]}
   [error throwable]
   (let [world (when-not (:seon.error/world error) (world-reference (current-world)))]
-    (cond-> (merge (producer error throwable) error)
+    ;; onto `error` itself: its metadata (the producer's
+    ;; `:seon.error/declared-schema`, which selects its render) is kept
+    (cond-> (reduce-kv (fn [held k v] (if (contains? held k) held (assoc held k v)))
+                       error (producer error throwable))
       world (assoc :seon.error/world world))))
 
 (defn diagnostic
