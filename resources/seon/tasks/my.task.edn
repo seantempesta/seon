@@ -1,0 +1,5 @@
+[#:seon.task{:name "the-queue-on-an-agent-branch-offers-tasks-claimed-on-the-cluster"
+             :kind :function
+             :intent "After (my.task/claim! {:seon.task/assigned \"cb07d384b078\"}) by agent e1-probe on its branch (2026-09-28), (my.task/open) on that branch still offers cb07d384b078: claim! writes the assignment to the task home (seon.task/home-connection), while open reads the branch's database, whose copy of the task has no assignment. One queue for every agent means open reads where claims are written. The same call costs 3,529 armed calls for 7 tasks (seon.db/database-value? 774x). Done when a claimed task leaves the queue read from the claimant's branch, with a regression."
+             :must-read #{my.task/open my.task/claim! seon.task/home-connection}
+             :evidence #{"tmp/health-loop-proof/evidence.md"}}]
