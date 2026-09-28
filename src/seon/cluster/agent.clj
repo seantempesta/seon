@@ -286,26 +286,15 @@
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
 (defn render-identity-ai
-  "My identity as data: my id, my namespace and its steward, and the issues I
-  work, offering `(help)` and each issue's context read."
+  "My identity as data: my id, my namespace and its steward, offering
+  `(help)`. The issues I work are their own concern (`seon.issue.opening`)."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/identity-view :seon.db/error-result]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
-  (let [agent-data (db/pull database identity-selector [:seon.agent/id agent-id])
-        issues (db/q '[:find [?issue-id ...] :in $ ?agent-id
-                       :where [?agent :seon.agent/id ?agent-id]
-                       [?issue :seon.issue/agent ?agent]
-                       [?issue :seon.issue/id ?issue-id]]
-                     database agent-id)]
-    (cond
-      (db/read-refusal? agent-data) agent-data
-      (db/read-refusal? issues) issues
-      :else
-      (cond-> (assoc agent-data :seon.render/operations
-                     (cond-> ['(help)]
-                       (= "root" agent-id) (conj '(seon.cluster.status/agents {}))
-                       (seq issues) (into (map #(list 'seon.issue.opening/context {:seon.issue/id %}))
-                                          (sort issues))))
-        (seq issues) (assoc :seon.agent/issues (vec (sort issues)))))))
+  (let [agent-data (db/pull database identity-selector [:seon.agent/id agent-id])]
+    (if (db/read-refusal? agent-data)
+      agent-data
+      (assoc agent-data :seon.render/operations
+             (cond-> ['(help)] (= "root" agent-id) (conj '(seon.cluster.status/agents {})))))))
 
 (defn render-id-ai
   "The identity concern read from its identifying attribute, as data."
