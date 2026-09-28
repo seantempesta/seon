@@ -186,7 +186,11 @@
         (is (empty? (db/q '[:find ?value
                            :where [_ ::mixed-value ?value]]
                          @connection))))))
-  (doseq [stored ["[" "true"]]
+  (with-mixed-connection
+    (fn [_]
+      (is (true? (schema.datahike/decode-attribute-value ::mixed-value "true"))
+          "a committed value reads as written; admission judged its write")))
+  (doseq [stored ["["]]
     (with-mixed-connection
       (fn [connection]
         (d/transact connection [{::mixed-value stored}])
@@ -198,6 +202,5 @@
                 (catch clojure.lang.ExceptionInfo error
                   (ex-data error)))]
           (is (some? (::schema.datahike/rule failure)))
-          (is (contains? #{::schema.datahike/malformed-edn
-                           ::schema.datahike/schema-invalid}
-                         (::schema.datahike/rule failure))))))))
+          (is (= ::schema.datahike/malformed-edn
+                 (::schema.datahike/rule failure))))))))

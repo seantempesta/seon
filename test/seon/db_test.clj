@@ -481,10 +481,21 @@
                       (map :v)
                       (db/datoms @connection :avet ::ai-declaration)))))))))
 
-(deftest invalid-edn-backed-storage-is-a-flat-read-error
+(deftest committed-edn-reads-as-written-unless-its-storage-is-malformed
+  ;; A committed value outside the current write schema (a legacy dependency
+  ;; plan past the 128-pattern bound) reads as written; only storage that is
+  ;; not EDN is a read error.
+  (with-codec-database
+   {:seon.test-support/extra-schema
+    [(schema.datahike/malli->datahike-attr-in
+      fixture-projection ::ai-declaration)]}
+   (fn [connection]
+     (d/transact connection [{::ai-declaration "true"}])
+     (is (true? (db/q '[:find ?declaration .
+                        :where [_ ::ai-declaration ?declaration]]
+                      @connection)))))
   (doseq [[stored rule]
-          [["[" ::schema.datahike/malformed-edn]
-           ["true" ::schema.datahike/schema-invalid]]]
+          [["[" ::schema.datahike/malformed-edn]]]
     (with-codec-database
      {:seon.test-support/extra-schema
       [(schema.datahike/malli->datahike-attr-in

@@ -1042,7 +1042,13 @@
       value)))
 
 (defn decode-attribute-value-in
-  "Decode one attribute value against exactly one projection."
+  "Decode one attribute value against exactly one projection.
+
+   Refuses storage that is not canonical EDN. A committed value is returned as
+   written: admission judges writes, and a read never re-applies the current
+   write schema to it (a dependency plan stored before its pattern bound
+   reads whole). A caller choosing among candidate attributes validates the
+   decoded value itself (`seon.db/decode-query-field`)."
   {:malli/schema [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [projection attr value]
   (if-not (edn-encoded-attr-in? projection attr)
@@ -1057,7 +1063,7 @@
                 (refuse-slot! ::malformed-edn attr value)))]
         (when-not (= value (storage-string decoded))
           (refuse-slot! ::noncanonical-edn attr value))
-        (validate-logical-slot-in! projection attr decoded)))))
+        decoded))))
 
 (defn decode-attribute-value
   "Decode and validate one value read from an EDN-backed attribute.
