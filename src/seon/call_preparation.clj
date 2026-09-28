@@ -609,6 +609,15 @@
       (and (not variadic?) (> (count slots) 1))
       (assoc :seon.call-preparation/argument-validators (mapv (comp m/validator ::argument-schema) arguments)))))
 
+(defn- supply-index
+  "Every supplied default by declared schema name: the admitted rows, and each
+  world member (`world-candidates`), which wins over a row naming it. The one
+  index both planners join contracts to (`planned-arities`, `arm-plan`)."
+  {:malli/schema [:=> [:cat :seon.call-preparation/snapshot]
+                  [:map-of :qualified-keyword :seon.call-preparation/supplied-default]]}
+  [current]
+  (merge (by-schema-key (:seon.call-preparation/supplied-defaults current)) world-candidates))
+
 (defn- planned-arities
   "`sym`'s contract arities in `projection` planned against `current`, or nil.
   A world member's schema name is planned from the world, whatever row also
@@ -616,7 +625,7 @@
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.call-preparation/snapshot :qualified-symbol]
                   [:maybe :seon.call-preparation/arity-plans]]}
   [projection current sym]
-  (let [index (merge (by-schema-key (:seon.call-preparation/supplied-defaults current)) world-candidates)]
+  (let [index (supply-index current)]
     (some->> (get (contract-arities projection) sym)
              (mapv #(arity-plan index %)))))
 
@@ -768,7 +777,9 @@
   [current projection sym]
   ;; One contract's arities, not the projection's whole contract index: an
   ;; agent's definition arms against a projection made for it alone.
-  (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))
+  ;; the same index `planned-arities` reads: a contract naming a world member
+  ;; only (a branch operation's store) was planned there and never armed
+  (let [index (supply-index current)
         compiled (some->> (mr/schema (:seon.schema.projection/registry projection) sym)
                           arity-facts
                           (mapv #(arity-plan index %))

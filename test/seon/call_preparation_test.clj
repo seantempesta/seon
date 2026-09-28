@@ -1196,3 +1196,21 @@
        (is (symbol? (:seon.error/exception-class cause))
            "the failed resolution's Throwable rides the refusal, never dropped")
        (is (instance? Throwable (:seon.error/offending cause)))))))
+
+(deftest arming-plans-a-contract-whose-supplied-inputs-are-world-members-only
+  ;; `arm-plan` joined contracts to the admitted rows only, while `plan-for`
+  ;; also joined the world members: `my.agent/branches`, whose context names
+  ;; only the store, connection and routing, was planned but armed without
+  ;; preparation, so its documented zero-argument call refused its count.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           carried (db/carried-projection database)
+           current (cp/snapshot database carried)]
+       (is (= (cp/plan-for database current 'my.agent/branches)
+              (cp/arm-plan current carried 'my.agent/branches))
+           "arming and planning join the same supplied defaults")
+       (is (contains? (:seon.call-preparation/by-supplied-count
+                       (cp/arm-plan current carried 'my.agent/branches))
+                      0)
+           "the armed wrapper supplies the whole context of a zero-argument call")))))

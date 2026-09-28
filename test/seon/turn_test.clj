@@ -175,13 +175,22 @@
                     :seon.cluster.eval/ordinal 0
                     :seon.ns/name 'my.agents.reader
                     :seon.cluster.reply/sources [{:seon.cluster.eval/source source}]}
-           fault (try (turn/evaluate-sources request) nil
-                      (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
-       ;; The whole fault can carry the request's world; name it, never print it.
-       (is (seq (:seon.turn/generated-read-attributes fault)))
-       (is (= source (get-in fault [:seon.error/offending])))
+           ;; the fault rides beside the value as a diagnostic (585b043e8), so
+           ;; its data is asked of its producer over the evaluation's evidence
+           evaluation (get-in (turn/evaluate-sources request)
+                              [:seon.turn.loop/evaluated-sources 0 :seon.sci.eval/evaluation])
+           fault (#'turn/generated-read-fault (db/db connection)
+                                              {:seon.cluster.eval/source source
+                                               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]}
+                                              (select-keys evaluation [:seon.cluster.eval/read-evidence]))]
+       (is (str/includes? (str (:seon.cluster.eval/diagnostics evaluation))
+                          "A generated context read depends on the agent's own turn-taking.")
+           "the fault is delivered beside the value")
+       (is (seq (:seon.turn/generated-read-attributes fault)) "the fault names the turn attributes read")
+       (is (= source (get-in fault [:seon.error/offending])) "the fault names the generated form")
        (is (= #{:seon.turn/id}
-              (get-in fault [:seon.error/data :datahike.read/attributes])))
+              (get-in fault [:seon.error/data :datahike.read/attributes]))
+           "the fault names the read's attributes")
        (is (nil? (:seon.cluster.eval/read-evidence
                   (db/pull @connection [:seon.cluster.eval/read-evidence]
                            [:seon.cluster.eval/id evaluation-id]))))
@@ -2238,8 +2247,14 @@
            ;; the fault is recorded in the cluster's world, with root to deliver to
            _ (cluster/seed-root-agent! connection "refused-refusal" cluster/boot-process-identity)
            now (java.util.Date.)
+           configuration (support/effective-config)
            requests [{:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
-                      :seon.turn/id run-id :seon.cluster.eval/ordinal 0}]
+                      :seon.turn/id run-id :seon.cluster.eval/ordinal 0
+                      :seon.sci.eval/evaluation
+                      (support/evaluate {:seon.cluster.eval/source "(+ 1 1)"
+                                         :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db (db/db connection)
+                                         :seon.sci.admit/caps (config/result-caps configuration)
+                                         :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})}]
            ;; the same ordinal twice: the writer's own terminal fence refuses
            ;; the refusal settlement (`receipt-settle-batch-call`)
            prepared [{:seon.turn.loop/receipt {:seon.turn/id run-id :seon.cluster.eval/ordinal 0 :seon.eval/shown "2"}}
@@ -2318,21 +2333,22 @@
            handle (terminal-fixture connection "throwing-settlement" run-id ["(+ 1 1)" "(* 3 3)"])
            configuration (support/effective-config)
            now (java.util.Date.)
-           evaluated (support/evaluate
-                      {:seon.cluster.eval/source "(+ 1 1)"
+           evaluate #(support/evaluate
+                      {:seon.cluster.eval/source %
                        :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db (db/db connection)
                        :seon.render/profile (render/agent-render-profile configuration)
                        :seon.sci.admit/caps (config/result-caps configuration)
                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
-           request {:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
-                    :seon.turn/id run-id}
-           ;; the second form's request carries no evaluation: the settlement
-           ;; cannot build its receipt and throws
-           requests [(assoc request :seon.cluster.eval/ordinal 0 :seon.sci.eval/evaluation evaluated)
-                     (assoc request :seon.cluster.eval/ordinal 1)]
+           requests (mapv (fn [ordinal source]
+                            {:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
+                             :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal
+                             :seon.sci.eval/evaluation (evaluate source)})
+                          (range 2) ["(+ 1 1)" "(* 3 3)"])
+           ;; a program without the fold's request: settle-batch! refuses its
+           ;; own input, a throw inside the settlement
            settled (#'turn/settle-evaluated! handle requests {})
            receipts (settled-receipts connection run-id)]
-       (is (= "2" (:seon.eval/shown (first receipts))) "the first form shows the value it evaluated")
+       (is (= ["2" "9"] (mapv :seon.eval/shown receipts)) "each form shows the value it evaluated")
        (is (some? (:refused-outcome settled)) "the settlement's failure is answered as a value")
        (is (every? #(some? (:seon.cluster.eval/error %)) receipts)
            "each receipt names the failed settlement beside its value")))))
