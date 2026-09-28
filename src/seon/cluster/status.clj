@@ -120,12 +120,10 @@
                                             {:seon.turn/opened-tx [:db/txInstant]}
                                             {:seon.turn/closed-tx [:db/txInstant]}
                                             {:seon.turn/attempts [*]}]) ...]
-                             :in $ ?a :where [?a :seon.agent/runtime ?r]
-                             [?r :seon.runtime/turns ?t]] database (:db/id agent))
+                             :in $ ?a :where [?t :seon.turn/agent ?a]] database (:db/id agent))
                evaluations (db/q '[:find [(pull ?e [:seon.eval/shown :seon.eval/duration-ms
                                                    :seon.cluster.eval/at]) ...]
-                                   :in $ ?a :where [?a :seon.agent/runtime ?r]
-                                   [?r :seon.runtime/turns ?t]
+                                   :in $ ?a :where [?t :seon.turn/agent ?a]
                                    [?e :seon.cluster.eval/run ?t]] database (:db/id agent))
                session (filter #(>= (some-> (:seon.cluster.eval/at %) inst-ms) boot) evaluations)
                attempts (filter #(>= (inst-ms (:seon.ai.attempt/at %)) boot)

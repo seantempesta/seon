@@ -67,13 +67,8 @@
 (defn- open-run!
   "Open a turn, optionally planned, THROUGH THE WRITER.
 
-   A hand-written `{:seon.turn/id … :seon.turn/agent …}` row is not an open
-   turn: since `ae0e54841` the agent's open turn is read through its runtime
-   component (`[?runtime :seon.runtime/agent ?agent] [?runtime
-   :seon.runtime/turns ?turn]`, `seon.turn/open-for-agent`), and only
-   `open-call` writes that edge. A fixture that authors the turn map instead
-   leaves `agent-run` nil, so every derivation row answered `:open` or idle no
-   matter what else the table built."
+   The writer (`open-call`) is the one that checks and writes an open turn,
+   so the derivation rows read what production writes."
   [connection {:keys [planned? triggered?]}]
   (support/transacted!
    connection

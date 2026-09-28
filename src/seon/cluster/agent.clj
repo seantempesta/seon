@@ -314,14 +314,14 @@
                        (db/pull database
                                 '[:seon.agent/id :seon.agent/archived-tx
                                   {:seon.agent/namespace [:seon.ns/name :seon.task/tasks {:seon.ns/steward [:seon.agent/id]}]}
-                                  {:seon.agent/runtime [{:seon.runtime/turns [:seon.turn/closed-tx]}]}]
+                                  {:seon.turn/_agent [:seon.turn/closed-tx]}]
                                 [:seon.agent/id agent-id]))
                      (or (:seon.render/value unit) unit))]
     (if (or (:seon.db/invalid-read agent-data) (:seon.schema/expected-value agent-data))
       agent-data
       (let [{agent-id :seon.agent/id {namespace-name :seon.ns/name tasks :seon.task/tasks
                                       {steward :seon.agent/id} :seon.ns/steward} :seon.agent/namespace} agent-data
-            turns (get-in agent-data [:seon.agent/runtime :seon.runtime/turns])
+            turns (:seon.turn/_agent agent-data)
             agent-link #(vector :a {:href (route/path :seon.render.route/agent {:id %})} %)
             entry (fn [label value] [:div [:dt label] [:dd value]])]
         (when agent-id

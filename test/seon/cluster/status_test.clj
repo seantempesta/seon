@@ -16,11 +16,7 @@
            now (java.util.Date. (+ (inst-ms opened) 20))]
        (let [result (db/transact! connection
                   [{:db/id "datomic.tx" :db/txInstant opened}
-                   {:seon.agent/id "metrics"
-                    :seon.agent/runtime
-                    {:seon.runtime/agent [:seon.agent/id "metrics"]
-                     :seon.runtime/turns
-                     [{:seon.turn/id "metrics-turn"
+                   {:seon.turn/id "metrics-turn"
                        :seon.turn/agent [:seon.agent/id "metrics"]
                        :seon.turn/opened-tx "datomic.tx"
                        :seon.turn/attempts
@@ -30,7 +26,7 @@
                          :seon.ai.attempt/settings-edn "{}"
                          :seon.ai.attempt/ordinal 0 :seon.ai.attempt/at now
                          :seon.ai.usage/total-tokens 17
-                         :seon.ai.attempt/usage-edn "{\"total_tokens\" 17}"}]}]}}])]
+                         :seon.ai.attempt/usage-edn "{\"total_tokens\" 17}"}]}])]
          (is (some? (:db-after result))))
        (let [result (db/transact! connection
                   [{:db/id "datomic.tx" :db/txInstant now}

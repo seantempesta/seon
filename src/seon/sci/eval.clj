@@ -2725,8 +2725,7 @@
   (let [rows (db/q '[:find ?id (pull ?evaluation [:seon.eval/value-digest :seon.eval/unstored :seon.eval/value-class])
                      :in $ ?agent-id
                      :where [?agent :seon.agent/id ?agent-id]
-                            [?agent :seon.agent/runtime ?runtime]
-                            [?runtime :seon.runtime/turns ?turn]
+                            [?turn :seon.turn/agent ?agent]
                             [?evaluation :seon.cluster.eval/run ?turn]
                             [?evaluation :seon.cluster.eval/id ?id]]
                    db agent-id)]

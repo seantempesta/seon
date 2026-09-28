@@ -29,7 +29,6 @@
                  :seon.agent/runtime
                  {:seon.runtime/agent "agent"
                   :seon.runtime/trigger "message"
-                  :seon.runtime/turns ["older" "newer"]
                   :seon.runtime/listens [{:seon.listen/attribute :seon.message/to}]}}
               
                 {:db/id "message" :seon.message/id "private-message-id"

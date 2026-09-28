@@ -181,8 +181,7 @@
              (is (some? (agent/armed routing "juniper")))
              (is (= 29 (turn/turns-left @connection "juniper")))
              (is (seq (db/q '[:find ?turn :where [?agent :seon.agent/id "juniper"]
-                              [?agent :seon.agent/runtime ?runtime]
-                              [?runtime :seon.runtime/turns ?turn]
+                              [?turn :seon.turn/agent ?agent]
                               [?turn :seon.turn/reply ""] [?turn :seon.turn/closed-tx]] @connection)))
              (let [basis (db/basis-t @connection)]
                (support/transacted! connection [{:seon.message/id "running-fixture/wake"

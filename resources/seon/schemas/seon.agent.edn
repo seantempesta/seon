@@ -30,7 +30,7 @@
   [:seon.store/store {:optional true} :seon.store/store]]
  :archived-tx [:and {:description "The transaction that archived this retained agent identity. Archival only filters presentation; it does not stop its graph, detach ownership or disable resumption."} :seon.db/ref]
  :admission-closed-tx [:and {:description "The transaction that closed this agent's admission: the run writer refuses every later run for it by name (seon.turn/system-run-call and plan-call). A hosted agent's retirement is this one assertion; the runs committed before it are the ones retirement awaits."} :seon.db/ref]
-:runtime [:and {:seon.db/component true :seon.db/component-schema :seon.runtime/entity :description "The agent owns its runtime and turn history."} :seon.db/ref]
+:runtime [:and {:seon.db/component true :seon.db/component-schema :seon.runtime/entity :description "The agent owns its runtime: latest trigger and listens. Its turns name it (:seon.turn/agent)."} :seon.db/ref]
 :agent
                      [:map
                       {:seon.db/attributes true,

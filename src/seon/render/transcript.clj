@@ -1052,7 +1052,7 @@
       :else
       (assoc (get pulled :seon.agent/runtime {})
              :seon.render/operations
-             [(list 'seon.db/pull ''[{:seon.agent/runtime [:seon.runtime/turns]}] [:seon.agent/id agent-id])]))))
+             [(list 'seon.db/pull ''[{:seon.turn/_agent [:seon.turn/id]}] [:seon.agent/id agent-id])]))))
 
 (defn render-runtime-form
   "The read that finds my trigger and listens again. Shown, never executed."
@@ -1153,8 +1153,7 @@
   [database agent-id]
   (let [entities (db/q '[:find ?opened (pull ?t pattern) :in $ ?agent-id pattern
                      :where [?a :seon.agent/id ?agent-id]
-                            [?a :seon.agent/runtime ?runtime]
-                            [?runtime :seon.runtime/turns ?t]
+                            [?t :seon.turn/agent ?a]
                             [?t :seon.turn/id _ ?opened]]
                    database agent-id debug-turn-selector)]
     (if (db/read-refusal? entities) entities
@@ -2437,9 +2436,9 @@
                 (db/pull database
                      ;; :db/id keeps a runtime with no turns, trigger or
                      ;; listens yet (a new agent's) from pulling as absent.
-                     [{:seon.agent/runtime
+                     [{:seon.turn/_agent runtime-turn-selector}
+                      {:seon.agent/runtime
                        [:db/id
-                        {:seon.runtime/turns runtime-turn-selector}
                         {:seon.runtime/trigger runtime-message-selector}
                         {:seon.runtime/listens [:seon.listen/attribute]}]}]
                      [:seon.agent/id agent-id]))]
@@ -2458,7 +2457,7 @@
         (let [runtime (:seon.agent/runtime entity)
               turns (sort-by (juxt #(some-> (get-in % [:seon.turn/opened-tx :db/txInstant])
                                             (.getTime)) :seon.turn/id)
-                             #(compare %2 %1) (:seon.runtime/turns runtime))
+                             #(compare %2 %1) (:seon.turn/_agent entity))
               open (first (remove :seon.turn/closed-tx turns))
               since (if open (get-in open [:seon.turn/opened-tx :db/txInstant])
                         (last (sort (keep #(get-in % [:seon.turn/closed-tx :db/txInstant]) turns))))

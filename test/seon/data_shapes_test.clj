@@ -134,12 +134,12 @@
                                [:seon.message/id (:seon.message/id ask)])
      :seon.test/open-id (turn/open-for-agent (:db-after opened) [:seon.agent/id "recipient"])
      :seon.test/closed-id (turn/open-for-agent result [:seon.agent/id "recipient"])
-     :seon.test/runtime (d/pull result '[{:seon.agent/runtime
-                                        [:seon.runtime/agent
-                                         {:seon.runtime/turns [:seon.turn/id
-                                                              {:seon.turn/opened-tx [:db/id :db/txInstant]}
-                                                              {:seon.turn/closed-tx [:db/id :db/txInstant]}]}
-                                         {:seon.runtime/listens [*]}]}]
+     :seon.test/runtime (d/pull result '[{:seon.turn/_agent [:seon.turn/id
+                                                            {:seon.turn/opened-tx [:db/id :db/txInstant]}
+                                                            {:seon.turn/closed-tx [:db/id :db/txInstant]}]}
+                                        {:seon.agent/runtime
+                                         [:seon.runtime/agent
+                                          {:seon.runtime/listens [*]}]}]
                                [:seon.agent/id "recipient"])
      :seon.test/reports
      (into {} (map (fn [[operation report]]
@@ -154,7 +154,8 @@
    (fn [connection]
      (let [probe (message-runtime-probe @connection)
            runtime (get-in probe [:seon.test/runtime :seon.agent/runtime])
-           recorded-turn (first (:seon.runtime/turns runtime))]
+           turns (get-in probe [:seon.test/runtime :seon.turn/_agent])
+           recorded-turn (first turns)]
        ;; Minted message identities come from the one identity derivation, so
        ;; the expected length is derived from it rather than mirrored here.
        (is (= (count (id/id)) (count (:seon.test/message-id probe))))
@@ -165,7 +166,7 @@
               (get-in probe [:seon.test/message :seon.turn/_handled])))
        (is (= "data-shapes-turn" (:seon.test/open-id probe)))
        (is (nil? (:seon.test/closed-id probe)))
-       (is (= 1 (count (:seon.runtime/turns runtime))))
+       (is (= 1 (count turns)))
        (is (inst? (get-in recorded-turn [:seon.turn/opened-tx :db/txInstant])))
        (is (inst? (get-in recorded-turn [:seon.turn/closed-tx :db/txInstant])))
        (is (= :seon.message/to (:seon.listen/attribute (first (:seon.runtime/listens runtime)))))))))
@@ -426,3 +427,35 @@
                        [:seon.message/id "system-message"])]
        (is (= "system-recipient" (get-in entity [:seon.message/to :seon.agent/id])))
        (is (nil? (:seon.turn/_handled entity)))))))
+
+(deftest a-turn-is-its-own-owning-value-so-writing-one-never-reads-the-history
+  ;; Write validation expands each changed entity's whole owning value
+  ;; (seon.db/write-owned-values-error). A turn owned by its agent's runtime
+  ;; made every open and close re-validate every turn the agent ever ran
+  ;; (41.8 ms and 439 entities at 433 turns, task 4bb788513862); a turn names
+  ;; its agent instead, so no component attribute refers to it.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (agent/creation-tx {:seon.agent/id "owner"
+                                                         :seon.ns/name 'my.agents.owner
+                                                         :seon.cluster/name "data-lane"}))
+     (let [runtime (get-in (db/pull @connection [{:seon.agent/runtime [:db/id]}] [:seon.agent/id "owner"])
+                           [:seon.agent/runtime :db/id])
+           reports (vec (for [n (range 3)
+                              :let [run-id (str "owned-turn-" n)]]
+                          [(db/transact! connection (turn/open-tx {:seon.turn/id run-id
+                                                                   :seon.turn/agent [:seon.agent/id "owner"]
+                                                                   :seon.turn/opened-tx "datomic.tx"}))
+                           (db/transact! connection (turn/close-tx {:seon.turn/id run-id}))]))
+           database @connection
+           turns (db/q '[:find [?t ...] :where [?a :seon.agent/id "owner"] [?t :seon.turn/agent ?a]] database)
+           components (keep (fn [[attribute properties]] (when (:db/isComponent properties) attribute))
+                            (:schema database))]
+       (is (every? :db-after (apply concat reports)))
+       (is (= 3 (count turns)))
+       (is (= [] (vec (for [turn turns a components
+                            datom (d/datoms database :avet a turn)]
+                        [a (:e datom)])))
+           "no component attribute owns a turn")
+       (is (not-any? #(= runtime (:e %)) (mapcat (comp :tx-data first) reports))
+           "opening a turn writes nothing on the agent's runtime")))))

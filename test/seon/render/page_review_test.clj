@@ -44,17 +44,10 @@
                                         [:seon.turn/id "old"])
                                [:seon.turn/opened-tx :db/id])}]))
          "An older opening can commit after the current turn.")
-     (is (:db-after (db/transact! connection
-                     [{:seon.agent/id "page"
-                       :seon.agent/runtime
-                       {:seon.runtime/agent [:seon.agent/id "page"]
-                        :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])}}])))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            evaluations (evaluation/of-agent database "page")
-           turns (get-in (db/pull database '[{:seon.agent/runtime [{:seon.runtime/turns [*]}]}]
-                                 [:seon.agent/id "page"])
-                         [:seon.agent/runtime :seon.runtime/turns])
+           turns (:seon.turn/_agent (db/pull database '[{:seon.turn/_agent [*]}] [:seon.agent/id "page"]))
            ;; the render boundary hands a unit its admission caps
            unit (assoc (db/pull database '[*] [:seon.turn/id "current"])
                        :seon.db/db database :seon.sci.eval/ctx ctx
@@ -76,7 +69,6 @@
                       [{:seon.agent/id "page"
                         :seon.agent/runtime
                         {:seon.runtime/agent [:seon.agent/id "page"]
-                         :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])
                          :seon.runtime/trigger {:seon.message/id "runtime-trigger"
                                                 :seon.message/from [:seon.agent/id "page"]
                                                 :seon.message/to [:seon.agent/id "page"]
@@ -107,8 +99,7 @@
            "a header states its turn, never its evaluations"))
      (is (:db-after (db/transact! connection
                      [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}
-                      {:seon.runtime/agent [:seon.agent/id "page"]
-                       :seon.runtime/turns [[:seon.turn/id "empty"]]}])))
+                      ])))
      (is (= ["old-eval" "current-a" "current-b"]
             (mapv :seon.cluster.eval/id (evaluation/of-agent @connection "page"))))
      (let [full (evaluation/of-agent @connection "page")

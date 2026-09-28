@@ -142,11 +142,7 @@
           (db/transact! connection
             (into [{:seon.turn/id "retained-adoption"
                     :seon.turn/agent [:seon.agent/id "root"]
-                    :seon.turn/opened-tx "datomic.tx"}
-                   {:seon.agent/id "root"
-                    :seon.agent/runtime
-                    {:seon.runtime/agent [:seon.agent/id "root"]
-                     :seon.runtime/turns [[:seon.turn/id "retained-adoption"]]}}]
+                    :seon.turn/opened-tx "datomic.tx"}]
                   (for [ordinal (range 2)]
                     {:seon.cluster.eval/id (str "retained-adoption-" ordinal)
                      :seon.cluster.eval/run [:seon.turn/id "retained-adoption"]

@@ -3272,8 +3272,7 @@
         database (db/db connection)
         owner (db/q '[:find ?agent-id . :in $ ?turn-id
                        :where [?agent :seon.agent/id ?agent-id]
-                              [?agent :seon.agent/runtime ?runtime]
-                              [?runtime :seon.runtime/turns ?turn]
+                              [?turn :seon.turn/agent ?agent]
                               [?turn :seon.turn/id ?turn-id]] database turn-id)]
     (if (not= agent-id owner)
       (not-found nil)

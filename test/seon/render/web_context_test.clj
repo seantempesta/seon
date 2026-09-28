@@ -59,10 +59,7 @@
            (is (identical? (render/shared-cache ctx) (render/shared-cache ctx)))
            (is (seq (:seon.render.web/calls @(render/shared-cache ctx))))
            (support/transacted! connection
-                    [{:seon.agent/id "root"
-                      :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
-                                           :seon.runtime/turns [[:seon.turn/id "context-probe"]]}}
-                     {:seon.cluster.eval/id "retained-history"
+                    [{:seon.cluster.eval/id "retained-history"
                       :seon.cluster.eval/run [:seon.turn/id "context-probe"]
                       :seon.cluster.eval/ordinal 0
                       :seon.cluster.eval/at (java.util.Date.)

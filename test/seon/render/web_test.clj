@@ -2366,8 +2366,7 @@ handle))}}
                              [:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"])))))
               (let [basis (db/basis-t @connection)
                     turns (db/q '[:find ?id ?opened :where
-                                   [?a :seon.agent/id "root"] [?a :seon.agent/runtime ?runtime]
-                                   [?runtime :seon.runtime/turns ?turn]
+                                   [?a :seon.agent/id "root"] [?turn :seon.turn/agent ?a]
                                    [?turn :seon.turn/id ?id ?opened]] @connection)
                     selected (ffirst (sort-by second > turns))
                     page-path (str "/ns/my.agents.root/debug?turn=" selected)
@@ -2392,8 +2391,7 @@ handle))}}
             (fn []
               (let [edges (db/q '[:find ?turn ?agent :where
                                   [?agent :seon.agent/id "root"]
-                                  [?agent :seon.agent/runtime ?runtime]
-                                  [?runtime :seon.runtime/turns ?turn]
+                                  [?turn :seon.turn/agent ?agent]
                                   [?turn :seon.turn/agent ?agent]] @connection)]
                 (is (:db-after
                      (db/transact! connection

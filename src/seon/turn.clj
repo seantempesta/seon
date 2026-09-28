@@ -422,14 +422,13 @@
         []
         (refuse! `open-call ::run-exists request))
 
-      :else [(cond-> {:db/id run-tempid ::id id ::agent agent-eid :seon.turn.work/situation (or situation :call) ::opened-tx "datomic.tx"}
-               trigger (assoc ::trigger trigger)
-               starting-ns (assoc ::starting-ns starting-ns))
-             {:seon.agent/id (:seon.agent/id (db/pull db [:seon.agent/id] agent-eid))
-              :seon.agent/runtime
-              (cond-> {:seon.runtime/agent agent-eid
-                       :seon.runtime/turns [run-tempid]}
-                trigger (assoc :seon.runtime/trigger trigger))}])))
+      ;; The turn names its agent (::agent); the runtime keeps only the
+      ;; latest trigger, so this write validates the turn, never the history.
+      :else (cond-> [(cond-> {:db/id run-tempid ::id id ::agent agent-eid :seon.turn.work/situation (or situation :call) ::opened-tx "datomic.tx"}
+                       trigger (assoc ::trigger trigger)
+                       starting-ns (assoc ::starting-ns starting-ns))]
+              trigger (conj {:seon.agent/id (:seon.agent/id (db/pull db [:seon.agent/id] agent-eid))
+                             :seon.agent/runtime {:seon.runtime/agent agent-eid :seon.runtime/trigger trigger}})))))
 
 (defn close-tx
   "Transaction data closing an open turn."
@@ -536,8 +535,7 @@
              [::id branch-id agent-id
               (or (db/q '[:find (count ?turn) . :in $ ?agent-id
                           :where [?agent :seon.agent/id ?agent-id]
-                          [?agent :seon.agent/runtime ?runtime]
-                          [?runtime :seon.runtime/turns ?turn]]
+                          [?turn :seon.turn/agent ?agent]]
                         database agent-id) 0)]))
 
 (defn receipt-identity
@@ -1362,10 +1360,7 @@
         (refuse! `record-evaluated-call ::recorded-content-conflict request))
       (into [(assoc run :db/id run-eid
                     ::opened-tx "datomic.tx" ::closed-tx "datomic.tx"
-                    ::starting-ns (str "namespace:" starting-namespace))
-             {:seon.agent/id (:seon.agent/id (db/pull database [:seon.agent/id] agent-eid))
-              :seon.agent/runtime {:seon.runtime/agent agent-eid
-                                   :seon.runtime/turns [run-eid]}}]
+                    ::starting-ns (str "namespace:" starting-namespace))]
             cat
             [namespaces
              (mapcat
@@ -1843,8 +1838,7 @@
                                  {:seon.cluster.eval/read-evidence [:db/id]}])
                           :in $ ?id
                           :where [?agent :seon.agent/id ?id]
-                          [?agent :seon.agent/runtime ?runtime]
-                          [?runtime :seon.runtime/turns ?turn]
+                          [?turn :seon.turn/agent ?agent]
                           [?turn :seon.turn/id _ ?t]
                           [?evaluation :seon.cluster.eval/run ?turn]
                           [?evaluation :seon.cluster.eval/ordinal ?ordinal]

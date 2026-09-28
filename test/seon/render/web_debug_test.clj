@@ -379,8 +379,7 @@
            written
            (db/transact!
             connection
-            [{:seon.runtime/agent [:seon.agent/id "history-probe"]
-              :seon.runtime/turns ["history-turn"]}
+            [{:seon.runtime/agent [:seon.agent/id "history-probe"]}
              {:my.plan/agent [:seon.agent/id "history-probe"]
               :my.plan/objective "An addressable component"}
              {:db/id "history-turn" :seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
@@ -785,9 +784,6 @@
                         :seon.turn/opened-tx "datomic.tx"
                         :seon.turn/closed-tx "datomic.tx"
                         :seon.turn/reply "" :seon.turn/reply-size 0}
-                       {:seon.agent/id "root"
-                        :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
-                                             :seon.runtime/turns [[:seon.turn/id "saved-directory-turn"]]}}
                        {:seon.cluster.eval/id "saved-directory"
                         :seon.cluster.eval/run [:seon.turn/id "saved-directory-turn"]
                         :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
@@ -834,9 +830,6 @@
                                        :seon.ai.usage/cached-tokens 80
                                        :seon.ai.attempt/usage-edn
                                        "{\"prompt_tokens\" 100, \"completion_tokens\" 12, \"prompt_cache_hit_tokens\" 80}"}]}
-                 {:seon.agent/id "root"
-                  :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "root"]
-                                       :seon.runtime/turns [[:seon.turn/id turn-id]]}}
                  {:seon.context.capture/id turn-id
                   :seon.context.capture/run [:seon.turn/id turn-id]
                   :seon.context.capture/basis-t (db/basis-t (db/db connection))
@@ -899,9 +892,8 @@
 (defn- outline-fixture
   "One agent whose history is an opening system turn and a provider turn.
 
-  THE TURNS ARE OPENED BY THEIR OWN WRITER. A hand-written turn map carries no
-  `:seon.runtime/turns` edge, so the agent's history query finds nothing and
-  the panel would read that absence as an agent with no history at all."
+  THE TURNS ARE OPENED BY THEIR OWN WRITER, which checks what a hand-written
+  turn map would skip."
   [connection]
   (config/apply! {:seon.db/connection connection
                   :seon.boot/cluster-name "debug-outline"
