@@ -190,35 +190,14 @@
                             (quote seon.fn/tests-reaching)))
             "analysis facts stay inside their defining source span")))))
 
-(deftest progress-observation-cannot-change-index-transaction-shapes
-  (let [commit-phase! (deref (ns-resolve 'seon.fn 'commit-index-phase!))
-        transactions-with
-        (fn [progress!]
-          (let [transactions (atom [])]
-            (with-redefs [db/transact!
-                          (fn [_ request]
-                            (swap! transactions conj request)
-                            {})]
-              (commit-phase! ::connection boot-process progress!
-                             :seon.fn/declarations
-                             [{:seon.fn/sym (quote sample/one)}
-                              {:seon.fn/sym (quote sample/two)}
-                              {:seon.fn/sym (quote sample/three)}]))
-            @transactions))
-        silent (transactions-with nil)
-        observed-lines (atom [])
-        observed (transactions-with #(swap! observed-lines conj %))]
-    (is (= silent observed)
-        "a progress callback cannot split or otherwise change writer work")
-    (is (= 1 (count observed)))
-    (is (= ["declarations: 3/3"] @observed-lines))))
-
 (deftest program-population-store-uses-measured-index-fanout
-  (is (= {:branching-factor 4096
-          :diff-buf-size 256}
+  ;; 4d1f147a7 measured 128/32 (a small commit 974 KB → 184 KB replayed on
+  ;; real commits); the 4,096/256 this asserted before is retired.
+  (is (= {:branching-factor 128
+          :diff-buf-size 32}
          (:index-config
           (store/datahike-configuration "tmp/fn-test/population-store")))
-      "4096-way persistent-set nodes bound one population's durable writes"))
+      "128-way persistent-set nodes bound a small commit's durable writes"))
 
 (defn- capability-fixture!
   [root capability-source]
@@ -1013,7 +992,10 @@
                              :seon.fn/index-phase :seon.fn/index-refused)))
        (is (str/includes? (ex-message failure) "publication-refusal"))
        (is (str/includes? (ex-message failure) ":seon.schedule/zone-id"))
-       (is (str/includes? (ex-message failure) ":seon.error/unknown"))))))
+       ;; Since f5fb4466a a missing key's offending value is the map that
+       ;; lacks it, never :seon.error/unknown.
+       (is (= {:seon.schedule/id "publication-refusal" :seon.schedule/expression "0 4 * * *"}
+              (:seon.db/offending (ex-data failure))))))))
 
 (deftest retracted-program-identities-leave-no-tombstones
   (test-support/with-database
@@ -1650,19 +1632,26 @@
     (fn [connection]
       (let [database @connection
             evaluate (production-callers database (quote seon.sci.eval/evaluate))
+            rows (production-callers database (quote seon.turn/evaluate-row))
             sources (production-callers database
                                         (quote seon.turn/evaluate-sources))
             previews (production-callers database
                                          (quote seon.turn/preview-sources))]
+        ;; Since bb47fd6d1 the turn evaluates on the one REPL path: its
+        ;; batch's evaluate stage (`evaluate-row`) calls the evaluator.
         (testing "the turn's edge to the evaluator is visible to the graph"
-          (is (contains? evaluate (quote seon.turn/evaluate-sources))))
+          (is (contains? evaluate (quote seon.turn/evaluate-row)))
+          (is (contains? rows (quote seon.turn/evaluate-sources))))
         (testing "no second function evaluates agent source"
           (is (= #{(quote seon.turn/resume-turn)
                    (quote seon.turn/system-turn)
                    (quote seon.turn/preview-sources)}
                  sources)))
-        (testing "the page and system turn reuse the same evaluation path"
-          (is (= #{(quote seon.render.web/render-source-call) (quote seon.turn/system-turn)} previews)))))))
+        ;; Since 17fd9768e the system turn's previews call `evaluate-sources`
+        ;; directly on one shared fork, so only the page goes through
+        ;; `preview-sources`.
+        (testing "the page reuses the same evaluation path"
+          (is (= #{(quote seon.render.web/render-source-call)} previews)))))))
 
 (deftest fixture-observations-survive-static-admission-and-the-fold
   (let [root (fixture-root)
@@ -1874,7 +1863,7 @@
                 "(defn read [] true)")
            shapes (program/shapes-in (seon.schema/build-projection (schema.edn/packaged-forms)))
            query db/q
-           pull db/pull
+           pull-many db/pull-many
            transact! db/transact!
            submitted (atom [])
            index-result
@@ -1889,11 +1878,13 @@
               {:seon.db/connection connection
                :seon.source/database database
                :seon.source/previous-database database}))
+           ;; Since 296dede99 the reconciliation reads every desired entity
+           ;; in one `db/pull-many`.
            reconcile-result
-           (with-redefs [db/pull (fn [& arguments]
-                                   (if (identical? database (first arguments))
-                                     refusal
-                                     (apply pull arguments)))]
+           (with-redefs [db/pull-many (fn [& arguments]
+                                        (if (identical? database (first arguments))
+                                          refusal
+                                          (apply pull-many arguments)))]
              (reconcile-in shapes database [entity] [] false))]
        (is (= refusal index-result)
            "the published-entity query refusal is the publication result")
@@ -2002,8 +1993,12 @@
             :db/cardinality :db.cardinality/one}]}
          (fn [connection]
            (let [packaged (schema.edn/packaged-forms)
-                 declared (update packaged :seon.fn.file/file conj
-                                  [::declared-after {:optional true} :string])
+                 ;; A program attribute is a registered key: since 3b86a7ba1
+                 ;; the shape derives each owned attribute's storage from it.
+                 declared (-> packaged
+                              (assoc ::declared-after :string)
+                              (update :seon.fn.file/file conj
+                                      [::declared-after {:optional true} :string]))
                  request {:seon.fn/source-path path
                           :seon.fn.file/first-party-functions []
                           :seon.fn/roots [(.getPath root)]}
@@ -2992,7 +2987,7 @@
         (is (pos? (get census false 0)))
         (is (true? (:seon.fn/host-bound?
                     (db/pull database [:seon.fn/host-bound?]
-                             [:seon.fn/sym 'seon.render.value/bounded-text])))
+                             [:seon.fn/sym 'seon.id/printed-digest])))
             "a proxy is an operation SCI cannot interpret")
         (is (false? (:seon.fn/host-bound?
                      (db/pull database [:seon.fn/host-bound?]

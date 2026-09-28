@@ -2179,8 +2179,12 @@
         [(test-support/namespace-entity (db/db connection) 'sample.arity)
          ;; The contract facts are part of the final entity its digest covers.
          (test-support/revised-entity (db/db connection) entity {})
+         ;; An edge is both facts, as every analyzed row holds them: since
+         ;; 88c65fc19 the gate finds a changed callee's callers by
+         ;; :seon.fn/calls.
          (test-support/program-fn-entity (db/db connection) caller "(defn caller [x] (target x))"
-                                      {:seon.fn/call-arities #{[callee 1]}})])
+                                      {:seon.fn/calls #{'clojure.core/defn callee}
+                                       :seon.fn/call-arities #{[callee 1]}})])
        (let [arity (db/q '[:find ?arity . :in $ ?callee
                           :where [?f :seon.fn/sym ?callee]
                           [?f :seon.fn/arities ?arity]] (db/db connection) callee)

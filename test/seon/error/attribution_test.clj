@@ -176,8 +176,11 @@
                (is (= [[`misuse]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row cluster (:seon.error/signature receipt)))))
                    "the cluster copy carries the producer's task, where a claim is written")
                (testing "a definition only the agent's branch holds: the copy keeps the digest that ran"
+                 ;; the fixture declares its namespace: an ambient my.probe row
+                 ;; in the captured world is not the fixture's
                  (test-support/transacted!
-                  attempt [(test-support/program-fn-entity (db/db attempt) 'my.probe/make-row "(defn make-row [] 1)"
+                  attempt [(test-support/namespace-entity (db/db attempt) 'my.probe)
+                           (test-support/program-fn-entity (db/db attempt) 'my.probe/make-row "(defn make-row [] 1)"
                                                            {:seon.schema.admission/source :agent})])
                  (let [ran (:seon.program/definition-digest
                             (db/pull (db/db attempt) [:seon.program/definition-digest] [:seon.fn/sym 'my.probe/make-row]))

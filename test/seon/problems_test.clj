@@ -351,7 +351,7 @@
         (is (:seon.error/at (problems/resolve! connection (apply str (repeat 64 "0"))))
             "resolving an unrecorded signature is refused, not a silent no-op")))))
 
-(deftest a-fault-resolves-when-its-function-changes-and-reopens-on-recurrence
+(deftest a-resolved-fault-reopens-on-recurrence-and-is-delivered-once-per-opening
   (with-db
     (fn [connection]
       (let [function (symbol "my.resolution.fixture" "target")
@@ -384,25 +384,24 @@
         (fault!)
         (is (open?) "a repeat under the same code keeps it open")
         (is (= 1 (messages)) "and is not delivered again")
-        (define! "(defn target [] 2)")
-        (let [resolved (error/resolution @connection (signature))]
-          (is (= :seon.program/definition-digest (:seon.error/resolved-by resolved)))
-          (is (= function (:seon.instrument/fn resolved)))
-          (is (not= (:seon.error/digest-then resolved) (:seon.error/digest-now resolved))))
-        (is (not (open?)) "a changed definition resolves it without resolve!")
+        ;; 7781d115c: a changed definition alone no longer resolves a fault
+        ;; (its producer's task needs a red-then-green proof; covered by
+        ;; seon.error.attribution-test). A resolution here is `resolve!`.
+        (is (= (signature) (:seon.error/signature (problems/resolve! connection (signature)))))
+        (is (not (open?)) "a resolution after the latest occurrence closes it")
         (let [value (found connection)
               entry (some #(when (= (signature) (:seon.error/signature %)) %) (:seon.problems/error-signatures value))]
-          (is (= :seon.program/definition-digest (get-in entry [:seon.error/resolution :seon.error/resolved-by]))
+          (is (= :seon.error/resolved-tx (get-in entry [:seon.error/resolution :seon.error/resolved-by]))
               "the problems value keeps the resolved signature and says why")
           (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
-          (is (some #(str/starts-with? (get % "resolved" "") "by change to my.resolution.fixture/target")
+          (is (some #(str/starts-with? (get % "resolved" "") "by resolve!")
                     (page-rows (problems/html-report value)))
               "the problems page shows the resolution, so a false one can be checked"))
         (fault!)
-        (is (open?) "a recurrence under the changed code reopens it")
+        (is (open?) "a recurrence after the resolution reopens it")
         (is (= 2 (messages)) "the reopening is delivered once")
         (fault!)
-        (is (= 2 (messages)) "a repeat under the changed code is not delivered again")))))
+        (is (= 2 (messages)) "a repeat in the same opening is not delivered again")))))
 
 (deftest every-committed-error-fact-shape-is-projectable
   (with-db
