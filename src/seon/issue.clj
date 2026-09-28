@@ -36,6 +36,27 @@
 (defonce ^:private cluster-agent-creation-tx
   (delay (requiring-resolve 'seon.cluster.agent/creation-tx)))
 
+(defn- request-error
+  "One flat issue-request refusal: the operation, its message, the offending value, the expected shape and the one member naming the cause."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :seon.schema/value :string :qualified-keyword :seon.schema/value]
+                  :seon.issue/refusal]}
+  [operation message offending expected cause value]
+  {:seon.error/at (java.util.Date.) :seon.error/layer :seon.issue/request
+   :seon.error/operation operation :seon.error/message message
+   :seon.error/offending offending :seon.error/expected expected cause value})
+
+(defn- refuse!
+  "Throw an already complete writer observation."
+  {:malli/schema [:=> [:cat :seon.issue/refusal] :nil]}
+  [observation]
+  (throw (ex-info (:seon.error/message observation) observation)))
+
+(defn- declared-error?
+  "Whether a read returned one of the owners' declared error values."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (boolean (and (map? value) (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value))))
+
 (def ^:private citable-character
   "ASCII characters that join letters and digits into one citable token."
   (let [flags (boolean-array 128)]
@@ -78,15 +99,9 @@
                                :seon.operator.subprocess/directory (str root)
                                :seon.operator.subprocess/deadline-ms (* 1000 git-bound-seconds)})]
     (if-not (zero? exit)
-      (throw (ex-info "Git did not report issue note history."
-                      {:seon.error/at (java.util.Date.)
-                       :seon.error/layer :seon.issue/request
-                       :seon.error/operation 'seon.issue/note-opened
-                       :seon.error/message "Issue operation requires issue history; git exited nonzero."
-                       :seon.error/offending exit
-                       :seon.issue/history-root (str root)
-                       :seon.operator.subprocess/exit exit
-                       :seon.error/expected "git log exiting 0 in the issue root"}))
+      (refuse! (assoc (request-error 'seon.issue/note-opened "Issue operation requires issue history; git exited nonzero." exit
+                                     "git log exiting 0 in the issue root" :seon.issue/history-root (str root))
+                      :seon.operator.subprocess/exit exit))
       (second
        (reduce (fn [[seconds dates] line]
                  (cond
@@ -143,28 +158,17 @@
   [root]
   (let [directory (io/file root "docs/seon/issues")]
     (when-not (.isDirectory directory)
-      (throw (ex-info "Issue directory is absent." {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/notes
-        :seon.error/message "Issue operation requires an existing issue directory."
-        :seon.error/offending (str directory)
-        :seon.issue/missing-notes-path (str directory)
-        :seon.error/expected "an existing issue directory"})))
+      (refuse! (request-error 'seon.issue/notes "Issue operation requires an existing issue directory." (str directory) "an existing issue directory" :seon.issue/missing-notes-path (str directory))))
     (let [dates (note-opened root)]
       (->> (concat (.listFiles directory) (.listFiles (io/file directory "archive")))
-           (filter #(and (.isFile ^java.io.File %)
-                         (note-path? (str "docs/seon/issues/"
-                                          (when (= "archive" (.getName (.getParentFile ^java.io.File %)))
-                                            "archive/")
-                                          (.getName ^java.io.File %)))))
-           (sort-by #(.getPath ^java.io.File %))
-           (mapv (fn [file]
-                   (let [file-name (.getName ^java.io.File file)
-                         seconds (get dates file-name)]
-                     (cond-> {:seon.issue/path (str "docs/seon/issues/"
-                                                    (when (= "archive" (.getName (.getParentFile ^java.io.File file))) "archive/")
-                                                    file-name)
-                              :seon.issue/text (slurp file)}
+           (filter #(.isFile ^java.io.File %))
+           (map (fn [^java.io.File file]
+                  [file (str "docs/seon/issues/" (when (= "archive" (.getName (.getParentFile file))) "archive/") (.getName file))]))
+           (filter (comp note-path? second))
+           (sort-by #(.getPath ^java.io.File (first %)))
+           (mapv (fn [[file path]]
+                   (let [seconds (get dates (.getName ^java.io.File file))]
+                     (cond-> {:seon.issue/path path :seon.issue/text (slurp file)}
                        seconds (assoc :seon.issue/opened (java.util.Date. (* 1000 (long seconds))))))))))))
 
 (defn- diagnostic [path reason value]
@@ -208,14 +212,8 @@
                           :when (contains? installed cited)]
                       [cited attribute]))]
     (when (empty? cites)
-      (throw (ex-info "No issue attribute declares :seon.issue/cites in this database's carried projection."
-                      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/citation-attributes
-        :seon.error/message "Issue operation requires declared citation relations for installed identities."
-        :seon.error/offending installed
-        :seon.issue/uncited-identity-count (count installed)
-        :seon.error/expected "declared citation relations for installed identities"})))
+      (refuse! (request-error 'seon.issue/citation-attributes "Issue operation requires declared citation relations for installed identities." installed
+                              "declared citation relations for installed identities" :seon.issue/uncited-identity-count (count installed))))
     cites))
 
 (defn- citation-spellings
@@ -519,9 +517,7 @@
         ;; all is taken here, on a connection its publication holds privately.
         result (when (seq delta)
                  (db/transact! connection [[:db.fn/call #'index-tx issue-notes paths]]))]
-    (if (and (map? result) (:seon.error/at result)
-           (:seon.error/layer result) (:seon.error/operation result)) ; debt: database and detector reads still declare generic seon.db/error-result.
-
+    (if (declared-error? result)
       result
       (merge (select-keys (meta delta) [:seon.issue/refusals :seon.issue/ambiguous :seon.issue/unresolved])
              (cond-> {:seon.issue/count (count (db/q '[:find [?e ...] :where [?e :seon.issue/path]]
@@ -580,11 +576,11 @@
   {:malli/schema [:=> [:cat :seon.schema/projection :string :string] [:vector :seon.task/task]]}
   [projection path text]
   (let [ns (file-namespace path)
-        refuse! #(functions/task-refused! 'seon.issue/file-declarations %1 ns %2 %3)
+        refuse-task! #(functions/task-refused! 'seon.issue/file-declarations %1 ns %2 %3)
         forms (try (edamame/parse-string-all text)
-                   (catch clojure.lang.ExceptionInfo failure (refuse! :unreadable-file text {:seon.error/throwable failure})))
-        _ (when-not (task-path? path) (refuse! :misplaced-file path {}))
-        _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse! :not-one-vector forms {}))
+                   (catch clojure.lang.ExceptionInfo failure (refuse-task! :unreadable-file text {:seon.error/throwable failure})))
+        _ (when-not (task-path? path) (refuse-task! :misplaced-file path {}))
+        _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse-task! :not-one-vector forms {}))
         ;; Only an empty set at an optional set member is absence (#{} clears);
         ;; every other member, empty or not, meets the closed entry schema.
         registry (:seon.schema.projection/registry projection)
@@ -592,10 +588,10 @@
                                 (m/children (m/deref (mr/schema registry :seon.task/entry))))
         entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
     (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
-      (refuse! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
+      (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
     (mapv (fn [{:seon.task/keys [id name kind] :as entry}]
             (let [handle (task-handle ns name kind)]
-              (when (and id (not= id handle)) (refuse! :handle-mismatch entry {:seon.error/expected handle}))
+              (when (and id (not= id handle)) (refuse-task! :handle-mismatch entry {:seon.error/expected handle}))
               (assoc entry :seon.task/id handle :seon.task/ns ns)))
           entries)))
 
@@ -786,11 +782,6 @@
   every later run: the generator writes them only when the issue holds none."
   #{:seon.issue/title :seon.issue/problem})
 
-(defn- refuse!
-  "Throw an already complete writer observation."
-  {:malli/schema [:=> [:cat :seon.issue/refusal] :nil]}
-  [observation]
-  (throw (ex-info (:seon.error/message observation) observation)))
 
 (defn subject-id
   "The detected issue identity shared by generation and a prospective plan.
@@ -812,30 +803,12 @@
   (let [{:keys [detector program severity identities cites namespaces]} context
         identifying (filterv (fn [[attribute _]] (contains? identities attribute)) subject)
         _ (when-not (= 1 (count identifying))
-            (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/subject-entity
-        :seon.error/message "Issue operation requires exactly one installed subject identity."
-        :seon.error/offending subject
-        :seon.issue/subject-identity-count (count identifying)
-        :seon.error/expected "exactly one installed subject identity"}))
+            (refuse! (request-error 'seon.issue/subject-entity "Issue operation requires exactly one installed subject identity." subject "exactly one installed subject identity" :seon.issue/subject-identity-count (count identifying))))
         [attribute value] (first identifying)
         issue-attribute (or (get cites attribute)
-                            (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/subject-entity
-        :seon.error/message "Issue operation requires a declared citation relation for the identity."
-        :seon.error/offending subject
-        :seon.issue/uncited-subject-attribute attribute
-        :seon.error/expected "a declared citation relation for the identity"}))
+                            (refuse! (request-error 'seon.issue/subject-entity "Issue operation requires a declared citation relation for the identity." subject "a declared citation relation for the identity" :seon.issue/uncited-subject-attribute attribute)))
         entity (or (:db/id (db/pull database [:db/id] [attribute value]))
-                   (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/subject-entity
-        :seon.error/message "Issue operation requires an existing subject entity."
-        :seon.error/offending subject
-        :seon.issue/missing-subject-attribute attribute
-        :seon.error/expected "an existing subject entity"}))
+                   (refuse! (request-error 'seon.issue/subject-entity "Issue operation requires an existing subject entity." subject "an existing subject entity" :seon.issue/missing-subject-attribute attribute)))
         cited (into #{} (keep namespaces) (:seon.issue/namespaces subject))]
     (cond-> {:seon.issue/id (subject-id (symbol detector) [attribute value])
              :seon.issue/detector program
@@ -851,33 +824,13 @@
   [database request]
   (let [detector (:seon.issue/detector request)
         program (or (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
-                    (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/detector-entities
-        :seon.error/message "Issue operation requires an installed detector function."
-        :seon.error/offending request
-        :seon.issue/missing-detector detector
-        :seon.error/expected "an installed detector function"}))
+                    (refuse! (request-error 'seon.issue/detector-entities "Issue operation requires an installed detector function." request "an installed detector function" :seon.issue/missing-detector detector)))
         detect (or (requiring-resolve (symbol detector))
-                   (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/detector-entities
-        :seon.error/message "Issue operation requires a resolving detector Var."
-        :seon.error/offending request
-        :seon.issue/unresolved-detector detector
-        :seon.error/expected "a resolving detector Var"}))
+                   (refuse! (request-error 'seon.issue/detector-entities "Issue operation requires a resolving detector Var." request "a resolving detector Var" :seon.issue/unresolved-detector detector)))
         scope (select-keys request [:seon.fn.file/relative-root :seon.fn/sym])
         subjects (if (seq scope) (detect database scope) (detect database))
-        _ (when (and (map? subjects) (:seon.error/at subjects)
-           (:seon.error/layer subjects) (:seon.error/operation subjects)) ; debt: database and detector reads still declare generic seon.db/error-result.
-
-            (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/detector-entities
-        :seon.error/message "Issue operation requires a successful detector read."
-        :seon.error/offending subjects
-        :seon.issue/refused-detector detector
-        :seon.error/expected "a successful detector read"}))
+        _ (when (declared-error? subjects)
+            (refuse! (request-error 'seon.issue/detector-entities "Issue operation requires a successful detector read." subjects "a successful detector read" :seon.issue/refused-detector detector)))
         context {:detector detector :program program
                  :severity (:seon.issue/severity request)
                  :identities (set (db/identity-attributes database))
@@ -943,11 +896,12 @@
   (let [program (:db/id (db/pull database [:db/id] [:seon.fn/sym (:seon.issue/detector request)]))
         entities (mapv #(db/pull database [:seon.issue/id :seon.issue/status] %)
                    (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
-                         database program))]
+                         database program))
+        by-status (frequencies (map :seon.issue/status entities))]
     {:seon.issue/detector (:seon.issue/detector request)
      :seon.issue/count (count entities)
-     :seon.issue/open (count (filterv #(= :open (:seon.issue/status %)) entities))
-     :seon.issue/resolved (count (filterv #(= :resolved (:seon.issue/status %)) entities))}))
+     :seon.issue/open (get by-status :open 0)
+     :seon.issue/resolved (get by-status :resolved 0)}))
 
 (defn generate!
   "Run one detector through the writer and report its issues.
@@ -968,13 +922,11 @@
                        (ex-data error)
                        (throw error))))]
     (cond
-      (and (map? delta) (:seon.error/at delta)
-           (:seon.error/layer delta) (:seon.error/operation delta)) ; debt: database and detector reads still declare generic seon.db/error-result.
+      (declared-error? delta)
  delta
       (empty? delta) (assoc (generated-report database request) :seon.issue/forms 0)
       :else (let [report (db/transact! connection delta)]
-              (if (and (map? report) (:seon.error/at report)
-           (:seon.error/layer report) (:seon.error/operation report)) ; debt: database and detector reads still declare generic seon.db/error-result.
+              (if (declared-error? report)
 
                 report
                 (assoc (generated-report (:db-after report) request)
@@ -1031,17 +983,10 @@
                                   {:seon.issue/errors [:db/id :seon.error/signature {:seon.error/occurrences [:seon.error.occurrence/count]}]}]
                      [:seon.issue/id issue-id])]
     (cond
-      (and (map? entity) (:seon.error/at entity)
-           (:seon.error/layer entity) (:seon.error/operation entity)) ; debt: database and detector reads still declare generic seon.db/error-result.
+      (declared-error? entity)
  entity
       (not (:seon.issue/title entity))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/status
-        :seon.error/message "Issue operation requires an existing issue."
-        :seon.error/offending issue-id
-        :seon.issue/missing-issue-id issue-id
-        :seon.error/expected "an existing issue"}
+      (request-error 'seon.issue/status "Issue operation requires an existing issue." issue-id "an existing issue" :seon.issue/missing-issue-id issue-id)
       :else
       (let [test-entities (mapv
                        (fn [test-value]
@@ -1284,9 +1229,7 @@
       (seq (:seon.issue/tests entity))
       (let [result (db/q tests-done-query database (:db/id entity))]
         ;; Debt: seon.db/q still declares the generic seon.db/error-result.
-        (when (and (map? result) (:seon.error/at result)
-                   (:seon.error/layer result) (:seon.error/operation result))
-          (throw (ex-info (:seon.error/message result) result)))
+        (when (declared-error? result)(throw (ex-info (:seon.error/message result) result)))
         (boolean result))
 
       (get-in entity [:seon.issue/detector :seon.fn/sym])
@@ -1308,13 +1251,7 @@
     (when-not (:seon.test/sym
                (db/pull database [:seon.test/sym]
                         (if (map? reference) (:db/id reference) reference)))
-      (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/require-test-refs!
-        :seon.error/message "Issue operation requires test entities in the success references."
-        :seon.error/offending reference
-        :seon.issue/non-test-reference-member (if (vector? reference) (first reference) :db/id)
-        :seon.error/expected "test entities in the success references"}))))
+      (refuse! (request-error 'seon.issue/require-test-refs! "Issue operation requires test entities in the success references." reference "test entities in the success references" :seon.issue/non-test-reference-member (if (vector? reference) (first reference) :db/id))))))
 
 (defn- create-tx
   "Create the assigned worker and its opening in one writer decision.
@@ -1337,51 +1274,15 @@
                            (get-in (first (sort-by :seon.fn/sym (:seon.issue/functions entity)))
                                    [:seon.fn/ns :seon.ns/name]))
         cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
-    (when-not (:seon.issue/title entity) (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/create-tx
-        :seon.error/message "Issue operation requires an existing issue."
-        :seon.error/offending issue-id
-        :seon.issue/missing-issue-id issue-id
-        :seon.error/expected "an existing issue"}))
-    (when (:seon.issue/agent entity) (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/create-tx
-        :seon.error/message "Issue operation requires an unassigned issue or a larger budget for an open issue."
-        :seon.error/offending request
-        :seon.issue/assigned-issue-id issue-id
-        :seon.error/expected "an unassigned issue or a larger budget for an open issue"}))
+    (when-not (:seon.issue/title entity) (refuse! (request-error 'seon.issue/create-tx "Issue operation requires an existing issue." issue-id "an existing issue" :seon.issue/missing-issue-id issue-id)))
+    (when (:seon.issue/agent entity) (refuse! (request-error 'seon.issue/create-tx "Issue operation requires an unassigned issue or a larger budget for an open issue." request "an unassigned issue or a larger budget for an open issue" :seon.issue/assigned-issue-id issue-id)))
     (when-not (or (seq (:seon.issue/tests entity)) (:seon.issue/detector entity))
-      (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/create-tx
-        :seon.error/message "Issue operation requires success tests or a detector before starting an issue."
-        :seon.error/offending request
-        :seon.issue/unverifiable-issue-id issue-id
-        :seon.error/expected "success tests or a detector before starting an issue"}))
+      (refuse! (request-error 'seon.issue/create-tx "Issue operation requires success tests or a detector before starting an issue." request "success tests or a detector before starting an issue" :seon.issue/unverifiable-issue-id issue-id)))
     (require-test-refs! database (:seon.issue/tests entity))
-    (when-not namespace-name (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/create-tx
-        :seon.error/message "Issue operation requires a supplied or subject namespace."
-        :seon.error/offending request
-        :seon.issue/unassigned-namespace-issue-id issue-id
-        :seon.error/expected "a supplied or subject namespace"}))
-    (when-not cluster-name (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/create-tx
-        :seon.error/message "Issue operation requires a cluster identity in the database."
-        :seon.error/offending request
-        :seon.issue/unscoped-issue-id issue-id
-        :seon.error/expected "a cluster identity in the database"}))
+    (when-not namespace-name (refuse! (request-error 'seon.issue/create-tx "Issue operation requires a supplied or subject namespace." request "a supplied or subject namespace" :seon.issue/unassigned-namespace-issue-id issue-id)))
+    (when-not cluster-name (refuse! (request-error 'seon.issue/create-tx "Issue operation requires a cluster identity in the database." request "a cluster identity in the database" :seon.issue/unscoped-issue-id issue-id)))
     (when (db/pull database [:seon.agent/id] [:seon.agent/id agent-id])
-      (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/create-tx
-        :seon.error/message "Issue operation requires an available derived worker identity."
-        :seon.error/offending request
-        :seon.issue/existing-worker-id agent-id
-        :seon.error/expected "an available derived worker identity"}))
+      (refuse! (request-error 'seon.issue/create-tx "Issue operation requires an available derived worker identity." request "an available derived worker identity" :seon.issue/existing-worker-id agent-id)))
     (let [creation (@cluster-agent-creation-tx
                     (merge {:seon.agent/id agent-id :seon.ns/name namespace-name
                             :seon.cluster/name cluster-name}
@@ -1429,22 +1330,10 @@
       (create-tx database request)
       (do
         (when-not (or (seq (:seon.issue/tests entity)) (:seon.issue/detector entity))
-          (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/start-tx
-        :seon.error/message "Issue operation requires success tests or a detector before starting an issue."
-        :seon.error/offending request
-        :seon.issue/unverifiable-issue-id issue-id
-        :seon.error/expected "success tests or a detector before starting an issue"}))
+          (refuse! (request-error 'seon.issue/start-tx "Issue operation requires success tests or a detector before starting an issue." request "success tests or a detector before starting an issue" :seon.issue/unverifiable-issue-id issue-id)))
         (when (or (:seon.issue/resolved-tx entity)
                   (<= (:seon.issue/budget request) (:seon.issue/budget entity 0)))
-          (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/start-tx
-        :seon.error/message "Issue operation requires an unassigned issue or a larger budget for an open issue."
-        :seon.error/offending request
-        :seon.issue/assigned-issue-id issue-id
-        :seon.error/expected "an unassigned issue or a larger budget for an open issue"}))
+          (refuse! (request-error 'seon.issue/start-tx "Issue operation requires an unassigned issue or a larger budget for an open issue." request "an unassigned issue or a larger budget for an open issue" :seon.issue/assigned-issue-id issue-id)))
         (let [cluster-name (config/agent-cluster database agent-id)
               turn-id (@turn-next-id database cluster-name agent-id)
               open-turn (db/q '[:find ?turn . :in $ ?id :where
@@ -1531,8 +1420,7 @@
                   [:or :map :seon.db/error-result :seon.issue/not-found-error :seon.issue/already-started-error :seon.issue/no-tests-error :seon.issue/no-namespace-error :seon.issue/no-cluster-error :seon.issue/worker-exists-error :seon.issue/not-a-test-error]]}
   [{connection :seon.db/connection :as request}]
   (let [report (db/transact! connection [[:db.fn/call #'start-tx (dissoc request :seon.db/connection)]])]
-    (if (and (map? report) (:seon.error/at report)
-           (:seon.error/layer report) (:seon.error/operation report)) ; debt: database and detector reads still declare generic seon.db/error-result.
+    (if (declared-error? report)
  report
       (status {:seon.db/db (:db-after report) :seon.issue/id (:seon.issue/id request)}))))
 
@@ -1548,13 +1436,7 @@
                   :seon.db/tx-data]}
   [database request]
   (when-not (db/pull database [:seon.agent/id] [:seon.agent/id (:seon.agent/id request)])
-    (refuse! {:seon.error/at (java.util.Date.)
-      :seon.error/layer :seon.issue/request
-      :seon.error/operation 'seon.issue/add-tx
-      :seon.error/message "Issue operation requires an existing author agent."
-      :seon.error/offending request
-      :seon.issue/missing-author-id (:seon.agent/id request)
-      :seon.error/expected "an existing author agent"}))
+    (refuse! (request-error 'seon.issue/add-tx "Issue operation requires an existing author agent." request "an existing author agent" :seon.issue/missing-author-id (:seon.agent/id request))))
   (require-test-refs! database (:seon.issue/tests request))
   [(assoc (select-keys request [:seon.issue/title :seon.issue/problem :seon.issue/severity
                                :seon.issue/functions :seon.issue/tests])
@@ -1574,8 +1456,7 @@
                   [:or :seon.issue/status-view :seon.db/error-result :seon.issue/no-author-error :seon.issue/not-a-test-error :seon.issue/not-found-error]]}
   [{connection :seon.db/connection :as request}]
   (let [report (db/transact! connection [[:db.fn/call #'add-tx (dissoc request :seon.db/connection)]])]
-    (if (and (map? report) (:seon.error/at report)
-           (:seon.error/layer report) (:seon.error/operation report)) ; debt: database and detector reads still declare generic seon.db/error-result.
+    (if (declared-error? report)
  report
       (let [database (:db-after report)]
         (status {:seon.db/db database
@@ -1591,13 +1472,7 @@
                   :seon.db/tx-data]}
   [database request]
   (let [entity (db/pull database [:seon.issue/title] [:seon.issue/id (:seon.issue/id request)])]
-    (when-not (:seon.issue/title entity) (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/guard-call
-        :seon.error/message "Issue operation requires an existing issue."
-        :seon.error/offending (:seon.issue/id request)
-        :seon.issue/missing-issue-id (:seon.issue/id request)
-        :seon.error/expected "an existing issue"}))
+    (when-not (:seon.issue/title entity) (refuse! (request-error 'seon.issue/guard-call "Issue operation requires an existing issue." (:seon.issue/id request) "an existing issue" :seon.issue/missing-issue-id (:seon.issue/id request))))
     (require-test-refs! database (:seon.issue/tests request))
     [{:seon.issue/id (:seon.issue/id request) :seon.issue/tests (:seon.issue/tests request)}]))
 
@@ -1620,8 +1495,7 @@
                   [:or :seon.issue/status-view :seon.db/error-result :seon.issue/not-found-error :seon.issue/not-a-test-error]]}
   [{connection :seon.db/connection :as request}]
   (let [report (db/transact! connection [[:db.fn/call #'tests-tx (dissoc request :seon.db/connection)]])]
-    (if (and (map? report) (:seon.error/at report)
-           (:seon.error/layer report) (:seon.error/operation report)) ; debt: database and detector reads still declare generic seon.db/error-result.
+    (if (declared-error? report)
  report
       (status {:seon.db/db (:db-after report) :seon.issue/id (:seon.issue/id request)}))))
 
