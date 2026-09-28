@@ -33,6 +33,7 @@
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.id :as id]
+            [seon.error.refusal]
             [seon.sci.admit :as admit]
             [seon.sci.arm :as arm]
             [seon.sci.batch :as sci.batch]
@@ -539,17 +540,51 @@
 ;;; settle: the one recording transaction
 ;;; ---------------------------------------------------------------------------
 
+(defn- changed-since-basis
+  "The refusal of a change whose definitions another writer changed after the
+  batch read them: an entity whose stored `:seon.program/definition-digest`
+  on `head` differs from the one on the batch's basis (its world's value).
+  Detect and push back, never lock: the author re-evaluates against the
+  current definition. nil when nothing changed underneath."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:vector :seon.program/row]]
+                  [:maybe :seon.error/value]]}
+  [request head entities]
+  (when-let [basis (get-in request [:seon.batch/world :seon.db/db])]
+    (when-not (identical? basis head)
+      (let [digest (fn [database lookup]
+                     (:seon.program/definition-digest
+                      (db/pull database [:seon.program/definition-digest] lookup)))
+            changed (into []
+                          (keep (fn [row]
+                                  (let [lookup (program/row-identity row)]
+                                    (when (and lookup (not= (digest basis lookup) (digest head lookup)))
+                                      lookup))))
+                          entities)]
+        (when (seq changed)
+          (seon.error.refusal/diagnostic
+           (java.util.Date.) :seon.turn.batch/program 'seon.turn.batch/program-facts
+           {:seon.error/message (str "Changed by another writer since this run read it: "
+                                     (str/join ", " (map (comp pr-str second) changed))
+                                     ". Evaluate your definition again against the current one.")
+            :seon.error/offending changed
+            :seon.error/member :seon.program/definition-digest
+            :seon.error/expected :seon.program/definition-digest}))))))
+
 (defn program-facts
-  "The folded program as transaction data on `head`, or a removal's refusal."
+  "The folded program as transaction data on `head`, or the refusal of a
+  definition changed since the batch's basis, or a removal's refusal."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :map]
-                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
+                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error :seon.error/value]]}
   [request head {:keys [entities schema-keys namespaces removed-namespaces]}]
-  (form-facts request head
-              {:seon.batch/entities (vec (keep (fn [[_ r]] (when (map? r) r)) entities))
-               :seon.batch/removals (into (vec (keep (fn [[s r]] (when (= :removed r) s)) entities))
-                                          removed-namespaces)
-               :seon.batch/schema-keys (or schema-keys #{})
-               :seon.batch/namespaces (or namespaces #{})}))
+  (let [rows (vec (keep (fn [[_ r]] (when (map? r) r)) entities))]
+    ;; decided at the writer: a definition changed underneath the run refuses
+    (or (changed-since-basis request head rows)
+        (form-facts request head
+                    {:seon.batch/entities rows
+                     :seon.batch/removals (into (vec (keep (fn [[s r]] (when (= :removed r) s)) entities))
+                                                removed-namespaces)
+                     :seon.batch/schema-keys (or schema-keys #{})
+                     :seon.batch/namespaces (or namespaces #{})}))))
 
 (defn program-facts-call
   "The folded program's facts, derived at the writer on its head: a turn's one
@@ -608,7 +643,8 @@
   [request head entries]
   (reduce (fn [[w p es] e]
             (if-let [change (:seon.batch/change e)]
-              (let [facts (form-facts request w change)
+              (let [facts (or (changed-since-basis request head (:seon.batch/entities change))
+                              (form-facts request w change))
                     ;; the removal's refusal whole, with its referrers: the
                     ;; refactoring data it exists to give (a message alone lost it)
                     r (if (:seon.error/at facts)

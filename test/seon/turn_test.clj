@@ -17,10 +17,13 @@
             [seon.render.web :as web]
             [seon.repl :as repl]
             [seon.render :as render]
+            [seon.batch]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.observe :as observe]
             [seon.test-support :as support]
             [seon.turn :as turn]
             [seon.turn.batch :as turn.batch]
+            [seon.turn.world :as world]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -2251,3 +2254,36 @@
        (is (true? (:seon.fault/committed? receipt)))
        (is (some? (:seon.turn/closed-tx (db/pull (db/db connection) [:seon.turn/closed-tx] [:seon.turn/id run-id])))
            "the run is closed, so the agent's next run can open")))))
+
+(deftest a-definition-changed-since-the-run-read-it-is-refused-at-the-writer
+  ;; Root ruling (AGENTS "decide at the authority"): the fold's program facts
+  ;; check each definition's stored digest against the run's basis; another
+  ;; writer's change in between refuses that form's facts (detect and push
+  ;; back, never lock, never last-writer-wins).
+  (support/with-database
+   (fn [connection]
+     (let [basis (db/db connection)
+           request (turn.batch/code-request
+                    {:seon.batch/world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                                           :seon.sci.eval/base-ctx (sci.eval/base-ctx basis)}
+                                                          {:seon.agent/id "stale-writer"})
+                     :seon.batch/observe observe/observe
+                     :seon.turn.batch/row-tx @#'turn/row-tx
+                     :seon.batch/start-ns 'user
+                     :seon.batch/text "(defn stale-f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"})
+           batch (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))
+           _ (is (= 'user/stale-f (get-in batch [:seon.batch/entries 0 :seon.batch/change :seon.batch/entities 0 :seon.fn/sym])))
+           unchanged (turn.batch/program-facts request (db/db connection) (:seon.batch/program batch))
+           _ (support/transacted!
+              connection
+              [(support/program-fn-entity basis 'user/stale-f
+                                          "(defn stale-f {:malli/schema [:=> [:cat :int] :int]} [x] (dec x))"
+                                          {:seon.schema.admission/source :agent})])
+           head (db/db connection)
+           refused (turn.batch/program-facts request head (:seon.batch/program batch))
+           [_ _ entries] (turn.batch/revalidate request head (vec (:seon.batch/entries batch)))]
+       (is (vector? unchanged) "nothing changed underneath: the program's facts")
+       (is (= [[:seon.fn/sym 'user/stale-f]] (:seon.error/offending refused))
+           "the writer refuses the definition another writer changed since the basis")
+       (is (= [[:seon.fn/sym 'user/stale-f]] (get-in entries [0 :seon.batch/facts-error :seon.error/offending]))
+           "revalidation gives the form that proposed it the refusal as its facts error")))))
