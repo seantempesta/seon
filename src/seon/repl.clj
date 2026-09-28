@@ -302,7 +302,8 @@
 (defn cost-attributes
   "The stored evaluation attributes the declared bounds and their lines read
   (every measure and named value outside `seon.repl`'s own derived ones), and
-  the evaluation's call profile. A
+  the evaluation's call profile and the class of its value (which the def note
+  reads). A
   reader that pulls an evaluation for its reply pulls these, so the findings
   see what the receipt recorded; nothing names them by hand."
   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
@@ -310,7 +311,8 @@
   (let [{measures ::measures named ::named} @bounds]
     (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct))
           ;; the evaluation's call profile: every reply shows it
-          (concat measures named [:seon.cluster.eval/call-count :seon.cluster.eval/repeated-calls]))))
+          (concat measures named [:seon.cluster.eval/call-count :seon.cluster.eval/repeated-calls
+                                  :seon.eval/value-class]))))
 
 (defn cost
   "The measures the declared bounds judge for one evaluation: each one its
