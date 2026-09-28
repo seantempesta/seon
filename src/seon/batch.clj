@@ -581,26 +581,29 @@
   value (`:seon.batch/error-value`) names `:seon.error/producer`, the blame
   rule stated where the value was built. The failure is handed as that value,
   so the recorder keeps its producer. A producer this batch defined states
-  the digest that ran from the batch's own change: its settlement may commit
+  the digest visible at that entry, never a later definition: its settlement may commit
   after the fault. A failure the agent's own form produced names none: it
   returns to the agent and is no fault."
   {:malli/schema [:=> [:cat :seon.batch/batch] [:vector :seon.batch/diagnostic]]}
   [batch]
-  (let [defined (into {} (comp (mapcat #(get-in % [:seon.batch/change :seon.batch/entities]))
-                               (keep (fn [{sym :seon.fn/sym digest :seon.program/definition-digest}]
-                                       (when (and sym digest) [sym digest]))))
-                      (:seon.batch/entries batch))]
-    (into []
-          (keep (fn [{failure :seon.batch/error ordinal :seon.batch/ordinal}]
-                  (let [error (:seon.batch/error-value (ex-data failure))
-                        ran (get defined (:seon.error/producer error))]
-                    (when (:seon.error/producer error)
-                      (diagnostic :evaluate ordinal
-                                  (ex-info (str (:seon.error/message error "The evaluation failed."))
-                                           (cond-> error
-                                             (and ran (nil? (:seon.error/producer-digest error)))
-                                             (assoc :seon.error/producer-digest ran))))))))
-          (:seon.batch/entries batch))))
+  (second
+   (reduce
+    (fn [[defined diagnostics] {failure :seon.batch/error ordinal :seon.batch/ordinal change :seon.batch/change}]
+      (let [defined (into defined
+                          (keep (fn [{sym :seon.fn/sym digest :seon.program/definition-digest}]
+                                  (when (and sym digest) [sym digest])))
+                          (:seon.batch/entities change))
+            error (:seon.batch/error-value (ex-data failure))
+            ran (get defined (:seon.error/producer error))]
+        [defined
+         (cond-> diagnostics
+           (:seon.error/producer error)
+           (conj (diagnostic :evaluate ordinal
+                             (ex-info (str (:seon.error/message error "The evaluation failed."))
+                                      (cond-> error
+                                        (and ran (nil? (:seon.error/producer-digest error)))
+                                        (assoc :seon.error/producer-digest ran))))))]))
+    [{} []] (:seon.batch/entries batch))))
 
 (defn- record-faults
   "Each diagnostic, and each form's failure a definition produced

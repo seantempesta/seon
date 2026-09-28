@@ -221,7 +221,8 @@
                        (db/q '[:find [?signature ...] :in $ ?producer
                                :where [?e :seon.error/producer ?producer] [?e :seon.error/signature ?signature]]
                              (db/db connection) producer))
-           batch (run "(defn make-row [] (seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})) (make-row)")
+           batch (run (str "(defn make-row [] (seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})) (make-row) "
+                           "(defn make-row \"second version\" [] (seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})) (make-row)"))
            error (:seon.batch/error-value (ex-data (get-in batch [:seon.batch/entries 1 :seon.batch/error])))
            [signature] (faults-of 'user/make-row)]
        (testing "the error value names the definition that produced the bad value"
@@ -232,11 +233,11 @@
          (is (= 'user/make-row (:seon.error/producer (first (problems/open-faults (db/db connection) signature))))
              "the open fault names who it counts against")
          (is (= [['user/make-row]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row connection signature)))))
-         (is (= [(get-in batch [:seon.batch/entries 0 :seon.batch/change :seon.batch/entities 0 :seon.program/definition-digest])]
-                (mapv :seon.error/producer-digest
+         (is (= (set (map #(get-in batch [:seon.batch/entries % :seon.batch/change :seon.batch/entities 0 :seon.program/definition-digest]) [0 2]))
+                (set (map :seon.error/producer-digest
                       (:seon.error/occurrences (db/pull (db/db connection) [{:seon.error/occurrences [:seon.error/producer-digest]}]
-                                                        [:seon.error/signature signature]))))
-             "the version that ran is the one this batch defined, though it settles after the fault")
+                                                        [:seon.error/signature signature])))))
+             "each failure names the version visible when it ran, never the later definition")
          (is (some #(= (:seon.task/id (first (:seon.task/_faults (signature-row connection signature)))) (:seon.task/id %))
                    (my.task/open (db/db connection)))))
        (testing "the agent's own form is its mistake, returned and never recorded"
