@@ -483,6 +483,7 @@
                          :seon.health/buckets-up (- (q after) (q before))
                          :seon.health/before-us (quot (bit-shift-left 1 (q before)) 1000)
                          :seon.health/after-us (quot (bit-shift-left 1 (q after)) 1000)
+                         :seon.health/before-calls (:seon.profile.measurement/calls before)
                          :seon.health/before-digest (:seon.profile.measurement/digest before)
                          :seon.health/after-digest (:seon.profile.measurement/digest after)
                          :seon.profile.measurement/calls (:seon.profile.measurement/calls after)

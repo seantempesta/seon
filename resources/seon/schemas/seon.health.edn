@@ -154,6 +154,7 @@
  :before-bucket [:int {:min 0 :max 39}]
  :after-bucket [:int {:min 0 :max 39}]
  :buckets-up [:int {:description "After bucket minus before bucket: each one is a doubling (at least 1.41x past the measurement's hysteresis)."}]
+ :before-calls [:int {:min 0 :description "Calls behind the previous digest's newest measurement."}]
  :before-digest :seon.program/definition-digest
  :after-digest :seon.program/definition-digest
  :before-us [:int {:min 0 :description "The before bucket's upper edge, 2^b ns, in microseconds."}]
@@ -167,6 +168,7 @@
   [:seon.health/buckets-up :seon.health/buckets-up]
   [:seon.health/before-us :seon.health/before-us]
   [:seon.health/after-us :seon.health/after-us]
+  [:seon.health/before-calls :seon.health/before-calls]
   [:seon.health/before-digest :seon.health/before-digest]
   [:seon.health/after-digest :seon.health/after-digest]
   [:seon.profile.measurement/calls :seon.profile.measurement/calls]
@@ -185,8 +187,11 @@
         :seon.health/impact :seon.profile.measurement/calls :seon.health/at :seon.health/changed-at
         :seon.health/clues [[:seon.health/quantile] [:seon.health/before-us] [:seon.health/after-us]
                             [:seon.health/before-digest] [:seon.health/after-digest]]
-        :description "A definition whose newest digest measures at least one bucket (a doubling) slower than its previous digest at the same quantile: the after digest is the change."}
+        :description "A definition whose median measures at least one bucket (a doubling) slower under its newest digest than under its previous one, each measured over at least 200 calls: the after digest is the change. A p99 move alone never counts (rare heavy calls dominate the tail; transact! p99 0.54 s -> 1.07 s was 68 vs 795 calls with a flat p50)."}
   [:seon.profile.measurement/sym :seon.profile.measurement/sym]
+  [:seon.health/quantile [:= :seon.profile.measurement/p50]]
+  [:seon.health/before-calls [:int {:min 200}]]
+  [:seon.profile.measurement/calls [:int {:min 200}]]
   [:seon.health/buckets-up [:int {:min 1}]]]
  :program-unknown
  [:map {:seon.health/severity 10 :seon.health/subject :seon.error/operation
