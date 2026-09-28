@@ -781,7 +781,14 @@
                      (when (and (:seon.db/connection request) (:seon.render/profile request))
                        (prepare-result (assoc request :seon.error/source error-value))))]
     {:seon.error/fact (merge fact result)
-     :seon.error/source (merge observation result)
+     ;; A digest the caller stated keeps: a cluster copy names the version that
+     ;; ran on its origin branch (`seon.fault/record!`), which the throwable's
+     ;; own observation cannot know.
+     :seon.error/source (cond-> (merge observation result)
+                          (and (nil? (:seon.error/producer-digest observation))
+                               (string? (:seon.error/producer-digest (:seon.error/source request))))
+                          (assoc :seon.error/producer-digest
+                                 (:seon.error/producer-digest (:seon.error/source request))))
      ;; the blob is the admission's value artifact, which
      ;; `seon.render.value/read-artifact` and `artifact-value` read back
      :seon.error/data-content (render.value/artifact-edn (render.value/artifact admitted))}))
