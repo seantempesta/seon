@@ -3,7 +3,6 @@
   (:require [seon.error.refusal]
             [clojure.string :as str]
             [clojure.java.io :as io]
-            [clojure.edn :as edn]
             [datahike.api :as d]
             [konserve.core :as k]
             [konserve.protocols]
@@ -544,60 +543,6 @@
    :seon.operator.collect/bytes
    (fs/tree-bytes (:seon.store/dir operation-store))})
 
-(defn- resolves-to-digest?
-  {:malli/schema [:=> [:cat [:map-of :keyword :seon.schema/malli-form] :seon.schema/malli-form] :boolean]}
-  [forms form]
-  (loop [current form
-         visited #{}]
-    (cond
-      (= :seon.blob/digest current) true
-      (or (not (keyword? current))
-          (contains? visited current)
-          (not (contains? forms current))) false
-      :else (recur (get forms current) (conj visited current)))))
-
-(defn- digest-attributes
-  {:malli/schema [:=> [:cat :seon.db/db] [:vector :qualified-keyword]]}
-  [database]
-  (let [entities
-        (d/q '[:find ?attribute ?form
-               :where
-               [?schema :seon.schema/key ?attribute]
-               [?schema :seon.schema/form ?form]]
-             database)
-        forms (into {} (map (fn [[schema-key form]]
-                              [schema-key (edn/read-string form)]))
-                    entities)]
-    (into []
-          (keep (fn [[attribute form]]
-                  (when (resolves-to-digest? forms (edn/read-string form))
-                    attribute)))
-          entities)))
-
-(defn- branch-digests
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch] [:set :seon.blob/digest]]}
-  [operation-store branch]
-  (let [database (d/branch-as-db
-                  (:seon.store/connection-object operation-store) branch)]
-    (try
-      (let [history-value (db/history database)
-            searchable (if ;; PRD 1.3 debt: seon.db/history's :seon.db/error-result includes :seon.error/value.
-                           (and (:seon.error/at history-value)
-                                (:seon.error/layer history-value)
-                                (:seon.error/operation history-value))
-                         database
-                         history-value)]
-        (into #{}
-              (mapcat
-               (fn [attribute]
-                 (d/q '[:find [?digest ...]
-                        :in $ ?attribute
-                        :where [_ ?attribute ?digest]]
-                      searchable attribute)))
-              (digest-attributes database)))
-      (finally
-        (d/release-materialized-db database)))))
-
 (defn- collection-evidence
   {:malli/schema [:=> [:cat :seon.store/store] [:map [:seon.operator.collect/branches :seon.operator.collect/branches] [:seon.operator.collect/digests [:set :seon.blob/digest]]]]}
   [operation-store]
@@ -610,8 +555,11 @@
                {:seon.store/store operation-store
                 :seon.store/branch branch})})
            branches)
+     ;; The same derivation the sweep roots its blobs with, so verification
+     ;; checks exactly what the collection kept.
      :seon.operator.collect/digests
-     (into #{} (mapcat #(branch-digests operation-store %)) branches)}))
+     (registry/referenced-blobs (:seon.store/connection-object operation-store)
+                                (set branches) true)}))
 
 (defn- commit-reopens?
   "Whether the commit recorded for a branch still reopens and reads its first
