@@ -132,20 +132,27 @@
    :seon.repl/repeated])
 
 (defn- def-note
-  "Explain a temporary def or a function missing its installation contract
-  from the evaluation's source evidence. Unreadable source earns no note."
-  [source]
-  (when (string? source)
+  "Explain a temporary def from the evaluation's own record: its source is a
+  `def` form and its outcome a Var, whose recorded class names the surface
+  that evaluated it (`sci.lang.Var`: the agent's SCI context; `clojure.lang.Var`:
+  a host Var in `ns-name`, MCP JVM mode). A failed evaluation, an unreadable
+  source or any other value earns no note."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] [:maybe :symbol]] [:maybe :string]]}
+  [source value-class ns-name]
+  (when (and (string? source) (#{"sci.lang.Var" "clojure.lang.Var"} value-class))
     (let [form (try (edn/read-string source) (catch Throwable _ nil))]
-      (when (and (seq? form) (symbol? (second form)))
-        (cond
-          (= 'def (first form))
+      (when (and (seq? form) (= 'def (first form)) (symbol? (second form)))
+        (if (= "sci.lang.Var" value-class)
           (str (second form)
-             " lives only in your SCI context and is lost when the JVM"
-             " restarts. Nothing defined with def is persisted, atoms"
-             " included; they are for temporary data-modeling experiments."
-             " To keep something, write a function, schema, or test, or"
-             " transact the data into the database."))))))
+               " lives only in your SCI context and is lost when the JVM"
+               " restarts. Nothing defined with def is persisted, atoms"
+               " included; they are for temporary data-modeling experiments."
+               " To keep something, write a function, schema, or test, or"
+               " transact the data into the database.")
+          (str (second form) " is the host Var " (or ns-name 'user) "/" (second form)
+               " and lasts until the JVM restarts. Nothing defined with def is"
+               " persisted, atoms included. To keep something, write a function,"
+               " schema, or test, or transact the data into the database."))))))
 
 (defn value-text
   "Return the saved shown text unchanged."
@@ -220,7 +227,8 @@
                 :seon.repl/out (when (seq output) (pr-str output))
                 ;; ALREADY TEXT: the value renderer bounded it once.
                 :seon.repl/errors (:seon.repl/errors emission)
-                :seon.repl/note (some-> (def-note source) pr-str)
+                :seon.repl/note (when-not failed?
+                                  (some-> (def-note source (:seon.eval/value-class emission) prompt-ns) pr-str))
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
                 :seon.repl/ms (when (and (int? duration)

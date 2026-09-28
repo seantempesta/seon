@@ -134,33 +134,39 @@
            (select-keys (support/reply response) [:seon.repl/out :seon.repl/value]))
         "output is its own key, never folded into the value")))
 
-(deftest every-def-says-it-is-not-persisted
-  ;; THE CLASS: an agent told nothing keeps defining data it expects to keep.
-  ;; Owner, 2026-09-08: every top-level def carries the one note; definers
-  ;; that become program entities carry none.
-  (let [emission (fn [source]
-                   {:seon.cluster.eval/source source
-                    :seon.ns/name 'my.agents.juniper
-                    :seon.cluster.eval/ordinal 0
-                    :seon.eval/shown
-                    "nil"})
-        def-response (repl/response (emission "(def secret 99)"))
-        defn-response (repl/response (emission "(defn hello [] 42)"))]
-    (is (str/includes? def-response ":note \"secret lives only in your SCI context")
-        "a def carries the note, naming the var")
-    (is (str/includes? def-response "transact the data into the database.\"")
-        "the note ends by saying what persists")
-    (is (not (str/includes? defn-response ":note"))
-        "an uncontracted defn is admitted: its Var render, not a note, names the missing contract")
-    (is (not (str/includes?
-              (repl/response
-               (emission "(defn hello {:malli/schema [:=> [:cat] :int]} [] 42)"))
-              ":note"))
-        "a contracted defn is eligible for installation")
-    (is (= [:seon.repl/value :seon.repl/note]
-           (->> (re-seq #":(value|note|out|ns|ms)" def-response)
-                (map (comp keyword #(str "seon.repl/" %) second))))
-        "the note sits after :out and before :ns in the one order")))
+(deftest a-def-note-follows-the-evaluations-surface-and-outcome
+  ;; THE CLASS: the note is decided from the evaluation's recorded outcome
+  ;; (the class of the Var it returned), never from the source text alone:
+  ;; an SCI def is told it lives in SCI, a host def names its Var, a failed
+  ;; def and a definer that becomes a program entity carry none.
+  (let [reply (fn [source extra]
+                (support/reply
+                 (repl/response (merge {:seon.cluster.eval/source source
+                                        :seon.ns/name 'my.agents.juniper
+                                        :seon.cluster.eval/ordinal 0
+                                        :seon.eval/shown "nil"}
+                                       extra))))
+        note (fn [source extra] (:seon.repl/note (reply source extra)))]
+    (testing "an SCI def keeps the SCI note"
+      (let [text (note "(def secret 99)" {:seon.eval/value-class "sci.lang.Var"})]
+        (is (str/starts-with? text "secret lives only in your SCI context"))
+        (is (str/ends-with? text "transact the data into the database."))))
+    (testing "a JVM def names its host Var and its lifetime"
+      (let [text (note "(def secret 99)" {:seon.eval/value-class "clojure.lang.Var"})]
+        (is (str/starts-with? text "secret is the host Var my.agents.juniper/secret"))
+        (is (str/includes? text "lasts until the JVM restarts"))
+        (is (not (str/includes? text "SCI")))))
+    (testing "a failed def carries no note"
+      (is (not (contains? (reply "(def secret (nope))" {:seon.cluster.eval/error "Unable to resolve symbol"})
+                          :seon.repl/note))))
+    (testing "a def with no recorded Var outcome, and a defn's value, carry none"
+      (is (not (contains? (reply "(def secret 99)" {}) :seon.repl/note)))
+      (is (not (contains? (reply "(defn hello [] 42)" {:seon.eval/value-class "sci.lang.Var"})
+                          :seon.repl/note))))
+    (testing "the note sits after :out and before :ns in the one order"
+      (is (= [:seon.repl/value :seon.repl/note]
+             (filter #{:seon.repl/value :seon.repl/note :seon.repl/out :seon.repl/ns :seon.repl/ms}
+                     (keys (reply "(def secret 99)" {:seon.eval/value-class "sci.lang.Var"}))))))))
 
 (deftest an-error-response-carries-no-value
   (let [response (repl/response {:seon.cluster.eval/source "(/ 1 0)"
