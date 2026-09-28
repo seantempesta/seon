@@ -430,11 +430,16 @@
   and throws that message and data to its caller; every other Datahike
   `log/error` names an id (reference-code/datahike 591c825d). The writer's
   `:datahike/write-error` puts the failure on the transaction's callback
-  first (`datahike/writer.cljc:159-164`). Timbre's configured minimum is
-  `:debug`, so `:trace` does not print."
-  {:malli/schema [:=> [:cat :keyword [:or :nil :keyword]] :keyword]}
+  first (`datahike/writer.cljc:159-164`). Its `:debug` also lowers: trove's
+  console backend, which it replaces, printed nothing below `:info`
+  (`taoensso/trove/console.cljc:21-24`), and Datahike logs every query plan
+  fallback at `:debug` (`datahike/query.cljc:4314`). Timbre's configured
+  minimum is `:debug`, so `:trace` does not print."
+  {:malli/schema [:=> [:cat :keyword [:or {:description "trove's `id` slot as passed: its `log!` hands the `:id` value through unchecked (taoensso/trove.cljc:92-104; declared ?Keyword at :22), and `replikativ.logging` puts its first argument there (logging.cljc:32-80), a keyword or, as in `(log/debug \"fused-scan-rel not applicable:\" msg)` (datahike/query.cljc:4314), a string; nil for a message-only call. Every such call in datahike 591c825d (85) and konserve 08465d6 (84) passes a keyword or string literal."} :nil :keyword :string]]
+                  :keyword]}
   [level id]
-  (if (and (= :error level) (or (nil? id) (= :datahike/write-error id)))
+  (if (or (= :debug level)
+          (and (= :error level) (or (nil? id) (= :datahike/write-error id))))
     :trace
     level))
 
@@ -444,7 +449,8 @@
   (`taoensso.trove/*log-fn*`: `(fn [ns coords level id lazy_])`). The call's
   message, data and error print as one value bounded by
   `seon.print.value/bounded-text`, never whole."
-  {:malli/schema [:=> [:cat :string [:or :nil [:sequential [:maybe :int]]] :keyword [:or :nil :keyword]
+  {:malli/schema [:=> [:cat :string [:or :nil [:sequential [:maybe :int]]] :keyword
+                       [:or {:description "trove's `id` slot as passed: its `log!` hands the `:id` value through unchecked (taoensso/trove.cljc:92-104; declared ?Keyword at :22), and `replikativ.logging` puts its first argument there (logging.cljc:32-80), a keyword or, as in `(log/debug \"fused-scan-rel not applicable:\" msg)` (datahike/query.cljc:4314), a string; nil for a message-only call. Every such call in datahike 591c825d (85) and konserve 08465d6 (84) passes a keyword or string literal."} :nil :keyword :string]
                        [:or :nil :map [:fn clojure.core/delay?]]]
                   :nil]}
   [callsite-ns coords level id lazy_]

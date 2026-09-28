@@ -698,6 +698,16 @@
     (is (= "" (logged #(replikativ.logging/raise "Bad entity attribute " :x/y " at " large
                                                  ", not defined in current schema" {:error :transact/schema}))))
     (is (= "" (logged #(replikativ.logging/error :datahike/write-error large))))
+    ;; replikativ.logging's (log/debug "msg:" x) passes a string id
+    ;; (datahike/query.cljc:4314); the armed hook refused it and HEAD e60e265c0
+    ;; did not boot.
+    (is (= "" (logged #(replikativ.logging/debug "fused-scan-rel not applicable:" "no index")))
+        "Datahike's :debug stays below the minimum, as under trove's console backend")
+    (is (str/includes? (logged #(replikativ.logging/warn "secondary-idx-agg not applicable:" "no index"
+                                                         "clojure.lang.ExceptionInfo"))
+                       "secondary-idx-agg not applicable:"))
+    (is (nil? (store/datahike-log! "datahike.query" [4314 nil] :debug "fused-scan-rel not applicable:"
+                                   {:msg "no index"})))
     (let [line (logged #(replikativ.logging/error :datahike/listener-error large))]
       (is (str/includes? line "ERROR"))
       (is (str/includes? line ":datahike/listener-error"))
