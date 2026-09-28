@@ -12,12 +12,11 @@
      ;; The turn's opening and closing are real transactions with chosen
      ;; instants (a bare {:db/txInstant} entity is not a transaction and the
      ;; writer refuses it as unowned). Opened now, after every fixture commit.
+     (support/transacted! connection (support/agent-tx @connection "metrics"))
      (let [opened (java.util.Date.)
            now (java.util.Date. (+ (inst-ms opened) 20))]
        (let [result (db/transact! connection
                   [{:db/id "datomic.tx" :db/txInstant opened}
-                   {:seon.agent/id "metrics"
-                    :seon.agent/runtime {:seon.runtime/agent [:seon.agent/id "metrics"]}}
                    {:seon.turn/id "metrics-turn"
                        :seon.turn/agent [:seon.agent/id "metrics"]
                        :seon.turn/opened-tx "datomic.tx"
