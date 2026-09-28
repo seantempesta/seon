@@ -360,7 +360,9 @@
             [entry] (open)
             signature (:seon.error/signature entry)]
         (is (= 1 (count (open))) "a recorded fault with no resolution is open")
-        (is (:db-after (problems/resolve! connection signature)))
+        (let [resolved (problems/resolve! connection signature)]
+          (is (= signature (:seon.error/signature resolved)) "resolve! answers the resolved fault")
+          (is (some? (:seon.error/resolved-tx resolved)) "with its resolving transaction"))
         (is (= [] (open)) "a resolution after the latest occurrence closes it")
         (is (= 1 (count (:seon.problems/error-signatures (found connection))))
             "history is kept: the signature is still a stored fact")

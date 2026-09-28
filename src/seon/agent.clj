@@ -71,11 +71,16 @@
       :else [[:db/add (:db/id entity) :seon.agent/archived-tx :db/current-tx]])))
 
 (defn archive!
-  "Archive an agent for presentation, retaining its identity and all live machinery."
+  "Archive an agent for presentation, retaining its identity and all live
+  machinery. Answers the archived agent: its id and the transaction that
+  archived it (an already archived agent answers its earlier one)."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id]
-                  [:or :seon.db/transaction-report :seon.error/value]]}
+                  [:or :seon.agent/archived :seon.error/value]]}
   [connection agent-id]
-  (db/transact! connection [[:db.fn/call #'archive-call agent-id]]))
+  (let [report (db/transact! connection [[:db.fn/call #'archive-call agent-id]])]
+    (if (:db-after report)
+      (db/pull (:db-after report) [:seon.agent/id :seon.agent/archived-tx] [:seon.agent/id agent-id])
+      report)))
 
 (defn settings
   "Read your setting overrides; omitted settings inherit the cluster defaults."

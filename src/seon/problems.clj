@@ -150,12 +150,18 @@
   "Record that the fault `signature` names is fixed away from its failing function.
   A fix at that function resolves it without this (`seon.error/resolution`).
   Its signature is open again only when a later occurrence is recorded.
-  Called by whoever fixed it, never inferred from a turn. Returns the writer's report or its refusal."
+  Called by whoever fixed it, never inferred from a turn. Answers the
+  resolved fault (its signature, operation and resolving transaction), or the
+  writer's refusal (an unrecorded signature)."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.error/signature]
-                  [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
+                  [:or :seon.problems/resolved :seon.db/transaction-refused-error]]}
   [connection signature]
-  (db/transact! connection [[:db/add [:seon.error/signature signature]
-                             :seon.error/resolved-tx "datomic.tx"]]))
+  (let [report (db/transact! connection [[:db/add [:seon.error/signature signature]
+                                          :seon.error/resolved-tx "datomic.tx"]])]
+    (if (:db-after report)
+      (db/pull (:db-after report) [:seon.error/signature :seon.error/operation :seon.error/resolved-tx]
+               [:seon.error/signature signature])
+      report)))
 
 (defn- failed-runs
   [db]

@@ -1,4 +1,9 @@
-#:seon.problems{:failed-tests
+#:seon.problems{:resolved
+                [:map {:description "A fault resolve! closed: its signature, operation and the transaction that resolved it."}
+                 [:seon.error/signature :seon.error/signature]
+                 [:seon.error/operation {:optional true} :seon.error/operation]
+                 [:seon.error/resolved-tx :seon.error/resolved-tx]]
+                :failed-tests
                 [:vector [:map [:seon.test/sym :seon.test/sym]
                           [:seon.test/fail-count :seon.test/fail-count]
                           [:seon.test/error-count :seon.test/error-count]

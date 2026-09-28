@@ -1571,7 +1571,7 @@
                              [:seon.issue/severity :seon.issue/severity]
                              [:seon.issue/functions {:optional true} :seon.issue/functions]
                              [:seon.issue/tests {:optional true} :seon.issue/tests]]]
-                  [:or :map :seon.db/error-result :seon.issue/no-author-error :seon.issue/not-a-test-error :seon.issue/not-found-error]]}
+                  [:or :seon.issue/status-view :seon.db/error-result :seon.issue/no-author-error :seon.issue/not-a-test-error :seon.issue/not-found-error]]}
   [{connection :seon.db/connection :as request}]
   (let [report (db/transact! connection [[:db.fn/call #'add-tx (dissoc request :seon.db/connection)]])]
     (if (and (map? report) (:seon.error/at report)
@@ -1617,7 +1617,7 @@
                              [:seon.agent/id :seon.agent/id]
                              [:seon.issue/id :seon.issue/id]
                              [:seon.issue/tests :seon.issue/tests]]]
-                  [:or :map :seon.db/error-result :seon.issue/not-found-error :seon.issue/not-a-test-error]]}
+                  [:or :seon.issue/status-view :seon.db/error-result :seon.issue/not-found-error :seon.issue/not-a-test-error]]}
   [{connection :seon.db/connection :as request}]
   (let [report (db/transact! connection [[:db.fn/call #'tests-tx (dissoc request :seon.db/connection)]])]
     (if (and (map? report) (:seon.error/at report)

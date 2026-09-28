@@ -25,7 +25,7 @@
                              [:seon.issue/severity :seon.issue/severity]
                              [:seon.issue/functions {:optional true} :seon.issue/functions]
                              [:seon.issue/tests {:optional true} :seon.issue/tests]]]
-                  :map]}
+                  [:or :seon.issue/status-view :seon.error/value]]}
   [request]
   (let [connection (task/home-connection (:seon.db/connection request))]
     (db/call-with-custody {:seon.db/connection connection}
@@ -37,7 +37,7 @@
                              [:seon.agent/id :seon.agent/id]
                              [:seon.issue/id :seon.issue/id]
                              [:seon.issue/tests :seon.issue/tests]]]
-                  :map]}
+                  [:or :seon.issue/status-view :seon.error/value]]}
   [request]
   (let [connection (task/home-connection (:seon.db/connection request))]
     (db/call-with-custody {:seon.db/connection connection}

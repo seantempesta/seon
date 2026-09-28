@@ -219,6 +219,9 @@
                               :seon.render/ai seon.agent/render-settings-ai
                               :seon.render/html seon.agent/render-settings-html
                               :seon.render/form seon.agent/render-settings-form} :seon.db/ref]
+             :archived [:map {:description "An archived agent as archive! answers it: its id and the transaction that archived it."}
+                        [:seon.agent/id :seon.agent/id]
+                        [:seon.agent/archived-tx :seon.agent/archived-tx]]
              :identity-view [:map {:description "My identity as the AI face shows it: my id, my namespace and its steward, and the reads offered."}
                              [:seon.agent/id :seon.agent/id]
                              [:seon.agent/namespace {:optional true} [:map [:seon.ns/name :seon.ns/name]

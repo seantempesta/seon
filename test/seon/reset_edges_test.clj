@@ -244,7 +244,8 @@
        (is (= basis (db/basis-t (db/db connection))))
        (is (true? (agent/open? (db/db connection) agent-id)))
        (let [result (agent/archive! connection agent-id)]
-         (is (some? (:db-after result))))
+         (is (= agent-id (:seon.agent/id result)) "archive! answers the archived agent")
+         (is (some? (:seon.agent/archived-tx result)) "with the transaction that archived it"))
        (is (true? (agent/archived? (db/db connection) agent-id)))
        (is (false? (agent/open? (db/db connection) agent-id)))
        (is (= before (db/pull (db/db connection) selector lookup)))))))
