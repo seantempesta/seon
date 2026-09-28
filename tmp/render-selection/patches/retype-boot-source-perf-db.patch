@@ -1,0 +1,203 @@
+diff --git a/src/seon/db.clj b/src/seon/db.clj
+index 2075cba..7422ff2 100644
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -4,7 +4,6 @@
+   elided, the current connection of the calling agent's cluster (`*conn*`,
+   bound per evaluation). Failures return flat `:seon.error` values."
+   (:require [clojure.core.cache.wrapped :as cache]
+-            [clojure.edn :as edn]
+             [clojure.set :as set]
+             [clojure.string :as str]
+             [clojure.walk :as walk]
+@@ -4595,35 +4594,70 @@
+   [database]
+   (arity-mismatches-with q database (carried-projection database)))
+ 
++(defn- render-face?
++  "Is `attribute` an installed ref naming a function by its identity: a schema
++  row's render face (`:seon.fn/reference-to` on its declaration)?"
++  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value :seon.schema/value] :boolean]}
++  [projection database attribute]
++  (boolean (and (keyword? attribute)
++                (= :db.type/ref (get-in (dbi/-schema database) [attribute :db/valueType]))
++                (:seon.fn/reference-to (some-> (mr/schema (:seon.schema.projection/registry projection) attribute)
++                                               m/properties)))))
++
++(defn- render-declaration-touched?
++  "Does this report write a schema row's key or form, or one of its face refs?"
++  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] :boolean]}
++  [projection report]
++  (let [database (:db-after report)]
++    (boolean (some (fn [{a :a added :added}]
++                     (or (and added (#{:seon.schema/key :seon.schema/form} a))
++                         (render-face? projection database a)))
++                   (:tx-data report)))))
++
+ (defn- write-render-target-error
+-  "Render declarations naming functions absent from `database`.
+-  With `declarations`, only those `[key form]` rows are read; without, every
+-  schema row is."
+-  {:malli/schema [:function
+-                  [:=> [:cat :seon.db/database-value] [:or :nil :seon.error/base]]
+-                  [:=> [:cat :seon.db/database-value [:sequential [:tuple [:or :keyword :symbol :string] :string]]]
+-                   [:or :nil :seon.error/base]]]}
+-  ([database]
+-   (write-render-target-error
+-    database
+-    (vec (d/q '[:find ?key ?form :where
+-                [?schema :seon.schema/key ?key]
+-                [?schema :seon.schema/form ?form]] database))))
+-  ([database declarations]
+-  (let [missing
++  "Render declarations this report touched whose function is absent or unmatched.
++
++  A schema row stores each face it declares, own or inherited, as a ref to
++  that function's entity (`seon.schema.datahike/storable-properties-in`). A
++  report touches a row by writing its key or form, or by asserting or
++  retracting one of its face refs: removing a function sweeps every ref to it
++  (datahike/db/transaction.cljc:1003-1014), so the rows it breaks are in the
++  report. Each touched row that declares a face (`declared-reference` over the
++  final projection) must name a defined function, and a stored ref must point
++  at it. Work is proportional to the touched rows, never the population."
++  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report]
++                  [:or :nil :seon.error/base]]}
++  [projection report]
++  (let [database (:db-after report)
++        registry (:seon.schema.projection/registry projection)
++        face? #(render-face? projection database %)
++        tx-data (:tx-data report)
++        touched-faces (into #{} (comp (map :a) (distinct) (filter face?)) tx-data)
++        touched (into (sorted-set)
++                      (keep (fn [{e :e a :a added :added}]
++                              (when (or (touched-faces a)
++                                        (and added (#{:seon.schema/key :seon.schema/form} a)))
++                                e)))
++                      tx-data)
++        faces (when (seq touched) (sort (filter face? (keys (dbi/-schema database)))))
++        value-of (fn [e a] (:v (first (d/datoms database :eavt e a))))
++        missing
+         (into []
+-              (mapcat
+-               (fn [[schema-key encoded]]
+-                 (let [properties (m/properties (schema/structural-schema (edn/read-string encoded)))]
+-                   (keep (fn [property]
+-                           (let [renderer (get properties property)]
+-                             (when (and (qualified-symbol? renderer)
+-                                        (not (db.utils/entid database [:seon.fn/sym renderer])))
+-                               {:seon.schema/key schema-key
+-                                :seon.render/property property
+-                                :seon.render/function renderer})))
+-                         [:seon.render/ai :seon.render/html]))))
+-              (sort-by first declarations))]
++              (for [entity touched
++                    :let [schema-key (value-of entity :seon.schema/key)
++                          compiled (some->> schema-key (mr/schema registry))]
++                    :when compiled
++                    face faces
++                    :let [renderer (schema.datahike/declared-reference compiled face)]
++                    :when renderer
++                    :let [function (:e (first (d/datoms database :avet :seon.fn/sym renderer)))
++                          stored (value-of entity face)]
++                    :when (not (and function
++                                    (value-of function :seon.program/definition-digest)
++                                    (or (nil? stored) (= stored function))))]
++                {:seon.schema/key schema-key
++                 :seon.render/property face
++                 :seon.render/function renderer}))]
+     (when (seq missing)
+       (diagnostic
+        {::transaction-refused true
+@@ -4633,7 +4667,7 @@
+         :seon.error/operation 'seon.db/transact!
+         :seon.error/member :seon.schema/form
+         :seon.error/expected :seon.fn/sym
+-        :seon.error/offending missing})))))
++        :seon.error/offending missing}))))
+ 
+ (defn- removed-definition-error
+   "Check surviving names against the identities removed by an admitted change.
+@@ -5189,6 +5223,8 @@
+         owned (delay (write-owned-values-error projection report attribute-plans identity-attrs))]
+     (or
+      (retention-report-check projection report affected)
++     (when (render-declaration-touched? projection report)
++       (write-render-target-error projection report))
+      (some (fn [datom]
+              (when (:added datom)
+                (let [attribute (:a datom)
+@@ -5210,26 +5246,6 @@
+      (write-deletion-error before database affected identity-attrs)
+      (when-not (find @owned ::changed-identity-attributes) @owned)
+      (write-digest-error projection report (identity-attributes database))
+-     ;; A render target breaks only by a declaration this report wrote or a
+-     ;; function it removed. Written entities are read alone; a removed function
+-     ;; can be named by any entity, so that report reads them all.
+-     (let [tx-data (:tx-data report)]
+-       (if (some #(and (= :seon.fn/sym (:a %)) (not (:added %))
+-                       (not (db.utils/entid database [:seon.fn/sym (:v %)])))
+-                 tx-data)
+-         (write-render-target-error database)
+-         (when-let [written (seq (into #{}
+-                                       (comp (filter #(and (:added %) (#{:seon.schema/form :seon.schema/key} (:a %))))
+-                                             (map :e))
+-                                       tx-data))]
+-           (write-render-target-error
+-            database
+-            (into []
+-                  (keep (fn [entity]
+-                          (let [schema-key (:v (first (d/datoms database :eavt entity :seon.schema/key)))
+-                                form (:v (first (d/datoms database :eavt entity :seon.schema/form)))]
+-                            (when (and schema-key form) [schema-key form]))))
+-                  written)))))
+      ;; Arity admission depends on declarations, their owned children and
+      ;; supplied defaults. The owning-value walk already found
+      ;; every changed root on both sides, including swept/deleted children.
+diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
+index 09c5c2a..2a6f020 100644
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -2899,25 +2899,26 @@
+          (is (false? (db/read-evidence-current? @connection evidence))
+              "a changed datom on the page makes it stale"))))))
+ 
+-(defn- declare-entity!
+-  {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword] :map]}
+-  [connection schema-key]
+-  (test-support/transacted!
+-   connection
+-   [[:db.fn/call #'turn/row-tx {}
+-     {:seon.schema/key schema-key :seon.schema/form (pr-str [:map])}]]))
+-
+-(deftest a-declaration-write-parses-only-the-declarations-it-wrote
++(deftest removing-a-renderer-refuses-by-the-declarations-it-breaks
++  ;; CLASS: a schema's render face is a ref to its function; retracting the
++  ;; function sweeps every such ref (datahike/db/transaction.cljc:1003-1014),
++  ;; so the writer reads only the rows the report touched, never the whole
++  ;; schema population, and refuses by name while a schema still declares it.
+   (test-support/with-database
+    (fn [connection]
+-     (let [render-check @#'seon.db/write-render-target-error
+-           rendered (atom [])]
+-       (with-redefs [seon.db/write-render-target-error
+-                     (fn ([database] (swap! rendered conj :all) (render-check database))
+-                         ([database declarations] (swap! rendered conj (count declarations))
+-                          (render-check database declarations)))]
+-         (declare-entity! connection ::rendered))
+-       (is (= [1] @rendered) "the render gate reads the one written declaration")))))
++     (let [database (db/db connection)
++           renderer (:e (first (d/datoms database :avet :seon.fn/sym 'seon.error/render-ai)))
++           users (count (d/datoms database :avet :seon.render/ai renderer))
++           refused (db/transact! connection [[:db/retractEntity renderer]])
++           declarations (get-in refused [:seon.error/data :seon.render/declarations])]
++       (is (< 1 users) "errors derived from :seon.error/base store the inherited face")
++       (is (:seon.db/transaction-refused refused))
++       (is (some #{{:seon.schema/key :seon.error/base
++                    :seon.render/property :seon.render/ai
++                    :seon.render/function 'seon.error/render-ai}}
++                 declarations))
++       (is (= renderer (:e (first (d/datoms (db/db connection) :avet :seon.fn/sym 'seon.error/render-ai))))
++           "refused, nothing was removed")))))
+ 
+ (deftest a-report-touching-no-function-reuses-the-committed-arity-comparison
+   ;; The arity gate compares only call edges and bounds under a caller or

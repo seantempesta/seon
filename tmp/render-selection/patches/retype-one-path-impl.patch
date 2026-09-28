@@ -86,3 +86,25 @@ index 33c2942..7e576c1 100644
    [unit]
    (when (false? (:seon.test.accretion/install? unit))
      (str/join
+diff --git a/test/seon/test/accretion_test.clj b/test/seon/test/accretion_test.clj
+index 06fcfa8..ae1487f 100644
+--- a/test/seon/test/accretion_test.clj
++++ b/test/seon/test/accretion_test.clj
+@@ -77,7 +77,7 @@
+ 
+ (deftest refusal-renderers-accept-the-declaring-error-shape
+   (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
+-          :seon.render/ai]
++          :string]
+          (:malli/schema (meta #'accretion/render-ai))))
+   (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
+           :seon.render/hiccup]
+@@ -99,7 +99,7 @@
+          contracts
+          {:seon.schema/validate-render-contracts? true})]
+     (is (= [:=> [:cat :seon.test.accretion/install-refused-error]
+-            :seon.render/ai]
++            :string]
+            (get-in projection
+                    [:seon.schema.projection/function-contracts
+                     'seon.test.accretion/render-ai])))

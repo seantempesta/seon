@@ -37,9 +37,15 @@
         db @conn
         ;; The candidate's packaged population.
         dir (java.io.File. (str root "/resources/seon/schemas"))
-        forms' (seon.schema.edn/derive-config-forms
-                (reduce (fn [acc f] (merge acc (clojure.edn/read-string (slurp f)))) {}
-                        (sort-by str (filter #(.endsWith (.getName ^java.io.File %) ".edn") (file-seq dir)))))
+        candidate-forms (seon.schema.edn/derive-config-forms
+                         (reduce (fn [acc f] (merge acc (clojure.edn/read-string (slurp f)))) {}
+                                 (sort-by str (filter #(.endsWith (.getName ^java.io.File %) ".edn") (file-seq dir)))))
+        ;; The live store's own declarations with only the candidate's render
+        ;; declarations swapped in, so rows and the writer's projection agree
+        ;; as they do when one publication lands both.
+        forms' (merge (:seon.schema.projection/forms (seon.schema/projection-from-database db))
+                      (select-keys candidate-forms [:seon.render/ai :seon.render/html :seon.render/form
+                                                    :seon.render/read-form :seon.render/rendered :seon.render/ai-data]))
         t0 (System/nanoTime)
         projection' (seon.schema/declaration-projection forms')
         projection-ms (ms t0)
@@ -74,8 +80,9 @@
         ;; function lands in the same transaction as the row.
         live? (fn [sym] (seq (datahike.api/datoms db :avet :seon.fn/sym sym)))
         absent (into (sorted-set) (for [[_ p] lifted [_ {sym :seon.fn/sym}] p :when (not (live? sym))] sym))
+        installed-row? (fn [k] (seq (datahike.api/datoms db :avet :seon.schema/key k)))
         rows-b (into [] (keep (fn [[k p]] (let [p (into {} (filter (fn [[_ {sym :seon.fn/sym}]] (live? sym))) p)]
-                                          (when (seq p) (assoc p :seon.schema/key k)))))
+                                          (when (and (seq p) (installed-row? k)) (assoc p :seon.schema/key k)))))
                      lifted)
         t3 (System/nanoTime)
         db-b (when-not (refused? db-a) (seon.db/with db-a {:tx-data rows-b}))

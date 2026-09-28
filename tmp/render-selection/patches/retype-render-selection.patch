@@ -1,0 +1,304 @@
+diff --git a/docs/seon/architecture/data-modeling-guide.md b/docs/seon/architecture/data-modeling-guide.md
+index 6eaacbf..e23843b 100644
+--- a/docs/seon/architecture/data-modeling-guide.md
++++ b/docs/seon/architecture/data-modeling-guide.md
+@@ -286,7 +286,7 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
+ | `[:or …]` whose members share one native type | that type (`:122-127`) | e.g. `[:or [:= :a] [:= :b]]` is a keyword |
+ | `[:or …]` of mixed or non-scalar members (maps, vectors, symbol-or-string, symbol-or-hiccup) | `:db.type/string` holding canonical EDN (`:128-129`); encoded at the transaction seam (`encode-transaction-in`, `:506-523`) and decoded, validated and canonical-checked on read (`decode-attribute-value-in`, `:559-575`) | A heterogeneous value has no native Datahike type; the codec keeps the logical value whole. Two-keyword many-values are split into `:db/add`s so Datahike does not read them as a lookup ref (`explicit-value-members`, `:440-468`) |
+ | `[:map {:seon.db/attributes true} …]` (an entity schema) | no attribute of its own; each entry's attribute is selected for installation (`:229-240`) | The entity schema describes the entity; it stamps no kind. Required entries must be storable (`src/seon/schema/internal.cljc:290-299`) |
+-| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`) |
++| entity-schema properties: `:seon.program/partition`, `:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.render/units`, `:seon.db/component-schema`, … | each qualified property whose own declaration is storable is installed (`:244-249`) and written onto the schema's own entity (identity `:seon.schema/key`) beside `:seon.schema/form` (`storable-properties-in`, `:268-287`; `canonical-schema-entities`, `src/seon/schema.clj:3689-3716`) | The schema declaration is itself an entity, so the program graph can query which schemas are program (`:seon.program/partition :seon.program`, read at `src/seon/program.cljc:50-56`) and which render pair each declares. Readers of the live program read the same properties from the compiled projection (`internal/entity-properties`, `src/seon/schema/internal.cljc:122`). A property whose attribute declares `:seon.fn/reference-to` (the render faces `:seon.render/ai`, `:html`, `:form`) is stored as its EFFECTIVE value along Malli's reference chain (`declared-reference`: own properties, a pointer's target, an `:and`'s later arm first) and as a ref to that function's entity, so inherited pairs are rows too, "which schemas render with f" is one AVET read, and the writer refuses by name a declaration whose function is absent (`write-render-target-error`, `src/seon/db.clj`) |
+ 
+ ### Open questions (accidental or contradicting mappings)
+ 
+@@ -300,12 +300,12 @@ Each is evidence for an owner decision; the bridge is unchanged.
+    `:my.shell/failed-argv` (argv order and repeated arguments),
+    `:seon.render/candidates`, `:seon.config.ai/stop`, `:seon.config.fs/roots`,
+    `:seon.ai/wire`, `:seon.test/failing-assertions`. Owner: the vector-storage design.
+-2. **Render pairs stored as EDN strings.** `:seon.render/ai` is
+-   `[:or :qualified-symbol :string]` and `:seon.render/html`
+-   `[:or :qualified-symbol :seon.render/hiccup]`, so every schema entity stores
+-   its renderer symbol as an EDN string (`:122-129`). The decoded value is a
+-   symbol, but a Datalog clause over the raw datom cannot match
+-   `'seon.render.ns/schema-ai`, against AGENTS "symbols stay Datahike symbols".
++2. **Render pairs are refs (resolved).** The faces are declared
++   `[:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]`; a schema row
++   stores each effective face as a ref to its function (row above), and a
++   render function's output schemas are `:string` or `:seon.render/ai-data`
++   (AI), `:seon.render/hiccup` (HTML) and `:seon.render/read-form` (form), never
++   the face keys.
+ 3. **Hand-encoded EDN strings beside the codec.** `:seon.effect/request-edn`,
+    `result-edn` and `:seon.test.accretion/report-edn` are declared `:string` and
+    encoded by their writers; §6 forbids a hand-encoded EDN mirror of a declared
+diff --git a/resources/seon/tasks/seon.fn.edn b/resources/seon/tasks/seon.fn.edn
+index 723080c..3de7741 100644
+--- a/resources/seon/tasks/seon.fn.edn
++++ b/resources/seon/tasks/seon.fn.edn
+@@ -82,11 +82,6 @@
+              :intent "seon.fn/build-artifact is a second indexing path beside the production one. It analyzes with no cache root (seon.fn.analyzer/analyze turns the cache off outside the checkout, analyzer.clj:818-822) and takes a hand-written first-party list, while the production path seon.fn/program-entities and analyzed-artifacts (fn.clj:2641) read the checkout cache and derive first-party from the database's entities. It has no src caller. Its test callers (fn_test ~881, 2071, 2080, 2132, 2431, 2843; program_test 1348; reset_edges_test 188; adoption_entities_test 15; edit_test 261; test/runner_test 163) mostly pass an empty first-party list and carry the same latent 'no analysis of seon.db' refusal since a9449b7c3. Delete it and convert its callers to seon.fn/program-entities in the same commit."
+              :must-read #{seon.fn/build-artifact seon.fn/program-entities}
+              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
+- #:seon.task{:name "declared-render-targets-select-no-tests"
+-             :kind :function
+-             :intent "The declared-edge rules name a target by a stored symbol ([(symbol? ?v)] on the raw datom), but :seon.render/ai and :seon.render/html are stored as strings that name render functions: seon.render/invoke-selected invokes seon.sci.kernel/render-ai and nine others through them, and selection never reaches their callers' tests. Read on default 2026-09-27: seon.db/datoms decodes these values to symbols and finds 127 declared targets where the stored-symbol rule finds 19. seon.fn/declared-callers keeps the stored-symbol rule so selection is unchanged; decide whether a decoded symbol names a target and change it with its regression."
+-             :must-read #{seon.fn/declared-callers seon.fn/call-reach seon.render/invoke-selected}
+-             :evidence #{"tmp/test-feedback-perf/proof.clj"}}
+  #:seon.task{:name "functions-without-tests-is-the-last-datalog-reach"
+              :kind :function
+              :intent "seon.fn/functions-without-tests has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside seon.fn/declared-callers that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach."
+diff --git a/src/my/program.clj b/src/my/program.clj
+index 56f8692..e5428da 100644
+--- a/src/my/program.clj
++++ b/src/my/program.clj
+@@ -248,10 +248,11 @@
+                    (when (= subject renderer)
+                      {:seon.schema/key schema-key :seon.schema/property property}))
+                  (let [result (db/q database
+-                                '[:find ?key ?renderer :in $ ?property :where
+-                                  [?schema :seon.schema/key ?key]
+-                                  [?schema ?property ?renderer]]
+-                                property)]
++                                '[:find ?key ?renderer :in $ ?property ?renderer :where
++                                  [?function :seon.fn/sym ?renderer]
++                                  [?schema ?property ?function]
++                                  [?schema :seon.schema/key ?key]]
++                                property subject)]
+  (if (:seon.db/invalid-read result)
+ 
+  (throw (ex-info (:seon.error/message result) result)) result)))))
+diff --git a/src/my/turn.clj b/src/my/turn.clj
+index 34a7ef2..76d1a2f 100644
+--- a/src/my/turn.clj
++++ b/src/my/turn.clj
+@@ -29,6 +29,6 @@
+ (defn usage-form
+   "Render the lifecycle usage request."
+   {:seon.fn/internal? true
+-   :malli/schema [:=> [:cat :my.turn/usage-unit] :seon.render/form]}
++   :malli/schema [:=> [:cat :my.turn/usage-unit] :seon.render/read-form]}
+   [request]
+   (run/usage-form request))
+diff --git a/src/seon/error.clj b/src/seon/error.clj
+index 3b426da..3beadc7 100644
+--- a/src/seon/error.clj
++++ b/src/seon/error.clj
+@@ -2189,7 +2189,7 @@
+ (defn render-form
+   "The form that finds this data again: the reply over the held error, when
+   the viewer holds it. Shown, never executed."
+-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
++  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/read-form]]}
+   [unit]
+   (when-let [held (held-reference unit)]
+     (list 'seon.error/reply-value held)))
+@@ -2341,7 +2341,7 @@
+   with zero evaluations and one `:seon.render/unknown` fault. Absence of a
+   fault is ordinary — it emits no form, exactly as an agent with faults but
+   no readable identity already did."
+-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.render/form :seon.db/error-result]]}
++  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.render/read-form :seon.db/error-result]]}
+   [unit]
+   (when-let [entity (faults-input unit)]
+    (let [entity-map (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
+diff --git a/src/seon/render.clj b/src/seon/render.clj
+index 75bc081..0ec19a3 100644
+--- a/src/seon/render.clj
++++ b/src/seon/render.clj
+@@ -688,7 +688,7 @@
+         (if (find request :seon.render/viewer-functions) request (viewer request))
+         ;; A face is a render output, never the schema's declaration of its
+         ;; renderer (the face keys name functions).
+-        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup output)
++        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup :seon.render/form :seon.render/read-form)
+         argument (delay (producer-argument request))
+         evidence (mapv (fn [candidate]
+                          (if (or (schema/function-accepts-and-returns-in?
+@@ -1264,7 +1264,7 @@
+      :seon.render/ai (and (some? rendered)
+                           (not ((schema/projection-validator projection :seon.error/base) rendered)))
+      :seon.render/html (hiccup/hiccup? rendered)
+-     ((schema/projection-validator projection :seon.render/form) rendered))))
++     ((schema/projection-validator projection :seon.render/read-form) rendered))))
+ 
+ (defn- declared-return?
+   "Does the selected producer's contract declare returning `rendered` for
+@@ -1467,7 +1467,7 @@
+ (defn render-form
+   "Spell the structural read that reproduces one reached database value."
+   {:malli/schema [:=> [:cat :seon.render/unit]
+-                  [:or :seon.render/form :seon.render/request-error :seon.db/error-result]]}
++                  [:or :seon.render/read-form :seon.render/request-error :seon.db/error-result]]}
+   [unit]
+   (let [value (:seon.render/value unit)
+         root (or (:seon.render.value/root unit)
+@@ -1494,7 +1494,7 @@
+ (defn render-form-value
+   "Render one value as the Clojure form that reads it."
+   {:malli/schema [:=> [:cat :seon.render/call-request]
+-                  [:or :seon.render/form :seon.render/error-result]]}
++                  [:or :seon.render/read-form :seon.render/error-result]]}
+   [request]
+   (let [profile (request-profile request)]
+     (if (:seon.render/refused-member profile)
+@@ -1509,7 +1509,7 @@
+   {:seon/tasks #{"c5e9496b4cb1"}
+    :malli/schema [:=> [:cat :seon.render/call-request]
+                   [:or :nil :string :seon.render/hiccup
+-                   :seon.render/form :seon.render/error-result]]}
++                   :seon.render/read-form :seon.render/error-result]]}
+   [{database :seon.db/db
+     output :seon.render/output
+     call-id :seon.render.call/id
+diff --git a/src/seon/render/ns.clj b/src/seon/render/ns.clj
+index e0f0823..3b016ad 100644
+--- a/src/seon/render/ns.clj
++++ b/src/seon/render/ns.clj
+@@ -108,7 +108,7 @@
+ 
+ (defn namespace-form
+   "Return the ordinary `dir` form for a namespace entity."
+-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
++  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
+   [unit]
+   (list 'dir (list 'quote (:seon.ns/name unit))))
+ 
+diff --git a/src/seon/render/schema.clj b/src/seon/render/schema.clj
+index 622b70e..06a8569 100644
+--- a/src/seon/render/schema.clj
++++ b/src/seon/render/schema.clj
+@@ -196,7 +196,7 @@
+ (defn render-form
+   "The form that finds this data again: the `usage` read for the registered
+   key and form, over the viewer's database. Shown, never executed."
+-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
++  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/read-form]]}
+   [unit]
+   (when-let [[schema-key definition] (subject unit)]
+     (list 'seon.render.schema/usage '(seon.db/db) schema-key (list 'quote definition))))
+diff --git a/src/seon/render/walk.clj b/src/seon/render/walk.clj
+index c0b8cc4..daa1947 100644
+--- a/src/seon/render/walk.clj
++++ b/src/seon/render/walk.clj
+@@ -771,7 +771,7 @@
+                                               (not (and (= output :seon.render/form)
+                                                         ((schema/projection-validator
+                                                           (db/carried-projection database)
+-                                                          :seon.render/form)
++                                                          :seon.render/read-form)
+                                                          rendered))))
+                                      rendered)
+                            failure-outcome
+diff --git a/src/seon/run.clj b/src/seon/run.clj
+index 0eb3444..4f49064 100644
+--- a/src/seon/run.clj
++++ b/src/seon/run.clj
+@@ -63,7 +63,7 @@
+   generated opening cannot silently retain a hand-copied demonstration after
+   its recurring anti-rot gate disappears."
+   {:malli/schema
+-   [:=> [:cat :my.turn/usage-unit] :seon.render/form]}
++   [:=> [:cat :my.turn/usage-unit] :seon.render/read-form]}
+   [unit]
+   (let [database (:seon.db/db unit)
+         usage-test
+diff --git a/test/my/program_query_test.clj b/test/my/program_query_test.clj
+index b80695f..5e9ac54 100644
+--- a/test/my/program_query_test.clj
++++ b/test/my/program_query_test.clj
+@@ -33,29 +33,31 @@
+                         :seon.program.probe/bound-count (count bound)
+                         :seon.program.probe/direct-count (count direct)}))))))
+ 
+-(deftest scalar-attribute-bindings-preserve-the-renderer-value-type
++(deftest scalar-attribute-bindings-preserve-an-encoded-value-type
+   (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+-           schema-key :seon.program/breakage
+-           pulled (db/pull database [:seon.render/ai] [:seon.schema/key schema-key])
++           ;; An EDN-codec property lifted onto a schema row (render faces are
++           ;; refs since render-selection slice A; a print default stays encoded).
++           schema-key :seon.print/length
++           pulled (db/pull database [:seon.print/default] [:seon.schema/key schema-key])
+            scalar (db/q database
+                         '[:find ?renderer . :in $ ?key ?property :where
+                           [?schema :seon.schema/key ?key]
+                           [?schema ?property ?renderer]]
+-                        schema-key :seon.render/ai)
++                        schema-key :seon.print/default)
+            literal (db/q database
+                          '[:find ?renderer . :in $ ?key :where
+                            [?schema :seon.schema/key ?key]
+-                           [?schema :seon.render/ai ?renderer]] schema-key)
++                           [?schema :seon.print/default ?renderer]] schema-key)
+            collection (db/q database
+                             '[:find ?property ?renderer
+                               :in $ ?key [?property ...] :where
+                               [?schema :seon.schema/key ?key]
+                               [?schema ?property ?renderer]]
+-                            schema-key [:seon.render/ai])]
+-       (is (= 'seon.render.value/render-ai (:seon.render/ai pulled)))
+-       (is (= (:seon.render/ai pulled) scalar literal))
++                            schema-key [:seon.print/default])]
++       (is (integer? (:seon.print/default pulled)))
++       (is (= (:seon.print/default pulled) scalar literal))
+        (println (pr-str {:seon.program.probe/pulled pulled
+                         :seon.program.probe/scalar scalar
+                         :seon.program.probe/literal literal
+diff --git a/test/seon/render/history_test.clj b/test/seon/render/history_test.clj
+index 60e61bd..9667330 100644
+--- a/test/seon/render/history_test.clj
++++ b/test/seon/render/history_test.clj
+@@ -177,13 +177,13 @@
+                        (support/fork-cluster-ctx connection))
+            entry {:seon.repl/comment "; think"
+                   :seon.repl/form '(help)}]
+-       (is (valid? projection :seon.render/form '(help)))
+-       (is (valid? projection :seon.render/form entry))
+-       (is (valid? projection :seon.render/form
++       (is (valid? projection :seon.render/read-form '(help)))
++       (is (valid? projection :seon.render/read-form entry))
++       (is (valid? projection :seon.render/read-form
+                    [entry {:seon.repl/form '(dir 'my.turn)}]))
+-       (is (not (valid? projection :seon.render/form
++       (is (not (valid? projection :seon.render/read-form
+                         {:seon.repl/comment "; no act"})))
+        ;; A refusal is its producer's declared return, never a form.
+-       (is (not (valid? projection :seon.render/form
++       (is (not (valid? projection :seon.render/read-form
+                    {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.history-test/fixture :seon.error/operation 'seon.render.history-test/form-output-validation-is-the-declared-open-shape :seon.render/refused-member :seon.render/output
+                     :seon.error/message "failed"})))))))
+diff --git a/test/seon/schema/datahike_test.clj b/test/seon/schema/datahike_test.clj
+index 702dba0..d991d9a 100644
+--- a/test/seon/schema/datahike_test.clj
++++ b/test/seon/schema/datahike_test.clj
+@@ -437,9 +437,9 @@
+             :seon.render/html 'my.agents.render-codec/render-plan-html
+             :seon.render/form 'my.agents.render-codec/render-plan-form}
+            outputs
+-           {:seon.render/ai :seon.render/ai
+-            :seon.render/html :seon.render/html
+-            :seon.render/form :seon.render/form}
++           {:seon.render/ai :string
++            :seon.render/html :seon.render/hiccup
++            :seon.render/form :seon.render/read-form}
+            entity-tx (ns-resolve 'seon.turn 'row-tx)
+            transact-entity!
+            (fn [entity-map]
+@@ -492,10 +492,12 @@
+              selected-entity
+              (some #(when (= shape (:seon.schema/key %)) %)
+                    (schema/matching-shapes-in projection entity))]
+-         (testing "storage uses the declared encoded representation"
+-           (is (= (update-vals renderers pr-str) raw-entity)))
+-         (testing "database reads restore the logical qualified symbols"
+-           (is (= renderers logical-entity)))
++         (testing "each face is stored as a ref to its function's entity"
++           (is (= (update-vals renderers
++                               #(select-keys (d/pull (db/db connection) [:db/id] [:seon.fn/sym %]) [:db/id]))
++                  raw-entity)))
++         (testing "a database read answers the ref, never a symbol to re-resolve"
++           (is (= raw-entity logical-entity)))
+          (testing "cold acquisition preserves the declarations used by selection"
+            (is (= renderers (select-keys selected-entity (keys renderers))))))))))
+ 

@@ -100,18 +100,10 @@ index 723080c..3de7741 100644
               :kind :function
               :intent "seon.fn/functions-without-tests has no caller outside fn_test and is the last reader of test-reach-rules and declared-reference-rules, a second statement of the declared-invocation relation beside seon.fn/declared-callers that can drift from it (111 s on default when measured 2026-09-17). Delete it with both rule sets, or derive coverage from call-reach."
 diff --git a/src/my/program.clj b/src/my/program.clj
-index c290313..e5428da 100644
+index 56f8692..e5428da 100644
 --- a/src/my/program.clj
 +++ b/src/my/program.clj
-@@ -11,6 +11,7 @@
-             [clojure.set :as set]
-             [seon.error :as error]
-             [seon.fn :as function]
-+            [seon.render.value :as render.value]
-             [seon.issue :as issue]
-             [seon.cluster.branch :as cluster.branch]
-             [seon.cluster.message :as message]
-@@ -247,10 +248,11 @@
+@@ -248,10 +248,11 @@
                     (when (= subject renderer)
                       {:seon.schema/key schema-key :seon.schema/property property}))
                   (let [result (db/q database
@@ -127,15 +119,6 @@ index c290313..e5428da 100644
   (if (:seon.db/invalid-read result)
  
   (throw (ex-info (:seon.error/message result) result)) result)))))
-@@ -275,7 +277,7 @@
-                :seon.issue/problem
-                (str "Repair the caller before retrying the retraction. Preserve its gate set. "
-                     "Done condition: seon.program/unresolved-callers no longer names the caller. "
--                    (pr-str (filterv #(= caller (:seon.fn/sym %)) sites)))
-+                    (render.value/bounded-text (filterv #(= caller (:seon.fn/sym %)) sites)))
-                :seon.issue/status :open :seon.issue/severity :friction
-                :seon.issue/functions #{[:seon.fn/sym value]}
-                :seon.issue/detector [:seon.fn/sym detector]}
 diff --git a/src/my/turn.clj b/src/my/turn.clj
 index 34a7ef2..76d1a2f 100644
 --- a/src/my/turn.clj
@@ -148,65 +131,6 @@ index 34a7ef2..76d1a2f 100644
 +   :malli/schema [:=> [:cat :my.turn/usage-unit] :seon.render/read-form]}
    [request]
    (run/usage-form request))
-diff --git a/src/seon/background.clj b/src/seon/background.clj
-index 6b445bc..facc4bd 100644
---- a/src/seon/background.clj
-+++ b/src/seon/background.clj
-@@ -15,7 +15,7 @@
-     [:cat [:or :my.background/invalid-call-error
-            :my.background/invalid-result-error
-            :my.background/missing-result-error]]
--    :seon.render/ai]}
-+    :string]}
-   [error]
-   (:seon.error/message error))
- 
-diff --git a/src/seon/cluster.clj b/src/seon/cluster.clj
-index 7cdc460..6ca3b68 100644
---- a/src/seon/cluster.clj
-+++ b/src/seon/cluster.clj
-@@ -1432,6 +1432,14 @@
-   (or (schema-lookup-ref? value)
-       (and (set? value) (seq value) (every? schema-lookup-ref? value))))
- 
-+(defn- identity-reference?
-+  "Is `value`, under installed ref `attribute`, a nested entity map naming its
-+  target by one identity attribute alone?"
-+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value] :boolean]}
-+  [database attribute value]
-+  (and (map? value) (= 1 (count value)) (qualified-keyword? (key (first value)))
-+       (= :db.type/ref (get-in (:schema database) [attribute :db/valueType]))))
-+
- (defn- as-schema-lookup-refs
-   "Normalize a pulled ref value into the canonical lookup-ref shape.
- 
-@@ -1489,9 +1497,14 @@
-    (keep
-     (fn [{schema-key :seon.schema/key :as desired}]
-       (let [selector (mapv (fn [[attribute value]]
--                             (if (schema-reference-valued? value)
--                               {attribute [:seon.schema/key]}
--                               attribute))
-+                             (cond
-+                               (schema-reference-valued? value) {attribute [:seon.schema/key]}
-+                               ;; A ref the bridge writes as a nested identity
-+                               ;; map (a render pair's `{:seon.fn/sym f}`) reads
-+                               ;; back through that identity, so a converged
-+                               ;; row compares equal.
-+                               (identity-reference? db attribute value) {attribute (vec (keys value))}
-+                               :else attribute))
-                            desired)
-             pulled (some-> (db/pull db selector
-                                     [:seon.schema/key schema-key])
-@@ -1984,7 +1997,7 @@
- 
-               (> (count (:seon.source/recorded-digests currentness)) 1)
-               (str "incoherent (multiple recorded source digests "
--                   (pr-str (:seon.source/recorded-digests currentness))
-+                   (render.value/bounded-text (:seon.source/recorded-digests currentness))
-                    ")")
- 
-               :else
 diff --git a/src/seon/cluster/agent.clj b/src/seon/cluster/agent.clj
 index 281fa83..d83bdd2 100644
 --- a/src/seon/cluster/agent.clj
@@ -243,7 +167,7 @@ index 03e4e60..738b43f 100644
    (list 'my.message/inbox
          {:seon.agent/id
 diff --git a/src/seon/db.clj b/src/seon/db.clj
-index 78a0f94..d8fa751 100644
+index 2075cba..7422ff2 100644
 --- a/src/seon/db.clj
 +++ b/src/seon/db.clj
 @@ -4,7 +4,6 @@
@@ -254,7 +178,7 @@ index 78a0f94..d8fa751 100644
              [clojure.set :as set]
              [clojure.string :as str]
              [clojure.walk :as walk]
-@@ -4579,35 +4578,70 @@
+@@ -4595,35 +4594,70 @@
    [database]
    (arity-mismatches-with q database (carried-projection database)))
  
@@ -352,7 +276,7 @@ index 78a0f94..d8fa751 100644
      (when (seq missing)
        (diagnostic
         {::transaction-refused true
-@@ -4617,7 +4651,7 @@
+@@ -4633,7 +4667,7 @@
          :seon.error/operation 'seon.db/transact!
          :seon.error/member :seon.schema/form
          :seon.error/expected :seon.fn/sym
@@ -361,7 +285,7 @@ index 78a0f94..d8fa751 100644
  
  (defn- removed-definition-error
    "Check surviving names against the identities removed by an admitted change.
-@@ -5173,6 +5207,8 @@
+@@ -5189,6 +5223,8 @@
          owned (delay (write-owned-values-error projection report attribute-plans identity-attrs))]
      (or
       (retention-report-check projection report affected)
@@ -370,7 +294,7 @@ index 78a0f94..d8fa751 100644
       (some (fn [datom]
               (when (:added datom)
                 (let [attribute (:a datom)
-@@ -5194,26 +5230,6 @@
+@@ -5210,26 +5246,6 @@
       (write-deletion-error before database affected identity-attrs)
       (when-not (find @owned ::changed-identity-attributes) @owned)
       (write-digest-error projection report (identity-attributes database))
@@ -398,10 +322,10 @@ index 78a0f94..d8fa751 100644
       ;; supplied defaults. The owning-value walk already found
       ;; every changed root on both sides, including swept/deleted children.
 diff --git a/src/seon/error.clj b/src/seon/error.clj
-index f59bd14..47aec7b 100644
+index 3b426da..3beadc7 100644
 --- a/src/seon/error.clj
 +++ b/src/seon/error.clj
-@@ -2440,7 +2440,7 @@
+@@ -2189,7 +2189,7 @@
  (defn render-form
    "The form that finds this data again: the reply over the held error, when
    the viewer holds it. Shown, never executed."
@@ -410,7 +334,7 @@ index f59bd14..47aec7b 100644
    [unit]
    (when-let [held (held-reference unit)]
      (list 'seon.error/reply-value held)))
-@@ -2624,7 +2624,7 @@
+@@ -2341,7 +2341,7 @@
    with zero evaluations and one `:seon.render/unknown` fault. Absence of a
    fault is ordinary — it emits no form, exactly as an agent with faults but
    no readable identity already did."
@@ -420,18 +344,9 @@ index f59bd14..47aec7b 100644
    (when-let [entity (faults-input unit)]
     (let [entity-map (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
 diff --git a/src/seon/note.clj b/src/seon/note.clj
-index b14b9ff..b83fc3a 100644
+index 1bb1b2a..b83fc3a 100644
 --- a/src/seon/note.clj
 +++ b/src/seon/note.clj
-@@ -51,7 +51,7 @@
- 
- (defn render-note-ai
-   "Render one current note as text."
--  {:malli/schema [:=> [:cat :my.note/note] :seon.render/ai]}
-+  {:malli/schema [:=> [:cat :my.note/note] :string]}
-   [note]
-   (str "Note " (note-line (note-value note))))
- 
 @@ -132,7 +132,7 @@
  
  (defn render-note-form
@@ -451,86 +366,28 @@ index b14b9ff..b83fc3a 100644
    (list 'my.note/notes))
  
 diff --git a/src/seon/render.clj b/src/seon/render.clj
-index 5ee4486..9f8fc28 100644
+index 75bc081..0ec19a3 100644
 --- a/src/seon/render.clj
 +++ b/src/seon/render.clj
-@@ -617,12 +617,18 @@
- 
- (defn- explicit-value
-   "A map's own inline render for OUTPUT's face: a renderer symbol, an inline
--  function (invoked under the same arm as a named producer), or the rendered
--  data itself. Each face is independent; nil when the value names none."
-+  function (invoked under the same arm as a named producer), or rendered data.
-+  Each face is independent; nil when the value names none. An unexpanded
-+  Datahike ref (`{:db/id n}`, with `:db/ident` when the target has one,
-+  datahike/pull_api.cljc:298-302) is not rendered data: a pulled schema
-+  entity's stored render ref is its schema's declaration, never its own
-+  render, so it falls through to the declared stage."
-   {:malli/schema [:=> [:cat :seon.schema/value :seon.render/output]
-                   [:maybe [:tuple :seon.render/output :seon.schema/value]]]}
-   [value output]
--  (when (render.value/keyword-lookup? value) (find value output)))
-+  (when-let [[_ v :as entry] (when (render.value/keyword-lookup? value) (find value output))]
-+    (when-not (and (map? v) (contains? v :db/id) (empty? (dissoc v :db/id :db/ident)))
-+      entry)))
- 
- (defn- explicit-value-stage
-   [request output]
-@@ -680,7 +686,9 @@
-   [request projection output]
-   (let [{namespace-name :seon.render/namespace candidates :seon.render/viewer-functions}
+@@ -688,7 +688,7 @@
          (if (find request :seon.render/viewer-functions) request (viewer request))
--        output-schema (case output :seon.render/html :seon.render/hiccup output)
-+        ;; A face is a render output, never the schema's declaration of its
-+        ;; renderer (`:seon.render/ai`, `:html` and `:form` are refs to functions).
+         ;; A face is a render output, never the schema's declaration of its
+         ;; renderer (the face keys name functions).
+-        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup output)
 +        output-schema (case output :seon.render/ai :string :seon.render/html :seon.render/hiccup :seon.render/form :seon.render/read-form)
          argument (delay (producer-argument request))
          evidence (mapv (fn [candidate]
                           (if (or (schema/function-accepts-and-returns-in?
-@@ -1238,7 +1246,7 @@
-               :seon.error/operation 'seon.render/raw-output
-               :seon.render/invalid-output (keyword (name output))
-               :seon.error/message (case output
--                                    :seon.render/ai "The selected AI renderer did not return text."
-+                                    :seon.render/ai "The selected AI renderer returned nothing or an undeclared error value."
-                                     :seon.render/html "The selected HTML renderer did not return Hiccup."
-                                     "The selected form renderer did not return a form.")
-               :seon.error/data {:seon.render/output rendered}
-@@ -1247,15 +1255,16 @@
-              assoc :seon.error/declared-schema :seon.render/invalid-output-error))
- 
- (defn- face-valid?
--  "Is `rendered` on `output`'s face: AI text or source blocks, Hiccup, a form?"
-+  "Is `rendered` on `output`'s face: AI data (any value but an error value,
-+  which is the producer's declared refusal), Hiccup, a form?"
-   {:malli/schema [:=> [:cat :seon.schema/projection :seon.render/output :seon.schema/value] :boolean]}
-   [projection output rendered]
-   (boolean
-    (case output
--     :seon.render/ai (or (string? rendered)
--                         ((schema/projection-validator projection :seon.render/source-blocks) rendered))
-+     :seon.render/ai (and (some? rendered)
-+                          (not ((schema/projection-validator projection :seon.error/base) rendered)))
+@@ -1264,7 +1264,7 @@
+      :seon.render/ai (and (some? rendered)
+                           (not ((schema/projection-validator projection :seon.error/base) rendered)))
       :seon.render/html (hiccup/hiccup? rendered)
 -     ((schema/projection-validator projection :seon.render/form) rendered))))
 +     ((schema/projection-validator projection :seon.render/read-form) rendered))))
  
  (defn- declared-return?
    "Does the selected producer's contract declare returning `rendered` for
-@@ -1390,9 +1399,10 @@
-       (if (contains? answer :face) face failure))))
- 
- (defn render-ai
--  "Render one value as text through the unique selected live SCI Var."
-+  "Render one value for an AI agent through the unique selected live SCI Var:
-+  its data, which the value printer prints; never evaluated."
-   {:malli/schema [:=> [:cat :seon.render/call-request]
--                  [:or :nil :string :seon.render/error-result]]
-+                  [:or :nil :seon.render/ai-data :seon.render/error-result]]
-    :seon.fn/external-sink :ai-visible-text
-   :seon.fn/projection-boundary :seon.render/ai}
-   [request]
-@@ -1457,7 +1467,7 @@
+@@ -1467,7 +1467,7 @@
  (defn render-form
    "Spell the structural read that reproduces one reached database value."
    {:malli/schema [:=> [:cat :seon.render/unit]
@@ -539,7 +396,7 @@ index 5ee4486..9f8fc28 100644
    [unit]
    (let [value (:seon.render/value unit)
          root (or (:seon.render.value/root unit)
-@@ -1484,7 +1494,7 @@
+@@ -1494,7 +1494,7 @@
  (defn render-form-value
    "Render one value as the Clojure form that reads it."
    {:malli/schema [:=> [:cat :seon.render/call-request]
@@ -548,7 +405,7 @@ index 5ee4486..9f8fc28 100644
    [request]
    (let [profile (request-profile request)]
      (if (:seon.render/refused-member profile)
-@@ -1499,7 +1509,7 @@
+@@ -1509,7 +1509,7 @@
    {:seon/tasks #{"c5e9496b4cb1"}
     :malli/schema [:=> [:cat :seon.render/call-request]
                    [:or :nil :string :seon.render/hiccup
@@ -558,10 +415,10 @@ index 5ee4486..9f8fc28 100644
      output :seon.render/output
      call-id :seon.render.call/id
 diff --git a/src/seon/render/ns.clj b/src/seon/render/ns.clj
-index 1b620bd..76aa9fc 100644
+index e0f0823..3b016ad 100644
 --- a/src/seon/render/ns.clj
 +++ b/src/seon/render/ns.clj
-@@ -108,13 +108,13 @@
+@@ -108,7 +108,7 @@
  
  (defn namespace-form
    "Return the ordinary `dir` form for a namespace entity."
@@ -569,13 +426,6 @@ index 1b620bd..76aa9fc 100644
 +  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
    [unit]
    (list 'dir (list 'quote (:seon.ns/name unit))))
- 
- (defn schema-form
-   "Return the ordinary `doc` form for a schema entity."
--  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
-+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
-   [unit]
-   (list 'doc (:seon.schema/key unit)))
  
 diff --git a/src/seon/render/schema.clj b/src/seon/render/schema.clj
 index 622b70e..06a8569 100644
@@ -629,124 +479,6 @@ index 0eb3444..4f49064 100644
    [unit]
    (let [database (:seon.db/db unit)
          usage-test
-diff --git a/src/seon/schema/datahike.clj b/src/seon/schema/datahike.clj
-index 925c24b..a872964 100644
---- a/src/seon/schema/datahike.clj
-+++ b/src/seon/schema/datahike.clj
-@@ -271,14 +271,46 @@
-    (when (contains? (:seon.schema.projection/forms projection) attr)
-      (declared-storable? projection attr))))
- 
-+(defn- chain-properties
-+  "Property maps along Malli's reference chain, nearest first: the schema's
-+  own, its type's, then a registry pointer's or `:ref`'s target
-+  (`m/deref`, malli/core.cljc:2864-2870) and an `:and`'s arms with the later
-+  arm first, as `mu/merge` lets the later arm win (malli/util.cljc:77, 96)."
-+  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:vector [:maybe :map]]]}
-+  [compiled]
-+  (into [(m/properties compiled) (m/type-properties compiled)]
-+        (cond
-+          (m/-ref-schema? compiled) (chain-properties (m/deref compiled))
-+          (= :and (m/type compiled)) (into [] (mapcat chain-properties) (rseq (vec (m/children compiled))))
-+          :else [])))
-+
-+(defn declared-reference
-+  "The function `property` names for `compiled`'s values, own or inherited.
-+
-+  The nearest value along Malli's reference chain (`chain-properties`), when
-+  it is a qualified symbol, else nil. A render pair resolves this way, so a
-+  derived error takes its own arm's pair before `:seon.error/base`'s."
-+  {:malli/schema [:=> [:cat [:fn malli.core/schema?] :qualified-keyword] [:maybe :qualified-symbol]]}
-+  [compiled property]
-+  (let [found (some #(get % property) (chain-properties compiled))]
-+    (when (qualified-symbol? found) found)))
-+
- (defn storable-properties-in
-   "Namespaced properties whose own declarations are database-storable.
- 
-+   A property whose attribute declares `:seon.fn/reference-to` names a
-+   function: it is stored as its EFFECTIVE value along the reference chain
-+   (`declared-reference`), a ref to the entity that identity attribute
-+   names, so the writer refuses a declaration whose function is absent and
-+   \"which schemas render with f\" is one AVET read. Every other property is
-+   the schema's own.
-+
-    A key absent from the projection refuses by name: `mr/schema` answers nil
-    for it, which Malli then reported as an anonymous invalid nil schema."
-   {:malli/schema [:=> [:cat :map :keyword] :map]}
-   [projection schema-key]
--  (let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
-+  (let [registry (:seon.schema.projection/registry projection)
-+        compiled (mr/schema registry schema-key)]
-     (when-not compiled
-       (throw (ex-info (str "Missing schema declaration " schema-key
-                            ": the supplied projection does not declare it.")
-@@ -286,11 +318,20 @@
-                        :seon.schema/key schema-key
-                        :seon.schema/missing-reference schema-key
-                        :seon.schema/missing-reference-namespace (namespace schema-key)})))
--    (into {}
--          (filter (fn [[property v]]
--                    (and (qualified-keyword? property) (some? v)
--                         (storable-attribute-in? projection property))))
--          (m/properties compiled))))
-+    (let [storable? #(and (qualified-keyword? %) (storable-attribute-in? projection %))
-+          identity-of #(when-let [identity-attribute (and (qualified-keyword? %)
-+                                                          (:seon.fn/reference-to (some-> (mr/schema registry %) m/properties)))]
-+                         (when (storable? %) identity-attribute))
-+          references (into {}
-+                           (keep (fn [property]
-+                                   (when-let [identity-attribute (identity-of property)]
-+                                     (when-let [function (declared-reference compiled property)]
-+                                       [property {identity-attribute function}]))))
-+                           (distinct (mapcat keys (chain-properties compiled))))]
-+      (into references
-+            (filter (fn [[property v]]
-+                      (and (some? v) (storable? property) (not (identity-of property)))))
-+            (m/properties compiled)))))
- 
- (defn database-attributes-core-in
-   "Entity members and independently persisted attributes, without metadata properties."
-@@ -403,27 +444,16 @@
-    (fn [[namespace-name local-name]]
-      (symbol namespace-name local-name))})
- 
--(defn- canonical-print-string
--  {:seon/tasks #{"befc26639ad0"}}
--  [value]
--  (binding [*print-length* nil
--            *print-level* nil
--            *print-meta* false
--            *print-readably* true
--            *print-dup* false
--            *print-namespace-maps* true]
--    (pr-str value)))
--
- (defn- storage-compare
-   {:seon/tasks #{"befc26639ad0"}}
-   [left right]
--  (compare (canonical-print-string left)
--           (canonical-print-string right)))
-+  (compare (id/printed left)
-+           (id/printed right)))
- 
- (defn- reader-round-trips?
-   [value]
-   (try
--    (= value (edn/read-string (canonical-print-string value)))
-+    (= value (edn/read-string (id/printed value)))
-     ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
-     (catch RuntimeException _ false)))
- 
-@@ -452,7 +482,7 @@
- 
- (defn- storage-string
-   [value]
--  (canonical-print-string (storage-data value)))
-+  (id/printed (storage-data value)))
- 
- (defn- encode-call-output-in
-   "Encode transaction data returned by one Datahike transaction function.
 diff --git a/src/seon/test/accretion.clj b/src/seon/test/accretion.clj
 index 33c2942..7e576c1 100644
 --- a/src/seon/test/accretion.clj
@@ -805,10 +537,10 @@ index b80695f..5e9ac54 100644
                          :seon.program.probe/scalar scalar
                          :seon.program.probe/literal literal
 diff --git a/test/seon/db_test.clj b/test/seon/db_test.clj
-index 0f061aa..1cf6869 100644
+index 09c5c2a..2a6f020 100644
 --- a/test/seon/db_test.clj
 +++ b/test/seon/db_test.clj
-@@ -2893,25 +2893,26 @@
+@@ -2899,25 +2899,26 @@
           (is (false? (db/read-evidence-current? @connection evidence))
               "a changed datom on the page makes it stale"))))))
  
@@ -852,28 +584,6 @@ index 0f061aa..1cf6869 100644
  
  (deftest a-report-touching-no-function-reuses-the-committed-arity-comparison
    ;; The arity gate compares only call edges and bounds under a caller or
-diff --git a/test/seon/render/entity_pairs_test.clj b/test/seon/render/entity_pairs_test.clj
-index 7ea9f39..43863f7 100644
---- a/test/seon/render/entity_pairs_test.clj
-+++ b/test/seon/render/entity_pairs_test.clj
-@@ -242,7 +242,7 @@
-       connection
-       [(support/program-fn-entity
-         (db/db connection) 'my.agents.viewer/agent-view
--        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :seon.render/ai]} [unit] \"viewer's view\")")])
-+        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :string]} [unit] \"viewer's view\")")])
-      (let [database (db/db connection)
-            ctx (support/fork-cluster-ctx connection)
-            selected (fn [viewer value output]
-@@ -279,7 +279,7 @@
-         connection
-         [(support/program-fn-entity
-           (db/db connection) 'my.agents.db-viewer/probe-view
--          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
-+          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :string]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
-        (let [database (db/db connection)
-              ctx (support/fork-cluster-ctx connection)
-              rendered (fn [value]
 diff --git a/test/seon/render/history_test.clj b/test/seon/render/history_test.clj
 index 60e61bd..9667330 100644
 --- a/test/seon/render/history_test.clj
@@ -897,158 +607,11 @@ index 60e61bd..9667330 100644
 +       (is (not (valid? projection :seon.render/read-form
                     {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.history-test/fixture :seon.error/operation 'seon.render.history-test/form-output-validation-is-the-declared-open-shape :seon.render/refused-member :seon.render/output
                      :seon.error/message "failed"})))))))
-diff --git a/test/seon/render_simplification/fixture_a.clj b/test/seon/render_simplification/fixture_a.clj
-index a174cba..07c2235 100644
---- a/test/seon/render_simplification/fixture_a.clj
-+++ b/test/seon/render_simplification/fixture_a.clj
-@@ -2,6 +2,6 @@
- 
- (defn namespace-ai
-   "Identify fixture A's declared subject (seon.render-simplification-test/declare-subject!)."
--  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
-+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
-   [value]
-   (str "A:" (:seon.ns/name value)))
-diff --git a/test/seon/render_simplification/fixture_ambiguous.clj b/test/seon/render_simplification/fixture_ambiguous.clj
-index 1fe34eb..0207dcc 100644
---- a/test/seon/render_simplification/fixture_ambiguous.clj
-+++ b/test/seon/render_simplification/fixture_ambiguous.clj
-@@ -2,12 +2,12 @@
- 
- (defn first-ai
-   "One deliberately overlapping renderer candidate."
--  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
-+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
-   [value]
-   (str "first:" (:seon.ns/name value)))
- 
- (defn second-ai
-   "The other deliberately overlapping renderer candidate."
--  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
-+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
-   [value]
-   (str "second:" (:seon.ns/name value)))
-diff --git a/test/seon/render_simplification/fixture_b.clj b/test/seon/render_simplification/fixture_b.clj
-index 7d08a72..4d18eb1 100644
---- a/test/seon/render_simplification/fixture_b.clj
-+++ b/test/seon/render_simplification/fixture_b.clj
-@@ -2,13 +2,13 @@
- 
- (defn namespace-ai
-   "Identify fixture B's declared subject (seon.render-simplification-test/declare-subject!)."
--  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
-+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
-   [value]
-   (str "B:" (:seon.ns/name value)))
- 
- (defn holes-html
-   "Return former walker markers as ordinary inert Hiccup attributes."
--  {:malli/schema [:=> [:cat :map] :seon.render/html]}
-+  {:malli/schema [:=> [:cat :map] :seon.render/hiccup]}
-   [_value]
-   [:section {:data-slot "inert"}
-    [:span {:data-ref "[:db/id 7]"} "also inert"]])
-diff --git a/test/seon/render_simplification_test.clj b/test/seon/render_simplification_test.clj
-index 0058441..6cc1b9a 100644
---- a/test/seon/render_simplification_test.clj
-+++ b/test/seon/render_simplification_test.clj
-@@ -243,6 +243,20 @@
-                 (:seon.render.selection/selected decision)))
-             (is (= (agent/render-identity-ai pulled) (render-ai request)))))))))
- 
-+(deftest a-stored-render-ref-is-not-the-value's-own-override
-+  ;; CLASS: a pulled schema entity carries its schema's render face as a ref
-+  ;; (`{:db/id n}`); read as the value's own override it rendered the schema
-+  ;; row with the function its schema's VALUES render with. An unexpanded ref
-+  ;; is a reference, never rendered data, so it falls through to the declared
-+  ;; stage; a symbol, a function or rendered data still override.
-+  (let [explicit #'seon.render/explicit-value]
-+    (doseq [output [:seon.render/ai :seon.render/html :seon.render/form]]
-+      (is (nil? (explicit {:seon.schema/key :seon.error/base output {:db/id 3952}} output)))
-+      (is (nil? (explicit {output {:db/id 7 :db/ident :probe/render}} output)))
-+      (is (= [output 'probe.render/view] (explicit {output 'probe.render/view} output))))
-+    (is (= [:seon.render/html [:p "shown"]] (explicit {:seon.render/html [:p "shown"]} :seon.render/html)))
-+    (is (= [:seon.render/ai {:shown 1}] (explicit {:seon.render/ai {:shown 1}} :seon.render/ai)))))
-+
- (deftest function-arities-are-matched-without-recompilation
-   (let [cross-arity 'probe.render/cross-arity
-         matching 'probe.render/matching
-@@ -253,8 +267,8 @@
-          {cross-arity
-           [:function
-            [:=> [:cat argument-schema] :int]
--           [:=> [:cat :string :string] :seon.render/ai]]
--          matching [:=> [:cat argument-schema] :seon.render/ai]})]
-+           [:=> [:cat :string :string] :string]]
-+          matching [:=> [:cat argument-schema] :string]})]
-     ;; The first question compiles each arity once into the projection's
-     ;; holder; every later question must reuse it.
-     (schema/function-matching-outputs-in projection matching [{:seon.render/value 7}])
-@@ -340,7 +354,7 @@
-                         retained
-                         (assoc :seon.render/retained-calls retained)))]
-         (let [definitions '[(defn cache-helper [] "H1")
--                            (defn ^{:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
-+                            (defn ^{:malli/schema [:=> [:cat :seon.render/unit] :string]}
-                               namespace-ai [value]
-                               (str
-                                 "A:"
 diff --git a/test/seon/schema/datahike_test.clj b/test/seon/schema/datahike_test.clj
-index 3de88a6..b06e241 100644
+index 702dba0..d991d9a 100644
 --- a/test/seon/schema/datahike_test.clj
 +++ b/test/seon/schema/datahike_test.clj
-@@ -14,6 +14,7 @@
-             [seon.profile :as profile]
-             [seon.schema :as schema]
-             [seon.schema.datahike :as schema.datahike]
-+            [seon.schema.edn :as schema.edn]
-             [seon.schema.internal :as internal]
-             [seon.test-support :as support]))
- 
-@@ -330,6 +331,32 @@
-     (is (= {:seon.config/dial true}
-            (schema.datahike/storable-properties-in projection ::present)))))
- 
-+(deftest a-render-face-is-stored-as-its-effective-function
-+  ;; CLASS: the lift stored a schema row's ROOT properties only, as EDN
-+  ;; strings: a pair declared on an :and arm or inherited through a reference
-+  ;; was absent from its row, and no face was a ref the writer could check.
-+  ;; Each face is now the nearest declaration along Malli's reference chain,
-+  ;; stored as a ref to its function by identity.
-+  (let [ai (fn [f] {:seon.fn/sym f})
-+        projection (schema/build-projection
-+                    (merge (schema.edn/packaged-forms)
-+                           {::base [:map {:seon.render/ai 'probe.render/base-ai
-+                                          :seon.render/html 'probe.render/base-html}
-+                                    [::x ::x]]
-+                            ::x :int
-+                            ::inherits [:and ::base [:map [::x ::x]]]
-+                            ::arm [:and ::base [:map {:seon.render/ai 'probe.render/arm-ai} [::x ::x]]]
-+                            ::alias ::arm
-+                            ::plain [:map [::x ::x]]}))
-+        faces #(select-keys (schema.datahike/storable-properties-in projection %)
-+                            [:seon.render/ai :seon.render/html :seon.render/form])]
-+    (is (= {:seon.render/ai (ai 'probe.render/base-ai) :seon.render/html (ai 'probe.render/base-html)}
-+           (faces ::inherits)))
-+    (is (= {:seon.render/ai (ai 'probe.render/arm-ai) :seon.render/html (ai 'probe.render/base-html)}
-+           (faces ::arm) (faces ::alias))
-+        "the later :and arm wins per face; an alias reads its target")
-+    (is (= {} (faces ::plain)))))
-+
- (deftest compiled-storage-navigation-reuses-retained-roots
-   ;; Navigation reads the projection's retained compiled roots: every lookup
-   ;; answers the same compiled object, so selecting and deriving the storable
-@@ -395,7 +422,8 @@
-            :seon.test/long-ms 120000}
-   agent-authored-render-symbols-cross-the-transaction-function-codec
-   ;; CLASS: transaction data returned by `:db.fn/call` used to bypass the one
--  ;; logical-to-storage encoder. Agent-authored schema entities are built at that
-+  ;; logical-to-storage encoder. (Render faces are refs since slice A of the
-+  ;; render-selection lane; the codec class stays guarded here.) Agent-authored schema entities are built at that
-   ;; seam, so coherent qualified render symbols reached Datahike's string-backed
-   ;; render attributes raw and could never publish. Wrapping transaction-function
-   ;; output in the same codec makes every returned heterogeneous slot cross the
-@@ -410,9 +438,9 @@
+@@ -437,9 +437,9 @@
              :seon.render/html 'my.agents.render-codec/render-plan-html
              :seon.render/form 'my.agents.render-codec/render-plan-form}
             outputs
@@ -1061,7 +624,7 @@ index 3de88a6..b06e241 100644
             entity-tx (ns-resolve 'seon.turn 'row-tx)
             transact-entity!
             (fn [entity-map]
-@@ -465,10 +493,12 @@
+@@ -492,10 +492,12 @@
               selected-entity
               (some #(when (= shape (:seon.schema/key %)) %)
                     (schema/matching-shapes-in projection entity))]

@@ -1,0 +1,48 @@
+diff --git a/src/seon/cluster/message.clj b/src/seon/cluster/message.clj
+index 03e4e60..738b43f 100644
+--- a/src/seon/cluster/message.clj
++++ b/src/seon/cluster/message.clj
+@@ -492,7 +492,7 @@
+   acknowledgement changes it. Each entry offers `(my.message/received! id)`;
+   acknowledged messages are one `(my.message/read ...)` away. A recipient
+   handed as an entity id is resolved in the form itself."
+-  {:malli/schema [:=> [:cat :seon.message/to] :seon.render/form]}
++  {:malli/schema [:=> [:cat :seon.message/to] :seon.render/read-form]}
+   [recipient]
+   (list 'my.message/inbox
+         {:seon.agent/id
+diff --git a/src/seon/note.clj b/src/seon/note.clj
+index 1bb1b2a..b83fc3a 100644
+--- a/src/seon/note.clj
++++ b/src/seon/note.clj
+@@ -132,7 +132,7 @@
+ 
+ (defn render-note-form
+   "Render the current database read for one note."
+-  {:malli/schema [:=> [:cat :my.note/note] :seon.render/form]}
++  {:malli/schema [:=> [:cat :my.note/note] :seon.render/read-form]}
+   [note]
+   (list 'seon.db/pull
+         (list 'quote '[*])
+@@ -140,7 +140,7 @@
+ 
+ (defn render-notes-form
+   "Render the current database read for this agent's notes."
+-  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/form]}
++  {:malli/schema [:=> [:cat [:or :my.note/notes :seon.render/unit]] :seon.render/read-form]}
+   [_notes]
+   (list 'my.note/notes))
+ 
+diff --git a/src/seon/render/transcript.clj b/src/seon/render/transcript.clj
+index 42ae9f9..7a9906b 100644
+--- a/src/seon/render/transcript.clj
++++ b/src/seon/render/transcript.clj
+@@ -799,7 +799,7 @@
+ 
+ (defn message-form
+   "Return the ordinary message read form for one message entity."
+-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
++  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
+   [unit]
+   (list 'my.message/read {:my.message/id (:seon.message/id unit)}))
+ 
