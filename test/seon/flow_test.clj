@@ -6,6 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.cluster.store :as store]
+            [seon.config :as config]
             [seon.db :as db]
             [datahike.core :as datahike]
             [malli.core :as m]
@@ -323,11 +324,14 @@
                                      #(= work-throws (counted (:db-after %))))
           (let [elapsed-ms (/ (- (System/nanoTime) t0) 1e6)]
             (is (= work-throws (counted @connection)) "every throw reached the writer")
-            (is (= 1 (count (db/q '[:find [?occurrence ...]
-                                    :where [?occurrence :seon.error.occurrence/message ?message]
-                                           [(clojure.string/includes? ?message "work throws")]]
-                                  @connection)))
-                "equal throws are one occurrence, counted")
+            ;; equal throws are one signature whose occurrences are capped
+            ;; (recurrence-limit), each counted (7781d115c)
+            (is (<= 1 (count (db/q '[:find [?occurrence ...]
+                                     :where [?occurrence :seon.error.occurrence/message ?message]
+                                            [(clojure.string/includes? ?message "work throws")]]
+                                   @connection))
+                    (:seon.config.error/recurrence-limit (config/effective @connection "seon.flow-test")))
+                "equal throws are counted over at most the capped occurrences")
             (is (nil? (async/poll! (:error-chan started)))
                 "nothing waits in Flow's error channel")
             (is (< elapsed-ms 2000.0) "fault writes stay within their bound"))
@@ -408,8 +412,13 @@
                {::sut/graph-definition
                 {:procs {::stalling-work
                          {:proc (sut/var-process #'stalling-work-step :io
+                                                 ;; A PANIC IS A FAULT THAT CANNOT BE STORED: the
+                                                 ;; environment names a cluster this database holds no
+                                                 ;; configuration for, so the recorder cannot read its
+                                                 ;; dials. A recorded fault keeps the graph running
+                                                 ;; (the test above); only this path stops it.
                                                  {:seon.env/environment
-                                                  (test-support/environment "seon.flow-test" connection)
+                                                  (test-support/environment "no-such-flow-cluster" connection)
                                                   ::work in ::seen seen ::entered entered ::gate gate})}}
                  :conns []}}))
             issued (atom 0)

@@ -3,7 +3,8 @@
   cluster world, never recursive, and retires the registration only while its
   identity still matches (`seon.cluster.store/listen-failures!`, the fork's
   `datahike.writer/notify-listeners!`)."
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.blob :as blob]
@@ -40,7 +41,12 @@
                                              :seon.error.occurrence/blob-digest])]
               {:count (:seon.error.occurrence/count occurrence)
                :evidence (str (pr-str occurrence)
-                              (when digest (blob/get connection digest)))}))
+                              (when digest (blob/get connection digest)))
+               ;; the cause chain's link data as data, read from the inline evidence
+               :linked (when-not (:seon.error/capped? occurrence)
+                         (into {} (keep :seon.error/data)
+                               (:seon.error/chain (edn/read-string {:default tagged-literal}
+                                                                   (:seon.error/data-edn occurrence)))))}))
           (db/q '[:find [(pull ?occurrence [*]) ...]
                   :where [_ :seon.error/occurrences ?occurrence]]
                 database))))
@@ -77,7 +83,7 @@
          (testing "one fault names the listener, its commit and the cause"
            (is (some? fault))
            (is (str/includes? (:evidence fault) (str ::failing)))
-           (is (str/includes? (:evidence fault) (str :seon.cluster.store/commit-id)))
+           (is (uuid? (:seon.cluster.store/commit-id (:linked fault))) "the failed commit, as data")
            (is (str/includes? (:evidence fault) "hand-off refused")))
          (testing "the matching registration is retired, so the fault's own commit cannot recurse"
            (is (not (contains? @registry ::failing)))))
