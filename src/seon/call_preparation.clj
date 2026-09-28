@@ -826,6 +826,12 @@
   [current environment slot sym]
   (let [row (get (:seon.call-preparation/supplied-defaults current) (:seon.call-preparation/key slot))]
     (cond
+      ;; An optional entry is filled from a world only: its absence means
+      ;; something to its callee (an evaluate request without :seon.db/db
+      ;; reads its context's custody), and a row answering from the thread's
+      ;; custody filled it with a sibling branch's database
+      ;; (seon.sci.eval-test custody reds, r9-r12). No world: it stays absent.
+      (:seon.call-preparation/optional? slot) (supply-from-world slot sym)
       (not= `seon.batch/world-members (:seon.call-preparation/supplier-symbol slot))
       (supply-from-row current environment slot sym)
       ;; an evaluation of the one path: its world is the only source

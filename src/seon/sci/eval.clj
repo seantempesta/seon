@@ -3958,7 +3958,9 @@
             (let [schema-key (:seon.schema/key raw-row)
                   definition
                   (schema/registration-delta-form schema-delta schema-key)]
-              (when-not (and (= schema-key schema-value) definition)
+              ;; register! answers its registration (:seon.schema/registration),
+              ;; whose identity is its key
+              (when-not (and (= schema-key (:seon.schema/key schema-value)) definition)
                 (throw
                  (ex-info
                   "Schema declaration did not register its reader identity."

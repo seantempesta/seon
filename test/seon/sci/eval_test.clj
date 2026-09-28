@@ -1057,7 +1057,8 @@
             "the schema expression's side effect occurs once")
         (is (= [{:before nil
                  :after [:int {:min 0}]
-                 :value :user/once-schema}]
+                 ;; register! answers its registration (:seon.schema/registration)
+                 :value {:seon.schema/key :user/once-schema :seon.schema/definition [:int {:min 0}]}}]
                @delta-observations)
             "the schema form becomes visible only inside its delta")
         (is (nil? (get (seon.schema/registered-schemas)
@@ -1340,14 +1341,12 @@
         (is (= (:seon.error/message failure) (:seon.cluster.eval/error evaluation)))
         (is (str/includes? (:seon.eval/shown evaluation) (pr-str arglists)))
         (is (not (str/includes? (:seon.eval/shown evaluation) "projection failed")))
-        ;; ONE composer, so the count appears ONCE in each sentence: the
-        ;; description is prose and `seon.error/problem-sentence` prints the
-        ;; offending value after it. Carrying the count in both rendered
-        ;; "got an argument count of 0 0" (3e41a5d22, measured 2026-09-17).
-        (is (str/includes? (:seon.eval/shown evaluation)
-                           "got an argument count of 0."))
-        (is (not (str/includes? (:seon.eval/shown evaluation)
-                                "an argument count of 0 0")))
+        ;; The reply shows the refusal as data (renders return data, owner
+        ;; 313e81181): the offending count is one value in its problem, never
+        ;; prose repeated beside it ("got an argument count of 0 0",
+        ;; 3e41a5d22, measured 2026-09-17).
+        (is (str/includes? (:seon.eval/shown evaluation) ":offending 0"))
+        (is (not (str/includes? (:seon.eval/shown evaluation) "0 0")))
         (is (str/includes? (:seon.error/message failure)
                            "got an argument count of 0."))))))
 
