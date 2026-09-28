@@ -1,0 +1,153 @@
+{:measured-at #inst "2026-09-28T03:01:24.655-00:00",
+ :jvm-pid 3360,
+ :n 52,
+ :ms 141.910709,
+ :structural-vs-semantic
+ [[25
+   {:structural
+    ["(require '[clojure.string :as parity-s])"
+     "::parity-s/k"
+     "(+ 1 2)"],
+    :semantic ["(require '[clojure.string :as parity-s])"],
+    :semantic-reason "Alias `parity-s` not found in `:auto-resolve`"}]
+  [41
+   {:structural ["#foo/bar [1 2]"],
+    :semantic [],
+    :semantic-reason
+    "Reader tag is not accepted; supply an explicitly declared reader."}]],
+ :structural-vs-planner
+ [[1
+   {:planner
+    ["(` left an open paren, and the REPL is now waiting for its close. Let me send just a closing paren to balance the buffer.\n\n```clojure\n)"],
+    :structural [],
+    :structural-unread 276}]
+  [5
+   {:planner
+    ["(dir my.agent)"
+     "#:seon.repl{:columns [:sym :arglists :doc :in :out], :rows [[my.agent/done ([] [request]) \"End my session early.\" [] []] [my.agent/effective-settings ([] [request]) \"Read the effective cluster settings for my agent.\" [] []] [my.agent/identity ([] [request]) \"Read my agent identity, namespace and steward.\" [] []] [my.agent/settings ([] [request]) \"Read my own agent settings overlay.\" [] []] [my.agent/settings! ([] [request]) \"Merge my own agent settings overlay; requires a plan reason.\" [] []]], :schemas {}}"
+     "(dir seon.schema)"
+     "#:seon.repl{:error \"Execution error at seon.sci.eval/directory-value$fn (eval.clj:1188).\\nInvalid token: ::keys\", :result result/e7f6f8cd2147f, :ms 104}"
+     "(seon.db/q\n  '[:find ?attr\n    :where\n    [?e :seon.db/attribute ?attr]\n    [(clojure.string/starts-with? (str ?attr) \":seon.fn/\")]])"
+     "#:seon.repl{:value #{}, :result result/e03801d08f65c, :ms 75}"
+     "(seon.db/q\n  '[:find ?sym ?source\n    :where\n    [?fn :seon.fn/sym ?sym]\n    [?fn :seon.fn/source ?source]\n    [(clojure.string/starts-with? (str ?sym) \"my.\")]\n    [(clojure.string/includes? ?source \"malli/schema\")]])"
+     "#:seon.repl{:value #{[\"my.agent/done\" \"(defn done\\n  \\\"End my session early.\\\"\\n  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.turn/wait :seon.error/value]]}\\n  [request]\\n  (seon.turn/done (:seon.db/connection request) (:seon.agent/id request)))\"] [\"my.agent/effective-settings\" \"(defn effective-settings\\n  \\\"Read the effective cluster settings for my agent.\\\"\\n  {:malli/schema [:=> [:cat :my.plan/request] [:or :seon.config/agent-overlay :seon.error/value]]}\\n  [request]\\n  (seon.agent/effective-settings (:seon.db/connection request) (:seon.agent/id request))]\"] [\"my.agent/identity\" \"(defn identity\\n  \\\"Read my agent identity, namespace and steward.\\\"\\\"\\n  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.agent/identity :seon.error/value]]}\\n  [request]\\n  (seon.agent/identity (:seon.db/connection request) (:seon.agent/id request))]\"]}, :result result/e0f778a03f0d5, :ms 1020}"
+     "(seon.db/q\n  '[:find ?nsname ?sym\n    :where\n    [?fn :seon.fn/ns ?ns]\n    [?ns :seon.ns/name ?nsname]\n    [?fn :seon.fn/sym ?sym]\n    [(clojure.string/starts-with? (str ?nsname) \"my.agents\")]])"
+     "#:seon.repl{:value #{}, :result result/e73b8e5099e14, :ms 74}"
+     "(seon.db/q\n  '[:find ?nsname\n    :where\n    [?ns :seon.ns/name ?nsname]\n    [(clojure.string/starts-with? (str ?nsname) \"my.agents\")]])"
+     "#:seon.repl{:value #{}, :result result/e3aadacd0db25, :ms 74}"
+     "(dir my.edit)"
+     "#:seon.repl{:columns [:sym :arglists :doc :in :out], :rows [[my.edit/exact! ([] [request]) \"Apply an exact-string replacement edit to a file.\" [] []] [my.edit/form! ([] [request]) \"Replace or insert a top-level form at a path and line.\" [] []] [my.edit/lines! ([] [request]) \"Replace a line range in a file.\" [] []]], :schemas {}}"
+     "(doc my.edit/form!)"
+     "#:seon.repl{:error \"Execution error at seon.sci.eval/directory-value\", :seon.error/message \"No such var: my.edit/form!\", :result result/e796646c62a3f, :ms 79}"
+     "(seon.db/q\n  '[:find ?attr ?type\n    :where\n    [?e :seon.db/ident ?attr]\n    [?e :seon.db/value-type ?type]\n    [(clojure.string/starts-with? (str ?attr) \":seon.fn/\")]])"
+     "#:seon.repl{:value #{}, :result result/ea04b9822624d, :ms 88}"
+     "(my.agent/identity {})"
+     "#:seon.repl{:value #:my.agent{:id \"juniper\"}, :result result/e371aeb72cdb0, :ms 5}"
+     "(keys (ns-publics 'my.agents.juniper))"
+     "#:seon.repl{:value (largest-customer), :result result/e129a466ef2cb, :ms 11}"
+     "(doc my.test/run)"
+     "#:seon.repl{:value {:body \"Run my namespace's declared tests and store their results.\", :example nil, :in [], :out [], :summary \"Run my namespace's declared tests and store their results.\"}, :result result/e01ca7f5c8830, :ms 3}"
+     "(deftest largest-customer-test\n  (let [rows [[\"a1\" \"Ada\" 60] [\"a2\" \"Ada\" 55] [\"b1\" \"Bea\" 100] [\"c1\" \"Cy\" 40]]]\n    (is (= {:customer \"Ada\" :total 115}\n           (largest-customer rows)))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e361f57e7865a, :ms 0}"
+     "(deftest largest-customer-test\n  (let [rows [[\"a1\" \"Ada\" 60] [\"a2\" \"Ada\" 55] [\"b1\" \"Bea\" 100] [\"c1\" \"Cy\" 40]]]\n    (is (= {:customer \"Ada\" :total 115} (largest-customer rows)))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/eb336f7c25b5b, :ms 0}"
+     "(def fixture-rows\n  [[\"a1\" \"Ada\" 60] [\"a2\" \"Ada\" 55] [\"b1\" \"Bea\" 100] [\"c1\" \"Cy\" 40]])"
+     "#:seon.repl{:error \"#'my.agents.juniper/fixture-rows\", :result result/e8a2de8d2d0cb, :ms 4}"
+     "(deftest largest-customer-test\n  (is (= {:customer \"Ada\" :total 115} (largest-customer fixture-rows))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/ede0c2c85b9f5, :ms 0}"
+     "(deftest largest-customer-test (is (= {:customer \"Ada\" :total 115} (largest-customer fixture-rows))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e148fbefc8ded, :ms 0}"
+     "(largest-customer fixture-rows)"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e8652bfa02a4c, :ms 0}"
+     "(+ 1 1)"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e9d80b11a0767, :ms 0}"
+     ";; The REPL still has an unmatched paren buffered from a prior message. I need to send enough closing parens to clear it, or start clean. Let me send a well-formed multiline form with a semicolon comment first.\n;; drain any pending reader state\nnil"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/ed77da5d221b8, :ms 0}"
+     "\n\n ;; The unmatched delimiter keeps surfacing. My earlier reply emitted `(is (= ...))` snippets with extra parens that got into the buffer. Let me try to flush by sending a single closing paren.\n)\n#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/eb190e013e5e2, :ms 0}\n\nmy.agents.juniper=> ;; There is a stray close paren in the reader buffer that I cannot drain with a form. Let me try sending an opening form with no close followup to consume it, or send a string literal.\n\"diagnostic\"\n#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e4f2a741a40ca, :ms 0}\n\nmy.agents.juniper=> ;; The reader state appears stuck on an unmatched `)`. Each of my replies has been adding a `)` from the printed error context? More likely: my prior \"response\" replies contained a trailing `)` which the REPL reader queued, and now every subsequent form starts with that pending `)`.\n"
+     "(println \"clear\")"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/eb8bee5bd16a1, :ms 0}"
+     ";; I cannot issue any form because of the stray close paren in the reader buffer, which I likely introduced by mis-formatting earlier. Since I cannot call functions, let me record this in a plan note... but I also can't call plan.\n;; Let me try to see whether the buffer will clear on the next turn naturally by sending a comment-only line.\n;; comment-only should be ignored by the reader\n#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e34d3be46d5c1, :ms 0}"
+     "\n\n ;; The buffer is still stuck. My previous replies that had a trailing `)` or `))` left the reader in a broken state.\n"
+     ";; Let me try to close out any unbalanced opens by sending the exact missing token sequence. If the reader has a stray `)`, a matching `(` on the next message might pair only if the reader accumulates across messages. Let me send a single `(`.\n"
+     "(\n#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e73e054f1adc1, :ms 0}"],
+    :structural
+    ["(dir my.agent)"
+     "#:seon.repl{:columns [:sym :arglists :doc :in :out], :rows [[my.agent/done ([] [request]) \"End my session early.\" [] []] [my.agent/effective-settings ([] [request]) \"Read the effective cluster settings for my agent.\" [] []] [my.agent/identity ([] [request]) \"Read my agent identity, namespace and steward.\" [] []] [my.agent/settings ([] [request]) \"Read my own agent settings overlay.\" [] []] [my.agent/settings! ([] [request]) \"Merge my own agent settings overlay; requires a plan reason.\" [] []]], :schemas {}}"
+     "(dir seon.schema)"
+     "#:seon.repl{:error \"Execution error at seon.sci.eval/directory-value$fn (eval.clj:1188).\\nInvalid token: ::keys\", :result result/e7f6f8cd2147f, :ms 104}"
+     "(seon.db/q\n  '[:find ?attr\n    :where\n    [?e :seon.db/attribute ?attr]\n    [(clojure.string/starts-with? (str ?attr) \":seon.fn/\")]])"
+     "#:seon.repl{:value #{}, :result result/e03801d08f65c, :ms 75}"
+     "(seon.db/q\n  '[:find ?sym ?source\n    :where\n    [?fn :seon.fn/sym ?sym]\n    [?fn :seon.fn/source ?source]\n    [(clojure.string/starts-with? (str ?sym) \"my.\")]\n    [(clojure.string/includes? ?source \"malli/schema\")]])"
+     "#:seon.repl{:value #{[\"my.agent/done\" \"(defn done\\n  \\\"End my session early.\\\"\\n  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.turn/wait :seon.error/value]]}\\n  [request]\\n  (seon.turn/done (:seon.db/connection request) (:seon.agent/id request)))\"] [\"my.agent/effective-settings\" \"(defn effective-settings\\n  \\\"Read the effective cluster settings for my agent.\\\"\\n  {:malli/schema [:=> [:cat :my.plan/request] [:or :seon.config/agent-overlay :seon.error/value]]}\\n  [request]\\n  (seon.agent/effective-settings (:seon.db/connection request) (:seon.agent/id request))]\"] [\"my.agent/identity\" \"(defn identity\\n  \\\"Read my agent identity, namespace and steward.\\\"\\\"\\n  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.agent/identity :seon.error/value]]}\\n  [request]\\n  (seon.agent/identity (:seon.db/connection request) (:seon.agent/id request))]\"]}, :result result/e0f778a03f0d5, :ms 1020}"
+     "(seon.db/q\n  '[:find ?nsname ?sym\n    :where\n    [?fn :seon.fn/ns ?ns]\n    [?ns :seon.ns/name ?nsname]\n    [?fn :seon.fn/sym ?sym]\n    [(clojure.string/starts-with? (str ?nsname) \"my.agents\")]])"
+     "#:seon.repl{:value #{}, :result result/e73b8e5099e14, :ms 74}"
+     "(seon.db/q\n  '[:find ?nsname\n    :where\n    [?ns :seon.ns/name ?nsname]\n    [(clojure.string/starts-with? (str ?nsname) \"my.agents\")]])"
+     "#:seon.repl{:value #{}, :result result/e3aadacd0db25, :ms 74}"
+     "(dir my.edit)"
+     "#:seon.repl{:columns [:sym :arglists :doc :in :out], :rows [[my.edit/exact! ([] [request]) \"Apply an exact-string replacement edit to a file.\" [] []] [my.edit/form! ([] [request]) \"Replace or insert a top-level form at a path and line.\" [] []] [my.edit/lines! ([] [request]) \"Replace a line range in a file.\" [] []]], :schemas {}}"
+     "(doc my.edit/form!)"
+     "#:seon.repl{:error \"Execution error at seon.sci.eval/directory-value\", :seon.error/message \"No such var: my.edit/form!\", :result result/e796646c62a3f, :ms 79}"
+     "(seon.db/q\n  '[:find ?attr ?type\n    :where\n    [?e :seon.db/ident ?attr]\n    [?e :seon.db/value-type ?type]\n    [(clojure.string/starts-with? (str ?attr) \":seon.fn/\")]])"
+     "#:seon.repl{:value #{}, :result result/ea04b9822624d, :ms 88}"
+     "(my.agent/identity {})"
+     "#:seon.repl{:value #:my.agent{:id \"juniper\"}, :result result/e371aeb72cdb0, :ms 5}"
+     "(keys (ns-publics 'my.agents.juniper))"
+     "#:seon.repl{:value (largest-customer), :result result/e129a466ef2cb, :ms 11}"
+     "(doc my.test/run)"
+     "#:seon.repl{:value {:body \"Run my namespace's declared tests and store their results.\", :example nil, :in [], :out [], :summary \"Run my namespace's declared tests and store their results.\"}, :result result/e01ca7f5c8830, :ms 3}"
+     "(deftest largest-customer-test\n  (let [rows [[\"a1\" \"Ada\" 60] [\"a2\" \"Ada\" 55] [\"b1\" \"Bea\" 100] [\"c1\" \"Cy\" 40]]]\n    (is (= {:customer \"Ada\" :total 115}\n           (largest-customer rows)))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e361f57e7865a, :ms 0}"
+     "(deftest largest-customer-test\n  (let [rows [[\"a1\" \"Ada\" 60] [\"a2\" \"Ada\" 55] [\"b1\" \"Bea\" 100] [\"c1\" \"Cy\" 40]]]\n    (is (= {:customer \"Ada\" :total 115} (largest-customer rows)))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/eb336f7c25b5b, :ms 0}"
+     "(def fixture-rows\n  [[\"a1\" \"Ada\" 60] [\"a2\" \"Ada\" 55] [\"b1\" \"Bea\" 100] [\"c1\" \"Cy\" 40]])"
+     "#:seon.repl{:error \"#'my.agents.juniper/fixture-rows\", :result result/e8a2de8d2d0cb, :ms 4}"
+     "(deftest largest-customer-test\n  (is (= {:customer \"Ada\" :total 115} (largest-customer fixture-rows))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/ede0c2c85b9f5, :ms 0}"
+     "(deftest largest-customer-test (is (= {:customer \"Ada\" :total 115} (largest-customer fixture-rows))))"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e148fbefc8ded, :ms 0}"
+     "(largest-customer fixture-rows)"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e8652bfa02a4c, :ms 0}"
+     "(+ 1 1)"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e9d80b11a0767, :ms 0}"
+     "nil"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/ed77da5d221b8, :ms 0}"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/eb190e013e5e2, :ms 0}"
+     "\"diagnostic\""
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e4f2a741a40ca, :ms 0}"
+     "(println \"clear\")"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/eb8bee5bd16a1, :ms 0}"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e34d3be46d5c1, :ms 0}"
+     "()"
+     "#:seon.repl{:error \"Execution error (ExceptionInfo) at seon.sci.eval/one-event (eval.clj:498).\\nUnmatched delimiter: )\", :result result/e73e054f1adc1, :ms 0}"],
+    :structural-unread nil}]
+  [6
+   {:planner
+    ["; thinking The situation: my defn returned a var but no `:seon.fn` row was admitted. This is likely because the form must be admitted via the durable definition mechanism, not just evaluated. Let me check the note the instructions gave: \"Define a function with its invoke contract: (defn increment\n{:malli/schema [:=> [:cat :int] :int]}"
+     "[x]"
+     "(+ x 1)"
+     "). ... Admitted definitions are durable; auto-check tests generated inputs...\"\n\nMaybe the admission happens but I'm querying wrong. Let me check if `:seon.fn/ns` references a namespace entity keyed differently, or if there's a `:seon.fn/sym` with the fully-qualified name like \"my.agents.juniper/largest-customer\".\n\nLet me query for any fn sym containing \"largest-customer\".\n\nActually, maybe the issue is that `defn` in the SCI eval doesn't auto-admit. Perhaps I need to look at how admission is triggered. Let me check the entities around.\n\nLet me query for the most recently created fn rows.\n\nActually simpler: query for `:seon.fn/sym` matching the fully qualified name or looking at the source of recent fns.\n\nLet me try a query for any fn sym containing \"largest\".\n\nActually, let me check the `:db/txInstant` of recent fn rows to see if any were just created.\n\nLet me try:\n```\n"
+     "(seon.db/q\n  '[:find ?sym ?spec\n    :where\n    [?fn :seon.fn/sym ?sym]\n    [?fn :seon.fn/spec ?spec]\n    [(clojure.string/includes? ?sym \"largest\")]])"
+     "(seon.db/q\n  '[:find ?e ?attr ?val\n    :where\n    [?e :seon.fn/sym \"my.note/add!\"]\n    [?e :seon.fn/ns ?ns]\n    [?ns ?attr ?val]])"
+     "; Actually — the more likely thing: the auto-check/admission pipeline runs asynchronously and I need to inspect `:seon.fn` rows created recently. Or perhaps the namespace needs to be admitted first (there's a `:seon.ns/source` attribute containing the ns form).\n\n; Wait — key insight: my.note has a `:seon.ns/source` containing the `(ns my.note ...)` form. My namespace `my.agents.juniper` has no such entity. So my namespace was never admitted.\n\n; So the mechanism must be: the namespace (with `ns` form) needs to be defined/admitted. Perhaps by evaluating `(ns my.agents.juniper ...)`. Or perhaps admission happens automatically when a form is submitted through a certain entry point.\n\n; Hmm, the prompt says: \"Define a function with its invoke contract: (defn increment\n{:malli/schema [:=> [:cat :int] :int]}"
+     "[x]"
+     "(+ x 1)"
+     "). The input :cat describes the arguments; the last schema describes the result. Admitted definitions are durable; auto-check tests generated inputs and reports a failing value when the contract does not hold.\"\n\n\"Admitted definitions are durable\" — so defn with schema should be admitted. But it's not appearing in my query. Maybe the admission happens on the NEXT transaction or on turn boundary.\n\nActually — maybe it DID appear but I need to look at a different attribute. Let me check for `:seon.fn/sym` values matching my namespace's fns differently.\n\nActually, let me check whether `dir` reading is from `:seon.fn` rows or from live SCI. If live SCI, my defn was evaluated in the SCI env but not admitted.\n\nLet me just look at what the most-recent `:seon.fn` rows are (by tx order) to see if mine is there.\n\nActually I realize — maybe the earlier `dir my.agents.juniper` showing `largest-customer` came from the REPL tracking my SCI env vars, not from `:seon.fn` rows. So I need a different way to admit.\n\nHmm, but the prompt says clearly that defn with malli schema gets admitted. Let me look more carefully - maybe the issue is that `:malli/schema` should be `:malli/schema` on the defn metadata, but the admission is triggered by something else, like a specific wrapper or a `(defn ...)` inside a `(do ...)`.\n\nLet me try to search for recently added fn rows, or query all fn syms with sources mentioning my function.\n\nLet me query for :seon.fn/source containing \"largest-customer\".\n\nActually let me just query with a filter on the sym:\n```\n"
+     "(seon.db/q\n  '[:find ?sym ?spec ?source\n    :where\n    [?fn :seon.fn/sym ?sym]\n    [?fn :seon.fn/spec ?spec]\n    [?fn :seon.fn/source ?source]\n    [(clojure.string/includes? ?source \"largest-customer\")]])"],
+    :structural
+    ["(seon.db/q\n  '[:find ?sym ?spec\n    :where\n    [?fn :seon.fn/sym ?sym]\n    [?fn :seon.fn/spec ?spec]\n    [(clojure.string/includes? ?sym \"largest\")]])"
+     "(seon.db/q\n  '[:find ?e ?attr ?val\n    :where\n    [?e :seon.fn/sym \"my.note/add!\"]\n    [?e :seon.fn/ns ?ns]\n    [?ns ?attr ?val]])"
+     "(seon.db/q\n  '[:find ?sym ?spec ?source\n    :where\n    [?fn :seon.fn/sym ?sym]\n    [?fn :seon.fn/spec ?spec]\n    [?fn :seon.fn/source ?source]\n    [(clojure.string/includes? ?source \"largest-customer\")]])"],
+    :structural-unread nil}]
+  [40
+   {:planner ["#=(System/exit 1)"],
+    :structural [],
+    :structural-unread 0}]
+  [45
+   {:planner ["(defn g [x]\n  (inc x))\n\n" "(g 1)"],
+    :structural ["(defn g [x]\n  (inc x))" "(g 1)"],
+    :structural-unread nil}]
+  [46
+   {:planner ["(defn h [x] (inc x))" ")\n" "(h 1)"],
+    :structural ["(defn h [x] (inc x))" "(h 1)"],
+    :structural-unread nil}]
+  [50 {:planner ["{:a 1 :b}"], :structural [], :structural-unread 0}]]}

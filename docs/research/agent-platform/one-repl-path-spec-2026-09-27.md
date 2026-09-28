@@ -484,61 +484,143 @@ definition plus every `(:require [seon.cluster.reply …])`, each assigned to th
 Each step up to S11 deletes a name only in the commit that converts its last caller; until then the old function stays
 callable (it is not a compatibility delegate: nothing new calls it).
 
-### 10.0 S4a: the product turn on the fold (design for review, root ruling: option 1)
+### 10.0 S4a: the product turn on the fold (rev 2: answers Astra's A1–A6, b469fc675; root ruling: option 1)
 
-**What exists.** `seon.turn/resume-turn` (turn.clj:5399) calls `evaluate-sources` (:5102), a loop that, per admitted
-source, re-reads the text inside `sci.eval/evaluate`, gates contracted installs (`gate-function-install`), applies the
-disposition rule, captures read evidence, binds the handle, and threads earlier rows (`with-settled`); then
-`settle-batch!` (:3910) turns each `:seon.sci.eval/evaluation` into its terminal data (`evaluation-terminal-data`,
-`settlement-projection`, `evaluation-facts`) and commits one transaction with the run's side effects (close, plan
-settle, issue tests, faults, blobs). MCP SCI runs enter the same path (`seon.cluster.agent/evaluate-source!`).
+**What exists** (HEAD 1a56cba66). `resume-turn` (turn.clj:5423) calls `evaluate-sources` (:5182), a loop that per
+pre-opened row re-reads the row's source inside `sci.eval/evaluate` (:4506, the one production caller), gates
+contracted installs (`gate-function-install` :3527), applies the disposition rule by reading the source a third time
+(`disposition-rule-error` :5161), binds the handle, and threads earlier rows (`with-settled`). `settle-batch!` (:3990)
+turns each `:seon.sci.eval/evaluation` into terminal data and commits one transaction with the run's side effects.
+The rows were opened from `planned-sources` (:3422), whose `reply/sources` reads every form semantically (tags, deferred
+aliases) before anything runs. `sci.eval/evaluate` is two things braided: the **evaluation frame** (custody, turn
+environment, request context, receipt and pending open, projection state, arm, loaded-identity check, acquisition,
+namespace, output and print-option capture, the form's read sink, the cost record, the shown result, the success or
+failure evaluation) and **admission** (`declared-row`, top-level `do` admission, `unmap-row`, `admit!`, restoration).
 
-**What S4a changes: one call.** `evaluate-sources`' loop becomes `(seon.batch/evaluate-batch (turn-request ...))`
-with the turn's world (`world/agent-world` over the turn's fork, connection, agent and run) and five stage values the
-turn supplies; the fold's own stages (observe, derive, apply, fold) replace admission, gating and row threading.
+**What S4a changes.** `evaluate-sources` keeps its name and its answer (`:seon.turn.loop/evaluated-sources`, so
+`resume-turn`, `preview-sources` and `system-turn` keep their shapes) and its body becomes
+`(seon.batch/evaluate-batch (turn.batch/turn-request ...))`. The fold's observe, derive, apply and fold stages replace
+admission, gating and row threading; the turn supplies the stage values below. Admission stays inside
+`sci.eval/evaluate` only for its tests until S10 deletes both.
 
 | Stage value | Supplied by the turn | Replaces |
 |---|---|---|
-| `:seon.batch/read-state`/`read-next` | the run's admitted sources as a read stage: each step is one source with its ordinal, namespace and reader event (the run's rows were opened with them; S8 hands the fold the reply text instead) | the loop over `:seon.cluster.reply/sources` |
-| `:seon.batch/show` | `sci.eval/shown-result` / `shown-failure` under the turn's carried profile and viewer namespace, keeping the whole shown map on the entry (value-size keys, `value-edn`/`unstored`, renderer, diagnostics) and binding the handle | the loop's print and `bind-result!` |
-| `:seon.batch/stop?` (new, one predicate on the published entry) | the disposition rule: a disposition ends reading; `(my.agent/done)` before the last form is replaced by its refusal through `sci.eval/unrun-evaluation` | the loop's `disposition` / `disposition-rule-error` branch |
-| `:seon.batch/settle` | the turn's settlement: the fold's entries become `settle-batch!` requests (below), and the fold's program facts (`program-facts` over `:seon.batch/program`) join `settle-batch!`'s one transaction | `settle-batch!`'s per-row program writes (`evaluation-terminal-data`'s `:seon.program/row` path) |
-| `:seon.batch/fault` | `seon.fault/fault!` in the cluster's environment (as MCP) | nothing: the old loop threw |
+| `:seon.batch/read-state`/`read-next` | **A1.** The run's rows in ordinal order; each step reads the row's source once with the live reader (`sci.batch/read-code`, the fork's current namespace and aliases); the form, span and version stay on the entry (`:seon.batch/form`). A row whose read fails is that form's reader error, read once | the loop over `:seon.cluster.reply/sources` and `one-event`'s re-read |
+| `:seon.batch/evaluate` | **A2.** `sci.eval/evaluation-frame` (the frame split out of `evaluate`, edited in place) running `(sci/eval-form ctx form)` on the held form under the batch's registration delta, with the per-ordinal receipt, handle, pending open and profile `evaluate-sources` builds today. It answers the complete `:seon.sci.eval/evaluation` (value or error value, output, interruption, print options, integer duration/acquisition/allocation, namespace lookup ref and ending symbol, the whole shown map) | `sci.eval/evaluate` + `gate-function-install` |
+| `:seon.batch/show` | the frame's shown map (the frame prints inside its arm, as today); nothing prints twice | the loop's print |
+| `:seon.batch/publish` (new, optional) | **A2.** The entrant's last word on a published entry, before derive: `(publish request batch entry)` answers `{:seon.batch/entry e :seon.batch/stop? b}`. The turn's: the disposition rule over the **held** form and whether a row remains (`last?` from the read state); an early `(my.agent/done ...)` is replaced by its refusal through `unrun-evaluation` + `shown-failure` (the refused disposition kept as `:seon.batch/refused-value`), a disposition stops reading; the generated-read fault check; then `bind-result!` of the (final) value | the loop's `disposition`/`disposition-rule-error` branch and bind site |
+| `:seon.batch/settle` | none here: `resume-turn`'s `settle-batch!` settles. **Q2 accepted**: the fold's program (`:seon.batch/program`) is handed to `settle-batch!` as data and `program-facts` on the head joins its one transaction inside the committed phase; no second settlement | `settle-batch!`'s `:seon.program/row` path and `final-namespace-digests` |
+| `:seon.batch/fault` | `world/record-fault` in the cluster's environment | nothing: the old loop threw |
 
-**The fold adds, for every entrant (seon.batch, about 25 lines):**
-- **Per-form evidence.** Each form runs in a world whose `:seon.batch/sink` is a fresh sink and whose scope binds a
-  fresh read-evidence sink. Futures the form starts carry that world (it travels as a value), so their calls and reads
-  land in the form that started them, not the form running when they finish. At completion the entry carries
-  `:seon.batch/read-evidence` and `:seon.batch/calls`; the batch sink receives the form's counts.
-- **Code evidence** (root ruling): the entry's callees (`calls`, plus a call-preparation refusal's `:seon.instrument/fn`)
-  map to their current `:seon.program/definition-digest`, one query per form, recorded on the evaluation as
-  `:seon.cluster.eval/code-evidence`. The refresh re-runs a kept unit when a read's evidence or any callee's digest
-  changed; a unit with neither is UNKNOWN and re-runs once (law: missing evidence is never current).
+**A1: one semantic read.** `planned-sources` segments with `forgive/forms` under the structural read options
+(edamame, tags unread, any alias: `forgive/structural-read-options`, made public) instead of `reply/sources` +
+`repair-sources`. Its rows are the accepted form texts of the repaired text; an unread remainder becomes one last row
+whose evaluation-time read answers its reader error once; no form is the no-forms error as today. The row's namespace
+attribution goes: the fold places each form in the fork's live namespace. REPL evidence
+(`tmp/one-path/s4a/a1-segmentation.edn`, 52 recorded replies, 64 ms): structural equals semantic segmentation except
+two designed improvements, #25 (`::parity-s/k` after `(require ... :as parity-s)`: the semantic segmenter stops because
+the alias does not exist before evaluation; the structural one reads all three forms and the evaluation-time read
+resolves it) and #41 (an unaccepted tag is one form whose read error is answered once). Against today's planner, 45 of
+52 equal or both empty; five are where the forgiving stage already differs from today's planner (prose and a stray
+delimiter: #1, #5, #6, #45, #46) and two are malformed texts (#40 `#=`, #50 odd map) that become the unread last row. Pre-opened rows stay until S8 (Q1 accepted): they are receipt
+identities, not parsed-form storage.
 
-**Entry → the settlement's evaluation** (the `:seon.sci.eval/evaluation` keys `settle-batch!` reads):
-`:seon.sci.admit/value` ← value or error value; shown map ← the show stage's; `:seon.cluster.eval/ns` ← ns-before;
-`:seon.sci.eval/ending-ns` ← ns-after; `:seon.sci.admit/record` ← outcome, duration, allocated bytes;
-read evidence and basis ← per-form evidence; `:seon.cluster.eval/error` ← error or facts error; the program row is
-gone (the fold's facts commit instead). Print options a form `set!`s are read from the fork's print session after the
-form, as `evaluate` does now.
+**A2: the evaluation handoff.** Producer/consumer matrix; every field has one producer:
 
-**Deleted in S4a** (measured at 79c10321d, spec §10): the loop body of `evaluate-sources` (164, a ~40-line request
-builder stays), `gate-function-install` (73), `restore-evaluations!` 19, `with-settled` 8, `settled-value` 10,
-`settlement-form` 10, `analyze-settlement` 23, `namespace-rows` 20, `evaluated-namespaces` 17,
-`schema-attribute-change-tx` 43, `affected-schema-attributes` 9; `settle-batch!`'s program-row path. **Added:** the turn's
-stage values and entry mapping (~150), the fold's per-form evidence and `stop?` (~25), code evidence (~25), the refresh
-rule (~10). Net about −130 in src. S4b deletes the old `sci.eval/evaluate` admission body callers (S10) and
-`preview-sources`' copy of the loop.
+| Consumer | Field | Producer in S4a |
+|---|---|---|
+| `evaluation-facts` :94 | ordinal, run | the row (read stage) |
+| | value, error, outcome, output, interrupted-at, print options, record | the frame (unchanged code) |
+| | `:seon.cluster.eval/ns` lookup ref, `:seon.sci.eval/ending-ns` | the frame (`[:seon.ns/name ns]`, symbol) |
+| | integer duration, acquisition, allocation | the frame (`elapsed-ms`, kernel record) |
+| | shown, renderer, diagnostics, value-size keys, `value-edn`, `unstored` | the frame's `shown-result`/`shown-failure` |
+| | read evidence and basis | the per-form world (below) |
+| | code evidence (new) | the per-form sink (below); declared in `seon.cluster.eval.edn`, selected by the receipt writer and `latest-evaluations` |
+| | facts error | the fold's apply stage; recorded as the evaluation's error beside its kept value |
+| `settlement-projection` :209 | `value-edn`, report EDN | the frame (unchanged) |
+| `evaluation-terminal-data` :3750 | disposition and original value | the publish stage; the refused disposition kept separately |
+| `settle-batch!` :3990 | program facts | `program-facts` over the batch's program on the head, in the committed phase |
+| `resume-turn` installation :5562 | installations | the batch's accepted entities with their observed Vars: `{:seon.program/row entity :seon.sci.eval/evaluation {:seon.sci.eval/bindings {sym {value, metadata}}}}` from the fold's writes, never `:seon.program/row` of an evaluation |
 
-**Proofs** (armed, on a disposable branch, both entrants): a turn and an MCP run of the same reply settle the same
-facts; a defn, a def, a require and a schema registration commit through the fold's facts; a disposition ends the run
-and an early `(my.agent/done)` is refused on that form; a future's calls land in the form that started it; the
-pre-S3a `(help)` refusal (no evidence) re-runs once; a callee digest change re-runs its unit and an unrelated
-definition change does not; the turn-prelude timings (P1) do not regress by more than 20% or 50 ms.
+REPL evidence (`a2-frame-vs-entry.edn`): for `(do (println "kept") 42)` the frame answers output `"kept\n"`, integer
+duration 1, allocation 871,784, `[:seon.ns/name user]`, shown `"42"`. The same form through today's fold SCI stage
+(`sci.batch/evaluate`, via `render-request`) fails: `sci/out` is unbound (`SciUnbound` cannot be cast to `Writer`),
+finding **F-Q** below. The frame is the fix for every SCI entrant; `sci.batch/evaluate` is deleted with acquisition's
+move to the frame (S9).
 
-**Open for review.** (1) Whether the run's pre-opened evaluation rows (one per admitted source) stay until S8, as this
-design keeps them. (2) Whether `settle-batch!` should take the fold's facts as data (this design) or the fold's settle
-should call the recording writer itself (the fold's current `settle`), which would duplicate the run's side effects.
+**The fold's contract changes (seon.batch):**
+- **The evaluate stage answers an outcome**, `{:seon.batch/value v}` or `{:seon.batch/error t}` with any entrant keys
+  (the turn's `:seon.batch/evaluation`); the four existing stages adapt (they are this lane's). B1's sentinel becomes
+  "no outcome".
+- **Per-form evidence (A3).** Each form runs in a world with a fresh call sink, a fresh read-evidence sink and an
+  owned-work count (`:seon.batch/in-flight`). `kernel/future-call`, the arm's one seam for an agent's futures, counts
+  the future in the world it carries and uncounts it when its body exits (its terminal event); nested futures count in
+  the same form. At the form's completion the entry freezes `:seon.batch/read-evidence`, `:seon.batch/executed` and
+  `:seon.batch/evidence` `:complete`, or `:unknown` with a diagnostic naming the missing terminal event ("a future this
+  form started had not exited") when owned work is still in flight. The value is published at once; nothing waits for
+  the future. Unknown evidence is never current: the refresh re-runs that unit. REPL evidence (`a3-in-flight.edn`): a
+  form whose future (and its nested future) is held is `:unknown` after the form and after the next form, whose own
+  evidence is `:complete`; after exit a fresh freeze is `:complete`. **Boundary:** concurrency that does not pass through
+  `kernel/future-call` is not counted: SCI's `pmap` (`reference-code/sci/src/sci/addons/future.clj`, which calls the host
+  `future-call`, so the arm does not govern it either) and executors inside host functions. Its late reads are not in
+  the frozen evidence. SCI's `pmap` escaping the arm is an existing kernel defect, filed as its own task, not fixed here.
+- **Executed definitions (A4).** `profile/with-cell` binds the cell's key `[sym digest]` once at install;
+  `count-into-world!` takes the key's adder at **entry** (`computeIfAbsent`) and increments at exit, so an entered,
+  unfinished call is evidence (count 0). `batch/calls` sums by symbol (callers unchanged); `batch/executed` answers
+  key → count. A nil digest is explicit unknown. A definition this batch armed at its write has no digest yet (arming
+  precedes derive): the fold resolves `[sym nil]` to the digest it derived for the one write of `sym` at or before
+  that form, and leaves it unknown when the batch wrote `sym` more than once. An armed call-preparation refusal names
+  its callee by `:seon.instrument/fn` (confirmed by Astra) and joins the same set. REPL evidence
+  (`a4-executed-digests.edn`): two cells of `review/f` with different digests are two keys; an unknown digest is
+  `[review/g nil]`; an entered, unfinished call is present with count 0.
+- **Settlement never replaces a published entry (A5).** `settled-into` merges the settlement's program and working
+  value and, per held ordinal, only a facts error (that form's change dropped, its value kept); an update naming an
+  ordinal the batch never published is a diagnostic. `:seon.batch/settled`'s schema is closed to those members.
+  REPL evidence (`a5-settled-into.edn`): Astra's empty-entries settlement drops `[42 3]` under today's `merge` and
+  keeps both under `settled-into`; a refusal of ordinal 1 marks only that form; a stray ordinal 7 is one diagnostic.
+
+**Code evidence and the refresh.** The evaluation stores `:seon.cluster.eval/code-evidence`: the `[sym digest]` pairs
+executed, or `:unknown`. Before a turn, a kept read-only unit re-runs when a read's evidence changed, when any executed
+pair's digest is not the symbol's current `:seon.program/definition-digest` (one query for the distinct symbols of all
+kept units), when a symbol is gone, or when its evidence is `:unknown` or absent (stored before S4a): absent evidence
+re-runs once and stores its evidence. Uncontracted definitions are not armed, so they have no cell; a change to one does
+not refresh a unit that called it. That is the contract law's boundary (the growing warning at the REPL, refusal at
+merge), not a new rule.
+
+**A6: a loadable deletion list** (current Var usages from clj-kondo over the archive, resource symbols included):
+
+| Deleted in S4a | Lines | Its callers, converted in the same commit |
+|---|---|---|
+| `evaluate-sources`' loop body (the name stays) | ~120 | — |
+| `gate-function-install` | 73 | `cluster/turn_test.clj:2638`, `cluster/agent_test.clj:1342` (quoted `ns-resolve`: the tests of the REPL gate, deleted with it per V1); task symbols `seon.sci.eval.edn:44,55,198` retargeted to `seon.turn/evaluate-sources` |
+| `with-settled`, `settled-value` | 18 | task `seon.turn.edn:126-127` retargeted |
+| `restore-evaluations!` | 19 | `turn_test.clj:268,278` become `a-refused-settlement-keeps-each-evaluated-value` cases (no restoration: OQ1) |
+| `final-namespace-digests` | 28 | `settle-batch!` (rows gone) |
+| `evaluation-entity-id` | 11 | the loop only |
+| `repairable-delimiter-error?`, `repaired-span`, `repair-source`, `repair-sources` | 62 | `planned-sources` only |
+| `disposition-rule-error`'s re-read | (rewritten as the publish stage) | — |
+
+**Kept** until the step retiring their last caller: `namespace-rows` and `evaluated-namespaces` (`source-rows` :665,
+`record-evaluated-call` :1620, `receipt-settle-batch-tx` :1101: S8/S9), `analyze-settlement` and `settlement-form`
+(`receipt-settle-tx` :1074), `schema-attribute-change-tx` and `affected-schema-attributes` (`row-tx` :1319, :1399: S9),
+`reply/sources` (other callers until S8), `sci.eval/evaluate`'s admission (its tests: S10).
+
+**Size.** Added ≈ 235: the frame split (+25 net, moved code), the fold's outcome, per-form evidence, publish and
+`settled-into` (+50), profile and kernel (+10), the turn's stage values and entry adapter (+110), code-evidence storage
+and the refresh rule with its attribute (+35), `planned-sources` (+5). Deleted ≈ 330 (table). Net ≈ −95 src, measured at
+landing.
+
+**Proofs** (armed, on a disposable branch, through both entrants: an MCP SCI run and a Seon agent turn with a scripted
+local stub provider): `held-reader-form` (one reader call per form; `::alias/k` after its `require` in the same reply
+reads), `settlement-field-parity` (every consumer field above present and equal between an MCP run and an agent turn
+of the same reply, `(do (println "kept") 42)` included), `early-done-replacement` (`(my.agent/done "d") 42` answers the
+refusal on form 0 and still evaluates 42; a last-form disposition stops), `late-form-evidence` (held future: unknown
+after the form, after the next form, after settlement), `executed-digest-evidence` (two versions in one form; a
+callee digest change re-runs its unit, an unrelated change does not), `settlement-preserves-published-entries`
+(Astra's A5 form), plus: a defn, a def, a require and a schema registration commit through the fold's facts; the
+pre-S3a `(help)` refusal (no evidence) re-runs once; the turn-prelude timings (P1) do not regress by more than 20% or
+50 ms. Focused tests for root: `seon.turn-test`, `seon.cluster.turn-test`, `seon.rereads-test`,
+`seon.profile-test`, `seon.sci.kernel-test`, `seon.dev.mcp-bridge-test`, `seon.batch-test`.
 
 ### 10.1 Net lines
 
@@ -621,6 +703,10 @@ Root files these; this lane edits no task file.
 - **F-O.** The agent's opening walk renders the runtime pull twice (two units); the system plan keeps one per source.
 - **F-P.** `(seon.cluster.message/…)` renders `:seon.render/operations`, which no schema declares; its owner is
   `seon.render`'s schema (root).
+- **F-Q (this lane's, 2026-09-28, default pid 3360).** The fold's SCI evaluate stage (`seon.sci.batch/evaluate`) binds
+  no `sci/out`: `(do (println "kept") 42)` through `render-request` fails with `SciUnbound` cannot be cast to
+  `java.io.Writer` (`tmp/one-path/s4a/a2-frame-vs-entry.edn`). No product turn uses the stage yet; S4a's evaluation
+  frame is the fix for every SCI entrant.
 - **F1 (again).** Once a namespace has stored facts, host bindings shadow analyzer forms (`clojure.core/import*`
   unresolvable); the corpus runs each item on its own branch until S3c.
 - **F-I.** SCI's own suite has 5 failures on the pinned fork (unchanged): `function-results-dont-have-metadata` ×2,

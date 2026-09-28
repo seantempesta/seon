@@ -16,4 +16,9 @@
              :intent "The pressure admission reads garbage as live. G1's young collector manages the old pool (probed on default 2026-09-27: `G1 Young Generation` lists `G1 Old Gen`, and its collection usage equals current usage), so collection usage after every young pause counts promoted garbage no marking has reclaimed; with the heap grown to 11 GB, G1's adaptive IHOP lets that garbage stand. Measured: 8.53 GB after r9 and 8.3-8.9 GB after earlier rounds, while forced collections found 1.5-2.4 GB live across a heavy round and 2.2 GB live in the OOM dump of pid 42397; one forced collection earlier read 4.2 GB. Done when a crossing closes arms only on live bytes: enter-memory-pressure! runs one full collection per crossing (0.1-0.5 s at this live size) and enters only when the collection still reads at or above ::enter (patch tmp/heap-retention/kernel-live-pressure.patch)."
              :must-read #{seon.sci.kernel/memory-pressure seon.sci.kernel/enter-memory-pressure!}
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"
-                         "docs/research/agent-platform/landing/heap-retention-2026-09-27.md"}}]
+                         "docs/research/agent-platform/landing/heap-retention-2026-09-27.md"}}
+ #:seon.task{:name "sci-pmap-escapes-the-arm"
+             :kind :function
+             :intent "An agent's `pmap` runs outside its evaluation's arm: SCI's future addon (reference-code/sci/src/sci/addons/future.clj) implements `pmap` over the host `clojure.core/future-call`, while seon.sci.eval replaces only `future-call` with seon.sci.kernel/future-call (eval.clj:404). The time limit, allocation total and interrupt do not reach pmap's threads, and S4a's owned-work count cannot see them. Done when an agent's pmap threads are governed by the form's arm and counted as its owned work, proven by a pmap whose element blocks past the time limit being cut and its form's evidence frozen :unknown until exit."
+             :must-read #{seon.sci.kernel/future-call seon.sci.kernel/adopt-arm}
+             :evidence #{"docs/research/agent-platform/one-repl-path-spec-2026-09-27.md"}}]

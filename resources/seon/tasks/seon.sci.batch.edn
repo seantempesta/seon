@@ -1,0 +1,5 @@
+[#:seon.task{:name "the-fold-sci-stage-binds-no-output"
+             :kind :function
+             :intent "seon.sci.batch/evaluate binds no sci/out or sci/err, so `(do (println \"kept\") 42)` through seon.turn.batch/render-request fails with SciUnbound cannot be cast to java.io.Writer (default pid 3360, 2026-09-28, tmp/one-path/s4a/a2-frame-vs-entry.edn). The stage also captures no output, print options or interruption, which the settlement needs (Astra A2). Done when every SCI entrant of the fold evaluates through the evaluation frame split out of seon.sci.eval/evaluate (spec §10.0) and the println form answers its output beside 42."
+             :must-read #{seon.sci.batch/evaluate seon.sci.eval/evaluate}
+             :evidence #{"docs/research/agent-platform/one-repl-path-spec-2026-09-27.md"}}]
