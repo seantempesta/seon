@@ -1719,7 +1719,11 @@
      k - Schema keyword (use `::name` for auto-namespacing)
      v - Malli schema definition
 
-   Returns the registered keyword `k`.
+   Returns the registration `{:seon.schema/key k :seon.schema/definition v}`
+   (`:seon.schema/registration`), whose render pair shows what it means for
+   the program and its stored data: the form it replaces, how many stored
+   values the new form refuses, and the schemas and contracts naming `k`
+   (`seon.render.schema/usage`).
 
    Map render metadata stays in the authored form. Database storability and
    stable identity derive from installed attribute declarations; no map-level
@@ -1733,7 +1737,7 @@
                             [:seon.eval/id ...] ...])"
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]
                          [::definition ::definition]]
-                  ::registry-key]}
+                  ::registration]}
   [k v]
   (internal/assert-non-nilable-value-schema! (candidate-forms) k (structural-schema v))
   (let [encoded (pr-str v)
@@ -1772,7 +1776,7 @@
       :seon.schema/admission
       {:seon.schema.admission/source *registration-admission-source*}}))
   (update-candidate-forms! assoc k v)
-  k)
+  {:seon.schema/key k :seon.schema/definition v})
 
 (defn unregister!
   "Stage removal of one schema from the current evaluation delta.

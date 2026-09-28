@@ -1,0 +1,36 @@
+#:seon.schema.usage{:previous
+                    [:and {:description "The committed form a registration replaces, when it differs. Shown, never stored."}
+                     :seon.schema/value],
+                    :new?
+                    [:= {:description "Present when no form is committed under the key yet."} true],
+                    :stored
+                    [:int {:min 0 :description "Entities holding the attribute, counted up to 10,000."}],
+                    :checked
+                    [:int {:min 0 :description "Stored values of the attribute validated against the new form: a bounded sample of at most 200."}],
+                    :failing
+                    [:int {:min 0 :description "How many of the checked values the new form refuses."}],
+                    :failing-example
+                    [:tuple {:description "The first refused stored value as [entity value]."} :int :seon.schema/value],
+                    :unchecked
+                    [:string {:min 1 :description "Why the new form could not be checked against this database: it names a schema the database does not hold yet."}],
+                    :referenced-by
+                    [:vector {:description "Schemas whose form names the key, the first eight sorted."} :qualified-keyword],
+                    :referenced-by-count [:int {:min 0}],
+                    :contracts
+                    [:vector {:description "Functions whose contract names the key, the first eight sorted."} :qualified-symbol],
+                    :contract-count [:int {:min 0}],
+                    :report
+                    [:map {:description "What registering a form under a key means for the program and its stored data (seon.render.schema/usage)."}
+                     [:seon.schema/key :seon.schema/registry-key]
+                     [:seon.schema/definition :seon.schema/value]
+                     [:seon.schema.usage/previous {:optional true} :seon.schema.usage/previous]
+                     [:seon.schema.usage/new? {:optional true} :seon.schema.usage/new?]
+                     [:seon.schema.usage/stored {:optional true} :seon.schema.usage/stored]
+                     [:seon.schema.usage/checked {:optional true} :seon.schema.usage/checked]
+                     [:seon.schema.usage/failing {:optional true} :seon.schema.usage/failing]
+                     [:seon.schema.usage/failing-example {:optional true} :seon.schema.usage/failing-example]
+                     [:seon.schema.usage/unchecked {:optional true} :seon.schema.usage/unchecked]
+                     [:seon.schema.usage/referenced-by {:optional true} :seon.schema.usage/referenced-by]
+                     [:seon.schema.usage/referenced-by-count {:optional true} :seon.schema.usage/referenced-by-count]
+                     [:seon.schema.usage/contracts {:optional true} :seon.schema.usage/contracts]
+                     [:seon.schema.usage/contract-count {:optional true} :seon.schema.usage/contract-count]]}

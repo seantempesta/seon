@@ -733,7 +733,7 @@
         "the refusal names the failing member, and retains the actual object")
     (is (identical? raw (first checked))
         "the whole checked argument survives beside the leaf, unprojected")
-    (is (str/includes? ai "expected a collection member satisfying an integer") ai)
+    (is (str/includes? ai ":expected :int") ai)
     (is (str/includes? ai "100") ai)
     (is (not (str/includes? ai "139"))
         "the AI projection stops at the profile's child bound")

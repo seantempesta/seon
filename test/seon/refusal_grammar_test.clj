@@ -80,8 +80,9 @@
         ;; "Example:" comes from the operation's docstring Examples; seon.db/pull
         ;; declares none, and the stored-doc enrichment that supplied one was
         ;; deleted in b1f291fbc (printing no longer enriches errors).
-        (doseq [fragment ["seon.db/pull refused :selector: expected a string"
-                          "got an integer 42" "Fix:"]]
+        ;; The reply is data (seon.error/reply-value): what was refused,
+        ;; what was expected, and the member.
+        (doseq [fragment [":offending 42" ":expected :string" ":member :selector"]]
           (is (str/includes? shown fragment) shown))
         (is (not (str/includes? shown "seon.error/data")) shown)
         (let [refusal (db/transact! connection
@@ -118,7 +119,7 @@
           (is (= [7] (:seon.error/input description)))
           (is (= :int (:seon.error/expected description)))
           (is (= "wrong" (:seon.error/offending description)))
-          (is (str/includes? text "Input: (7)" ) text)
+          (is (str/includes? text ":input (7)") text)
           (is (not (str/includes? text "AFunction")) text))
         (let [wrapped (instrument/wrap-interpreted
                        'example/guard
@@ -126,5 +127,5 @@
                        (schema/handed-projection) (config/result-caps config/defaults) identity)
               refusal (support/refusal-data #(wrapped 7))
               text (error/render-ai (assoc unit :seon.render/value refusal))]
-          (is (str/includes? text "Input: [7]" ) text)
-          (is (str/includes? text "Result contract: :int") text))))))
+          (is (str/includes? text ":input [7]") text)
+          (is (str/includes? text ":result-contract :int") text))))))

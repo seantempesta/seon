@@ -1,0 +1,301 @@
+{:installed? false,
+ :errors
+ {:contract-missing-key
+  {:before-tokens 161,
+   :fix-shown "0",
+   :after-ms 0,
+   :entrants-agree? true,
+   :fix-works? true,
+   :html-nodes 46,
+   :after-entrants-agree? true,
+   :fix "(scratch.fbr/area {:scratch.fbr/w 2, :scratch.fbr/h 0})",
+   :after
+   "{:seon.error/message \"scratch.fbr/area refused argument 0\",\n :seon.error/problems\n   [#:seon.error{:path [:scratch.fbr/h],\n     :offending {:scratch.fbr/w 2},\n     :expected [:int {:min 0}]}],\n :seon.error/fix-form (scratch.fbr/area #:scratch.fbr{:w 2, :h 0}),\n :seon.sci.eval/stacktrace [[scratch.fbr/area 2 1] [scratch.fbr 5 1]]}",
+   :after-tokens 103,
+   :before
+   "{:seon.error/exception-class clojure.lang.ExceptionInfo,\n :seon.sci.eval/stacktrace [[scratch.fbr/area 2 1] [scratch.fbr 5 1]],\n :seon.error/member :seon.fn.arity/input,\n :seon.error/expected\n   [:map\n    [:scratch.fbr/w [:int {:min 0}]]\n    [:scratch.fbr/h [:int {:min 0}]]],\n :seon.error/message\n   \"scratch.fbr/area refused argument 0 at [:scratch.fbr/h]: expected the required key :scratch.fbr/h with an integer at least 0, got a map missing :scratch.fbr/h. Fix: Supply :scratch.fbr/h with an integer at least 0.\"}"},
+  :contract-nested
+  {:before-tokens 155,
+   :fix-shown "10",
+   :after-ms 1,
+   :entrants-agree? true,
+   :fix-works? true,
+   :html-nodes 39,
+   :after-entrants-agree? true,
+   :fix
+   "(scratch.fbr/total-area [{:scratch.fbr/w 2, :scratch.fbr/h 3} {:scratch.fbr/w 1, :scratch.fbr/h 4}])",
+   :after
+   "{:seon.error/message \"scratch.fbr/total-area refused argument 0\",\n :seon.error/problems\n   [#:seon.error{:path [1 :scratch.fbr/h],\n     :offending \"4\",\n     :expected [:int {:min 0}]}],\n :seon.error/fix-form\n   (scratch.fbr/total-area\n    [#:scratch.fbr{:w 2, :h 3} #:scratch.fbr{:w 1, :h 4}]),\n :seon.sci.eval/stacktrace\n   [[scratch.fbr/total-area 3 1] [scratch.fbr 5 1]]}",
+   :after-tokens 116,
+   :before
+   "{:seon.error/exception-class clojure.lang.ExceptionInfo,\n :seon.sci.eval/stacktrace\n   [[scratch.fbr/total-area 3 1] [scratch.fbr 5 1]],\n :seon.error/member :seon.fn.arity/input,\n :seon.error/expected\n   [:vector\n    [:map\n     [:scratch.fbr/w [:int {:min 0}]]\n     [:scratch.fbr/h [:int {:min 0}]]]],\n :seon.error/message\n   \"scratch.fbr/total-area refused argument 0 at [1 :scratch.fbr/h]: expected an integer at least 0, got a string. Fix: Supply an integer at least 0 at [1 :scratch.fbr/h].\"}"},
+  :exception
+  {:before-tokens 73,
+   :fix-shown "3",
+   :after-ms 0,
+   :entrants-agree? true,
+   :fix-works? true,
+   :html-nodes 11,
+   :after-entrants-agree? true,
+   :fix "(ratio 3 1)",
+   :after
+   "{:seon.error/message \"Divide by zero\",\n :seon.error/exception-class java.lang.ArithmeticException,\n :seon.sci.eval/stacktrace\n   [[clojure.core// 1022 1]\n    [scratch.fbr/ratio 4 86]\n    [scratch.fbr/ratio 4 1]\n    [scratch.fbr 5 1]]}",
+   :after-tokens 73,
+   :before
+   "{:seon.error/exception-class java.lang.ArithmeticException,\n :seon.sci.eval/stacktrace\n   [[clojure.core// 1022 1]\n    [scratch.fbr/ratio 4 86]\n    [scratch.fbr/ratio 4 1]\n    [scratch.fbr 5 1]],\n :seon.error/message \"Divide by zero\"}"},
+  :first-party-contract
+  {:before-tokens 147,
+   :fix-shown nil,
+   :after-ms 0,
+   :entrants-agree? true,
+   :fix-works? nil,
+   :html-nodes 41,
+   :after-entrants-agree? true,
+   :fix nil,
+   :after
+   "{:seon.error/message \"my.program/callers refused argument 0\",\n :seon.error/problems\n   [#:seon.error{:path [:seon.program/subject],\n     :offending \"seon.error/reply-value\",\n     :expected\n       [:or\n        {:description\n           \"A function or test symbol, namespace symbol, or schema key.\"}\n        :symbol\n        :qualified-keyword]}],\n :seon.sci.eval/stacktrace\n   [[my.program/callers 156 1] [scratch.fbr 5 1]]}",
+   :after-tokens 131,
+   :before
+   "{:seon.error/exception-class clojure.lang.ExceptionInfo,\n :seon.sci.eval/stacktrace\n   [[my.program/callers 156 1] [scratch.fbr 5 1]],\n :seon.error/member :seon.fn.arity/input,\n :seon.error/expected :my.program/subject-request,\n :seon.error/message\n   \"my.program/callers refused argument 0 at [:seon.program/subject]: expected :my.program/subject-request (a symbol), got a string. Fix: Supply a symbol at [:seon.program/subject]. Contract: :my.program/subject-request.\"}"},
+  :missing-entity
+  {:before-tokens 111,
+   :fix-shown
+   "{:seon.program/subject seon.error/reply-value,\n :seon.program/kind :seon.fn/sym,\n :seon.db/basis-t 536886748,\n :seon.program/unknown\n   [#:seon.program{:gap :outside-graph,\n     :message\n       \"This supplied database value answers; callers outside its program graph are unknown.\"}],\n :seon.program/callers\n   #{seon.sci.eval/shown-failure seon.turn/refusal-terminal-data},\n :seon.program/call-sites\n   [#:seon.fn{:sym seon.sci.eval/shown-failure,\n     :form-span [222087 223064],\n     :declared-arities [#:seon.fn.arity{:min 1, :max 1}],\n     :call-arity 1}\n    #:seon.fn{:sym seon.turn/refusal-terminal-data,\n     :form-span [197098 199966],\n     :declared-arities [#:seon.fn.arity{:min 1, :max 1}],\n     :call-arity 1}]}",
+   :after-ms 33,
+   :entrants-agree? false,
+   :fix-works? true,
+   :html-nodes 15,
+   :after-entrants-agree? true,
+   :fix
+   "(my.program/callers {:seon.program/subject 'seon.error/reply-value})",
+   :after
+   "#:seon.error{:message\n   \"No program declaration names seon.error/replyvalue.\",\n :offending seon.error/replyvalue,\n :in-namespace\n   {seon.error\n      [reply-value value prepare refusal mcp-prose normalize recording\n       render-ai]}}",
+   :after-tokens 73,
+   :before
+   "{:seon.error/at #inst \"2026-09-28T01:53:53.868Z\",\n :seon.error/layer :seon.program/read,\n :seon.error/operation my.program/locate,\n :seon.error/message\n   \"No program declaration names seon.error/replyvalue.\",\n :seon.program/not-found seon.error/replyvalue,\n :seon.error/expected [:seon.fn/sym :seon.test/sym],\n :seon.error/data {:seon.db/basis-t 536886746}}"},
+  :removal-refusal
+  {:before-tokens 3094,
+   :fix-shown nil,
+   :after-ms 3,
+   :entrants-agree? false,
+   :fix-works? nil,
+   :html-nodes 22,
+   :after-entrants-agree? true,
+   :fix nil,
+   :after
+   "#:seon.error{:message\n   \"Cannot perform my.program/ns-unmap! on seon.error/evidence-path; repair the named referrers first.\",\n :offending {:seon.program/callers #{seon.error/render-html}},\n :expected \"no surviving referrer\",\n :sources\n   {seon.error/render-html\n      [\"56: [:a {:href (evidence-path id)} \\\"Inspect evidence\\\"]]])))))\"]}}",
+   :after-tokens 105,
+   :before
+   "{:seon.error/at #inst \"2026-09-28T01:53:31.070Z\",\n :seon.error/data\n   {:seon.db/basis-t 536886743,\n    :seon.program/call-sites\n      [#:seon.fn{:sym seon.error/render-html,\n        :form-span [115146 118446],\n        :declared-arities [#:seon.fn.arity{:min 1, :max 1}],\n        :call-arity 1}],\n    :seon.program/callers #{seon.error/render-html},\n    :seon.program/capability-of #{},\n    :seon.program/contract-refs #{},\n    :seon.program/gating\n      [my.agent-test/branch-mode-is-the-acquisition-decision-not-a-cluster-label\n       my.agent-test/settings!-declares-the-dials-it-takes\n       my.agent-test/settings-are-one-owned-component-with-a-derived-render-pair\n       my.agent-test/settings-updates-preserve-one-component-and-agent-isolation\n       my.background-test/poll-and-await-derive-terminal-presence-without-acknowledging\n       my.edit-test/public-entries-declare-resolvable-io-capabilities\n       my.examples-test/public-docstring-examples-run-in-the-canonical-agent-context\n       my.fs-test/public-entries-declare-resolvable-io-capabilities\n       my.message-test/a-contract-forbidden-argument-is-a-value-the-agent-reads\n       my.message-test/delivery-preserves-the-returned-message-identity\n       my.message-test/inbox-lists-this-agents-messages-newest-last\n       my.message-test/read-pulls-one-admitted-message-entity\n       my.message-test/received!-acknowledges-once-and-leaves-the-unread-set\n       my.message-test/send-preserves-r…+28 …1626],\n    :seon.program/kind :seon.fn/sym,\n    :seon.program/plan\n      {:seon.program/issues\n         [\"Issue 564616f86cad: still open.\\nseon.error/render-html must be repaired before retracting seon.error/evidence-path\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not veri…+21514\"]},\n    :seon.program/references #{},\n    :seon.program/render-declared-by #{},\n    :seon.program/requiring-namespaces #{},\n    :seon.program/schedule-tasks #{},\n    :seon.program/schema-references #{},\n    …4},\n :seon.error/expected \"no surviving referrer\",\n :seon.error/layer :seon.program/write,\n :seon.error/message\n   \"Cannot perform my.program/ns-unmap! on seon.error/evidence-path; repair the named referrers first.\",\n :seon.error/offending {:seon.program/callers #{seon.error/render-html}},\n :seon.error/operation my.program/ns-unmap!,\n :seon.program/affected #{seon.error/evidence-path},\n :seon.program/blocked-subject seon.error/evidence-path,\n :seon.program/plan\n   {:seon.program/issues\n      [\"Issue 564616f86cad: still open.\\nseon.error/render-html must be repaired before retracting seon.error/evidence-path\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not verified\\n: not veri…+21514\"]},\n :seon.program/unknown\n   [#:seon.program{:gap :outside-graph,\n     :message\n       \"This supplied database value answers; callers outside its program graph are unknown.\"}\n    #:seon.program{:gap :dispatch-not-modelled,\n     :message\n       \"Protocol and multimethod implementations have no independent program entity.\"}\n    #:seon.program{:gap :arity-unknown-sites,\n     :count 0,\n     :message\n       \"Calls without recorded argument counts, including apply, cannot be checked for arity.\"}\n    #:seon.program{:gap :macro-mediated,\n     :message\n       \"Macro expansions can introduce calls absent from the indexed caller relation.\"}\n    #:seon.program{:gap :unresolvable-callers,\n     :message\n       \"Runtime-computed targets cannot be attributed to this subject by static analysis.\"}]}"},
+  :schema-admission
+  {:before-tokens 73,
+   :fix-shown nil,
+   :after-ms 0,
+   :entrants-agree? true,
+   :fix-works? nil,
+   :html-nodes 7,
+   :after-entrants-agree? true,
+   :fix nil,
+   :after
+   "{:seon.error/message\n   \"Schema population refused :scratch.fbr/rect2 (unresolved-reference).\",\n :seon.sci.eval/stacktrace\n   [[seon.schema/register! 1710 1] [scratch.fbr 5 1]]}",
+   :after-tokens 55,
+   :before
+   "{:seon.error/exception-class clojure.lang.ExceptionInfo,\n :seon.sci.eval/stacktrace\n   [[seon.schema/register! 1710 1] [scratch.fbr 5 1]],\n :seon.error/message\n   \"Schema population refused :scratch.fbr/rect2 (unresolved-reference).\"}"},
+  :schema-nilable
+  {:before-tokens 190,
+   :fix-shown ":scratch.fbr/maybe-n",
+   :after-ms 0,
+   :entrants-agree? true,
+   :fix-works? true,
+   :html-nodes 7,
+   :after-entrants-agree? true,
+   :fix "(seon.schema/register! :scratch.fbr/maybe-n :int)",
+   :after
+   "{:seon.error/message\n   \"schema/register! :scratch.fbr/maybe-n: [:maybe :int] — a registered value is never nil in seon (absent = the key is omitted), so a value schema may not be nilable/[:maybe …]. Register the non-nil BASE shape: (schema/register! :scratch.fbr/maybe-n :int). Where a map field may be absent, write [:scratch.fbr/maybe-n {:optional true} :int]. Where a function slot may return nil, put [:maybe :scratch.fbr/maybe-n] directly in that function schema.\",\n :seon.sci.eval/stacktrace\n   [[seon.schema/register! 1710 1] [scratch.fbr 5 1]]}",
+   :after-tokens 172,
+   :before
+   "{:seon.error/exception-class clojure.lang.ExceptionInfo,\n :seon.sci.eval/stacktrace\n   [[seon.schema/register! 1710 1] [scratch.fbr 5 1]],\n :seon.error/message\n   \"schema/register! :scratch.fbr/maybe-n: [:maybe :int] — a registered value is never nil in seon (absent = the key is omitted), so a value schema may not be nilable/[:maybe …]. Register the non-nil BASE shape: (schema/register! :scratch.fbr/maybe-n :int). Where a map field may be absent, write [:scratch.fbr/maybe-n {:optional true} :int]. Where a function slot may return nil, put [:maybe :scratch.fbr/maybe-n] directly in that function schema.\"}"},
+  :unresolved
+  {:before-tokens 49,
+   :fix-shown "6",
+   :after-ms 3,
+   :entrants-agree? true,
+   :fix-works? true,
+   :html-nodes 13,
+   :after-entrants-agree? true,
+   :fix "(area {:scratch.fbr/w 2 :scratch.fbr/h 3})",
+   :after
+   "{:seon.error/message \"Unable to resolve symbol: aera\",\n :seon.error/offending aera,\n :seon.error/in-namespace {scratch.fbr [area ratio total-area]},\n :seon.sci.eval/stacktrace [[scratch.fbr 5 1]]}",
+   :after-tokens 61,
+   :before
+   "{:seon.error/exception-class clojure.lang.ExceptionInfo,\n :seon.sci.eval/stacktrace [[scratch.fbr 5 1]],\n :seon.error/message \"Unable to resolve symbol: aera\"}"},
+  :writer-refusal
+  {:before-tokens 157,
+   :fix-shown nil,
+   :after-ms 0,
+   :entrants-agree? true,
+   :fix-works? nil,
+   :html-nodes 34,
+   :after-entrants-agree? true,
+   :fix nil,
+   :after
+   "#:seon.error{:message \"seon.db/transact! refused transaction data\",\n :problems\n   [#:seon.error{:path [0 :seon.task/id],\n     :offending \"fbr-task\",\n     :expected\n       [:and\n        {:description\n           \"The task handle: seon.id/id over the ordered aspect [ns name kind] (spec 3b.6), written literally in task EDN, :seon/tasks annotations and rendered context. seon.issue/task-handle returns it.\"}\n        :seon.task/handle]}]}",
+   :after-tokens 135,
+   :before
+   "seon.db/transact! refused transaction data at [0 :seon.task/id]: expected a string of length exactly 12 ([:and\n {:seon.db/identity true,\n  :seon.program/row-schema :seon.task/task,\n  :description\n    \"The task handle: seon.id/id over the ordered aspect [ns name kind] (spec 3b.6), written literally in task EDN, :seon/tasks annotations and rendered context. seon.issue/task-handle returns it.\"}\n :seon.task/handle]), got a string \"fbr-task\". Fix: Supply a string of length exactly 12 at [0 :seon.task/id]."}},
+ :schemas
+ {:changed-compatible
+  {:before-tokens 5,
+   :after-ms 21,
+   :entrants-agree? true,
+   :html-nodes 27,
+   :after
+   "{:seon.schema/key :seon.task/intent,\n :seon.schema/definition [:string {:min 1, :max 20000}],\n :seon.schema.usage/checked 200,\n :seon.schema.usage/contract-count 1,\n :seon.schema.usage/contracts [seon.task/create!],\n :seon.schema.usage/failing 0,\n :seon.schema.usage/previous [:string {:min 1}],\n :seon.schema.usage/referenced-by\n   [:seon.task/declaration :seon.task/entry :seon.task/task],\n :seon.schema.usage/referenced-by-count 3,\n :seon.schema.usage/stored 249}",
+   :notes [],
+   :after-tokens 145,
+   :before ":seon.task/intent",
+   :html
+   [:article
+    {:class "seon-family-entry seon-schema-entry"}
+    [:header
+     [:p {:class "seon-kicker"} "Schema"]
+     [:h3 [:code ":seon.task/intent"]]]
+    nil
+    [:div
+     {:class "seon-schema-diff"}
+     [:div [:p "Before"] [:pre [:code "[:string {:min 1}]"]]]
+     [:div [:p "Now"] [:pre [:code "[:string {:min 1, :max 20000}]"]]]]
+    [:p
+     {:class "seon-schema-usage-stored"}
+     "249 stored; 0 of 200 checked fail the form"]
+    [:p
+     {:class "seon-schema-usage-names"}
+     "Schemas naming it (3): "
+     [:span
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.schema%2Fkey+%3Aseon.task%2Fdeclaration%5D"}
+       [:code ":seon.task/declaration"]]
+      " "
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.schema%2Fkey+%3Aseon.task%2Fentry%5D"}
+       [:code ":seon.task/entry"]]
+      " "
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.schema%2Fkey+%3Aseon.task%2Ftask%5D"}
+       [:code ":seon.task/task"]]]
+     nil]
+    [:p
+     {:class "seon-schema-usage-names"}
+     "Contracts naming it (1): "
+     [:span
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.fn%2Fsym+seon.task%2Fcreate%21%5D"}
+       [:code "seon.task/create!"]]]
+     nil]]},
+  :changed-refusing-stored
+  {:before-tokens 5,
+   :after-ms 17,
+   :entrants-agree? true,
+   :html-nodes 31,
+   :after
+   "{:seon.schema/key :seon.task/intent,\n :seon.schema/definition [:string {:min 400}],\n :seon.schema.usage/checked 200,\n :seon.schema.usage/contract-count 1,\n :seon.schema.usage/contracts [seon.task/create!],\n :seon.schema.usage/failing 90,\n :seon.schema.usage/failing-example\n   [34504\n    \"Every definition an evaluation makes passes the entry gate and is armed, not only a top-level clojure.core/defn the reader matched: (do (defn …)), (let [..] (defn …)), (def f (fn …)) and defn-expanding macros must be refused when uncontracted. Keep an unindexed change distinct from an absent contract. A call inside the defining form still runs before the check.\"],\n :seon.schema.usage/previous [:string {:min 1}],\n :seon.schema.usage/referenced-by\n   [:seon.task/declaration :seon.task/entry :seon.task/task],\n :seon.schema.usage/referenced-by-count 3,\n :seon.schema.usage/stored 249}",
+   :notes [],
+   :after-tokens 273,
+   :before ":seon.task/intent",
+   :html
+   [:article
+    {:class "seon-family-entry seon-schema-entry"}
+    [:header
+     [:p {:class "seon-kicker"} "Schema"]
+     [:h3 [:code ":seon.task/intent"]]]
+    nil
+    [:div
+     {:class "seon-schema-diff"}
+     [:div [:p "Before"] [:pre [:code "[:string {:min 1}]"]]]
+     [:div [:p "Now"] [:pre [:code "[:string {:min 400}]"]]]]
+    [:p
+     {:class "seon-schema-usage-stored"}
+     "249 stored; 90 of 200 checked fail the form"]
+    [:div
+     {:class "seon-schema-usage-failing"}
+     [:p "First failing: entity " "34504"]
+     [:div
+      {:id "seon-value-f461aee098aa599ee6e26e8e",
+       :class "seon-data-panel"}
+      nil
+      [:span
+       {:class "seon-print-string"}
+       "\"Every definition an evaluation makes passes the entry gate and is armed, not only a top-level clojure.core/defn the reader matched: (do (defn …)), (let [..] (defn …)), (def f (fn …)) and defn-expanding macros must be refused when uncontracted. Keep an unindexed change distinct from an absent contract. A call inside the defining form still runs before the check.\""]
+      nil]]
+    [:p
+     {:class "seon-schema-usage-names"}
+     "Schemas naming it (3): "
+     [:span
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.schema%2Fkey+%3Aseon.task%2Fdeclaration%5D"}
+       [:code ":seon.task/declaration"]]
+      " "
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.schema%2Fkey+%3Aseon.task%2Fentry%5D"}
+       [:code ":seon.task/entry"]]
+      " "
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.schema%2Fkey+%3Aseon.task%2Ftask%5D"}
+       [:code ":seon.task/task"]]]
+     nil]
+    [:p
+     {:class "seon-schema-usage-names"}
+     "Contracts naming it (1): "
+     [:span
+      [:a
+       {:href
+        "/data?entity=%5B%3Aseon.fn%2Fsym+seon.task%2Fcreate%21%5D"}
+       [:code "seon.task/create!"]]]
+     nil]]},
+  :new
+  {:before-tokens 5,
+   :after-ms 42,
+   :entrants-agree? true,
+   :html-nodes 7,
+   :after
+   "{:seon.schema/key :scratch.fbr/width,\n :seon.schema/definition [:int {:min 0}],\n :seon.schema.usage/new? true}",
+   :notes [],
+   :after-tokens 34,
+   :before ":scratch.fbr/width",
+   :html
+   [:article
+    {:class "seon-family-entry seon-schema-entry"}
+    [:header
+     [:p {:class "seon-kicker"} "New schema"]
+     [:h3 [:code ":scratch.fbr/width"]]]
+    nil
+    [:pre [:code "[:int {:min 0}]"]]]},
+  :unstorable
+  {:before-tokens 5,
+   :after-ms 16,
+   :entrants-agree? true,
+   :html-nodes 7,
+   :after
+   "{:seon.schema/key :scratch.fbr/rect3,\n :seon.schema/definition [:map [:w :int]],\n :seon.schema.usage/new? true}",
+   :notes
+   [{:seon.schema/key :scratch.fbr/rect3,
+     :seon.schema/installed? false,
+     :seon.error/message
+     "A stored attribute needs a storable Datahike value type, and this Malli form has none. Register a concrete storable shape."}],
+   :after-tokens 34,
+   :before ":scratch.fbr/rect3",
+   :html
+   [:article
+    {:class "seon-family-entry seon-schema-entry"}
+    [:header
+     [:p {:class "seon-kicker"} "New schema"]
+     [:h3 [:code ":scratch.fbr/rect3"]]]
+    nil
+    [:pre [:code "[:map [:w :int]]"]]]}}}

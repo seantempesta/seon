@@ -41,6 +41,13 @@
               :pulled-projection-result
               [:or :seon.schema/projection :seon.schema/validation-refusal],
               :definition :seon.schema/malli-form,
+              :registration
+              [:map {:description "What seon.schema/register! returns: the key and the form it registered. Its pair renders what the registration means for the program and its stored data (seon.render.schema/usage)."
+                     :seon.render/ai seon.render.schema/render-ai
+                     :seon.render/html seon.render.schema/render-html
+                     :seon.render/form seon.render.schema/render-form}
+               [:seon.schema/key :seon.schema/registry-key]
+               [:seon.schema/definition :seon.schema/definition]],
               :value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                             :seon.schema.admission/reason "The shared value schema represents arbitrary in-memory Clojure values, including nil and host objects; callers declaring concrete data must use their own shape."
                             :gen/elements [nil false 0 "" :k [] {}]}],
@@ -102,8 +109,8 @@
               [:map
                {:seon.db/attributes true,
                 :seon.program/projected-properties true,
-                :seon.render/ai seon.render.ns/schema-ai,
-                :seon.render/html seon.render.ns/schema-html,
+                :seon.render/ai seon.render.schema/render-ai,
+                :seon.render/html seon.render.schema/render-html,
                 :seon.render/form seon.render.ns/schema-form :seon.program/partition :seon.program}
                [:seon.schema/key :seon.schema/key]
                [:seon.program/definition-digest :seon.program/definition-digest]

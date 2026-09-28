@@ -160,7 +160,7 @@
             (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
                                "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
-          (is (str/includes? (error/render-ai entity) "Occurrences: 6"))
+          (is (str/includes? (error/render-ai entity) "occurrence-count 6"))
           (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value entity})) "Open"))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]

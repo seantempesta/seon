@@ -157,7 +157,7 @@
             "an AI pair renders the fact's data, never its attribute dump")
         (is (str/includes?
              (error/render-ai (assoc fault :seon.error/occurrence-count 3))
-             "Occurrences: 3")
+             "occurrence-count 3")
             "and it carries the recorded occurrence evidence")))))
 
 (deftest maintenance-pair-preserves-ai
