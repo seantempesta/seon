@@ -1,0 +1,10 @@
+(require '[clj-kondo.impl.cache :as cache])
+(let [root (first *command-line-args*)
+      entry (cache/from-cache-1 root :cljc 'datahike.api)
+      result {:filename (:filename entry)
+              :connect? (contains? (:clj entry) 'connect)
+              :new-declaration? (contains? (:clj entry) 'astra-analysis-cache-proof)}]
+  (prn result)
+  (assert (:connect? result))
+  (assert (:new-declaration? result)))
+(shutdown-agents)

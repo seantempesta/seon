@@ -1,0 +1,7 @@
+diff --git a/src/datahike/api.cljc b/src/datahike/api.cljc
+index d8564924..088dd9a5 100644
+--- a/src/datahike/api.cljc
++++ b/src/datahike/api.cljc
+@@ -89,0 +90,2 @@
++
++(defn astra-analysis-cache-proof [] :new-dependency-revision)

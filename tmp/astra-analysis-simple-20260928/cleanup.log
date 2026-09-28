@@ -1,0 +1,2 @@
+SEON down OK
+#:seon.operator{:stopped-processes [], :process-exit? false}

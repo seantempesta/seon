@@ -1,0 +1,3 @@
+WARNING: Use of :paths external to the project has been deprecated, please remove: target/dev-dependency-classes/189de89cc98cb4d6f135e358a3aac5e5fc6f561c1369286e41c78f3c5206336f
+WARNING: Using incubator modules: jdk.incubator.vector
+{:filename "/Users/sean/src/seon/tmp/astra-analysis-simple-20260928/root/data/source/pins/reference-code-datahike/e27d9ff6db35dc5c4079c90cec0d9051b4511cd9/src/datahike/api.cljc", :connect? true, :new-declaration? true}

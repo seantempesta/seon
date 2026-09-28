@@ -1,0 +1,12 @@
+{
+  "store_bytes": 120919803,
+  "store_files": 28319,
+  "du_kib": 179244,
+  "caches": [
+    {
+      "path": "tmp/astra-analysis-simple-20260928/root/data/source/analysis-cache/dependencies/348d8b633a82",
+      "inode": 406621711,
+      "mtime_ns": 1790630909365573504
+    }
+  ]
+}

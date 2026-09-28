@@ -1199,7 +1199,7 @@
   Each entry is kondo's own cached namespace (`from-cache-1`, :23), absent when unanalyzed."
   {:malli/schema [:=> [:cat [:set :symbol]] [:map-of :symbol :map]]}
   [namespaces]
-  (let [root (kondo.core/resolve-cache-dir analyzer/config-directory true nil)]
+  (let [root (kondo.core/resolve-cache-dir analyzer/config-directory true analyzer/cache-directory)]
     (into {} (keep (fn [namespace-name]
                      (some->> (some #(kondo.cache/from-cache-1 root % namespace-name) [:clj :cljc])
                               (vector namespace-name))))
@@ -2901,7 +2901,7 @@
         prior-projection (when database (db/carried-projection database))
         projection (analysis-projection request prior-projection (some-> selected set))
         cache-root (or (::analyzer/cache-root request)
-                       (str (io/file directory analyzer/config-directory ".cache")))
+                       analyzer/cache-directory)
         ;; Only the names the selected files declared: the namespaces whose
         ;; resolver entries are superseded and the definitions a removal
         ;; guard compares, never the files' whole entities.
@@ -4140,7 +4140,7 @@
                                     (get-in request [:seon.fn/manifest :seon.fn.manifest/relative-roots])) directory
                                 (mapv #(fs/absolute-path directory %) (sort caller-paths))
                                 database
-                                (str (io/file directory analyzer/config-directory ".cache")))
+                                analyzer/cache-directory)
                      findings (into [] (comp (mapcat :seon.fn.file/rows) (filter :seon.lint/id)) artifacts)
                      previous (require-committed! (file-entities database (vec caller-paths) :seon.lint/file)
                                                   :seon.fn/population)
