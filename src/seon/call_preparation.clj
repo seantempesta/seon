@@ -581,7 +581,8 @@
                            ;; name. Any other optional entry's absence is the caller's.
                            :when (and (or (not optional?) (world-member? value))
                                       (= entry-key (:seon.call-preparation/key candidate)))]
-                       (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)))
+                       (cond-> (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)
+                         optional? (assoc :seon.call-preparation/optional? true))))
         slots (vec (for [{position :seon.fn.argument/index rest? :seon.fn.argument/rest?
                           schema-key :seon.call-preparation/schema-key map-entries ::map-entries} arguments
                          :let [candidate (get index schema-key)
@@ -589,7 +590,10 @@
                                               map-entries)
                                own (filterv #(= position (:seon.fn.argument/index %)) entries)]
                          slot [(when (and candidate (not rest?)) (slot-of candidate position))
-                               (when (and (seq required) (= required (set (map :seon.call-preparation/entry-key own))))
+                               (when (and (nil? candidate) (seq required)
+                                          (= required (set (keep #(when-not (:seon.call-preparation/optional? %)
+                                                                    (:seon.call-preparation/entry-key %))
+                                                                 own))))
                                  {:seon.fn.argument/index position :seon.call-preparation/entries own})]
                          :when slot]
                      slot))]
@@ -820,9 +824,19 @@
          :seon.call-preparation/slot :seon.fn/sym]
     [:or :seon.schema/value :seon.call-preparation/unavailable-error :seon.call-preparation/invalid-supplied-value-error]]}
   [current environment slot sym]
-  (if (= `seon.batch/world-members (:seon.call-preparation/supplier-symbol slot))
-    (supply-from-world slot sym)
-    (supply-from-row current environment slot sym)))
+  (let [row (get (:seon.call-preparation/supplied-defaults current) (:seon.call-preparation/key slot))]
+    (cond
+      (not= `seon.batch/world-members (:seon.call-preparation/supplier-symbol slot))
+      (supply-from-row current environment slot sym)
+      ;; an evaluation of the one path: its world is the only source
+      seon.batch/*world* (supply-from-world slot sym)
+      ;; an entrant not yet converted to the one path binds no world: its
+      ;; member's row supplier answers, as before (deleted with the last
+      ;; converted entrant, S4-S12)
+      row (supply-from-row current environment
+                           (assoc slot :seon.call-preparation/supplier-symbol (:seon.call-preparation/supplier-symbol row))
+                           sym)
+      :else (supply-from-world slot sym))))
 
 (defn- supply-from-world
   "The calling evaluation's world member for `slot`, or the refusal naming
@@ -1039,9 +1053,11 @@
                         (if (or (not (map? target)) (contains? target entry-key))
                           args
                           (let [produced (value-for entry)]
-                            (if (reduced? produced)
-                              produced
-                              (assoc args position (assoc target entry-key produced)))))))
+                            (cond
+                              ;; an optional member the world lacks stays absent
+                              (and (reduced? produced) (:seon.call-preparation/optional? entry)) args
+                              (reduced? produced) produced
+                              :else (assoc args position (assoc target entry-key produced)))))))
                     with-inserts
                     (:seon.call-preparation/entries answer))))))))
 

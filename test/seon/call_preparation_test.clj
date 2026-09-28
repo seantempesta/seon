@@ -933,11 +933,12 @@
              (is (= :seon.db/db (:seon.call-preparation/unavailable-key result)))
              (is (zero? @entered) "the target body was never entered"))))))))
 
-(deftest an-optional-entry-is-never-supplied-and-a-required-one-refuses
-  ;; Only REQUIRED inputs are supplied by declared schema name (ruling
-  ;; 2026-09-27): an optional entry's absence is the caller's meaning, so it
-  ;; is not in the plan at all. A required entry whose supplier cannot answer
-  ;; refuses by name before the body.
+(deftest an-optional-world-member-is-supplied-and-a-required-one-refuses
+  ;; An input declared under a world member's schema name is supplied when
+  ;; omitted, required or optional (owner ruling 2026-09-27, S3a): a function
+  ;; whose meaning needs it absent declares another name. A present key is
+  ;; never replaced. A required entry whose supplier cannot answer refuses by
+  ;; name before the body.
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection database-entities)
@@ -951,11 +952,14 @@
                   :seon.call-preparation/key :seon.agent/id
                   :seon.call-preparation/entry-key :seon.agent/id
                   :seon.call-preparation/supplier-symbol 'sample/nowhere-at-all}]
-       (is (every? (comp empty? :seon.call-preparation/entries) (:seon.call-preparation/arities optional-plan))
-           "the optional connection is not an entry the plan fills")
-       (is (= [{:sample/label "caller"}]
+       (is (every? (comp seq :seon.call-preparation/entries) (:seon.call-preparation/arities optional-plan))
+           "the optional connection, a world member, is an entry the plan fills")
+       (is (= [{:sample/label "caller" :seon.db/connection connection}]
               (cp/prepare current environment optional-plan [{:sample/label "caller"}]))
-           "the caller's map reaches the body unchanged")
+           "the omitted connection is filled from the evaluation's custody")
+       (is (= [{:sample/label "caller" :seon.db/connection ::the-callers}]
+              (cp/prepare current environment optional-plan [{:sample/label "caller" :seon.db/connection ::the-callers}]))
+           "a connection the caller passes is never replaced")
        (is (some? compiled))
        (is (= :seon.agent/id
               (:seon.call-preparation/unavailable-key

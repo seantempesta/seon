@@ -96,7 +96,7 @@
 
 (defn- own-branch
   "The branch my context's connection holds."
-  {:malli/schema [:=> [:cat :my.program/context] :seon.store/branch]}
+  {:malli/schema [:=> [:cat :my.agent/branch-context] :seon.store/branch]}
   [{connection :seon.db/connection}]
   (get-in @connection [:config :branch]))
 
@@ -107,7 +107,7 @@
 
   Example:
   (my.agent/branches)"
-  {:malli/schema [:=> [:cat :my.program/context] [:or :my.agent/branches :seon.error/value]]}
+  {:malli/schema [:=> [:cat :my.agent/branch-context] [:or :my.agent/branches :seon.error/value]]}
   [{store :seon.store/store :as context}]
   (if-not store
     (branch-refusal `branches "My context holds no store to read the roster from." {})
@@ -122,7 +122,7 @@
 
   Example:
   (my.agent/create-branch! {:seon.store/branch :my-lane})"
-  {:malli/schema [:=> [:cat :my.agent/branch-request :my.program/context]
+  {:malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
                   [:or :my.agent/created-branch :seon.error/value]]}
   [{lane :seon.store/branch} {store :seon.store/store connection :seon.db/connection :as context}]
   (cond
@@ -146,7 +146,7 @@
 
   Example:
   (my.agent/retire-branch! {:seon.store/branch :my-lane})"
-  {:malli/schema [:=> [:cat :my.agent/branch-request :my.program/context]
+  {:malli/schema [:=> [:cat :my.agent/branch-request :my.agent/branch-context]
                   [:or :my.agent/retired-branch :seon.error/value]]}
   [{lane :seon.store/branch} {store :seon.store/store routing :seon.agent/routing :as context}]
   (cond
