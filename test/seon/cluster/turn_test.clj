@@ -1605,14 +1605,14 @@
               "the red form settles as a flat error on its own eval")
           (is (= 42 (edn/read-string (:seon.eval/shown (second receipts))))
               "the sibling in the other namespace still ran and settled")
-          (is (empty?
-               (db/q '[:find ?assignment
-                      :where
-                      [?assignment :seon.message/assignment _]]
-                    @connection))
-              "no message is written on the agent's behalf: an error is a
-               value the agent sees; routing it to an owner is a later
-               capability (owner, 2026-09-05), never an automatic wake")
+          (is (= #{["agent-b" (turn/problem-id route-run 0)]}
+                 (set (db/q '[:find ?to ?problem
+                        :where
+                        [?assignment :seon.message/assignment ?problem]
+                        [?assignment :seon.message/to ?agent]
+                        [?agent :seon.agent/id ?to]]
+                      @connection)))
+              "the red form is routed to its namespace's owner, who can act on it")
           (is (= 1
                  (db/q '[:find (count ?tx) .
                         :in $ ?run-id
@@ -3299,3 +3299,31 @@
           (is (= 1 (turn/episode-runs database "agent-a")))
           (is (= 0 (turn/turns-left database "agent-a")))
           (is (nil? (turn/next-agent-work database (request connection)))))))))
+
+(deftest two-drivers-of-one-opening-both-answer-and-it-settles-once
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            run-id "two-driver-opening"]
+        (test-support/transacted!
+         connection
+         (turn/generated-run-tx
+          @connection
+          {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process
+           :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
+        ;; Two procs holding the same work value: whichever settles second
+        ;; finds the run closed and answers that refusal as its report.
+        (let [work (turn/next-agent-work @connection (request connection))
+              drive #(turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next work} now)
+              reports (vec (pcalls drive drive))
+              database (db/db connection)
+              ordinals (db/q '[:find [?ordinal ...] :in $ ?run-id
+                               :where [?run :seon.turn/id ?run-id]
+                               [?form :seon.cluster.eval/run ?run]
+                               [?form :seon.cluster.eval/ordinal ?ordinal]]
+                             database run-id)]
+          (is (= :generate (:seon.turn.work/situation work)))
+          (is (= [:closed :error] (sort (map :seon.turn.loop/outcome reports))))
+          (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id]))))
+          (is (seq ordinals))
+          (is (= (count ordinals) (count (distinct ordinals)))))))))

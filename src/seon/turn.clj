@@ -5335,8 +5335,10 @@
             (if-let [refusal (:refused-outcome settlement)]
               ;; a refused settlement keeps every evaluated value (OQ1): the
               ;; live definitions stay private to this fork, nothing restores
-              (assoc (report :error (count gated) refusal)
-                     :seon.turn.loop/basis (:db-after outcome))
+              ;; A refused refusal settlement (a concurrent driver closed the
+              ;; run first) committed nothing: the report carries no basis.
+              (cond-> (report :error (count gated) refusal)
+                (:db-after outcome) (assoc :seon.turn.loop/basis (:db-after outcome)))
               (let [installations
                     ;; the batch's accepted entities with the Vars its forms
                     ;; bound: what this settlement committed
