@@ -188,6 +188,16 @@ Sequence:
        (ruling), gate evidence goes in the reply, and auto-check covers only the changed definitions;
      - turn overhead: 5–9 s per agent turn against 13–112 ms through MCP;
      - four MCP-versus-agent gaps.
+  d2. **Var render replaces feedback and the REPL gate (owner, 2026-09-27 night).** "Rather than doing explicit checking
+      and warning with defn … a render function that renders the return value of a defn … check it for schemas … autorun
+      the tests … show the test output"; "Everything that we care about is rendered both ways" (AI and HTML).
+      - A defn returns its Var. The Var's render pair shows contract status and the reaching test results at its digest.
+        Test results are derived values keyed by exercised digests, so a missing one runs test agents. It shows only the
+        delta.
+      - Late results arrive by the ordinary changed-read refresh.
+      - Deleted: the :seon.eval/feedback stage, the uncontracted-defn warning code and the REPL install gate. Merge
+        acceptance is the one refusal point.
+      - The same pattern follows for ns-unmap, register!, in-ns, errors, deftest, tasks and merge proposals.
   e. Beside it:
      - test agents: design 38e5a6d47 and prototype 33e878596, 13/13 proofs; Astra is re-reviewing; it lands after spec
        step S12;
