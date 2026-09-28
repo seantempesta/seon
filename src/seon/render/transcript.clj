@@ -404,8 +404,7 @@
     (->> (concat (map (partial message-entry db run-id agent-id
                                message-orders)
                       messages)
-                 (map receipt-entry receipts)
-                 [])
+                 (map receipt-entry receipts))
          (map (fn [entry]
                 (assoc entry
                        ::root (entry-root identity-attrs entry)
@@ -432,7 +431,7 @@
      (assoc :seon.render.call/id [::history-value value]))))
 
 (defn- message-text
-  [unit entry _detail]
+  [unit entry]
   (let [entity (cond-> (::entity entry)
                  (::content entry)
                  (assoc :seon.message/content (::content entry)))
@@ -508,26 +507,6 @@
       (::branch-errors-text entry) (assoc :seon.repl/errors
                                           (::branch-errors-text entry)))))
 
-(defn- evaluation-text
-  "One frozen form or settled evaluation, through the one REPL generator.
-
-  A frozen form and its evaluation were two arms calling the same function
-  with the same argument. `repl/text` already emits a prompt line and no
-  response when nothing has settled — absence of a terminal fact IS running —
-  so the distinction the two arms encoded is one the generator derives."
-  [_unit entry _detail]
-  (repl/text (emission entry)))
-
-(defn- undisposed-run-text
-  "The run's own `:seon.render/ai`, with no grammar of its own.
-
-  This used to build `\"system=> \" (pr-str form)` — a third prompt grammar
-  for a subject that is not a form anyone evaluated. An undisposed run's
-  evaluations are ordinary transcript entries rendered by `seon.repl/text`;
-  the run entry says only what the run itself says."
-  [_unit entry _detail]
-  (or (turn/render-ai (::entity entry)) ""))
-
 (defn- projected-entry
   [unit entry detail]
   ;; Every value this entry renders through the floor is rooted at the entry's
@@ -544,9 +523,13 @@
      ::detail detail
      ::execution-error? (some? (::error entry))
      ::text (case (::kind entry)
-              :message (message-text unit entry detail)
-              :eval (evaluation-text unit entry detail)
-              :run (undisposed-run-text unit entry detail))}))
+              :message (message-text unit entry)
+              ;; One frozen form or settled evaluation, through the one REPL
+              ;; generator: `repl/text` emits a prompt line and no response
+              ;; when nothing has settled, so running needs no second arm.
+              :eval (repl/text (emission entry))
+              ;; The run's own `:seon.render/ai`, with no grammar of its own.
+              :run (or (turn/render-ai (::entity entry)) ""))}))
 
 (defn reasoning-disclosure
   "A collapsed, exact reasoning display shared by live and settled HTML."
@@ -609,11 +592,7 @@
   ;; whose reported count came from the history query's limit rather than
   ;; from any budget.
   [pinned entries]
-  (str/join
-   "\n\n"
-   (cond-> []
-     (seq pinned) (into (map ::text pinned))
-     (seq entries) (into (map ::text entries)))))
+  (str/join "\n\n" (map ::text (concat pinned entries))))
 
 (defn- html-entries
   [entries]
@@ -641,11 +620,8 @@
   [pinned entries]
   (into
    [:section {:class "seon-transcript"}]
-   (cond-> []
-     (seq pinned)
-     (conj (html-entries pinned))
-     (seq entries)
-     (conj (html-entries entries)))))
+   (map html-entries)
+   (filter seq [pinned entries])))
 
 (defn- candidate-history
   "The shared source of transcript entries, supplied evaluations or stored history."
@@ -765,20 +741,23 @@
      (or supplied-agent-id (when-not (db/read-refusal? queried) queried))
      ::selected-run-error (some #(when (db/read-refusal? %) %) [queried run])}))
 
-(defn- missing-selected-run
+(defn- request-error
+  "One refused render request, declared as `:seon.render.transcript/request-error`."
+  [operation data]
+  (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render operation data)
+             assoc :seon.error/declared-schema :seon.render.transcript/request-error))
 
+(defn- missing-selected-run
   {:malli/schema [:=> [:cat :seon.render/unit :map] :seon.render.transcript/request-error]}
   [unit identities]
-  (let [observation
-        (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/missing-selected-run
-         {:seon.error/message "The selected run is unavailable because its run, agent, or database identity is missing."
-         :seon.error/fix "Supply the expected member and repeat the requested operation."
-         :seon.error/member :seon.turn/turn
-         :seon.render.transcript/refused-member :seon.turn/turn
-         :seon.error/expected [:seon.db/db :seon.turn/id :seon.agent/id]
-         :seon.error/offending unit
-         :seon.render.transcript/selection-identities identities}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
-    observation))
+  (request-error 'seon.render.transcript/missing-selected-run
+                 {:seon.error/message "The selected run is unavailable because its run, agent, or database identity is missing."
+                  :seon.error/fix "Supply the expected member and repeat the requested operation."
+                  :seon.error/member :seon.turn/turn
+                  :seon.render.transcript/refused-member :seon.turn/turn
+                  :seon.error/expected [:seon.db/db :seon.turn/id :seon.agent/id]
+                  :seon.error/offending unit
+                  :seon.render.transcript/selection-identities identities}))
 
 (defn render-run-ai
   "Render only the selected turn's state and evaluations."
@@ -1018,15 +997,13 @@
                                  (if (map? owner) (:db/id owner) owner))))
                      (:seon.agent/id unit))]
     (or agent-id
-        (let [observation
-              (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/runtime-owner
-               {:seon.error/message "The runtime component's owner could not be resolved."
-               :seon.error/fix "Supply the expected member and repeat the requested operation."
-               :seon.render.transcript/refused-member :seon.agent/runtime
-               :seon.error/member :seon.runtime/agent
-               :seon.error/expected :seon.agent/id
-               :seon.error/offending unit}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
-          observation))))
+        (request-error 'seon.render.transcript/runtime-owner
+                       {:seon.error/message "The runtime component's owner could not be resolved."
+                        :seon.error/fix "Supply the expected member and repeat the requested operation."
+                        :seon.render.transcript/refused-member :seon.agent/runtime
+                        :seon.error/member :seon.runtime/agent
+                        :seon.error/expected :seon.agent/id
+                        :seon.error/offending unit}))))
 
 (def ^:private runtime-selector
   '[{:seon.agent/runtime
@@ -1103,6 +1080,11 @@
      (str "Message from " (or (get-in trigger [:seon.message/from :seon.agent/id])
                                "outside this cluster"))]))
 
+(defn- turn-reply [connection entity]
+  (or (:seon.turn/reply entity)
+      (when (and connection (:seon.turn/reply-blob entity))
+        (blob/get connection (:seon.turn/reply-blob entity)))))
+
 (defn- runtime-turn-table [turns latest-trigger connection]
   [:details {:class "seon-turn-history" :data-preserve-attr "open"}
    [:summary (str "Turns (" (count turns) ")")]
@@ -1116,9 +1098,7 @@
                closed (get-in entity [:seon.turn/closed-tx :db/txInstant])
                trigger (or (:seon.turn/trigger entity)
                            (when (zero? index) latest-trigger))
-               reply (or (:seon.turn/reply entity)
-                         (when (and connection (:seon.turn/reply-blob entity))
-                           (blob/get connection (:seon.turn/reply-blob entity))))]
+               reply (turn-reply connection entity)]
            [:tr
             [:td (runtime-time opened)]
             [:td (if (:seon.turn/closed-tx entity)
@@ -1180,11 +1160,6 @@
 (defn- utf8-size [text]
   (alength (.getBytes ^String text "UTF-8")))
 
-(defn- turn-reply [connection entity]
-  (or (:seon.turn/reply entity)
-      (when (and connection (:seon.turn/reply-blob entity))
-        (blob/get connection (:seon.turn/reply-blob entity)))))
-
 (defn- readable-shown [source]
   (try
     (with-open [reader (PushbackReader. (StringReader. source))]
@@ -1219,6 +1194,11 @@
 (defn- session-url [agent-id turn-id raw?]
   (route/path ::route/agent-debug {:id agent-id}
               (cond-> {:turn turn-id} raw? (assoc :prompt "true"))))
+
+(defn- nav-click
+  "The Datastar click that moves the address to `href` and fetches `fetch-url`."
+  [href fetch-url]
+  (str "evt.preventDefault(); history.replaceState(null, '', '" href "'); @get('" fetch-url "')"))
 
 (defn- outline-url
   [agent-id]
@@ -1296,9 +1276,8 @@
         [:a {:class "seon-session-toggle" :href (session-url agent-id selected (not raw?))
              (keyword "data-on:click")
              (when-not raw?
-               (str "evt.preventDefault(); history.replaceState(null, '', '"
-                    (session-url agent-id selected true) "'); @get('"
-                    (session-url agent-id selected true) "')"))}
+               (let [raw-url (session-url agent-id selected true)]
+                 (nav-click raw-url raw-url)))}
          (if raw? "Turn ledger" "As the model saw it")])
       (when (not= false (::debug? request))
         [:a {:href (route/path ::route/agent-debug {:id agent-id})} "Latest"])
@@ -2162,12 +2141,13 @@
                                           :seon.ai.model/cached-input-usd-per-mtok
                                           :seon.ai.model/output-usd-per-mtok]
                                          [:seon.ai.model/id model])]))
+        rates-of (fn [a] (mapv #(get-in models [(:seon.ai/model a) %])
+                               [:seon.ai.model/input-usd-per-mtok
+                                :seon.ai.model/cached-input-usd-per-mtok
+                                :seon.ai.model/output-usd-per-mtok]))
         costs (mapv (fn [{a ::attempt u ::usage}]
-                      (let [rates (get models (:seon.ai/model a))
-                            input (:seon.ai.model/input-usd-per-mtok rates)
-                            cached (:seon.ai.model/cached-input-usd-per-mtok rates)
-                            output (:seon.ai.model/output-usd-per-mtok rates)]
-                        (when (every? number? [input cached output (::miss u) (::hit u) (::out u)])
+                      (let [[input cached output :as rates] (rates-of a)]
+                        (when (every? number? (into rates [(::miss u) (::hit u) (::out u)]))
                           (/ (+ (* input (::miss u)) (* cached (::hit u)) (* output (::out u))) 1000000.0)))) attempts)
         plan ((requiring-resolve 'seon.plan/plan) {:seon.db/db database :seon.agent/id agent-id})
         steps (:my.plan/steps plan)
@@ -2186,13 +2166,7 @@
      ::per-step per-step ::totals totals ::attempts (count attempts)
      ::missing-usage (count (remove #(every? number? (map (::usage %) [::prompt ::hit ::miss ::out])) attempts))
      ::cost (when (every? number? costs) (reduce + 0 costs))
-     ::missing-rates (count (filter
-                             (fn [{a ::attempt}]
-                               (not (every? number?
-                                      (map #(get-in models [(:seon.ai/model a) %])
-                                           [:seon.ai.model/input-usd-per-mtok
-                                            :seon.ai.model/cached-input-usd-per-mtok
-                                            :seon.ai.model/output-usd-per-mtok])))) attempts))}))
+     ::missing-rates (count (remove #(every? number? (rates-of (::attempt %))) attempts))}))
 
 (defn- session-problems {:malli/schema [:=> [:cat :map [:sequential :map] [:or :nil :map]] :map]}
   [request entities evaluations]
@@ -2234,8 +2208,7 @@
          :let [href (ledger-url agent-id (:seon.turn/id entity) {})]]
      [:a {:href href
           (keyword "data-on:click")
-          (str "evt.preventDefault(); history.replaceState(null, '', '" href "'); @get('"
-               (ledger-url agent-id (:seon.turn/id entity) {:ledger "true"}) "')")}
+          (nav-click href (ledger-url agent-id (:seon.turn/id entity) {:ledger "true"}))}
       (str "turn " (::ordinal entity))])])
 
 (defn- budget-html [budget]
@@ -2353,8 +2326,7 @@
                          (when-let [labels (seq (get marks turn-id))]
                            (str "\n" (str/join " · " (sort labels)))))
              (keyword "data-on:click")
-             (str "evt.preventDefault(); history.replaceState(null, '', '" href "'); @get('"
-                  (ledger-url (:seon.agent/id request) turn-id {:ledger "true"}) "')")}
+             (nav-click href (ledger-url (:seon.agent/id request) turn-id {:ledger "true"}))}
          (str (::ordinal entity) (when (seq (get marks turn-id)) "·"))])]]))
 
 (defn- turn-story [request evaluations entity]
@@ -2444,14 +2416,12 @@
     (cond
       (or (db/read-refusal? entity) (:seon.render.transcript/refused-member entity)) entity
       (nil? (:seon.agent/runtime entity))
-      (let [observation
-            (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/render-runtime-html
-             {:seon.error/message "The agent's runtime component is unavailable."
-             :seon.error/fix "Supply the expected member and repeat the requested operation."
-             :seon.render.transcript/refused-member :seon.agent/runtime
-             :seon.error/expected :seon.runtime/entity
-             :seon.error/offending agent-id}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
-        observation)
+      (request-error 'seon.render.transcript/render-runtime-html
+                     {:seon.error/message "The agent's runtime component is unavailable."
+                      :seon.error/fix "Supply the expected member and repeat the requested operation."
+                      :seon.render.transcript/refused-member :seon.agent/runtime
+                      :seon.error/expected :seon.runtime/entity
+                      :seon.error/offending agent-id})
       :else
         (let [runtime (:seon.agent/runtime entity)
               turns (sort-by (juxt #(some-> (get-in % [:seon.turn/opened-tx :db/txInstant])
