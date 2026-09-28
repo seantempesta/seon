@@ -10,6 +10,7 @@
   measured at the REPL (landing note), never asserted here."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [malli.instrument :as mi]
+            [seon.batch :as batch]
             [seon.config :as config]
             [seon.instrument :as instrument]
             [seon.profile :as profile]
@@ -160,7 +161,7 @@
         slow (profile/cell {:seon.profile/sym 'probe/slow :seon.profile/scope :seon.profile/host})
         idle (profile/cell {:seon.profile/sym 'probe/idle :seon.profile/scope :seon.profile/host})
         record! (fn [held nanos]
-                  (.increment ^LongAdder (:seon.profile/call-counter held))
+                  (.increment ^LongAdder (aget ^objects (:seon.profile/histogram held) (profile/bucket nanos)))
                   (.add ^LongAdder (:seon.profile/total-counter held) nanos)
                   (.accumulate ^LongAccumulator (:seon.profile/max-counter held) nanos))]
     (dotimes [_ 5000] (record! fast 1000000))
@@ -206,3 +207,56 @@
         (is (nil? (profile/explain-slow (profile/begin)))
             "an operation within one second has nothing to explain"))
       (finally (ns-unmap 'seon.profile-test var-name)))))
+
+(defn- digest-of
+  [label]
+  (apply str (take 64 (cycle (str label "0123456789abcdef")))))
+
+(defn- probe-cell
+  [label]
+  (profile/cell {:seon.profile/sym (symbol "seon.profile-test" (str label "-" (random-uuid)))
+                 :seon.profile/digest (digest-of label)
+                 :seon.profile/scope :seon.profile/host}))
+
+(deftest a-cell-counts-each-call-into-its-histogram-gauge-and-throws-by-class
+  (let [held (probe-cell "histogram")
+        inside (volatile! nil)
+        call (profile/with-cell held (fn [f] (profile/timed (f))))]
+    (call (fn [] (vreset! inside (:seon.profile/in-flight (profile/observation held)))))
+    (dotimes [_ 2] (try (call #(throw (ex-info "probe" {}))) (catch clojure.lang.ExceptionInfo _)))
+    (try (call #(throw (IllegalStateException. "probe"))) (catch IllegalStateException _))
+    (let [observed (profile/observation held)]
+      (is (= 1 @inside) "a call not yet returned is in flight")
+      (is (= {:seon.profile/calls 4 :seon.profile/throws 3 :seon.profile/in-flight 0
+              :seon.profile/throws-by-class {"clojure.lang.ExceptionInfo" 2 "java.lang.IllegalStateException" 1}}
+             (select-keys observed [:seon.profile/calls :seon.profile/throws :seon.profile/in-flight
+                                    :seon.profile/throws-by-class])))
+      (is (= 4 (reduce + (map #(.sum ^LongAdder %) (:seon.profile/histogram held))))
+          "calls are the histogram's sum")
+      (is (<= (:seon.profile/p50-us observed) (:seon.profile/p99-us observed))))))
+
+(deftest a-world-sink-holds-self-time-and-an-observation-is-its-delta
+  (let [inner-cell (probe-cell "inner")
+        outer-cell (probe-cell "outer")
+        inner (profile/with-cell inner-cell (fn [] (profile/timed (Thread/onSpinWait))))
+        outer (profile/with-cell outer-cell (fn [n] (profile/timed (dotimes [_ n] (inner)))))
+        sink (batch/sink)
+        world {:seon.batch/sink sink
+               :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
+        key-of (fn [held] [(:seon.profile/sym held) (:seon.profile/digest held)])
+        slots (fn [held] (let [^java.util.concurrent.atomic.AtomicLongArray a (get sink (key-of held))]
+                           (mapv #(.get a %) (range 3))))]
+    (binding [batch/*world* world] (outer 101))
+    (let [[outer-calls outer-nanos outer-self] (slots outer-cell)
+          [inner-calls inner-nanos inner-self] (slots inner-cell)
+          observed (profile/transaction-observation world)]
+      (is (= [1 101] [outer-calls inner-calls]))
+      (is (= inner-nanos inner-self) "a leaf's self time is its whole time")
+      (is (= outer-nanos (+ outer-self inner-nanos)) "a caller's self time excludes its counted callees")
+      (is (= 102 (:seon.db.transaction/calls observed)))
+      (is (= #{(key-of inner-cell) (key-of outer-cell)}
+             (into #{} (map (fn [[sym digest]] [sym digest])) (:seon.db.transaction/hot observed))))
+      (is (= #{(conj (key-of inner-cell) 101)} (:seon.db.transaction/repeated observed)))
+      (is (nat-int? (:seon.db.transaction/ms observed)))
+      (is (= {} (dissoc (profile/transaction-observation world) :seon.db.transaction/ms))
+          "the next observation holds only work done since"))))

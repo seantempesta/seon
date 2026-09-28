@@ -1,0 +1,158 @@
+--- a/src/seon/turn.clj	2026-09-28 13:40:55.629598684 -0600
++++ b/src/seon/turn.clj	2026-09-28 13:40:55.690172980 -0600
+@@ -23,6 +23,7 @@
+             [seon.flow :as seon.flow]
+             [seon.id :as id]
+             [seon.plan :as plan]
++            [seon.profile.measurement :as measurement]
+             [seon.program :as program]
+             [seon.print.value :as print.value]
+             [seon.render :as render]
+@@ -3790,6 +3791,11 @@
+                            (update entry :seon.turn.loop/receipt with-diagnostic refusal)
+                            entry))
+                        requests prepared)
++        ;; The definitions these forms executed whose measurement moved,
++        ;; once for every attempt: measuring advances their cells' marks.
++        measured (measurement/significant-tx
++                  (db/db connection)
++                  (into #{} (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/executed])) requests))
+         ;; Built inside the committed phase: a refused read of the fault
+         ;; window is a refused settlement the arm below closes, never an escape.
+         transaction
+@@ -3802,6 +3808,7 @@
+              (into (receipt-settle-batch-tx
+                     (with-fault-windows (db/db connection) requests (mapv :seon.turn.loop/receipt prepared))))
+              (into (mapcat :seon.db/tx-data) prepared)
++             (into measured)
+              ;; The close precedes plan/settle-call, as in close-turn; a
+              ;; settlement that already closes the turn needs no fold.
+              (cond-> (not (some closing-settlement? prepared))
+@@ -5220,6 +5227,7 @@
+                        :seon.db/connection connection :seon.db/db basis :seon.db/writer db/transact!
+                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
+                        :seon.render/profile profile :seon.batch/sink (seon.batch/sink)
++                       :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
+                        :seon.agent/id agent-id}
+                 run-id (assoc :seon.turn/id run-id)
+                 (env/of cluster) (assoc :seon.env/environment (env/of cluster))
+--- a/src/seon/turn/batch.clj	2026-09-28 13:40:55.640287508 -0600
++++ b/src/seon/turn/batch.clj	2026-09-28 13:40:55.689690602 -0600
+@@ -29,6 +29,7 @@
+             [seon.fn :as sfn]
+             [seon.batch]
+             [seon.fn.analyzer :as analyzer]
++            [seon.profile.measurement :as measurement]
+             [seon.program :as program]
+             [seon.schema :as schema]
+             [seon.schema.datahike :as schema.datahike]
+@@ -675,10 +676,15 @@
+   (let [conn (world/settlement-connection world)
+         writer (:seon.db/writer world)
+         head (db/db conn)
++        ;; once for every attempt: measuring advances the cells' marks
++        measured (measurement/significant-tx
++                  head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
+         commit! (fn [tx] (let [r (writer conn tx)]
+                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
+         attempt (fn [b]
+-                  (let [tx (try (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))
++                  (let [tx (try (let [tx (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))]
++                                  ;; measurements ride a commit that happens anyway, never one of their own
++                                  (cond-> tx (and (vector? tx) (seq tx)) (into measured)))
+                                 (catch Throwable t {:seon.error/message (ex-message t) :seon.error/data (ex-data t)}))]
+                     (cond
+                       (map? tx) {:seon.batch/writer-refusal tx}
+--- a/src/seon/turn/world.clj	2026-09-28 13:40:55.650726789 -0600
++++ b/src/seon/turn/world.clj	2026-09-28 13:41:11.748612180 -0600
+@@ -16,6 +16,7 @@
+ (schema/register-core-predicate! 'seon.batch/sink? seon.batch/sink?)
+ 
+ (schema/register-core-predicate! 'seon.batch/owned? seon.batch/owned?)
++(schema/register-core-predicate! 'seon.batch/stamped-clock? seon.batch/stamped-clock?)
+ 
+ (def sink-generator
+   "Fresh, empty call sinks."
+@@ -46,6 +47,7 @@
+              :seon.sci.eval/ctx (eval/fork-cluster-ctx base db conn)
+              :seon.sci.eval/base-ctx base
+              :seon.batch/sink (seon.batch/sink)
++             :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
+              :seon.sci.eval/time-limit-ms (or limit 30000)}
+       agent-id (assoc :seon.agent/id agent-id)
+       turn-id (assoc :seon.turn/id turn-id)
+@@ -71,7 +73,8 @@
+                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
+   (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
+            :seon.db/writer (or writer db/transact!)
+-           :seon.batch/sink (seon.batch/sink)}
++           :seon.batch/sink (seon.batch/sink)
++           :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
+     agent-id (assoc :seon.agent/id agent-id)
+     turn-id (assoc :seon.turn/id turn-id)
+     ctx (assoc :seon.sci.eval/ctx ctx)
+--- a/src/seon/batch.clj	2026-09-28 13:40:55.660489649 -0600
++++ b/src/seon/batch.clj	2026-09-28 13:40:55.690514233 -0600
+@@ -63,6 +63,12 @@
+   [x]
+   (instance? java.util.concurrent.ConcurrentHashMap x))
+ 
++(defn stamped-clock?
++  "True for a world's stamp clock."
++  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
++  [x]
++  (instance? java.util.concurrent.atomic.AtomicLong x))
++
+ (defn owned?
+   "True for a form's owned-work count."
+   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+@@ -119,9 +125,12 @@
+   (reduce (fn [m [[sym _] n]] (update m sym (fnil + 0) n)) {} (executed s)))
+ 
+ (def ^:private ^java.util.function.Function new-adder
+-  "A sink's `[calls nanos]` counter for a key it has not seen."
++  "A sink's counter for a key it has not seen, the same five slots as
++  `seon.profile/new-adder` makes: calls, nanos, self nanos and the two marks
++  `seon.profile/transaction-observation` keeps (seon.profile requires this
++  namespace, so the constructor is repeated here)."
+   (reify java.util.function.Function
+-    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 2))))
++    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 5))))
+ 
+ (defn- ms-since
+   {:malli/schema [:=> [:cat :int] :double]}
+@@ -430,10 +439,11 @@
+         in-flight (.get owned)
+         executed-now (executed s)]
+     (when-let [^java.util.concurrent.ConcurrentHashMap batch-sink (:seon.batch/sink (:seon.batch/world request))]
+-      (doseq [[k [n t]] (counters s)
++      (doseq [[k ^java.util.concurrent.atomic.AtomicLongArray form-counter] s
+               :let [^java.util.concurrent.atomic.AtomicLongArray c (.computeIfAbsent batch-sink k new-adder)]]
+-        (.addAndGet c 0 (long n))
+-        (.addAndGet c 1 (long t))))
++        (.addAndGet c 0 (.get form-counter 0))
++        (.addAndGet c 1 (.get form-counter 1))
++        (when (< 2 (.length form-counter)) (.addAndGet c 2 (.get form-counter 2)))))
+     (last-entry batch
+                 #(cond-> (assoc % :seon.batch/reads @reads :seon.batch/read-sink reads :seon.batch/executed executed-now
+                                 :seon.batch/call-profile (call-profile s)
+--- a/resources/seon/schemas/seon.batch.edn	2026-09-28 13:40:55.670182133 -0600
++++ b/resources/seon/schemas/seon.batch.edn	2026-09-28 13:41:11.748766056 -0600
+@@ -13,6 +13,7 @@
+          [:seon.batch/sink {:optional true :description "This world's armed-call counts (seon.batch/sink): a test agent's counters see only its own calls."} :seon.batch/sink]
+          [:seon.batch/reads {:optional true :description "One form's read sink: the atom seon.turn.world/with-world binds as seon.db/*read-evidence-sink*, so the form's reads and those of work it starts land in it."} :seon.db/read-evidence-sink]
+          [:seon.batch/in-flight {:optional true} :seon.batch/owned]
++         [:seon.batch/stamped-ns {:optional true :description "When this world last stamped a transaction (its start before the first): seon.profile/transaction-observation reads and moves it, so a transaction's :seon.db.transaction/ms is the work since the world's previous one."} :seon.batch/stamped-ns]
+          [:seon.batch/ordinal {:optional true :description "The ordinal of the form this world is running."} :seon.cluster.eval/ordinal]
+          [:seon.batch/form-sink {:optional true :description "The running form's own call sink: the evaluator binds it as the world's sink around the form's code (seon.sci.eval/evaluate), so the definitions the form executed are its code evidence."} :seon.batch/sink]
+          [:seon.agent/id {:optional true} :seon.agent/id]
+@@ -180,7 +181,8 @@
+          [:seon.batch/shown-map {:optional true :description "The show stage's whole shown value (size keys, renderer, diagnostics), kept beside the text."} :map]]
+  :applied :boolean
+  :tx-count nat-int?
+- :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos] (java.util.concurrent.atomic.AtomicLongArray, seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
++ :stamped-ns [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLong" :description "A world's clock: System/nanoTime of its previous transaction stamp." :gen/gen seon.turn.world/owned-generator} seon.batch/stamped-clock?]
++ :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos self-nanos calls-stamped self-stamped] (java.util.concurrent.atomic.AtomicLongArray, seon.profile/new-adder)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
+  :printed [:map {:description "The show stage's answer: the one print and its whole shown value, whose diagnostics (a renderer that refused) are the agent's."}
+            [:seon.batch/shown :string]
+            [:seon.batch/shown-map {:optional true} :map]]

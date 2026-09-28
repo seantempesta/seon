@@ -1,0 +1,12 @@
+--- a/test/seon/test_support.clj	2026-09-28 13:39:59.223668158 -0600
++++ b/test/seon/test_support.clj	2026-09-28 13:39:59.243659256 -0600
+@@ -583,8 +583,7 @@
+   (let [found (reduce (fn [found cell]
+                         (let [sym (:seon.profile/sym cell)]
+                           (if (contains? symbols sym)
+-                            (update found sym (fnil + 0)
+-                                    (.sum ^java.util.concurrent.atomic.LongAdder (:seon.profile/call-counter cell)))
++                            (update found sym (fnil + 0) (:seon.profile/calls (profile/observation cell)))
+                             found)))
+                       {} (profile/cells))
+         missing (remove #(contains? found %) symbols)]

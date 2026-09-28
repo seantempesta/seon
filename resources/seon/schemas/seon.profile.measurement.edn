@@ -1,0 +1,36 @@
+;; A definition version's timing and error behaviour in stable buckets, upserted
+;; by `seon.profile.measurement/significant-tx` on a settle or test-batch commit
+;; that already happens, only when a bucket moved (health plan 2026-09-28 §1.3).
+;; Producer: seon.profile.measurement/significant-tx. Consumers: significant-tx
+;; itself (the stored measurement each window is compared with) and the health
+;; report, whose named warning schemas (:seon.profile/over-bound-warning,
+;; :seon.profile/frequent-throws-warning) select on these plain attributes.
+;; The measured members are noHistory: the current measurement is the fact, and
+;; a move replaces it without temporal datoms.
+#:seon.profile.measurement
+{:id [:string {:min 16 :max 16 :seon.db/identity true :seon.program/row-schema :seon.profile.measurement/measurement
+               :description "The measured definition version's identity: seon.id/digest 16 of [sym digest] (seon.profile.measurement/measurement-id). A new definition digest is a new measurement, so a changed definition starts from its own baseline."}]
+ :sym [:qualified-symbol {:seon.db/index true
+                          :description "The measured definition's symbol: a value, since the definition version may be absent from the branch that stores it (plan §2, refs without reads). Indexed: the health report finds a function's measurements by it."}]
+ :digest [:and {:description "The measured definition version's digest, as its installed callable held it."}
+          :seon.program/definition-digest]
+ :p50 [:int {:min 0 :max 39 :seon.db/no-history? true
+             :description "The median's histogram bucket: bucket b holds calls of [2^(b-1), 2^b) ns; 14 is the floor, any median under about 16 us (seon.profile.measurement/floor-position)."}]
+ :p99 [:int {:min 0 :max 39 :seon.db/no-history? true :seon.db/index true
+             :description "The 99th percentile's histogram bucket: bucket b holds calls of [2^(b-1), 2^b) ns; 14 is the floor (seon.profile.measurement/floor-position). From bucket 31 (2^30 ns, 1.07 s) the definition is over the one-second bound. Indexed: :seon.profile/over-bound-warning selects on it."}]
+ :errors [:enum {:seon.db/no-history? true :seon.db/index true
+                 :description "The window's error-ratio class: none, rare (under one throw in ten calls) or frequent. Indexed: :seon.profile/frequent-throws-warning selects on it."}
+          :none :rare :frequent]
+ :calls [:int {:min 1 :seon.db/no-history? true
+               :description "The calls in the window this measurement was made from (at least seon.profile.measurement/min-calls)."}]
+ :at [:and {:seon.db/no-history? true :description "When this measurement was made."} :inst]
+ :measurement
+ [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+  [:seon.profile.measurement/id :seon.profile.measurement/id]
+  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
+  [:seon.profile.measurement/digest :seon.profile.measurement/digest]
+  [:seon.profile.measurement/p50 :seon.profile.measurement/p50]
+  [:seon.profile.measurement/p99 :seon.profile.measurement/p99]
+  [:seon.profile.measurement/errors :seon.profile.measurement/errors]
+  [:seon.profile.measurement/calls :seon.profile.measurement/calls]
+  [:seon.profile.measurement/at :seon.profile.measurement/at]]}

@@ -1,0 +1,34 @@
+--- a/src/seon/db.clj	2026-09-28 13:39:48.584014553 -0600
++++ b/src/seon/db.clj	2026-09-28 13:39:48.602597724 -0600
+@@ -34,6 +34,7 @@
+             [seon.error.refusal :as error.refusal]
+             [seon.id :as id]
+             [seon.print :as print]
++            [seon.profile :as profile]
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn]
+             [seon.schema.datahike :as schema.datahike]
+@@ -3534,7 +3535,8 @@
+                        [:maybe :map] :seon.db.process/id] :seon.store/transaction]}
+   [database transaction world process-id]
+   (let [request (if (map? transaction) transaction {:tx-data transaction})
+-        attributes [:seon.db.transaction/process :seon.db.transaction/operation :seon.db.transaction/agent]
++        attributes [:seon.db.transaction/process :seon.db.transaction/operation :seon.db.transaction/agent
++                    :seon.db.transaction/ms :seon.db.transaction/calls :seon.db.transaction/hot :seon.db.transaction/repeated]
+         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
+         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
+         projection (when forms (schema/declaration-projection forms))
+@@ -3551,9 +3553,10 @@
+                             (:tx-data request))
+                       'seon.db/transact!)
+         agent (or (:seon.db.transaction/agent request) (:seon.agent/id world))
+-        stamp (cond-> {:db/id :db/current-tx
+-                        :seon.db.transaction/process process-id
+-                        :seon.db.transaction/operation operation}
++        stamp (cond-> (merge (profile/transaction-observation world)
++                             {:db/id :db/current-tx
++                              :seon.db.transaction/process process-id
++                              :seon.db.transaction/operation operation})
+                 agent (assoc :seon.db.transaction/agent agent)
+                 *receipt* (assoc ::receipt *receipt*))]
+     (assoc request :tx-data (conj (into (into (vec declarations) (when *receipt* *open*))

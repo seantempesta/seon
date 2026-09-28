@@ -4,4 +4,22 @@
  :operation [:qualified-symbol {:seon.db/index true
                                :description "Caller-named operation, first named transaction function, or seon.db/transact! for an unnamed plain write."}]
  :agent [:string {:min 1 :seon.db/index true
-                  :description "Observed calling agent id; absent for a system write with no agent world."}]}
+                  :description "Observed calling agent id; absent for a system write with no agent world."}]
+ ;; The work that produced the transaction (health plan 2026-09-28 §1.2): its
+ ;; world's delta since that world's previous transaction, from its call sink
+ ;; (seon.profile/transaction-observation, stamped by seon.db/stamp-transaction).
+ ;; Absent for a write with no world, or whose world did no armed work since.
+ ;; Consumer: the health report's "slow or call-heavy work" query (plan §3).
+ ;; Named in this namespace: AEVT orders by attribute name here
+ ;; (:attribute-refs? false), so these datoms share the leaves the stamp above
+ ;; already rewrites (a name outside it cost +228 KB per commit, measured
+ ;; 2026-09-28). Only ms and calls are indexed (root ruling): slow and
+ ;; call-heavy work are range queries over them.
+ :ms [:int {:min 0 :seon.db/index true
+            :description "Milliseconds the writing world worked since its previous transaction (or its start). Absent when the world holds no start instant. Indexed: slow work is a range query."}]
+ :calls [:int {:min 1 :seon.db/index true
+               :description "Armed calls the writing world's own code made since its previous transaction. Indexed: call-heavy work is a range query."}]
+ :hot [:set {:description "The top five definitions by self time in that work, each [sym digest calls self-ms]: what dominated it, callers' callee time excluded."}
+       [:tuple :qualified-symbol :seon.program/definition-digest [:int {:min 1}] [:int {:min 0}]]]
+ :repeated [:set {:description "Each definition that work called more than seon.batch/repeated-calls times, as [sym digest calls]: repetition, the N+1 and repeated-work finding."}
+            [:tuple :qualified-symbol :seon.program/definition-digest [:int {:min 1}]]]}

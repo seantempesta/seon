@@ -59,4 +59,9 @@
              :kind :function
              :intent "seon.schema/pull-selector? compiles its whole argument (Datahike compile-pull-plan) on every armed :seon.schema/pull-selector check: 0.69 ms for the 15,060-node root selector, ten checks per walk since 18ce1b1a4 armed vector-pull and physical-selector (sci.eval-test public-walk counted 10 compiles for one plan, E6). projection-with-pulled-form-in's hit costs 2.9-3.1 ms digesting its key. Parse once per selector value (a content-keyed cache kind) or check structure only."
              :must-read #{seon.schema/pull-selector? seon.schema/projection-with-pulled-form-in}
-             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}
+ #:seon.task{:name "schema-registration-rechecks-the-whole-program-per-key"
+             :kind :function
+             :intent "Registering schema keys in an evaluation costs about 300 ms per key of whole-program work, measured 2026-09-28 on default's branches through seon.schema/register! in SCI: 3 keys 951 ms (106,692 armed calls), 10 keys 2,661-2,974 ms (319,316-354,837 calls), 13 keys 3,884 ms (461,456 calls). The calls are seon.schema/contract-references (11,256 to 48,672 calls, 824 to 3,372 ms), structural-schema, compilable-form and widen-component-children: every registration re-derives the references of every contract rather than those naming the registered keys. Done when a registration's cost follows the keys it registers and the contracts that reference them (one key under 100 ms on default), with the timing in the reply."
+             :must-read #{seon.schema/register! seon.schema/contract-references}
+             :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}]

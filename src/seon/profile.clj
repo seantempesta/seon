@@ -1,38 +1,61 @@
 (ns seon.profile
-  "Cumulative inclusive call timing held by the armed wrappers.
+  "Cumulative inclusive call timing held by the armed wrappers, and the work a
+  world did, as its transactions describe it.
 
   Each armed callable owns one cell of JDK accumulators, created when it is
-  installed: calls, total nanoseconds, lifetime maximum nanoseconds and
-  throws. `seon.instrument` brackets every call with two `System/nanoTime`
-  reads and updates the cell's accumulators directly (`timed`); the call path
-  constructs no map, reads no database and calls no armed function.
+  installed: a log2 latency histogram (one LongAdder per bucket, so calls are
+  its sum), total nanoseconds, lifetime maximum nanoseconds, entries (in flight
+  is entries minus calls) and throws by class. `seon.instrument` brackets every
+  call with two `System/nanoTime` reads and updates the cell directly (`timed`);
+  the call path constructs no map, reads no database and calls no armed
+  function. p50, p99 and the error ratio derive on demand from the counts.
+
+  A call made inside an evaluation's world also counts into that world's call
+  sink: its calls, nanoseconds and self nanoseconds (its elapsed less its
+  counted callees', from the same two clock reads). `transaction-observation`
+  turns a sink's delta into the attributes the world's next transaction
+  carries; `seon.profile.measurement` stores a definition's buckets when they
+  move.
 
   A host cell belongs to a loaded Var's JVM wrapper and is attributed to no
   cluster. A context cell belongs to one SCI installation's wrapper. Cells are
   cumulative and never reset (`LongAdder.sum` is not an atomic snapshot, and
   independent resets would split samples: JDK `LongAdder.java` sumThenReset).
-  Reads are approximate under concurrent calls.
+  Reads are approximate under concurrent calls. A JVM starts every cell from
+  zero (owner ruling): what survives a restart is what was stored.
 
-  Times are inclusive wall time: a caller's total contains its callees' and its
-  waits. Totals cannot be subtracted into self time.
+  Times are inclusive wall time unless named self: a caller's total contains
+  its callees' and its waits.
 
   A call is one outermost entry per thread: a call that re-enters the same
   cell on its thread (one arity of a multi-arity function calling another
   through the armed Var, or recursion through it) is inside that entry's time
   and is not counted again. Counting each re-entry inflated calls and totals
   (`seon.cluster/refresh-source!` showed x3 and three inclusive totals for one
-  call)."
+  call).
+
+  # Costs
+  Measured in the landing note (docs/research/agent-platform/landing/
+  health-recording-2026-09-28.md): the bracket against the previous one at one
+  and eight threads, and a cell's bytes."
   (:require [seon.batch]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Collections IdentityHashMap WeakHashMap]
-           [java.util.concurrent.atomic LongAccumulator LongAdder]
-           [java.util.function LongBinaryOperator]))
+           [java.util.concurrent ConcurrentHashMap]
+           [java.util.concurrent.atomic AtomicLong AtomicLongArray AtomicReference LongAccumulator LongAdder]
+           [java.util.function LongBinaryOperator Supplier]))
 
 (schema.edn/load! {})
 
 (def slow-ms
   "The owner's bound (2026-09-23): every operation over one second is explained."
   1000)
+
+(def buckets
+  "Histogram buckets: bucket b counts calls of [2^(b-1), 2^b) nanoseconds
+  (bucket 0 the zero-nanosecond call); the last also holds everything longer."
+  40)
+
 
 ;;; ---------------------------------------------------------------------------
 ;;; Cells
@@ -56,15 +79,56 @@
   [value]
   (instance? LongAccumulator value))
 
+(defn histogram?
+  "True for a cell's histogram: an array of `buckets` LongAdders."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (instance? (Class/forName "[Ljava.util.concurrent.atomic.LongAdder;") value)
+       (= buckets (alength ^objects value))))
+
+(defn throw-counts?
+  "True for a cell's throws by class: a ConcurrentHashMap of Class to LongAdder."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (instance? ConcurrentHashMap value))
+
+(defn measured-mark?
+  "True for a cell's judged mark (an AtomicReference).
+
+  It holds the counts `significant-tx` last judged, nil before the first."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (instance? AtomicReference value))
+
+(defn counts?
+  "True for a counts array: `buckets` histogram counts and the throws, as longs."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (boolean (and (some-> value class .isArray)
+                (= Long/TYPE (.getComponentType (class value)))
+                (= (inc buckets) (alength ^longs value)))))
+
 (def ^:private longest
   (reify LongBinaryOperator
     (applyAsLong [_ a b] (Math/max a b))))
 
-;; The live cells, held weakly: a cell is reachable from its wrapper's
-;; metadata, so a replaced wrapper or a released SCI context releases its cell.
-;; Written at installation only; read by `cells`.
-(defonce ^:private live
-  (Collections/synchronizedSet (Collections/newSetFromMap (WeakHashMap.))))
+(def ^java.util.function.Function new-counter
+  "The one function a cell's throws by class makes a class's first counter with."
+  (reify java.util.function.Function
+    (apply [_ _] (LongAdder.))))
+
+;; The roster of live cells, keyed by executed definition `[sym digest]` (a
+;; nil digest is unknown), each key's cells held weakly: a cell is reachable
+;; from its wrapper's metadata, so a replaced wrapper or a released SCI
+;; context releases its cell. One key has one cell per scope and context
+;; (2,563 live cells over 2,560 keys, 2026-09-28). Written at installation
+;; only; read by `cells` and by `significant-tx` for the definitions an
+;; evaluation ran.
+(defonce ^:private roster (ConcurrentHashMap.))
+
+(def ^:private ^java.util.function.Function new-member-set
+  (reify java.util.function.Function
+    (apply [_ _] (Collections/synchronizedSet (Collections/newSetFromMap (WeakHashMap.))))))
 
 (defn cell
   "A new cumulative cell for one installed callable.
@@ -75,13 +139,18 @@
   {:malli/schema [:=> [:cat :seon.profile/identity] :seon.profile/cell]}
   [callable-identity]
   (let [created (merge (select-keys callable-identity [:seon.profile/sym :seon.profile/digest
-                                              :seon.profile/scope :seon.profile/context])
-                       {:seon.profile/call-counter (LongAdder.)
+                                                       :seon.profile/scope :seon.profile/context])
+                       {:seon.profile/histogram (into-array LongAdder (repeatedly buckets #(LongAdder.)))
                         :seon.profile/total-counter (LongAdder.)
                         :seon.profile/max-counter (LongAccumulator. longest 0)
-                        :seon.profile/throw-counter (LongAdder.)
-                        :seon.profile/entered (ThreadLocal.)})]
-    (.add ^java.util.Set live created)
+                        :seon.profile/entry-counter (LongAdder.)
+                        :seon.profile/throw-counts (ConcurrentHashMap.)
+                        :seon.profile/entered (ThreadLocal.)
+                        :seon.profile/measured (AtomicReference.)})]
+    (.add ^java.util.Set (.computeIfAbsent ^ConcurrentHashMap roster
+                                           [(:seon.profile/sym created) (:seon.profile/digest created)]
+                                           new-member-set)
+          created)
     created))
 
 (defn reusable?
@@ -109,14 +178,16 @@
   inside it performs no lookup."
   [cell-form & body]
   `(let [cell# ~cell-form
-         ~(with-meta '__profile-calls {:tag 'java.util.concurrent.atomic.LongAdder})
-         (:seon.profile/call-counter cell#)
+         ~(with-meta '__profile-histogram {:tag 'objects})
+         (:seon.profile/histogram cell#)
          ~(with-meta '__profile-total {:tag 'java.util.concurrent.atomic.LongAdder})
          (:seon.profile/total-counter cell#)
          ~(with-meta '__profile-max {:tag 'java.util.concurrent.atomic.LongAccumulator})
          (:seon.profile/max-counter cell#)
-         ~(with-meta '__profile-throws {:tag 'java.util.concurrent.atomic.LongAdder})
-         (:seon.profile/throw-counter cell#)
+         ~(with-meta '__profile-entries {:tag 'java.util.concurrent.atomic.LongAdder})
+         (:seon.profile/entry-counter cell#)
+         ~(with-meta '__profile-throws {:tag 'java.util.concurrent.ConcurrentHashMap})
+         (:seon.profile/throw-counts cell#)
          ~(with-meta '__profile-entered {:tag 'java.lang.ThreadLocal})
          (:seon.profile/entered cell#)
          ;; the executed definition's identity, once: its symbol and held
@@ -126,84 +197,128 @@
 
 (def ^java.util.function.Function new-adder
   "The one function a call sink makes an executed definition's first counter
-  with: its calls and its nanoseconds, `[calls nanos]`."
+  with: `[calls nanos self-nanos calls-stamped self-stamped]`, the last two
+  where `transaction-observation` last read the first and third."
   (reify java.util.function.Function
-    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 2))))
+    (apply [_ _] (AtomicLongArray. 5))))
 
-(defmacro exited-in-world
-  "Count one exit of a call into its world counter `counted` (nil outside a
-  world): one call and the nanoseconds since `started`."
-  [counted started]
-  `(when-some [^java.util.concurrent.atomic.AtomicLongArray c# ~counted]
-     (.incrementAndGet c# 0)
-     (.addAndGet c# 1 (- (System/nanoTime) ~started))))
+(defn world-counter?
+  "True for a call sink's counter as `new-adder` makes it (five slots)."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (and (instance? AtomicLongArray value) (= 5 (.length ^AtomicLongArray value))))
 
-(defmacro entered-in-world
-  "The calling evaluation's `[calls nanos]` counter for the executed definition `k` in its
-  world's call sink (`seon.batch/*world*`'s `:seon.batch/sink`), taken at
-  entry so an entered, unfinished call is evidence; nil outside a world. A
-  dynamic read and a map lookup, calling no armed function."
-  [k]
-  `(when-some [sink# (:seon.batch/sink seon.batch/*world*)]
-     (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink# ~k seon.profile/new-adder)))
+(def ^ThreadLocal callee-frame
+  "Per thread, the nanoseconds the counted armed calls inside the current
+  counted entry have used: self time is an entry's elapsed less this, from the
+  bracket's own two clock reads (profiling research Part A §2.2)."
+  (ThreadLocal/withInitial (reify Supplier (get [_] (long-array 1)))))
+
+(defmacro bucket-of
+  "The histogram bucket of `elapsed` nanoseconds: its bit length, the last
+  bucket holding everything longer. One leading-zeros instruction."
+  [elapsed]
+  `(let [b# (- 64 (Long/numberOfLeadingZeros ~elapsed))]
+     (if (< b# ~(dec buckets)) b# ~(dec buckets))))
+
+(defn bucket
+  "The histogram bucket of `elapsed` nanoseconds (`bucket-of` as a function)."
+  {:malli/schema [:=> [:cat nat-int?] [:int {:min 0 :max 39}]]}
+  [elapsed]
+  (bucket-of (long elapsed)))
 
 (def host-entry
   "The re-entry marker of an armed call made outside any evaluation's world."
   (Object.))
 
+(defn- hinted
+  "A fresh local symbol tagged `tag`, for a macro expansion. Built outside the
+  syntax-quote so every reader (the MCP evaluator's included) keeps the tag a
+  class name."
+  {:malli/schema [:=> [:cat :string :symbol] :symbol]}
+  [prefix tag]
+  (with-meta (gensym prefix) {:tag tag}))
+
+(defmacro exited
+  "Count one exit of an entry made at `started`, from the one clock read here.
+  Its self time is its elapsed less what its counted callees added to the
+  thread's `callee-frame` (reset at entry, the caller's total `saved`); the
+  caller's frame then holds `saved` plus this elapsed. Into the world counter
+  `counted` (nil outside a world): a call, its nanoseconds and its self
+  nanoseconds; for an `outer`most entry, into the cell `with-cell` bound."
+  [outer counted started frame saved]
+  (let [elapsed (gensym "elapsed")
+        c (hinted "counted" 'java.util.concurrent.atomic.AtomicLongArray)
+        b (hinted "bucket" 'java.util.concurrent.atomic.LongAdder)]
+    `(let [~elapsed (- (System/nanoTime) ~started)
+           self# (- ~elapsed (aget ~frame 0))]
+       (aset ~frame 0 (+ ~saved ~elapsed))
+       (when-some [~c ~counted]
+         (. ~c ~'incrementAndGet 0)
+         (. ~c ~'addAndGet 1 ~elapsed)
+         (. ~c ~'addAndGet 2 self#))
+       (when ~outer
+         (let [~b (aget ~'__profile-histogram (seon.profile/bucket-of ~elapsed))]
+           (. ~b ~'increment))
+         (. ~'__profile-total ~'add ~elapsed)
+         (. ~'__profile-max ~'accumulate ~elapsed)))))
+
 (defmacro timed
   "Evaluate `body` inside `with-cell`, counting its completion and elapsed time
   once per outermost entry on this thread, and once per world entered.
 
-  The cell's thread entry holds the call sink of the world it was entered in
-  (`seon.batch/*world*`'s `:seon.batch/sink`, else `host-entry`). A re-entry
-  of the same cell in the same world runs `body` uncounted: its time is inside
-  the outer entry's. A re-entry under another world (a nested test agent)
-  counts one call into that world's sink only; the JVM-wide counters keep
-  their outermost entry. A world's count is keyed by the executed definition
-  (`[sym digest]`) and taken at entry; its calls and nanoseconds are added at
-  exit. Each entry
-  restores the prior one on exit. A throw is counted as a completed call and a
-  throw, then rethrown unchanged."
+  The world (`seon.batch/*world*`) is read once. The cell's thread entry holds
+  the call sink of the world it was entered in (its `:seon.batch/sink`, else
+  `host-entry`). A re-entry of the same cell in the same world runs `body`
+  uncounted: its time is inside the outer entry's, self time included. A
+  re-entry under another world (a nested test agent) counts one call into that
+  world's sink only; the JVM-wide counters keep their outermost entry. A
+  world's count is keyed by the executed definition (`[sym digest]`) and taken
+  at entry, so an entered, unfinished call is evidence; its calls, nanoseconds
+  and self nanoseconds are added at exit from the same clock read as the
+  cell's. Each entry restores the prior one on exit. A throw is counted as a
+  completed call and as a throw of its class, then rethrown unchanged. Two
+  clock reads per counted entry, never more."
   [& body]
-  `(let [prior# (.get ~'__profile-entered)
-         here# (or (:seon.batch/sink seon.batch/*world*) seon.profile/host-entry)]
-     (cond
-       (identical? prior# here#) (do ~@body)
-
-       (some? prior#)
-       (let [started# (System/nanoTime)
-             counted# (entered-in-world ~'__profile-key)]
-         (.set ~'__profile-entered here#)
-         (try
-           ~@body
-           (finally
-             (exited-in-world counted# started#)
-             (.set ~'__profile-entered prior#))))
-
-       :else
-       (let [started# (System/nanoTime)
-             counted# (entered-in-world ~'__profile-key)]
-         (.set ~'__profile-entered here#)
-         (try
-           (let [value# (do ~@body)
-                 elapsed# (- (System/nanoTime) started#)]
-             (.increment ~'__profile-calls)
-             (.add ~'__profile-total elapsed#)
-             (.accumulate ~'__profile-max elapsed#)
-             value#)
-           (catch Throwable failure#
-             (let [elapsed# (- (System/nanoTime) started#)]
-               (.increment ~'__profile-calls)
-               (.add ~'__profile-total elapsed#)
-               (.accumulate ~'__profile-max elapsed#)
-               (.increment ~'__profile-throws))
-             (throw failure#))
-           (finally
-             ;; the calling evaluation's own count (its world's sink): a test
-             ;; agent's counters see only its own calls
-             (exited-in-world counted# started#)
-             (.set ~'__profile-entered prior#)))))))
+  (let [prior (gensym "prior")
+        sink (hinted "sink" 'java.util.concurrent.ConcurrentHashMap)
+        here (gensym "here")
+        outer (gensym "outer")
+        started (gensym "started")
+        counted (gensym "counted")
+        frames (hinted "frames" 'java.lang.ThreadLocal)
+        frame (hinted "frame" 'longs)
+        saved (gensym "saved")
+        value (gensym "value")
+        failure (gensym "failure")
+        thrown (hinted "thrown" 'java.util.concurrent.atomic.LongAdder)]
+    `(let [~prior (. ~'__profile-entered ~'get)
+           ~sink (:seon.batch/sink seon.batch/*world*)
+           ~here (or ~sink seon.profile/host-entry)]
+       (if (identical? ~prior ~here)
+         (do ~@body)
+         (let [~outer (nil? ~prior)
+               ~started (System/nanoTime)
+               ~counted (when (some? ~sink)
+                          (. ~sink ~'computeIfAbsent ~'__profile-key seon.profile/new-adder))
+               ~frames seon.profile/callee-frame
+               ~frame (. ~frames ~'get)
+               ~saved (aget ~frame 0)]
+           (aset ~frame 0 0)
+           (when ~outer (. ~'__profile-entries ~'increment))
+           (. ~'__profile-entered ~'set ~here)
+           (try
+             (let [~value (do ~@body)]
+               (seon.profile/exited ~outer ~counted ~started ~frame ~saved)
+               ~value)
+             (catch Throwable ~failure
+               (seon.profile/exited ~outer ~counted ~started ~frame ~saved)
+               (when ~outer
+                 (let [~thrown (. ~'__profile-throws ~'computeIfAbsent (class ~failure) seon.profile/new-counter)]
+                   (. ~thrown ~'increment)))
+               (throw ~failure))
+             (finally
+               (. ~'__profile-entered ~'set ~prior))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reads — pure over the cells; nothing here resets a counter
@@ -213,21 +328,92 @@
   "Every live cell, host and context."
   {:malli/schema [:=> [:cat] [:vector :seon.profile/cell]]}
   []
-  (locking live (vec live)))
+  ;; a synchronized set's toArray holds its own lock
+  (into [] (mapcat (fn [^java.util.Set members] (.toArray members)))
+        (.values ^ConcurrentHashMap roster)))
+
+(defn cells-of
+  "The live cells of the executed definition `[sym digest]`."
+  {:malli/schema [:=> [:cat :seon.batch/executed-key] [:vector :seon.profile/cell]]}
+  [executed-key]
+  (if-let [^java.util.Set members (.get ^ConcurrentHashMap roster executed-key)]
+    (vec (.toArray members))
+    []))
+
+(defn counts
+  "A cell's histogram counts and throws, `[b0 ... b39 throws]`, as one array."
+  {:malli/schema [:=> [:cat :seon.profile/cell] :seon.profile/counts]}
+  [held]
+  (let [^objects histogram (:seon.profile/histogram held)
+        out (long-array (inc buckets))]
+    (dotimes [b buckets]
+      (aset out b (.sum ^LongAdder (aget histogram b))))
+    (aset out buckets (long (reduce (fn [n ^LongAdder a] (+ n (.sum a))) 0
+                                    (.values ^ConcurrentHashMap (:seon.profile/throw-counts held)))))
+    out))
+
+(defn histogram-calls
+  "The calls a counts array holds: its buckets' sum."
+  {:malli/schema [:=> [:cat :seon.profile/counts] nat-int?]}
+  [^longs counted]
+  (loop [b 0 n 0] (if (< b buckets) (recur (inc b) (+ n (aget counted b))) n)))
+
+(defn quantile-position
+  "The log2-nanosecond position of quantile `q` of `total` calls in `counted`:
+  a call in bucket b lies in [b-1, b), interpolated by its rank inside the
+  bucket; the zero bucket is 0.
+
+  The rank never exceeds `total` - 1: a quantile never rests on the single
+  largest call, so one outlier (a collection pause) in a window under 100
+  calls cannot move a p99. From 100 calls on the clamp changes nothing. The
+  largest call is the lifetime maximum, reported beside it."
+  {:malli/schema [:=> [:cat :seon.profile/counts pos-int? [:double {:min 0.0 :max 1.0}]] [:double {:min 0.0}]]}
+  [^longs counted total q]
+  (let [target (max 1.0 (min (* (double q) (double total)) (double (dec total))))]
+    (loop [b 0 below 0]
+      (let [n (aget counted b)
+            upto (+ below n)]
+        (if (or (and (pos? n) (>= upto target)) (= b (dec buckets)))
+          (if (zero? b)
+            0.0
+            (+ (double (dec b)) (if (pos? n) (min 1.0 (max 0.0 (/ (- target below) (double n)))) 0.0)))
+          (recur (inc b) upto))))))
+
+(defn bucket-at
+  "The bucket a log2 position lies in: [b-1, b) is bucket b."
+  {:malli/schema [:=> [:cat [:double {:min 0.0}]] [:int {:min 0 :max 39}]]}
+  [p]
+  (min (dec buckets) (inc (long (Math/floor p)))))
+
+(defn- upper-us
+  "The upper edge of bucket `b` in whole microseconds."
+  {:malli/schema [:=> [:cat [:int {:min 0 :max 39}]] nat-int?]}
+  [b]
+  (quot (bit-shift-left 1 b) 1000))
 
 (defn observation
-  "One cell's cumulative counters as a value."
+  "One cell's cumulative counters as a value.
+
+  Its p50 and p99 are the upper edges of their histogram buckets (within a
+  factor of two); beside them the calls in flight and the throws by class."
   {:malli/schema [:=> [:cat :seon.profile/cell] :seon.profile/observation]}
   [held]
-  (let [calls (.sum ^LongAdder (:seon.profile/call-counter held))
-        total (.sum ^LongAdder (:seon.profile/total-counter held))]
-    (merge (select-keys held [:seon.profile/sym :seon.profile/digest
-                              :seon.profile/scope :seon.profile/context])
-           {:seon.profile/calls calls
-            :seon.profile/total-ms (quot total 1000000)
-            :seon.profile/mean-us (if (pos? calls) (quot total (* 1000 calls)) 0)
-            :seon.profile/max-ms (quot (.get ^LongAccumulator (:seon.profile/max-counter held)) 1000000)
-            :seon.profile/throws (.sum ^LongAdder (:seon.profile/throw-counter held))})))
+  (let [counted (counts held)
+        calls (histogram-calls counted)
+        total (.sum ^LongAdder (:seon.profile/total-counter held))
+        by-class (into {} (map (fn [[^Class k ^LongAdder v]] [(.getName k) (.sum v)]))
+                       (:seon.profile/throw-counts held))]
+    (cond-> (merge (select-keys held [:seon.profile/sym :seon.profile/digest
+                                      :seon.profile/scope :seon.profile/context])
+                   {:seon.profile/calls calls
+                    :seon.profile/total-ms (quot total 1000000)
+                    :seon.profile/mean-us (if (pos? calls) (quot total (* 1000 calls)) 0)
+                    :seon.profile/max-ms (quot (.get ^LongAccumulator (:seon.profile/max-counter held)) 1000000)
+                    :seon.profile/throws (aget ^longs counted buckets)
+                    :seon.profile/in-flight (max 0 (- (.sum ^LongAdder (:seon.profile/entry-counter held)) calls))})
+      (pos? calls) (assoc :seon.profile/p50-us (upper-us (bucket-at (quantile-position counted calls 0.5)))
+                          :seon.profile/p99-us (upper-us (bucket-at (quantile-position counted calls 0.99))))
+      (seq by-class) (assoc :seon.profile/throws-by-class by-class))))
 
 (defn top
   "Rank `population` by inclusive total and maximum; list maxima over one second.
@@ -246,32 +432,90 @@
      :seon.profile/over-second
      (into [] (filter #(< slow-ms (:seon.profile/max-ms %))) (sort-by :seon.profile/max-ms > observed))}))
 
+(defn transaction-observation
+  "The work `world` did since its previous transaction, as the attributes the
+  transaction it writes carries on `:db/current-tx` (health plan §1.2): its
+  milliseconds, its armed calls, its top five definitions by self time and the
+  definitions it called more than `seon.batch/repeated-calls` times.
+
+  Read from the world's call sink (`:seon.batch/sink`): each counter's calls
+  and self nanoseconds less those at the world's previous transaction, which
+  this call then marks (the sink's counters own the mark, so nothing beside
+  them holds state). Milliseconds come from the world's `:seon.batch/stamped-ns`
+  (the fold's start instant, moved to now here) and are absent without it.
+  Empty for no world, no sink, or no armed work since; definitions whose
+  digest is unknown count in calls but are named nowhere. Two threads stamping
+  one world at once split its work between their transactions.
+
+  # Costs
+  Proportional to the definitions the world executed (one pass over its sink,
+  a sort of those with calls): measured in the landing note."
+  {:malli/schema [:=> [:cat [:maybe :map]] :seon.profile/transaction-observation]}
+  [world]
+  (let [sink (:seon.batch/sink world)]
+    (if-not (instance? ConcurrentHashMap sink)
+      {}
+      (let [worked (into []
+                         (keep (fn [[k counter]]
+                                 (when (world-counter? counter)
+                                   (let [^AtomicLongArray c counter
+                                         calls (.get c 0)
+                                         self (.get c 2)
+                                         made (- calls (.getAndSet c 3 calls))
+                                         used (- self (.getAndSet c 4 self))]
+                                     (when (pos? made) [k made used])))))
+                         ^ConcurrentHashMap sink)
+            known (filterv (fn [[[_ digest]]] digest) worked)
+            calls (reduce + 0 (map second worked))
+            ms (when-let [^AtomicLong at (:seon.batch/stamped-ns world)]
+                 (let [now (System/nanoTime)]
+                   (quot (- now (.getAndSet at now)) 1000000)))
+            hot (into #{} (comp (take 5) (map (fn [[[sym digest] made used]] [sym digest made (quot used 1000000)])))
+                      (sort-by #(- (long (nth % 2))) known))
+            repeated (into #{} (keep (fn [[[sym digest] made]]
+                                       (when (> made seon.batch/repeated-calls) [sym digest made])))
+                           known)]
+        (cond-> {}
+          (and ms (or (pos? calls) (pos? ms))) (assoc :seon.db.transaction/ms ms)
+          (pos? calls) (assoc :seon.db.transaction/calls calls)
+          (seq hot) (assoc :seon.db.transaction/hot hot)
+          (seq repeated) (assoc :seon.db.transaction/repeated repeated))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Explaining one slow operation
 ;;; ---------------------------------------------------------------------------
 
 (defn snapshot?
-  "True for the counter snapshot `begin` takes: the live cells it read and
-  their calls and nanos, `[calls0 nanos0 calls1 nanos1 ...]` in one long array."
+  "True for the counter snapshot `begin` takes.
+
+  It holds the live cells it read and their entries and nanos,
+  `[entries0 nanos0 entries1 nanos1 ...]`, in one long array."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (boolean (and (map? value)
                 (vector? (::cells value))
                 (some-> (::sums value) class .isArray))))
 
+(defn- entries
+  "A cell's outermost entries so far: one counter, where a window needs calls
+  cheaply (an entered call not yet returned is included)."
+  {:malli/schema [:=> [:cat :seon.profile/cell] nat-int?]}
+  [held]
+  (.sum ^LongAdder (:seon.profile/entry-counter held)))
+
 (defn begin
-  "Mark the start of an operation: its clock and every cell's calls and total.
+  "Mark the start of an operation: its clock and every cell's entries and total.
 
   One pass over the live cells, calling no other armed function, fills one
   primitive array beside the vector of cells it read: its cost is proportional
   to the number of cells, with two longs each and no per-cell allocation."
   {:malli/schema [:=> [:cat] :seon.profile/mark]}
   []
-  (let [held (locking live (vec live))
+  (let [held (cells)
         sums (long-array (* 2 (count held)))]
     (dotimes [i (count held)]
       (let [member (nth held i)]
-        (aset sums (* 2 i) (.sum ^LongAdder (:seon.profile/call-counter member)))
+        (aset sums (* 2 i) (.sum ^LongAdder (:seon.profile/entry-counter member)))
         (aset sums (inc (* 2 i)) (.sum ^LongAdder (:seon.profile/total-counter member)))))
     {:seon.profile/started-ns (System/nanoTime)
      :seon.profile/snapshot {::cells held ::sums sums}}))
@@ -289,8 +533,9 @@
 
   The growth is every cell's inclusive counter increase in this JVM during the
   window, largest first: nested calls appear in both caller and callee, and
-  concurrent work on other threads is included. No growth means the time was
-  spent in unarmed code or waiting."
+  concurrent work on other threads is included. Calls are the outermost
+  entries in the window, an entered call not yet returned included. No growth
+  means the time was spent in unarmed code or waiting."
   {:malli/schema [:=> [:cat :seon.profile/mark [:int {:min 1}]] :seon.profile/explanation]}
   [{started :seon.profile/started-ns {held ::cells ^longs sums ::sums} :seon.profile/snapshot} limit]
   (let [elapsed-ms (quot (- (System/nanoTime) started) 1000000)
@@ -299,22 +544,21 @@
         ;; `begin` starts from zero.
         position (let [index (IdentityHashMap.)]
                    (dotimes [i (count held)]
-                     (.put index (:seon.profile/call-counter (nth held i)) i))
+                     (.put index (:seon.profile/entry-counter (nth held i)) i))
                    index)
         prior (fn [member offset]
-                (if-let [i (.get position (:seon.profile/call-counter member))]
+                (if-let [i (.get position (:seon.profile/entry-counter member))]
                   (aget sums (+ (* 2 (long i)) (long offset)))
                   0))
         growth (into []
                      (comp
                       (keep (fn [member]
-                              (let [calls (- (.sum ^LongAdder (:seon.profile/call-counter member))
-                                             (long (prior member 0)))
+                              (let [calls (- (long (entries member)) (long (prior member 0)))
                                     total (- (.sum ^LongAdder (:seon.profile/total-counter member))
                                              (long (prior member 1)))]
                                 (when (pos? calls)
                                   (merge (select-keys member [:seon.profile/sym :seon.profile/digest
-                                                            :seon.profile/scope :seon.profile/context])
+                                                              :seon.profile/scope :seon.profile/context])
                                          {:seon.profile/calls calls
                                           :seon.profile/total-ms (quot total 1000000)})))))
                       (filter (comp pos? :seon.profile/total-ms)))
@@ -352,8 +596,8 @@
 (defn- observation-line
   {:malli/schema [:=> [:cat :seon.profile/observation] :string]}
   [{sym :seon.profile/sym calls :seon.profile/calls total :seon.profile/total-ms
-    longest :seon.profile/max-ms throws :seon.profile/throws scope :seon.profile/scope}]
-  (str sym " inclusive total " total " ms, max " longest " ms, x" calls
+    maximum :seon.profile/max-ms throws :seon.profile/throws scope :seon.profile/scope}]
+  (str sym " inclusive total " total " ms, max " maximum " ms, x" calls
        (when (pos? throws) (str ", " throws " threw"))
        (when (= :seon.profile/context scope) " [SCI]")))
 

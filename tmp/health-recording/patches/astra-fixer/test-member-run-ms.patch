@@ -1,0 +1,41 @@
+--- a/src/seon/test.clj	2026-09-28 13:41:33.749906240 -0600
++++ b/src/seon/test.clj	2026-09-28 13:41:33.814908776 -0600
+@@ -2069,7 +2069,9 @@
+                                        ;; be whole registry entries
+                                        (value/bounded-text drifted)))))]
+         (when-not @handed? (vreset! handed? true) (release! false))
+-        {:seon.test/result (cond-> (with-cleanup-failure result)
++        {:seon.test/result (cond-> (assoc (with-cleanup-failure result)
++                                          ;; the body's own run time rides the batch's one commit
++                                          :seon.test.member/run-ms (Math/round (double executed)))
+                              (not (:seon.test.run/terminated? result))
+                              (assoc :seon.agent/branch (:seon.agent/branch child))
+                              explanation
+--- a/src/seon/test/runner.clj	2026-09-28 13:41:33.768802705 -0600
++++ b/src/seon/test/runner.clj	2026-09-28 13:41:33.815536863 -0600
+@@ -1516,6 +1516,8 @@
+                           :seon.test.member/error-count (:seon.test/error-count result)
+                           :seon.test.member/began? (:seon.test.member/began? result)
+                           :seon.test.member/ended? (:seon.test.member/ended? result)}
++                           (:seon.test.member/run-ms result)
++                           (assoc :seon.test.member/run-ms (:seon.test.member/run-ms result))
+                            (:seon.test.member/error result)
+                            (assoc :seon.test.member/error
+                                   (execution-read
+--- a/resources/seon/schemas/seon.test.member.edn	2026-09-28 13:41:33.786769496 -0600
++++ b/resources/seon/schemas/seon.test.member.edn	2026-09-28 13:41:33.816574037 -0600
+@@ -17,6 +17,7 @@
+  :seon.test.member/failures [:set {:description "Signature-keyed failing reports observed in this execution; no pass report entities. Optional peer refs sweep with report deletion."} :seon.db/ref]
+  :seon.test.member/error [:and {:description "Boundary failure preventing normal member completion, when present. Optional peer ref sweeps with the error."} :seon.db/ref]
+  :seon.test.member/reach-digest [:and {:description "The test's reach digest as this execution tested it: the content of its static closure (sources, specs, named schemas), so reuse compares it with the current reach on any branch or lineage. Absent: unknown, never reuse."} :seon.test/reach-digest]
++ :seon.test.member/run-ms [:int {:min 0 :description "The body's own run time in milliseconds, resolution excluded (seon.test/member-result), stored by the batch's one commit. Consumer: the health report's slow-test query (health plan 2026-09-28 §1.3)."}]
+  :seon.test.member/member
+  [:map {:seon.db/attributes true}
+   [:seon.test.member/symbol :seon.test.member/symbol]
+@@ -34,4 +35,5 @@
+   [:seon.test.member/ended? {:optional true} :seon.test.member/ended?]
+   [:seon.test.member/failures {:optional true} :seon.test.member/failures]
+   [:seon.test.member/error {:optional true} :seon.test.member/error]
+-  [:seon.test.member/reach-digest {:optional true} :seon.test.member/reach-digest]]}
++  [:seon.test.member/reach-digest {:optional true} :seon.test.member/reach-digest]
++  [:seon.test.member/run-ms {:optional true} :seon.test.member/run-ms]]}

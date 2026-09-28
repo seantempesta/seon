@@ -1,5 +1,7 @@
 ;; Cumulative inclusive call timing on the armed wrappers (src/seon/profile.clj).
 ;; Values only: nothing here is stored, so no Datahike attribute derives from it.
+;; What is stored: the measurement (seon.profile.measurement.edn) and the
+;; transaction's work (seon.db.transaction.edn).
 {:seon.profile/sym [:qualified-symbol {:description "The installed callable's symbol."}]
  :seon.profile/digest :seon.program/definition-digest
  :seon.profile/definition-digests
@@ -16,10 +18,18 @@
   [:seon.profile/context {:optional true} :seon.profile/context]]
  :seon.profile/adder [:fn {:error/message "must be a java.util.concurrent.atomic.LongAdder"} seon.profile/adder?]
  :seon.profile/accumulator [:fn {:error/message "must be a java.util.concurrent.atomic.LongAccumulator"} seon.profile/accumulator?]
- :seon.profile/call-counter :seon.profile/adder
+ :seon.profile/histogram [:fn {:error/message "must be an array of 40 java.util.concurrent.atomic.LongAdder"
+                                 :description "The log2 latency histogram: bucket b counts outermost calls of [2^(b-1), 2^b) ns; calls are its sum."}
+                           seon.profile/histogram?]
  :seon.profile/total-counter :seon.profile/adder
  :seon.profile/max-counter :seon.profile/accumulator
- :seon.profile/throw-counter :seon.profile/adder
+ :seon.profile/entry-counter [:and {:description "Outermost entries; in flight is entries minus calls."} :seon.profile/adder]
+ :seon.profile/throw-counts [:fn {:error/message "must be a java.util.concurrent.ConcurrentHashMap of Class to LongAdder"
+                                  :description "Outermost calls that threw, by the thrown class."}
+                            seon.profile/throw-counts?]
+ :seon.profile/measured [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicReference"
+                            :description "The counts seon.profile.measurement/significant-tx last measured (nil before the first): the next window starts there."}
+                       seon.profile/measured-mark?]
  :seon.profile/entered [:fn {:error/message "must be a java.lang.ThreadLocal"
                              :description "Set on a thread while it is inside this cell's outermost call; a re-entry on that thread is not counted again."}
                         seon.profile/thread-local?]
@@ -29,16 +39,22 @@
   [:seon.profile/digest {:optional true} :seon.profile/digest]
   [:seon.profile/scope :seon.profile/scope]
   [:seon.profile/context {:optional true} :seon.profile/context]
-  [:seon.profile/call-counter :seon.profile/call-counter]
+  [:seon.profile/histogram :seon.profile/histogram]
   [:seon.profile/total-counter :seon.profile/total-counter]
   [:seon.profile/max-counter :seon.profile/max-counter]
-  [:seon.profile/throw-counter :seon.profile/throw-counter]
-  [:seon.profile/entered :seon.profile/entered]]
+  [:seon.profile/entry-counter :seon.profile/entry-counter]
+  [:seon.profile/throw-counts :seon.profile/throw-counts]
+  [:seon.profile/entered :seon.profile/entered]
+  [:seon.profile/measured :seon.profile/measured]]
  :seon.profile/calls [:int {:min 0 :description "Completed outermost calls per thread (a re-entry through the same wrapper is inside its caller's): returns and throws both count."}]
  :seon.profile/total-ms [:int {:min 0 :description "Inclusive wall milliseconds."}]
  :seon.profile/mean-us [:int {:min 0}]
  :seon.profile/max-ms [:int {:min 0 :description "Lifetime maximum of one call, inclusive."}]
  :seon.profile/throws [:int {:min 0}]
+ :seon.profile/in-flight [:int {:min 0 :description "Outermost calls entered and not yet returned, approximately (two counters read apart)."}]
+ :seon.profile/p50-us [:int {:min 0 :description "The median's histogram bucket upper edge, in microseconds: within a factor of two."}]
+ :seon.profile/p99-us [:int {:min 0 :description "The 99th percentile's histogram bucket upper edge, in microseconds: within a factor of two."}]
+ :seon.profile/throws-by-class [:map-of {:description "Outermost calls that threw, by the thrown class's name: throws used as control flow show here."} :string [:int {:min 1}]]
  :seon.profile/observation
  [:map
   [:seon.profile/sym :seon.profile/sym]
@@ -49,7 +65,55 @@
   [:seon.profile/total-ms :seon.profile/total-ms]
   [:seon.profile/mean-us :seon.profile/mean-us]
   [:seon.profile/max-ms :seon.profile/max-ms]
-  [:seon.profile/throws :seon.profile/throws]]
+  [:seon.profile/throws :seon.profile/throws]
+  [:seon.profile/in-flight :seon.profile/in-flight]
+  [:seon.profile/p50-us {:optional true} :seon.profile/p50-us]
+  [:seon.profile/p99-us {:optional true} :seon.profile/p99-us]
+  [:seon.profile/throws-by-class {:optional true} :seon.profile/throws-by-class]]
+ :seon.profile/counts [:fn {:error/message "must be a long array of 40 histogram counts and the throws"
+                            :description "A cell's (or a window's) histogram counts followed by its throws, [b0 ... b39 throws]."}
+                       seon.profile/counts?]
+ :seon.profile/window-counts :seon.profile/counts
+ :seon.profile/marks [:vector {:description "Each measured cell with the counts it was last measured at (nil before any) and the counts now."}
+                      [:tuple :seon.profile/cell [:maybe :seon.profile/counts] :seon.profile/counts]]
+ :seon.profile/window
+ [:map {:description "The calls one definition's cells counted since each was last measured."}
+  [:seon.profile/window-counts :seon.profile/window-counts]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/marks :seon.profile/marks]]
+ :seon.profile/p50-position [:double {:min 0.0 :description "The median's interpolated log2-nanosecond position: [b-1, b) lies in bucket b."}]
+ :seon.profile/p99-position [:double {:min 0.0 :description "The 99th percentile's interpolated log2-nanosecond position: [b-1, b) lies in bucket b."}]
+ :seon.profile/stored-measurement
+ [:map {:description "The measured buckets a database holds for one definition version."}
+  [:seon.profile.measurement/p50 :seon.profile.measurement/p50]
+  [:seon.profile.measurement/p99 :seon.profile.measurement/p99]
+  [:seon.profile.measurement/errors :seon.profile.measurement/errors]]
+ :seon.profile/over-bound-warning
+ [:map {:description "A slow definition version: the p99 of its measured window is in bucket 31 or above (at least 2^30 ns, 1.07 s), over the one-second bound. A named warning over the measurement's plain attributes (health plan 2026-09-28 §1): a function is slow because its measurement satisfies this, never by a stored label. The health report queries it (plan §3)."}
+  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
+  [:seon.profile.measurement/digest :seon.profile.measurement/digest]
+  [:seon.profile.measurement/p99 [:int {:min 31 :max 39}]]]
+ :seon.profile/frequent-throws-warning
+ [:map {:description "A definition version that throws in at least one call in ten of its measured window: throws used as control flow, or a failing path. A named warning over the measurement's plain attributes (health plan 2026-09-28 §1). The health report queries it (plan §3)."}
+  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
+  [:seon.profile.measurement/digest :seon.profile.measurement/digest]
+  [:seon.profile.measurement/errors [:= :frequent]]]
+ :seon.profile/measurement
+ [:map {:description "A window's measurement: its stable buckets and the quantile positions compared with a stored measurement."}
+  [:seon.profile/p50-position :seon.profile/p50-position]
+  [:seon.profile/p99-position :seon.profile/p99-position]
+  [:seon.profile.measurement/p50 :seon.profile.measurement/p50]
+  [:seon.profile.measurement/p99 :seon.profile.measurement/p99]
+  [:seon.profile.measurement/errors :seon.profile.measurement/errors]]
+ :seon.profile/transaction-observation
+ [:map {:description "The work a writing world did since its previous transaction, as the transaction's own attributes (seon.profile/transaction-observation): empty for a world that did no armed work."}
+  [:seon.db.transaction/ms {:optional true} :seon.db.transaction/ms]
+  [:seon.db.transaction/calls {:optional true} :seon.db.transaction/calls]
+  [:seon.db.transaction/hot {:optional true} :seon.db.transaction/hot]
+  [:seon.db.transaction/repeated {:optional true} :seon.db.transaction/repeated]]
+ :seon.profile/world-counter [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray of five slots"
+                                   :description "One executed definition's counter in a world's call sink: [calls nanos self-nanos calls-at-last-transaction self-at-last-transaction] (seon.profile/new-adder)."}
+                              seon.profile/world-counter?]
  :seon.profile/cells [:int {:min 0}]
  :seon.profile/observed [:int {:min 0}]
  :seon.profile/by-total [:vector :seon.profile/observation]
@@ -64,7 +128,7 @@
   [:seon.profile/over-second :seon.profile/over-second]]
  :seon.profile/started-ns :int
  :seon.profile/snapshot [:fn {:error/message "must be the counter snapshot seon.profile/begin takes"
-                              :description "Each live cell's call and total counts, keyed by its call counter."}
+                              :description "Each live cell's entry and total counts, keyed by its entry counter."}
                          seon.profile/snapshot?]
  :seon.profile/mark
  [:map
