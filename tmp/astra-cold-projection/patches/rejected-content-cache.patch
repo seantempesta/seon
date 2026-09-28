@@ -1,0 +1,99 @@
+diff --git a/src/seon/schema/datahike.clj b/src/seon/schema/datahike.clj
+index ccb79ee3d..9350c9586 100644
+--- a/src/seon/schema/datahike.clj
++++ b/src/seon/schema/datahike.clj
+@@ -78,8 +78,38 @@
+       (first (m/children node))
+       node)))
+ 
++(defn- storage-content
++  "The storage fold's immutable input, with scoped references resolved.
++
++   Malli retains this key on its compiled schema. Equal schemas in different
++   registries share it by value; neither the key nor the central cache holds
++   a compiled schema or its registry. A changed reference target changes the
++   key even when the attribute's authored form stays the same."
++  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:tuple [:vector :seon.schema/value] [:int {:min 1}]]]}
++  [compiled]
++  (m/-cached
++   compiled ::storage-content
++   (fn [root]
++     (letfn [(content [node active]
++               (m/walk
++                node
++                (fn [node _ children _]
++                  (let [reference (when (m/-ref-schema? node) (m/-ref node))
++                        scope [(:registry (m/options node)) reference]]
++                    [(m/type node) (m/properties node) reference
++                     (if reference
++                       (when-not (or (= :seon.db/ref reference) (contains? active scope))
++                         (content (m/deref node) (conj active scope)))
++                       children)]))))]
++       (let [content-key (content root #{})]
++         ;; Charge the retained key and result using the content's size once,
++         ;; never walk either on a hit. Cache entry overhead is charged centrally.
++         [content-key (+ 512 (* 4 (count (id/printed content-key))))])))))
++
+ (defn- compiled-storage
+-  "Fold compiled value nodes; reference identity precedes logical dereference."
++  "Fold compiled value nodes once per storage content in the bounded cache.
++   Reference identity precedes logical dereference. Hits cost one retained
++   Malli key read and one central lookup, independent of projection size."
+   {:malli/schema [:=> [:cat [:fn malli.core/schema?]] :map]}
+   [compiled]
+   (letfn [(fold [compiled active]
+@@ -150,7 +180,9 @@
+              (= 'inst? t) {::value-type :db.type/instant}
+              :else {::value-type (malli-type->datahike-type t)})]
+        (merge {::cardinality :db.cardinality/one ::properties properties} result))))) ]
+-    (fold compiled #{})))
++    (let [[content estimated-bytes] (storage-content compiled)]
++      (seon.cache/lookup ::compiled-storage content (constantly estimated-bytes)
++                         #(fold compiled #{})))))
+ 
+ (defn attribute-declaration
+   "Derive a native declaration from the supplied generation's retained root,
+@@ -421,11 +453,9 @@
+    cells or not ([[vector-attribute-in?]])."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+   [projection attr]
+-  (schema/projection-cache-value
+-   projection [::vector-shaped attr]
+-   #(boolean
+-     (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+-       (::vector? (compiled-storage compiled))))))
++  (boolean
++   (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
++     (::vector? (compiled-storage compiled)))))
+ 
+ (defn vector-attribute-in?
+   "Whether `attr` stores its elements in bridge cells under `projection`: a
+@@ -602,22 +632,18 @@
+   "Whether `attr` is declared an upsert identity in `projection`."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+   [projection attr]
+-  (schema/projection-cache-value
+-   projection [::identity attr]
+-   #(boolean
+-     (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+-       (:seon.db/identity (::properties (compiled-storage compiled)))))))
++  (boolean
++   (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
++     (:seon.db/identity (::properties (compiled-storage compiled))))))
+ 
+ (defn- ref-attr-in?
+   "Whether `attr` stores entity references in `projection`: its pulled values
+    are entities, never data maps."
+   {:malli/schema [:=> [:cat :seon.schema/projection :keyword] :boolean]}
+   [projection attr]
+-  (schema/projection-cache-value
+-   projection [::ref attr]
+-   #(boolean
+-     (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
+-       (= :db.type/ref (::value-type (compiled-storage compiled)))))))
++  (boolean
++   (when-let [compiled (mr/schema (:seon.schema.projection/registry projection) attr)]
++     (= :db.type/ref (::value-type (compiled-storage compiled))))))
+ 
+ (defn- new-entity-id?
+   "True for an entity id Datahike allocates in this transaction."
