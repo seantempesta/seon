@@ -284,26 +284,40 @@
   {:malli/schema [:=> [:cat :symbol [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] :boolean]}
   [bound body]
   (let [tail (last body)]
-    (boolean (and (seq? tail) (= 'throw (first tail)) (= bound (second tail))))))
+    (and (seq? tail) (= 'throw (first tail)) (= bound (second tail)))))
 
 (defn- form-sites
   "Every node of `form` that `site?` selects, each as its row and column and
   whether a converting `try` of the same form encloses it (`::converted?`),
-  plus `::resurfaced?` for a `throw` of an enclosing catch's own binding.
-  Quoted forms and `comment` bodies are data, not code."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]
-                       [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any source node.", :gen/elements [nil 0 :k [] {}]}]] :boolean]]
-                  [:vector [:map [::row [:maybe :int]] [::col [:maybe :int]] [::converted? :boolean] [::resurfaced? :boolean]]]]}
-  [form site?]
+  plus `::resurfaced?` for a `throw` of an enclosing catch's own binding and
+  `::node` for a selected symbol. The arguments of a call to one of
+  `runners` are converted. Quoted forms and `comment` bodies are data, not
+  code."
+  {:malli/schema [:function
+                  [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]
+                        [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any source node.", :gen/elements [nil 0 :k [] {}]}]] :boolean]]
+                   [:vector :map]]
+                  [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]
+                        [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any source node.", :gen/elements [nil 0 :k [] {}]}]] :boolean]
+                        [:set :symbol]]
+                   [:vector :map]]]}
+  ([form site?] (form-sites form site? #{}))
+  ([form site? runners]
   (letfn [(walk [node converted? bindings]
             (let [here (when (site? node)
-                         [{::row (:row (meta node)) ::col (:col (meta node))
-                           ::converted? converted?
-                           ::resurfaced? (and (seq? node) (= 'throw (first node))
-                                              (contains? bindings (second node)))}])]
+                         [(cond-> {::row (:row (meta node)) ::col (:col (meta node))
+                                   ::converted? converted?
+                                   ::resurfaced? (and (seq? node) (= 'throw (first node))
+                                                      (contains? bindings (second node)))}
+                            (symbol? node) (assoc ::node node))])]
               (into (vec here)
                     (cond
                       (and (seq? node) (#{'quote 'comment} (first node))) []
+
+                      ;; a same-file runner calls its function argument inside
+                      ;; its own converting try: what is handed to it is converted
+                      (and (seq? node) (runners (first node)))
+                      (mapcat #(walk % true bindings) (rest node))
 
                       (and (seq? node) (= 'try (first node)))
                       (let [clause? (fn [head] #(and (seq? %) (= head (first %))))
@@ -323,7 +337,7 @@
 
                       (coll? node) (mapcat #(walk % converted? bindings) (seq node))
                       :else []))))]
-    (walk form false #{})))
+    (walk form false #{}))))
 
 (defn- throw-site?
   "True for a `(throw ...)` form."
@@ -373,83 +387,6 @@
                   false))))]
     (error? schema #{})))
 
-(defn containment
-  "Each `defn`/`defn-` in the source `text` holding a `throw`, classified:
-  `::sites` its throw sites; `::escaping` those neither converted in the
-  function nor resurfacing a caught cause; `::declared?` its output union
-  names an error alternative; `::caller-converted?` it is private and every
-  reference to it in the text sits inside a converting `try`. With
-  `selected`, only the definitions it names are classified."
-  {:malli/schema [:function
-                  [:=> [:cat :string :map] [:vector :map]]
-                  [:=> [:cat :string :map [:maybe [:set :symbol]]] [:vector :map]]]}
-  ([text forms] (containment text forms nil))
-  ([text forms selected]
-  (let [source (read-source text)
-        namespace-name (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) source)
-                           'user)
-        definitions (definition-forms source)]
-    (into []
-          (keep (fn [form]
-                  (let [sites (when (and (function-heads (first form))
-                                         (or (nil? selected) (selected (second form))))
-                                (form-sites form throw-site?))]
-                    (when (seq sites)
-                      (let [escaping (filterv #(not (or (::converted? %) (::resurfaced? %))) sites)
-                            name-symbol (second form)
-                            references (when (= 'defn- (first form))
-                                         (into [] (comp (remove #(identical? form %))
-                                                        (mapcat #(form-sites % (fn [node] (= name-symbol node)))))
-                                               definitions))]
-                        {::symbol (symbol (str namespace-name) (name name-symbol))
-                         ::row (:row (meta form))
-                         ::sites sites
-                         ::escaping escaping
-                         ::declared? (boolean (some #(error-alternative? % forms)
-                                                    (output-schemas (declared-schema form) forms)))
-                         ::caller-converted? (boolean (and (seq references)
-                                                           (every? ::converted? references)))})))))
-          definitions))))
-
-(defn- test-source?
-  "True for a path under a `test` root: the test runner converts its members."
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [path]
-  (or (str/starts-with? path "test/") (str/includes? path "/test/")))
-
-(defn uncontained-changes
-  "Findings for every `defn`/`defn-` in the source `text` that `baseline`
-  lacks or defines differently and that holds a throw reaching its caller
-  with no error alternative in its output union: the crash the owner's
-  2026-09-28 law forbids. A throw its own function converts, a resurfaced
-  caught cause and a private function every same-file caller converts are
-  internal control flow. Test sources are the test runner's to convert.
-  A transaction function is judged by [[check]], which knows every text."
-  {:malli/schema [:=> [:cat :string :string :string :map] [:vector :map]]}
-  [path text baseline forms]
-  (if (test-source? path)
-    []
-    (let [before (into {} (map (juxt second identity))
-                       (definition-forms (read-source baseline)))
-          changed (into #{} (comp (filter #(not= % (get before (second %)))) (map second))
-                        (definition-forms (read-source text)))]
-      (into []
-            (keep (fn [{::keys [row escaping declared? caller-converted?] function-symbol ::symbol}]
-                    (when (and (changed (symbol (name function-symbol)))
-                               (seq escaping) (not declared?) (not caller-converted?))
-                      {:filename path :row (::row (first escaping)) :col (::col (first escaping))
-                       :level :error :type :uncontained-throw ::symbol function-symbol
-                       :message (str function-symbol " (row " row ") throws to its caller "
-                                     (count escaping) " way(s) with no error alternative in its "
-                                     "output union. Return the failure as a named error value "
-                                     "instead ([:and :seon.error/base [:map ...]] naming the "
-                                     "operation, what was expected, the offending value by "
-                                     "reference and the fix) and add it to the contract's "
-                                     "output union, e.g. [:=> [:cat ...] [:or :my.ns/result "
-                                     ":my.ns/refused-error]]; or convert the throw in this "
-                                     "function's own try/catch.")})))
-            (when (seq changed) (containment text forms changed))))))
-
 (defn- require-aliases
   "The `:as` aliases the `ns` form among `forms` requires, alias to namespace."
   {:malli/schema [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:map-of :symbol :symbol]]}
@@ -489,6 +426,151 @@
                           (symbol (str (get aliases (symbol target-ns) target-ns)) (name target))
                           (symbol (str namespace-name) (name target))))))))
         (vals texts)))
+
+(defn- parameters
+  "Every symbol a function definition's argument vectors bind."
+  {:malli/schema [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form's members are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:set :symbol]]}
+  [form]
+  (let [arglists (concat (filter vector? (take 4 (drop 2 form)))
+                         (keep #(when (and (seq? %) (vector? (first %))) (first %)) (drop 2 form)))]
+    (into #{} (comp (mapcat #(tree-seq coll? seq %)) (filter simple-symbol?) (remove #{'&}))
+          arglists)))
+
+(defn- runners
+  "The functions of `definitions` that call one of their own parameters
+  inside their own converting `try`: whatever is handed to them is converted
+  (my.program's `read-result`, the pattern of a public boundary running a
+  private body)."
+  {:malli/schema [:=> [:cat [:vector [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form's members are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]] [:set :symbol]]}
+  [definitions]
+  (into #{}
+        (keep (fn [form]
+                (when (function-heads (first form))
+                  (let [bound (parameters form)]
+                    (when (some ::converted? (form-sites form #(and (seq? %) (contains? bound (first %)))))
+                      (second form))))))
+        definitions))
+
+(defn containment
+  "Each `defn`/`defn-` in the source `text` that holds a `throw` or reaches
+  one through a same-file function, classified:
+  `::sites` its own throw sites; `::escaping` those neither converted in the
+  function nor resurfacing a caught cause, plus each unconverted reference
+  to a same-file function whose failure escapes undeclared (the throwing
+  helper's callers); `::declared?` its output union names an error
+  alternative; `::caller-converted?` it is private and its failure never
+  leaves the file: every same-file call of it is converted (by a `try` or a
+  runner it is handed to) or made by a function whose own failure never
+  leaves the file.
+  A declared function or a `:db.fn/call` target of the text does not pass
+  its throws on. With `selected`, only those definitions are answered."
+  {:malli/schema [:function
+                  [:=> [:cat :string :map] [:vector :map]]
+                  [:=> [:cat :string :map [:maybe [:set :symbol]]] [:vector :map]]]}
+  ([text forms] (containment text forms nil))
+  ([text forms selected]
+  (let [source (read-source text)
+        namespace-name (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) source)
+                           'user)
+        definitions (filterv #(function-heads (first %)) (definition-forms source))
+        names (into #{} (map second) definitions)
+        converting (runners definitions)
+        local-transactions (into #{} (map #(symbol (name %)))
+                                 (transaction-functions {"" text}))
+        facts (into {}
+                    (map (fn [form]
+                           (let [sites (form-sites form throw-site? converting)
+                                 references (form-sites form #(and (symbol? %) (contains? names %)) converting)]
+                             [(second form)
+                              {::form form
+                               ::sites sites
+                               ::direct (into [] (comp (remove #(or (::converted? %) (::resurfaced? %)))
+                                                       (map #(assoc % ::sites-own? true)))
+                                              sites)
+                               ::references (filterv #(not= (second form) (::node %)) references)
+                               ::declared? (boolean (some #(error-alternative? % forms)
+                                                          (output-schemas (declared-schema form) forms)))}])))
+                    definitions)
+        passes-on? (fn [name-symbol] (not (or (get-in facts [name-symbol ::declared?])
+                                              (local-transactions name-symbol))))
+        ;; the functions whose failure reaches their caller undeclared: their
+        ;; own escaping throws, then every unconverted caller of one, to a fixpoint
+        escaping (loop [found (into #{} (keep (fn [[n f]] (when (and (seq (::direct f)) (passes-on? n)) n))) facts)]
+                   (let [more (into found
+                                    (keep (fn [[n f]]
+                                            (when (and (passes-on? n)
+                                                       (some #(and (found (::node %)) (not (::converted? %)))
+                                                             (::references f)))
+                                              n)))
+                                    facts)]
+                     (if (= more found) found (recur more))))
+        ;; each function's same-file callers, and whether each call converts
+        referrers (reduce-kv (fn [m from {::keys [references]}]
+                               (reduce #(update %1 (::node %2) (fnil conj []) (assoc %2 ::from from))
+                                       m references))
+                             {} facts)
+        public? (fn [name-symbol] (= 'defn (first (get-in facts [name-symbol ::form]))))
+        ;; the escaping functions whose failure leaves the file: every public
+        ;; one, a private one no function here calls, then every private one
+        ;; an escaping caller calls unconverted, to a fixpoint
+        leaves (loop [found (into #{} (filter #(or (public? %) (empty? (referrers %)))) escaping)]
+                 (let [more (into found
+                                  (filter #(some (fn [call] (and (found (::from call)) (not (::converted? call))))
+                                                 (referrers %)))
+                                  escaping)]
+                   (if (= more found) found (recur more))))]
+    (into []
+          (keep (fn [[name-symbol {::keys [form sites direct references declared?]}]]
+                  (let [reached (filterv #(and (escaping (::node %)) (not (::converted? %))) references)]
+                    (when (and (or (seq sites) (seq reached))
+                               (or (nil? selected) (selected name-symbol)))
+                      {::symbol (symbol (str namespace-name) (name name-symbol))
+                       ::row (:row (meta form))
+                       ::sites sites
+                       ::escaping (if (escaping name-symbol) (into direct reached) direct)
+                       ::declared? declared?
+                       ::public? (public? name-symbol)
+                       ::caller-converted? (boolean (and (escaping name-symbol) (not (leaves name-symbol))))}))))
+          (sort-by (comp :row meta ::form val) facts)))))
+
+(defn- test-source?
+  "True for a path under a `test` root: the test runner converts its members."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [path]
+  (or (str/starts-with? path "test/") (str/includes? path "/test/")))
+
+(defn uncontained-changes
+  "Findings for every `defn`/`defn-` in the source `text` that `baseline`
+  lacks or defines differently and that holds a throw reaching its caller
+  with no error alternative in its output union: the crash the owner's
+  2026-09-28 law forbids. A throw its own function converts, a resurfaced
+  caught cause and a private function every same-file caller converts are
+  internal control flow. Test sources are the test runner's to convert.
+  A transaction function is judged by [[check]], which knows every text."
+  {:malli/schema [:=> [:cat :string :string :string :map] [:vector :map]]}
+  [path text baseline forms]
+  (if (test-source? path)
+    []
+    (let [before (into {} (map (juxt second identity))
+                       (definition-forms (read-source baseline)))
+          changed (into #{} (comp (filter #(not= % (get before (second %)))) (map second))
+                        (definition-forms (read-source text)))]
+      (into []
+            (keep (fn [{::keys [row escaping declared? caller-converted?] function-symbol ::symbol}]
+                    (when (and (changed (symbol (name function-symbol)))
+                               (seq escaping) (not declared?) (not caller-converted?))
+                      {:filename path :row (::row (first escaping)) :col (::col (first escaping))
+                       :level :error :type :uncontained-throw ::symbol function-symbol
+                       :message (str function-symbol " (row " row ") throws to its caller "
+                                     (count escaping) " way(s) with no error alternative in its "
+                                     "output union. Return the failure as a named error value "
+                                     "instead ([:and :seon.error/base [:map ...]] naming the "
+                                     "operation, what was expected, the offending value by "
+                                     "reference and the fix) and add it to the contract's "
+                                     "output union, e.g. [:=> [:cat ...] [:or :my.ns/result "
+                                     ":my.ns/refused-error]]; or convert the throw in this "
+                                     "function's own try/catch.")})))
+            (when (seq changed) (containment text forms changed))))))
 
 (defn- checkout-sources
   "Every JVM source text under `root`'s src/, by path."
@@ -653,7 +735,9 @@
   holds a `throw`: each classified by the rule [[uncontained-changes]]
   applies, with counts by class and the escaping functions by file. Measured
   on 4e10213a9 (2026-09-28): 514 sites in 376 functions; 270 functions (352
-  sites) escape with no error alternative, in about one second."
+  sites) escape with no error alternative, in about one second. A function
+  that throws nothing itself but calls such a same-file function unconverted
+  is `::escaping-through-helper`."
   {:malli/schema [:=> [:cat :string] :map]}
   [root]
   (let [forms (checkout-packaged-forms root)
@@ -666,7 +750,8 @@
                          (::declared? row) ::declared-error-alternative
                          (::caller-converted? row) ::caller-converted
                          (transactional (::symbol row)) ::transaction-function
-                         :else ::escaping))
+                         (some ::sites-own? (::escaping row)) ::escaping
+                         :else ::escaping-through-helper))
         by-class (group-by class-of rows)
         sites (mapcat ::sites rows)]
     {::functions (count rows)
@@ -675,8 +760,11 @@
      ::resurfaced-sites (count (filter ::resurfaced? sites))
      ::functions-by-class (update-vals by-class count)
      ::escaping-sites-by-class (update-vals by-class #(count (mapcat ::escaping %)))
+     ::public-boundaries (count (filter ::public? (concat (::escaping by-class) (::escaping-through-helper by-class))))
      ::escaping-by-file (into (sorted-map) (update-vals (group-by ::path (::escaping by-class))
-                                                        #(mapv ::symbol %)))}))
+                                                        #(mapv ::symbol %)))
+     ::through-helper-by-file (into (sorted-map) (update-vals (group-by ::path (::escaping-through-helper by-class))
+                                                              #(mapv ::symbol %)))}))
 
 (defn- uncontained
   "The uncontained-throw findings of the edited `texts` against their
@@ -856,6 +944,9 @@
 (defn- leaky-helper {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"leaky\" {})))
 (defn leaky-caller {:malli/schema [:=> [:cat :int] :int]} [x] (leaky-helper x))
 (defn quoted {:malli/schema [:=> [:cat :int] :any]} [x] '(throw x))
+(defn- body {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"body\" {})))
+(defn- run-converted {:malli/schema [:=> [:cat [:=> [:cat] :int]] :int]} [f] (try (f) (catch Exception _ 0)))
+(defn runs-body {:malli/schema [:=> [:cat :int] :int]} [x] (run-converted #(body x)))
 (defn refuse-call {:malli/schema [:=> [:cat :map :int] [:vector :map]]} [db x] (throw (ex-info \"refused\" {:x x})))
 (defn write {:malli/schema [:=> [:cat :int] [:vector :any]]} [x] [[:db.fn/call #'refuse-call x]])"
         baseline "(ns seon.probe)
@@ -865,9 +956,13 @@
         refused (into #{} (comp (filter #(= :uncontained-throw (:type %)))
                                 (map #(symbol (first (str/split (:message %) #" ")))))
                       findings)]
-    (is (= '#{seon.probe/crashes seon.probe/rethrows-inner seon.probe/wraps seon.probe/leaky-helper}
+    (is (= '#{seon.probe/crashes seon.probe/rethrows-inner seon.probe/wraps seon.probe/leaky-helper
+              seon.probe/leaky-caller}
            refused)
-        "a crash, a catch that rethrows what it caught, a wrapping rethrow and a helper one caller leaves unconverted are refused")
+        "a crash, a catch that rethrows what it caught, a wrapping rethrow, a helper one caller leaves unconverted and that caller are refused")
+    (is (not (refused 'seon.probe/caller)) "a caller that converts its helper's throw is contained")
+    (is (not (or (refused 'seon.probe/body) (refused 'seon.probe/runs-body)))
+        "a body handed to a same-file runner that converts it is contained")
     (is (not (refused 'seon.probe/legacy)) "an unchanged function is not judged")
     (is (not (refused 'seon.probe/declares)) "an error alternative in the output union declares the failure")
     (is (not (refused 'seon.probe/refuse-call)) "a transaction function's throw is the writer's declared refusal")
