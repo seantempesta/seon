@@ -1616,7 +1616,15 @@
    ;; the thread that starts the graph (`flow/impl.clj:263`), so a supplied
    ;; route is registered before `start-graph!` returns and before boot's
    ;; prime; the stop transition and the quiescence request remove it.
-   (some-> (:seon.cluster.wake/route args) wake/route!)
+   ;; A declaration population that cannot route answers its refusal and
+   ;; registers nothing (wake/route!): this proc records it as its fault.
+   (let [registered (some-> (:seon.cluster.wake/route args) wake/route!)]
+     (when (map? registered)
+       (fault/fault! (env/of args) registered
+                     {:seon.error/layer :seon.cluster.wake/registration
+                      :seon.error/operation `armer-step
+                      :seon.db.process/id (:seon.db.process/id (:seon.turn.loop/cluster args))
+                      :seon.error/declared-schema :seon.cluster.wake/unroutable-declarations-error})))
    (assoc args
           ::flow/in-ports {:seon.agent/arm (:seon.cluster.wake/channel
                                   (:seon.turn.loop/cluster args))}))

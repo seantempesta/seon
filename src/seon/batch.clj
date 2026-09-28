@@ -498,11 +498,15 @@
       (last-entry batch #(merge % (select-keys change [:seon.batch/notes :seon.batch/private])))
       (let [t1 (System/nanoTime)
             tx ((:seon.batch/facts request) request (:seon.batch/working batch) change)]
+        (if (:seon.error/at tx)
+          ;; the facts stage's refusal (a removal whose referrers survive) is
+          ;; this form's error value, delivered with it
+          (last-entry (clock batch :facts t1) #(assoc % :seon.batch/facts-error tx))
         (-> batch
             (assoc :seon.batch/pending {:seon.batch/ordinal (:seon.batch/ordinal entry) :seon.batch/tx tx
                                         :seon.batch/change change})
             (last-entry #(merge % (select-keys change [:seon.batch/notes :seon.batch/private])))
-            (clock :facts t1)))))
+            (clock :facts t1))))))
   (catch Exception t
     (let [refusal (ex-data t)]
       (last-entry batch #(assoc % :seon.batch/facts-error

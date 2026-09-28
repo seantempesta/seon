@@ -473,30 +473,36 @@
 
 (defn- removal-facts
   "Retraction of a removed Var's or namespace's stored declarations on `db`,
-  through the program owner's deletion report; surviving referrers refuse."
-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :seon.store/transaction-data]}
+  through the program owner's deletion report; surviving referrers answer
+  the owner's refusal, naming them."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
   [db subject]
   (let [stored? (if (qualified-symbol? subject)
                   (or (dbu/entid db [:seon.fn/sym subject]) (dbu/entid db [:seon.test/sym subject]))
                   (dbu/entid db [:seon.ns/name subject]))]
     (when stored?
       (let [[report subjects] (#'my.program/deletion-report db subject)]
-        (when (or (#'my.program/blocking? report) (some keyword? subjects))
-          (throw (ex-info "Program retraction refused." (#'my.program/refusal 'seon.turn.batch/removal-facts report subjects))))
-        (mapv (fn [target] [:db/retractEntity (:seon.program/identity (#'my.program/locate db target))])
-              (sort-by str subjects))))))
+        (if (or (#'my.program/blocking? report) (some keyword? subjects))
+          (#'my.program/refusal 'seon.turn.batch/removal-facts report subjects)
+          (mapv (fn [target] [:db/retractEntity (:seon.program/identity (#'my.program/locate db target))])
+                (sort-by str subjects)))))))
 
 (defn form-facts
-  "A program change as transaction data on `db`."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.batch/change] :seon.store/transaction-data]}
+  "A program change as transaction data on `db`, or the refusal of a removal
+  whose referrers survive."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.batch/change]
+                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
   [request db {:seon.batch/keys [entities removals schema-keys namespaces]}]
   (let [stx (schema-tx request db schema-keys)
         ;; entities read the schema this change registers
-        db' (if (and (seq stx) (seq entities)) (let [w (db/with db stx)] (if (:seon.error/message w) db w)) db)]
-    (-> stx
-        (into (mapcat #(namespace-facts request db' %)) (sort namespaces))
-        (into (mapcat #(entity-facts db' %)) entities)
-        (into (mapcat #(removal-facts db' %)) removals))))
+        db' (if (and (seq stx) (seq entities)) (let [w (db/with db stx)] (if (:seon.error/message w) db w)) db)
+        removed (mapv #(removal-facts db' %) removals)]
+    (or (first (filter :seon.error/at removed))
+        (-> stx
+            (into (mapcat #(namespace-facts request db' %)) (sort namespaces))
+            (into (mapcat #(entity-facts db' %)) entities)
+            (into cat removed)))))
 
 (defn apply-facts
   "`tx` on `working` through the writer's own validation. A refusal is the
@@ -534,8 +540,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn program-facts
-  "The folded program as transaction data on `head`."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :map] :seon.store/transaction-data]}
+  "The folded program as transaction data on `head`, or a removal's refusal."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :map]
+                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
   [request head {:keys [entities schema-keys namespaces removed-namespaces]}]
   (form-facts request head
               {:seon.batch/entities (vec (keep (fn [[_ r]] (when (map? r) r)) entities))
@@ -549,7 +556,11 @@
   settlement commits them beside its evaluations (`seon.turn/settle-batch!`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/request :map] :seon.store/transaction-data]}
   [db request program]
-  (program-facts request db program))
+  ;; a transaction function's throw is the writer's refusal of this settlement
+  (let [facts (program-facts request db program)]
+    (if (:seon.error/at facts)
+      (throw (ex-info (:seon.error/message facts) facts))
+      facts)))
 
 (defn- evaluation-record
   "One entry as the recording writer's terminal evaluation."
@@ -597,8 +608,12 @@
   [request head entries]
   (reduce (fn [[w p es] e]
             (if-let [change (:seon.batch/change e)]
-              (let [r (try (apply-facts request w (form-facts request w change) change)
-                           (catch Throwable t {:seon.batch/refusal {:seon.error/message (ex-message t)}}))]
+              (let [facts (form-facts request w change)
+                    ;; the removal's refusal whole, with its referrers: the
+                    ;; refactoring data it exists to give (a message alone lost it)
+                    r (if (:seon.error/at facts)
+                        {:seon.batch/refusal facts}
+                        (apply-facts request w facts change))]
                 (if-let [refusal (:seon.batch/refusal r)]
                   [w p (conj es (-> e (dissoc :seon.batch/change) (assoc :seon.batch/facts-error refusal)))]
                   [(:seon.batch/working r) (fold-change request p change) (conj es e)]))

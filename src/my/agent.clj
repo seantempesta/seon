@@ -155,12 +155,16 @@
     (branch-refusal `retire-branch! "The cluster's own branch is shared; name a lane branch." {:seon.store/branch lane})
     :else
     (let [child #(some-> routing deref (get-in [:seon.agent/children lane]) deref)
-          _ (some-> (:seon.cluster.host/host (child)) deref ((requiring-resolve 'seon.cluster.host/retire!)))
+          retired (some-> (:seon.cluster.host/host (child)) deref ((requiring-resolve 'seon.cluster.host/retire!)))
           held (vec (:seon.agent/contexts (child)))
           agents (vec (keep (comp :seon.agent/id second) held))]
-      (if (seq agents)
+      (cond
+        ;; the host's refusal (a refused read or admission close) is the answer
+        (:seon.error/at retired) retired
+        (seq agents)
         (branch-refusal `retire-branch! "Agents hold this branch; disarm them first."
                         {:seon.store/branch lane :seon.agent/id agents})
+        :else
         (do (doseq [[_ execution] (sort-by (comp :seon.agent/owns-connection? second) held)]
               ((requiring-resolve 'seon.cluster.agent/release-context!) execution))
             (registry/retire-branch! {:seon.store/store store :seon.store/branch lane})
