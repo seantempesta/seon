@@ -1682,3 +1682,30 @@
            (mapv #(dissoc % :seon.error/example) (:seon.error/problems reply))))
     (is (int? (get-in reply [:seon.error/problems 0 :seon.error/example])))
     (is (not-any? #(contains? reply %) [:seon.error/fix-form :seon.error/offending]))))
+
+(deftest a-thrown-failure-shows-its-cause-chain-to-the-agent
+  ;; Owner 2026-09-28: an error indicates what went wrong. An agent's own
+  ;; `ex-info` over a JVM cause showed only its message; the data it threw
+  ;; and the root cause were one requery away.
+  (let [thrown (error.refusal/diagnostic
+                {:seon.error/at (java.util.Date.) :seon.error/layer :seon.error-test/probe
+                 :seon.error/operation 'seon.error-test/probe
+                 :seon.error/throwable (ex-info "probe: nested" {:probe/k 1}
+                                                (IllegalStateException. "root cause"))})
+        reply (error/reply-value nil thrown)]
+    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+             :seon.error/message "probe: nested" :seon.error/data {:probe/k 1}}
+            {:seon.error/throwable-class "java.lang.IllegalStateException"
+             :seon.error/message "root cause"}]
+           (:seon.error/chain reply))
+        "each link's class, message and data, without frames")
+    (testing "a bare message has nothing more to say"
+      (is (not (contains? (error/reply-value nil (error.refusal/diagnostic
+                                                  {:seon.error/at (java.util.Date.)
+                                                   :seon.error/layer :seon.error-test/probe
+                                                   :seon.error/operation 'seon.error-test/probe
+                                                   :seon.error/throwable (ex-info "only a message" {})}))
+                          :seon.error/chain))))
+    (testing "a structural refusal keeps its problems and shows no chain"
+      (is (not (contains? (error/reply-value nil (assoc thrown :seon.error/offending ["4"]))
+                          :seon.error/chain))))))

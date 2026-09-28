@@ -1897,6 +1897,9 @@
     namespace declares nearest to it by spelling, at most eight.
   - `:seon.error/sources`: where each function the refusal names (a
     removal's callers, at most three) mentions the blocked subject.
+  - `:seon.error/chain`: for a thrown failure that is no structural refusal
+    (no problems, nothing offending), every cause link's class, message and
+    `ex-data` without frames, when there is more than the message to say.
   - `:seon.sci.eval/stacktrace`: the agent's own frames.
 
   The one-argument arity reads the database in custody, if any.
@@ -1948,6 +1951,19 @@
                             (vals offending)))
          class (:seon.error/exception-class error)
          member (or (:seon.error/member error) (:seon.error/member (:seon.error/data error)))
+         ;; A thrown failure with no structural refusal says what went wrong
+         ;; in its cause chain: each link's class, message and ex-data. The
+         ;; agent's frames are shown once, as its stacktrace; a link whose
+         ;; data IS the structural refusal is already shown above.
+         chain (when-not (or problems (some? offending))
+                 (let [links (mapv (fn [link]
+                                     (cond-> (dissoc link :seon.error/frames)
+                                       (let [data (:seon.error/data link)]
+                                         (or (:seon.error/at data) (and (map? data) (empty? data))))
+                                       (dissoc :seon.error/data)))
+                                   (:seon.error/chain error))]
+                   (when (or (< 1 (count links)) (some :seon.error/data links))
+                     links)))
          arity? (or (= :arity (:seon.instrument/check error)) (= :arity (:seon.instrument/arm error)))]
      (cond-> {}
        message (assoc :seon.error/message message)
@@ -1970,6 +1986,7 @@
        (assoc :seon.error/in-namespace {namespace-name (names-in database namespace-name missing)})
        (and database (seq referenced) (qualified-symbol? (:seon.program/blocked-subject error)))
        (assoc :seon.error/sources (call-lines database referenced (:seon.program/blocked-subject error)))
+       chain (assoc :seon.error/chain chain)
        (:seon.sci.eval/stacktrace error)
        (assoc :seon.sci.eval/stacktrace (:seon.sci.eval/stacktrace error))))))
 
