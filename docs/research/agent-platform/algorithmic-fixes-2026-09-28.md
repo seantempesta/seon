@@ -7,6 +7,11 @@ status: partial
 
 # Algorithmic fixes — 2026-09-28
 
+Six fixes are committed: read evidence `1d05b4f16`, capability batching
+`21a8b04f0`, requested reach `3e0370417`, stored EDN `6ddc77262`, arity
+revisions `712eb81a5`, publication keys `d37ffd5e1`. Definition-digest reuse
+is measured but awaits ownership of its actual owner, `src/seon/program.cljc`.
+
 ## Read evidence: one pull dependency walk per selector
 
 `seon.db/query-index-patterns` already asked Datahike to resolve the complete
@@ -194,6 +199,56 @@ Root's focused tests:
 - `seon.db-test/durable-pull-digests-replay-without-retaining-read-results`
 
 Foreign boundary and installation limits remain as above.
+
+## Definition digests: measured candidate, ownership pending
+
+The common owner is `seon.program/definition-digest` in `program.cljc:410`,
+called by both fn indexing and `db/definition-digest-of`. That file is outside
+the explicit assignment; the ownership question is pending. No production
+digest implementation was edited. Caching only `id/digest` would leave the
+canonical encoding repeated and generic printed-data caching would conflate
+equal data with different printed identities.
+
+The saved scratch candidate excludes provenance and selects resolver inputs
+exactly as the owner does, then constructs an O(N) content key preserving
+canonical list/vector and numeric distinctions. Ordinary Clojure map equality
+alone is insufficient: lists and vectors compare equal but the canonical
+encoder hashes them differently. A resident key avoids canonical framing,
+sorting, printing and SHA work; the writer's recomputation hits the same key.
+The key is still walked once per invocation, so this is not constant-time
+digest lookup or a claim that all of the boot profile's 5–7 s disappear.
+
+MCP `scratch.astra.digest`, default pid 32304, 100 actual function rows from
+`src/seon/db.clj` and their actual stored namespace resolver context:
+1/10/100 warm digests measured 0.124→0.042, 0.444→0.158,
+4.305→1.399 ms. All answers match; every producer answer also equals
+`db/definition-digest-of` on that row. Repeated 1/10/100 inputs caused zero
+new misses after priming. List/vector, numeric, nested map/set and empty
+sequence cases also matched the old oracle. The 100 cached keys charged
+1,525,228 estimated bytes (not measured retained memory).
+
+Reviewable scratch candidate and reproduction:
+
+- `tmp/astra-algorithmic-fixes-20260928/definition-digest-candidate.clj`
+- `tmp/astra-algorithmic-fixes-20260928/definition-digest-probe.clj`
+
+On ownership approval, place the key helper and central-cache lookup in the
+existing program owner, keeping both public arities and digest bytes. Add
+`seon.program-test/definition-digests-reuse-canonical-content` (proposed):
+1/10/100 real rows, exact canonical encoder call counts, writer/producer
+agreement, provenance exclusions and list/vector/numeric separation. Root
+also needs the existing
+`seon.program-test/a-require-a-definition-does-not-use-leaves-its-digest-unchanged`
+and `seon.program-test/program-shapes-derive-once-per-projection`.
+An indexing/publication drill is still required before this implementation
+can land. No regression or drill for this unlanded candidate is claimed.
+
+The saved candidate/probe were replayed as MCP forms in a fresh scratch
+namespace: 100 rows 4.379→1.670 ms, all answers equal, writer equality true,
+zero new misses at every size. Final archive `d37ffd5e1` checks before this
+evidence-only landing: lint 0 errors, 1,725 warnings, 7.239 s; contracts
+498 files, same 10 foreign script errors, zero source/test findings,
+13.241 s. Root's focused tests above remain unrun by this lane.
 
 ## Publication keys: derive only missed file content
 
