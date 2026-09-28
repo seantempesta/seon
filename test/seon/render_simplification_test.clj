@@ -241,7 +241,7 @@
               (=
                 'seon.cluster.agent/render-identity-ai
                 (:seon.render.selection/selected decision)))
-            (is (= (agent/render-identity-ai pulled) (render-ai request)))))))))
+            (is (= (agent/render-identity-ai (assoc pulled :seon.db/db database)) (render-ai request)))))))))
 
 (deftest a-stored-render-ref-is-not-the-value's-own-override
   ;; CLASS: a pulled schema entity carries its schema's render face as a ref

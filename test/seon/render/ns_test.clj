@@ -9,7 +9,7 @@
             [seon.render.schema :as render.schema]
             [seon.issue :as issue]
             [seon.test-support :as support])
-  (:import [java.io PushbackReader StringReader]))
+  )
 
 (deftest identity-reads-stewardship-without-an-agent-cluster-attribute
   (support/with-database
@@ -21,19 +21,19 @@
                           (support/agent-tx @connection "record-agent" 'my.agents.record))
      (let [unit {:seon.db/db @connection
                  :seon.agent/id "record-agent"}
-           source (agent/render-identity-ai unit)
-           form (with-open [reader (PushbackReader. (StringReader. source))]
-                  (is (= '(help) (read reader)))
-                  (read reader))
-           selector (second (second form))
-           observed (db/pull @connection selector (nth form 2))]
+           observed (agent/render-identity-ai unit)]
        (is (= "record-agent" (:seon.agent/id observed)))
        (is (= 'my.agents.record
               (get-in observed [:seon.agent/namespace :seon.ns/name])))
        (is (= "record-steward"
               (get-in observed [:seon.agent/namespace :seon.ns/steward
                                 :seon.agent/id])))
-       (is (not (str/includes? source ":seon.agent/cluster")))))))
+       (is (not (contains? observed :seon.agent/cluster)))
+       (is (= ['(help)] (:seon.render/operations observed)))
+       (is (= (list 'seon.db/pull (list 'quote (second (second (:seon.repl/form (agent/identity-form unit)))))
+                    [:seon.agent/id "record-agent"])
+              (:seon.repl/form (agent/identity-form unit)))
+           "the form face is the identity read")))))
 
 (defn- namespace-unit
   [db namespace-name distance token-budget]

@@ -141,8 +141,11 @@
         (readable! (cluster.agent/render-identity-html unit) ["Agent" "alice" "my.agents.alice" "Steward"])
         (readable! (cluster.agent/render-id-html "alice" @connection) ["alice" "Steward"])
         (readable! (cluster.agent/render-creation-html creation) ["alice" "Opening turn"])
-        (is (= (golden :identity) (cluster.agent/render-identity-ai unit)))
-        (is (= (golden :id) (cluster.agent/render-id-ai "alice")))
+        (is (= {:seon.agent/id "alice"
+                :seon.agent/namespace {:seon.ns/name 'my.agents.alice :seon.ns/steward {:seon.agent/id "alice"}}
+                :seon.render/operations ['(help)]}
+               (cluster.agent/render-identity-ai unit)))
+        (is (= (cluster.agent/render-identity-ai unit) (cluster.agent/render-id-ai "alice" @connection)))
         (is (= (golden :creation) (cluster.agent/render-creation-ai creation)))))))
 
 (deftest fault-pairs-preserve-ai
@@ -154,7 +157,7 @@
         (readable! (error/render-html fault) ["example/connect" "Connection lost"])
         (readable! (error/render-faults-html [fault] @connection) ["Faults (1)" "Connection lost"])
         (is (= (golden :fault) (error/render-ai fault)))
-        (is (= [(golden :faults)] (error/render-faults-ai {:seon.render/value [fault]})))
+        (is (= (golden :faults) (error/render-faults-ai {:seon.render/value [fault]})))
         ;; THE PAIR RENDERS THE FACT, NOT ITS EDN. The frozen bytes were
         ;; `(pr-str ...)` output until `render-ai` became prose over the
         ;; error's own data (`src/seon/error.clj:1558`); the golden kept
@@ -163,8 +166,9 @@
         ;; side can go stale silently again.
         (is (not (str/includes? (error/render-ai fault) "#:seon.error{"))
             "an AI pair renders the fact's data, never its attribute dump")
-        (is (= 3 (:seon.error/occurrence-count
-                  (error/render-ai (assoc fault :seon.error/occurrence-count 3))))
+        (is (str/includes?
+             (error/render-ai (assoc fault :seon.error/occurrence-count 3))
+             "occurrence-count 3")
             "and it carries the recorded occurrence evidence")))))
 
 (deftest maintenance-pair-preserves-ai

@@ -117,10 +117,7 @@
             "the argumentless SCI call uses the one declared request-map arity")
         (is (every? :seon.fn.arity/output arities))
         (is (some? live))
-        (let [result (evaluate (str "(do\n"
-                                   (agent/render-identity-ai
-                                    {:seon.agent/id agent-id})
-                                   "\n)"))
+        (let [result (evaluate (str (:seon.repl/form (agent/identity-form {:seon.agent/id agent-id}))))
               value (:seon.sci.admit/value result)]
           ;; `identity-form` emits the raw identity pull (d6377ac39), so the
           ;; value carries the stored attributes, not the :my.agent projection.

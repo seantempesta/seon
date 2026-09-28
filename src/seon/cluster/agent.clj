@@ -83,10 +83,8 @@
             [seon.cluster.store :as store]
             [seon.id :as id]
             [seon.env :as env]
-            [seon.issue.opening :as issue.opening]
             [seon.error :as error]
             [seon.fault :as fault]
-            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.program :as program]
             [seon.render.route :as route]
@@ -288,38 +286,33 @@
                 (when cluster-name (str "\nCluster   " cluster-name))))))))
 
 (defn render-identity-ai
-  "Read identity, namespace, and stewardship as data in one block."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.render/source-blocks]]}
-  [unit]
-  (let [form (identity-form unit)
-        identity-source
-        (str ";; I should understand how this REPL works before I act.\n(help)\n\n"
-             (:seon.repl/comment form)
-             (when (= "root" (:seon.agent/id unit))
-               "\n;; (seon.cluster.status/agents {}) shows agent work and turn accounting on demand.")
-             "\n" (repl/source-text (:seon.repl/form form)))
-        database (:seon.db/db unit)
-        issues (when database
-                 (db/q '[:find [?issue-id ...] :in $ ?agent-id
-                         :where [?agent :seon.agent/id ?agent-id]
-                         [?issue :seon.issue/agent ?agent]
-                         [?issue :seon.issue/id ?issue-id]]
-                       database (:seon.agent/id unit)))]
-    (if (seq issues)
-      {:seon.render/source-blocks
-       (into [{:seon.render/source identity-source}]
-             (map (fn [issue-id]
-                    {:seon.render/source
-                     (issue.opening/source database issue-id)
-                     :seon.eval/origin issue-id}))
-             (sort issues))}
-      identity-source)))
+  "My identity as data: my id, my namespace and its steward, and the issues I
+  work, offering `(help)` and each issue's context read."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/identity-view :seon.db/error-result]]}
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (let [agent-data (db/pull database identity-selector [:seon.agent/id agent-id])
+        issues (db/q '[:find [?issue-id ...] :in $ ?agent-id
+                       :where [?agent :seon.agent/id ?agent-id]
+                       [?issue :seon.issue/agent ?agent]
+                       [?issue :seon.issue/id ?issue-id]]
+                     database agent-id)]
+    (cond
+      (db/read-refusal? agent-data) agent-data
+      (db/read-refusal? issues) issues
+      :else
+      (cond-> (assoc agent-data :seon.render/operations
+                     (cond-> ['(help)]
+                       (= "root" agent-id) (conj '(seon.cluster.status/agents {}))
+                       (seq issues) (into (map #(list 'seon.issue.opening/context {:seon.issue/id %}))
+                                          (sort issues))))
+        (seq issues) (assoc :seon.agent/issues (vec (sort issues)))))))
 
 (defn render-id-ai
-  "Read the identity concern from its identifying attribute."
-  {:malli/schema [:=> [:cat :seon.agent/id] :seon.render/source]}
-  [agent-id]
-  (render-identity-ai {:seon.agent/id agent-id}))
+  "The identity concern read from its identifying attribute, as data."
+  {:malli/schema [:=> [:cat :seon.agent/id :seon.db/database-value]
+                  [:or :seon.agent/identity-view :seon.db/error-result]]}
+  [agent-id database]
+  (render-identity-ai {:seon.db/db database :seon.agent/id agent-id}))
 
 (defn render-identity-html
   "Render an agent node: id, namespace, steward, the tasks naming its namespace

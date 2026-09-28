@@ -46,7 +46,9 @@
                        :seon.render/ai
                        seon.cluster.agent/render-identity-ai,
                        :seon.render/html
-                       seon.cluster.agent/render-identity-html :seon.program/partition :seon.data}
+                       seon.cluster.agent/render-identity-html
+                       :seon.render/form
+                       seon.cluster.agent/identity-form :seon.program/partition :seon.data}
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/branch :seon.agent/branch]
                       [:seon.agent/archived-tx {:optional true} :seon.agent/archived-tx]
@@ -215,6 +217,12 @@
                               :seon.render/ai seon.agent/render-settings-ai
                               :seon.render/html seon.agent/render-settings-html
                               :seon.render/form seon.agent/render-settings-form} :seon.db/ref]
+             :identity-view [:map {:description "My identity as the AI face shows it: my id, my namespace and its steward, my issues, and the reads offered."}
+                             [:seon.agent/id :seon.agent/id]
+                             [:seon.agent/namespace {:optional true} [:map [:seon.ns/name :seon.ns/name]
+                                                                      [:seon.ns/steward {:optional true} [:map [:seon.agent/id :seon.agent/id]]]]]
+                             [:seon.agent/issues {:optional true} [:vector :seon.issue/id]]
+                             [:seon.render/operations :seon.render/operations]]
              :settings-view [:map {:description "My setting overrides as the AI face shows them, with the read of the effective defaults offered."}
                              [:my.agent/settings :my.agent/settings]
                              [:seon.render/operations :seon.render/operations]]
