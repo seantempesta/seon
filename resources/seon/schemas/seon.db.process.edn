@@ -1,15 +1,7 @@
 #:seon.db.process{:id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.db.process/process}]
  :pid [:and {:description "Operating-system identity observed for this process record; the two fields identify one generation."} :seon.boot/pid]
  :start-instant [:and {:description "Operating-system identity observed for this process record; the two fields identify one generation."} :seon.boot/start-instant]
- ;; Written by boot with the process entity, on the commit that establishes it
- ;; (seon.cluster/ensure-cluster-entity!). Consumer: seon.health/regressions,
- ;; which compares the newest boot's phases with the previous program's.
- :layers [:set {:seon.db/no-history? true
-                :description "Boot's timeline when the process was established: each layer acquired so far with the cumulative milliseconds since the start began (seon.cluster.boot/boot-timeline). A process's facts never change."}
-          [:tuple :qualified-keyword [:int {:min 0}]]]
  :process [:map {:seon.db/attributes true :seon.program/partition :seon.data}
            [:seon.db.process/id :seon.db.process/id]
            [:seon.db.process/pid {:optional true} :seon.db.process/pid]
-           [:seon.db.process/start-instant {:optional true} :seon.db.process/start-instant]
-           [:seon.source/commit-id {:optional true :description "The published source commit this process booted: its program."} :seon.source/commit-id]
-           [:seon.db.process/layers {:optional true} :seon.db.process/layers]]}
+           [:seon.db.process/start-instant {:optional true} :seon.db.process/start-instant]]}

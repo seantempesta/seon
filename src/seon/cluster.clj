@@ -2792,18 +2792,13 @@
   result)
 
 (defn ensure-cluster-entity!
-  "Exactly converge the branch-local cluster entity's shared base set.
-
-  The four-argument form writes `record` (the process record: boot's
-  timeline so far and the program it runs, which the health report compares
-  across programs) with the process entity, on the commit that establishes it."
+  "Exactly converge the branch-local cluster entity's shared base set."
   {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/connection :seon.cluster/name :seon.db.process/id] :nil]
-    [:=> [:cat :seon.db/connection :seon.cluster/name :seon.db.process/id :seon.db.process/process] :nil]]}
-  ([connection cluster-name process]
-   (ensure-cluster-entity! connection cluster-name process {:seon.db.process/id process}))
-  ([connection cluster-name process record]
+   [:=> [:cat :seon.db/connection
+         :seon.cluster/name
+         :seon.db.process/id]
+    :nil]}
+  [connection cluster-name process]
   ;; Transaction metadata cannot resolve a lookup ref introduced by that same
   ;; transaction. Establish this process under the bootstrap provenance first;
   ;; subsequent cluster and agent transactions can then name it honestly.
@@ -2814,7 +2809,7 @@
     (require-committed!
      (db/transact!
       connection
-      {:tx-data [(assoc record :seon.db.process/id process)]
+      {:tx-data [{:seon.db.process/id process}]
        :tx-meta {:seon.db/process
                  [:seon.db.process/id boot-process-identity]}})
      {:seon.db.process/id process
@@ -2873,7 +2868,7 @@
          :tx-meta {:seon.db/process [:seon.db.process/id process]}})
        {:seon.cluster/name cluster-name
         :seon.boot/population :seon.cluster/cluster})))
-  nil))
+  nil)
 
 (defn seed-cluster-facts!
   "Write the facts boot seeds for a cluster: its config row, then its entity.
@@ -2882,18 +2877,13 @@
   these facts: boot seeds root separately (`seed-root-agent!`), and a test
   world holds only the agents its own seeds or body create. Returns the config
   reconciliation result; a refused write throws."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.db/connection :seon.cluster/name :seon.config/compiled :seon.db.process/id]
-                   :seon.reconcile/result]
-                  [:=> [:cat :seon.db/connection :seon.cluster/name :seon.config/compiled :seon.db.process/id
-                        :seon.db.process/process]
-                   :seon.reconcile/result]]}
-  ([connection cluster-name compiled process]
-   (seed-cluster-facts! connection cluster-name compiled process {:seon.db.process/id process}))
-  ([connection cluster-name compiled process record]
-   (let [result (config/apply-compiled! connection compiled)]
-     (ensure-cluster-entity! connection cluster-name process record)
-     result)))
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster/name
+                       :seon.config/compiled :seon.db.process/id]
+                  :seon.reconcile/result]}
+  [connection cluster-name compiled process]
+  (let [result (config/apply-compiled! connection compiled)]
+    (ensure-cluster-entity! connection cluster-name process)
+    result))
 
 (defn ensure-entity-call
   "Create an absent agent inside the transaction; otherwise change nothing."
