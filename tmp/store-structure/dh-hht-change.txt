@@ -1,0 +1,44 @@
+WARNING: Using incubator modules: jdk.incubator.vector
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+WARNING: abs already refers to: #'clojure.core/abs in namespace: datahike.experimental.graph-util, being replaced by: #'datahike.experimental.graph-util/abs
+WARNING: random-uuid already refers to: #'clojure.core/random-uuid in namespace: datahike.test.schema-test, being replaced by: #'datahike.test.schema-test/random-uuid
+[(...............................................................)(.....................)(..................................................................................)(................................)(.........................................................................)(............)(.........................................)(.................................................................................................................................)(......)(......................)(....)(............................)(......................................................)(.....................................................................................)(..............................[31mF[m..................................................................[31mF[m.[31mF[m[31mF[m.................................................)(...................................................................................................)(............................................)]
+Randomized with --seed 886784407
+
+[31mFAIL[m in datahike.test.query-test/query-dependency-plans-are-execution-aware-and-source-scoped (query_test.cljc:152)
+an input-bound pull pattern contributes its realized attributes
+Expected:
+  [1;31m{[0m[1;33m:datahike.query.dependency/sources[0m [1;31m[[0m[1;31m{[0m[1;33m:datahike.query.source/argument-position[0m [36m0[0m,
+                                        [1;33m:datahike.query.source/attributes[0m [1;31m#{[0m[1;33m:person/email[0m
+                                                                            [1;33m:person/friend[0m
+                                                                            [1;33m:person/id[0m[1;31m}[0m,
+                                        [1;33m:datahike.query.source/symbol[0m $[1;31m}[0m[1;31m][0m[1;31m}[0m
+Actual:
+  [1;31m{[0m[1;33m:datahike.query.dependency/sources[0m [1;31m[[0m[1;31m{[0m[1;33m:datahike.query.source/argument-position[0m [36m0[0m,
+                                        [1;33m:datahike.query.source/attributes[0m [31m-#{:person/email
+                                                                             :person/friend
+                                                                             :person/id}[0m
+                                                                          [32m+:all[0m,
+                                        [1;33m:datahike.query.source/symbol[0m $[1;31m}[0m[1;31m][0m[1;31m}[0m
+
+[31mFAIL[m in datahike.test.query-test/query-attribute-dependencies-are-public-and-conservative (query_test.cljc:58)
+find pulls contribute attributes
+Expected:
+  [1;31m#{[0m[1;33m:person/friend[0m [1;33m:person/id[0m [1;33m:person/name[0m[1;31m}[0m
+Actual:
+  [31m-#{:person/friend :person/id :person/name}[0m [32m+:all[0m
+
+[31mFAIL[m in datahike.test.query-test/query-attribute-dependencies-are-public-and-conservative (query_test.cljc:69)
+nested pulls contribute every realized attribute
+Expected:
+  [1;31m#{[0m[1;33m:person/email[0m [1;33m:person/friend[0m [1;33m:person/id[0m[1;31m}[0m
+Actual:
+  [31m-#{:person/email :person/friend :person/id}[0m [32m+:all[0m
+
+[31mFAIL[m in datahike.test.query-test/query-attribute-dependencies-are-public-and-conservative (query_test.cljc:75)
+reverse pulls use the canonical stored forward attribute
+Expected:
+  [1;31m#{[0m[1;33m:person/email[0m [1;33m:person/friend[0m [1;33m:person/id[0m[1;31m}[0m
+Actual:
+  [31m-#{:person/email :person/friend :person/id}[0m [32m+:all[0m
+[31m187 tests, 945 assertions, 4 failures.[m

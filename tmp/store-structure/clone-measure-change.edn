@@ -1,0 +1,3 @@
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+2026-09-28T22:10:41.766039Z :info datahike.query.estimate :datahike/estimate-heuristic-fallback Index lacks precomputed subtree counts (old database format). Using heuristic estimates for query planning. Consider re-indexing for optimal performance.
+{:label "change", :warm-history-read-ms 277.8082584, :rows [{:variant :current, :attrs 20, :nodes 23.3, :by-index {:eavt 4.0, :aevt 11.2, :avet 8.1, :temporal-eavt 0.0, :temporal-aevt 0.0, :temporal-avet 0.0}, :node-bytes 74323, :record-bytes 42836, :commit-ms 27.8}]}

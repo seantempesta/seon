@@ -1,0 +1,61 @@
+;; store-structure-opus evidence, 2026-09-28 ~22:00-23:00Z. Scripts beside this file.
+{:run-commit-attributes
+ ;; listened on default's cluster-default connection (d/listen, removed after): an ordinary
+ ;; one-form eval_clj run commits 19-20 distinct attributes
+ {:tx [:db/txInstant :seon.db.transaction/process :seon.db.transaction/operation :seon.db.transaction/agent]
+  :turn [:seon.turn/id :seon.turn/opened-tx :seon.turn/closed-tx :seon.turn/reply-size :seon.turn/agent :seon.turn/starting-ns :seon.runtime/turns]
+  :evaluation [:seon.cluster.eval/id :seon.cluster.eval/run :seon.cluster.eval/ordinal :seon.cluster.eval/at :seon.cluster.eval/source
+               :seon.cluster.eval/author :seon.cluster.eval/ns :seon.eval/shown :seon.eval/duration-ms]
+  :redundant {:seon.turn/opened-tx "= the commit's own tx (one transaction per run)"
+              :seon.turn/closed-tx "= the commit's own tx"
+              :seon.cluster.eval/at "= :db/txInstant of the commit in every sampled run"
+              :seon.cluster.eval/author ":system on every sampled run"
+              :seon.db.transaction/process "same value on every commit of a process; no reader in src/script (grep)"}
+  :indexed-per-commit "12 of 20 attributes also write AVET (refs, uniques, the three :db/index stamps)"}
+
+ ;; tmp/store-structure/branch_probe.clj on disposable branches of default's live store (deleted after);
+ ;; nodes = new node addresses by index.interface/-mark with one seen set; 10 commits each, parent Datahike
+ :live-branch-variants
+ [{:variant :current :attrs 20 :nodes 43.8 :node-bytes 142284 :record 38817 :ms 38.1
+   :by-index {:eavt 4.8 :aevt 10.7 :avet 7.6 :temporal-eavt 4.3 :temporal-aevt 8.7 :temporal-avet 7.7}}
+  {:variant :no-process :attrs 19 :nodes 42.0 :node-bytes 140018 :ms 36.3}
+  {:variant :stamps-unindexed :attrs 20 :nodes 40.9 :node-bytes 136305 :ms 35.6}
+  {:variant :all-redundant-gone+unindexed :attrs 15 :nodes 38.6 :node-bytes 133497 :ms 34.0}]
+ :throwaway-variants "tmp/store-structure/probe-out.edn (synthetic base; same ranking, 13% bytes at most)"
+
+ :finding "every card-one assertion was copied into all three temporal indexes (persistent_set.cljc temporal-upsert):
+           17 of a 20-datom run commit's datoms landed in temporal; 20.7 of 43.8 nodes per commit"
+
+ :temporal-history-only
+ {:fork-commit "ea2677aa on seantempesta/datahike branch temporal-history-only (pushed; seon pin unchanged 05a02804)"
+  :clone "APFS clone of data/store (cp -c), :cluster-default head 6abae4f4-fc3f-583a-8632-6b4b49f07c45"
+  :old-store-reads-equal "history-fingerprint (history AEVT of 11 attrs incl. 110k :seon.fn/calls, as-of, since, pull, query) of the clone under the change = default's own JVM at that commit: equal"
+  :run-commit {:parent {:nodes 41.7 :node-bytes 126731 :record 42823 :commit-ms 33.5
+                        :by-index {:eavt 4.0 :aevt 11.2 :avet 8.1 :temporal-eavt 2.9 :temporal-aevt 8.7 :temporal-avet 6.8}}
+               :change {:nodes 23.3 :node-bytes 74323 :record 42836 :commit-ms 27.8
+                        :by-index {:eavt 4.0 :aevt 11.2 :avet 8.1 :temporal-eavt 0 :temporal-aevt 0 :temporal-avet 0}}}
+  :history-read-ms-old-store {:parent {:entity-group [2.7 2.6] :card-one-scan [5.6 3.2] :join [6.8 5.3]}
+                              :change {:entity-group [4.6 5.2] :card-one-scan [7.2 3.9] :join [7.3 11.3]}
+                              :answers "8 of 8 query hashes equal"}
+  :history-read-ms-steady-state {:store "memory, 20k entities, 3 card-one update rounds"
+                                 :temporal-eavt-datoms {:parent 100015 :change 40002}
+                                 :parent {:entity-group [10.1 11.3] :card-one-scan [7.6 7.9] :join [7.0 7.5] :many [3.3 2.8]}
+                                 :change {:entity-group [15.1 12.1] :card-one-scan [10.0 9.3] :join [9.8 9.3] :many [2.8 3.0]}
+                                 :answers "equal hashes"}
+  :datahike-tests {:focused-17-ns {:parent "185 tests, 4 failures (query-test deps, pre-existing)"
+                                   :change "187 tests, 945 assertions, same 4"}
+                   :full-clj-pss "913 tests: 15 failures before the gc-test update, 13 of them also at HEAD (pull-limit, connector-release x2, query-cache, writer-error x5, query-test x4); gc-test counts updated for the rule"
+                   :clj-hht-focused "187 tests, same 4 pre-existing"}}
+
+ :nohistory-candidates
+ ;; cluster-default, store 1.5 h old; retractions (history growth) per attribute in the last hour.
+ ;; Program data (seon.program, seon.fn, seon.schema, seon.ns, seon.render, seon.test/source) excluded.
+ [{:attr :seon.lint/row :retractions-per-h 639 :commits-per-h 8 :temporal-held 3332 :current 1520}
+  {:attr :seon.db.vector/position :retractions-per-h 234 :commits-per-h 6 :temporal-held 11017 :current 10531}
+  {:attr :seon.db.vector/cells :retractions-per-h 234 :commits-per-h 6 :temporal-held 486 :current 10531}
+  {:attr :seon.db.vector/present :retractions-per-h 113 :commits-per-h 6 :temporal-held 238 :current 6573}
+  {:attr :error/message :retractions-per-h 123 :commits-per-h 1 :temporal-held 370 :current 124}]
+
+ :probe-bytes {:throwaway-store-mb 42 :live-branch-commits-mb "~8 (44 commits x ~180 KB)" :clone-commits-mb "~4"
+               :clone "APFS clone, copy-on-write; du reported 1.1 GB (clones count full), deleted"
+               :total-written-mb "~54 (over the 50 MB budget by ~4)"}}

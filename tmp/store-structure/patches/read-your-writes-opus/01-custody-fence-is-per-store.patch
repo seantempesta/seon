@@ -1,0 +1,25 @@
+--- a/src/seon/db.clj	2026-09-28 15:53:50.788461265 -0600
++++ b/src/seon/db.clj	2026-09-28 15:53:50.806209309 -0600
+@@ -510,7 +510,7 @@
+ (declare write-observation)
+ 
+ (defn- foreign-connection-error
+-  "Refuse a write naming a branch outside the writing custody, naming both.
++  "Refuse a write naming another branch of the writing custody's store, naming both.
+ 
+   DECIDED WHERE THE WRITE IS ADMITTED, never from a pre-read: the two
+   identities are read from the two connections this call actually holds,
+@@ -523,7 +523,12 @@
+   (when (some? *conn*)
+     (let [ambient-connection-id (connection-id *conn*)
+           explicit-connection-id (connection-id connection)]
+-      (when-not (= ambient-connection-id explicit-connection-id)
++      ;; Custody fences the branches of ONE store (a connection id is
++      ;; [store-id branch & overlay], datahike/store.cljc:43-54). A connection
++      ;; to another store (a test's own fresh store) is no branch of this
++      ;; cluster: its explicit write stands.
++      (when (and (= (first ambient-connection-id) (first explicit-connection-id))
++                 (not= ambient-connection-id explicit-connection-id))
+         (let [ambient-branch (connection-branch *conn*)
+               explicit-branch (connection-branch connection)]
+           (write-observation

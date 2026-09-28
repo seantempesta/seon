@@ -1,0 +1,10 @@
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+{:base {:datoms 37672, :files 5050, :disk 20799488}}
+{:datoms-per-commit 20, :variant :current, :disk-growth-per-commit 131686, :files-per-commit 31.2, :read-answer [1 true], :commit-ms 19.0, :read-us 17.2, :written-bytes-per-commit 65645, :attrs-per-commit 20}
+{:datoms-per-commit 19, :variant :no-process, :disk-growth-per-commit 135987, :files-per-commit 32.15, :read-answer [1 true], :commit-ms 19.9, :read-us 12.7, :written-bytes-per-commit 66112, :attrs-per-commit 19}
+{:datoms-per-commit 20, :variant :stamps-unindexed, :disk-growth-per-commit 105267, :files-per-commit 24.65, :read-answer [1 true], :commit-ms 17.9, :read-us 12.0, :written-bytes-per-commit 57765, :attrs-per-commit 20}
+{:datoms-per-commit 18, :variant :no-tx-refs, :disk-growth-per-commit 116531, :files-per-commit 27.55, :read-answer [1 true], :commit-ms 18.4, :read-us 11.8, :written-bytes-per-commit 61366, :attrs-per-commit 18}
+{:datoms-per-commit 18, :variant :no-eval-at-author, :disk-growth-per-commit 118579, :files-per-commit 28.05, :read-answer [1 true], :commit-ms 19.8, :read-us 7.4, :written-bytes-per-commit 59948, :attrs-per-commit 18}
+{:datoms-per-commit 15, :variant :all-redundant-gone, :disk-growth-per-commit 111411, :files-per-commit 26.15, :read-answer [1 true], :commit-ms 17.6, :read-us 6.4, :written-bytes-per-commit 57070, :attrs-per-commit 15}
+{:datoms-per-commit 15, :variant :all+unindexed, :disk-growth-per-commit 107520, :files-per-commit 25.25, :read-answer [1 true], :commit-ms 17.3, :read-us 7.4, :written-bytes-per-commit 56923, :attrs-per-commit 15}
+{:final-disk 41955328}
