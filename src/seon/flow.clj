@@ -15,7 +15,9 @@
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
             [seon.await :as await]
+            [seon.batch]
             [seon.cluster.process :as process]
+            [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
             [seon.fault :as fault]
@@ -235,6 +237,50 @@
                                [unrecorded failure])
       true))))
 
+(def ^:private origin-keys
+  "The submitting evaluation's identities an io submission carries as data."
+  [:seon.agent/id :seon.agent/branch :seon.turn/id :seon.batch/ordinal :seon.task/id])
+
+(defn- proc-world
+  "The world a proc step or an io task runs in (`seon.batch/*world*`),
+  derived from the environment its args or submission carry, since Flow
+  conveys no bindings: its cluster, connection and environment, the database
+  read now, its agent, and the submitting evaluation's identities (`origin`).
+  Nil for an environment holding no connection. Capture, supply and error
+  context then know where the work runs (health plan §0).
+
+  ## Costs
+
+  - One connection deref and a small map per step; measured in the landing."
+  {:malli/schema [:=> [:cat [:maybe :seon.env/environment] [:maybe :map]] [:maybe :seon.batch/world]]}
+  [environment origin]
+  (when-let [connection (:seon.db/connection environment)]
+    (merge (select-keys origin origin-keys)
+           (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name environment)
+                    :seon.db/connection connection
+                    :seon.db/db (db/db connection)
+                    :seon.env/environment environment}
+             (:seon.agent/id environment) (assoc :seon.agent/id (:seon.agent/id environment))))))
+
+(defn- in-world
+  "Run `f` in the world `proc-world` derives, unless one is already bound on
+  this thread (an evaluation inside a turn proc binds its own)."
+  {:malli/schema [:=> [:cat [:maybe :seon.env/environment] [:maybe :map] [:=> [:cat] :any]] :any]}
+  [environment origin f]
+  (if-let [world (when-not seon.batch/*world* (proc-world environment origin))]
+    (binding [seon.batch/*world* world] (f))
+    (f)))
+
+(defn stop-off-thread!
+  "Request `graph`'s stop from a new virtual thread, never the caller's: a
+  proc stopping through its own control tap, or the panicked proc's own
+  thread, can wedge `flow/stop` (`request-graph-stop!`). The one sender of a
+  graph stop off the calling thread; answers true."
+  {:malli/schema [:=> [:cat ::graph] :boolean]}
+  [graph]
+  (Thread/startVirtualThread ^Runnable (fn [] (flow/stop graph)))
+  true)
+
 (defn- request-graph-stop!
   "Request the whole graph's stop on a virtual thread, never the panicked proc's.
 
@@ -253,7 +299,7 @@
   {:malli/schema [:=> [:cat ::channel [:maybe ::channel]] :boolean]}
   [control graph-ref]
   (if-let [graph (some-> graph-ref async/poll!)]
-    (do (Thread/startVirtualThread ^Runnable (fn [] (flow/stop graph))) true)
+    (stop-off-thread! graph)
     (async/put! control #::flow{:command ::flow/stop :to ::flow/all})))
 
 (defn- fault-port
@@ -320,6 +366,7 @@
          ;; a panicked proc reads no further input until the graph's stop
          ;; reaches it: Flow reads control regardless of the filter
          closed (fn [state] (assoc state ::flow/input-filter (constantly false)))
+         environment (env/of args)
          step (fn [stop!]
                 (let [failed! (fn [failure]
                                 (let [panicked? (proc-failed! step-var args failure stop!)]
@@ -329,15 +376,17 @@
                     ([] (step-var))
                     ([init-args] (step-var (dissoc init-args ::graph-ref)))
                     ([state transition]
-                     (try (step-var state transition)
-                          (catch Throwable failure
-                            (if (and (failed! failure) (not= ::flow/stop transition))
-                              (closed state)
-                              state))))
+                     (in-world environment nil
+                               #(try (step-var state transition)
+                                     (catch Throwable failure
+                                       (if (and (failed! failure) (not= ::flow/stop transition))
+                                         (closed state)
+                                         state)))))
                     ([state input message]
-                     (try (step-var state input message)
-                          (catch Throwable failure
-                            [(cond-> state (failed! failure) closed) nil]))))))
+                     (in-world environment nil
+                               #(try (step-var state input message)
+                                     (catch Throwable failure
+                                       [(cond-> state (failed! failure) closed) nil])))))))
          launcher (flow/process (step (fn [])) options)]
      (reify
        core.protocols/Datafiable
@@ -452,8 +501,9 @@
                      ::value
                      (kernel/adopt-arm
                       (carried-arm work)
-                      #(work-fn (env/carry {::started! (fn [])}
-                                           (env/of work))))}
+                      #(in-world (env/of work) (::origin work)
+                                 (fn [] (work-fn (env/carry {::started! (fn [])}
+                                                            (env/of work))))))}
                     (catch Throwable throwable
                       {::started-at started-at
                        ::throwable throwable}))]
@@ -693,6 +743,9 @@
         {:seon.config.flow.io/keys [concurrency queue-depth]} configuration
         work
         (assoc submission
+               ;; the submitting evaluation's identities, as data: the io task
+               ;; derives its world from them and the submission's environment
+               ::origin (select-keys seon.batch/*world* origin-keys)
                ::status (atom ::queued)
                ::active? (atom false)
                ::task (atom nil))
