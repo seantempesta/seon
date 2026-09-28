@@ -2000,14 +2000,38 @@
        (mapv :seon.sci.reader/form events)
        (:seon.cluster.eval/source source))]))
 
-(defn- unit-read-form
-  "The read that finds a rendered unit's data again: its attribute of the
-  entity, or the entity."
-  {:malli/schema [:=> [:cat :map] :seon.render/read-form]}
-  [{lookup :seon.render.walk/lookup attribute :seon.render.walk/attribute}]
-  (if attribute
-    (list 'get (list 'seon.db/pull (list 'quote [attribute]) lookup) attribute)
-    (list 'seon.db/pull (list 'quote '[*]) lookup)))
+(defn- unit-read
+  "What a rendered unit shows and the read that finds it again: its declared
+  form face (`seon.render/render-form-value`: a schema's own requery, else the
+  structural pull), as source text with its comment. The unit is an entity
+  (`lookup`) or one attribute of one (`[entity attribute]`)."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value :seon.agent/id :map]
+                  [:map [:seon.cluster.eval/source :seon.cluster.eval/source]
+                   [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]]]}
+  [handle database agent-id {lookup :seon.render.walk/lookup}]
+  (let [[entity attribute] (if (vector? (first lookup)) lookup [lookup nil])
+        value (if attribute
+                (get (db/pull database [attribute] entity) attribute)
+                (db/pull database '[*] entity))
+        form (render/render-form-value
+              (cond-> {:seon.db/db database
+                       :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                       :seon.sci.admit/caps (:seon.sci.admit/caps handle)
+                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)
+                       :seon.agent/id agent-id
+                       :seon.render/value value
+                       :seon.render.value/root entity}
+                attribute (assoc :seon.render.walk/attribute attribute)))
+        entry (cond
+                (:seon.repl/form form) form
+                (and (map? form) (:seon.error/message form))
+                ;; no form face could be selected: the structural read
+                {:seon.repl/form (if attribute
+                                   (list 'get (list 'seon.db/pull (list 'quote [attribute]) entity) attribute)
+                                   (list 'seon.db/pull (list 'quote '[*]) entity))}
+                :else {:seon.repl/form form})]
+    (cond-> {:seon.cluster.eval/source (id/printed (:seon.repl/form entry))}
+      (:seon.repl/comment entry) (assoc :seon.cluster.eval/comment (:seon.repl/comment entry)))))
 
 (defn- declared-sources
   {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value
@@ -2051,13 +2075,14 @@
                ;; and never evaluated; its source is the read that finds the
                ;; data again, and its read evidence is the render's own.
                (conj sources
-                     {:seon.cluster.eval/source (id/printed (unit-read-form unit))
-                      :seon.ns/name namespace-name
+                     (merge
+                     (unit-read handle database agent-id unit)
+                     {:seon.ns/name namespace-name
                       :seon.render.walk/lookup lookup
                       :seon.turn/rendered
                       (cond-> {:seon.sci.admit/value data}
                         (seq (:seon.render.call/read-evidence call))
-                        (assoc :seon.cluster.eval/read-evidence (:seon.render.call/read-evidence call)))})
+                        (assoc :seon.cluster.eval/read-evidence (:seon.render.call/read-evidence call)))}))
              (reduce
               (fn [sources block]
                 (let [parsed (planned-sources
