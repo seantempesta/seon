@@ -1,0 +1,1148 @@
+--- a/src/seon/cluster.clj
++++ b/src/seon/cluster.clj
+@@ -20,7 +20,6 @@
+             [clojure.core.async.flow :as flow.core]
+             [clojure.core.server]
+             [clojure.set :as set]
+-            [seon.blob :as blob]
+             [seon.cluster.agent :as cluster.agent]
+             [seon.cluster.instruction :as instruction]
+             [seon.cluster.process :as cluster.process]
+@@ -55,14 +54,9 @@
+              :refer [root-store-holder running-instances]]
+                         [seon.oversight :as oversight]
+             [seon.problems :as problems]
+-            [seon.render :as render]
+             [seon.program :as program]
+             [seon.render.value :as render.value]
+             [seon.schedule :as schedule]
+-            [seon.sci.admit :as admit]
+-            [seon.render.walk :as render.walk]
+-            [seon.print :as print]
+-            [clojure.walk :as walk]
+             [seon.render.web :as web]
+             [seon.sci.eval :as sci.eval]
+             [taoensso.timbre :as log]
+@@ -227,11 +221,9 @@
+   (constantly nil))
+ 
+ ;;; ---------------------------------------------------------------------------
+-;;; MCP result projection — installed at the cluster io-prepl boundary.
++;;; Loaded-code identity: a host evaluation that changed it re-renders pages
++;;; (`seon.mcp`); the cluster instance a runtime observation reads.
+ ;;; ---------------------------------------------------------------------------
+-
+-(defonce ^:private mcp-projection
+-  (ThreadLocal.))
+ 
+ (defn identity-hash-map?
+   "True for a java.util.IdentityHashMap."
+@@ -263,326 +255,9 @@
+                  (not (identical? current (.get mappings namespace-object))))
+                now-mappings)))))
+ 
+-(defn project-next-prepl-value!
+-  "Mark the next PREPL return with explicit projection and read-only intent.
+-  Unspecified intent conservatively announces possible runtime changes.
+-  No JVM-wide profile window rides a host evaluation: its counters include
+-  every other lane's concurrent work, so they cannot say what this
+-  evaluation did (task c7bc0c506aa4); the event's own `ms` is its time."
+-  {:malli/schema [:function
+-                  [:=> [:cat] :nil]
+-                  [:=> [:cat [:or :boolean
+-                              [:map
+-                               [:seon.dev.mcp/evaluation? {:optional true} :boolean]
+-                               [:seon.dev.mcp/project? {:optional true} :boolean]
+-                               [:seon.dev.mcp/read-only? {:optional true} :boolean]]]] :nil]]}
+-  ([] (project-next-prepl-value! false))
+-  ([request]
+-   (let [request (if (map? request) request {:seon.dev.mcp/evaluation? request})]
+-     (.set mcp-projection
+-           (cond-> request
+-             ;; Only an evaluation that may change code pays for the mark.
+-             (not (:seon.dev.mcp/read-only? request))
+-             (assoc ::loaded-code-mark (loaded-code-mark)))))
+-   nil))
+-
+-(defn- consume-mcp-projection!
+-  []
+-  (let [project? (.get mcp-projection)]
+-    (.remove mcp-projection)
+-    project?))
+-
+ (defn- mcp-instance
+   [cluster-name]
+   (get @running-instances cluster-name))
+-
+-(defn- mcp-effective
+-  {:malli/schema [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective]]
+-                  [:or :nil :seon.config/effective :seon.config/error
+-                   :seon.db/error-result :seon.schema/validation-refusal]]}
+-  [cluster-name bootstrap-effective]
+-  (let [instance (mcp-instance cluster-name)
+-        connection (:seon.boot/cluster-connection instance)
+-        projection-state
+-        (get-in instance
+-                [:seon.sci.eval/ctx :seon.sci.eval/projection-state])]
+-    (if connection
+-      (if projection-state
+-        (schema/call-with-projection-state
+-         projection-state
+-         #(config/effective (db/db connection) cluster-name))
+-        {:seon.error/at (Date.)
+-          :seon.error/layer :seon.dev.mcp/configuration
+-          :seon.error/operation 'seon.cluster/mcp-effective
+-          :seon.schema/expected-value :seon.schema/projection
+-          :seon.schema/refused-value :seon.error/unknown
+-          :seon.error/message "The MCP config read has no cluster projection state."
+-          :seon.error/expected :seon.sci.eval/projection-state
+-          :seon.error/data {:seon.boot/cluster-name cluster-name}})
+-      bootstrap-effective)))
+-
+-(defn- mcp-plain
+-  "`value` by plain Clojure printing under `effective`'s result bounds, beside the
+-  diagnostics of the render path that could not project it. The floor's fallback:
+-  a failed projection never replaces the value (AGENTS.md, the REPL path is total)."
+-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]
+-                       [:vector :seon.error/base] [:or :nil :seon.config/effective]]
+-                  [:map [:seon.dev.mcp/value [:map [:seon.dev.mcp/text :string]]] [:seon.dev.mcp/windowed? :boolean]
+-                   [:seon.render.value/diagnostics [:vector :seon.error/base]]]]}
+-  [value diagnostics effective]
+-  {:seon.dev.mcp/value {:seon.dev.mcp/text (binding [*print-length* (:seon.config.eval.result/max-nodes effective)
+-                                                  *print-level* (:seon.config.eval.result/max-depth effective)]
+-                                          (pr-str value))}
+-   :seon.dev.mcp/windowed? false
+-   :seon.render.value/diagnostics diagnostics})
+-
+-(defn- mcp-project
+-  {:malli/schema
+-   [:function
+-    [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective] :seon.schema/value]
+-     [:map [:seon.dev.mcp/value :seon.schema/value] [:seon.dev.mcp/windowed? :boolean]]]
+-    [:=> [:cat :seon.boot/cluster-name [:or :nil :seon.config/effective]
+-          :seon.schema/value :boolean :boolean]
+-     [:map [:seon.dev.mcp/value :seon.schema/value] [:seon.dev.mcp/windowed? :boolean]]]]}
+-  ([cluster-name bootstrap-effective value]
+-   (mcp-project cluster-name bootstrap-effective value false false))
+-  ([cluster-name bootstrap-effective value evaluation? exception?]
+-   (try
+-     (let [instance (mcp-instance cluster-name)
+-           connection (:seon.boot/cluster-connection instance)
+-           configured (mcp-effective cluster-name bootstrap-effective)
+-           ;; A refused configuration read never replaces the value: it prints
+-           ;; under the bootstrap configuration the prepl started with, and the
+-           ;; refusal rides beside it.
+-           refused (when (or (:seon.config/error-key configured) (:seon.db/invalid-read configured)
+-                             (:seon.schema/expected-value configured))
+-                     configured)
+-           effective (if refused bootstrap-effective configured)
+-           caps (config/result-caps effective)
+-           diagnostics (filterv some? [refused (when (:seon.config/error-key caps) caps)])
+-           ;; A thrown evaluation is the one error shape: class, message,
+-           ;; ex-data and first-party frames per cause link.
+-           value (if (and exception? (instance? Throwable value))
+-                   (seon.error.refusal/diagnostic (Date.) :seon.dev.mcp/evaluation 'clojure.core/eval
+-                                                  {:seon.error/throwable value})
+-                   value)]
+-       (cond-> (cond
+-         (:seon.config/error-key caps)
+-         (mcp-plain value diagnostics bootstrap-effective)
+-
+-         (and evaluation? (not exception?) (string? (:seon.eval/shown value)))
+-         {:seon.dev.mcp/value
+-          (assoc (select-keys value [:seon.cluster.eval/ns
+-                                    :seon.sci.eval/ending-ns
+-                                    :seon.sci.admit/record
+-                                    :seon.cluster.eval/error
+-                                    :seon.cluster.eval/output])
+-                 :seon.dev.mcp/text (:seon.eval/shown value))
+-          :seon.dev.mcp/windowed? false}
+-
+-         :else
+-         ;; ONE BUDGET, IN ESTIMATED TOKENS: the floor selects the held value
+-         ;; under the MCP profile, and only a value it cut is stored, so each
+-         ;; cut's continuation reads the rest from the blob. A value shown
+-         ;; whole commits nothing, however large its print-node artifact.
+-         (let [instance-projection
+-               (some-> (:seon.sci.eval/ctx instance)
+-                       env/of
+-                       :seon.schema/projection)
+-               profile (assoc (render/agent-render-profile effective)
+-                              :seon.render.profile/id :seon.render.profile/mcp)
+-               selected (fn [value profile]
+-                          (render.value/prepare
+-                           (cond-> {:seon.render/value value
+-                                    :seon.render/profile profile
+-                                    :seon.render.value/root [:seon.dev.mcp/value]
+-                                    :seon.sci.admit/caps caps}
+-                             ;; A JVM evaluation has no evaluation world: the unit's
+-                             ;; required database is the cluster's own, handed here.
+-                             connection (assoc :seon.db/db (db/db connection)))))
+-               held (selected value (assoc profile :seon.print/requery-refusal
+-                                           (if connection
+-                                             "the value was shown whole"
+-                                             "the cluster has no database connection")))
+-               admitted (when (and connection (:seon.render.value/truncated? held))
+-                          (admit/admit-value
+-                           (cond-> {:seon.sci.admit/value value
+-                                    :seon.sci.admit/interrupt-fn (fn [])
+-                                    :seon.sci.admit/caps caps}
+-                             instance-projection
+-                             (assoc :seon.schema/projection instance-projection))))
+-               ;; An admission over its storage bound stored nothing: the held
+-               ;; value's page stands, and the reason rides beside it.
+-               artifact (when (and admitted (not (:seon.sci.admit/reason admitted)))
+-                          (render.value/artifact admitted))
+-               content (some-> artifact render.value/artifact-edn)
+-               content-digest (some-> content blob/digest)
+-               ;; The first page and every continuation select ONE backing
+-               ;; (one-render-path §3g): a stored value's page is selected
+-               ;; from the artifact `get_value` continues, so a cut's path and
+-               ;; offset address the value it was cut from.
+-               projection (if artifact
+-                            (selected (render.value/artifact-value artifact)
+-                                      (assoc profile :seon.print/requery-id
+-                                             (list 'seon.cluster/mcp-value cluster-name content-digest)))
+-                            held)
+-               projected-node (:seon.render.value/tree projection)
+-               ;; THE BLOB IS THE WHOLE RECORD. `get_value` reads it by digest,
+-               ;; so a windowed result commits NO transaction: a probe advances
+-               ;; no basis. An unreferenced blob goes with the next GC sweep.
+-               stored-digest (when artifact (blob/put! connection content))]
+-           (cond-> {:seon.dev.mcp/value
+-                    (if (:seon.error/at projection)
+-                      projection
+-                      ;; A cut is data an agent reads: its one text and
+-                      ;; continuation form, as the agent's own reply prints it
+-                      ;; (`print/elided-text`), never the node's bookkeeping.
+-                      (walk/postwalk #(if (and (map? %) (= :seon.print/elided (:seon.print/face %)))
+-                                        (print/elided-text %)
+-                                        %)
+-                                     (admit/semantic-value projected-node)))
+-                    :seon.dev.mcp/windowed? (boolean artifact)}
+-             artifact
+-             (assoc :seon.blob/digest content-digest
+-                    :seon.blob/size (count content)
+-                    :seon.dev.mcp/retrievable? (boolean stored-digest))
+-
+-             (:seon.sci.admit/reason admitted)
+-             (assoc :seon.dev.mcp/remainder
+-                    (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes]))
+-
+-             (and (:seon.render.value/truncated? held) (nil? connection))
+-             (assoc :seon.dev.mcp/remainder
+-                    "The cluster has no database connection; the remainder is not retrievable."))))
+-         (and (seq diagnostics) (not (:seon.config/error-key caps)))
+-         (assoc :seon.render.value/diagnostics diagnostics)))
+-     ;; The ordinary render path itself failed: the value prints plainly, the
+-     ;; failure's whole cause beside it.
+-     (catch Throwable failure
+-       (mcp-plain value
+-                  [(seon.error.refusal/diagnostic (Date.) :seon.dev.mcp/projection `mcp-project
+-                                                  {:seon.error/throwable failure})]
+-                  bootstrap-effective)))))
+-
+-(defn mcp-valf
+-  "Project marked MCP returns with caller-supplied exception recognition."
+-  {:malli/schema
+-   [:function
+-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]
+-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean] :string]
+-    [:=> [:cat :seon.boot/cluster-name :seon.config/effective [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Clojure's prepl hands the projection arbitrary evaluation results, including live JVM objects and nil.", :gen/elements [nil false 0 "" :k [] {}]}] :boolean [:sequential :seon.flow/channel]] :string]]}
+-  ([cluster-name bootstrap-effective value]
+-   (mcp-valf cluster-name bootstrap-effective value false))
+-  ([cluster-name bootstrap-effective value exception?]
+-   (mcp-valf cluster-name bootstrap-effective value exception?
+-             (keep #(get-in % [:seon.render.web/view
+-                               :seon.render.web/runtime-eval-channel])
+-                   (vals @running-instances))))
+-  ([cluster-name bootstrap-effective value exception? runtime-eval-channels]
+-   (let [projection (consume-mcp-projection!)]
+-     (try
+-       ;; A host evaluation that defined, redefined or unmapped a Var may
+-       ;; change what any cohosted cluster's pages render; one that changed no
+-       ;; loaded code (the evidence, not the flag) keeps every cached page.
+-       (when (some-> (::loaded-code-mark projection) loaded-code-changed?)
+-         (doseq [channel runtime-eval-channels]
+-           (async/offer! channel
+-                         :seon.render.web/runtime-eval)))
+-       (admit/canonical-edn
+-        (if (and projection (get projection :seon.dev.mcp/project? true))
+-          (mcp-project cluster-name bootstrap-effective value
+-                       (true? (:seon.dev.mcp/evaluation? projection)) exception?)
+-          value))
+-       (catch Throwable failure
+-         ;; Never re-enter admission or a failed producer: the Throwable floor
+-         ;; renders the whole bounded cause chain from the Throwable alone.
+-         (pr-str (render.value/floor failure)))))))
+-
+-(defn mcp-value
+-  "The value an MCP reply stored under `content-digest`, read back from its
+-  artifact: the source every cut of that reply continues from. The reader's
+-  refusal when the blob holds no value artifact.
+-
+-  ## Examples
+-
+-      (drop 5 (get-in (seon.cluster/mcp-value \"default\" \"2133…\") [0 :seon.error/frames]))"
+-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest]
+-                  [:or :seon.render.value/unreadable-artifact-error
+-                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+-                          :seon.schema.admission/reason "A stored MCP value is any evaluation result."
+-                          :gen/elements [nil false 0 "" :k [] {}]}]]]}
+-  [cluster-name content-digest]
+-  (let [connection (:seon.boot/cluster-connection (mcp-instance cluster-name))
+-        content (when connection (blob/get connection content-digest))
+-        artifact (when content (render.value/read-artifact content))]
+-    (cond
+-      (nil? content)
+-      (let [reason (if connection
+-                     (str "No blob is stored under " content-digest ".")
+-                     (str "Cluster " cluster-name " has no database connection."))]
+-        (assoc (seon.error.refusal/diagnostic (Date.) :seon.render.value/artifact 'seon.cluster/mcp-value
+-                                              {:seon.error/message reason
+-                                               :seon.error/expected :seon.render.value/artifact
+-                                               :seon.error/data {:seon.blob/digest content-digest}})
+-               :seon.render.value/unreadable-artifact reason))
+-      (:seon.render.value/unreadable-artifact artifact) artifact
+-      :else (render.value/artifact-value artifact))))
+-
+-(defn mcp-get-value
+-  "Read and drill one stored MCP value artifact without mutating REPL state."
+-  {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.blob/digest :seon.render.data/path :int] :seon.schema/value]}
+-  [cluster-name content-digest path offset]
+-  (if-let [connection (:seon.boot/cluster-connection
+-                       (mcp-instance cluster-name))]
+-    (let [effective (mcp-effective cluster-name nil)]
+-      (if (or (:seon.config/error-key effective)
+-              (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
+-        effective
+-        ;; A page is the one continuation owner's selection at the path and
+-        ;; absolute offset (design §3g), over the artifact the first page was
+-        ;; selected from: the same text an agent reads, with the cut's
+-        ;; coordinates beside it. This adapter reads nothing itself.
+-        (let [projection (render.walk/continue
+-                          {:seon.render.walk/continuation-node [:seon.blob/digest content-digest]
+-                           :seon.db/connection connection
+-                           ;; a render unit carries the database it renders against
+-                           :seon.db/db (db/db connection)
+-                           :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}
+-                           :seon.render/profile (assoc (render/agent-render-profile effective)
+-                                                       :seon.render.profile/id :seon.render.profile/mcp
+-                                                       :seon.print/requery-refusal "continue with get_value at this digest and path from the next-offset")
+-                           :seon.sci.admit/caps (config/result-caps effective)})
+-              tree (:seon.render.value/tree projection)
+-              cut (some #(when (and (map? %) (= :seon.print/elided (:seon.print/face %))
+-                                    (= path (:seon.render.data/path %)))
+-                           %)
+-                        (tree-seq coll? seq tree))
+-              ;; An uncut string page is the whole remainder from `offset`
+-              ;; (the floor names a string's length only on its cut): its end
+-              ;; is the offset plus what it shows, and an empty remainder at
+-              ;; a positive offset is at or past the end.
+-              remainder (when (and (nil? cut) (= :seon.print/string (:seon.print/face tree)))
+-                          (count (:seon.print/value tree)))
+-              total (or (:seon.render.data/total tree) (:seon.render.data/total cut)
+-                        (when (and remainder (pos? remainder)) (+ offset remainder)))
+-              beyond-end? (if total
+-                            (and (>= offset total) (pos? total))
+-                            (and (some? remainder) (pos? offset)))]
+-          (if (:seon.error/at projection)
+-            (assoc projection :seon.blob/digest content-digest)
+-            (cond-> {:seon.dev.mcp/text (:seon.render.value/text projection)
+-                     :seon.render.data/path path
+-                     :seon.render.data/offset offset
+-                     :seon.render.value/beyond-end? (boolean beyond-end?)}
+-              total (assoc :seon.render.data/total total)
+-              cut (assoc :seon.render.data/next-offset (:seon.render.data/next-offset cut)))))))
+-    {:seon.dev.mcp/remainder-not-retrievable content-digest
+-     :seon.error/at (java.util.Date.)
+-     :seon.error/layer :seon.cluster/operation
+-     :seon.error/operation 'seon.cluster/mcp-get-value
+-     :seon.error/message
+-     "The cluster has no database connection; the remainder is not retrievable."
+-     :seon.blob/digest content-digest}))
+ 
+ (defn- program-function-files
+   "Symbol and relative source path of every `defn`/`defn-` row in `database`.
+--- a/resources/seon/operator/prepl.clj
++++ b/resources/seon/operator/prepl.clj
+@@ -19,21 +19,22 @@
+   when projecting or printing throws, `:val` becomes a declared error value
+   with `:exception true`, phase `:print-eval-result`, as
+   `clojure.core.server/io-prepl` answers a throwing valf (server.clj:275-296)."
+-  [event failure valf cluster-name]
++  [event failure valf]
+   (binding [*print-length* nil *print-level* nil *print-meta* false *print-readably* true]
+     (try
+       (let [value (:val event)
+-            project (or valf (when-let [project (some-> (find-ns 'seon.cluster) (ns-resolve 'mcp-valf))]
+-                               #(project cluster-name (deref (ns-resolve 'seon.config 'defaults)) %1 %2)))
++            ;; canonical EDN (`seon.id/printed`) once Seon is loaded, so a
++            ;; returned string reads back exactly; before that, Clojure's own
++            printed (or (some-> (find-ns 'seon.id) (ns-resolve 'printed)) pr-str)
+             exit? (and (= :ret (:tag event)) (map? value) (not (sorted? value))
+                        (true? (get value :seon.operator/process-exit?)))]
+         [(pr-str (if (#{:ret :tap} (:tag event))
+                    ;; A thrown evaluation's projection receives the Throwable
+                    ;; itself, not prepl's `Throwable->map` of it, so it can keep
+                    ;; the whole cause in the one error shape.
+-                   (assoc event :val (cond project (project (or failure value) (true? (:exception event)))
++                   (assoc event :val (cond valf (valf (or failure value) (true? (:exception event)))
+                                            failure (pr-str (failure-text failure))
+-                                           :else (pr-str value)))
++                                           :else (printed value)))
+                    event))
+          exit?])
+       (catch Throwable layer
+@@ -50,63 +51,20 @@
+                                                   (failure-text failure))))})))
+          false]))))
+ 
+-(defn evaluate
+-  "Read `source` with the one reader (`seon.sci.reader/read`) in
+-  `namespace-symbol`, with that namespace's aliases, Vars, classes and data
+-  readers, and evaluate its one form there, leaving the session in it. A
+-  reader refusal is thrown as the reader's own; more or fewer than one form
+-  refuses with where the second starts.
+-
+-  The MCP bridge calls this from this namespace (`(do (in-ns
+-  'seon.operator.prepl) (evaluate …))`, `seon.dev.mcp/jvm-evaluation-form`),
+-  so every frame between the prepl and the caller's form is the prepl
+-  wire's, which a fault never names: a compile error has no first-party
+-  frame and a runtime error's is the caller's form. The bridge's wrapper
+-  evaluated in `user` named itself (`user$eval… NO_SOURCE_FILE 61`)."
+-  {:malli/schema [:=> [:cat [:map [:seon.dev.mcp/source :string]
+-                             [:seon.dev.mcp/namespace :symbol]
+-                             [:seon.dev.mcp/read-only? :boolean]]]
+-                  :any]}
+-  [{source :seon.dev.mcp/source namespace-symbol :seon.dev.mcp/namespace read-only? :seon.dev.mcp/read-only?}]
+-  ((requiring-resolve 'seon.cluster/project-next-prepl-value!) {:seon.dev.mcp/read-only? read-only?})
+-  (in-ns namespace-symbol)
+-  (refer 'clojure.core)
+-  (let [target *ns*
+-        events ((requiring-resolve 'seon.sci.reader/read)
+-                {:seon.sci.reader/text source
+-                 :seon.sci.reader/ns namespace-symbol
+-                 :seon.sci.reader/aliases (into {} (map (fn [[alias-name aliased]] [alias-name (ns-name aliased)]))
+-                                                (ns-aliases target))
+-                 :seon.sci.reader/refers (into {} (keep (fn [[s v]] (cond (var? v) [s (symbol v)]
+-                                                                          (class? v) [s (symbol (.getName ^Class v))])))
+-                                               (ns-map target))
+-                 :seon.sci.reader/tags *data-readers*
+-                 :seon.config.eval.result/max-source (count source)})
+-        failure (if (map? events) events (some :seon.sci.reader/error events))
+-        second-form (second events)]
+-    (cond
+-      failure (throw (ex-info (:seon.error/message failure) failure))
+-      (= 1 (count events)) (eval (:seon.sci.reader/form (first events)))
+-      :else (throw (ex-info (if second-form
+-                              (str "Evaluation accepts exactly one form; the second form starts at line "
+-                                   (:seon.sci.reader/line second-form) ", column "
+-                                   (:seon.sci.reader/column second-form) ". Wrap sequences in `(do ...)`.")
+-                              "Your reply had no form; only comments/prose. Send a form.")
+-                            (select-keys second-form [:seon.sci.reader/line :seon.sci.reader/column
+-                                                      :seon.sci.reader/source]))))))
+-
+ (defn io-prepl
+   "Print PREPL events, retaining no evaluation result in *1/*2/*3/*e, then
+   perform a requested process exit after the flush. The out-fn never throws:
+-  `valf` (value, exception?) -> string defaults to the cluster's projection."
+-  [& {:keys [cluster-name valf]}]
++  `valf` (value, exception?) -> string, when given, prints each value; else a
++  value prints as canonical EDN, so a string an entrance returns (`seon.mcp`)
++  reads back exactly."
++  [& {:keys [valf]}]
+   (let [out *out*
+         lock (Object.)]
+     (server/prepl
+      *in*
+      (fn [event]
+        (let [ret? (= :ret (:tag event))
+-             [line exit?] (reply event (when (and ret? (:exception event)) *e) valf cluster-name)]
++             [line exit?] (reply event (when (and ret? (:exception event)) *e) valf)]
+          ;; Our functions name what they return (`seon.sci.admit/result-handle`,
+          ;; blob digests), so no session keeps a result: `prepl` has just
+          ;; `set!` *1/*2/*3 or *e on this thread (clojure/core/server.clj:236-238,
+--- a/script/seon/operator.clj
++++ b/script/seon/operator.clj
+@@ -265,8 +265,6 @@
+ (defn- request-form [request]
+   (pr-str `(do
+              (require '~'seon.cluster.boot)
+-             (when-let [mark# (ns-resolve '~'seon.cluster '~'project-next-prepl-value!)]
+-               (mark# {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false}))
+              (~'seon.cluster.boot/request! '~request))))
+ 
+ (defn connected! [request]
+--- a/test/seon/cluster/reload_measure.clj
++++ b/test/seon/cluster/reload_measure.clj
+@@ -72,8 +72,6 @@
+                          (walk/postwalk-replace
+                           {"default" cluster}
+                           '(do
+-                            (seon.cluster/project-next-prepl-value!
+-                             {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
+                             (let [database (seon.db/db (seon.cluster.boot/connection "default"))
+                                   transaction (seon.db/q '[:find ?tx . :where
+                                                           [?c :seon.cluster/name "default"]
+--- a/test/seon/dev/hook_measure.clj
++++ b/test/seon/dev/hook_measure.clj
+@@ -33,8 +33,6 @@
+                         endpoint
+                         (pr-str
+                          '(do
+-                            (seon.cluster/project-next-prepl-value!
+-                             {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
+                             (let [database (seon.db/db (seon.cluster.boot/connection "default"))
+                                   transaction (seon.db/q '[:find ?tx . :where
+                                                           [?c :seon.cluster/name "default"]
+--- a/test/seon/render/web_context_test.clj
++++ b/test/seon/render/web_context_test.clj
+@@ -238,49 +238,3 @@
+                           [:seon.message/id "identity-cache-message"]))))
+          (is (zero? calls)
+              "reverse concern changes are not inputs to the scalar identity pair"))))))
+-
+-(clojure.test/deftest read-only-mcp-return-preserves-root-page
+-  (#'seon.render.web-test/with-server
+-   (fn [connection server context]
+-     (let [cache (seon.render/shared-cache (:ctx context))
+-           calls (atom 0)
+-           roots (atom 0)
+-           acquire @#'seon.render.web/acquire-root
+-           invoke seon.sci.kernel/invoke
+-           channels [(:runtime-eval-channel context)]
+-           retained-count #(reduce + (map count (vals (:seon.render.web/calls @cache))))]
+-       (with-redefs [seon.render.web/acquire-root
+-                     (fn [request call-id] (swap! roots inc) (acquire request call-id))
+-                     seon.sci.kernel/invoke
+-                     (fn [request] (swap! calls inc) (invoke request))]
+-         (let [before (#'seon.render.web-test/fetch server "/agent/root")
+-               count-before (retained-count)
+-               invokes-before @calls
+-               roots-before @roots
+-               basis (seon.db/basis-t (seon.db/db connection))
+-               _ (seon.cluster/project-next-prepl-value! {:seon.dev.mcp/read-only? true})
+-               terminal (seon.cluster/mcp-valf
+-                         "cold-page-mcp-test" seon.config/defaults
+-                         (seon.db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
+-                                    (seon.db/db connection))
+-                         false channels)]
+-           (clojure.test/is (= 200 (.statusCode before)))
+-           (clojure.test/is (pos? count-before))
+-           (clojure.test/is (pos? invokes-before) "the page used real SCI")
+-           (clojure.test/is (= "root" (:seon.dev.mcp/value (clojure.edn/read-string terminal)))
+-                           "the synchronous return crossed its notification boundary")
+-           (clojure.test/is (= count-before (retained-count)))
+-           (clojure.test/is (= basis (seon.db/basis-t (seon.db/db connection))))
+-           (let [after (#'seon.render.web-test/fetch server "/agent/root")]
+-             (clojure.test/is (= (.body before) (.body after)))
+-             (clojure.test/is (= invokes-before @calls))
+-             (clojure.test/is (= roots-before @roots) "zero root reacquisitions"))
+-           (seon.cluster/project-next-prepl-value!)
+-           (seon.cluster/mcp-valf "cold-page-mcp-test" seon.config/defaults 3 false channels)
+-           (seon.test-support/await-event!
+-            cache [:unspecified-mcp-return-invalidates]
+-            #(empty? (:seon.render.web/calls %)))
+-           (clojure.test/is (zero? (retained-count)))
+-           (#'seon.render.web-test/fetch server "/agent/root")
+-           (clojure.test/is (> @roots roots-before)
+-                           "unspecified evaluation still reacquires the page")))))))
+--- a/test/seon/cluster/mcp_test.clj
++++ b/test/seon/cluster/mcp_test.clj
+@@ -1,25 +1,18 @@
+ (ns seon.cluster.mcp-test
+-  "The MCP surface shares Seon's admitted print-node value chain."
+-  (:require [clojure.core.async :as async]
+-            [seon.ai.tokens :as tokens]
+-            [clojure.edn :as edn]
+-            [clojure.string :as str]
+-            [clojure.test :refer [deftest is testing]]
++  "The runtime observation (`runtime_status`, `bin/seon status`) and the value
++  artifact marker."
++  (:require [clojure.test :refer [deftest is testing]]
+             [seon.cluster :as cluster]
+             [seon.cluster.boot :as boot]
+             [seon.config :as config]
+-            [seon.db :as db]
+             [seon.env :as env]
+             [seon.fault :as fault]
+             [seon.operator.runtime :refer [running-instances]]
+             [seon.oversight :as oversight]
+-            [seon.print :as print]
+             [seon.problems :as problems]
+-            [seon.render :as render]
+             [seon.render.value :as render.value]
+             [seon.schema :as schema]
+             [seon.sci.admit :as admit]
+-            [seon.sci.eval :as sci.eval]
+             [seon.test-support :as support]))
+ 
+ (deftest missing-artifacts-have-a-real-marker-under-armed-admission
+@@ -37,15 +30,6 @@
+       (is (= 'seon.sci.admit/admit-value
+              (:seon.instrument/fn refusal))
+           "bounded admission still requires its declared limits"))))
+-
+-(defn- projected
+-  [cluster-name effective value & [evaluation? exception?]]
+-  (cluster/project-next-prepl-value! (boolean evaluation?))
+-  (edn/read-string (cluster/mcp-valf cluster-name effective value (boolean exception?))))
+-
+-(defn- utf8-size
+-  [value]
+-  (alength (.getBytes ^String (pr-str value) "UTF-8")))
+ 
+ (defn- listening-instance
+   "A declared `:seon.boot/instance` for a fixture cluster, built by boot's own
+@@ -65,219 +49,6 @@
+   [connection cluster-name]
+   (assoc (listening-instance connection cluster-name)
+          :seon.sci.eval/ctx (support/fork-cluster-ctx connection cluster-name)))
+-
+-(defn- sci-evaluation
+-  [effective source]
+-  (support/with-database
+-    (fn [connection]
+-      (sci.eval/evaluate
+-       {:seon.cluster.eval/source source
+-        :seon.cluster.eval/ns [:seon.ns/name 'user]
+-        :seon.db/db (db/db connection)
+-        :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+-        :seon.sci.admit/caps (config/result-caps effective)
+-        :seon.render/profile (render/agent-render-profile effective)
+-        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)}))))
+-
+-(defn- observed-query-shape
+-  []
+-  (let [text (apply str (repeat 36 \x))]
+-    (mapv (fn [entity]
+-            (into {:db/id entity}
+-                  (map (fn [field]
+-                         [(keyword "seon.fn" (str "field-" field)) text]))
+-                  (range 7)))
+-          (range 116))))
+-
+-(deftest mcp-config-reads-receive-the-running-cluster-projection
+-  (support/with-database
+-   (fn [connection]
+-     (let [cluster-name "mcp-projection-test"
+-           database (db/db connection)
+-           projection (db/carried-projection database)
+-           projection-state (:seon.sci.eval/projection-state (meta database))
+-           observed (atom nil)]
+-       (swap! running-instances assoc cluster-name
+-              (assoc (listening-instance connection cluster-name)
+-                     :seon.sci.eval/ctx (env/carry-state {} projection-state)))
+-       (try
+-         (with-redefs [config/effective
+-                       (fn [value _]
+-                         (reset! observed
+-                                 (identical? projection (db/carried-projection value)))
+-                         config/defaults)]
+-           (is (= 42 (get-in (projected cluster-name config/defaults 42)
+-                            [:seon.dev.mcp/value])))
+-           (is (true? @observed)
+-               "the config read receives the projection carried by its database"))
+-         (finally
+-           (swap! running-instances dissoc cluster-name)))))))
+-
+-(deftest nested-bulk-is-bounded-by-the-shared-value-window
+-  (let [cluster-name "mcp-nested-window-test"
+-        effective config/defaults
+-        oversized-string
+-        (apply str
+-               (repeat (inc (:seon.config.eval.result/max-string effective))
+-                       \x))
+-        nested-value {:rows (vec (range 50000)) :text oversized-string}
+-        result (projected cluster-name effective nested-value)]
+-    ;; A raw value is bounded by the profile's token budget (owner
+-    ;; 2026-09-26: the budget is chosen by provenance; raw values are tight).
+-    ;; The retired 8,192-byte window predates the one budget.
+-    (is (<= (tokens/estimate (pr-str (:seon.dev.mcp/value result)))
+-            (:seon.config.render.agent/token-budget effective))
+-        "nested collection and string bulk cannot escape the profile's budget")
+-    (is (< (utf8-size result) (utf8-size nested-value)))
+-    ;; This cluster has no instance, so nothing can hold the remainder.
+-    (is (false? (:seon.dev.mcp/windowed? result)))
+-    (is (str/includes? (:seon.dev.mcp/remainder result) "not retrievable"))))
+-
+-(deftest sci-evaluations-project-the-repl-text-face
+-  (let [cluster-name "mcp-text-face-test"
+-        effective config/defaults
+-        evaluation (sci-evaluation effective "(vec (range 50000))")
+-        result (projected cluster-name effective evaluation true false)
+-        face (:seon.dev.mcp/value result)]
+-    (is (string? (:seon.dev.mcp/text face))
+-        "an SCI evaluation projects the printed REPL face")
+-    (is (str/starts-with? (:seon.dev.mcp/text face) "[0 1 2")
+-        "the text face reads like a REPL value")
+-    (is (= (:seon.eval/shown evaluation) (:seon.dev.mcp/text face))
+-        "the saved observation is not rendered again")
+-    (is (not (contains? face :seon.sci.admit/value))
+-        "the live result does not ride beside its shown text")
+-    (is (< (utf8-size result) 8192))))
+-
+-(deftest sci-top-level-strings-use-the-shared-value-window
+-  (let [cluster-name "mcp-top-level-string-window-test"
+-        effective config/defaults
+-        evaluation (sci-evaluation effective
+-                                    "(apply str (repeat 1048576 \\x))")
+-        result (projected cluster-name effective evaluation true false)
+-        text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
+-    (is (<= (tokens/estimate text) (:seon.config.render.agent/token-budget effective))
+-        "a scalar face is bounded by the same profile budget as structural values")
+-    (is (= (:seon.eval/shown evaluation) text))
+-    (is (false? (:seon.dev.mcp/windowed? result)))
+-    (is (not (contains? result :seon.blob/digest))
+-        "SCI results retain their live objects, not serialized result blobs")))
+-
+-(deftest ordinary-mcp-results-always-use-the-explicit-mcp-profile
+-  ;; A result below the blob threshold is still fitted by the MCP profile's
+-  ;; budget. Since 36609fc3e each cut is its one text (`print/elided-text`),
+-  ;; never a node naming its profile, path and refusal: WANTED is a root cut
+-  ;; counting the entities not shown, cuts inside shown entities, and no cut naming a
+-  ;; continuation, because nothing was stored. The render unit's database
+-  ;; (required since 93144cb71) is the custody's here: this cluster has no
+-  ;; instance, so no connection hands one.
+-  (support/with-database
+-   (fn [_connection]
+-     (let [cluster-name "mcp-unconditional-fit-test"
+-           ;; A budget the 116 entities exceed, so members of nested entities are cut
+-           ;; too; at the default budget 32 whole entities fit (13,506 characters).
+-           effective (assoc config/defaults
+-                            :seon.config.eval.result/blob-threshold 1000000
+-                            :seon.config.render.agent/token-budget 1000)
+-           entities (observed-query-shape)
+-           text (apply str (repeat 36 \x))
+-           result (projected cluster-name effective entities)
+-           face (:seon.dev.mcp/value result)
+-           cut? #(and (string? %) (str/starts-with? % "…"))
+-           root-cut (peek face)]
+-       (is (not (contains? result :seon.render.value/diagnostics))
+-           "the value is projected, not printed plainly beside a refusal")
+-       (is (str/includes? (pr-str face) (pr-str text))
+-           "the observed 36-character strings remain readable")
+-       (is (cut? root-cut) "the entities not shown are one root cut")
+-       (is (and (cut? root-cut)
+-                (= (count entities) (+ (dec (count face)) (parse-long (subs root-cut 1)))))
+-           "the root cut counts exactly the entities not shown")
+-       (is (some #(and (map? %) (some cut? (tree-seq coll? seq %))) face)
+-           "members of shown entities are cut too")
+-       (is (every? #(re-matches #"…\+?\d+" %) (filter cut? (tree-seq coll? seq face)))
+-           "a cut without a stored artifact names no continuation")
+-       (is (false? (:seon.dev.mcp/windowed? result))
+-           "presentation fitting does not invent a durable artifact")))))
+-
+-(deftest sci-artifact-size-ignores-evaluation-envelope-bulk
+-  (let [cluster-name "mcp-small-sci-value-test"
+-        effective config/defaults
+-        evaluation
+-        (assoc (sci-evaluation effective "42")
+-               :seon.sci.eval/internal-detail (apply str (repeat 5000 \x)))
+-        result (projected cluster-name effective evaluation true false)
+-        face (:seon.dev.mcp/value result)]
+-    (is (= "42" (:seon.dev.mcp/text face)))
+-    (is (= (:seon.sci.admit/record evaluation)
+-           (:seon.sci.admit/record face))
+-        "evaluation diagnostics stay inline beside the text face")
+-    (is (false? (:seon.dev.mcp/windowed? result)))
+-    (is (not (contains? result :seon.blob/digest)))))
+-
+-(defn- jvm-exceptions-keep-the-whole-cause
+-  ;; An exception is an ordinary value on the one REPL path: prepl's
+-  ;; `Throwable->map` projects like any other value, every cause link with
+-  ;; its message and ex-data, and an oversized one pages by digest.
+-  [connection]
+-  (let [cluster-name "mcp-jvm-exception-face-test"
+-        effective config/defaults
+-        inline-ceiling (:seon.config.eval.result/blob-threshold effective)
+-        frame ['seon.cluster$mcp_io_prepl 'invokeStatic "cluster.clj" 336]
+-        root-message "The contract value was wrong."
+-        oversized-message (apply str (repeat (inc inline-ceiling) \x))
+-        envelope
+-        {:via [{:type 'clojure.lang.ExceptionInfo
+-                :message "The wrapper."
+-                :data {:seon.probe/member 1}
+-                :at frame}
+-               {:type 'java.lang.IllegalArgumentException
+-                :message root-message
+-                :at frame}]
+-         :trace [frame]
+-         :cause root-message
+-         :phase :execution}]
+-    (config/apply! {:seon.db/connection connection
+-                    :seon.boot/cluster-name cluster-name})
+-    (support/seed-cluster! connection cluster-name)
+-    (support/transacted! connection
+-                         [{:seon.ns/name 'seon.cluster.mcp-test
+-                           :seon.ns/source "(ns seon.cluster.mcp-test)"}])
+-    (swap! running-instances assoc cluster-name
+-           (running-instance connection cluster-name))
+-    (try
+-      (let [result (projected cluster-name effective envelope false true)
+-            whole (:seon.dev.mcp/value result)
+-            shown (pr-str result)
+-            oversized-result
+-            (projected cluster-name effective
+-                       (assoc envelope :cause oversized-message) false true)
+-            retained-message
+-            (cluster/mcp-get-value
+-             cluster-name (:seon.blob/digest oversized-result) [:cause] 0)]
+-        ;; `pr-str` of the reply lifts a one-namespace map to `#:seon.probe{…}`,
+-        ;; so the member is searched by its namespace; its data is asserted below.
+-        (doseq [part ["The wrapper." root-message "seon.probe"
+-                      "clojure.lang.ExceptionInfo" "java.lang.IllegalArgumentException"]]
+-          (is (str/includes? shown part)
+-              "the reply keeps every cause link"))
+-        (is (false? (:seon.dev.mcp/windowed? result)) "a small exception stays inline")
+-        (is (= [{:seon.probe/member 1} nil] (mapv :data (:via whole)))
+-            "each link keeps its own ex-data")
+-        (is (= root-message (:cause whole)) "the root cause is the value's own member")
+-        (is (true? (:seon.dev.mcp/windowed? oversized-result)))
+-        (is (true? (:seon.dev.mcp/retrievable? oversized-result)))
+-        ;; A page is the floor's selection at the path (one-render-path §3g).
+-        ;; The page opens the string literal with its first characters; a
+-        ;; closed 16-character literal would claim the string ends there.
+-        (is (str/starts-with? (:seon.dev.mcp/text retained-message)
+-                              (str "\"" (subs oversized-message 0 16)))
+-            "an oversized cause pages by digest")
+-        (is (= (count oversized-message)
+-               (:seon.render.data/total retained-message))))
+-      (finally
+-        (swap! running-instances dissoc cluster-name)))))
+-
+ 
+ (deftest runtime-observation-is-whole-and-its-ai-face-renders-less
+   ;; The producer returns every open fault whole, newest first; the value
+@@ -368,212 +139,3 @@
+                (swap! running-instances dissoc cluster-name)))))))
+     (is (zero? @fresh-stores)
+         "Flow-health projection needs only an ordinary canonical branch.")))
+-
+-(defn- a-cut-value-is-stored-only-where-a-connection-can-hold-it
+-  [connection]
+-  (let [cluster-name "mcp-value-test"
+-        value (vec (range 2000))
+-        effective config/defaults
+-        storeless (projected cluster-name effective value)]
+-    (is (false? (:seon.dev.mcp/windowed? storeless)))
+-    (is (not (contains? storeless :seon.blob/digest)) "an unstored value names no digest")
+-    (is (str/includes? (:seon.dev.mcp/remainder storeless)
+-                       "not retrievable"))
+-    (config/apply! {:seon.db/connection connection
+-                    :seon.boot/cluster-name cluster-name})
+-    (support/seed-cluster! connection cluster-name)
+-    (swap! running-instances assoc cluster-name
+-           (running-instance connection cluster-name))
+-    (try
+-      (let [stored (projected cluster-name effective value)
+-            content-digest (:seon.blob/digest stored)
+-            drilled (cluster/mcp-get-value
+-                     cluster-name content-digest [] 7)
+-            past-end (cluster/mcp-get-value
+-                      cluster-name content-digest [] 9000)]
+-        (is (string? content-digest))
+-        (is (true? (:seon.dev.mcp/retrievable? stored)))
+-        (is (str/starts-with? (:seon.dev.mcp/text drilled) "[7 8 9 10 11 12 13 14"))
+-        (is (< 7 (:seon.render.data/next-offset drilled) 2000)
+-            "the page names its absolute continuation")
+-        (is (= 9000 (:seon.render.data/offset past-end)))
+-        (is (= 2000 (:seon.render.data/total past-end)))
+-        (is (true? (:seon.render.value/beyond-end? past-end))))
+-      (finally
+-        (swap! running-instances dissoc cluster-name)))))
+-
+-(defn- stored-strings-page-by-character-offset
+-  [connection]
+-  (let [cluster-name "mcp-string-page-test"
+-        effective config/defaults
+-        value (apply str (take 4975 (cycle "abcdefghijklmnopqrstuvwxyz")))
+-        page-size (:seon.print/width (print/default-options))]
+-    (config/apply! {:seon.db/connection connection
+-                    :seon.boot/cluster-name cluster-name})
+-    (support/seed-cluster! connection cluster-name)
+-    (swap! running-instances assoc cluster-name
+-           (running-instance connection cluster-name))
+-    (try
+-      (let [stored (projected cluster-name effective value)
+-            digest (:seon.blob/digest stored)
+-            first-page (cluster/mcp-get-value cluster-name digest [] 0)
+-            next-page
+-            (cluster/mcp-get-value cluster-name digest [] page-size)
+-            last-page
+-            (cluster/mcp-get-value cluster-name digest [] (- (count value) 10))
+-            past-end
+-            (cluster/mcp-get-value cluster-name digest [] (count value))
+-            far-past-end
+-            (cluster/mcp-get-value cluster-name digest [] 9000)]
+-        ;; A string pages by absolute character offset: each page is the
+-        ;; floor's selection of the characters from that offset.
+-        (is (str/starts-with? (:seon.dev.mcp/text first-page) (str "\"" (subs value 0 page-size))))
+-        (is (str/starts-with? (:seon.dev.mcp/text next-page)
+-                              (str "\"" (subs value page-size (* 2 page-size)))))
+-        (is (= (count value) (:seon.render.data/total first-page)))
+-        (is (= "\"\"" (:seon.dev.mcp/text past-end))
+-            "past the end the page is the empty remainder, named beyond the end")
+-        (is (true? (:seon.render.value/beyond-end? past-end)))
+-        ;; An uncut page is the whole remainder: it names the value's end
+-        ;; and is not past it, and any page past the end says so.
+-        (is (= [(count value) false]
+-               ((juxt :seon.render.data/total :seon.render.value/beyond-end?) last-page)))
+-        (is (true? (:seon.render.value/beyond-end? far-past-end))))
+-      (finally
+-        (swap! running-instances dissoc cluster-name)))))
+-
+-(defn- retrievable-artifacts-commit-no-transaction
+-  {:malli/schema [:=> [:cat :seon.db/connection] :boolean]}
+-  [connection]
+-  (let [cluster-name "mcp-durable-artifact-test"
+-        effective config/defaults
+-        value (vec (range 3000))]
+-    (config/apply! {:seon.db/connection connection
+-                    :seon.boot/cluster-name cluster-name})
+-    (support/seed-cluster! connection cluster-name)
+-    (swap! running-instances assoc cluster-name
+-           (running-instance connection cluster-name))
+-    (try
+-      (let [before (db/commit-id (db/db connection))
+-            stored (projected cluster-name effective value)
+-            content-digest (:seon.blob/digest stored)]
+-        (is (= before (db/commit-id (db/db connection)))
+-            "a windowed result stores its blob and commits no transaction")
+-        (is (true? (:seon.dev.mcp/retrievable? stored))
+-            "the stored blob is retrievable by its digest")
+-        (let [cut (some #(when (and (string? %) (str/starts-with? % "…")) %)
+-                        (tree-seq coll? seq (:seon.dev.mcp/value stored)))
+-              shown (count (remove string? (:seon.dev.mcp/value stored)))
+-              continuation (read-string (subs cut (inc (str/index-of cut " "))))]
+-          (is (string? cut) "a clipped value's cut is its one text, as the agent reply prints it")
+-          (is (= (drop shown value) (eval continuation))
+-              "the cut's continuation form reads the stored remainder")
+-          ;; Stability sweep 2026-09-27: each MCP cut cost ~70 tokens, more
+-          ;; than the values it hid; its source is now one short call.
+-          (is (= (list 'seon.cluster/mcp-value cluster-name content-digest) (last continuation)))
+-          (is (< (tokens/estimate cut) (tokens/estimate (pr-str (drop shown value))))
+-              "the cut costs less than what it hides"))
+-        (let [absent (apply str (repeat 64 "0"))]
+-          (is (= [:gone [:seon.blob/digest absent]]
+-                 ((juxt :seon.render.walk/continuation-reason :seon.render.walk/continuation-node)
+-                  (cluster/mcp-get-value cluster-name absent [] 0)))
+-              "an unknown digest is the one continuation owner's :gone refusal"))
+-        (is (not= content-digest (apply str (repeat 64 "0")))))
+-      (finally
+-        (swap! running-instances dissoc cluster-name)))))
+-
+-(defn- ordinary-value-artifacts-drill-from-the-result-root
+-  [connection]
+-  (let [cluster-name "mcp-sci-value-test"
+-        effective config/defaults
+-        value (assoc (vec (range 2000)) 1999 2999)
+-        nested-value {:alpha value :omega 42}]
+-    (config/apply! {:seon.db/connection connection
+-                    :seon.boot/cluster-name cluster-name})
+-    (support/seed-cluster! connection cluster-name)
+-    (swap! running-instances assoc cluster-name
+-           (running-instance connection cluster-name))
+-    (try
+-      (let [stored (projected cluster-name effective value)
+-            content-digest (:seon.blob/digest stored)
+-            nested-stored (projected cluster-name effective nested-value)
+-            root (cluster/mcp-get-value
+-                  cluster-name content-digest [] 0)
+-            nested (cluster/mcp-get-value
+-                    cluster-name (:seon.blob/digest nested-stored)
+-                    [:alpha] 7)
+-            projected-root (projected cluster-name effective root)]
+-        (is (str/starts-with? (:seon.dev.mcp/text root) "[0 1 2 3 4 5 6 7"))
+-        (is (str/starts-with? (:seon.dev.mcp/text nested) "[7 8 9 10 11 12 13 14"))
+-        (is (false? (:seon.dev.mcp/windowed? projected-root))
+-            "reading the result root must not mint another artifact")
+-        (is (not (contains? projected-root :seon.blob/digest))))
+-      (finally
+-        (swap! running-instances dissoc cluster-name)))))
+-
+-(defn- a-value-shown-whole-stores-nothing
+-  ;; Stability sweep 2026-09-27: an 8 KB result was windowed into a blob
+-  ;; because its print-node artifact passed the byte threshold. The budget is
+-  ;; estimated tokens: a value the floor shows whole is its own reply.
+-  [connection]
+-  (let [cluster-name "mcp-whole-value-test"
+-        effective config/defaults
+-        value (into {} (map (fn [i] [(keyword "probe" (str "k" i)) (apply str (repeat 40 \y))])) (range 30))]
+-    (config/apply! {:seon.db/connection connection
+-                    :seon.boot/cluster-name cluster-name})
+-    (support/seed-cluster! connection cluster-name)
+-    (swap! running-instances assoc cluster-name
+-           (running-instance connection cluster-name))
+-    (try
+-      (let [artifact-size (count (render.value/artifact-edn
+-                                  (render.value/artifact
+-                                   (admit/admit-value {:seon.sci.admit/value value
+-                                                       :seon.sci.admit/interrupt-fn (fn [])
+-                                                       :seon.sci.admit/caps (config/result-caps effective)}))))
+-            before (db/commit-id (db/db connection))
+-            result (projected cluster-name effective value)]
+-        (is (< (:seon.config.eval.result/blob-threshold effective) artifact-size)
+-            "the artifact exceeds the byte threshold the old rule windowed by")
+-        (is (= value (:seon.dev.mcp/value result)) "the whole value is the reply")
+-        (is (false? (:seon.dev.mcp/windowed? result)))
+-        (is (not (contains? result :seon.blob/digest)))
+-        (is (= before (db/commit-id (db/db connection)))))
+-      (finally
+-        (swap! running-instances dissoc cluster-name)))))
+-
+-(deftest artifact-lifecycle-preserves-identity-paging-and-retraction
+-  ;; Every scenario configures and seeds its cluster, which a program-less
+-  ;; fresh store cannot take (config resolves the functions it names to program
+-  ;; entities), so they run on the member's branched world. No assertion needs a
+-  ;; private store: digests are content identities, the zero-transaction check
+-  ;; reads this branch's commit, and the absent digest is absent everywhere.
+-  (let [scenarios
+-        [[:exception jvm-exceptions-keep-the-whole-cause]
+-         [:identity a-cut-value-is-stored-only-where-a-connection-can-hold-it]
+-         [:whole a-value-shown-whole-stores-nothing]
+-         [:string stored-strings-page-by-character-offset]
+-         [:nested ordinary-value-artifacts-drill-from-the-result-root]
+-         [:blob-only retrievable-artifacts-commit-no-transaction]]
+-        executed (support/with-database
+-                  (fn [connection]
+-                    (into [] (map (fn [[scenario verify!]] (verify! connection) scenario))
+-                          scenarios)))]
+-    (is (= (mapv first scenarios) executed)
+-        "All six artifact cases execute, with the blob-only case last.")))
+-
+-(deftest only-an-evaluation-that-changed-loaded-code-drops-cached-pages
+-  ;; 24z: the page-cache signal follows evidence after the evaluation
+-  ;; (Var/rev and namespace mappings), not the read_only flag alone.
+-  (let [signal (fn [body]
+-                 (let [channel (async/chan 1)]
+-                   (cluster/project-next-prepl-value! {:seon.dev.mcp/read-only? false})
+-                   (cluster/mcp-valf "mcp-signal-test" config/defaults (body) false [channel])
+-                   (some? (async/poll! channel))))
+-        probe (symbol (str "signal-probe-" (random-uuid)))
+-        created (atom nil)]
+-    (try
+-      (is (false? (signal #(+ 1 2))) "a form that changes no code keeps cached pages")
+-      (is (true? (signal #(reset! created (intern 'seon.cluster.mcp-test probe 1)))))
+-      (is (true? (signal #(alter-var-root @created inc))))
+-      (is (true? (signal #(ns-unmap 'seon.cluster.mcp-test probe))))
+-      (finally (ns-unmap 'seon.cluster.mcp-test probe)))))
+diff --git a/test/seon/mcp_test.clj b/test/seon/mcp_test.clj
+deleted file mode 100644
+--- a/test/seon/mcp_test.clj
++++ /dev/null
+@@ -1,113 +0,0 @@
+-(ns seon.mcp-test
+-  "Total outward preparation through the real MCP PREPL."
+-  (:require [clojure.edn :as edn]
+-            [clojure.string :as str]
+-            [clojure.test :refer [deftest is]]
+-            [seon.cluster :as cluster]
+-            [seon.config :as config]
+-            [seon.db :as db]
+-            [seon.env :as env]
+-            [seon.id :as id]
+-            [seon.operator.prepl :as prepl]
+-            [seon.operator.runtime :refer [running-instances]]
+-            [seon.print :as print]
+-            [seon.render :as render]
+-            [seon.render.value :as value]
+-            [seon.test-support :as support]))
+-
+-(defn- prepl-events
+-  [cluster-name effective form]
+-  (with-open [reader (clojure.lang.LineNumberingPushbackReader.
+-                     (java.io.StringReader. (pr-str form)))
+-              writer (java.io.StringWriter.)]
+-    (binding [*in* reader *out* writer]
+-      (prepl/io-prepl :valf #(cluster/mcp-valf cluster-name effective %1 %2)))
+-    (with-open [events (java.io.PushbackReader.
+-                       (java.io.StringReader. (str writer)))]
+-      (loop [result []]
+-        (let [event (edn/read {:eof ::end} events)]
+-          (if (= ::end event) result
+-              (recur (conj result event))))))))
+-
+-(deftest outward-values-use-total-projection
+-  (support/with-database
+-   (fn [connection]
+-     (let [cluster-name (str "mcp-total-" (id/id))
+-           effective (support/effective-config)
+-           profile (render/agent-render-profile effective)
+-           database (db/db connection)
+-           ctx (support/fork-cluster-ctx connection)
+-           request {:seon.db/db database
+-                    :seon.sci.eval/ctx ctx
+-                    :seon.schema/projection (db/carried-projection database)
+-                    :seon.render/profile profile
+-                    :seon.render/value {"a" 1 "b" 2}
+-                    :seon.sci.admit/caps (config/result-caps effective)
+-                    :seon.sci.eval/time-limit-ms 2000}]
+-       (config/apply! {:seon.db/connection connection
+-                      :seon.boot/cluster-name cluster-name})
+-       (swap! running-instances assoc cluster-name
+-              {:seon.boot/cluster-connection connection
+-               :seon.sci.eval/ctx
+-               (env/carry-state {} (:seon.sci.eval/projection-state (meta database)))})
+-       (try
+-         (doseq [[form expected]
+-                 [['(sorted-map "a" 1 "b" 2) {"a" 1 "b" 2}]
+-                  ['{:seon.sci.admit/record {} :seon.eval/shown "ordinary"}
+-                   {:seon.sci.admit/record {} :seon.eval/shown "ordinary"}]
+-                  ['{:via [] :trace [] :cause "ordinary"}
+-                   {:via [] :trace [] :cause "ordinary"}]]]
+-           (let [events (prepl-events
+-                         cluster-name effective
+-                         (list 'do '(seon.cluster/project-next-prepl-value!) form))
+-                 terminal (filterv #(= :ret (:tag %)) events)]
+-             (is (= 1 (count terminal)))
+-             (is (not (:exception (first terminal))))
+-             (is (= expected
+-                    (:seon.dev.mcp/value
+-                     (edn/read-string (:val (first terminal))))))))
+-         (let [events (prepl-events cluster-name effective
+-                       '(do (seon.cluster/project-next-prepl-value!)
+-                            (throw (ex-info "expected failure" {}))))
+-               terminal (filterv #(= :ret (:tag %)) events)
+-               result (:seon.dev.mcp/value
+-                       (edn/read-string (:val (first terminal))))]
+-           (is (= 1 (count terminal)))
+-           (is (true? (:exception (first terminal))))
+-           ;; The thrown Throwable itself reaches the projection, which keeps
+-           ;; it in the one error shape: class, message and ex-data per cause
+-           ;; link, and the root frame (task 8aba59c87b88).
+-           (is (= "expected failure" (:seon.error/message result)))
+-           (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class result)))
+-           (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+-                    :seon.error/message "expected failure" :seon.error/data {}}]
+-                  (mapv #(dissoc % :seon.error/frames) (:seon.error/chain result)))))
+-         ;; A root without an identity is refused before selection: the
+-         ;; refusal is the whole answer, with no tree and no text. With a
+-         ;; root, the one selection yields the tree and its text.
+-         (let [refused (value/prepare request)]
+-           (is (string? (:seon.render.value/root-description refused)))
+-           (is (not (contains? refused :seon.render.value/tree)))
+-           (is (not (contains? refused :seon.render.value/text))))
+-         (let [prepared (value/prepare (assoc request :seon.render.value/root [::root]))]
+-           (is (= {"a" 1 "b" 2} (edn/read-string (:seon.render.value/text prepared))))
+-           (is (= (:seon.render.value/text prepared)
+-                  (:seon.print/text (print/emit-both (:seon.render.value/tree prepared)
+-                                                     (:seon.render.value/options prepared))))))
+-         ;; A value's own renderer that refuses the value never replaces it:
+-         ;; the value prints as data and the refusal is one diagnostic line
+-         ;; beside it. The real directory renderer refuses a map that is not
+-         ;; a directory.
+-         (let [value {:seon.render/ai 'seon.repl/render-directory-ai
+-                      :seon.error/message "probe"}
+-               prepared (value/prepare
+-                         (assoc request :seon.render.value/root [::root]
+-                                :seon.render/value value))
+-               shown (:seon.render.value/text prepared)
+-               diagnostics (filter #(str/starts-with? % ";; renderer failed") (str/split-lines shown))]
+-           (is (= value (edn/read-string shown)))
+-           (is (= 1 (count diagnostics)))
+-           (is (str/includes? (first diagnostics) "seon.repl/render-directory-ai"))
+-           (is (= :refused (:seon.render.unknown/reason
+-                            (first (:seon.render.value/diagnostics prepared))))))
+-         (finally (swap! running-instances dissoc cluster-name)))))))

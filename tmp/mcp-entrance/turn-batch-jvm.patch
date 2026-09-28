@@ -1,0 +1,100 @@
+--- a/src/seon/turn/batch.clj
++++ b/src/seon/turn/batch.clj
+@@ -32,6 +32,8 @@
+             [seon.program :as program]
+             [seon.schema :as schema]
+             [seon.schema.datahike :as schema.datahike]
++            [seon.id :as id]
++            [seon.sci.admit :as admit]
+             [seon.sci.arm :as arm]
+             [seon.sci.batch :as sci.batch]
+             [seon.sci.eval :as eval]
+@@ -547,12 +549,14 @@
+ (defn- evaluation-record
+   "One entry as the recording writer's terminal evaluation."
+   {:malli/schema [:=> [:cat :string :seon.batch/entry] :map]}
+-  [turn-id {:seon.batch/keys [ordinal shown error facts-error ns-before source] :as entry}]
++  [turn-id {:seon.batch/keys [ordinal shown error facts-error ns-before source duration-ms] :as entry}]
+   (cond-> {:seon.turn/id turn-id
+            :seon.cluster.eval/ordinal ordinal
+            :seon.cluster.eval/at (java.util.Date.)
+            :seon.cluster.eval/source (or source "")
+            :seon.cluster.eval/ns [:seon.ns/name (or ns-before 'user)]}
++    ;; the reply's :ms, as an SCI evaluation records it
++    duration-ms (assoc :seon.eval/duration-ms (Math/round (double duration-ms)))
+     shown (assoc :seon.eval/shown shown)
+     (contains? entry :seon.batch/error)
+     (assoc :seon.cluster.eval/error (or (ex-message error) (.getName (class error))))
+@@ -785,15 +789,20 @@
+ (defn- jvm-show
+   "A host evaluation's shown text through the same floor as every entrant
+   (`seon.sci.eval/shown-result`, `shown-failure`), with the world's render
+-  profile and the host observation the fold measured; no SCI context, so a
+-  render's entries are not evaluated."
++  profile and the host observation the fold measured. With the agent's SCI
++  context in the world, the value is bound there under its result handle
++  (`result/e<evaluation id>`), so the agent digs it as it digs an SCI value."
+   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
+-  [{{db :seon.db/db profile :seon.render/profile cluster :seon.boot/cluster-name} :seon.batch/world}
+-   {:seon.batch/keys [value error source duration-ms allocated-bytes] :as entry}]
++  [{{db :seon.db/db profile :seon.render/profile cluster :seon.boot/cluster-name ctx :seon.sci.eval/ctx
++     turn-id :seon.turn/id limit :seon.sci.eval/time-limit-ms} :seon.batch/world}
++   {:seon.batch/keys [value error source duration-ms allocated-bytes ordinal] :as entry}]
+   (let [req (cond-> {:seon.cluster.eval/source (or source "")}
+               cluster (assoc :seon.boot/cluster-name cluster)
+               profile (assoc :seon.render/profile profile)
+-              db (assoc :seon.db/db db))
++              db (assoc :seon.db/db db)
++              ctx (assoc :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms (or limit 30000)
++                         :seon.sci.admit/caps (:seon.sci.admit/caps (#'eval/instrumentation-config db)))
++              (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal))))
+         record {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0
+                 :seon.eval/duration-ms (Math/round (double duration-ms)) :seon.eval/allocated-bytes allocated-bytes
+                 :seon.eval/outcome (if (contains? entry :seon.batch/error) :error :ok)}]
+@@ -811,7 +820,9 @@
+   of `:seon.agent/id`."
+   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
+   [request]
+-  (merge {:seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
++  ;; the host evaluates: no SCI write observer, no program facts
++  (dissoc
++   (merge {:seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
+                                              :seon.batch/repairs []})
+           :seon.batch/read-next jvm-read-next
+           :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
+@@ -823,9 +834,8 @@
+           :seon.batch/within world/with-world
+           :seon.batch/settle settle
+           :seon.batch/start-ns 'user}
+-         request
+-         ;; the host evaluates: no SCI write observer, no program facts
+-         {:seon.batch/observe nil :seon.batch/derive nil}))
++         request)
++   :seon.batch/observe :seon.batch/derive))
+ 
+ (defn test-request
+   "A test agent's resolved body: one entry whose evaluation is the body, its
+--- a/src/seon/turn/world.clj
++++ b/src/seon/turn/world.clj
+@@ -63,16 +63,18 @@
+   (assoc (agent-world execution opts) :seon.batch/settlement {:seon.db/connection requester}))
+ 
+ (defn jvm-world
+-  "An MCP JVM evaluation's world: the cluster's connection and value and the
+-  writer; no SCI context (the host evaluates)."
++  "An MCP JVM evaluation's world: the agent's connection and value and the
++  writer. The host evaluates; the agent's SCI context, when given, holds
++  each value under its result handle."
+   {:malli/schema [:=> [:cat :seon.boot/cluster-name :seon.db/connection :map] :seon.batch/world]}
+-  [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer
++  [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer ctx :seon.sci.eval/ctx
+                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
+   (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
+            :seon.db/writer (or writer db/transact!)
+            :seon.batch/sink (seon.batch/sink)}
+     agent-id (assoc :seon.agent/id agent-id)
+     turn-id (assoc :seon.turn/id turn-id)
++    ctx (assoc :seon.sci.eval/ctx ctx)
+     environment (assoc :seon.env/environment environment)
+     process (assoc :seon.db.process/id process)
+     profile (assoc :seon.render/profile profile)))
