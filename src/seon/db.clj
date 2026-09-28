@@ -1142,12 +1142,19 @@
                         (mapv #(if (= ::database %) database %) arguments)))
               parsed-query (query/memoized-parse-query (:query query-request))]
           ;; Evidence recorded before reads were type-checked can still hold
-          ;; a mistyped value; it refuses here as the read now would.
+          ;; a mistyped value; it refuses here as the read now would. A query
+          ;; recorded before a schema change can name an attribute since
+          ;; retired (a pull selector derived from the old schema): Datahike
+          ;; raises it, and the replay classifies it as `q` does, a value, so
+          ;; the read is not current instead of throwing into the turn.
           (or (query-value-type-error declarations query-request parsed-query)
-              (let [answer (vector-query-call declarations query-request
-                                              (encode-query-request declarations query-request parsed-query)
-                                              parsed-query)]
-                (if (vector? answer) (second answer) answer))))
+              (try
+                (let [answer (vector-query-call declarations query-request
+                                                (encode-query-request declarations query-request parsed-query)
+                                                parsed-query)]
+                  (if (vector? answer) (second answer) answer))
+                (catch clojure.lang.ExceptionInfo cause
+                  (dependency-error 'seon.db/replay-read cause)))))
 
         (:pull :pull-many)
         (let [many? (= :pull-many (:seon.db/read-operation request))
