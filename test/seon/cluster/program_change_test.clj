@@ -232,19 +232,20 @@
   ;; deleted reached definition names another analyzer, so every file
   ;; reanalyzes (seon.cluster/selected-analyzer-digest; 2b6625eff61e).
   ;; And ONE IDENTITY FROM LAUNCH THROUGH ADOPTION: a seal read from entities
-  ;; of the files the JVM loaded is exactly what adoption reads from the stored
-  ;; entities (`analyzer-digest`), so the adoption after boot publishes
+  ;; of the files the JVM loaded is exactly what the stored entities name, so
+  ;; the adoption after boot publishes
   ;; nothing; entities analyzed by other loaded bytes name another analyzer
   ;; (publication-cost-opus 2026-09-27: boot sealed the prior head's identity
   ;; and every analyzer-changing start published twice, 15.5 s the second time).
   (let [database (db/db (:seon.db/connection (support/execution-handle nil)))
         selected #'cluster/selected-analyzer-digest
-        head (#'cluster/analyzer-digest database)
         entities (seon.fn/file-entities database ["src/seon/fn.clj"] :seon.fn/file)
         files (into {} (db/q '[:find ?path ?digest
                                :where [?file :seon.fn.file/relative-path ?path]
                                       [?file :seon.fn.file/digest ?digest]]
                              database))
+        ;; The stored entities' own analyzer: nothing replaced, loaded as published.
+        head (selected database #{} [] files files)
         zero (apply str (repeat 64 "0"))]
     (is (seq entities) "the indexer's own file is published")
     (is (contains? files "src/seon/fn.clj"))

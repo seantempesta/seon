@@ -454,13 +454,31 @@
            (is (<= (get calls 'seon.cluster/file-derivation-key) 1)
                "one changed file does not rehash every unchanged file")))))))
 
+(deftest loaded-file-selection-does-not-query-the-program-graph
+  (let [store (:seon.store/store (test-support/execution-handle nil))
+        expected (#'cluster/loaded-files store)]
+    (is (map? expected))
+    (doseq [n [1 10 100]]
+      (let [[answers calls]
+            (test-support/armed-calls
+             '#{seon.db/q seon.cluster.source/commit-database}
+             #(mapv (fn [_] (#'cluster/loaded-files store)) (range n)))]
+        (is (= (vec (repeat n expected)) answers))
+        (is (zero? (get calls 'seon.db/q 0)))
+        (is (<= (get calls 'seon.cluster.source/commit-database 0) n))))))
+
 (deftest the-analyzer-digest-follows-the-analyzing-declarations-only
   ;; A file's derivation key (`derivation-keys`) names the deriving code's
   ;; identity: a changed declaration in its reach changes every key, and a
   ;; declaration outside it none.
   (test-support/with-database
     (fn [connection]
-      (let [digest #(#'cluster/analyzer-digest (db/db connection))
+      (let [digest #(let [database (db/db connection)
+                          files (into {} (db/q '[:find ?path ?digest
+                                                 :where [?file :seon.fn.file/relative-path ?path]
+                                                        [?file :seon.fn.file/digest ?digest]]
+                                               database))]
+                      (#'cluster/selected-analyzer-digest database #{} [] files files))
             restamp! (fn [function-symbol]
                        (test-support/transacted!
                         connection [(test-support/revision (db/db connection) [:seon.fn/sym function-symbol]

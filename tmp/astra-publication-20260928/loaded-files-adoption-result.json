@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "#:seon.repl{:value {:published? true, :adopted? true, :operations 1}, :result result/e13893474a29f, :ms 841}"
+    }
+  ],
+  "isError": false
+}

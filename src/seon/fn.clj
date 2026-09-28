@@ -1577,6 +1577,9 @@
                     :form-source source
                     :seon.fn/namespace-row namespace-entity
                     :seon.fn/declared declared}])
+        analysis (with-dependency-analysis
+                  analysis
+                  (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis)))
         [first-row last-row] (first spans)
         context (text-context text)
         ;; The submitted form starts its own line after the prelude.

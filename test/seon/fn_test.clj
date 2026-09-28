@@ -2619,6 +2619,26 @@
             (is (= [(quote sample.call-declarations/reaches-declarations)]
                    (filterv #(= "sample.call-declarations" (namespace %))
                             (seon.fn/tests-reaching @connection target))))))))))
+(deftest submitted-declarations-share-the-dependency-analysis-join
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           shapes (program/shapes-in projection)
+           ns-row (#'test-support/digest-namespace-entity database 'seon.cluster)]
+       (doseq [n [1 10 100]]
+         (let [source (str/join "\n" (for [i (range n)]
+                         (str "(defn read" i " [connection] (d/db connection))")))
+               [rows calls]
+               (test-support/armed-calls
+                '#{seon.fn/shared-dependency-analysis seon.fn/with-dependency-analysis}
+                #(seon.fn/source-rows database shapes ns-row source
+                                      (set (keys (:seon.schema.projection/forms projection)))))]
+           (is (= n (count rows)))
+           (is (every? #(contains? (:seon.fn/calls %) 'datahike.api/db) rows))
+           (is (= 1 (get calls 'seon.fn/shared-dependency-analysis 0)))
+           (is (= 1 (get calls 'seon.fn/with-dependency-analysis 0)))))))))
+
 (deftest invocation-metadata-survives-admission-and-exact-replacement
   (test-support/with-database
    (fn [connection]
@@ -3095,24 +3115,3 @@
                             database (str directory "/caller.clj")))
                 "the caller's reanalyzed finding names the value def's entity"))))
       (finally (test-support/delete-recursively! root)))))
-
-(deftest an-analyzer-launch-loaded-as-other-bytes-reanalyzes-everything
-  ;; The loaded analyzer's identity derives from what this JVM loaded, never
-  ;; from the prior head's entities alone (seon.cluster/launched-analyzer).
-  (test-support/with-database
-    (fn [connection]
-      (let [database (db/db connection)
-            launched-analyzer #'cluster/launched-analyzer
-            files (vec (distinct (map #(nth % 2) (#'cluster/analyzer-declarations database))))
-            stored (source/stored-path-digests database files)
-            head (#'cluster/analyzer-digest database)
-            other (apply str (repeat 64 "0"))]
-        (is (contains? stored "src/seon/fn.clj") "the indexer's own file is an analyzer file")
-        (is (= {:seon.source/analyzer-digest head}
-               (launched-analyzer database (assoc stored "src/seon/cluster.clj" other)))
-            "launch bytes the head published, and any file outside the analyzer, stay incremental")
-        (let [ahead (launched-analyzer database (assoc stored "src/seon/fn.clj" other))]
-          (is (not= head (:seon.source/analyzer-digest ahead))
-              "an analyzer file loaded as other bytes matches no seal, so every file reanalyzes")
-          (is (= other (get (:seon.cluster/launched-analyzer ahead) "src/seon/fn.clj"))
-              "and the publication seals the entities it analyzed with those bytes"))))))
