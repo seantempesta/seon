@@ -156,8 +156,8 @@
   "The creation configuration for a cluster store.
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
-  must be the ONE store), fused persistent-set roots with a 256-entry
-  diff buffer and a measured 4096-way branching factor, retained history by
+  must be the ONE store), fused persistent-set roots with a 32-entry
+  diff buffer and a measured 128-way branching factor, retained history by
   the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
   creation-only; reopen configurations omit them so Datahike adopts the
@@ -189,13 +189,16 @@
       :writer {:backend :self}
       :keep-history? keep-history?
       :fuse-index-roots? true
-      :index-config {; The dependency's 512 default made the 208k-datom
-                     ; publication flush 3,029 values, each paying Konserve's
-                     ; file + directory force. 4,096 measured 357 without a
-                     ; read regression; keep the evidence beside the tuning:
-                     ; docs/seon/issues/complete-publication-takes-seventy-seconds.md
-                     :branching-factor 4096
-                     :diff-buf-size 256}
+      :index-config {; A commit rewrites every leaf it touches whole, in each of
+                     ; six indexes. At 4,096 a leaf is 2,000-4,000 datoms
+                     ; (40-210 KB) and the 256-datom diff buffer saturates with
+                     ; slots nothing touches again, so a small commit cost
+                     ; 974 KB (fresh store) to 4.3 MB (a day old). 128/32
+                     ; replayed the same real commits at 184 KB. The per-file
+                     ; force that chose 4,096 is gone (`:defer-immutable-sync?`
+                     ; above). Evidence: tmp/store-writes/evidence.edn.
+                     :branching-factor 128
+                     :diff-buf-size 32}
       :schema-flexibility :write})))
 
 (defn- open-configuration

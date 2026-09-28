@@ -7,6 +7,7 @@
  ; `:seon.config.ai/no-provider :seon.config/absent` with --config) for a
  ; deliberate provider verification.
  :seon.config.ai/no-provider true
- ; Proposed 2026-09-22, lane a2-storage-retention; orchestrator ratifies.
- ; Current branch heads survive; superseded commit/index ancestry is collectible.
- :seon.config.db/snapshot-window-ms 0}
+ ; Current branch heads survive; ancestry older than one hour is collected by the
+ ; daily collection. The hour keeps a database value someone still holds readable
+ ; mid-read. Owner 2026-09-28: ≤~1 GB/day, reclaimed by the collection.
+ :seon.config.db/snapshot-window-ms 3600000}

@@ -706,7 +706,7 @@
   (let [inventory
         (registry/collect!
          operation-store
-         registry/plain-cutoff
+         (registry/retention-cutoff operation-store)
          {:seon.operator.collect/dry-run? true})
         retained (:seon.cluster.registry/retained-files inventory)
         candidates (:seon.cluster.registry/candidate-files inventory)
@@ -777,7 +777,7 @@
          :seon.operator.collect/complete? false}]
     (try
       (let [inventory
-            (registry/collect! operation-store registry/plain-cutoff {})
+            (registry/collect! operation-store (registry/retention-cutoff operation-store) {})
             swept (:seon.cluster.registry/swept inventory)
             after-first (collection-observation operation-store)
             first-result
@@ -794,7 +794,7 @@
                               (:seon.operator.collect/bytes after-first)))))]
         (try
           (let [verification-swept
-                (registry/collect! operation-store registry/plain-cutoff)
+                (registry/collect! operation-store (registry/retention-cutoff operation-store))
                 after (collection-observation operation-store)
                 evidence (collection-evidence operation-store)
                 verification
