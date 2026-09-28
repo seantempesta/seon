@@ -736,6 +736,11 @@
                                     :seon.config/manifest (:seon.config/manifest request)})]
           (if (:seon.error/at result) result
               {:seon.boot/cluster-name (or name "default") :seon.reconcile/result result}))
+        ;; Will a candidate program boot? Its publication and this cluster's
+        ;; adoption run here on disposable branches (`bin/seon check`).
+        :check (merge identity
+                      (cluster/rehearse-source! cluster-root (:seon.source/directory request)
+                                                (or name "default")))
         :export {:seon.operator/destination
                  (export/export! {:seon.store/store (:seon.store/store (selected-instance name))
                                   :seon.export/parent-dir (:seon.operator/destination request)})}
