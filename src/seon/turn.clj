@@ -3878,6 +3878,32 @@
       {:prepared prepared :outcome outcome}
       (settle-batch-refusal! cluster requests prepared outcome changes))))
 
+(defn- settle-evaluated!
+  "`settle-batch!`, total (AGENTS \"The path is total\"): a throw anywhere in
+  the settlement, its own input refusal included, is refused like a refused
+  commit (`settle-batch-refusal!`), so every form still shows the value it
+  evaluated with the failure beside it; it never replaces the values."
+  {:malli/schema
+   [:=> [:cat :seon.turn.loop/cluster [:vector :seon.turn.loop/settle-evaluation-request] :map]
+    [:map [:prepared [:vector :map]] [:outcome [:or :seon.db/transaction-report :seon.error/value]]
+     [:refused-outcome {:optional true} :seon.error/value]]]}
+  [cluster requests program]
+  (try
+    (settle-batch! cluster requests program)
+    (catch Throwable failure
+      (settle-batch-refusal!
+       cluster requests
+       (mapv (fn [{run-id :seon.turn/id ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
+               {:seon.turn.loop/receipt
+                (cond-> {:seon.turn/id run-id :seon.cluster.eval/ordinal ordinal
+                         :seon.eval/shown (:seon.eval/shown evaluation "")}
+                  (:seon.cluster.eval/error evaluation)
+                  (assoc :seon.cluster.eval/error (:seon.cluster.eval/error evaluation)))})
+             requests)
+       (seon.error.refusal/diagnostic (Date.) :seon.turn/settlement 'seon.turn/settle-batch!
+                                      {:seon.error/throwable failure})
+       (:seon.batch/changes program [])))))
+
 ;;; A REFUSED PHASE ESCALATES THROUGH `seon.error/commit-tx`, LIKE EVERY OTHER
 ;;; FAILURE. This site used to `dissoc` the escalation dial — silencing the one
 ;;; designed owner — and then hand-roll its own `"A run phase failed: …"`
@@ -5489,7 +5515,7 @@
                 ;; the committed value the settlement is written on: the
                 ;; program-change fast path proves no commit came between
                 written-on (db/db connection)
-                settlement (settle-batch! cluster requests
+                settlement (settle-evaluated! cluster requests
                                           (assoc program :seon.batch/changes
                                                  (into [] (keep (fn [{n :seon.cluster.eval/ordinal c :seon.batch/change}]
                                                                   (when c {:seon.batch/ordinal n :seon.batch/change c})))

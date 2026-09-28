@@ -2307,3 +2307,32 @@
                                                        :seon.batch/removals ['never.recorded-namespace]
                                                        :seon.batch/namespaces #{'never.held-namespace}})]
        (is (= [] facts) "an unrecorded namespace's removal is an empty transaction, not a refusal")))))
+
+(deftest a-settlement-that-throws-still-shows-each-evaluated-value
+  ;; Root, 2026-09-28: while a settle stage threw (measurement), every reply
+  ;; showed only the settle error and lost the value its form computed. The
+  ;; path is total: the settlement's failure rides beside each value.
+  (support/with-database
+   (fn [connection]
+     (let [run-id "throwing-settlement"
+           handle (terminal-fixture connection "throwing-settlement" run-id ["(+ 1 1)" "(* 3 3)"])
+           configuration (support/effective-config)
+           now (java.util.Date.)
+           evaluated (support/evaluate
+                      {:seon.cluster.eval/source "(+ 1 1)"
+                       :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db (db/db connection)
+                       :seon.render/profile (render/agent-render-profile configuration)
+                       :seon.sci.admit/caps (config/result-caps configuration)
+                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})
+           request {:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
+                    :seon.turn/id run-id}
+           ;; the second form's request carries no evaluation: the settlement
+           ;; cannot build its receipt and throws
+           requests [(assoc request :seon.cluster.eval/ordinal 0 :seon.sci.eval/evaluation evaluated)
+                     (assoc request :seon.cluster.eval/ordinal 1)]
+           settled (#'turn/settle-evaluated! handle requests {})
+           receipts (settled-receipts connection run-id)]
+       (is (= "2" (:seon.eval/shown (first receipts))) "the first form shows the value it evaluated")
+       (is (some? (:refused-outcome settled)) "the settlement's failure is answered as a value")
+       (is (every? #(some? (:seon.cluster.eval/error %)) receipts)
+           "each receipt names the failed settlement beside its value")))))
