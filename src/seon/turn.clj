@@ -2185,7 +2185,7 @@
                         [?effect :seon.effect/form-ordinal ?ordinal]]
                       database run-id (:seon.cluster.eval/ordinal evaluation))))))
 
-(declare generated-read-fault evaluate-sources preview-sources phase)
+(declare generated-read-fault evaluate-sources phase)
 
 (defn- code-currency
   "Each symbol the kept evaluations executed -> its current definition digest
@@ -2380,6 +2380,13 @@
             agent-ctx (when turn-id
                         (:seon.sci.eval/ctx
                          (@cluster-agent-acquire-context! handle agent-id)))
+            ;; ONE FORK FOR EVERY PREVIEWED READ: the reads are read-only, so
+            ;; they share one fork of the agent's context; a fork per read was
+            ;; 58 ms each (root, default, 2026-09-28: 9 changed reads 526 ms)
+            preview-ctx (delay (:seon.sci.eval/ctx
+                                (sci.eval/fork-for-turn
+                                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db database
+                                  :seon.db/connection connection :seon.agent/id agent-id})))
             previews (second
                       (reduce
                        (fn [[ordinal previews] source]
@@ -2415,14 +2422,16 @@
                              :seon.ns/name (:seon.ns/name source)
                              :seon.cluster.reply/sources [source]}))}
                           :else
-                          (preview-sources
-                           {:seon.turn.loop/cluster handle
-                            :seon.db/db database
-                            :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                            :seon.agent/id agent-id
-                            :seon.ns/name (:seon.ns/name source)
-                            :seon.cluster.reply/text (:seon.cluster.eval/source source)
-                            :seon.sci.admit/caps (:seon.sci.admit/caps handle)}))
+                          {:seon.turn.loop/evaluated-sources
+                           (:seon.turn.loop/evaluated-sources
+                            (evaluate-sources
+                             {:seon.turn.loop/cluster handle
+                              :seon.db/db database
+                              :seon.sci.eval/ctx @preview-ctx
+                              :seon.agent/id agent-id
+                              :seon.cluster.eval/ordinal 0
+                              :seon.ns/name (:seon.ns/name source)
+                              :seon.cluster.reply/sources [source]}))})
                                previous (get latest (source-key source))
                                evaluation (get-in preview [:seon.turn.loop/evaluated-sources 0
                                                            :seon.sci.eval/evaluation])
