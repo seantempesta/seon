@@ -6018,20 +6018,33 @@
   "One agent dial: the agent's overlay, else the handle's carried value, else
   the cluster's effective config; nil only when none of them declares it.
 
-  A refused overlay or config read throws that declared error as its
-  `ex-data`; it never falls through to the next source as if it were absent."
+  A refused overlay or config read is RETURNED, the declared error it is; it
+  never falls through to the next source as if it were absent."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/cluster
                        :seon.agent/id :qualified-keyword]
-                  [:maybe :seon.schema/value]]}
+                  [:or [:maybe :seon.schema/value] :seon.error/value]]}
   [database cluster agent-id dial]
-  (let [refused! #(throw (ex-info (:seon.error/message % "Agent dial read refused.") %))
-        overlay (ai/agent-overlay database agent-id)]
-    (when (:seon.error/at overlay) (refused! overlay))
-    (or (get overlay dial)
-        (get cluster dial)
-        (let [effective (config/effective database (:seon.cluster/name cluster))]
-          (when (:seon.error/at effective) (refused! effective))
-          (get effective dial)))))
+  (let [overlay (ai/agent-overlay database agent-id)]
+    (if (:seon.error/at overlay)
+      overlay
+      (or (get overlay dial)
+          (get cluster dial)
+          (let [effective (config/effective database (:seon.cluster/name cluster))]
+            (if (:seon.error/at effective) effective (get effective dial)))))))
+
+(defn- dial-absent
+  "The declared refusal of a turn dial no source declares: the cluster names
+  none, so the turn it bounds cannot run. Apply the config manifest."
+  {:malli/schema [:=> [:cat [:maybe :seon.cluster/name] :seon.agent/id :qualified-keyword] :seon.error/value]}
+  [cluster-name agent-id dial]
+  (seon.error.refusal/diagnostic
+   (Date.) :seon.turn/configuration `dial-absent
+   {:seon.error/message (str "Cluster " (pr-str cluster-name) " declares no " dial
+                             ", so agent " (pr-str agent-id) "'s turn has no bound. Apply the config manifest.")
+    :seon.config/required-absent dial
+    :seon.error/member dial
+    :seon.error/expected dial}))
+
 
 (defn- await-turn-permit!
   [state]
@@ -6048,15 +6061,15 @@
         run-id (open-for-agent database [:seon.agent/id agent-id])
         timeout-ms (or (agent-dial database (:seon.turn.loop/cluster state) agent-id
                                    :seon.config.agent/turn-completion-backstop-ms)
-                       (throw (ex-info (str "Cluster " (pr-str cluster-name)
-                                            " declares no turn completion backstop.")
-                                       {:seon.config/required-absent
-                                        :seon.config.agent/turn-completion-backstop-ms
-                                        :seon.cluster/name cluster-name
-                                        :seon.agent/id agent-id})))
+                       (dial-absent cluster-name agent-id :seon.config.agent/turn-completion-backstop-ms))
         [value selected]
-        (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
-    (if (= selected completion)
+        (when (int? timeout-ms)
+          (async/alts!! [completion (async/timeout timeout-ms)] :priority true))]
+    (cond
+      ;; a dial the turn cannot run without, refused or absent, is the
+      ;; step's declared answer: the proc parks on it (`step`)
+      (not (int? timeout-ms)) timeout-ms
+      (= selected completion)
       (cond->
       {:seon.agent/turn-permit value
        :seon.agent/connection connection
@@ -6077,6 +6090,7 @@
        :seon.agent/run-id (atom run-id)}
         ;; the execution owner's stop, requested before a panic records
         stop-request! (assoc :seon.fault/stop-request! stop-request!))
+      :else
       (throw
        (turn-completion-backstop-failure
         agent-id run-id timeout-ms :seon.agent/turn-start :seon.agent/turn-permit
@@ -6092,22 +6106,14 @@
   value the cluster handle carries, then the cluster's effective config."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/cluster
                        :seon.agent/id]
-                  :seon.config.agent/write-refusal-bound]}
+                  [:or :seon.config.agent/write-refusal-bound :seon.error/value]]}
   [database cluster agent-id]
-  (let [cluster-name (:seon.cluster/name cluster)]
-    (or (agent-dial database cluster agent-id :seon.config.agent/write-refusal-bound)
-        ;; ABSENCE IS NEVER "no bound". A cluster whose config singleton
-        ;; predates this dial would otherwise read as healthy and re-fire
-        ;; forever, which is the exact failure class this bound exists to end.
-        (throw
-         (ex-info
-          (str "Cluster " (pr-str cluster-name)
-               " declares no :seon.config.agent/write-refusal-bound, so a "
-               "refused turn write for agent " (pr-str agent-id)
-               " has no bound. Apply the config manifest.")
-          {:seon.config/required-absent :seon.config.agent/write-refusal-bound
-           :seon.cluster/name cluster-name
-           :seon.agent/id agent-id})))))
+  ;; ABSENCE IS NEVER "no bound". A cluster whose config singleton predates
+  ;; this dial would otherwise read as healthy and re-fire forever, which is
+  ;; the exact failure class this bound exists to end: it answers the
+  ;; declared absence, and the proc parks on it.
+  (or (agent-dial database cluster agent-id :seon.config.agent/write-refusal-bound)
+      (dial-absent (:seon.cluster/name cluster) agent-id :seon.config.agent/write-refusal-bound)))
 
 (defn write-refusal-error
   "Describe the repeated write refusal that parked one agent's turn proc."
@@ -6295,6 +6301,19 @@
        ;; must not park the agent until restart, sweep 2026-09-27 item 2).
        [state nil]
        (if-some [turn-bound (await-turn-permit! state)]
+       (if (:seon.error/at turn-bound)
+         ;; A turn dial refused or absent: the pass cannot run. The proc parks
+         ;; with its one recorded fault, answering a caller's reply with it;
+         ;; a later submission tries again (a config apply can repair it).
+         (let [agent-id (:seon.agent/id state)]
+           (when-not (:seon.turn.loop/parked state)
+             (fault/fault! (env/of cluster) (ex-info (:seon.error/message turn-bound) turn-bound)
+                           {:seon.error/layer :seon.turn/configuration
+                            :seon.error/operation `step
+                            :seon.db.process/id (:seon.db.process/id cluster)
+                            :seon.agent/id agent-id}))
+           (when reply (async/offer! reply {:seon.turn.loop/refusal turn-bound}))
+           [(assoc state :seon.turn.loop/parked turn-bound) nil])
        (let [backstop (arm-turn-completion-backstop! turn-bound)
              cluster (assoc cluster :seon.turn.loop/await-part
                             (:seon.turn.loop/await-part backstop))]
@@ -6386,7 +6405,11 @@
                           bound (when refusal
                                   (write-refusal-bound
                                    (db/db connection) cluster agent-id))
-                          parked? (boolean (and refusal bound (>= refusals bound)))
+                          ;; a bound the config cannot supply parks at once:
+                          ;; absence is never "no bound"
+                          parked? (boolean (and refusal bound
+                                                (or (:seon.error/at bound) (>= refusals bound))))
+                          bound (if (:seon.error/at bound) refusals bound)
                           ;; A PARKED AGENT NEVER RE-FIRES. The wake is the only
                           ;; thing that made the refused write repeat, so the
                           ;; bound removes exactly it — no retry, no sleep, no
@@ -6478,5 +6501,5 @@
                {:seon.agent/id
                 (:seon.agent/id state)
                 :seon.agent/turn-completion-undeliverable
-                (:seon.agent/id state)}))))))
+                (:seon.agent/id state)})))))))
        [state nil])))))

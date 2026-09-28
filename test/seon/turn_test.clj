@@ -2136,9 +2136,7 @@
                            :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                            :seon.db.process/id cluster/boot-process-identity})
                          :seon.cluster/name "no-such-dial-cluster")
-           refused (try (turn/write-refusal-bound (db/db connection) handle "dial-reader")
-                        nil
-                        (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+           refused (turn/write-refusal-bound (db/db connection) handle "dial-reader")]
        (is (= :seon.config/cluster (:seon.config/error-key refused)))
        (is (= "no-such-dial-cluster" (:seon.config/missing-effective refused)))
        (is (= 3 (turn/write-refusal-bound
