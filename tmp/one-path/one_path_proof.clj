@@ -1159,6 +1159,45 @@
                    (every? (fn [e] (not (contains? e :seon.batch/error))) (:seon.batch/entries b)))
        :shown (mapv (fn [t] (subs (str t) 0 (min 120 (count (str t))))) shown)})))
 
+(defn- tree-fork-for-turn
+  "seon.sci.eval/fork-for-turn and its handle binding as the working tree has
+  them, evaluated in a scratch namespace over the installed privates (no live
+  Var redefined)."
+  []
+  (let [src (slurp "/Users/sean/src/seon/src/seon/sci/eval.clj")
+        form-at (fn [start] (-> (subs src (str/index-of src start))
+                                (str/replace "::turn-fork?" ":seon.sci.eval/turn-fork?")
+                                (str/replace "::base-bindings" ":seon.sci.eval/base-bindings")
+                                (str/replace "::result-objects" ":seon.sci.eval/result-objects")
+                                (str/replace "::kernel/installed-functions" ":seon.sci.kernel/installed-functions")
+                                (str/replace "::kernel/program-snapshot" ":seon.sci.kernel/program-snapshot")
+                                (str/replace "::print-session" ":seon.sci.eval/print-session")
+                                (str/replace "::bind-result!" ":seon.sci.eval/bind-result!")
+                                (str/replace "::custody" ":seon.sci.eval/custody")
+                                (str/replace "::base-ctx" ":seon.sci.eval/base-ctx")
+                                (str/replace "::unavailable-execution" ":seon.sci.eval/unavailable-execution")
+                                read-string))
+        forms (mapv form-at ["(defn- settled-results" "(declare bind-handles!)" "(def ^:private unstored-notes"
+                             "(defn- bind-settled-results!" "(defn- bind-handles!" "(defn fork-for-turn"])]
+    (binding [*ns* (create-ns 'one-path-proof.fork)]
+      (refer-clojure)
+      (require '[sci.core :as sci] '[seon.sci.admit :as admit] '[seon.render.value :as render.value]
+               '[seon.db :as db] '[seon.blob :as blob] '[seon.env :as env] '[seon.error.refusal] '[seon.sci.kernel :as kernel])
+      (doseq [p '[regenerate-agent-context! base-bindings session-print-options projection-state context-projection
+                  advance-context-projection! agent-namespace bind-result!]]
+        (eval (list 'def p (list 'deref (list 'var (symbol "seon.sci.eval" (name p)))))))
+      (run! eval forms))
+    @(ns-resolve 'one-path-proof.fork 'fork-for-turn)))
+
+(defproof :fork-unbound-results-surface :totality
+  "A fresh fork whose result handles cannot be bound says so as data (:seon.sci.eval/unbound-results), for its entrant to record as a fault; the fork itself stands"
+  (let [fork-for-turn (tree-fork-for-turn)
+        d (wdb (world))
+        ctx (eval/build-base-ctx (db/carried-projection d))
+        r (fork-for-turn {:seon.sci.eval/ctx ctx :seon.db/db d :seon.agent/id "root"})]
+    {:pass? (and (some? (:seon.sci.eval/ctx r)) (string? (get-in r [:seon.sci.eval/unbound-results :seon.error/message])))
+     :unbound (select-keys (:seon.sci.eval/unbound-results r) [:seon.error/message :seon.error/operation])}))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"

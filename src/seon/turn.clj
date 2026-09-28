@@ -5371,7 +5371,15 @@
                    (:seon.sci.eval/agent-ctx cluster)
                    (assoc :seon.sci.eval/agent-ctx
                           (:seon.sci.eval/agent-ctx cluster)))))
-        trigger (phase #(message/trigger (db/db connection) run-id))]
+        trigger (phase #(message/trigger (db/db connection) run-id))
+        ;; handles a fresh fork could not bind: a core fault delivered to this
+        ;; agent's next context; the turn continues without them
+        _ (when-let [unbound (:seon.sci.eval/unbound-results forked)]
+            (fault/fault! (env/of cluster) (ex-info (:seon.error/message unbound) unbound)
+                          {:seon.error/layer :seon.sci.eval/fork
+                           :seon.error/operation 'seon.sci.eval/fork-for-turn
+                           :seon.db.process/id (:seon.db.process/id cluster)
+                           :seon.agent/id agent-id}))]
     (if-let [failure (some #(when (:seon.turn.loop/phase-failed %) %)
                            [forked trigger])]
       (settled (settle! {:seon.turn.loop/cluster cluster

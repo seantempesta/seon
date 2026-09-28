@@ -3334,13 +3334,21 @@
   the marker with that reason, and a refused read of the handles is answered
   as the refusal."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:maybe :seon.agent/id]]
-                  [:or :nil :seon.db/invalid-read-error]]}
+                  [:or :nil :seon.error/value]]}
   [ctx db agent-id]
-  (when-let [connection (and agent-id (:seon.db/connection (env/of ctx)))]
-    (let [handles (settled-results db agent-id)]
-      (if (db/read-refusal? handles)
-        handles
-        (bind-handles! ctx connection handles)))))
+  (when agent-id
+    (if-let [connection (:seon.db/connection (env/of ctx))]
+      (let [handles (settled-results db agent-id)]
+        (if (db/read-refusal? handles)
+          handles
+          (bind-handles! ctx connection handles)))
+      ;; the blob tier is the context's connection's: without one no stored
+      ;; value can be read, and saying nothing would leave every handle dangling
+      (seon.error.refusal/diagnostic
+       (java.util.Date.) :seon.sci.eval/fork 'seon.sci.eval/bind-settled-results!
+       {:seon.error/message "The agent's result handles could not be bound: its context has no connection to read stored values from."
+        :seon.error/member :seon.db/connection
+        :seon.error/expected :seon.db/connection}))))
 
 (defn- bind-handles!
   "Bind each handle of `handles` (`settled-results`) in `ctx`: a stored cut
@@ -3394,7 +3402,19 @@
     (advance-context-projection! ctx db (context-projection base-ctx))
     (when (and assigned-namespace (not (sci/find-ns ctx assigned-namespace)))
       (sci/add-namespace! ctx assigned-namespace {}))
-    (let [unbound (when-not agent-ctx (bind-settled-results! ctx db agent-id))]
+    ;; Binding is a later stage than the fork: its failure (a refused read,
+    ;; or a throw such as an armed contract's refusal) never fails the fork.
+    ;; It rides the result as data; the entrant records it as a fault
+    ;; delivered to the agent (seon.turn/resume-turn,
+    ;; seon.cluster.agent/acquire-context!).
+    (let [unbound (when-not agent-ctx
+                    (try (bind-settled-results! ctx db agent-id)
+                         (catch Throwable failure
+                           (seon.error.refusal/diagnostic
+                            (java.util.Date.) :seon.sci.eval/fork 'seon.sci.eval/bind-settled-results!
+                            {:seon.error/message (str "The agent's result handles could not be bound: "
+                                                      (ex-message failure))
+                             :seon.error/throwable failure}))))]
       (cond-> {:seon.sci.eval/ctx ctx
                :seon.sci.eval/private-state
                (if carried? :preserved-in-memory :absent)}

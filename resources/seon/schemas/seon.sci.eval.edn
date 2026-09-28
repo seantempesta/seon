@@ -89,8 +89,8 @@
                 :time-limit-ms [:int {:min 1}],
                 :defs-fork-result
                 [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                 [:seon.sci.eval/unbound-results {:optional true} :seon.sci.eval/unbound-results]],
-                :unbound-results [:and {:description "The refused read that left a fresh fork's result handles unbound, for the entrant to deliver."} :seon.db/invalid-read-error],
+                 [:seon.sci.eval/unbound-results {:optional true :description "Why a fresh fork's result handles were not bound (a refused read of them, or the binding's own failure), for the entrant to record as a fault delivered to the agent."} :seon.sci.eval/unbound-results]],
+                :unbound-results :seon.error/value,
                 :namespace-binding-cycle-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.sci.eval/pending-namespaces :seon.sci.eval/pending-namespaces]]],

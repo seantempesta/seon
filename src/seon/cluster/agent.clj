@@ -1156,14 +1156,22 @@
                     (:seon.sci.eval/projection-state base)
                     (cond-> (assoc (env/of base) :seon.agent/routing roster)
                       held-store (assoc :seon.store/store held-store)))
-                 ctx (if (nil? agent-id)
-                       base
-                       (:seon.sci.eval/ctx
-                        (sci.eval/fork-for-turn
-                         (cond-> {:seon.sci.eval/ctx base
-                                  :seon.db/db selected :seon.agent/id agent-id}
-                           previous (assoc :seon.sci.eval/agent-ctx
-                                           (:seon.sci.eval/ctx previous))))))
+                 forked (when agent-id
+                          (sci.eval/fork-for-turn
+                           (cond-> {:seon.sci.eval/ctx base
+                                    :seon.db/db selected :seon.agent/id agent-id}
+                             previous (assoc :seon.sci.eval/agent-ctx
+                                             (:seon.sci.eval/ctx previous)))))
+                 ;; handles the fresh context could not bind: a core fault
+                 ;; delivered to this agent; the acquisition stands
+                 _ (when-let [unbound (:seon.sci.eval/unbound-results forked)]
+                     (fault/fault! (or (env/of handle) (env/of base))
+                                   (ex-info (:seon.error/message unbound) unbound)
+                                   {:seon.error/layer :seon.sci.eval/fork
+                                    :seon.error/operation 'seon.sci.eval/fork-for-turn
+                                    :seon.db.process/id (:seon.db.process/id handle)
+                                    :seon.agent/id agent-id}))
+                 ctx (if forked (:seon.sci.eval/ctx forked) base)
                  acquired (cond->
                            {:seon.cluster/name (:seon.cluster/name handle)
                             :seon.db/connection connection
