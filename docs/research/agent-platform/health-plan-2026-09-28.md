@@ -81,8 +81,12 @@ an entrant (an evaluation's value, a reply, a proc step, a test body). An error 
 
 - **Never a drain (owner, hard rule).** Health may not noticeably load the system or grow the store: no commit of its
   own, no background work that scales with call volume, nothing measured in gigabytes. Every slice's proof states
-  bytes added per 1,000 ordinary evaluations (target ~0) and per 1,000 failures, and probes stay under ~50 MB of store
-  (a model-proof probe that committed per item added 17 GB in ten minutes).
+  bytes added per 1,000 ordinary evaluations and per 1,000 failures, and probes stay under ~50 MB of store (a
+  model-proof probe that committed per item added 17 GB in ten minutes). Budget: up to ~1 GB/day under heavy use is
+  acceptable only if the daily collection reclaims it. Within that, find the sweet spot: where a commit's added cost is
+  fixed (a touched index subtree costs the same for 2 or 20 datoms), carry everything useful; where it is proportional,
+  optimize. All health attributes are noHistory; each is linked (ref or value) and indexed only as the queries that read
+  it need.
 
 ## 3. Reading it: queries, then renders
 
