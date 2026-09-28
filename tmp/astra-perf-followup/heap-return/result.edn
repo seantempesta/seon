@@ -1,0 +1,10 @@
+{:pid 42311 :start 1790633512492
+ :before {:min-free-ratio 40 :max-free-ratio 70 :rss-kib 3629696
+          :heap-used 1166657176 :heap-committed 3154116608 :heap-max 10997465088
+          :probe-ms [28.328708 27.959833 28.026459 27.871542 26.671875]}
+ :after {:min-free-ratio 20 :max-free-ratio 40 :rss-kib 2138736
+         :heap-used 969310840 :heap-committed 1627389952 :heap-max 10997465088
+         :probe-ms [27.843750 26.481750 26.396333 26.733667 28.335708]}
+ :all-projections-identical true
+ :forced-gc false :restart false :periodic-gc-ms 30000
+ :contracts-compile {:result [] :ms 69}}

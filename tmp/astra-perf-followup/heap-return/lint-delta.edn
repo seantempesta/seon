@@ -1,0 +1,1 @@
+{:before {:error 0, :warning 1600, :info 12, :type :summary, :duration 5898, :files 517}, :after {:error 0, :warning 1600, :info 12, :type :summary, :duration 5982, :files 518}, :new-findings {}}

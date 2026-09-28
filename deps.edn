@@ -138,7 +138,8 @@
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
-              "-XX:G1PeriodicGCInterval=30000"]}
+              "-XX:G1PeriodicGCInterval=30000"
+              "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"]}
 
   ;; Rebuild the source-preferred class cache for the dependency namespaces
   ;; reached by `seon.artifact`; first-party source remains uncached.
@@ -162,6 +163,7 @@
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=8"
               "-XX:G1PeriodicGCInterval=30000"
+              "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"
               ;; A heap failure ends the JVM instead of limping into the store.
               ;; The operator names the dump directory (<root>/data/heap) at
               ;; launch; this JVM's working directory may be a pruned archive.
