@@ -1,4 +1,5 @@
-(ns seon.repl-parity-test
+(ns ^{:seon.test/golden "Stock-Clojure parity is a printing contract: each case compares what the REPL prints, writes to *out* and *err* with what stock Clojure prints."}
+  seon.repl-parity-test
   "Stock-Clojure behavior checks exercised through Seon's production evaluation path."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
