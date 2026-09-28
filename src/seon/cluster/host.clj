@@ -22,24 +22,24 @@
 (schema.edn/load! {})
 
 (defn- agent-entity
-  "The agent's entity on `database` with its branch and admission, or nil when absent."
+  "The agent's entity on `database` with its branch and admission, nil when
+  absent, or the read's refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:maybe [:map [:db/id :int]]]]}
+                  [:or :nil [:map [:db/id :int]] :seon.db/invalid-read-error]]}
   [database agent-id]
   (let [entity (db/pull database [:db/id :seon.agent/branch :seon.agent/admission-closed-tx]
                      [:seon.agent/id agent-id])]
-    (when (:seon.error/at entity) (throw (ex-info (str (:seon.error/message entity)) entity)))
-    (when (:db/id entity) entity)))
+    (cond (:seon.error/at entity) entity
+          (:db/id entity) entity)))
 
 (defn- refusal
-  "The flat refusal a host decision throws; the writer returns it verbatim."
-  {:malli/schema [:=> [:cat :qualified-symbol :string :keyword :any :seon.agent/id] :seon.error/throwable]}
+  "The flat refusal a host decision answers."
+  {:malli/schema [:=> [:cat :qualified-symbol :string :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "The refused value a host decision names: a transaction id, a branch or an agent id." :gen/elements [1 :db "agent"]}] :seon.agent/id] :seon.cluster.host/refused-error]}
   [operation message member offending agent-id]
-  (ex-info message
-           (seon.error.refusal/diagnostic
-            (java.util.Date.) :seon.cluster/host operation
-            {:seon.error/message message :seon.error/member member
-             :seon.error/offending offending :seon.agent/id agent-id})))
+  (seon.error.refusal/diagnostic
+   (java.util.Date.) :seon.cluster/host operation
+   {:seon.error/message message :seon.error/member member
+    :seon.error/offending offending :seon.agent/id agent-id ::refused-agent agent-id}))
 
 (defn home-call
   "Admit `agent-id` as the agent homed on `branch`, decided by this writer.
@@ -53,16 +53,19 @@
                        :seon.ns/name :seon.cluster/name]
                   :seon.store/transaction-data]}
   [database agent-id branch namespace-name cluster-name]
-  (let [existing (agent-entity database agent-id)]
+  (let [existing (agent-entity database agent-id)
+        ;; a transaction function's throw is its writer's refusal
+        refuse! #(throw (ex-info (:seon.error/message %) %))]
     (cond
+      (:seon.error/at existing) (refuse! existing)
       (:seon.agent/admission-closed-tx existing)
-      (throw (refusal `home-call "The hosted agent's admission is closed."
-                      :seon.agent/admission-closed-tx agent-id agent-id))
+      (refuse! (refusal `home-call "The hosted agent's admission is closed."
+                        :seon.agent/admission-closed-tx agent-id agent-id))
       (and existing (not= branch (:seon.agent/branch existing)))
-      (throw (refusal `home-call
-                      (str "Agent " agent-id " is homed on " (:seon.agent/branch existing)
-                           ", not on " branch ".")
-                      :seon.agent/branch (:seon.agent/branch existing) agent-id))
+      (refuse! (refusal `home-call
+                        (str "Agent " agent-id " is homed on " (:seon.agent/branch existing)
+                             ", not on " branch ".")
+                        :seon.agent/branch (:seon.agent/branch existing) agent-id))
       existing []
       :else (agent/creation-tx {:seon.agent/id agent-id :seon.ns/name namespace-name
                                 :seon.agent/branch branch :seon.cluster/name cluster-name}))))
@@ -71,20 +74,24 @@
   "Admit the agent as homed on the execution's branch, on the cluster and on
   that branch (each writer decides, `home-call`), then start the branch's
   armer graph; the armer's init registers the route listener."
-  {:malli/schema [:=> [:cat ::request :seon.agent/execution-handle] ::host]}
+  {:malli/schema [:=> [:cat ::request :seon.agent/execution-handle]
+                  [:or ::host :seon.db/transaction-refused-error]]}
   [{cluster-handle :seon.turn.loop/cluster agent-id :seon.agent/id namespace-name :seon.ns/name}
    execution]
   (let [connection (:seon.db/connection execution)
         branch (:seon.agent/branch execution)
-        roster (:seon.agent/routing execution)]
-    ;; The agent is an entity of the cluster naming its home branch, and of that
-    ;; branch: a message to or from it resolves on either, and root lists it.
-    (doseq [target [(:seon.db/connection cluster-handle) connection]]
-      (let [result (db/call-with-custody {}
-                     #(db/transact! target [[:db.fn/call #'home-call agent-id branch namespace-name
-                                             (:seon.cluster/name cluster-handle)]]))]
-        (when-not (:db-after result)
-          (throw (ex-info (str (:seon.error/message result "Hosted agent admission refused.")) result)))))
+        roster (:seon.agent/routing execution)
+        ;; The agent is an entity of the cluster naming its home branch, and of that
+        ;; branch: a message to or from it resolves on either, and root lists it.
+        ;; The first writer's refusal is the answer; nothing starts.
+        refused (some (fn [target]
+                        (let [result (db/call-with-custody {}
+                                       #(db/transact! target [[:db.fn/call #'home-call agent-id branch namespace-name
+                                                               (:seon.cluster/name cluster-handle)]]))]
+                          (when-not (:db-after result) result)))
+                      [(:seon.db/connection cluster-handle) connection])]
+   (if refused
+    refused
     (let [armer-channel (async/chan (async/sliding-buffer 1))
           handle (merge cluster-handle
                         (select-keys execution [:seon.db/connection :seon.sci.eval/ctx :seon.sci.eval/base-ctx
@@ -112,7 +119,7 @@
              :conns []}})]
       {:seon.turn.loop/cluster handle :seon.agent/routing roster :seon.agent/id agent-id
        ::execution execution ::parent (:seon.db/connection cluster-handle)
-       :seon.flow/graph graph :seon.flow/executor executor})))
+       :seon.flow/graph graph :seon.flow/executor executor}))))
 
 (defn hosted
   "The host running on `branch` under `cluster-handle`, or nil when none is."
@@ -126,11 +133,13 @@
 
   Concurrent callers share one start: the execution's roster reserves `::host`
   with a delay, as `arm!` reserves an arming. A failed start clears its claim
-  and rethrows whole. A branch hosts one agent: a request naming another agent
-  than the one running there refuses by name. Answers the host value `retire!`
-  and `seon.cluster.agent/evaluate-source!` take (its `:seon.turn.loop/cluster`
-  and `:seon.agent/routing`)."
-  {:malli/schema [:=> [:cat ::request] ::host]}
+  and rethrows whole; a refused admission clears its claim and answers the
+  writer's refusal. A branch hosts one agent: a request naming another agent
+  than the one running there answers `::refused-error` by name. Answers the
+  host value `retire!` and `seon.cluster.agent/evaluate-source!` take (its
+  `:seon.turn.loop/cluster` and `:seon.agent/routing`)."
+  {:malli/schema [:=> [:cat ::request]
+                  [:or ::host ::refused-error :seon.db/transaction-refused-error]]}
   [{cluster-handle :seon.turn.loop/cluster branch :seon.agent/branch agent-id :seon.agent/id :as request}]
   ;; A running host answers from the roster; reacquiring the branch per call
   ;; measured 409 ms warm against 240 ms for the first host (default, 2026-09-26).
@@ -138,19 +147,24 @@
                  (let [execution (agent/acquire-context! cluster-handle nil {:seon.agent/branch branch})
                        roster (:seon.agent/routing execution)
                        claim (::host (swap! roster update ::host #(or % (delay (start! request execution)))))]
-                   (try @claim
-                        (catch Throwable failure
-                          ;; A refused start holds nothing: its claim goes, and so does the
-                          ;; execution acquired for it (a retired agent's branch otherwise
-                          ;; keeps a connection its retirement cannot see).
-                          (when (identical? claim (::host (first (swap-vals! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host)))))))
-                            (try (agent/release-context! execution)
-                                 (catch Throwable cleanup (.addSuppressed failure cleanup))))
-                          (throw failure)))))]
-    (if (= agent-id (:seon.agent/id host))
-      host
-      (throw (refusal `host! (str "Branch " branch " hosts " (:seon.agent/id host) ", not " agent-id ".")
-                      :seon.agent/id (:seon.agent/id host) agent-id)))))
+                   ;; A refused start holds nothing: its claim goes, and so does the
+                   ;; execution acquired for it (a retired agent's branch otherwise
+                   ;; keeps a connection its retirement cannot see).
+                   (letfn [(unclaim! [] (identical? claim (::host (first (swap-vals! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host))))))))]
+                     (try (let [started @claim]
+                            (when (and (:seon.error/at started) (unclaim!))
+                              (agent/release-context! execution))
+                            started)
+                          (catch Throwable failure
+                            (when (unclaim!)
+                              (try (agent/release-context! execution)
+                                   (catch Throwable cleanup (.addSuppressed failure cleanup))))
+                            (throw failure))))))]
+    (cond
+      (:seon.error/at host) host
+      (= agent-id (:seon.agent/id host)) host
+      :else (refusal `host! (str "Branch " branch " hosts " (:seon.agent/id host) ", not " agent-id ".")
+                     :seon.agent/id (:seon.agent/id host) agent-id))))
 
 (defn retire!
   "Retire a host: close its agent's admission, on its branch row and then its
@@ -161,20 +175,24 @@
   `seon.cluster/disarm-agents!` (armer quiescence removes the route listener,
   agent graphs join, the armer graph joins, all under one deadline). A missed
   join throws with admission closed and the execution held, so a retry after
-  exit completes. Then the execution is released."
-  {:malli/schema [:=> [:cat ::host] :nil]}
+  exit completes. Then the execution is released. A refused read or a
+  refused admission close is answered and nothing further happens."
+  {:malli/schema [:=> [:cat ::host] [:or :nil :seon.db/invalid-read-error :seon.db/transaction-refused-error]]}
   [{handle :seon.turn.loop/cluster roster :seon.agent/routing agent-id :seon.agent/id
     execution ::execution :as host}]
   ;; The branch entity first: its run writer refuses every later run from then
   ;; on. The cluster entity then records that this host is closed.
-  (doseq [connection (keep identity [(:seon.db/connection handle) (::parent host)])
-          :let [entity (agent-entity @connection agent-id)]
-          :when (and entity (not (:seon.agent/admission-closed-tx entity)))]
-    (let [result (db/call-with-custody {}
-                   #(db/transact! connection
-                      [[:db/add (:db/id entity) :seon.agent/admission-closed-tx "datomic.tx"]]))]
-      (when-not (:db-after result) (throw (ex-info "Closing the host's admission was refused." result)))))
-  (cluster/disarm-agents! host)
-  (swap! roster dissoc ::host)
-  (agent/release-context! execution)
-  nil)
+  (or (some (fn [connection]
+              (let [entity (agent-entity @connection agent-id)]
+                (cond
+                  (:seon.error/at entity) entity
+                  (and entity (not (:seon.agent/admission-closed-tx entity)))
+                  (let [result (db/call-with-custody {}
+                                 #(db/transact! connection
+                                    [[:db/add (:db/id entity) :seon.agent/admission-closed-tx "datomic.tx"]]))]
+                    (when-not (:db-after result) result)))))
+            (keep identity [(:seon.db/connection handle) (::parent host)]))
+      (do (cluster/disarm-agents! host)
+          (swap! roster dissoc ::host)
+          (agent/release-context! execution)
+          nil)))

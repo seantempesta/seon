@@ -1,4 +1,9 @@
-#:seon.cluster.host{:request
+#:seon.cluster.host{:refused-error
+                    [:and {:description "A host decision refused by name: a closed admission, another home branch, another agent hosted on the branch; :seon.error/member names which."}
+                     :seon.error/base
+                     [:map [:seon.cluster.host/refused-agent :seon.cluster.host/refused-agent]]],
+                    :refused-agent [:string {:min 1 :description "The agent id a host decision refused, as a value (not the agent's identity)."}],
+                    :request
                     [:map
                      {:description "Host one agent on an existing branch through the running cluster's handle."}
                      [:seon.turn.loop/cluster :seon.agent/context-source]

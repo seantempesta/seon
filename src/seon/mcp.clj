@@ -180,16 +180,14 @@
                                                 :seon.agent/routing (:seon.agent/routing handle)}))]
         (if (:seon.error/at created)
           created
-          ;; host! refuses by name (closed admission, another agent hosted
-          ;; there) as an ex-info carrying its flat refusal: the caller's to fix
-          (try
-            (select-keys (host/host! {:seon.turn.loop/cluster (assoc handle :seon.store/store store)
-                                      :seon.agent/branch branch :seon.agent/id agent-id
-                                      :seon.ns/name (or namespace-name 'user)})
-                         [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
-            (catch clojure.lang.ExceptionInfo refusal
-              (let [flat (refusal/refusal refusal)]
-                (if (:seon.error/at flat) flat (throw refusal))))))))))
+          ;; host! answers its refusal by name (closed admission, another
+          ;; agent hosted there): the caller's to fix
+          (let [host (host/host! {:seon.turn.loop/cluster (assoc handle :seon.store/store store)
+                                  :seon.agent/branch branch :seon.agent/id agent-id
+                                  :seon.ns/name (or namespace-name 'user)})]
+            (if (:seon.error/at host)
+              host
+              (select-keys host [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id]))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Evaluation
