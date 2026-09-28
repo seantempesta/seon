@@ -320,6 +320,26 @@
     (is (contains? attributes :seon.config/dial))
     (is (not (contains? attributes :gen/schema)))))
 
+(deftest unstorable-declarations-return-values-without-the-throwing-wrapper
+  (let [projection (schema/build-projection
+                    (assoc (:seon.schema.projection/forms (schema/handed-projection))
+                           ::unstorable :seon.schema/definition))]
+    (doseq [n [1 10 100]]
+      (let [[answers calls]
+            (support/armed-calls
+             '#{seon.schema.datahike/attribute-declaration
+                seon.schema.datahike/malli->datahike-attr-in}
+             #(mapv (fn [_] (schema.datahike/storable-attribute-in? projection ::unstorable))
+                    (range n)))]
+        (is (= (vec (repeat n false)) answers))
+        (is (= n (get calls 'seon.schema.datahike/attribute-declaration)))
+        (is (zero? (get calls 'seon.schema.datahike/malli->datahike-attr-in 0)))))
+    (let [refusal (schema.datahike/attribute-declaration projection ::absent)]
+      (is (= ::absent (:seon.schema.datahike/unstorable-attribute refusal)))
+      (is (= ::absent (:seon.schema.datahike/attribute-absent refusal)))
+      (is (m/validate :seon.schema.datahike/unstorable-attribute-error refusal
+                      {:registry (:seon.schema.projection/registry projection)})))))
+
 (deftest a-schema-absent-from-the-projection-refuses-by-name
   ;; CLASS: ambiguous nil. `mr/schema` answers nil for an undeclared key, and
   ;; Malli then refused an anonymous `{:schema nil}`; the refusal names the key.
