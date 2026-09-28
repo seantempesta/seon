@@ -167,14 +167,17 @@
     :else nil))
 
 (defn- accepts-request?
+  "Whether the owner's input contract accepts `request`, or the refusal that
+  no projection was carried to ask it with."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol :seon.schema/value]
+                  [:or :boolean :seon.schema/validation-refusal]]}
   [database owner-sym request]
   (let [projection (or (db/carried-projection database)
                        (:seon.schema/projection request)
                        (:seon.schema/projection (env/of request)))]
     (if projection
       (schema/function-accepts-in? projection owner-sym [request])
-      (let [failure (db/projection-fallback 'seon.effect/accepts-request?)]
-        (throw (ex-info (:seon.error/message failure) failure))))))
+      (db/projection-fallback 'seon.effect/accepts-request?))))
 
 (defn- admission
   [request-context]
@@ -752,7 +755,8 @@
              ;; Resolved BEFORE the receipt is opened, so an unbounded
              ;; detached request is refused rather than recorded.
              background-limit
-             (when background? (background-time-limit execution effective))]
+             (when background? (background-time-limit execution effective))
+             accepted (delay (accepts-request? database owner-sym request))]
          (cond
            (nil? handler-symbol)
            (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
@@ -771,7 +775,10 @@
         :seon.error/expected "a loaded capability handler"}
               (:seon.error/data resolved) (assoc :seon.error/data (:seon.error/data resolved))))
 
-           (not (accepts-request? database owner-sym request))
+           ;; no projection to ask the owner's contract with: its refusal
+           (map? @accepted) @accepted
+
+           (not @accepted)
            (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
             {:seon.error/message "Supply a request satisfying the owner input contract."
         :seon.error/offending request

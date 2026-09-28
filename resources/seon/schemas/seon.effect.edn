@@ -275,7 +275,13 @@
                 "Declared handler on a function; the exact dispatched handler observed on an effect. Only function declarations are live deletion obligations."}],
               :missing-context-member :qualified-keyword,
               :request-result
-              :seon.schema/value,
+              [:or {:description "What seon.effect/request! answers: the boundary's refusal of the request before or during dispatch (each alternative named by its distinguishing member), or the capability's own declared result."}
+               :seon.effect/no-evaluation-context-error :seon.effect/invalid-owner-error
+               :seon.effect/undeclared-owner-error :seon.effect/unavailable-handler-error
+               :seon.effect/invalid-request-error :seon.effect/invalid-time-limit-error
+               :seon.effect/missing-background-time-limit-error :seon.effect/request-too-large-error
+               :seon.effect/handler-failed-error :seon.effect/interrupted-error
+               :seon.schema/validation-refusal :seon.schema/value],
               :opened-at :inst,
               :content-blobs [:vector :seon.blob/digest],
               :already-recorded-error
