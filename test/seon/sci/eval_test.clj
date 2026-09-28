@@ -411,7 +411,8 @@
             :seon.print/level 2}
            (:seon.print/options evaluation)))))
 
-(deftest ^{:seon.test/fixture-observation "Reloads the JVM namespace seon.sci.eval, which every cluster in the process shares; a branch isolates no loaded Var, so on a shared JVM the reload replaces default's roots and generator Vars mid-run."}
+(deftest ^{:seon.test/fixture-observation "Reloads the JVM namespace seon.sci.eval, which every cluster in the process shares; a branch isolates no loaded Var, so on a shared JVM the reload replaces default's roots and generator Vars mid-run."
+            :seon.test/platform "Moving part: adoption reloads namespaces, so the evaluator must stay live after its own namespace reloads. The require :reload is forbidden in the shared JVM; this runs in the platform tier's isolated JVM."}
   the-evaluator-remains-live-after-its-namespace-reloads
   (let [entering (instrument/state)
         projection (schema/handed-projection)
