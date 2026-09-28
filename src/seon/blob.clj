@@ -204,6 +204,12 @@
   ^bytes [content]
   (.getBytes ^String content StandardCharsets/UTF_8))
 
+(defn utf8-size
+  "The UTF-8 byte count of `text`."
+  {:malli/schema [:=> [:cat :string] nat-int?]}
+  [text]
+  (alength (utf8-bytes text)))
+
 (def ^:private byte-array-class
   (class (byte-array 0)))
 

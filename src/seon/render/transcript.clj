@@ -1157,9 +1157,6 @@
     (or (:seon.turn/reply entity) (:seon.turn/reply-blob entity)) "System"
     :else "No provider attempt"))
 
-(defn- utf8-size [text]
-  (alength (.getBytes ^String text "UTF-8")))
-
 (defn- readable-shown [source]
   (try
     (with-open [reader (PushbackReader. (StringReader. source))]
@@ -1320,7 +1317,7 @@
              (when (and (number? (::before change)) (number? (::after change)))
                (str " " (::before change) " → " (::after change)))))
       (and (seq changes) (seq (::path (first changes)))) (str (count changes) " changed paths")
-      :else (str (utf8-size (or first-shown "")) " → " (utf8-size (or last-shown "")) " shown bytes"))))
+      :else (str (blob/utf8-size (or first-shown "")) " → " (blob/utf8-size (or last-shown "")) " shown bytes"))))
 
 (defn render-session-loading
   "Select only the latest turn initially; acquire its prompt on demand."
@@ -1384,7 +1381,7 @@
                                                [source (str "reread" index)]) rereads))
         turn-bytes (reduce (fn [sizes [segment evaluation-entity]]
                              (update sizes (get-in evaluation-entity [:seon.cluster.eval/run :db/id])
-                                     (fnil + 0) (utf8-size segment)))
+                                     (fnil + 0) (blob/utf8-size segment)))
                            {} (map vector (:seon.render.history/segments acquired) saved))
         raw? (::raw? request)]
     [:section {:id (session-id agent-id) :class "seon-session" :data-ignore-morph ""
@@ -1409,7 +1406,7 @@
          (str (::ordinal entity))])]
      (when prompt
        [:p {:class "seon-session-meta"}
-        (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
+        (str (format "%,d" (blob/utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
              " tokens · " (count entries) " emissions · oldest → newest")])]
      ;; An acquisition without prompt text is the refusal caught above (or a
      ;; web refusal); it renders as that failure, never as an empty prompt.
@@ -1433,7 +1430,7 @@
                 [:p "Expanded at their original positions below."]]))])
         [:div {:class "seon-session-scroll"}
          (if raw?
-           [:pre {:class "seon-session-raw" :data-prompt-bytes (utf8-size prompt)} [:code prompt]]
+           [:pre {:class "seon-session-raw" :data-prompt-bytes (blob/utf8-size prompt)} [:code prompt]]
            (into [:div {:class "seon-session-emissions"}]
                  (map-indexed
                   (fn [position [entry evaluation-entity]]
@@ -1458,7 +1455,7 @@
                         [:aside {:class (str "seon-session-gutter seon-origin-" origin)}
                          [:span (str (::ordinal entity))] [:span (str "● " origin)]]
                         [:pre {:data-emission-bytes (+ (if (pos? position) 2 0)
-                                                       (utf8-size (:seon.render.history/bytes entry)))}
+                                                       (blob/utf8-size (:seon.render.history/bytes entry)))}
                          (when (pos? position) [:span "\n\n"])
                          (if (= (:seon.render.history/bytes entry) (repl/text emission))
                            (repl/render-emission-html emission)
@@ -1585,7 +1582,7 @@
           (error/render-html (assoc request :seon.render/value html))]
          html)]
       [:pre {:class "seon-outline-ai" :data-show (str "$" signal)
-             :data-ai-bytes (utf8-size bytes)}
+             :data-ai-bytes (blob/utf8-size bytes)}
        [:code bytes]]]]))
 
 (defn- outline-everything
@@ -1614,13 +1611,13 @@
         "Show everything · the composed prompt was refused"
         (let [text (:seon.cluster.prompt/text composed)]
           (str "Show everything · the composed prompt · "
-               (format "%,d" (utf8-size text)) " bytes · ≈"
+               (format "%,d" (blob/utf8-size text)) " bytes · ≈"
                (format "%,d" (tokens/estimate text)) " tokens")))]
      (if refusal
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value composed))]
        [:pre {:class "seon-session-raw"
-              :data-prompt-bytes (utf8-size (:seon.cluster.prompt/text composed))}
+              :data-prompt-bytes (blob/utf8-size (:seon.cluster.prompt/text composed))}
         [:code (:seon.cluster.prompt/text composed)]])]))
 
 (defn render-outline
@@ -1846,7 +1843,7 @@
                            ::outcome (cond (:seon.cluster.eval/interrupted-at entity) "interrupted"
                                            (:seon.cluster.eval/error entity) "error"
                                            (:seon.eval/shown entity) "value" :else "out")
-                           ::contributed-bytes (utf8-size segment)))) entries segments))
+                           ::contributed-bytes (blob/utf8-size segment)))) entries segments))
         entities (ledger-entities database (turn-entities database agent-id) evaluations)
         effects (ledger-effects database agent-id entities)
         calibrations (into {} (for [model (distinct (keep #(get-in % [::attempt :seon.ai/model]) entities))]
@@ -1918,7 +1915,7 @@
          [:summary
           (str (if provider? "Full context as sent" "Full context before reply")
                (when capture
-                 (str ": " (format "%,d" (utf8-size capture)) " bytes · "
+                 (str ": " (format "%,d" (blob/utf8-size capture)) " bytes · "
                       (if (or (db/read-refusal? calibration) (:seon.config/error-key calibration) (:seon.config/missing-effective calibration) (:seon.cluster.prompt/missing-cluster calibration) (:seon.cluster.prompt/missing-config calibration))
                         "estimate unavailable"
                         (str "rebuilt ≈" (format "%,d" (tokens/estimate capture calibration)) " tokens"))))
@@ -1927,8 +1924,8 @@
      (when authored?
        (list
         [:section {:class "seon-ledger-reply" :data-author "agent"}
-         (ledger-heading "AGENT REPLIED" "agent" (str (format "%,d" (utf8-size reply)) " bytes"))
-         [:pre {:data-reply-bytes (utf8-size reply) :data-reply-turn turn-id} (colour-source reply)]]
+         (ledger-heading "AGENT REPLIED" "agent" (str (format "%,d" (blob/utf8-size reply)) " bytes"))
+         [:pre {:data-reply-bytes (blob/utf8-size reply) :data-reply-turn turn-id} (colour-source reply)]]
         [:section {:class (str "seon-ledger-results"
                               (when (some :seon.cluster.eval/error own) " seon-ledger-results-error"))
                    :data-author "seon" :data-evaluation-count (count own)}

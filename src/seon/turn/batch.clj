@@ -27,6 +27,7 @@
             [seon.db :as db]
             [seon.fn :as sfn]
             [seon.batch]
+            [seon.blob :as blob]
             [seon.fn.analyzer :as analyzer]
             [seon.profile.measurement :as measurement]
             [seon.program :as program]
@@ -41,17 +42,11 @@
             [seon.sci.forgive :as forgive]
             [seon.turn.world :as world]
             [seon.sci.kernel :as kernel]
-            [seon.test.accretion :as accretion])
-  (:import (java.nio.charset StandardCharsets)))
+            [seon.test.accretion :as accretion]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Analysis and the join
 ;;; ---------------------------------------------------------------------------
-
-(defn- utf8-length
-  {:malli/schema [:=> [:cat :string] nat-int?]}
-  [^String s]
-  (alength (.getBytes s StandardCharsets/UTF_8)))
 
 (defn- line-starts
   {:malli/schema [:=> [:cat :string] [:vector nat-int?]]}
@@ -194,7 +189,7 @@
   {:malli/schema [:=> [:cat :string int? [:tuple int? int?]] nat-int?]}
   [^String source first-row [r c]]
   (let [ls (line-starts source)]
-    (utf8-length (subs source 0 (+ (get ls (- r first-row)) (dec c))))))
+    (blob/utf8-size (subs source 0 (+ (get ls (- r first-row)) (dec c))))))
 
 (defn- definition-source
   {:malli/schema [:=> [:cat :map :map] :string]}

@@ -19,9 +19,6 @@
 (defn- boot-time []
   (java.util.Date. (.getStartTime (ManagementFactory/getRuntimeMXBean))))
 
-(defn- utf8-size [text]
-  (alength (.getBytes ^String text "UTF-8")))
-
 (defn- thread-counts
   "Live platform threads from the JVM's thread bean. Virtual threads are a
   typed unknown: the bean counts platform threads only, and a thread dump to
@@ -138,8 +135,8 @@
                digests (set (concat (keep :seon.turn/reply-blob turns)
                                     (keep :seon.ai.attempt/reasoning-blob (mapcat :seon.turn/attempts turns))
                                     fault-blobs))
-               blob-sizes (map #(some-> (blob/get connection %) utf8-size) digests)
-               storage (sum-known (concat (map #(utf8-size (get % :seon.eval/shown "")) evaluations)
+               blob-sizes (map #(some-> (blob/get connection %) blob/utf8-size) digests)
+               storage (sum-known (concat (map #(blob/utf8-size (get % :seon.eval/shown "")) evaluations)
                                            blob-sizes) "A referenced blob is unavailable.")]
            (cond-> (assoc (dissoc agent :db/id)
                           :seon.cluster.status/evaluations (count session)
