@@ -1,7 +1,8 @@
 ;; store-structure-opus: history-query ms on a memory store written entirely by the
 ;; Datahike this JVM loads (steady state for that write rule); nothing touches disk.
 ;; Run: clojure -M tmp/store-structure/memory_history_queries.clj <label>
-(require '[datahike.api :as d])
+(require '[datahike.api :as d]
+         '[datahike.db.interface :as dbi])
 
 (let [label (first *command-line-args*)
       cfg {:store {:backend :memory :id (random-uuid)} :keep-history? true :schema-flexibility :write
@@ -34,6 +35,19 @@
               {:n (count r) :hash (hash (set r))
                :median-ms (/ (Math/round (* 10 (nth (sort (map first runs)) 7))) 10.0)}))]
   (prn {:label label :temporal-eavt (count (seq (:temporal-eavt db)))
+        ;; the read-evidence refresh: one since-over-history at a basis, the first
+        ;; datom of each retained pattern (seon.db/index-evidence-current)
+        :refresh (let [eavt (vec (d/datoms db :eavt))
+                       sample (vec (take-nth (max 1 (quot (count eavt) 3000)) eavt))
+                       patterns (vec (concat (map (fn [x] [(:e x) (:a x) nil]) sample)
+                                             [[nil :x/n nil] [nil :x/name nil] [nil :x/tags nil]]))
+                       check (fn [basis] (let [changes (d/since (d/history db) basis)]
+                                           (mapv #(some-> (first (dbi/search changes %)) ((juxt :e :a :v :tx :added))) patterns)))
+                       basis (- (:max-tx db) 3)]
+                   (dotimes [_ 5] (check basis))
+                   {:hash (hash (check basis))
+                    :median-ms (let [xs (sort (repeatedly 15 #(let [t (System/nanoTime)] (check basis) (/ (- (System/nanoTime) t) 1e6))))]
+                                 (/ (Math/round (* 10 (nth xs 7))) 10.0))})
         :history (into {} (for [[k q] queries] [k (run q h)]))
         :as-of-n (count (d/q '[:find ?e ?p :where [?e :x/n ?p]] (d/as-of db (- (:max-tx db) 10))))})
   (d/release conn)
