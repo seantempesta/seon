@@ -46,6 +46,16 @@
       (test-support/transacted! connection (test-support/agent-tx @connection "agent-a"))
       (body connection))))
 
+(defn- page-rows
+  "Each problems-page row as its label → shown-value map: the page's findings as data."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:sequential [:map-of :string :string]]]}
+  [html]
+  (for [row (test-support/hiccup-elements html)
+        :when (= "seon-problems-row" (:class (second row)))]
+    (into {} (for [field (test-support/hiccup-elements row)
+                   :when (= "seon-problems-field" (:class (second field)))]
+               (vec (test-support/hiccup-leaves field))))))
+
 (defn problems-surface
   "The problems block as a producer wires it: a projection that supplies
   the liveness set the pipeline will thread from the process. Package 2
@@ -256,9 +266,10 @@
                entries)
             "cluster and agent assertions deduplicate and sort by model id")
         (is (str/includes? (problems/ai-prose value) "a-agent-model"))
-        (is (str/includes?
-             (hiccup/->string (problems/html-report value))
-             "no registry entity"))
+        (is (= [{"model" "a-agent-model" "problem" "no registry entity"}
+                {"model" "z-cluster-model" "problem" "no registry entity"}]
+               (page-rows (problems/html-report value)))
+            "the page shows one row per missing model")
         (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
 
         (is (:db-after
@@ -308,9 +319,8 @@
                 (is (= [{:seon.fn/sym qualified-name}] stale-vars))
                 (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
                 (is (str/includes? (problems/ai-prose value) qualified-text))
-                (is (str/includes?
-                     (hiccup/->string (problems/html-report value))
-                     qualified-text)))
+                (is (= [qualified-text] (keep #(get % "var") (page-rows (problems/html-report value))))
+                    "the page shows the stale Var's row"))
               (finally
                 (when (identical? created
                                   (ns-resolve loaded-namespace intern-name))
@@ -416,7 +426,8 @@
           (is (= :seon.program/definition-digest (get-in entry [:seon.error/resolution :seon.error/resolved-by]))
               "the problems value keeps the resolved signature and says why")
           (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
-          (is (str/includes? (pr-str (problems/html-report value)) "by change to my.resolution.fixture/target")
+          (is (some #(str/starts-with? (get % "resolved" "") "by change to my.resolution.fixture/target")
+                    (page-rows (problems/html-report value)))
               "the problems page shows the resolution, so a false one can be checked"))
         (fault!)
         (is (open?) "a recurrence under the changed code reopens it")
@@ -475,7 +486,7 @@
         (is (= "receipt-1" (:seon.cluster.eval/id entry)))
         (is (= "run-with-receipt" (:seon.turn/id entry)))
         (is (= 0 (:seon.cluster.eval/ordinal entry)))
-        (is (str/includes? (:seon.cluster.eval/error entry) "widgets"))
+        (is (= "Unable to resolve symbol: widgets" (:seon.cluster.eval/error entry)))
         (is (= "(widgets)" (:seon.cluster.eval/source entry)))
         (is (str/includes?
              (problems/ai-prose value)
@@ -546,17 +557,16 @@
       (let [healthy @connection
             _ (commit-failed-run! connection)
             broken @connection
-            render-at (fn [db]
-                        (hiccup/->string
-                         (problems/block
-                          {:seon.db/db db
-                           })))]
+            render-at (fn [db] (problems/block {:seon.db/db db}))
+            errors (fn [db] (keep #(get % "error") (page-rows (render-at db))))]
         (is (= (render-at (db/db (:seon.db/connection seon.test/*member*))) (render-at healthy))
             "the fixture's healthy value renders exactly its world's surface")
-        (is (not (str/includes? (render-at healthy) "the model did not answer")))
-        (is (str/includes? (render-at broken) "the model did not answer"))))))
+        (is (empty? (errors healthy)) "the healthy value shows no failed run")
+        (is (= ["the model did not answer"] (errors broken))
+            "the broken value shows its failed run's error")))))
 
-(deftest six-hundred-failed-tests-render-within-the-profile-bound
+(deftest ^{:seon.test/golden "ai-prose is the value printer's bounded text: its budget, whole lines and elision continuation are what the agent reads."}
+  six-hundred-failed-tests-render-within-the-profile-bound
   ;; 649 live failed tests were 313,589 characters of prose with no bound.
   (let [profile {:seon.render.profile/id :seon.render.profile/agent
                  :seon.render.profile/token-budget 15000
