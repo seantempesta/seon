@@ -319,8 +319,15 @@ incremental path and failed the from-scratch one, i.e. **boot-from-files and ado
 AGENTS.md already says the opposite should hold: prove schema changes incrementally on a branch of a live store;
 inability to adopt is a publication defect, never a reason to boot from zero. The fix is one path: a from-scratch boot
 is adoption of every file onto an empty store, so a change proven by adoption on a branch of the live store (seconds)
-is proven for a fresh install too, and the drill is deleted. The boot-perf lane measures what differs between the two
-paths and what the from-scratch build redoes, to cost that cut.
+is proven for a fresh install too, and the drill is deleted. Measured (boot-perf lane, tmp/boot-perf/): only one of the seven failures
+was from-scratch-only (conflicting entity maps, from `index!`'s fresh-store branch, `src/seon/fn.clj:4185-4201`); two
+failed only on existing stores; four came from weak rehearsals any `start --head` catches; six more from-scratch-only
+failures in history share the class "an empty store selects different code". The reconcile writer populates an empty
+store with the same 89,069 datoms after a one-line `seon.db` fix. **Root chose option A:** one writer (db.clj +8/−3,
+fn.clj −58/+11 deleting the fresh branch), then `bin/seon drill` and its AGENTS.md rule are deleted; proof is
+publication and adoption on a branch of the live store (now the code a fresh install runs), the long test
+`fresh-population-flattens-with-its-supplied-declarations` in root's central tier, and root's batched `start --head`,
+which already restores the previous commit on failure.
 
 ## 10. Warnings, and what the armed wrapper can capture
 
