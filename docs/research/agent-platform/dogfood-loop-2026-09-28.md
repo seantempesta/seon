@@ -78,6 +78,15 @@ understand, 0 manual steps outside the REPL (the fix itself went to a patch beca
   :note "ns-unmap! = three deletion-reports (pre-read, writer re-decide, :affected recompute), each a breaks (1,480 read-declarations); its evaluation is labelled :error even when it returns a count"}]
 ```
 
+### Loop 1, attempt 4 (default 52e163bee, B7 live as 77dda7bcf)
+
+```clojure
+[{:step 1 :form "(my.program/propose-merge! {})" :ms 6651 :tok 350 :verdict :blocker
+  :note "Cannot interpret seon.sci.eval/acquire-program!: host-bound, unchanged, calls a definition this branch changes (sci/eval.clj:1281-1298). 588,765 calls."}
+ {:step 2 :form "(reverse-closure of seon.render.value/tree, host-bound members)" :ms 53 :tok 150 :verdict :ok
+  :note "419 transitive callers, 13 host-bound, among them seon.sci.eval/evaluate, acquire-program! and evaluated-source: the evaluator prints through the value printer, so a branch change to the printer refuses the branch's own evaluator and test tooling"}]
+```
+
 ## 2. Blockers and fixes
 
 | # | Step | Blocker | Root cause | Fix |
@@ -93,6 +102,7 @@ understand, 0 manual steps outside the REPL (the fix itself went to a patch beca
 | F1 | all | loop replies were a TxReport, a message or bare values with no next step | owner rule: return the useful entity, its status and the next operation | `assign!` answers the assignment offering `propose-merge!`; `propose-merge!` answers the proposal offering `prepare-merge!`; `proposals` offers `prepare-merge!` by merge task; prepare offers `accept-merge!` with its data literal; accept offers `write-back!` when prepare named the checkout |
 | F2 | all | merge-path returns were plumbing (`decide!` a TxReport, `propose-merge!` the message) | owner rule, judged by caller | `decide!` answers the closed merge task; `propose-merge!` answers the proposal (`:seon.task/proposal-answer`) |
 | F3 | pre-commit | two drills (~8 min each) failed on schema EDN errors of mine: a duplicate key, and a named error schema with no domain member | the drill was my first full compile | `seon.contracts-compile-test/check` over the touched files, in an archive of HEAD plus the diff with `reference-code` linked, compiles the whole packaged population in 24-45 s and caught both |
+| B8 | 3 (proof) | a branch change to any function the platform reaches (the value printer: 13 host-bound callers) refuses the branch's evaluator and test tooling | an unchanged host-bound caller of a changed definition is bound to a refusing stub on the branch (sci/eval.clj:1281-1298), by the law "refuse an unsupported override by name instead of running other code" | owner decision: three priced options in the report |
 | B6 | 4 (close) | the agent's branch lives on after its merge | nothing retired it | `my.program/accept-merge!` retires the proposing branch through `my.agent/retire-branch!` with the tested one |
 
 Regressions: `seon.cluster.host-test/a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root` (extended: root
