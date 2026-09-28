@@ -4870,7 +4870,7 @@
     (cond
       (:seon.sci.eval/untrusted evaluation)
       {:seon.batch/value value :seon.batch/evaluation evaluation
-       :seon.batch/facts-refused (select-keys (:seon.sci.eval/untrusted evaluation) [:seon.error/message])}
+       :seon.batch/facts-refused (:seon.sci.eval/untrusted evaluation)}
       (:seon.cluster.eval/error evaluation)
       {:seon.batch/error (ex-info (:seon.cluster.eval/error evaluation) {:seon.batch/error-value value})
        :seon.batch/evaluation evaluation}

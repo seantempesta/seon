@@ -3787,10 +3787,12 @@
   {:malli/schema [:=> [:cat :seon.error/throwable] :seon.sci.eval/untrusted]}
   [^Throwable throwable]
   (let [data (ex-data throwable)]
-    (if (and (map? data) (string? (:seon.error/message data)))
+    (if (and (map? data) (string? (:seon.error/message data)) (:seon.error/at data))
       data
-      {:seon.error/message (or (ex-message throwable) (.getName (class throwable)))
-       :seon.error/throwable-class (.getName (class throwable))})))
+      (seon.error.refusal/diagnostic
+       (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/failure-refusal
+       {:seon.error/message (or (ex-message throwable) (.getName (class throwable)))
+        :seon.error/throwable throwable}))))
 
 (defn- kept-evaluation
   "The frame's evaluation of a form whose value SCI returned before a later

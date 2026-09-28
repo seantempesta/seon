@@ -307,6 +307,16 @@
         (is (= :released (:seon.turn.loop/outcome report))
             "the generating turn goes on to its provider call instead of parking"))))))
 
+(deftest an-untrusted-frame-failure-is-an-error-value-carrying-its-instant
+  (testing "a failure after SCI returned a form's value is the kept value's error, built by the one constructor: it carries :seon.error/at, so the settlement's diagnostic contract admits it"
+    (let [failure-refusal #'sci.eval/failure-refusal]
+      (doseq [thrown [(ex-info "loaded program changed" {:seon.error/message "no such schema"})
+                      (ex-info "bare" {})
+                      (IllegalStateException. "plain")]]
+        (let [error (failure-refusal thrown)]
+          (is (inst? (:seon.error/at error)))
+          (is (string? (:seon.error/message error))))))))
+
 (deftest compaction-refuses-an-open-turn-at-the-writer
   (support/with-database
    (fn [connection]

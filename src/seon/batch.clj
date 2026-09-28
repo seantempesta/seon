@@ -33,7 +33,9 @@
   proposed. The one transaction therefore holds only facts already validated
   in order."
   (:require [clojure.string :as str]
-            [seon.print.value :as print.value]))
+            [seon.error.refusal :as refusal]
+            [seon.print.value :as print.value])
+  (:import (java.util Date)))
 
 (def ^:dynamic *world*
   "The world of the evaluation running on this thread: the entrant's world
@@ -536,9 +538,13 @@
   (catch Exception t
     (let [refusal (ex-data t)]
       (last-entry batch #(assoc % :seon.batch/facts-error
-                                (if (string? (:seon.error/message refusal))
+                                (if (and (string? (:seon.error/message refusal)) (:seon.error/at refusal))
                                   refusal
-                                  (diagnostic :derive (:seon.batch/ordinal %) t)))))))))
+                                  (refusal/diagnostic
+                                   (Date.) :seon.batch/derive `derive-step
+                                   {:seon.error/message (str "derive: " (or (ex-message t) (.getName (class t))))
+                                    :seon.error/throwable t
+                                    :seon.batch/ordinal (:seon.batch/ordinal %)})))))))))
 
 (defn- form-step
   "Read, evaluate and record one form. Answers the batch with :seon.batch/done
