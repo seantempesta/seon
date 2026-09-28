@@ -294,14 +294,15 @@
 
 (defn- comment-of
   "The prose before a form as its comment: the `;` lines between the previous
-  form and this one, their markers removed; fence lines dropped."
+  form and this one, markers kept (the agent-facing grammar reads them back
+  as it typed them: `ns=> ;; prose`); fence lines dropped."
   {:malli/schema [:=> [:cat :string] :string]}
   [^String between]
   (->> (str/split-lines between)
        (map str/trim)
        (remove fence-line?)
-       (keep (fn [l] (when (str/starts-with? l ";") (str/trim (str/replace-first l #"^;+" "")))))
-       (remove str/blank?)
+       (filter (fn [l] (str/starts-with? l ";")))
+       (remove #(str/blank? (str/replace-first % #"^;+" "")))
        (str/join "\n")))
 
 (defn- balanced-end
