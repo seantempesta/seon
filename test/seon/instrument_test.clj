@@ -660,6 +660,32 @@
       (finally
         (instrument/remove!)))))
 
+(deftest boot-arming-arms-only-the-published-program
+  ;; Regression (fallback boot to f15ea624a, 2026-09-28T02:01Z): a JVM-mode
+  ;; client evaluated a scratch namespace whose contract names a schema the
+  ;; booting commit lacks; boot's whole-JVM collection armed it and refused.
+  (let [scratch 'seon.instrument-test.unpublished-scratch]
+    (try
+      (binding [*ns* (create-ns scratch)]
+        (eval '(clojure.core/defn reply-html
+                 {:malli/schema [:=> [:cat :seon.instrument-test/no-such-schema] :int]}
+                 [x] x)))
+      (let [result (instrument/apply!
+                    {:seon.schema/projection
+                     (schema/projection-with-function-contract
+                      (schema/handed-projection) 'seon.instrument-test/declared-map-input
+                      (:malli/schema (meta #'declared-map-input))
+                      {:seon.schema.admission/source :core})
+                     :seon.profile/definition-digests
+                     {'seon.instrument-test/declared-map-input (apply str (repeat 64 "0"))}})]
+        (is (nil? (:seon.instrument/registration-observation result)) (:seon.error/message result))
+        (is (= 1 (:seon.instrument/registered result)))
+        (is (not (contains? (instrument/instrumented)
+                            (find-var (symbol (str scratch) "reply-html"))))))
+      (finally
+        (remove-ns scratch)
+        (instrument/remove!)))))
+
 (deftest many-problem-contract-violations-have-bounded-headlines
   (let [caps (assoc (config/result-caps (test-support/effective-config))
                     :seon.config.eval.result/max-depth 4

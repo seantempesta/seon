@@ -908,16 +908,27 @@
             :seon.instrument/definitions definitions}))))))))
 
 (defn- collect-contracts!
-  "Read declarations from the program loaded into this JVM, without Malli's registry."
-  {:malli/schema [:=> [:cat :seon.sci.admit/caps] [:map-of :seon.instrument/loaded-var :seon.schema/value]]}
-  [_caps]
+  "Read declarations from the program loaded into this JVM, without Malli's registry.
+
+  With `digests`, the program is the published one they name: only its
+  loaded Vars, so a namespace a JVM-mode client evaluated meanwhile (the
+  prepl is open while the boot arms) is neither armed nor able to refuse the
+  boot. Without them, every loaded Var."
+  {:malli/schema [:=> [:cat [:or :nil :seon.profile/definition-digests]]
+                  [:map-of :seon.instrument/loaded-var :seon.schema/value]]}
+  [digests]
   (into {}
         (keep (fn [candidate]
-                (when-let [authored (mi/-schema candidate)]
+                (when-let [authored (and candidate (mi/-schema candidate))]
                   (when (and (bound? candidate)
                              (not (primitive-fn? @candidate)))
                     [candidate authored]))))
-        (mapcat (comp vals ns-interns) (all-ns))))
+        (if digests
+          (map (fn [function-symbol]
+                 (when (find-ns (symbol (namespace function-symbol)))
+                   (find-var function-symbol)))
+               (keys digests))
+          (mapcat (comp vals ns-interns) (all-ns)))))
 
 (defn- registration-error
   "Describe the particular declaration or acquisition that could not be armed."
@@ -938,7 +949,9 @@
 
 (defn apply!
   "Arm only the supplied changed function identities on adoption.
-  A missing changed-identities member collects the complete loaded program.
+  A missing changed-identities member collects the complete loaded program:
+  the published program `:seon.profile/definition-digests` names when handed
+  (boot), else every loaded Var.
   An identity without a retained contract is disarmed on adoption.
   Unrelated contracts are neither inspected nor re-armed.
 
@@ -993,7 +1006,7 @@
                                         (when-let [authored (mi/-schema candidate)]
                                           [candidate authored]))))
                               candidates)
-                        (collect-contracts! caps))
+                        (collect-contracts! digests))
             pending (if changed
                       contracts
                       (remove (fn [[candidate authored]]
