@@ -45,4 +45,8 @@
              :kind :function
              :intent "Transacting :seon.config.ai/no-provider false answered 'expected a value satisfying should be true ([:= {:seon.config/display-label \"No provider\", ... :description \"Use virtual turns ...\"} true]), got a boolean false', printing the dial's whole property map inside the message (repl-dogfood 2026-09-27). The expected text is the schema's value (true), never its properties."
              :must-read #{seon.error/problem-sentence}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "a-fault-notification-is-its-errors-edn-as-text"
+             :kind :function
+             :intent "A fault's notification message carries the error value printed as EDN text (message-tx: :seon.message/content (render.value/bounded-text (value fact))). On default 2026-09-27, 33 of root's 35 unread messages were such strings, so its inbox (and the runtime trigger it wakes on) shows \"#:seon.error{:at\"…+412: the content head is timestamp and layer, never what failed. Content is for the reader: the error's message and operation as its text, with the whole record one read away through :seon.message/about (the signature). Done when a notified agent's inbox entry reads what failed and where within its first line, and the error value is not re-printed into the message."
+             :must-read #{seon.error/message-tx}}]
