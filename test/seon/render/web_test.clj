@@ -107,19 +107,6 @@
   [html css]
   (mapv #(.text ^Element %) (.select (dom html) ^String css)))
 
-(defn elements
-  "Every hiccup element in `h`, depth first."
-  [h]
-  (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq h)))
-
-(defn leaves
-  "The leaves a hiccup value shows (strings, symbols, numbers), attributes skipped."
-  [h]
-  (cond (and (vector? h) (keyword? (first h))) (mapcat leaves (remove map? (rest h)))
-        (sequential? h) (mapcat leaves h)
-        (nil? h) []
-        :else [h]))
-
 (defn painted
   "The elements a response delivered as one document: every
   `datastar-patch-elements` payload in order, or the page itself when the
@@ -817,9 +804,9 @@ handle))}}
         ((web-private 'applicable-renderers-html)
          {:seon.render.debug/viewer-namespace 'my.viewer} experiments)
         links (fn [css-class]
-                (->> (elements renderers)
+                (->> (support/hiccup-elements renderers)
                      (filter #(= css-class (:class (second %))))
-                     first elements
+                     first support/hiccup-elements
                      (filter #(= :a (first %)))
                      (mapv last)))]
     (is (= '[my.render/other-ai my.render/other-html]
@@ -906,7 +893,7 @@ handle))}}
                  :seon.render/ai experiment (db/db connection))
         details ((web-private 'debug-selected-renderer-details)
                  request :seon.render/ai experiment)
-        classes (fn [h] (set (keep #(:class (second %)) (elements h))))]
+        classes support/hiccup-classes]
     (is (= [:pre "exact agent-visible text"] (last preview))
         "the AI preview is the renderer output alone: no renderer metadata inside it")
     (is (= #{"seon-debug-read-dependencies" "seon-debug-function-definition"}
@@ -1199,12 +1186,12 @@ handle))}}
   "A read-dependency disclosure as data: its summary line, its basis line and
   the evidence values it shows (each `[:pre (pr-str value)]` read back)."
   [rendered]
-  (let [shown (fn [tag] (->> (elements rendered) (filter #(= tag (first %)))))]
-    {:summary (apply str (leaves (first (shown :summary))))
-     :basis (some #(when (= "seon-debug-read-basis" (:class (second %))) (apply str (leaves %)))
-                  (elements rendered))
+  (let [shown (fn [tag] (->> (support/hiccup-elements rendered) (filter #(= tag (first %)))))]
+    {:summary (apply str (support/hiccup-leaves (first (shown :summary))))
+     :basis (some #(when (= "seon-debug-read-basis" (:class (second %))) (apply str (support/hiccup-leaves %)))
+                  (support/hiccup-elements rendered))
      :evidence (mapv #(edn/read-string (last %)) (shown :pre))
-     :notes (mapv #(apply str (leaves %)) (remove #(map? (second %)) (shown :p)))}))
+     :notes (mapv #(apply str (support/hiccup-leaves %)) (remove #(map? (second %)) (shown :p)))}))
 
 (deftest debug-compatible-candidate-discloses-retained-read-dependencies
   (let [evidence {:seon.db/source-argument-position 0
@@ -2073,7 +2060,7 @@ handle))}}
              ;; symbol and, when the value has a source, its continuation.
              (is (= (count wide)
                     (+ (count (filter number? shown)) (parse-long (subs (str cut) 1))))))
-           (is (not-any? #{4999 "4999"} (leaves (render/render-html wide-request)))
+           (is (not-any? #{4999 "4999"} (support/hiccup-leaves (render/render-html wide-request)))
                "and HTML shows the same cut collection")))))))
 
 (deftest each-agent-has-an-isolated-debug-route

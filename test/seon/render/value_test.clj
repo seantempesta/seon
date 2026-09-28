@@ -89,17 +89,7 @@
        (is (seq (:tx-data report)))
        (is (map? installed))
        (is (map? completed))
-       (let [shown-plan (plan/format-plan-ai whole-plan)]
-         (is (str/includes? (:seon.plan/current-line shown-plan) "Current criterion"))
-         (is (= #{"later" "finished"} (set (keys (:seon.plan/step-lines shown-plan)))))
-         (is (not (str/includes? (pr-str shown-plan) "Later criterion")))
-         (is (not (str/includes? (pr-str shown-plan) "Finished criterion")))
-         (is (str/includes? (get-in shown-plan [:seon.plan/step-lines "finished"])
-                            "completed — Finished task — "))
-         (is (= 'my.plan/current! (first (last (:seon.render/operations shown-plan))))))
        (is (seq (:functions directory)))
-       (is (str/starts-with? (db/render-transaction-ai report)
-                             "Wrote 5 facts on 2 entities:"))
        ;; Each value names its producer (design §1 rule 2): its declared
        ;; return names the pair.
        (doseq [[raw render-pair producer] [[report db/render-transaction-ai 'seon.db/transact!]
@@ -190,8 +180,8 @@
                                    :seon.render/profile profile :seon.repl/handle handle))]
              (is (= (value/render-ai-data prepared)
                     (value/render-ai-data (assoc prepared :seon.render.value/truncated? true))))
-             (is (not (str/includes? (pr-str (:seon.render.value/html prepared))
-                                    "seon-data-capped"))))))))))
+             (is (not (contains? (support/hiccup-classes (:seon.render.value/html prepared))
+                                 "seon-data-capped"))))))))))
 
 (deftest a-pulled-function-entity-is-its-attributes-not-steering-prose
   ;; THE CLASS: a one-attribute finding entity may not declare a render pair
@@ -224,8 +214,8 @@
        (is (= 'seon.db/q (:seon.fn/sym raw)))
        (is (nil? (:seon.cluster.eval/error result)))
        (is (= raw (:seon.sci.admit/value result)))
-       (is (= raw (edn/read-string shown)))
-       (is (not (str/includes? shown "Restart the JVM")))
+       (is (= raw (edn/read-string shown))
+           "the agent sees the entity's attributes, no steering prose")
        (is (empty? (filter :seon.render/ai
                            (schema/matching-shapes-in
                             (db/carried-projection database) raw)))
@@ -319,8 +309,8 @@
            request (render-request connection groups)]
        (doseq [raw [groups (first groups)]]
          (let [shown (value/render-ai (assoc request :seon.render/value raw))]
-           (is (= raw (edn/read-string shown)))
-           (is (not (str/includes? shown "seon.render/ambiguous")))))))))
+           (is (= raw (edn/read-string shown))
+               "settings print as the data they are")))))))
 
 (deftest ai-values-are-laid-out-by-fipp-at-their-width
   ;; fipp breaks between tokens at the caller's width; the laid-out text

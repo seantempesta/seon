@@ -608,6 +608,25 @@
         result (body)]
     [result (merge-with - (armed-counts symbols) before)]))
 
+(defn hiccup-elements
+  "Every element of a hiccup value, depth first: a test asserts on the node its
+  behavior is about, never on the serialized page."
+  [hiccup]
+  (filter #(and (vector? %) (keyword? (first %))) (tree-seq sequential? seq hiccup)))
+
+(defn hiccup-leaves
+  "The leaves a hiccup value shows (strings, symbols, numbers), attributes skipped."
+  [hiccup]
+  (cond (and (vector? hiccup) (keyword? (first hiccup))) (mapcat hiccup-leaves (remove map? (rest hiccup)))
+        (sequential? hiccup) (mapcat hiccup-leaves hiccup)
+        (nil? hiccup) []
+        :else [hiccup]))
+
+(defn hiccup-classes
+  "The class of every element of a hiccup value."
+  [hiccup]
+  (set (keep #(:class (second %)) (hiccup-elements hiccup))))
+
 (defn refusal-data
   "Return a flat error value, deepest thrown ex-data, or `committed`."
   [thunk]
