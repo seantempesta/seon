@@ -22,7 +22,6 @@
             [malli.transform :as mt]
             [malli.util :as mu]
             [seon.batch :as batch]
-            [seon.call-preparation :as call-preparation]
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.env :as env]
@@ -38,12 +37,6 @@
             [seon.schema.internal :as internal]
             [seon.sci.admit :as admit])
   (:import [java.nio.charset StandardCharsets]))
-
-;;; LOAD-CYCLE BOUNDARY. `seon.sci.eval` requires `seon.error` transitively,
-;;; so this namespace cannot require it back. One resolution, realized at
-;;; first use, instead of a `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private sci-eval-docstring-parts
-  (delay (requiring-resolve 'seon.sci.eval/docstring-parts)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -870,20 +863,6 @@
                                      (.getName (class failure))))
         :seon.error/throwable failure}))))
 
-(defn- flat-data
-  {:malli/schema [:=> [:cat :map]
-                  :seon.error/source]}
-  [fact]
-  (fact-source fact))
-
-(defn- evidence-prose
-  {:malli/schema [:=> [:cat :map]
-                  :string]}
-  [fact]
-  (str "Evidence: error " (:seon.error/id fact)
-       ", operation " (:seon.error/operation fact)
-       ", signature " (:seon.error/signature fact) "."))
-
 (defn- value-description
   {:malli/schema [:=> [:cat :seon.error/source]
                   :string]}
@@ -1074,8 +1053,10 @@
     (pr-str value)))
 
 (defn- refusal-value-shown
-  "One refusal value through the floor, in the unit's output face: laid-out
-  text for AI, the floor's hiccup (its cuts as elision nodes) for HTML."
+  "One error value, or one of its members at `path`, through the value
+  printer in the unit's output face: laid-out text for AI, hiccup (its cuts
+  as elision nodes) for HTML. With a path and a held result, a cut's
+  requery reads the held error at that path."
   {:malli/schema [:=> [:cat :seon.error/source :seon.error/source [:or :nil :seon.render.data/path]]
                   :seon.render/hiccup]}
   [unit value path]
@@ -1084,7 +1065,7 @@
         unit (cond-> (dissoc unit :seon.repl/handle :seon.render.value/root)
                (and path (qualified-symbol? root) profile)
                (assoc :seon.render/profile
-                      (assoc profile :seon.print/requery-id (list 'get-in root path))))
+                      (assoc profile :seon.print/requery-id (if (seq path) (list 'get-in root path) root))))
         projection
         (render.value/prepare
          (-> unit
@@ -1100,218 +1081,6 @@
       shown
       (str "<value rendering unavailable: " (:seon.error/message projection) ">"))))
 
-(defn- reader-correction
-  "Select a missing declared argument key; no spelling heuristic is used."
-  {:malli/schema [:=> [:cat :seon.error/source :map]
-                  [:or :nil :qualified-keyword :seon.db/error-result :seon.error/base]]}
-  [unit evidence]
-  (when-let [database (:seon.db/db unit)]
-    (when-let [operation (:seon.sci.reader/call evidence)]
-      (let [spec (db/q '[:find ?spec . :in $ ?sym
-                        :where [?f :seon.fn/sym ?sym] [?f :seon.fn/spec ?spec]]
-                      database operation)
-            position (:seon.sci.reader/argument-index evidence)
-            supplied (call-preparation/supplied-map-entries
-                      database operation)
-            supplied-keys (into #{} (map #(nth % 2)) (when (vector? supplied) supplied))
-            container (first (:seon.sci.reader/containers evidence))
-            present (set (take-nth 2 (:edamame/elements container)))]
-        (cond
-          (map? spec) spec
-          (not (vector? supplied))
-          supplied
-          (and (string? spec) (nat-int? position)
-               (= "{" (:edamame/opened-delimiter container)))
-          (let [projection (or (db/carried-projection database)
-                               (schema/projection-from-database database))
-                compiled (m/function-schema (edn/read-string spec)
-                          {:registry (:seon.schema.projection/registry projection)})
-                candidates
-                (into #{}
-                      (mapcat
-                       (fn [arity]
-                         (let [input (:input (m/-function-info arity))
-                               argument (when (= :cat (m/type input))
-                                          (nth (m/children input) position nil))
-                               argument (when argument (m/deref-all argument))]
-                           (when (and argument (= :map (m/type argument)))
-                             (for [[key properties _] (m/children argument)
-                                   :when (and (not (:optional properties))
-                                              (not (contains? supplied-keys key))
-                                              (not (contains? present key)))]
-                               key)))))
-                      (m/-function-schema-arities compiled))]
-            (when (= 1 (count candidates)) (first candidates))))))))
-
-(defn- refusal-data
-  {:malli/schema [:=> [:cat :seon.error/source :seon.error/source [:or :nil :map]]
-                  [:or :nil :map :seon.db/error-result :seon.error/base]]}
-  [unit fact data]
-  (let [evidence (merge (when (map? fact) fact) data)]
-    (cond
-      (seq (:seon.error/problems evidence)) evidence
-
-      (find evidence :seon.sci.reader/text)
-      (let [correction (reader-correction unit evidence)]
-       (if (map? correction)
-         correction
-         {:seon.error/problems [{:seon.error/argument "source"
-         :seon.error/path (into [] (keep evidence) [:seon.sci.reader/line :seon.sci.reader/column])
-         :seon.error/expected :seon.cluster.eval/source
-         :seon.error/expected-description "readable Clojure source"
-         :seon.error/offending (or (:seon.sci.reader/token evidence) (:seon.sci.reader/text evidence))
-         :seon.error/actual-description "unreadable source"
-         :seon.error/fix
-         (cond
-           correction (str "Use " correction ".")
-           (:seon.sci.reader/prose-span? evidence) "Prose must start with ; on every line."
-           (= :stray-closer (:seon.sci.reader/error-kind evidence))
-           "Balance the delimiters in this reply; every reply is read from scratch."
-           :else (str "Correct the reader error: " (:seon.error/message fact)))}]
-          :seon.error/operation (or (:seon.sci.reader/call evidence) 'seon.sci.reader/read)}))
-
-      (and (:seon.schema/definition evidence) (:seon.schema/error evidence))
-      {:seon.error/problems [{:seon.error/argument (str (:seon.schema/identity evidence))
-         :seon.error/path (get evidence :seon.schema/path [])
-         :seon.error/expected :seon.schema/definition
-         :seon.error/expected-description "a complete authored schema"
-         :seon.error/offending (:seon.schema/definition evidence)
-         :seon.error/actual-description "an incomplete schema"
-         :seon.error/fix (:seon.error/message fact)}]
-       :seon.error/operation 'seon.schema/register!}
-
-      (:seon.sci.eval/symbol evidence)
-      {:seon.error/problems [{:seon.error/argument "source"
-         :seon.error/path []
-         :seon.error/expected :symbol
-         :seon.error/expected-description "a resolvable symbol"
-         :seon.error/offending (:seon.sci.eval/symbol evidence)
-         :seon.error/actual-description "an unresolved symbol"
-         :seon.error/fix "Define or require this symbol."}]
-       :seon.error/operation 'seon.sci.eval/evaluate}
-
-      (and (:seon.error/operation evidence)
-           (or (find evidence :seon.error/expected) (find evidence :seon.error/offending)))
-      (let [expected (:seon.error/expected evidence)
-            offending (:seon.error/offending evidence)
-            member (:seon.error/member evidence)
-            compiled (try
-                       (m/schema expected
-                                 (when-let [database (:seon.db/db unit)]
-                                   {:registry (:seon.schema.projection/registry
-                                               (or (db/carried-projection database)
-                                                   (:seon.schema/projection unit)
-                                                   (schema/projection-from-database database)))}))
-                       ;; DECLARED CASE: `expected` is often a description,
-                       ;; not a schema. Malli declares its schema-construction
-                       ;; refusals as `-exception` ex-info whose `:type` is a
-                       ;; `malli.core` keyword (malli core.cljc:203); that
-                       ;; answer is kept as data. Every other failure is not
-                       ;; "not a schema" and propagates whole.
-                       (catch clojure.lang.ExceptionInfo failure
-                         (let [data (ex-data failure)]
-                           (if (and (qualified-keyword? (:type data))
-                                    (= "malli.core" (namespace (:type data))))
-                             data
-                             (throw failure)))))
-            problem (when (m/schema? compiled)
-                      (explain-problem
-                       {:seon.error/problem {:schema compiled :value offending}
-                        :seon.error/path [] :seon.error/argument (str member)}))]
-        ;; A SCHEMA PROBLEM ONLY FROM MALLI: when `expected` is no schema, or
-        ;; the offending value satisfies it, the refusal is the producer's
-        ;; own declared message and members, never a fabricated
-        ;; "expected the declared requirement (nil)" sentence.
-        (if problem
-          {:seon.error/problems [problem]
-           :seon.error/operation (:seon.error/operation evidence)}
-          data))
-
-      :else data)))
-
-(defn- refusal-text
-  "The refusal's sentences in the unit's output face: one text for AI, one
-  element of problem nodes for HTML, or nil when the value is no refusal."
-  {:malli/schema [:=> [:cat :seon.error/source :seon.error/source :seon.error/source]
-                  :seon.render/hiccup]}
-  [unit fact data]
-  (let [stored-problems? (seq (:seon.error/problems fact))
-        data (refusal-data unit fact (when (map? data) data))
-        operation (:seon.error/operation data)
-        problems (:seon.error/problems data)
-        example (or (not-empty (get-in fact [:seon.error/doc :example]))
-                    (when (and (:seon.db/db unit) (qualified-symbol? operation))
-                      (let [doc (db/q '[:find ?doc . :in $ ?sym
-                                        :where [?f :seon.fn/sym ?sym]
-                                               [?f :seon.fn/doc ?doc]]
-                                      (:seon.db/db unit) operation)]
-                        (if (map? doc)
-                          (str "Documentation lookup unavailable: " (:seon.error/message doc))
-                          (when (string? doc)
-                            (not-empty (:example (@sci-eval-docstring-parts doc))))))))]
-    (when (and operation (seq problems))
-      (let [html? (= :seon.render/html (:seon.render/output unit))
-            sentences
-            (map-indexed
-             (fn [index {:seon.error/keys [expected offending input result-contract]
-                         :as problem}]
-               (let [location [:seon.error/problems index]
-                     ;; Each shown value is its own member of the unit, so
-                     ;; its HTML node has its own element id.
-                     shown (fn [member member-value]
-                             (refusal-value-shown
-                              (assoc unit :seon.render.call/id
-                                     (into (vec (some-> (:seon.render.call/id unit) vector))
-                                           (conj location member)))
-                              member-value (when stored-problems? (conj location member))))]
-                 (cond-> (problem-parts operation problem
-                                        (shown :seon.error/expected expected)
-                                        (shown :seon.error/offending offending))
-                   (find problem :seon.error/input)
-                   (conj " Input: " (shown :seon.error/input input) ".")
-                   result-contract
-                   (conj " Result contract: " (shown :seon.error/result-contract result-contract) ".")
-                   (and (zero? index) (:seon.instrument/caller data))
-                   (conj (str " Called from " (:seon.instrument/caller data) "."))
-                   example (conj (str " Example: " example)))))
-             problems)]
-        (if html?
-          (into [:div {:class "seon-error-message"}]
-                (map #(into [:div {:class "seon-error-problem"}] %))
-                sentences)
-          (str/join "\n" (map #(apply str %) sentences)))))))
-
-(defn instrumentation-prose
-  "`:seon.render/ai` — detailed steering for a validation failure."
-  {:malli/schema
-  [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
-  [error-value]
-  (let [fact (or (:seon.error/fact error-value) error-value)
-        data (if (:seon.error/data-edn fact)
-               (flat-data fact)
-               fact)
-        data (when (map? data) data)
-        ;; A stored fact's instrument payloads are already bounded text; a
-        ;; live value's members are values the floor printer bounds here.
-        member-text (fn [data-key fact-key]
-                      (if-some [entry (find data data-key)]
-                        (refusal-value-shown error-value (val entry) nil)
-                        (get fact fact-key)))]
-    (or (refusal-text error-value fact data)
-        ;; A declared refusal prints its own message and members.
-        (let [expected (member-text :seon.error/expected :seon.instrument/expected)
-              received (member-text :seon.error/offending :seon.instrument/args)]
-          (str/join "\n"
-                    (remove nil?
-                            [(or (not-empty (:seon.error/message fact))
-                                 (not-empty (:seon.error/message data))
-                                 (str (or (:seon.error/operation data) (:seon.instrument/fn fact)
-                                          "An operation")
-                                      " refused without a message."))
-                             (when expected (str "Expected: " expected))
-                             (when received (str "Got: " received))
-                             (when (:seon.error/id fact) (evidence-prose fact))]))))))
-
 (defn- notice-ai-prose
   "Describe recorded evidence and why this recipient receives its first notification."
   {:malli/schema [:=> [:cat :seon.error/notice]
@@ -1322,18 +1091,6 @@
     (if (= reason :failover)
       "The primary model was not called: its connection failed before send, so no output exists. Answer the unchanged request as the backup attempt."
       (str message " Inspect error " id ". Signature: " signature "."))))
-
-(declare ai-prose)
-
-(defn notice-prose
-  "`:seon.render/ai` for one notice: steering for a contract arm's fact, else its evidence."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
-  [notice]
-  (let [fact (:seon.error/fact notice)]
-    (if (and (qualified-symbol? (:seon.instrument/fn fact))
-             (#{:input :output :guard} (:seon.instrument/arm fact)))
-      (instrumentation-prose notice)
-      (ai-prose notice))))
 
 (defn ai-prose
   "`:seon.render/ai` — AI-attempt evidence or a legacy error notice.
@@ -2281,7 +2038,15 @@
                    {:registry (:seon.schema.projection/registry projection)})
          fix (fix-form options error)
          missing (missing-symbol error)
-         offending (when-not problems (if missing missing (:seon.error/offending error)))
+         ;; a stored contract fault keeps its expected and received values
+         ;; as bounded text under :seon.instrument/* (`normalize`)
+         offending (when-not problems
+                     (cond missing missing
+                           (find error :seon.error/offending) (:seon.error/offending error)
+                           :else (:seon.instrument/args error)))
+         expected (if (find error :seon.error/expected)
+                    (:seon.error/expected error)
+                    (:seon.instrument/expected error))
          namespace-name (when missing
                           (or (some-> (namespace missing) symbol)
                               (let [frame (first (peek (:seon.sci.eval/stacktrace error)))]
@@ -2299,8 +2064,8 @@
        problems (assoc :seon.error/problems (into [] (comp (map #(problem-shown options %)) (distinct)) problems))
        fix (assoc :seon.error/fix-form fix)
        (some? offending) (assoc :seon.error/offending offending)
-       (and (not problems) (not missing) (find error :seon.error/expected))
-       (assoc :seon.error/expected (expected-shown (:seon.error/expected error)))
+       (and (not problems) (not missing) (some? expected))
+       (assoc :seon.error/expected (expected-shown expected))
        (and (not problems) (some? member)) (assoc :seon.error/member member)
        (and (not fix) (not problems) (string? (:seon.error/fix error)))
        (assoc :seon.error/fix (:seon.error/fix error))
@@ -2332,22 +2097,6 @@
         (:seon.error/occurrence-count value)
         (assoc :seon.error/occurrence-count (:seon.error/occurrence-count value))))))
 
-(defn- reply-shown
-  "The reply through the floor in `output`'s face under the unit's profile.
-  The unit's result handle stays the root: the reply keeps the error's own
-  keys where it shows its members, so a cut's requery reads the held error
-  at the same path."
-  {:malli/schema [:=> [:cat :seon.render/unit :seon.error/reply :seon.render/output]
-                  [:maybe :seon.render/hiccup]]}
-  [unit reply output]
-  (let [projection (render.value/prepare
-                    (-> unit
-                        (assoc :seon.render/value reply
-                               :seon.render.value/options {:seon.render.value/structural? true})
-                        (update :seon.render.call/id #(or % [:seon.error/reply])))
-                    output)]
-    (get projection (if (= :seon.render/html output) :seon.render.value/html :seon.render.value/text))))
-
 (defn render-ai
   "Render an error as its reply map (`reply-value`), printed by the floor.
 
@@ -2361,7 +2110,7 @@
         text (cond
                (empty? reply) nil
                (= [:seon.error/message] (keys reply)) (:seon.error/message reply)
-               :else (reply-shown unit reply :seon.render/ai))
+               :else (refusal-value-shown (assoc unit :seon.render/output :seon.render/ai) reply []))
         ;; a stored fault's offending value, as the floor printed it when recorded
         stored (:seon.error/shown (rendered-error-value unit))]
     (str (if (and (string? text) (seq text)) text "Error evidence is unavailable.")
@@ -2373,8 +2122,8 @@
   {:malli/schema [:=> [:cat :seon.render/unit :seon.error/reply] :seon.render/hiccup]}
   [unit reply]
   (let [html (assoc unit :seon.render/output :seon.render/html)
-        shown (fn [id value]
-                (refusal-value-shown (assoc html :seon.render.call/id id) value nil))
+        shown (fn [path value]
+                (refusal-value-shown (assoc html :seon.render.call/id path) value path))
         {:seon.error/keys [message problems fix-form offending fix in-namespace sources]} reply]
     (into
      [:div {:class "seon-error-reply"}
@@ -2444,38 +2193,6 @@
   [unit]
   (when-let [held (held-reference unit)]
     (list 'seon.error/reply-value held)))
-
-(defn render-contract-ai
-  "A contract refusal as REPL entries: the function and member refused, then
-  each problem's path, expected schema, offending value and fix and the
-  author's location, read from the held refusal. The function's contract and
-  the whole refusal are one read away; instrument bookkeeping stays on the
-  value, unshown."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [unit]
-  (let [value (if (map? (:seon.render/value unit)) (:seon.render/value unit) unit)
-        held (held-reference unit)
-        {:seon.error/keys [operation member problems message]} value
-        location (:seon.sci.eval/stacktrace value)]
-    (source-entries
-     (concat
-      [(str operation " refused its " (or member "call") ".")]
-      (cond
-        (and held (seq problems))
-        [(list 'mapv (list 'fn '[problem]
-                           (list 'select-keys 'problem [:seon.error/path :seon.error/expected
-                                                        :seon.error/offending :seon.error/fix]))
-               (list :seon.error/problems held))]
-        (seq problems)
-        (map #(problem-sentence operation %
-                                (scalar-text (:seon.error/expected %))
-                                (scalar-text (:seon.error/offending %)))
-             problems)
-        :else (when (string? message) [message]))
-      (when location
-        [(if held (list :seon.sci.eval/stacktrace held) (str "At " (pr-str location)))])
-      [(str "Contract: (doc " operation ")"
-            (when held (str "; the whole refusal: " held)))]))))
 
 (defn render-html
   "Render one fault's operation, message, time, function, turn, and evidence link."

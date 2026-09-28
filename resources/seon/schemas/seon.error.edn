@@ -249,7 +249,7 @@
              :occurrence [:int {:min 1}],
              :notice
              [:map
-              {:seon.render/ai seon.error/notice-prose}
+              {:seon.render/ai seon.error/ai-prose}
               [:seon.error/fact :seon.error/fact]
               [:seon.error/evidence :seon.error/evidence]
               [:seon.error/reason {:optional true} :seon.error/reason]

@@ -6,6 +6,7 @@
             [seon.config :as config]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
+            [seon.render.schema :as render.schema]
             [seon.issue :as issue]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
@@ -185,13 +186,22 @@
            (is (str/includes? source ";; Must read: tn.a/f"))
            (is (= [(list 'seon.issue/task-edges (list 'seon.db/db) handle)] (forms source)))
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
-       (testing "a schema renders as the register! form of its stored definition"
-         (let [source (sut/schema-ai (unit [:seon.schema/key :seon.task/intent] 1))]
-           (is (= [(list 'seon.schema/register! :seon.task/intent [:string {:min 1}])] (forms source)))
-           (is (= ";; Schema :seon.task/intent" (sut/schema-ai (unit [:seon.schema/key :seon.task/intent] 0))))))
-       (testing "a described schema's header carries its doc line"
-         (is (str/starts-with? (sut/schema-ai (unit [:seon.schema/key :seon.task/ns] 0))
-                               ";; Schema :seon.task/ns — The owning namespace")))))))
+       (testing "a schema's usage is data: the form it replaces and the stored values a new form refuses"
+         (let [usage (render.schema/usage database :seon.task/intent [:string {:min 400}])]
+           (is (= [:string {:min 1}] (:seon.schema.usage/previous usage)) (pr-str usage))
+           (is (pos? (:seon.schema.usage/stored usage)) (pr-str usage))
+           (is (= (:seon.schema.usage/checked usage) (:seon.schema.usage/failing usage))
+               "every stored intent is shorter than 400 characters")
+           (is (some #{:seon.task/task} (:seon.schema.usage/referenced-by usage)) (pr-str usage)))
+         (is (= [(list 'doc :seon.task/intent)]
+                (forms (render.schema/render-ai (unit [:seon.schema/key :seon.task/intent] 0))))
+             "listed among others, a schema is its doc call and reads nothing")
+         (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/intent (list 'quote [:string {:min 1}]))
+                (render.schema/render-form (unit [:seon.schema/key :seon.task/intent] 1)))
+             "the form face is the usage read, shown and never run"))
+       (testing "a described schema listed among others carries its doc line"
+         (is (str/starts-with? (render.schema/render-ai (unit [:seon.schema/key :seon.task/ns] 0))
+                               "(doc :seon.task/ns)\n;; The owning namespace")))))))
 
 (deftest a-function-renders-its-source-and-neighbours-by-name
   ;; Class regression: the function node is its authored form plus callees and

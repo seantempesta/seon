@@ -85,14 +85,16 @@ Before and after for the nested contract refusal:
 - The same problem appeared twice. Problems are now distinct.
 - A reply holding only a message renders as that message. This keeps the `html_views` goldens.
 
-**Deletes and retires.** The prose path for returned errors (`refusal-text` in `render-ai` and `render-html`). The dead
-code left after this cut:
+**Deleted (second commit).**
 
-- `render-contract-ai` (34 lines) and its attachment in `seon.instrument.edn:103`;
-- `held-reference`/`source-entries`, whose callers are in `sci/kernel.clj`, a held file;
-- the `refusal-text` chain (about 300 lines), once `instrumentation-prose` and `notice-prose` go.
+- The prose chain in `error.clj`: `instrumentation-prose`, `notice-prose`, `refusal-text`, `refusal-data`,
+  `reader-correction`, `evidence-prose`, `flat-data` and `sci-eval-docstring-parts`. The notice pair is now
+  `ai-prose`.
+- `render-contract-ai` and its `seon.instrument.edn` attachment.
+- `reply-shown`, folded into `refusal-value-shown`. With an empty path, the requery's root is the handle itself.
 
-These are patches for their owners and are not deleted here. Net for this cut: error.clj +330, schema +35.
+Net `error.clj` since before the renders is **+99** (it was +436). `seon.render.ns` loses `schema-ai`, `schema-html`,
+`schema-parts` and `schema-form` (−35). The schema entity's three faces are now `seon.render.schema`'s.
 
 ## 2. Schemas (`src/seon/render/schema.clj`, `seon.schema.edn`, `seon.schema.usage.edn`, `register!` in `schema.clj`)
 
@@ -142,19 +144,23 @@ declaration; the patch to delete them goes to their holder.
 The Var render belongs to the one-path lane. Agent, turn, message, branch, config, blob and read evidence follow the
 same shape: one query, data for AI, hiccup for HTML, and a form face.
 
-## 4. Defects found (for root to file as tasks)
+## 4. Producer defects found, and fixed (each with a tightened contract)
 
-- **Producer (`seon.schema.edn`, admission).** The unresolved-reference refusal stores its cause as a printed string
-  (`:seon.schema.edn/cause`), and `:unresolved-reference` names the attribute, not the missing reference
-  `:scratch.fbr/nope`. No render can fix this from the reply.
-- **Writer.** `write-entity-error` reports only the first problem: a bad `:seon.task/id`, while `:intent 5` and the
-  missing required keys go unnamed.
-- **One path.** A returned error value shows an `#inst` in its floor print, so the MCP and agent-turn shown text
-  differ.
-- **One path.** An unstorable `register!` note (`:installed? false`) is not in the shown reply.
-- **Render machinery (render-selection lane).** `face-valid?` still requires the AI face to be a string. The two
-  `render-ai` functions therefore print their data map through the value printer (`render.value/prepare`). The switch
-  to returning the map itself is one line each, once the machinery accepts data faces.
+- **An unresolved reference names the missing key** (`seon.schema.edn/admit`, through
+  `seon.schema/unresolved-reference-in`). `:seon.schema.edn/unresolved-reference` is now the key nothing declares, and
+  `:seon.schema.edn/attribute` is the declaration that names it. The error schema requires both. The message adds "It
+  names :k, which no schema declares."
+- **Writer refusals report every failing path** (`seon.db/write-entity-error` over Malli's whole `:errors`, through
+  the new `write-problem`). A missing key's offending value is the entity that is missing it, never
+  `:seon.error/unknown`. This also fixes the garbled "got a map missing :seon.task/intent :seon.error/unknown".
+  The output is `:seon.db.write/entity-refusal`, which refuses the placeholder and requires at least one problem.
+  Measured on default: a bad task write now lists 5 problems (it listed 1).
+- **The MCP and agent-turn text differed** because the value printer printed a returned error's `:seon.error/at`, and
+  the two runs are two instants. This is not a printer difference. The reply leaves the timestamp out, and the proof's
+  `:after-entrants-agree?` is true for every case.
+- **Still open, not mine:**
+  - `face-valid?` still requires a string AI face (render-selection lane);
+  - the batch's `:installed? false` note is not in the shown reply (one-path lane).
 
 ## 5. Verification limits
 

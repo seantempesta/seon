@@ -3542,12 +3542,13 @@
               by-identity)))
         {} forms)))))
 
-(defn- invalid-write
-  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
-  [_projection attribute compiled value path entity-form cause candidates]
-  (let [form (if (= ::attribute-not-installed cause) compiled (m/form compiled))
-        problem
-        (if (= ::attribute-not-installed cause)
+(defn- write-problem
+  "One refused write as a problem description (`seon.error/explain-problem`).
+  A missing key's offending value is its parent map, never a placeholder."
+  {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value [:maybe :map]]
+                  :seon.error/problem-description]}
+  [attribute compiled value path cause parent]
+  (if (= ::attribute-not-installed cause)
           {:seon.error/argument "transaction data"
            :seon.error/path path
            :seon.error/expected :qualified-keyword
@@ -3556,12 +3557,19 @@
            :seon.error/actual-description "an undeclared attribute"
            :seon.error/fix "Use a declared attribute from the entity's schema."}
           (@error-explain-problem
-           {:seon.error/argument "transaction data"
-            :seon.error/path path
-            :seon.error/problem
-            (cond-> {:schema compiled
-                     :value value :in path}
-              (= :malli.core/missing-key cause) (assoc :type cause))}))]
+           (cond-> {:seon.error/argument "transaction data"
+                    :seon.error/path path
+                    :seon.error/problem
+                    (cond-> {:schema compiled
+                             :value value :in path}
+                      (= :malli.core/missing-key cause) (assoc :type cause))}
+             (map? parent) (assoc :seon.error/parent parent)))))
+
+(defn- invalid-write
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
+  [_projection attribute compiled value path entity-form cause candidates]
+  (let [form (if (= ::attribute-not-installed cause) compiled (m/form compiled))
+        problem (write-problem attribute compiled value path cause nil)]
   (diagnostic
    (cond->
     {:seon.error/message (@error-problem-sentence
@@ -3861,7 +3869,7 @@
    value already in its declared collection."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:map-of [:or :keyword :int] :map]
                        :seon.db/entity-id :map :map [:? [:sequential :keyword]]]
-                  [:or :nil :seon.error/base]]}
+                  [:or :nil :seon.db.write/entity-refusal]]}
   [_database projection _attribute-plans entity-id identities entity-map & [owned-schemas]]
   (when (seq entity-map)
     (let [forms (:seon.schema.projection/forms projection)
@@ -3874,20 +3882,28 @@
            (let [explain (schema/projection-cache-value
                           projection [::write-explainer schema-key]
                           #(schema/projection-explainer projection schema-key))
-                 failure (first (:errors (explain entity-map)))
+                 failures (:errors (explain entity-map))
+                 ;; every failing path, each with its own offending value: a
+                 ;; missing key's is the map it is missing from
+                 attribute-of #(or (first (:in %)) (first (keys identities)))
+                 offending-of #(if (= :malli.core/missing-key (:type %))
+                                 (get-in entity-map (pop (vec (:in %))))
+                                 (:value %))
+                 failure (first failures)
                  in (:in failure)
-                 attribute (or (first in) (first (keys identities)))
-                 value (if (= :malli.core/missing-key (:type failure))
-                         :seon.error/unknown
-                         (:value failure))
-                 refusal (invalid-write projection attribute
+                 refusal (invalid-write projection (attribute-of failure)
                                         (:schema failure)
-                                        value (into [entity-id] in) (get forms schema-key)
-                                        (or (:type failure) ::invalid-entity) nil)]
+                                        (offending-of failure) (into [entity-id] in) (get forms schema-key)
+                                        (or (:type failure) ::invalid-entity) nil)
+                 problems (mapv #(write-problem (attribute-of %) (:schema %) (offending-of %)
+                                                (into [entity-id] (:in %))
+                                                (or (:type %) ::invalid-entity) nil)
+                                failures)]
              (-> refusal
                  (write-error-identity identities)
                  (update :seon.error/data merge
-                         {::entity identities ::entity-value entity-map ::path (into [entity-id] in)})))))
+                         {:seon.error/problems problems
+                          ::entity identities ::entity-value entity-map ::path (into [entity-id] in)})))))
        schema-keys))))
 
 (defn- write-owned-values-error

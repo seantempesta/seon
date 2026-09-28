@@ -753,8 +753,6 @@
     (is (= "[\"not a fact\"]" (:seon.instrument/args fact)))
     (let [notice (error/notice {:seon.error/fact fact})
           prose (error/ai-prose notice)]
-      (is (= (error/instrumentation-prose notice) (error/notice-prose notice))
-          "a contract arm's notice renders through instrumentation-prose")
       (is (not (str/blank? prose))))))
 
 (deftest the-flat-value-projects-from-the-fact
@@ -1489,21 +1487,23 @@
   ;; schema problem: it leads with its own message and shows its members,
   ;; with no fabricated "expected the declared requirement (nil)" frame and
   ;; no filler lines (error-text-opus, 2026-09-26).
-  (let [prose (error/instrumentation-prose
+  (let [reply (error/reply-value
+               nil
                {:seon.error/at #inst "2026-09-26T00:00:00Z"
                 :seon.error/layer ::rendering
                 :seon.error/operation 'seon.cluster.source/write-back!
                 :seon.error/message "The staged file base changed."
                 :seon.error/offending {:seon.fs/path "src/a.clj"}})]
-    (is (= (str "The staged file base changed.\n"
-                "Got: {:seon.fs/path \"src/a.clj\"}")
-           prose))))
+    (is (= {:seon.error/message "The staged file base changed."
+            :seon.error/offending {:seon.fs/path "src/a.clj"}}
+           reply))))
 
 (deftest specialist-renderers-use-their-declared-evidence
   (test-support/with-database
    (fn [_connection]
-    (testing "instrumentation names the failed arm and received value"
-    (let [prose (error/instrumentation-prose
+    (testing "a stored contract fault names what was expected and received"
+    (let [reply (error/reply-value
+                 nil
                  {:seon.error/at #inst "2026-09-22T00:00:00Z"
                   :seon.error/layer ::rendering
                   :seon.error/operation 'my.fs/read
@@ -1512,9 +1512,10 @@
                   :seon.instrument/expected ":my.fs/read-request"
                   :seon.instrument/args "[{:my.fs/path 42}]"
                   :seon.error/message "The call violated its contract."})]
-      (is (str/starts-with? prose "The call violated its contract."))
-      (is (str/includes? prose "Expected: :my.fs/read-request"))
-      (is (str/includes? prose "Got: [{:my.fs/path 42}]"))))
+      (is (= {:seon.error/message "The call violated its contract."
+              :seon.error/expected ":my.fs/read-request"
+              :seon.error/offending "[{:my.fs/path 42}]"}
+             reply))))
   (testing "AI attempt prose exposes the decision attributes"
     (let [prose (error/ai-prose
                  {:seon.error/at #inst "2026-09-22T00:00:00Z"

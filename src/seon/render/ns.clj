@@ -112,12 +112,6 @@
   [unit]
   (list 'dir (list 'quote (:seon.ns/name unit))))
 
-(defn schema-form
-  "Return the ordinary `doc` form for a schema entity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
-  [unit]
-  (list 'doc (:seon.schema/key unit)))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Graph nodes: one entity each. Distance 0 names it; distance 1 and beyond
 ;;; show its content, with its neighbours as names (the walk renders those).
@@ -175,35 +169,6 @@
        (when edges
          [:dl (entity "Done when these proofs pass" (:seon.task/proofs edges)) (entity "Subjects" (:seon.task/subjects edges))
           (entity "Must read" must-read) (entity "Evidence" evidence)])])))
-
-(defn- schema-parts
-  "A schema entity's key, its stored form read as data, and the form's description."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:tuple :qualified-keyword [:or [:vector :any] :keyword :symbol] [:maybe :string]]]}
-  [unit]
-  (let [{schema-key :seon.schema/key text :seon.schema/form} (or (:seon.render/value unit) unit)
-        form (edn/read-string text)]
-    [schema-key form (when (and (vector? form) (map? (second form))) (:description (second form)))]))
-
-(defn schema-ai
-  "Render one schema as its `register!` form, headed by its doc line."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [unit]
-  (let [[schema-key form doc] (schema-parts unit)
-        header (str ";; Schema " schema-key (some->> (first-doc-line doc) (str " — ")))]
-    (if (zero? (node-distance unit))
-      header
-      (str header "\n" (repl/source-text (list 'seon.schema/register! schema-key form))))))
-
-(defn schema-html
-  "Render one schema: its key, its doc and its declaring form."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [[schema-key form doc] (schema-parts unit)]
-    [:article {:class "seon-family-entry seon-schema-entry"}
-     [:header [:p {:class "seon-kicker"} "Schema"] [:h3 [:code (str schema-key)]]]
-     (when doc [:p doc])
-     (when (pos? (node-distance unit))
-       [:pre [:code (repl/source-text (list 'seon.schema/register! schema-key form))]])]))
 
 (def ^:private callers-named
   "Callers are named up to this count; beyond it the node renders less: the

@@ -64,7 +64,8 @@
     (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
     (is (= attribute (:seon.db/attribute result)))
     (is (= offending (:seon.db/offending result)))
-    (if (= :seon.error/unknown offending)
+    ;; a missing key's offending value is the entity missing it
+    (if (map? offending)
       (do (is (int? (first (:seon.db/path result))))
           (is (= (rest path) (rest (:seon.db/path result)))))
       (is (= path (:seon.db/path result))))
@@ -109,7 +110,8 @@
   (test-support/with-database
    (fn [connection]
      (let [result (refused connection [{:my.plan.item/id "feedback/missing"}]
-                           :my.plan.item/title :seon.error/unknown [0 :my.plan.item/title])]
+                           :my.plan.item/title {:my.plan.item/id "feedback/missing"}
+                           [0 :my.plan.item/title])]
        (is (= :map (first (:seon.db/entity-form result))))
        (is (some #(= [:my.plan.item/title :my.plan.item/title] %)
                  (:seon.db/entity-form result)))))))

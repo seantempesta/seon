@@ -1797,8 +1797,11 @@
                              ::bootstrap-referrer)]
           (is (= :seon.schema.edn/unresolved-reference
                  (:seon.schema.edn/error refused)))
-          (is (= ::bootstrap-referrer
-                 (:seon.schema.edn/unresolved-reference refused))))))))
+          (is (= ::never-declared
+                 (:seon.schema.edn/unresolved-reference refused))
+              "the refusal names the key nothing declares")
+          (is (= ::bootstrap-referrer (:seon.schema.edn/attribute refused))
+              "and the declaration naming it"))))))
 
 (deftest a-nilable-value-schema-is-refused-at-admission-never-at-build
   ;; CLASS: a tightened authoring rule judges a new or changed declaration at

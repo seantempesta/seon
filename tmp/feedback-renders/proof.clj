@@ -126,14 +126,20 @@
                  (:require [clojure.string :as str] [malli.core :as m] [malli.generator :as mg] [malli.registry :as mr]
                            [malli.transform :as mt] [malli.util :as mu]
                            [seon.batch :as batch] [seon.db :as db] [seon.render.value :as render.value] [seon.repl :as repl]))
-              (str "(def ^:private refusal-value-shown @#'seon.error/refusal-value-shown)\n"
+              (str (let [i (str/index-of error-text "(defn- refusal-value-shown")]
+                     (subs error-text i (str/index-of error-text "(defn-" (inc i))))
+                   "\n"
                    "(def ^:private rendered-error-value @#'seon.error/rendered-error-value)\n"
                    "(def ^:private fact-source @#'seon.error/fact-source)\n"
 
                    (subs error-text start end))))
   (eval-in! '(ns fr.render.schema)
-            (str/replace-first (slurp (str root "src/seon/render/schema.clj"))
-                               "(ns seon.render.schema" "(ns fr.render.schema-copy"))
+            ;; seon.id/printed is public from f3b05eb31; an older installed
+            ;; archive prints the link identity with pr-str
+            (-> (slurp (str root "src/seon/render/schema.clj"))
+                (str/replace-first "(ns seon.render.schema" "(ns fr.render.schema-copy")
+                (cond-> (:private (meta (resolve 'seon.id/printed)))
+                  (str/replace "(id/printed " "(pr-str "))))
   (eval-in! '(ns fr.render.schema) "(def usage fr.render.schema-copy/usage) (def render-ai fr.render.schema-copy/render-ai) (def render-html fr.render.schema-copy/render-html)")
   :copied)
 

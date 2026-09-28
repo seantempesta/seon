@@ -111,7 +111,7 @@
                 :seon.program/projected-properties true,
                 :seon.render/ai seon.render.schema/render-ai,
                 :seon.render/html seon.render.schema/render-html,
-                :seon.render/form seon.render.ns/schema-form :seon.program/partition :seon.program}
+                :seon.render/form seon.render.schema/render-form :seon.program/partition :seon.program}
                [:seon.schema/key :seon.schema/key]
                [:seon.program/definition-digest :seon.program/definition-digest]
                [:seon.schema.admission/source

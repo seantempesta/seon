@@ -461,7 +461,9 @@
            (when (= error ::unregistered-predicate)
              (str " Predicate " predicate " is owned by namespace "
                   predicate-owner "; load or reload that namespace before "
-                  "schema admission.")))
+                  "schema admission."))
+           (when-let [missing (::unresolved-reference extra)]
+             (str " It names " missing ", which no schema declares.")))
       (cond->
        (merge
         {::error error
@@ -613,8 +615,14 @@
               definition (get forms offending)]
           (if (or (:seon.schema/missing-reference data)
                   (= :malli.core/invalid-schema (:type data)))
-            (refusal! ::unresolved-reference offending definition
-                      {::cause data})
+            ;; The refusal names the key nothing declares (read through the
+            ;; whole cause chain), not only the declaration that named it:
+            ;; the one fact the author needs to fix the declaration.
+            (let [missing (#'schema/unresolved-reference-in e)]
+              (refusal! ::unresolved-reference offending definition
+                        (cond-> {::cause data}
+                          missing (assoc ::unresolved-reference missing
+                                         :seon.schema/missing-reference missing))))
             (throw e)))))
     ;; `schema/register!` owns the leaf write. When that one registration
     ;; changes a derived config composite, contribute only those projections

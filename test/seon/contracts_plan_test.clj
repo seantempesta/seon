@@ -13,8 +13,8 @@
         shown (:seon.eval/shown saved)]
     (is ((schema/projection-validator (schema/handed-projection)
                                       :seon.instrument/contract-error) refusal))
-    ;; The contract pair's reads, each with its result (seon.error/render-contract-ai).
-    (doseq [fragment ["my.note/add!" ":my.note/id" "Supply :my.note/id with a string" ";=> "]]
+    ;; The reply names the function and the failing key (seon.error/reply-value).
+    (doseq [fragment ["my.note/add!" ":my.note/id"]]
       (is (str/includes? shown fragment) shown))))
 
 (deftest installed-contract-refusal-names-the-run5-failing-coordinate

@@ -149,23 +149,23 @@
       (is (every? #(str/starts-with? % ";; ")
                   (str/split-lines (kernel/render-ai {:seon.render/value divide})))))))
 
-(deftest a-contract-refusals-pair-shows-operation-expected-offending-fix-and-location
+(deftest a-contract-refusals-reply-is-the-failing-path-and-a-fix-as-data
   ;; A program function resolves in an acquired agent context (a bare
-  ;; interpreter holds no program namespaces): the member's, forked.
+  ;; interpreter holds no program namespaces): the member's, forked. The reply
+  ;; (seon.error/reply-value) is data the agent fixes the call from: the
+  ;; failing path with its expectation and value, the call rewritten so its
+  ;; contract admits it (the string decoded to the symbol), and its frames.
   (let [ctx (test-support/fork-cluster-ctx
              (:seon.db/connection (test-support/execution-handle nil)))
-        handle 'result/e2
         refusal (failure ctx "(seon.error.refusal/frame-function \"x\")")
-        source (error/render-contract-ai {:seon.render/value refusal :seon.repl/handle handle})
-        {:keys [results tokens]} (shown source handle refusal)]
+        reply (error/reply-value nil refusal)]
     (is (= 'seon.error.refusal/frame-function (:seon.error/operation refusal)) (pr-str refusal))
-    (is (str/starts-with? source ";; seon.error.refusal/frame-function refused its ") source)
+    (is (str/starts-with? (:seon.error/message reply)
+                          "seon.error.refusal/frame-function refused argument 0")
+        (pr-str reply))
     (is (= [{:seon.error/path [] :seon.error/expected :symbol :seon.error/offending "x"}]
-           (mapv #(dissoc % :seon.error/fix) (first results)))
-        source)
-    (is (string? (:seon.error/fix (ffirst results))))
-    (is (= (:seon.sci.eval/stacktrace refusal) (second results)) "the author's location")
-    (is (str/includes? source "(doc seon.error.refusal/frame-function)") "its contract is one read away")
-    (is (not-any? #(str/includes? source %) ["seon.instrument/" ":seon.error/doc" "expected-shape"])
-        "instrument bookkeeping stays on the value, unshown")
-    (is (<= tokens 400) source)))
+           (:seon.error/problems reply)))
+    (is (= '(seon.error.refusal/frame-function (quote x)) (:seon.error/fix-form reply)))
+    (is (= (:seon.sci.eval/stacktrace refusal) (:seon.sci.eval/stacktrace reply)) "the author's location")
+    (is (not-any? #(contains? reply %) [:seon.error/expected-shape :seon.error/chain :seon.instrument/malli])
+        "instrument bookkeeping stays on the value, unshown")))

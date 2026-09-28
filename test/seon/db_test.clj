@@ -1937,7 +1937,9 @@
            (is (= {:seon.schedule/id "f2-invalid"}
                   (get-in refusal [:seon.error/data :seon.db/entity])))
            (is (= :seon.schedule/zone-id (:seon.db/attribute refusal)))
-           (is (= :seon.error/unknown (:seon.db/offending refusal)))
+           (is (= "f2-invalid" (:seon.schedule/id (:seon.db/offending refusal)))
+               "a missing key's offending value is the entity missing it")
+           (is (not (contains? (:seon.db/offending refusal) :seon.schedule/zone-id)))
            (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
                                      [:seon.schedule/id "f2-invalid"]))))
            (is (nil? (:db/id (db/pull (db/db connection) '[:db/id]
@@ -2001,7 +2003,11 @@
          (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= :seon.program/definition-digest (:seon.db/attribute refusal))
              "the refusal names the missing required key")
-         (is (= :seon.error/unknown (:seon.db/offending refusal)))
+         (is (map? (:seon.db/offending refusal)) "the offending value is the entity missing the key")
+         (is (not (contains? (:seon.db/offending refusal) :seon.program/definition-digest)))
+         (is (some #(= :seon.program/definition-digest (last (:seon.error/path %)))
+                   (get-in refusal [:seon.error/data :seon.error/problems]))
+             "every failing path is a problem")
          (is (= identities (get-in refusal [:seon.error/data :seon.db/entity]))
              "the refusal names the entity by its identity attributes")
          (is (= basis (db/basis-t (db/db connection))) "the incomplete create commits nothing")))
