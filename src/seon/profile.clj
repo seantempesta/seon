@@ -432,18 +432,37 @@
      :seon.profile/over-second
      (into [] (filter #(< slow-ms (:seon.profile/max-ms %))) (sort-by :seon.profile/max-ms > observed))}))
 
+(def explained-calls
+  "Armed calls since a world's previous transaction from which its work is
+  stamped even under `slow-ms`: call-heavy work (N+1, repeated derivation)."
+  10000)
+
+(def hot-limit
+  "Definitions a stamped transaction names by self time."
+  20)
+
 (defn transaction-observation
   "The work `world` did since its previous transaction, as the attributes the
-  transaction it writes carries on `:db/current-tx` (health plan §1.2): its
-  milliseconds, its armed calls, its top five definitions by self time and the
-  definitions it called more than `seon.batch/repeated-calls` times.
+  transaction it writes carries on `:db/current-tx` (health plan §1.2), when
+  that work is worth explaining: at least `slow-ms` milliseconds or
+  `explained-calls` armed calls. Then its milliseconds, its armed calls, its
+  top `hot-limit` definitions by self time and the definitions it called more
+  than `seon.batch/repeated-calls` times; otherwise nothing.
+
+  Why the floor: a store attribute costs its commit one rewritten index leaf
+  (about 40-70 KB) once its datoms outgrow a shared leaf, whatever the values,
+  and the plain daily collection keeps every commit of a live branch. Stamped
+  on every commit (7,646 on default in 24 h) the four attributes cost ~0.8 to
+  2.3 GB a day; above the floor (19 of 267 evaluations in the same day) they
+  cost a leaf or two on the commits the health report reads, and more values
+  in a touched attribute are nearly free (landing note).
 
   Read from the world's call sink (`:seon.batch/sink`): each counter's calls
   and self nanoseconds less those at the world's previous transaction, which
   this call then marks (the sink's counters own the mark, so nothing beside
   them holds state). Milliseconds come from the world's `:seon.batch/stamped-ns`
   (the fold's start instant, moved to now here) and are absent without it.
-  Empty for no world, no sink, or no armed work since; definitions whose
+  Empty for no world, no sink, or work under the floor; definitions whose
   digest is unknown count in calls but are named nowhere. Two threads stamping
   one world at once split its work between their transactions.
 
@@ -470,16 +489,18 @@
             ms (when-let [^AtomicLong at (:seon.batch/stamped-ns world)]
                  (let [now (System/nanoTime)]
                    (quot (- now (.getAndSet at now)) 1000000)))
-            hot (into #{} (comp (take 5) (map (fn [[[sym digest] made used]] [sym digest made (quot used 1000000)])))
+            hot (into #{} (comp (take hot-limit) (map (fn [[[sym digest] made used]] [sym digest made (quot used 1000000)])))
                       (sort-by #(- (long (nth % 2))) known))
             repeated (into #{} (keep (fn [[[sym digest] made]]
                                        (when (> made seon.batch/repeated-calls) [sym digest made])))
                            known)]
-        (cond-> {}
-          (and ms (or (pos? calls) (pos? ms))) (assoc :seon.db.transaction/ms ms)
-          (pos? calls) (assoc :seon.db.transaction/calls calls)
-          (seq hot) (assoc :seon.db.transaction/hot hot)
-          (seq repeated) (assoc :seon.db.transaction/repeated repeated))))))
+        ;; the marks above advanced either way: the next stamp is the work since this one
+        (if (or (>= calls explained-calls) (and ms (>= ms slow-ms)))
+          (cond-> {:seon.db.transaction/calls calls}
+            ms (assoc :seon.db.transaction/ms ms)
+            (seq hot) (assoc :seon.db.transaction/hot hot)
+            (seq repeated) (assoc :seon.db.transaction/repeated repeated))
+          {})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Explaining one slow operation

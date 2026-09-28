@@ -15,6 +15,12 @@ definition version's p50/p99/error-class buckets only when they move. Nothing wr
 
 ## Broken or not yet live
 
+- **This lane's probes were a drain before the owner's rule:** about 4,600 commits on disposable branches
+  (`:health-recording-proof`, `-final`, `-tx`; ~4,000 of them one byte loop that outlived its 120 s MCP timeout),
+  roughly 4-5 GB. All three branches are retired, so the daily collection sweeps them (unlinked). The later
+  probe (`:health-recording-bytes`, retired) wrote ~115 commits, ~35-40 MB.
+- **The daily collection reclaims nothing on a live branch** (`plain-cutoff`, below); `data/store` grew
+  102,589,464 → 107,773,192 KB in ~10 minutes from other writers. Task in `resources/seon/tasks/seon.maintenance.edn`.
 - **Not installed until root's restart and three patches.** Default runs HEAD's `seon.profile`; the stamp, settle
   hooks, world clock and member run time are patches (below). Every proof here ran on a scratch copy of the
   committed text loaded as `tmp.health-recording.profile` in default's JVM, on disposable branches.
@@ -39,7 +45,8 @@ definition version's p50/p99/error-class buckets only when they move. Nothing wr
 - Schemas: `seon.profile.edn` (cell, window, measurement values; named warnings `:seon.profile/over-bound-warning`
   = p99 ≥ bucket 31, `:seon.profile/frequent-throws-warning` = errors :frequent — no stored label),
   `seon.profile.measurement.edn` (new; noHistory buckets keyed by `[sym digest]` as values: the definition version
-  may be absent on the storing branch), `seon.db.transaction.edn` (`/ms /calls` indexed, `/hot /repeated` not).
+  may be absent on the storing branch; only the identity indexed), `seon.db.transaction.edn` (four noHistory
+  attributes, none indexed, written only above the floor).
 - Deleted: the weak `live` set, the call and throw counters, the third clock read in a world, `over-bound?` as a
   stored fact (derived from p99).
 
@@ -70,13 +77,54 @@ source is docstrings and contracts; it is new capability the plan asks for, not 
 | one query for slow or call-heavy transactions | 0.23 ms over 45 stamped; returned exactly the 2 slow + 3 N+1 with op, agent, hot, repeated |
 | bytes per commit (idx/-mark), 30 rounds | bare 689 KB; names in `seon.db.transaction`, unindexed +45 KB; distant namespace +228 KB; history + AVET index on ms/calls ~+670 KB |
 
-The index on `/ms /calls` is root's ruling (model proof ~+0.6 files per commit per indexed attribute); this lane
-measured ~+670 KB per commit for indexed-with-history against +45 KB unindexed — root to reconcile.
+## Store cost: where it is fixed, the chosen payload, the projection (owner: never a drain)
+
+Probe: one disposable branch (`:health-recording-bytes`, retired), attributes installed by the writer, new node
+files per commit by `idx/-mark` over the six indexes, 5 round-robin rounds per payload (≈115 commits ≈ 35-40 MB of
+branch-own nodes; store-wide `du` 102,589,464 → 107,773,192 KB over the same 10 minutes is other writers).
+
+| Payload on `:db/current-tx` (noHistory) | KB/commit | ms/commit |
+|---|---|---|
+| bare stamp (process, operation, agent) | 339 | 39.5 (first) |
+| + 2 / 5 / 10 / 20 plain longs | 333 / 357 / 349 / 328 | 27.8-30.5 |
+| + 1 indexed long | 351 | 30.8 |
+| + top 5 tuples, 64-char digests / 12-char ids | 354 / 338 | 33.2 / 28.7 |
+| + top 20 tuples, 64-char digests | 350 | 29.4 |
+| + top 5 as plain symbols | 358 | 28.5 |
+| + component children | refused: a component needs its declared entity schema | — |
+
+All within ±20 KB of bare on this young branch: payload size and count are nearly free while an attribute's datoms
+share a leaf. The cost is fixed per written attribute per index once its run outgrows a leaf: each commit that writes
+it rewrites that run's tail leaf (≈40-70 KB) in AEVT, again in AVET when indexed or a tuple (Datahike puts tuples in
+AVET), again in the temporal indexes with history. On a branch carrying 4,000 stamped transactions three unindexed
+attributes cost +45 KB and indexed-with-history ones ~+670 KB (earlier table); the model proof's "~0" was a young
+store. noHistory did not remove the AVET-family node in the probe (+40 KB either way, 6 rounds).
+
+**What the daily collection reclaims:** nothing on a live branch. `seon.maintenance/collect!` passes
+`registry/plain-cutoff` (the epoch, `src/seon/cluster/registry.clj:525`, `src/seon/maintenance.clj:780,797`), so
+Datahike keeps every commit of every roster branch; only unlinked branches are swept. `retention-cutoff`
+(`:seon.config.db/snapshot-window-ms`) exists and is not used by the scheduled job. Every commit's rewritten nodes on
+`:cluster-default` are permanent; noHistory changes the indexes written, not what is retained.
+
+**Chosen payload:** stamp only work worth explaining — at least `seon.profile/slow-ms` (1 s) or
+`seon.profile/explained-calls` (10,000 armed calls) since the world's previous transaction — and then carry
+everything useful: `/ms`, `/calls`, `/hot` top 20 `[sym digest calls self-ms]`, `/repeated`; all noHistory; nothing
+indexed (every stamped transaction is a match; the query scans the `/ms` run). Full digests: they join to
+measurements and functions by value, and short ids saved nothing measurable. Measurements index only their
+identity (`/sym`, `/p99`, `/errors` indexes dropped; the warning queries scan one row per measured definition).
+
+**Projection at today's rate** (default: 7,646 commits in 24 h; 267 evaluations, of which 19 were ≥ 1 s or ≥ 10,000
+calls; p50 5 ms, p90 480 ms, p99 2.9 s): the stamp on every commit would cost ~0.8 GB/day (two plain attributes) to
+~2.3 GB/day (the four as first declared), none reclaimed. Gated, it is written on the commits that carry heavy work
+— on the order of tens to hundreds a day — at ≤ 4 leaf rewrites (≤ ~250 KB) each once the runs mature, ~0 while
+young: under ~25 MB/day at 100 heavy commits. Per 1,000 ordinary evaluations: 0 bytes of stamp. Per 1,000
+unchanged settles: 0 measurement writes, 0 bytes (proven: 0 writes in 100 settles of jittered work); a settle that
+moves measurements rides its commit with one leaf per written measurement attribute.
 
 ## Patches (tmp/health-recording/patches/)
 
 - `root/db-stamp-transaction.patch` (+7 −4): `seon.db` requires `seon.profile`; stamp's lazily installed attribute
-  list gains the four; the stamp merges `(profile/transaction-observation world)`.
+  list gains the four; the stamp merges `(profile/transaction-observation world)`, which is empty under the floor.
 - `root/test-support-cell-calls.patch` (+1 −2): `armed-counts` reads `(:seon.profile/calls (profile/observation c))`
   — required with this commit (test_support.clj is held by one-path-impl-2).
 - `one-path-impl-2/settle-measurements-and-world-clock.patch` (+36 −8): `settle-batch!` and `turn.batch/settle`

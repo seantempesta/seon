@@ -23,4 +23,9 @@
              :kind :function
              :intent "seon.maintenance/report makes 7 reads, 3 of them with dependency :all (a wildcard pull), so a reader retaining it by the attributes it read (seon.health/derived) re-derives it on every commit (1.0-1.6 ms per health report). Pull the receipts by their declared members; done when its read evidence names only attributes."
              :must-read #{seon.maintenance/report}
-             :evidence #{"tmp/health-page/RESUME.md"}}]
+             :evidence #{"tmp/health-page/RESUME.md"}}
+ #:seon.task{:name "the-daily-collection-keeps-every-commit-of-a-live-branch"
+             :kind :function
+             :intent "seon.maintenance/collect! passes seon.cluster.registry/plain-cutoff (the epoch) to Datahike's gc-storage, so every commit in a roster branch's ancestry is kept and only unlinked branches are swept; seon.cluster.registry/retention-cutoff (:seon.config.db/snapshot-window-ms) exists and the scheduled job never calls it. Every commit's rewritten index nodes on :cluster-default are therefore permanent: measured 2026-09-28, a commit rewrites 0.3-1.2 MB of nodes, default made 7,646 commits in 24 h, and data/store grew from 102,589,464 to 107,773,192 KB in about ten minutes while this lane's own probe wrote ~40 MB. Owner rule: health and probes must never be a drain, and up to ~1 GB/day is acceptable only if the daily collection reclaims it. Done when the scheduled collection applies a declared snapshot window to live branches (older commits beyond it reclaimed, branch heads and held values kept), with the bytes reclaimed per run recorded, and the store's daily growth measured against it."
+             :must-read #{seon.maintenance/collect! seon.cluster.registry/collect! seon.cluster.registry/retention-cutoff}
+             :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}]
