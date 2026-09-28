@@ -21,7 +21,9 @@
          [:seon.render/profile {:optional true} :seon.render/profile]
          [:seon.sci.eval/time-limit-ms {:optional true} :seon.sci.eval/time-limit-ms]
          [:seon.turn/id {:optional true} :seon.turn/id]
-         [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]]
+         [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
+         [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its roster."} :seon.store/store]
+         [:seon.agent/routing {:optional true :description "The execution's agent routing (its environment's): retiring a hosted agent reads it."} :seon.agent/routing]]
  :text [:string {:description "Exact text of a batch; after reading, its repaired text: what is evaluated, stored and rendered."}]
  :start-ns :symbol
  :mode [:enum :reply :code]

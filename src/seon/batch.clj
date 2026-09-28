@@ -55,7 +55,17 @@
    :seon.task/id :seon.task/id
    :seon.render/profile :seon.render/profile
    :seon.batch/sink :seon.batch/sink
-   :seon.sci.eval/ctx :seon.sci.eval/ctx})
+   :seon.sci.eval/ctx :seon.sci.eval/ctx
+   :seon.store/store :seon.store/store
+   :seon.agent/routing :seon.agent/routing})
+
+(defn environment-members
+  "The world members an execution's environment holds: its store and its
+  agent routing (what branch operations read, `my.agent/create-branch!`)."
+  {:malli/schema [:=> [:cat :map] [:map [:seon.store/store {:optional true} :seon.store/store]
+                                   [:seon.agent/routing {:optional true} :seon.agent/routing]]]}
+  [environment]
+  (select-keys environment [:seon.store/store :seon.agent/routing]))
 
 (defn sink?
   "True for a call sink."

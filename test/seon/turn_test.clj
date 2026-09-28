@@ -2336,3 +2336,20 @@
        (is (some? (:refused-outcome settled)) "the settlement's failure is answered as a value")
        (is (every? #(some? (:seon.cluster.eval/error %)) receipts)
            "each receipt names the failed settlement beside its value")))))
+
+(deftest a-branch-operation-is-supplied-its-context-from-the-world
+  ;; Lanes, 2026-09-28: `(my.agent/retire-branch! {...})` from MCP refused
+  ;; its argument count: its context's store and routing were no world's
+  ;; members. The execution's environment supplies them by schema name.
+  (support/with-database
+   (fn [connection]
+     (let [execution (support/execution-handle connection)
+           request (turn.batch/code-request
+                    {:seon.batch/world (world/agent-world execution {:seon.agent/id "branch-lister"})
+                     :seon.batch/observe observe/observe
+                     :seon.turn.batch/row-tx @#'turn/row-tx
+                     :seon.batch/start-ns 'user
+                     :seon.batch/text "(my.agent/branches)"})
+           entry (first (:seon.batch/entries (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))))]
+       (is (contains? (get-in entry [:seon.batch/evaluation :seon.sci.admit/value]) :my.agent/roster)
+           "the one-argument call answers the store's roster")))))

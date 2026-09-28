@@ -5267,7 +5267,8 @@
                        :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
                        :seon.agent/id agent-id}
                 run-id (assoc :seon.turn/id run-id)
-                (env/of cluster) (assoc :seon.env/environment (env/of cluster))
+                (env/of cluster) (-> (assoc :seon.env/environment (env/of cluster))
+                                     (merge (seon.batch/environment-members (env/of cluster))))
                 (:seon.db.process/id cluster) (assoc :seon.db.process/id (:seon.db.process/id cluster)))
         request (-> (turn.batch/program-request
                      {:seon.batch/world world

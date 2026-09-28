@@ -51,7 +51,8 @@
              :seon.sci.eval/time-limit-ms (or limit 30000)}
       agent-id (assoc :seon.agent/id agent-id)
       turn-id (assoc :seon.turn/id turn-id)
-      environment (assoc :seon.env/environment environment)
+      environment (-> (assoc :seon.env/environment environment)
+                      (merge (seon.batch/environment-members environment)))
       process (assoc :seon.db.process/id process)
       branch (assoc :seon.agent/branch branch)
       task (assoc :seon.task/id task)
@@ -78,7 +79,8 @@
     agent-id (assoc :seon.agent/id agent-id)
     turn-id (assoc :seon.turn/id turn-id)
     ctx (assoc :seon.sci.eval/ctx ctx)
-    environment (assoc :seon.env/environment environment)
+    environment (-> (assoc :seon.env/environment environment)
+                    (merge (seon.batch/environment-members environment)))
     process (assoc :seon.db.process/id process)
     profile (assoc :seon.render/profile profile)))
 
