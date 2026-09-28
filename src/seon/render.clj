@@ -1703,7 +1703,8 @@
 (defn branch-scope
   "The Datahike connection a ctx derives render values in, as Datahike names it.
 
-  `:datahike.cache/connection-id` is `[store-id branch]` and
+  `:datahike.cache/connection-id` is `[store-id branch]` (an overlay's adds its
+  `[:datahike/overlay uuid]`, `:seon.db/connection-id`) and
   `:datahike.cache/generation` is that connection's opening
   (`reference-code/datahike/src/datahike/store.cljc:44`,
   `connector.cljc:376`). A branch unlinked and reopened under the same name
@@ -1717,8 +1718,7 @@
   {:malli/schema
    [:=> [:cat :seon.sci.eval/ctx]
     [:map
-     [:datahike.cache/connection-id {:optional true}
-      [:vector {:min 2} [:or :uuid :string :keyword]]]
+     [:datahike.cache/connection-id {:optional true} :seon.db/connection-id]
      [:datahike.cache/generation {:optional true} :uuid]]]}
   [ctx]
   (let [custody (:seon.sci.eval/custody ctx)
