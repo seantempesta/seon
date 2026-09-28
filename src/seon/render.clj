@@ -1474,11 +1474,15 @@
                  (when (map? value)
                    (entity-lookup (:seon.db/db unit) value)))
         cursor (:seon.render.data/cursor unit)
-        path (:seon.render.data/path cursor)]
+        path (:seon.render.data/path cursor)
+        attribute (:seon.render.walk/attribute unit)]
     (cond
       (nil? root) (source-provenance-error unit)
       (seq path) (list 'seon.render.data/pull-at
                        (list 'quote '[*]) root cursor)
+      ;; an attribute request stays an attribute request: its value is read
+      ;; again as that attribute of the entity, never the whole entity
+      attribute (list 'get (list 'seon.db/pull (list 'quote [attribute]) root) attribute)
       :else (list 'seon.db/pull (list 'quote '[*]) root))))
 
 (defn render-default-ai-source
