@@ -2192,7 +2192,7 @@
                         [?effect :seon.effect/form-ordinal ?ordinal]]
                       database run-id (:seon.cluster.eval/ordinal evaluation))))))
 
-(declare generated-read-fault evaluate-sources preview-sources)
+(declare generated-read-fault evaluate-sources preview-sources phase)
 
 (defn- system-plan
   "The opening's sources and the agent's retained reads, each with its status
@@ -2369,7 +2369,9 @@
                           (:seon.turn/rendered source)
                           {:seon.turn.loop/evaluated-sources
                            [{:seon.cluster.eval/ordinal ordinal
-                             :seon.turn.loop/admitted-form (dissoc source :seon.turn/rendered)
+                             :seon.turn.loop/admitted-form
+                             (assoc (dissoc source :seon.turn/rendered)
+                                    :seon.cluster.eval/ns [:seon.ns/name (:seon.ns/name source)])
                              :seon.sci.eval/evaluation
                              (sci.eval/rendered-evaluation
                               (merge (:seon.turn/rendered source)
@@ -2484,12 +2486,17 @@
                                    (assoc % :seon.turn/status :unchanged)) plan)}]
               (if (and write? (or (seq evaluated) (seq refresh-tx)))
                 (let [prepared (when (seq evaluated)
-                                 (record-evaluated-tx
-                                  {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated}))
+                                 (phase
+                                  #(record-evaluated-tx
+                                  {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated})))
                       ;; A SYSTEM TURN RUNS NO ISSUE TESTS. It appends
                       ;; generated reads; it is not the agent answering, so
                       ;; nothing it settles can newly satisfy an issue.
-                      report (blob/with-publication!
+                      ;; a recording its own contract refused is this turn's
+                      ;; refusal as a value, never a throw to the caller
+                      report (if (:seon.turn.loop/phase-failed prepared)
+                              prepared
+                             (blob/with-publication!
                               connection (vec (:seon.blob/staged-writes prepared))
                               #(db/transact!
                                 connection
@@ -2503,8 +2510,8 @@
                                              (= latest (latest-evaluations current agent-id)))
                                       (conj (into refresh-tx (:seon.db/tx-data prepared))
                                             [:db.fn/call #'plan/settle-call agent-id])
-                                      []))]]))]
-                  (if (:seon.db/transaction-refused report)
+                                      []))]])))]
+                  (if (or (:seon.turn.loop/phase-failed report) (:seon.db/transaction-refused report))
                     (assoc report :seon.turn/refused-system-agent agent-id)
                       (if (some #(and (= :seon.turn/id (:a %))
                                       (= turn-id (:v %))) (:tx-data report))

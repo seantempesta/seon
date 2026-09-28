@@ -4477,8 +4477,11 @@
                             record)]
     (cond-> (merge {:seon.cluster.eval/ns namespace-ref
                     :seon.sci.eval/ending-ns (second namespace-ref)
-                    :seon.print/options {}}
+                    :seon.print/options {}
+                    :seon.cluster.eval/at (java.util.Date.)}
                    shown)
+      (:seon.db/db request)
+      (assoc :seon.cluster.eval/read-basis-transaction (db/basis-t (:seon.db/db request)))
       (seq evidence) (assoc :seon.cluster.eval/read-evidence evidence))))
 
 (defn- trusted-evaluation

@@ -1211,6 +1211,20 @@
                  (not (str/includes? (str (:seon.error/message r)) "could not be built")))
      :message (:seon.error/message r) :problems (count (:seon.error/problems r))}))
 
+(defproof :p1-system-turn-records-data-units :parity
+  "P1: a written system turn on a disposable branch records the opening's data units (each printed as data, never evaluated) and answers them in its forms; a recording its contract refuses answers a refusal value, never a throw"
+  (on-fresh-branch
+   (fn []
+     (let [instance (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default")
+           handle (merge (:seon.turn.loop/cluster instance) (select-keys *exec* [:seon.db/connection :seon.sci.eval/ctx]))
+           r (try (seon.turn/system-turn {:seon.turn.loop/cluster handle :seon.agent/id "root" :seon.turn/write? true})
+                  (catch Throwable t {:threw (ex-message t)}))
+           rendered (filter :seon.turn/rendered (:seon.turn/forms r))]
+       {:pass? (and (not (:threw r)) (not (:seon.error/message r)) (some? (:seon.turn/id r))
+                    (seq rendered) (every? :seon.turn/text rendered))
+        :turn (:seon.turn/id r) :rendered (count rendered)
+        :failure (or (:threw r) (:seon.error/message r))}))))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
