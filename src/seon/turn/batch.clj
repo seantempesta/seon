@@ -617,7 +617,7 @@
 (defn- evaluation-record
   "One entry as the recording writer's terminal evaluation."
   {:malli/schema [:=> [:cat :string :seon.batch/entry] :map]}
-  [turn-id {:seon.batch/keys [ordinal shown error facts-error ns-before source duration-ms] :as entry}]
+  [turn-id {:seon.batch/keys [ordinal shown shown-map error facts-error ns-before source duration-ms] :as entry}]
   (cond-> {:seon.turn/id turn-id
            :seon.cluster.eval/ordinal ordinal
            :seon.cluster.eval/at (java.util.Date.)
@@ -626,6 +626,8 @@
     ;; the reply's :ms, as an SCI evaluation records it
     duration-ms (assoc :seon.eval/duration-ms (Math/round (double duration-ms)))
     shown (assoc :seon.eval/shown shown)
+    ;; what the value was, as the show stage measured it (`value-storage`)
+    (:seon.eval/value-class shown-map) (merge (select-keys shown-map [:seon.eval/unstored :seon.eval/value-class]))
     (contains? entry :seon.batch/error)
     (assoc :seon.cluster.eval/error (or (ex-message error) (.getName (class error))))
     facts-error (assoc :seon.cluster.eval/error (str "facts not proposed: " (:seon.error/message facts-error)))

@@ -236,14 +236,26 @@
          (is (= 'user/make-row (:seon.error/producer (first (problems/open-faults (db/db connection) signature))))
              "the open fault names who it counts against")
          (is (= [['user/make-row]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row connection signature)))))
-         (is (= (set (map #(get-in batch [:seon.batch/entries % :seon.batch/change :seon.batch/entities 0 :seon.program/definition-digest]) [0 2]))
-                (set (map :seon.error/producer-digest
-                      (:seon.error/occurrences (db/pull (db/db connection) [{:seon.error/occurrences [:seon.error/producer-digest]}]
-                                                        [:seon.error/signature signature])))))
-             "each failure names the version visible when it ran, never the later definition")
          (is (some #(= (:seon.task/id (first (:seon.task/_faults (signature-row connection signature)))) (:seon.task/id %))
                    (my.task/open (db/db connection)))))
        (testing "the agent's own form is its mistake, returned and never recorded"
          (let [before (db/basis-t (db/db connection))]
            (run "(seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})")
            (is (= before (db/basis-t (db/db connection))))))))))
+
+(deftest a-batch-failure-names-the-definition-visible-when-it-ran
+  ;; Entry order decides the version: a failure before any definition names
+  ;; none, and a later redefinition never relabels an earlier failure
+  ;; (live probe 2026-09-28: B/B/B before the fold, unknown/A/B after).
+  (let [error (ex-info "probe" {:seon.batch/error-value {:seon.error/producer 'probe/f :seon.error/message "probe"}})
+        a (apply str (repeat 64 "a"))
+        b (apply str (repeat 64 "b"))
+        define (fn [digest] {:seon.batch/change {:seon.batch/entities [{:seon.fn/sym 'probe/f :seon.program/definition-digest digest}]}})
+        batch {:seon.batch/entries [{:seon.batch/error error :seon.batch/ordinal 0}
+                                    (define a)
+                                    {:seon.batch/error error :seon.batch/ordinal 2}
+                                    (define b)
+                                    {:seon.batch/error error :seon.batch/ordinal 4}]}]
+    (is (= [nil a b]
+           (mapv #(get-in % [:seon.error/data :seon.error/producer-digest])
+                 (#'seon.batch/produced-failures batch))))))
