@@ -152,3 +152,45 @@ Root's focused tests:
 - `seon.test.runner-test/nested-runs-own-their-counters-and-evidence`
 
 Foreign boundary and installation limits are unchanged from the first slice.
+
+## Stored EDN: parse and canonicalize each text once
+
+`decode-attribute-value-in` now retains successful canonical decoding in
+`:seon.schema.datahike/decoded-edn`, keyed by the stored text, attribute and
+loaded codec functions/readers. Reloading that codec selects a new key.
+Non-string, malformed and noncanonical storage keeps the same refusal data;
+failed derivations are not retained. Attribute identity in the key also keeps
+concurrent malformed reads from sharing another attribute's refusal. A tuple
+holds decoded nil, so successful nil is cacheable. Reading still does not
+reapply the current write schema to historical values. All contracts remain.
+
+For R reads of length-L text, parsing and canonical reprinting changes from
+O(R × codec-work(L)) to O(codec-work(L)) per resident content key; lookups
+remain, and hashing a freshly allocated equal Java string is still O(L).
+This is not an O(1) claim for obtaining arbitrary new text. Estimated retained
+weight is ten times text length plus the central cache's entry allowance.
+
+MCP scratch `scratch.astra.codec`: the actual first stored
+`:datahike.read/revision` datom on default (581 characters), same immutable
+database as above. Final candidate timings at 1/10/100 decodes: 0.540→0.404,
+1.015→0.116, 9.626→1.035 ms, with identical values. Separate probes confirmed
+equal values/refusal data for nil, malformed text, noncanonical map ordering
+and non-string storage. Memory was not measured. The earlier prototype had
+additional public-wrapper overhead and measured 18.66→4.42 ms at 100; the
+final numbers above are the candidate actually landing.
+
+Archive `3e0370417` plus bridge source/test: lint 0 errors, 1,725 warnings,
+6.416 s. Contracts: 497 files, same 10 foreign script findings, zero source/test
+findings, 4.275 s. No test request started. This changes read reuse, not schema
+projection, encoding, publication or arming. Probe:
+`tmp/astra-algorithmic-fixes-20260928/codec-probe.clj`.
+
+Root's focused tests:
+
+- `seon.schema.datahike-test/repeated-canonical-storage-is-decoded-once`
+  (new, decoder call count at 1/10/100 and successful nil).
+- `seon.schema.datahike-test/edn-backed-attributes-have-one-canonical-datahike-round-trip`
+- `seon.schema.datahike-test/a-write-encodes-a-slot-by-its-installed-attribute`
+- `seon.db-test/durable-pull-digests-replay-without-retaining-read-results`
+
+Foreign boundary and installation limits remain as above.

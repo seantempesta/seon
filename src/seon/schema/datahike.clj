@@ -1116,6 +1116,19 @@
       (storage-string (validate-logical-slot-in! projection attr value))
       value)))
 
+(defn- decode-canonical-edn
+  "Decode and check canonical storage once. The tuple retains successful nil;
+  failures throw with this attribute and are never retained by the cache."
+  {:malli/schema [:=> [:cat :qualified-keyword :string] [:tuple :seon.schema/value]]}
+  [attr value]
+  (let [decoded (try
+                  (edn/read-string {:readers storage-readers} value)
+                  (catch Throwable _
+                    (refuse-slot! ::malformed-edn attr value)))]
+    (when-not (= value (storage-string decoded))
+      (refuse-slot! ::noncanonical-edn attr value))
+    [decoded]))
+
 (defn decode-attribute-value-in
   "Decode one attribute value against exactly one projection.
 
@@ -1131,14 +1144,12 @@
     (do
       (when-not (string? value)
         (refuse-slot! ::storage-not-string attr value))
-      (let [decoded
-            (try
-              (edn/read-string {:readers storage-readers} value)
-              (catch Throwable _
-                (refuse-slot! ::malformed-edn attr value)))]
-        (when-not (= value (storage-string decoded))
-          (refuse-slot! ::noncanonical-edn attr value))
-        decoded))))
+      (first
+       (seon.cache/lookup
+        ::decoded-edn [decode-canonical-edn storage-string storage-readers attr value]
+        ;; Stored text, decoded nodes and the key; no second value walk to weigh.
+        (constantly (* 10 (count value)))
+        #(decode-canonical-edn attr value))))))
 
 (defn decode-attribute-value
   "Decode and validate one value read from an EDN-backed attribute.
