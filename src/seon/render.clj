@@ -558,6 +558,10 @@
       (nil? projection) []
       ;; An attribute request stays about that attribute: its own pair.
       (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
+      ;; A defined Var's identity is :seon.render.var/var: its schema declares
+      ;; the pair that says what the definition has to say.
+      (or (instance? clojure.lang.Var value) (instance? sci.lang.Var value))
+      (or (pairs [:seon.render.var/var]) [])
       ;; A record's ILookup is its generated field `case`, so it runs no
       ;; foreign code: a declared record (a Datahike TxReport) selects too.
       (not (or (render.value/keyword-lookup? value) (instance? clojure.lang.IRecord value))) []
