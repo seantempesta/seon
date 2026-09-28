@@ -327,6 +327,11 @@ root.
   branches writes from a captured commit. Use real SCI, armed contracts and fixed render profiles; substitute only
   external effects, as explicit values. No hand-built entities, bespoke fixture machinery or Var redefinitions. Tests are
   deterministic: generated inputs are bounded so every seed passes.
+  A test checks one behavior, asserted on DATA: the value, the render's data, the stored fact or the error's key that
+  behavior is about, and only that part, so unrelated changes never break it. Printed text is asserted only by the
+  value printer's own tests and a few declared golden transcripts. A test body is a program run through the one path,
+  so its failure values reach the runner's report through the value printer. An assertion message is prose and never
+  prints a value.
 - **Run tests as agents run.** Fork the context onto the test branch, inject custody, run the body in its member's
   context, unlink. Call the agent's owners, never a test-side copy. Ordinary work uses the main JVM; only
   platform/bootstrap, declared destructive and host-bound work gets isolated JVMs. If an edit cannot reach the main
