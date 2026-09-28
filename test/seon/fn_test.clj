@@ -23,8 +23,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private boot-process
   [:seon.db.process/id "seon.db.process/boot"])
@@ -102,7 +101,7 @@
                        :seon.program/row (entity here 'sample.alias-batch/registers aliased)}
                       {:seon.cluster.eval/source elsewhere :seon.cluster.eval/ns other
                        :seon.program/row (entity other 'sample.alias-other/elsewhere elsewhere)}])]
-        (is (vector? results) (seon.print.value/bounded-text results))
+        (is (vector? results))
         (is (contains? (set (:seon.fn/calls (second (nth results 1)))) 'seon.schema/register!)
             "the alias an earlier form required resolves to its namespace")
         (is (contains? (set (:seon.fn/calls (second (nth results 2)))) 'seon.fn/tests-reaching)
@@ -129,7 +128,7 @@
                      {:seon.fn/sym 'sample.static-member/f :seon.fn/ns here :seon.fn/source source
                       :seon.fn/arglists "([x])" :seon.fn/private? false
                       :seon.schema.admission/source :agent})]
-        (is (map? entity) (seon.print.value/bounded-text entity))
+        (is (map? entity))
         (is (contains? (set (:seon.fn/calls entity)) 'seon.fn/tests-reaching)
             "a prefix the program declares as a namespace still resolves its call")
         (is (not-any? #(#{"System" "Math" "java.util.UUID"} (namespace %)) (:seon.fn/calls entity))
@@ -468,8 +467,7 @@
               macros (filter ::analyzer/macro usages)]
           (is (seq macros))
           (doseq [usage macros]
-            (is (some? (#'seon.fn/call-target usage))
-                (seon.print.value/bounded-text (select-keys usage [::analyzer/to ::analyzer/name])))))
+            (is (some? (#'seon.fn/call-target usage)))))
         (is (= "(defrecord Pair [left right])"
                (:seon.fn/source
                 (get by-id [:seon.fn/sym (quote sample.core/map->Pair)]))))
@@ -548,10 +546,7 @@
                    :seon.cluster.eval/ordinal 0
                    :seon.eval/shown ":defined"
                    :seon.program/row indexed}))]
-            (is (some? (:db-after settlement))
-                (seon.print.value/bounded-text (select-keys settlement
-                                     [:seon.error/message
-                                      :seon.error/data]))))
+            (is (some? (:db-after settlement))))
           (let [edge-facts
                 (fn [identity-attribute identity-value]
                   (let [entity
@@ -1012,8 +1007,7 @@
                [(dissoc base-request :seon.fn.change/current-artifact) :missing-artifact]
                [(assoc base-request :seon.fn.change/uncertain? true) :uncertain-projection]]]
         (is (some #{reason}
-                  (:seon.fn.change/reasons (seon.fn/plan-file-change (assoc request :seon.schema/projection (seon.schema/handed-projection)))))
-            (str request))))))
+                  (:seon.fn.change/reasons (seon.fn/plan-file-change (assoc request :seon.schema/projection (seon.schema/handed-projection))))))))))
 
 (deftest indexing-uses-a-prebuilt-manifest-without-analysis
   ;; WANTED: `index!` handed a manifest takes its entities from that value and
@@ -1049,7 +1043,7 @@
                   test-entity (db/pull database
                                     [:seon.test/subject :seon.fn/calls]
                                     [:seon.test/sym (quote prebuilt/value-test)])]
-              (is (pos? (:seon.reconcile/operations result)) (seon.print.value/bounded-text result))
+              (is (pos? (:seon.reconcile/operations result)))
               (is (= (inc (:max-tx before)) (:max-tx database))
                   "the real writer admits the population in one transaction")
               (is (integer? function-id))
@@ -1458,15 +1452,11 @@
                                      (quote sample.shape/subject-test)]}
                gate-sets)
             "none, one and many reaching tests")
-        (doseq [[function-symbol gate] gate-sets]
-          (is (vector? gate)
-              (str function-symbol " gates a vector"))
+        (doseq [[_function-symbol gate] gate-sets]
+          (is (vector? gate))
           (is (every? test-sym? gate)
-              (str function-symbol " gates only values the declared "
-                   ":seon.test/sym element schema accepts: "
-                   (seon.print.value/bounded-text (vec (remove test-sym? gate)))))
-          (is (= gate (vec (sort gate)))
-              (str function-symbol " gates a sorted vector")))
+              "gates only values the declared :seon.test/sym element schema accepts")
+          (is (= gate (vec (sort gate)))))
         ;; The class: a flat database refusal concatenated into the selection
         ;; splices its map entries, and each entry reads as a two-element
         ;; vector the declared element schema refuses.
@@ -1571,18 +1561,13 @@
             visible-paths
             (filterv #(contains? #{:ai-visible-text :html-response}
                                  (:seon.fn.output/external-sink %))
-                     paths)
-            offenders
-            (filterv #(contains? #{:bypass :unresolved}
-                                 (:seon.fn.output/classification %))
-                     visible-paths)]
+                     paths)]
         (is (pos? (:seon.fn.output/sinks totals))
             "a census with no identity-bearing sink subjects is a failure")
         (is (seq visible-paths)
             "the class check must exercise agent- or human-visible paths")
-        (is (every? #(= :projected (:seon.fn.output/classification %))
-                    visible-paths)
-            (seon.print.value/bounded-text offenders))))))
+        (is (= [] (filterv #(not= :projected (:seon.fn.output/classification %))
+                           visible-paths)))))))
 
 (deftest blocking-analysis-keeps-the-fresh-branch-unpublished
   (let [root (fixture-root)]
@@ -1640,7 +1625,7 @@
                       {:seon.db/connection connection
                        :seon.db/process boot-process
                        :seon.fn/manifest @test-support/source-manifest})]
-          (is (pos? (:seon.reconcile/operations result)) (seon.print.value/bounded-text result)))
+          (is (pos? (:seon.reconcile/operations result))))
         (let [database (db/db connection)
               component-attributes
               (into []
@@ -1721,7 +1706,7 @@
           (is (seq edges) "no first-party function calls sci.core/eval* at all")
           (is (seq tests) "no namespace declares a test, so the filter is blind"))
         (testing "only one namespace turns a form into running code"
-          (is (= #{"seon.sci.eval"} owning) (seon.print.value/bounded-text production)))))))
+          (is (= #{"seon.sci.eval"} owning)))))))
 
 (deftest agent-source-reaches-the-evaluator-through-one-visible-path
   (test-support/with-database
@@ -1733,17 +1718,14 @@
             previews (production-callers database
                                          (quote seon.turn/preview-sources))]
         (testing "the turn's edge to the evaluator is visible to the graph"
-          (is (contains? evaluate (quote seon.turn/evaluate-sources))
-              (seon.print.value/bounded-text evaluate)))
+          (is (contains? evaluate (quote seon.turn/evaluate-sources))))
         (testing "no second function evaluates agent source"
           (is (= #{(quote seon.turn/resume-turn)
                    (quote seon.turn/system-turn)
                    (quote seon.turn/preview-sources)}
-                 sources)
-              (seon.print.value/bounded-text sources)))
+                 sources)))
         (testing "the page and system turn reuse the same evaluation path"
-          (is (= #{(quote seon.render.web/render-source-call) (quote seon.turn/system-turn)} previews)
-              (seon.print.value/bounded-text previews)))))))
+          (is (= #{(quote seon.render.web/render-source-call) (quote seon.turn/system-turn)} previews)))))))
 
 (deftest fixture-observations-survive-static-and-runtime-admission
   (let [root (fixture-root)
@@ -1759,7 +1741,7 @@
           (test-support/seed-cluster! connection "default")
           (let [entities (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]})
                 admitted (db/transact! connection entities)]
-            (is (:db-after admitted) (seon.print.value/bounded-text admitted))
+            (is (:db-after admitted))
             (is (= reason (:seon.test/fixture-observation
                            (db/pull @connection [:seon.test/fixture-observation]
                                     [:seon.test/sym (quote sample.observation/observed)]))))
@@ -1779,11 +1761,11 @@
                                         :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms 10000
                                         :seon.db/db @connection :seon.db/connection connection}))
                     entity (:seon.program/row evaluation)]
-                (is (:seon.test/sym entity) (seon.print.value/bounded-text evaluation))
-                (is (= expected (:seon.test/fixture-observation entity)) (seon.print.value/bounded-text entity))
+                (is (:seon.test/sym entity))
+                (is (= expected (:seon.test/fixture-observation entity)))
                 (when entity
                   (let [admitted (db/transact! connection [(dissoc entity :seon.sci.eval/evaluated?)])]
-                    (is (:db-after admitted) (seon.print.value/bounded-text admitted))
+                    (is (:db-after admitted))
                     (is (= expected (:seon.test/fixture-observation
                                       (db/pull @connection [:seon.test/fixture-observation]
                                                [:seon.test/sym (symbol (str namespace-name) name)])))))))))))
@@ -1864,7 +1846,7 @@
             (is (= (:seon.fn/file entity)
                    (:seon.fn/file (program/declaration-row (seon.schema/handed-projection) entity :all :core))))))
         (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) entities []))]
-          (is (:db-after report) (seon.print.value/bounded-text (select-keys report [:seon.error/message])))
+          (is (:db-after report))
           (when (:db-after report)
             (doseq [entity declarations]
               (is (= (relative-file file)
@@ -2098,9 +2080,7 @@
                                   [(program/canonical-row
                                     (program/shapes-in (seon.schema/build-projection declared)) emitted)]
                                   []))]
-                     (is (:db-after report)
-                         (seon.print.value/bounded-text (select-keys report [:seon.error/message
-                                                      :seon.error/message])))
+                     (is (:db-after report))
                      (is (= "carried"
                             (::declared-after
                              (db/pull (:db-after report) '[*]
@@ -2119,7 +2099,7 @@
         (is (= :unused-binding (:seon.lint/type finding)))
         (is (= [:seon.fn/sym (quote sample.lint/chosen)] (:seon.lint/fn finding)))
         (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) entities []))]
-          (is (:db-after report) (seon.print.value/bounded-text (select-keys report [:seon.error/message])))
+          (is (:db-after report))
           (when (:db-after report)
             (is (= {:seon.lint/fn {:seon.fn/sym (quote sample.lint/chosen)}}
                    (db/pull (:db-after report) [{:seon.lint/fn [:seon.fn/sym]}]
@@ -2207,8 +2187,7 @@
       (doseq [entity (vals entities)]
         (is (= (into #{} (map first) (:seon.fn/call-arities entity))
                (set (:seon.fn/calls entity)))
-            (str (:seon.fn/sym entity)
-                 " refines exactly its :seon.fn/calls targets"))))
+            "refines exactly its :seon.fn/calls targets")))
     (is (= #{[(quote clojure.core/defn) 3]}
            (:seon.fn/call-arities (get entities (quote sample.attributes/helper))))
         "a declaration calling nothing else carries only its defining form's tuple")))
@@ -2268,7 +2247,7 @@
              refusal (db/transact! connection
                                    [[:db/add [:seon.fn/sym caller]
                                      :seon.fn/call-arities ['my.message/inbox 2]]])]
-         (is (string? (:seon.db.write.attempt/request-id refusal)) (seon.print.value/bounded-text refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)))
          (is (= [{:seon.fn/caller caller
                   :seon.fn/callee 'my.message/inbox
                   :seon.fn/call-arity 2
@@ -2312,8 +2291,7 @@
                          connection
                          [{:seon.fn/sym caller
                            :seon.fn/call-arities #{[callee refused]}}])]
-            (is (string? (:seon.db.write.attempt/request-id refusal))
-                (seon.print.value/bounded-text refusal))
+            (is (string? (:seon.db.write.attempt/request-id refusal)))
             (is (= [{:seon.fn/caller caller
                      :seon.fn/callee callee
                      :seon.fn/call-arity (long refused)
@@ -2372,7 +2350,7 @@
             roots (into #{} (db/q '[:find [?root ...] :where
                                     [?f :seon.fn.file/relative-root ?root]] database))]
         (is (seq files) "the canonical population holds indexed files")
-        (is (empty? (remove rooted files)) (seon.print.value/bounded-text (remove rooted files)))
+        (is (empty? (remove rooted files)))
         (is (= (set seon.fn/source-roots) roots))))))
 
 (deftest a-declaration-answers-its-source-root-through-its-file
@@ -2411,8 +2389,7 @@
               (get-in entity [:seon.fn/file
                            :seon.fn.file/relative-path])))
        (is (some #(= "seon.cluster.process" (namespace %))
-                 (:seon.program/callers callers))
-           (seon.print.value/bounded-text callers))))))
+                 (:seon.program/callers callers)))))))
 
 (deftest the-walked-root-travels-with-its-file-relative-to-the-publication
   (let [root (fixture-root)]
@@ -2474,13 +2451,11 @@
         kept-attributes (attributes kept)]
     (is (seq emitted) "the analysis emitted declaration entities")
     (is (<= 10 (count emitted-attributes))
-        (str "the analysis emitted a rich entity set, not an empty one: "
-             (seon.print.value/bounded-text (sort emitted-attributes))))
+        "the analysis emitted a rich entity set, not an empty one")
     (is (contains? emitted-attributes :seon.fn/writes)
         "the write attribute is among the emitted attributes")
     (is (empty? (remove kept-attributes emitted-attributes))
-        (str "attributes the analysis emitted and the canonical entity dropped: "
-             (seon.print.value/bounded-text (sort (remove kept-attributes emitted-attributes)))))
+        "attributes the analysis emitted and the canonical entity dropped")
     (doseq [entity emitted
             :when (program/row-identity entity)
             :let [canonical (set (keys (program/canonical-row entity)))
@@ -2491,9 +2466,7 @@
                                           attribute)))
                                 entity)]]
       (is (empty? (remove canonical carried))
-          (str "the canonical entity dropped "
-               (seon.print.value/bounded-text (vec (remove canonical carried)))
-               " from " (seon.print.value/bounded-text (program/row-identity entity)))))))
+          "the canonical entity dropped from"))))
 
 (defn- analyzed-namespace-contexts
   "Each fixture source's namespace context, from one publication analysis."
@@ -2545,8 +2518,7 @@
                         "(defn f [] (join #{1} #{2}))\n")})
         refusal (get contexts 'sample.top-renamed)]
     (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
-         refusal)
-        (seon.print.value/bounded-text refusal))
+         refusal))
     (is (= 2 (get-in refusal [:seon.fn/analysis-entry :seon.fn.analyzer/row]))
         "the refusal names the require's own :rename")))
 
@@ -2561,8 +2533,7 @@
                      (catch clojure.lang.ExceptionInfo failure failure))
         refusal (ex-data failure)]
     (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
-         refusal)
-        (seon.print.value/bounded-text refusal))
+         refusal))
     (is (= :analysis (:seon.cluster.source/phase refusal)))
     (is (= :refused (:seon.cluster.boot/disposition refusal))
         "the operator request returns it as refused, never a core fault")
@@ -2734,7 +2705,7 @@
        (doseq [invalid [nil false :seon.render/ai #{:unqualified}]]
          (let [refusal (test-support/refusal-data
                         #(analyze (str "(defn invalid {:seon.fn/invokes " (pr-str invalid) "} [x] x)")))]
-           (is (true? (:seon.fn/index-refused refusal)) (seon.print.value/bounded-text refusal))))))))
+           (is (true? (:seon.fn/index-refused refusal)))))))))
 
 (deftest value-uses-are-calls-and-quoted-symbols-select-nothing
   ;; Selection by call reach (owner 2026-09-26): a function handed on as a
@@ -2808,14 +2779,11 @@
           (is (seq edge-members) "the fixture exercised real resolved edges")
           (is (every? #(and (symbol? %)
                             (= % (edn/read-string (pr-str %))))
-                      edge-members)
-              (seon.print.value/bounded-text edge-members))
+                      edge-members))
           (let [report (db/transact!
                         connection
                         (seon.fn/reconcile-tx (db/db connection) entities []))]
-            (is (:db-after report)
-                (seon.print.value/bounded-text (select-keys report [:seon.error/message
-                                             :seon.error/message]))))
+            (is (:db-after report)))
           (let [bad (symbol ":clj-kondo/unknown-namespace" "visitFile")
                 entity (test-support/program-fn-entity
                      (db/db connection)
@@ -2823,10 +2791,8 @@
                      "(defn refused [] true)"
                      {:seon.fn/calls #{bad}})
                 refusal (db/transact! connection [entity])]
-            (is (string? (:seon.db.write.attempt/request-id refusal))
-                (seon.print.value/bounded-text refusal))
-            (is (= :seon.fn/calls (:seon.db/attribute refusal))
-                (seon.print.value/bounded-text refusal))))))))
+            (is (string? (:seon.db.write.attempt/request-id refusal)))
+            (is (= :seon.fn/calls (:seon.db/attribute refusal)))))))))
 
 (deftest cross-file-implementations-keep-edges-or-widen
   (let [root (fixture-root)]
@@ -2983,8 +2949,7 @@
       (write-source! root "sample/env_macro.clj" text)
       (let [refusal (entities)]
         (is (= '[clojure.core.async/<! clojure.core.async/chan clojure.core.async/go-loop]
-               (:seon.fn/unresolved-targets refusal))
-            (seon.print.value/bounded-text refusal))
+               (:seon.fn/unresolved-targets refusal)))
         (is (str/includes? (str (:seon.error/message refusal)) seon.fn/dependency-analysis-command)))
       ;; The fill the command performs, for this fixture's own cache.
       (clj-kondo.core/run! {:lint [jar] :dependencies true :parallel true
@@ -3017,7 +2982,7 @@
                        (clj-kondo.impl.core/resolve-cache-dir (str (io/file root ".clj-kondo")) true cache)
                        :clj 'clojure.core.async)]
             (is (= :seon.fn/dependency-analysis-missing-error
-                   (:seon.error/declared-schema (meta (ex-data refusal)))) (seon.print.value/bounded-text refusal))
+                   (:seon.error/declared-schema (meta (ex-data refusal)))))
             (is (m/validate :seon.fn/dependency-analysis-missing-error (ex-data refusal)
                             {:registry (:seon.schema.projection/registry (db/carried-projection @connection))}))
             (is (= '[clojure.core.async/<! clojure.core.async/go-loop] (:seon.fn/unresolved-targets (ex-data refusal))))
@@ -3163,7 +3128,7 @@
                 database (db/db connection)
                 entity (db/pull database [:db/id :seon.fn/defined-by] [:seon.fn/sym value-def])]
             (is (= 'clojure.core/def (:seon.fn/defined-by entity)) "the computed def is the analyzer's entity")
-            (is (= test-support/committed result) (seon.print.value/bounded-text result))
+            (is (= test-support/committed result))
             (is (some #(= (:db/id entity) (get-in % [:seon.lint/fn :db/id]))
                       (db/q '[:find [(pull ?lint [{:seon.lint/fn [:db/id]}]) ...] :in $ ?path
                               :where [?file :seon.fn.file/relative-path ?path] [?lint :seon.lint/file ?file]]

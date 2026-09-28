@@ -6,8 +6,7 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest a-repl-definition-is-admitted-with-the-digest-the-writer-recomputes
   ;; The contract makes `definition-entities` replace `:seon.fn/spec` after
@@ -27,13 +26,13 @@
            entity (:seon.program/row evaluation)
            database @connection
            projection (db/carried-projection database)]
-       (is (= 'sample.repl-digest/probe (:seon.fn/sym entity)) (seon.print.value/bounded-text evaluation))
+       (is (= 'sample.repl-digest/probe (:seon.fn/sym entity)))
        (is (= (db/definition-digest-of projection entity
                                        (db/pull database '[*] [:seon.ns/name 'sample.repl-digest]))
               (:seon.program/definition-digest entity))
            "the final entity carries the owner's digest")
        (let [report (db/transact! connection [(program/canonical-row (program/shapes-in projection) entity)])]
-         (is (:db-after report) (seon.print.value/bounded-text report)))))))
+         (is (:db-after report)))))))
 
 (deftest a-definition-digests-with-the-namespace-entity-its-settlement-stores
   ;; A `require` in form N writes the namespace's context entity in the same
@@ -57,9 +56,9 @@
                                       :seon.sci.eval/settled-namespaces {'sample.repl-settled context-entity})))
            projection (db/carried-projection @connection)
            shapes (program/shapes-in projection)]
-       (is (= 'sample.repl-settled (:seon.ns/name context-entity)) (seon.print.value/bounded-text context-entity))
+       (is (= 'sample.repl-settled (:seon.ns/name context-entity)))
        (is (= (db/definition-digest-of projection entity context-entity)
               (:seon.program/definition-digest entity)))
        (let [report (db/transact! connection [(program/canonical-row shapes context-entity)
                                               (program/canonical-row shapes entity)])]
-         (is (:db-after report) (seon.print.value/bounded-text report)))))))
+         (is (:db-after report)))))))

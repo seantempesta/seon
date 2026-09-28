@@ -267,7 +267,7 @@
            (is (= :agent (:seon.schema.admission/source
                           (db/pull (db/db connection) [:seon.schema.admission/source] [:seon.fn/sym subject])))
                "the declaration writer admits the override as the agent's own change")
-           (is (= :unavailable (:seon.sci.eval/load-state installed)) (seon.print.value/bounded-text installed))
+           (is (= :unavailable (:seon.sci.eval/load-state installed)))
            (is (string? (get-in installed [:seon.sci.eval/load-result :seon.error/message])))
            (is (= subject (:seon.sci.eval/refused-function refused)))
            (is ((schema/projection-validator
@@ -477,8 +477,7 @@
          ;; gap recorded in the affected-callers issue, not an unbound name.
          (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
                             (map :seon.error/message
-                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
-             (seon.print.value/bounded-text {:ms (:ms acquired) :interpreted (:interpreted-count view)}))))))))
+                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx))))))))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two changed entities and their reverse closures; measured 1,090 ms on default."
            :seon.test/long-ms 12000}
@@ -505,8 +504,7 @@
              "each changed entity is an SCI definition")
          (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
                             (map :seon.error/message
-                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
-             (seon.print.value/bounded-text {:ms (:ms acquired)}))))))))
+                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx))))))))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program after one analyzed declaration."
            :seon.test/long-ms 8000}

@@ -6,8 +6,7 @@
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.sci.eval :as sci]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest settings-are-one-owned-component-with-a-derived-render-pair
   (support/with-database
@@ -116,6 +115,6 @@
                      'my.agent/settings!))
       (let [value (agent-value handle "dial-owner"
                                "(my.agent/settings! {:seon.config.eval/time-limit-ms 1234})")]
-        (is (= 1234 (:seon.config.eval/time-limit-ms value)) (seon.print.value/bounded-text value))
+        (is (= 1234 (:seon.config.eval/time-limit-ms value)))
         (is (= value (agent/settings (db/db (:seon.db/connection handle)) "dial-owner"))))
       (finally (cluster.agent/release-context! handle)))))

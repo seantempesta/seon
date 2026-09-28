@@ -34,13 +34,11 @@
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000})
            values (:seon.sci.admit/value result)]
-       (is (nil? (:seon.cluster.eval/error result))
-           (:seon.cluster.eval/error result))
+       (is (nil? (:seon.cluster.eval/error result)))
        (is (vector? values))
        (is (= (count functions) (count values)))
-       (doseq [[sym [omitted explicit]] (map vector functions (when (vector? values) values))]
-         (is (= explicit omitted) (str sym))
+       (doseq [[_sym [omitted explicit]] (map vector functions (when (vector? values) values))]
+         (is (= explicit omitted))
          (is (not (and (map? omitted)
-                       (or (:seon.db/invalid-read omitted) (:seon.schema/expected-value omitted))))
-             (str sym)))
+                       (or (:seon.db/invalid-read omitted) (:seon.schema/expected-value omitted))))))
        (is (seq (:seon.help/lines (ffirst values))))))))

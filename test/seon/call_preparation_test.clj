@@ -16,8 +16,7 @@
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Probe targets — ordinary contracted functions of this namespace.
@@ -679,7 +678,7 @@
                  :seon.db/db database
                  :seon.instrument/changed-identities
                  (into #{} (map (fn [probe-var] [:seon.fn/sym (symbol probe-var)])) (vals probe-vars))})]
-    (is (nil? (:seon.instrument/registration-observation result)) (seon.print.value/bounded-text result))))
+    (is (nil? (:seon.instrument/registration-observation result)))))
 
 (defn- probe-ctx
   "A scratch ctx binding this namespace's probes the way a cluster does, whose
@@ -1090,15 +1089,13 @@
                    "(seon.call-preparation-test/probe-current-database), "
                    ":seon.agent/id \"missing\"})"))]
          (is (contains? (:seon.call-preparation/supplied-defaults current)
-                        :seon.db/db)
-             (seon.print.value/bounded-text (:seon.call-preparation/refusals current)))
+                        :seon.db/db))
          (let [prepared (cp/prepare current environment invocation-plan [])]
            (is (= 1 (count prepared)))
            (is (db/database-value? (:seon.db/db (first prepared))))
            (is (= "missing"
                   (:seon.agent/id (first prepared)))))
-         (is (not (instance? Throwable omitted))
-             (some-> ^Throwable omitted ex-message))
+         (is (not (instance? Throwable omitted)))
          (is (= "missing" (:my.plan/missing-agent-id omitted)))
          (is (= (dissoc omitted :seon.error/at) (dissoc explicit :seon.error/at))
              "an explicit database wins and reaches the same function body"))))))

@@ -11,8 +11,7 @@
             [seon.sci.eval :as eval]
             [seon.sci.reader :as reader]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- source-files
   []
@@ -175,9 +174,9 @@
   (doseq [[text sources] {"1" ["1"] "1 2" ["1" "2"] "1\n2" ["1" "2"]
                           ":k 1" [":k" "1"] "\"s\" -1.5" ["\"s\"" "-1.5"]}]
     (let [read-events (events text)]
-      (is (= sources (mapv :seon.sci.reader/source read-events)) text)
-      (is (not-any? :seon.sci.reader/error read-events) text)
-      (is (= text (apply str (event-slices text read-events))) text))))
+      (is (= sources (mapv :seon.sci.reader/source read-events)))
+      (is (not-any? :seon.sci.reader/error read-events))
+      (is (= text (apply str (event-slices text read-events)))))))
 
 (deftest evaluation-refuses-a-second-form-by-its-position
   (doseq [[text line column offending] [["(+ 1 2) (+ 3 4)" 1 9 "(+ 3 4)"] ["1 2" 1 3 "2"]
@@ -188,11 +187,11 @@
                                    :seon.sci.admit/caps (config/result-caps config/defaults)
                                    :seon.sci.eval/time-limit-ms 2000}))]
       (is (schema/valid-candidate-value? (schema/handed-projection)
-                                         :seon.sci.eval/reader-event-count-error refusal) text)
+                                         :seon.sci.eval/reader-event-count-error refusal))
       (is (= [:seon.cluster.eval/source offending]
-             [(:seon.error/member refusal) (:seon.error/offending refusal)]) text)
-      (is (= [line column] (mapv (:seon.error/data refusal {}) [:seon.sci.reader/line :seon.sci.reader/column])) text)
-      (when line (is (str/includes? (:seon.error/message refusal) "(do ...)") text)))))
+             [(:seon.error/member refusal) (:seon.error/offending refusal)]))
+      (is (= [line column] (mapv (:seon.error/data refusal {}) [:seon.sci.reader/line :seon.sci.reader/column])))
+      (when line (is (str/includes? (:seon.error/message refusal) "(do ...)"))))))
 
 (deftest original-source-spans-preserve-crlf-and-utf16
   (let [text "; 😀 note\r\n(+ 1 2)\r\n\"😀\"\r\n"
@@ -280,7 +279,7 @@
                         (sci/binding [sci/ns (sci/create-ns namespace-name)]
                           (events text {:seon.sci.reader/ns namespace-name
                                         :seon.sci.reader/ctx ctx}))]
-                    (is (vector? read-events) text)
+                    (is (vector? read-events))
                     (if-let [failure (some :seon.sci.reader/error read-events)]
                       failure
                       (:seon.sci.reader/form (first read-events)))))
@@ -480,7 +479,7 @@
            ["(message/user \"hi\")\n]" [:form :error]]
            ["(+ 1 2))" [:form :error]]
            ["(let [x 1]\n(f x)\n}" [:error :form :error]]]]
-    (is (= expected (read-kinds (events source))) (seon.print.value/bounded-text source))))
+    (is (= expected (read-kinds (events source))))))
 
 (deftest recovered-forms-carry-the-coordinates-of-the-whole-source
   ;; Recovery resumes the same text, so a nested declaration after an error
@@ -494,13 +493,11 @@
     (let [result (events source)
           form (some #(when-not (:seon.sci.reader/error %) %) result)]
       (is (= nested (mapv (comp (juxt :line :column) meta)
-                          (filter seq? (tree-seq seq? seq (:seon.sci.reader/form form)))))
-          (seon.print.value/bounded-text source))
+                          (filter seq? (tree-seq seq? seq (:seon.sci.reader/form form))))))
       (is (= (:seon.sci.reader/source form)
              (subs source (:seon.sci.reader/source-start form) (:seon.sci.reader/source-end form))))
       (is (= error-line (get-in (last (filter :seon.sci.reader/error result))
-                                [:seon.sci.reader/error :seon.error/data :seon.sci.reader/line]))
-          (seon.print.value/bounded-text source)))))
+                                [:seon.sci.reader/error :seon.error/data :seon.sci.reader/line]))))))
 
 (deftest recovery-never-anchors-on-inner-maps-or-vectors
   (doseq [[source expected]
@@ -508,7 +505,7 @@
            ["{:a 1}" [:form]]
            ["(good)\n{:a 1}" [:form :form]]
            ["(broken [\n{:a 1}" [:error]]]]
-    (is (= expected (read-kinds (events source))) (seon.print.value/bounded-text source))))
+    (is (= expected (read-kinds (events source))))))
 
 (deftest recovery-never-hides-a-real-failure
   (let [broken (events "(+ 1 3x)")
@@ -617,8 +614,8 @@
              (str "(ns a) " call
                   " (defn ^{:malli/schema [:=> [:cat :int] :int]} x [n] n)"))
             declaration (peek read-events)]
-        (is (= 'a (:seon.sci.reader/ns declaration)) call)
-        (is (= 'a/x (:seon.fn/sym declaration)) call))))
+        (is (= 'a (:seon.sci.reader/ns declaration)))
+        (is (= 'a/x (:seon.fn/sym declaration))))))
   (testing "a switch visible only to evaluation removes attribution"
     (doseq [text
             ["(do (in-ns 'a)) (defn x [])"

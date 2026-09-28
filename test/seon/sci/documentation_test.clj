@@ -7,8 +7,7 @@
             [seon.program :as program]
             [seon.sci.eval :as evaluation]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (deftest a-named-private-override-documents-the-jvm-boundary
   (support/with-database
@@ -47,7 +46,7 @@
                       {:seon.fn/spec
                        "[:function [:=> [:cat :int] :string [:fn {:error/message \"pair relation\"} clojure.core/vector?]] [:=> [:cat [:or :string :int] :boolean] :keyword]]"})]
         (is (contains? doc :in))
-        (is (not (str/includes? output ":gen/gen")) output)
+        (is (not (str/includes? output ":gen/gen")))
         (is (= [[:cat :int] [:cat [:or :string :int] :boolean]] (:in contract)))
         (is (= [:string :keyword] (:out contract)))))))
 
@@ -126,13 +125,13 @@
        (is (= [] (get-in initial [:seon.sci.admit/value :functions])))
        (is (seq evidence))
        (is (true? (db/read-evidence-current? (db/db connection) evidence)))
-       (is (nil? (:seon.cluster.eval/error defined)) (seon.print.value/bounded-text defined))
+       (is (nil? (:seon.cluster.eval/error defined)))
        (is (= 'fixture.own-functions/identity-number (:seon.fn/sym entity)))
        (let [written-on (db/db connection)
              written (db/transact! connection
                                    [(support/namespace-entity @connection 'fixture.own-functions)
                                     (program/canonical-row entity)])]
-         (is (:db-after written) (seon.print.value/bounded-text written))
+         (is (:db-after written))
          (when (:db-after written)
            (evaluation/install-evaluated-rows!
             {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
@@ -141,7 +140,7 @@
              [{:seon.program/row entity :seon.sci.eval/evaluation defined}]})))
        (is (false? (db/read-evidence-current? (db/db connection) evidence)))
        (let [directory (run "(dir fixture.own-functions)")]
-         (is (nil? (:seon.cluster.eval/error directory)) (seon.print.value/bounded-text directory))
+         (is (nil? (:seon.cluster.eval/error directory)))
          (is (= [{:sym 'fixture.own-functions/identity-number
                   :arglists '([number])
                   :doc "Return the number."
@@ -174,7 +173,7 @@
            (let [qualified (symbol (str namespace-name) (str function))]
              (is (identical? @(sci/resolve base qualified)
                              @(sci/resolve updated qualified))
-                 (str qualified " receives its current macro root")))))))))
+                 "receives its current macro root"))))))))
 
 (deftest bare-test-macros-resolve-without-namespace-referrals
   (support/with-database
@@ -188,7 +187,7 @@
        (sci/add-namespace! ctx 'fixture.bare-tests {})
        (sci/binding [sci/ns (sci/create-ns 'fixture.bare-tests)]
          (doseq [test-symbol ['deftest 'is]]
-           (is (some? (sci/resolve ctx test-symbol)) (str test-symbol)))
+           (is (some? (sci/resolve ctx test-symbol))))
          (sci/eval-string* ctx "(deftest bare-arithmetic (is (= 2 (+ 1 1))))")
          (is (fn? (:test (meta (sci/resolve ctx 'bare-arithmetic)))))))
      (let [ctx (support/fork-cluster-ctx connection)
@@ -201,10 +200,10 @@
                     :seon.sci.admit/caps (config/result-caps (support/effective-config))
                     :seon.sci.eval/time-limit-ms 10000})
            entity (:seon.program/row result)]
-       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+       (is (nil? (:seon.cluster.eval/error result)))
        (is (= 'fixture.bare-tests/durable-arithmetic (:seon.test/sym entity)))
        (let [written (db/transact! connection [(program/canonical-row entity)])]
-         (is (:db-after written) (seon.print.value/bounded-text written))
+         (is (:db-after written))
          (is (= (:seon.test/source entity)
                 (:seon.test/source
                  (db/pull (db/db connection) [:seon.test/source]
@@ -233,7 +232,7 @@
          (is (identical? retained updated))
          (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
            (doseq [test-symbol ['deftest 'is]]
-             (is (some? (sci/resolve updated test-symbol)) (str test-symbol)))
+             (is (some? (sci/resolve updated test-symbol))))
            (sci/eval-string* updated "(deftest retained-arithmetic (is (= 4 (* 2 2))))")
            (is (fn? (:test (meta (sci/resolve updated 'retained-arithmetic)))))))))))
 
@@ -261,12 +260,12 @@
          (is (= (resolve 'my.message/send)
                 (:seon.instrument/var (meta @(sci/resolve ctx 'my.message/send))))
              "SCI must acquire the canonical armed host callable, not a pre-arming copy")
-         (is (= :input (:seon.instrument/check value)) (seon.print.value/bounded-text failed))
+         (is (= :input (:seon.instrument/check value)))
          (is (= 'my.message/send (:seon.instrument/fn value)))
          ;; The refusal is never enriched; its pair offers the contract as a
          ;; read, `(doc my.message/send)`, which answers the same documentation.
-         (is (not (find value :seon.error/doc)) (seon.print.value/bounded-text failed))
-         (is (str/includes? (:seon.eval/shown failed) "(doc my.message/send)") (:seon.eval/shown failed))
+         (is (not (find value :seon.error/doc)))
+         (is (str/includes? (:seon.eval/shown failed) "(doc my.message/send)"))
          (doseq [term ["nonempty string subject identity token"
                        ":my.message/assignment" ":seon.message/from"]]
            (is (str/includes? (:body documentation) term)))
@@ -292,12 +291,12 @@
                      (:functions (evaluation/directory-value database 'my.note false)))]
        (is (contains? doc :in))
        (is (some? entity) "the undeclared entity is still listed by dir")
-       (doseq [[label value attribute]
+       (doseq [[_label value attribute]
                [["doc :in" (:in doc) :seon.fn/spec]
                 ["doc :out" (:out doc) :seon.fn/spec]
 ]]
-         (is (= attribute (:seon.sci.eval/missing-declaration value)) label)
-         (is (= 'seon.sci.eval/declaration-absent (:seon.error/operation value)) label))
+         (is (= attribute (:seon.sci.eval/missing-declaration value)))
+         (is (= 'seon.sci.eval/declaration-absent (:seon.error/operation value))))
        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
        (is (not= "" (:summary doc)))
        (is (str/includes? (:summary doc) (str :seon.fn/doc)))
@@ -326,10 +325,9 @@
              current (run "(clojure.test/run-tests)")
              named (run "(clojure.test/run-tests 'fixture.clojure-test)")
              summary {:test 2 :pass 2 :fail 1 :error 0 :type :summary}]
-         (is (str/includes? (str (:seon.cluster.eval/output direct)) "FAIL in (a-failing-test)")
-             (seon.print.value/bounded-text direct))
+         (is (str/includes? (str (:seon.cluster.eval/output direct)) "FAIL in (a-failing-test)"))
          (doseq [result [current named]]
-           (is (= summary (:seon.sci.admit/value result)) (seon.print.value/bounded-text result))
+           (is (= summary (:seon.sci.admit/value result)))
            (is (str/includes? (str (:seon.cluster.eval/output result)) "Testing fixture.clojure-test"))
            (is (str/includes? (str (:seon.cluster.eval/output result))
                               "Ran 2 tests containing 3 assertions."))))))))
@@ -350,7 +348,7 @@
            aliased (run "(do (require '[my.agent :as agent]) (clojure.repl/source agent/settings!))")
            missing (run "(clojure.repl/source fixture.missing/nothing)")]
        (is (string? stored))
-       (is (= (str stored "\n") (:seon.cluster.eval/output qualified)) (seon.print.value/bounded-text qualified))
-       (is (= (str stored "\n") (:seon.cluster.eval/output aliased)) (seon.print.value/bounded-text aliased))
-       (is (= "Source not found\n" (:seon.cluster.eval/output missing)) (seon.print.value/bounded-text missing))
+       (is (= (str stored "\n") (:seon.cluster.eval/output qualified)))
+       (is (= (str stored "\n") (:seon.cluster.eval/output aliased)))
+       (is (= "Source not found\n" (:seon.cluster.eval/output missing)))
        (is (= stored (evaluation/stored-source (db/db connection) 'my.agent/settings!)))))))

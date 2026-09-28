@@ -14,8 +14,7 @@
             [seon.id :as id]
             [seon.render.transcript :as transcript]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- tokens
   "The shipped prior of `seon.ai.tokens`: ceil(chars / 3.2)."
@@ -52,24 +51,24 @@
          (let [failed (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})" 'result/erendersource1)
                shown (:seon.eval/shown failed)]
            (is (:seon.cluster.eval/error failed))
-           (is (str/includes? shown ";=> [#:seon.error{:path") shown)
-           (is (str/includes? shown "(doc my.message/send)") shown)
-           (is (empty? (unanswered-forms shown)) shown)
+           (is (str/includes? shown ";=> [#:seon.error{:path"))
+           (is (str/includes? shown "(doc my.message/send)"))
+           (is (empty? (unanswered-forms shown)))
            (is (not (find (:seon.sci.admit/value failed) :seon.error/doc))
                "printing never enriches the value")
-           (is (<= (tokens shown) 250) shown)))
+           (is (<= (tokens shown) 250))))
        (testing "an agent's own exception"
          (let [shown (:seon.eval/shown (run "(/ 1 0)" 'result/erendersource2))]
-           (is (str/includes? shown ";=> [[clojure.core// ") shown)
-           (is (empty? (unanswered-forms shown)) shown)
-           (is (<= (tokens shown) 100) shown)))
+           (is (str/includes? shown ";=> [[clojure.core// "))
+           (is (empty? (unanswered-forms shown)))
+           (is (<= (tokens shown) 100))))
        (testing "an error nested in a vector renders by its pair, read through value-at"
          (let [error (:seon.sci.admit/value
                       (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})" 'result/erendersource3))
                shown (:seon.eval/shown (evaluation/shown-result
                                         [error] (request connection ctx "[e]" 'result/erendersource4) nil))]
-           (is (str/includes? shown "(seon.print/value-at result/erendersource4 [0])") shown)
-           (is (str/includes? shown ";=> ") shown)))))))
+           (is (str/includes? shown "(seon.print/value-at result/erendersource4 [0])"))
+           (is (str/includes? shown ";=> "))))))))
 
 (deftest a-render-form-that-fails-shows-the-value-and-one-diagnostic
   (support/with-database
@@ -80,8 +79,7 @@
                     (request connection ctx "(/ 1 0)" nil) {} ";; boom\n(/ 1 0)")]
        (testing "the failing form is named, never shown as an answer"
          (is (nil? (:seon.render/source failing)))
-         (is (str/includes? (get-in failing [:seon.error/value :seon.error/message]) "Divide by zero")
-             (seon.print.value/bounded-text failing)))
+         (is (str/includes? (get-in failing [:seon.error/value :seon.error/message]) "Divide by zero")))
        (testing "with no evaluator the floor prints the value beside one diagnostic"
          (let [error (:seon.sci.admit/value
                       (evaluation/evaluate (request connection ctx "(/ 1 0)" 'result/erendersource5)))
@@ -89,9 +87,9 @@
                                         error (dissoc (request connection ctx "(/ 1 0)" 'result/erendersource5)
                                                       :seon.sci.eval/time-limit-ms)
                                         nil))]
-           (is (str/includes? shown ":seon.error/message") shown)
-           (is (= 1 (count (re-seq #";; renderer failed" shown))) shown)
-           (is (not (str/includes? shown ";=> ")) shown)))))))
+           (is (str/includes? shown ":seon.error/message"))
+           (is (= 1 (count (re-seq #";; renderer failed" shown))))
+           (is (not (str/includes? shown ";=> ")))))))))
 
 (deftest ^{:seon.test/long "One agent arming and one ordinary run with its settlement commit (184-229 ms warm per run on default, 2026-09-26), plus two history reads."
            :seon.test/long-ms 10000}
@@ -128,8 +126,8 @@
                                 {:seon.db/db (:seon.db/db result) :seon.agent/id agent-id
                                  :seon.render.transcript/selected-run-id (:seon.turn/id result)
                                  :seon.sci.admit/caps (config/result-caps config/defaults)})))]
-          (is (str/includes? saved ";=> ") saved)
-          (is (empty? (unanswered-forms saved)) saved)
+          (is (str/includes? saved ";=> "))
+          (is (empty? (unanswered-forms saved)))
           (testing "the context is the saved evaluated text: history reads take no SCI context, so they evaluate nothing"
             (is (str/starts-with? (context) saved))
             (is (= (context) (context))))))

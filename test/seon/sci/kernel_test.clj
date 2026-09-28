@@ -34,7 +34,7 @@
 (defn- value
   [ctx source]
   (let [evaluation (evaluate ctx source 5000)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (seon.print.value/bounded-text [source evaluation]))
+    (is (nil? (:seon.cluster.eval/error evaluation)))
     (:seon.sci.admit/value evaluation)))
 
 (deftest the-interpreter-resolves-the-classpath-and-loaded-namespaces
@@ -60,7 +60,7 @@
       (is (= 1 (value ctx "@(future 1)")))
       (let [started (System/nanoTime)
             evaluation (evaluate ctx "@(future (loop [] (recur)))" 300)]
-        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (seon.print.value/bounded-text evaluation))
+        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])))
         (is (< (quot (- (System/nanoTime) started) 1000000) 5000))))))
 
 (deftest a-nested-context-inherits-the-outer-arm
@@ -77,7 +77,7 @@
             evaluation (kernel/with-arm
                          outer 300
                          (fn [_] (evaluate nested "(loop [] (recur))" 600000)))]
-        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (seon.print.value/bounded-text evaluation))
+        (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])))
         (is (< (quot (- (System/nanoTime) started) 1000000) 5000))))))
 
 (deftest memory-pressure-holds-until-usage-falls-below-its-resume-bound
@@ -120,8 +120,8 @@
   (let [ctx (eval/build-base-ctx (schema/handed-projection))
         divide (failure ctx "(/ 1 0)")
         reply (error/reply-value nil divide)]
-    (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))) (print.value/bounded-text divide))
-    (is (= 'java.lang.ArithmeticException (symbol (str (:seon.error/exception-class reply)))) (print.value/bounded-text reply))
+    (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))))
+    (is (= 'java.lang.ArithmeticException (symbol (str (:seon.error/exception-class reply)))))
     (is (= (:seon.sci.eval/stacktrace divide) (:seon.sci.eval/stacktrace reply)))
     (is (not-any? #(str/includes? (print.value/bounded-text reply 100000) %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
         "no evaluator frame is shown")))
@@ -136,10 +136,9 @@
              (:seon.db/connection (test-support/execution-handle nil)))
         refusal (failure ctx "(seon.error.refusal/frame-function \"x\")")
         reply (error/reply-value nil refusal)]
-    (is (= 'seon.error.refusal/frame-function (:seon.error/operation refusal)) (seon.print.value/bounded-text refusal))
+    (is (= 'seon.error.refusal/frame-function (:seon.error/operation refusal)))
     (is (str/starts-with? (:seon.error/message reply)
-                          "seon.error.refusal/frame-function refused argument 0")
-        (seon.print.value/bounded-text reply))
+                          "seon.error.refusal/frame-function refused argument 0"))
     (is (= [{:seon.error/path [] :seon.error/expected :symbol :seon.error/offending "x"}]
            (mapv #(dissoc % :seon.error/example) (:seon.error/problems reply))))
     (is (symbol? (get-in reply [:seon.error/problems 0 :seon.error/example]))

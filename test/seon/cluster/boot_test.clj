@@ -17,8 +17,7 @@
             [seon.instrument :as instrument]
             [seon.operator :as client]
             [seon.operator.runtime :as runtime]
-            [seon.test-support :as support]
-            [seon.print.value])
+            [seon.test-support :as support])
   (:import [java.nio.file Files LinkOption]
            [java.util.concurrent TimeUnit]))
 
@@ -116,7 +115,7 @@
 
 (defn- started! [root children]
   (let [result (completed! (cli! root children ["start"]))]
-    (is (zero? (:seon.probe/exit result)) (seon.print.value/bounded-text result))
+    (is (zero? (:seon.probe/exit result)))
     (when-not (zero? (:seon.probe/exit result))
       (throw (ex-info "Scratch boot failed." result)))
     (:seon.probe/value result)))
@@ -132,7 +131,7 @@
         (is (= 2 (client/prepl-value! early "(+ 1 1)" event-ms)))
         (let [result (completed! launch)
               ready (get-in result [:seon.probe/value :seon.boot/readiness])]
-          (is (zero? (:seon.probe/exit result)) (seon.print.value/bounded-text result))
+          (is (zero? (:seon.probe/exit result)))
           (is (empty? (:seon.boot/missing-layers ready)))
           (is (client/matching-handle early))
           (is (= (select-keys early [:seon.boot/pid :seon.boot/start-instant])
@@ -147,7 +146,7 @@
           ;; One ordinary run of root through the bridge's form: its settled shown text.
           (let [sci (client/prepl-value! early (#'mcp/run-form "(+ 1 1)" "default" nil true nil "boot-test")
                                          event-ms)]
-            (is (= "2" (-> sci :seon.dev.mcp/evaluations last :seon.eval/shown)) (seon.print.value/bounded-text sci)))
+            (is (= "2" (-> sci :seon.dev.mcp/evaluations last :seon.eval/shown))))
           (let [partial (evaluate! root
                          "(with-redefs [seon.cluster/serve! (fn [& _] (throw (ex-info \"injected web failure\" {})))] (try (seon.cluster.boot/start! {:seon.boot/root (get-in (get @seon.operator.runtime/running-instances \"default\") [:seon.boot/config :seon.boot/root]) :seon.boot/cluster-name \"partial\"}) (catch Throwable e (seon.cluster.boot/readiness (get @seon.operator.runtime/running-instances (:seon.boot/cluster-name (ex-data e)))))))" 120000)]
             (is (some #{:seon.render.web/served} (:seon.boot/missing-layers partial)))
@@ -167,11 +166,10 @@
 
 (defn- lock-refused! [launch]
   (let [result (completed! launch)]
-    (is (= 1 (:seon.probe/exit result)) (seon.print.value/bounded-text result))
+    (is (= 1 (:seon.probe/exit result)))
     (is (some #(and (map? %)
                     (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
-              (tree-seq coll? seq (:seon.probe/value result)))
-        (seon.print.value/bounded-text result))
+              (tree-seq coll? seq (:seon.probe/value result))))
     (let [identity (await! (:seon.probe/early launch) :loser-identity)]
       (is (nil? (client/matching-handle identity)) "Lock refusal includes actual loser exit."))
     result))
@@ -208,7 +206,7 @@
             (.write writer "continue\n") (.flush writer)
             (let [ready (edn/read-string (.readLine reader))
                   advertisement (client/advertisement root "default")]
-              (is (= :ready (:seon.probe/event ready)) (seon.print.value/bounded-text ready))
+              (is (= :ready (:seon.probe/event ready)))
               (is (= (select-keys identity [:seon.boot/pid :seon.boot/start-instant])
                      (select-keys advertisement [:seon.boot/pid :seon.boot/start-instant])))
               (lock-refused! (cold-launch! root children false))
@@ -242,7 +240,7 @@
             ;; A stopping instance stays an instance in the table (its
             ;; readers hand the table to contracts over maps), and it is
             ;; claimed: a second stop of it does nothing.
-            (is (true? (:seon.boot/stopping (:entry refusal))) (seon.print.value/bounded-text (type (:entry refusal))))
+            (is (true? (:seon.boot/stopping (:entry refusal))))
             (is (identical? (:seon.boot/prepl-server replacement) (:seon.boot/prepl-server (:entry refusal))))
             (is (contains? refusal :second-stop))
             (is (nil? (:second-stop refusal)))
@@ -259,7 +257,7 @@
             first-identity (select-keys first-start [:seon.boot/pid :seon.boot/start-instant])
             first-handle (client/matching-handle first-identity)
             stopped (completed! (cli! root children ["stop"]))]
-        (is (zero? (:seon.probe/exit stopped)) (seon.print.value/bounded-text stopped))
+        (is (zero? (:seon.probe/exit stopped)))
         (is (= {:seon.boot/cluster-name "default" :seon.operator/stopped? true
                 :seon.operator/process-exit? true}
                (:seon.probe/value stopped)))
@@ -280,7 +278,7 @@
             handle (client/matching-handle identity)
             down (completed! (cli! root children ["down"]))
             reply (:seon.probe/value down)]
-        (is (zero? (:seon.probe/exit down)) (seon.print.value/bounded-text down))
+        (is (zero? (:seon.probe/exit down)))
         (is (= {:seon.operator/stopped-processes [identity]
                 :seon.operator/process-exit? true} reply))
         (is (= reply (edn/read-string (pr-str reply))))
@@ -310,7 +308,7 @@
         (evaluate! root "(do (locking seon.operator.runtime/running-instances (swap! seon.operator.runtime/running-instances assoc \"reserved-sibling\" {:seon.boot/config {:seon.boot/cluster-name \"reserved-sibling\"}})) true)")
         (let [result (client/request! (assoc (request root :stop)
                                       :seon.boot/cluster-name "default" :seon.operator/force? true))]
-          (is (:seon.error/at result) (seon.print.value/bounded-text result))
+          (is (:seon.error/at result))
           (is (str/includes? (pr-str result) "reserved-sibling"))
           (is (client/matching-handle identity)))
         (evaluate! root "(do (locking seon.operator.runtime/running-instances (swap! seon.operator.runtime/running-instances dissoc \"reserved-sibling\")) true)")
@@ -353,7 +351,7 @@
         (is (= "old data" (slurp marker)))
         (let [result (completed! (cli! root children ["reset" "--force"]))
               current (client/advertisement root nil)]
-          (is (zero? (:seon.probe/exit result)) (seon.print.value/bounded-text result))
+          (is (zero? (:seon.probe/exit result)))
           (is (not= (:seon.boot/pid old) (:seon.boot/pid current)))
           (is (nil? (client/matching-handle old)))
           (is (not (.exists marker)))
@@ -459,7 +457,7 @@
                 (is (= "untouched" (slurp marker)) "Foreign loser did not enter deletion.")
                 (.write writer "continue\n") (.flush writer)
                 (let [ready (edn/read-string (.readLine reader))]
-                  (is (= :ready (:seon.probe/event ready)) (seon.print.value/bounded-text ready))
+                  (is (= :ready (:seon.probe/event ready)))
                   (is (true? (:seon.probe/same-lock? ready)))
                   (is (true? (:seon.probe/same-channel? ready)))
                   (is (empty? (get-in ready [:seon.boot/readiness :seon.boot/missing-layers]))))
@@ -481,7 +479,7 @@
                                 (prn :acquired)
                                 (prn :locked)))
                       acquired (completed! (launch-process! children ["bb" "-e" (pr-str form)]) event-ms)]
-                  (is (zero? (:seon.probe/exit acquired)) (:seon.probe/err acquired))
+                  (is (zero? (:seon.probe/exit acquired)))
                   (is (= :acquired (:seon.probe/value acquired))))))))))))
 
 (deftest an-uncaught-throwable-without-its-world-is-printed-and-never-stored-elsewhere
@@ -527,7 +525,7 @@
                elapsed-ms (/ (- (System/nanoTime) started) 1e6)
                observed (some #(when (= cluster-name (:seon.dev.mcp/cluster %)) %)
                               (:seon.operator/clusters response))]
-           (is (nil? (:seon.error/at response)) (seon.print.value/bounded-text (select-keys response [:seon.error/message])))
+           (is (nil? (:seon.error/at response)))
            (is (= :faulted (:seon.dev.mcp/health observed)))
            (is (nat-int? (:seon.agent/count (boot/readiness (get @runtime/running-instances cluster-name))))
                "an agentless world counts 0 agents, never nil")

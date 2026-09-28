@@ -38,8 +38,7 @@
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The armed boundary, as the suite supplies it
@@ -451,7 +450,7 @@
     (is (= (+ n empty-node-bytes) (:seon.sci.admit/bytes admitted))
         "the bytes reached are exactly what printing the leaf would emit")
     (is (< elapsed-ms 100.0)
-        (str "refusing a 10 MB leaf took " elapsed-ms " ms"))))
+        "refusing a 10 MB leaf stays within its bound")))
 
 (deftest a-value-under-the-bound-is-stored-whole-however-wide-or-deep
   ;; The display caps are GONE. Width, depth and string length are
@@ -499,8 +498,7 @@
       ;; cluster arms, so this case now asks the question it claimed to.
       (doseq [depth [2000 5000 20000]]
         (let [admitted (admit/admit (request (nest depth)))]
-          (is (contains? admitted :seon.sci.admit/print-node)
-              (str "depth " depth " stored nothing"))
+          (is (contains? admitted :seon.sci.admit/print-node))
           (is (= depth (node-depth (:seon.sci.admit/print-node admitted)))
               "the stored node keeps every level the value had")
           (is (= depth
@@ -570,8 +568,8 @@
                                             :admitted admitted}))))
            offending (get-in (:admitted (peek runs)) [:seon.sci.admit/value :seon.error/offending])]
        ;; the owner's bound: 5 ms and 5 MB (measured 2.4 ms / 1.1 MB unarmed on default)
-       (is (< (apply min (map :ms runs)) 5.0) (seon.print.value/bounded-text (map :ms runs)))
-       (is (< (apply min (map :bytes runs)) 5000000) (seon.print.value/bounded-text (map :bytes runs)))
+       (is (< (apply min (map :ms runs)) 5.0))
+       (is (< (apply min (map :bytes runs)) 5000000))
        (is (< (count (:seon.sci.admit/edn (:admitted (peek runs)))) 20000))
        (testing "each world object is its typed identity"
          (is (uuid? (get-in offending [:db :datahike/commit-id])))

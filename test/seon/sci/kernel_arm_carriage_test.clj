@@ -23,8 +23,7 @@
             [sci.core :as sci]
             [sci.interrupt :as interrupt]
             [seon.sci.eval :as eval]
-            [seon.sci.kernel :as kernel]
-            [seon.print.value])
+            [seon.sci.kernel :as kernel])
   (:import [java.util.concurrent Callable ExecutorService Executors Future
             TimeUnit]))
 
@@ -171,11 +170,9 @@
           "the parent evaluation returns immediately")
       (is (pos? @ticks) "the detached loop really ran")
       (is (true? (::interrupted? settled))
-          (str "the detached loop must end by SCI's own interrupt; got "
-               (seon.print.value/bounded-text settled)))
+          "the detached loop must end by SCI's own interrupt")
       (is (< elapsed-ms 2000)
-          (str "detached work must end at its ~" time-limit-ms
-               "ms limit, not run unbounded; elapsed " elapsed-ms "ms"))
+          "detached work must end at its limit, not run unbounded")
       (let [before @ticks]
         (Thread/sleep 200)
         (is (= before @ticks) "and it is no longer running")))))

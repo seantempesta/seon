@@ -11,8 +11,7 @@
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private ordered-marker ::ordered)
 
@@ -34,7 +33,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
+                 (contains? refusal :seon.error/operation)))
         (is (= refusal result)
             "boot recovery returns the failed read instead of recovering zero turns")
         (is (= before (db/basis-t (db/db connection)))
@@ -52,7 +51,7 @@
         (is (and (map? refusal)
                  (contains? refusal :seon.error/at)
                  (contains? refusal :seon.error/layer)
-                 (contains? refusal :seon.error/operation)) (seon.print.value/bounded-text refusal))
+                 (contains? refusal :seon.error/operation)))
         (is (= refusal missing-process-entities)
             "process identities are not rebuilt from error-map entries")))))
 
@@ -87,8 +86,7 @@
           (binding [*print-namespace-maps* namespace-maps?]
             (let [delta (changes database (schema/handed-projection))]
               (is (= [] delta)
-                  (str "canonical schema bytes converge with namespace-map printing "
-                       namespace-maps?)))))))))
+                  "canonical schema bytes converge with namespace-map printing"))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The fault committer hands `seon.error` the dials its contracts declare
@@ -342,15 +340,12 @@
             refusal (test-support/refusal-data
                      #(#'cluster/transact-initialization! connection [entity]))
             offense (:seon.boot/offense refusal)]
-        (is (= :refused (:seon.cluster.boot/disposition refusal))
-            (seon.print.value/bounded-text refusal))
+        (is (= :refused (:seon.cluster.boot/disposition refusal)))
         (is (not (str/includes? (str (:seon.error/message refusal))
                                 "lookup refs do not resolve"))
-            (str "the refusal names the refused read, not absence: "
-                 (:seon.error/message refusal)))
+            "the refusal names the refused read, not absence")
         (is (= :seon.ai.model/provider-id
-               (:seon.activation/lookup-attribute offense))
-            (seon.print.value/bounded-text offense))
+               (:seon.activation/lookup-attribute offense)))
         (is (and (map? (:seon.boot/result offense))
                  (contains? (:seon.boot/result offense) :seon.error/at)
                  (contains? (:seon.boot/result offense) :seon.error/layer)
@@ -379,8 +374,7 @@
                               [{:seon.ai.model/provider [:seon.ai.model/provider-id]}]
                               [:seon.ai.model/id "seon.cluster-test/model"])]
           (is (= "seon.cluster-test/provider"
-                 (get-in pulled [:seon.ai.model/provider :seon.ai.model/provider-id]))
-              (seon.print.value/bounded-text pulled)))))))
+                 (get-in pulled [:seon.ai.model/provider :seon.ai.model/provider-id]))))))))
 
 (deftest render-contract-refusals-retain-the-cause-and-name-the-missing-contract
   (doseq [[cause fragment]

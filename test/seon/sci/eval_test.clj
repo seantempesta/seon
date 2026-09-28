@@ -40,8 +40,7 @@
             [seon.sci.admit :as admit]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
-            [seon.test-support :as test-support]
-            [seon.print.value]))
+            [seon.test-support :as test-support]))
 
 (def ^:private caps
   (config/result-caps config/defaults))
@@ -356,7 +355,7 @@
                                 :seon.sci.admit/caps caps,
                                 :seon.sci.eval/time-limit-ms 2000})]
               (is (nil? (:seon.program/row evaluation)))
-              (is (ok? evaluation) (seon.print.value/bounded-text evaluation))
+              (is (ok? evaluation))
               (is
                 (= :opening-probe (:seon.sci.admit/value evaluation))))))))
 
@@ -435,7 +434,7 @@
         ;; policy. No whole-JVM `apply!`, which strips every production
         ;; wrapper's supplied-default plan.
         (let [replaced (instrument/restore! entering)]
-          (is (contains? replaced (find-var 'seon.sci.eval/evaluate)) (seon.print.value/bounded-text replaced))
+          (is (contains? replaced (find-var 'seon.sci.eval/evaluate)))
           (is (every? (instrument/instrumented) replaced)
               "every reloaded contracted definition is armed again"))))))
 
@@ -484,7 +483,7 @@
           ::root-rebound
           (catch Throwable failure
             failure))]
-    (is (empty? shared-writable) (seon.print.value/bounded-text (sort shared-writable)))
+    (is (empty? shared-writable))
     (is (instance? Throwable attempt))
     (is (re-find #"read-only" (ex-message attempt)))
     (is (= before
@@ -560,13 +559,11 @@
     (try
       (doseq [form mutation-forms]
         (let [evaluation (run-in ctx form 2000)]
-          (is (failed? evaluation) form)
+          (is (failed? evaluation))
           (is (identical? victim-root
-                          (var-get #'compiled-runtime-victim))
-              form)
+                          (var-get #'compiled-runtime-victim)))
           (is (identical? dynamic-root
-                          (var-get #'*compiled-runtime-dynamic-victim*))
-              form)))
+                          (var-get #'*compiled-runtime-dynamic-victim*)))))
       (finally
         (alter-var-root #'compiled-runtime-victim (constantly victim-root))
         (alter-var-root #'*compiled-runtime-dynamic-victim*
@@ -587,13 +584,11 @@
                (schema/handed-projection) :malli.core/invalid-arity
                {:fn-name 'seon.sci.eval-test/compiled-runtime-victim
                 :arity 9})]
-          (is (failed? evaluation) source)
-          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/execution-error) refusal)
-              source)
+          (is (failed? evaluation))
+          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/execution-error) refusal))
           (is (str/includes? (:seon.error/message refusal)
-                             "metadata is read-only from SCI")
-              source)
-          (is (= before (meta #'compiled-runtime-victim)) source)
+                             "metadata is read-only from SCI"))
+          (is (= before (meta #'compiled-runtime-victim)))
           (is (= (:arglists before)
                  (::instrument/arglists instrumentation-read))
               "instrumentation reads only the unpoisoned compiled metadata")))
@@ -1272,10 +1267,10 @@
       (let [ctx (test-support/fork-cluster-ctx connection)
             completed (run-in ctx "(my.turn/complete {:my.turn/result \"done\"})" 2000)
             waiting (run-in ctx "(my.turn/wait {:my.turn/note \"later\"})" 2000)]
-        (is (ok? completed) (seon.print.value/bounded-text completed))
+        (is (ok? completed))
         (is (= {:my.turn/disposition :completed :my.turn/result "done"}
                (:seon.sci.admit/value completed)))
-        (is (ok? waiting) (seon.print.value/bounded-text waiting))
+        (is (ok? waiting))
         (is (= {:my.turn/disposition :wait :my.turn/note "later"}
                (:seon.sci.admit/value waiting)))))))
 
@@ -1307,9 +1302,8 @@
     (is (= [["clojure.lang.ExceptionInfo" "outer" {:audit/offending 7}]
             ["clojure.lang.ExceptionInfo" "inner" {:audit/detail :sentinel}]]
            (mapv (juxt :seon.error/throwable-class :seon.error/message :seon.error/data)
-                 (:seon.error/chain value)))
-        (seon.print.value/bounded-text value))
-    (is (= "outer" (:seon.error/message shown)) (:seon.eval/shown evaluation))
+                 (:seon.error/chain value))))
+    (is (= "outer" (:seon.error/message shown)))
     (is (= [2 3] (rest (first (:seon.sci.eval/stacktrace shown))))
         "the innermost author frame is the throw's own line and column")
     (is (nil? (:seon.error/frame shown)) "an interpreter frame is not the author's location")
@@ -1384,7 +1378,7 @@
         (is (= (count (:arglists multi-value))
                (count (:in multi-value)) (count (:out multi-value))))
         (doseq [result [directory read-doc multi-doc]]
-          (is (ok? result) (seon.print.value/bounded-text result))
+          (is (ok? result))
           (is (string? (:seon.eval/shown result)))
           (is (nil? (:seon.cluster.eval/output result))
               "doc and dir return data; the value renderer owns shown text"))))))
@@ -1666,8 +1660,7 @@
            occurrence '[:find ?error .
                         :where [?error :seon.error/occurrences ?occurrence]
                         [?occurrence :seon.sci.eval/refused-function acquire.custody/bad]]]
-       (is (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired))
-           (seon.print.value/bounded-text (:seon.sci.eval/acquisition-recording-error acquired)))
+       (is (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
        (is (int? (db/q occurrence (db/db connection)))
            "the refusal is a fact of the acquired branch")
        (is (nil? (db/q occurrence (db/db foreign)))
@@ -1701,16 +1694,15 @@
          (run-in ctx "(authored.contract/accept \"wrong\")" 2000)
          failure
          (:seon.sci.admit/value evaluation)]
-        (is
-         ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) failure)
-         moment)
-        (is
-         (=
-          'authored.contract/accept
-          (get-in
-           failure
-           [:seon.error/operation]))
-         moment)))
+        (testing moment
+         (is
+          ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) failure))
+         (is
+          (=
+           'authored.contract/accept
+           (get-in
+            failure
+            [:seon.error/operation]))))))
       acquired-ctx
       (eval/build-base-ctx (seon.schema/handed-projection))]
      (eval/acquire!
@@ -1805,8 +1797,7 @@
         (is (= {:seon.agent/id "scoped-agent"
                 :seon.turn/id "scoped-run"
                 :seon.cluster.eval/ordinal 7}
-               (:seon.sci.admit/value evaluation))
-            (seon.print.value/bounded-text (:seon.cluster.eval/error evaluation)))))))
+               (:seon.sci.admit/value evaluation)))))))
 
 (deftest
   evaluation-custody-is-derived-only-from-the-cluster-context
@@ -1964,14 +1955,10 @@
             (is (= 2 (count web)))
             (is
               (and (seq @root-selectors) (<= @compilation-count 1))
-              (str "direct, web, and through-SCI reuse a plan, including an already warm plan: "
-                   {:seon.sci.eval-test/selector-count (count @root-selectors)
-                    :seon.sci.eval-test/distinct-selectors (count (distinct @root-selectors))
-                    :seon.sci.eval-test/compilations @compilation-count
-                    :seon.sci.eval-test/acquisitions @plan-acquisitions}))
+              "direct, web, and through-SCI reuse a plan, including an already warm plan")
             (is
               (every? #(and (int? %) (< % (* 1024 1024 1024))) allocations)
-              (str "through-SCI allocations must stay below 1 GiB: " (seon.print.value/bounded-text allocations)))
+              "through-SCI allocations must stay below 1 GiB")
             (is (identical? (:datahike.pull/plan direct) (:datahike.pull/plan bounded-plan)))
             (is (= 0 (:seon.render/distance bounded-plan)))
             (is
@@ -2303,12 +2290,12 @@
             shown (:seon.error/message
                    (:seon.sci.admit/value @(future (run-in ctx source 2000))))
             [head message] (str/split-lines shown)]
-        (is (= (second reference) message) shown)
+        (is (= (second reference) message))
         (is (= (str (subs (first reference) 0 (str/index-of (first reference) " at "))
                     " at (REPL:1:1).")
                head)
             "the location is the agent's form, never the interpreter's frame or the agent's own ex-data")
-        (is (not (str/includes? shown "refused")) shown)))))
+        (is (not (str/includes? shown "refused")))))))
 
 ;; tmp/orchestrator/smoke-6-2026-09-26.md: (/ 1 0) reached the agent as ~3 KB
 ;; — the wrapper ExceptionInfo beside the real class, 30+ JVM frames of the
@@ -2342,7 +2329,7 @@
                      (try (sci/eval-string* host "(h/ff \"x\")") nil (catch Throwable t t))
                      {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0 :seon.eval/duration-ms 1
                       :seon.eval/allocated-bytes -1 :seon.eval/outcome :error})]
-        (is (= 'seon.error.refusal/frame-function (:seon.error/operation refused)) (seon.print.value/bounded-text refused))
+        (is (= 'seon.error.refusal/frame-function (:seon.error/operation refused)))
         (is (= :symbol (:seon.error/expected refused)))
         (is (= ["x"] (:seon.error/offending refused)))
         (is (some :seon.error/fix (:seon.error/problems refused)))
@@ -2671,7 +2658,7 @@
        (is (some #(and (= 'seon.id/valid? (:seon.fn/sym %))
                        (= :unavailable (:seon.sci.eval/load-state %)))
                  (:seon.sci.eval/load-results acquisition)))
-       (is (and (string? call) (str/includes? call "seon.id/valid?")) (seon.print.value/bounded-text call))
+       (is (and (string? call) (str/includes? call "seon.id/valid?")))
        (is (= 2 (sci/eval-string* ctx "(+ 1 1)")))))))
 
 (deftest a-namespace-an-agent-requires-keeps-its-vars-at-the-next-turn
@@ -2692,7 +2679,7 @@
                                  :seon.sci.eval/ctx ctx
                                  :seon.db/db database}))
            required (run entering "(require '[malli.core :as m])")]
-       (is (nil? (:seon.cluster.eval/error required)) (seon.print.value/bounded-text (:seon.sci.admit/value required)))
+       (is (nil? (:seon.cluster.eval/error required)))
        (is (true? (:seon.sci.admit/value (run entering "(m/validate int? 1)"))))
        (let [next-turn (:seon.sci.eval/ctx
                         (eval/fork-for-turn (assoc request :seon.sci.eval/agent-ctx entering)))]
@@ -2708,7 +2695,7 @@
                      :seon.cluster.eval/source "(+ 1 2)"
                      :seon.sci.admit/caps caps
                      :seon.sci.eval/time-limit-ms 5000})]
-    (is (= 3 (:seon.sci.admit/value evaluation)) (seon.print.value/bounded-text evaluation))
+    (is (= 3 (:seon.sci.admit/value evaluation)))
     (is (= "3" (:seon.eval/shown evaluation)))
     (is (string? (:seon.cluster.eval/diagnostics evaluation))
         "the refused print is one diagnostic beside the value")))
@@ -2724,7 +2711,7 @@
                         :seon.render/profile (render/agent-render-profile config/defaults)
                         :seon.sci.admit/caps caps
                         :seon.sci.eval/time-limit-ms 5000})]
-       (is (:seon.cluster.eval/error evaluation) (seon.print.value/bounded-text evaluation))
+       (is (:seon.cluster.eval/error evaluation))
        (is (string? (:seon.eval/shown evaluation)))
        (is (nil? (:seon.cluster.eval/diagnostics evaluation))
            "the print had its database: no diagnostic")))))

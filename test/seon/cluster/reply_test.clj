@@ -23,8 +23,7 @@
             [sci.core :as sci]
             [seon.cluster.reply :as reply]
             [seon.schema :as schema]
-            [seon.sci.reader :as reader]
-            [seon.print.value]))
+            [seon.sci.reader :as reader]))
 
 (defn- read-back
   "Read one source string with a throwaway sci reader, as the evaluator
@@ -107,7 +106,7 @@
                   (= forms (mapv read-back sources)))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "round trip failed: " (seon.print.value/bounded-text check)))))
+        "round trip failed")))
 
 (deftest fences-are-presentation-and-never-reach-the-plan
   (let [check
@@ -122,7 +121,7 @@
                     (not-any? #(str/includes? % "```") sources)))))
          :seed 20260727)]
     (is (true? (:result check))
-        (str "fenced input differed: " (seon.print.value/bounded-text check)))))
+        "fenced input differed")))
 
 (deftest exact-live-fences-and-unfenced-forms-share-the-grammar
   (let [replies (edn/read-string (slurp "test/seon/reader_fences.edn"))]
@@ -130,7 +129,7 @@
             "(my.test/run)" "(dir my.test)"]
            (mapv (fn [reply]
                    (let [parsed (sources (:seon.turn/reply reply))]
-                     (is (= 1 (count parsed)) (seon.print.value/bounded-text parsed))
+                     (is (= 1 (count parsed)))
                      (first parsed)))
                  replies))))
   (is (= ["(inc 1)" "(dec 3)" "(+ 2 3)"]
@@ -312,7 +311,7 @@
              ["#foo/bar [1 2]" 100 :seon.cluster.reply/refused-tag-error]
              ["#=(inc 1)" 100 :seon.cluster.reply/refused-tag-error]]]
       (let [result (checked text 'user bound)]
-        (is (m/validate expected result {:registry registry}) (seon.print.value/bounded-text result))
+        (is (m/validate expected result {:registry registry}))
         (is (inst? (:seon.error/at result)))
         (if (= :seon.cluster.reply/unreadable-error expected)
           (is (= [text nil 7] [(:seon.cluster.reply/unreadable result) (:seon.cluster.reply/text result)
@@ -352,7 +351,7 @@
            ["Here is the plan:\n```clojure\n(+ 1 2)\n```\nThat is all."
             ["; Here is the plan:"]]]]
     (is (= expected (mapv :seon.cluster.eval/comment (reply/sources text)))
-        (str "a comment must be the prose above its form: " (seon.print.value/bounded-text text))))
+        "a comment must be the prose above its form"))
   (testing "and the form sources are untouched by the dropped prose"
     (is (= ["(+ 1 2)"]
            (sources "Here is the plan.\n(+ 1 2)\nThat is all."))))
@@ -458,7 +457,7 @@
   (doseq [text leaked-control-markup]
     (let [result (reply/sources text)]
       (is (error? result)
-          (str "control markup must not become a plan form: " text))
+          "control markup must not become a plan form")
       (is (true? (:seon.cluster.reply/no-forms result)))
       (is (= text (:seon.cluster.reply/text (:seon.error/data result)))
           "the refusal carries the leaked text so the leak stays visible"))))
@@ -472,11 +471,10 @@
                   "Here:\n```clojure\n(+ 1 2)\n```\nDone."
                   "(ns my.gen.alpha)\n(def a 1)\nThat is all."]]
       (let [forms (reply/sources text)]
-        (is (vector? forms) (str "expected forms for: " text))
+        (is (vector? forms))
         (doseq [{source :seon.cluster.eval/source} forms]
           (is (seq (reader/read
                     {:seon.sci.reader/text source
                      :seon.config.eval.result/max-source (count source)
                      :seon.sci.reader/defer-auto-resolve? true}))
-              (str "a plan source with no reader event settles no receipt: "
-                   (seon.print.value/bounded-text source))))))))
+              "a plan source with no reader event settles no receipt"))))))

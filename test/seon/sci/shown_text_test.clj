@@ -6,8 +6,7 @@
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 
 (deftest a-plan-item-result-shows-data-instead-of-its-block-render-source
@@ -49,14 +48,14 @@
            result (render/call-with-walk-context
                    request #(evaluation/evaluate request))
            shown (repl/value-text result)]
-       (is (nil? (:seon.cluster.eval/error result)) (seon.print.value/bounded-text result))
+       (is (nil? (:seon.cluster.eval/error result)))
        (is (= "juniper/render-plan"
               (get-in result [:seon.sci.admit/value 0 :my.plan.item/id])))
        (is (= ["juniper/render-plan"]
               (get-in result [:seon.sci.admit/value 1 0 :my.plan/needs])))
        (is (= [] (get-in result [:seon.sci.admit/value 2])))
-       (is (not (str/includes? shown "ExceptionInfo")) shown)
+       (is (not (str/includes? shown "ExceptionInfo")))
        (is (string? shown))
-       (is (str/includes? shown "juniper/render-plan") shown)
-       (is (str/includes? shown "Render this plan clearly") shown)
-       (is (not (str/includes? shown "format-item-ai")) shown)))))
+       (is (str/includes? shown "juniper/render-plan"))
+       (is (str/includes? shown "Render this plan clearly"))
+       (is (not (str/includes? shown "format-item-ai")))))))

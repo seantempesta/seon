@@ -55,8 +55,7 @@
             [seon.sci.kernel :as kernel]
             [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
-            [seon.test-support :as test-support]
-            [seon.print.value])
+            [seon.test-support :as test-support])
   (:import [java.nio.file Files LinkOption]))
 
 (defn- scoped-instrumentation
@@ -103,7 +102,7 @@
                          :seon.instrument/changed-identities
                          (into #{} (map #(vector :seon.fn/sym %)) symbols)}
                         request))]
-     (is (= (count symbols) (:seon.instrument/registered result)) (seon.print.value/bounded-text result))
+     (is (= (count symbols) (:seon.instrument/registered result)))
      result)))
 
 (deftest an-invalid-apply-request-is-refused-at-its-crossing
@@ -223,10 +222,9 @@
              (is (= before @calls) "Input and arity checks precede the body.")
              (doseq [[refusal declared-schema] [[input :seon.instrument/contract-error]
                                       [arity :seon.instrument/arity-error]]]
-               (is ((schema/projection-validator projection declared-schema) refusal)
-                   (seon.print.value/bounded-text refusal))))
+               (is ((schema/projection-validator projection declared-schema) refusal))))
            (let [refusal (test-support/refusal-data #(candidate domain))]
-             (is (= :output (:seon.instrument/check refusal)) (seon.print.value/bounded-text refusal))
+             (is (= :output (:seon.instrument/check refusal)))
              (is (= 1 (:seon.instrument/arity refusal)))
              (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))
              (is (= domain (candidate domain 1)) "Only the declaring arity permits this declared-schema."))
@@ -435,8 +433,7 @@
                                          {:seon.schema.admission/source :agent
                                           :seon.fn/source "(defn valid? [length id] true)"})])
      (let [committed (db/pull (db/db connection) '[*] [:seon.fn/sym 'seon.id/valid?])
-           _ (is (= "(defn valid? [length id] true)" (:seon.fn/source committed))
-                 (seon.print.value/bounded-text (select-keys committed [:seon.error/operation :seon.error/message])))
+           _ (is (= "(defn valid? [length id] true)" (:seon.fn/source committed)))
            base (sci.eval/base-ctx (db/db connection))
            _ (is (::instrument/interpreted-original
                   (meta @(sci/resolve base 'seon.id/valid?)))
@@ -579,15 +576,14 @@
                              {:seon.env/environment environment}]
                      (try (wrapped)
                           (catch Exception thrown thrown)))]
-       (is (:db-after registration) (seon.print.value/bounded-text registration))
-       (is (env/environment? environment) (seon.print.value/bounded-text environment))
+       (is (:db-after registration))
+       (is (env/environment? environment))
        (let [diagnostic (ex-data failure)]
          (let [reply (error/render-ai diagnostic)]
            (is (str/includes? (:seon.error/message reply)
-                              (str function-symbol " refused argument count"))
-               (seon.print.value/bounded-text reply))
-           (is (= '([entities]) (:seon.instrument/arglists reply)) (seon.print.value/bounded-text reply))
-           (is (= 0 (get-in reply [:seon.error/problems 0 :seon.error/offending])) (seon.print.value/bounded-text reply))))))))
+                              (str function-symbol " refused argument count")))
+           (is (= '([entities]) (:seon.instrument/arglists reply)))
+           (is (= 0 (get-in reply [:seon.error/problems 0 :seon.error/offending])))))))))
 
 (deftest a-violation-carries-bounded-arguments-only-when-it-can
   ;; `error/value`'s wrapper under bounded and default caps, built without
@@ -681,7 +677,7 @@
                       {:seon.schema.admission/source :core})
                      :seon.profile/definition-digests
                      {'seon.instrument-test/declared-map-input (apply str (repeat 64 "0"))}})]
-        (is (nil? (:seon.instrument/registration-observation result)) (:seon.error/message result))
+        (is (nil? (:seon.instrument/registration-observation result)))
         (is (= 1 (:seon.instrument/registered result)))
         (is (not (contains? (instrument/instrumented)
                             (find-var (symbol (str scratch) "reply-html"))))))
@@ -767,9 +763,9 @@
     ;; their continuations are the value printer's, applied once at the edge.
     (is (identical? member (get-in ai [:seon.error/problems 0 :seon.error/offending]))
         "the selection carries the failing member itself, unclipped")
-    (is (= :int (get-in ai [:seon.error/problems 0 :seon.error/expected])) (seon.print.value/bounded-text ai))
+    (is (= :int (get-in ai [:seon.error/problems 0 :seon.error/expected])))
     (testing "the HTML face lays out the same selection"
-      (is (every? #(str/includes? html (str %)) [100 101 102]) html))
+      (is (every? #(str/includes? html (str %)) [100 101 102])))
     (testing "the whole value stays retrievable from the stored reference"
       (is (= member (print/value-at refusal [:seon.error/problems 0 :seon.error/offending])))
       (is (= (drop 3 member)
@@ -805,8 +801,7 @@
         (is (identical? registry received)
             "the seam retains the actual object; presentation alone elides it")
         (is (< allocated allocation-ceiling)
-            (str "construction allocated " allocated
-                 " bytes; the issue baseline was 150,063,304"))
+            "construction allocation stays below the issue baseline of 150,063,304 bytes")
         (is (= 1 (:seon.instrument/problem-count instrument-data)))
         (is (= :int (:seon.error/expected instrument-data)))
         (is (identical? registry
@@ -1283,8 +1278,7 @@
                  (instrument/apply!
                   {:seon.instrument/changed-identities
                    #{[:seon.fn/sym 'seon.instrument-test/doubled]}}))]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result)
-        (seon.print.value/bounded-text result))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) result))
     (is (= :seon.schema/projection (:seon.error/member result)))
     (is (identical? before @#'doubled)
         "a missing projection refuses before any Var is unarmed or re-armed")))
@@ -1364,7 +1358,7 @@
                               :where [?error :seon.error/signature ?signature]
                                      [?error :seon.error/occurrences ?occurrence]]
                             database (:seon.error/signature error))]
-       (is (= :seon.flow/committed outcome) (seon.print.value/bounded-text outcome))
+       (is (= :seon.flow/committed outcome))
        (is (pos-int? occurrence))
        (is (contains? (instrument/instrumented) #'db/pull))
        (let [pulled (db/pull database '[*] occurrence)]
@@ -1388,7 +1382,7 @@
            [#'error/latest-fact [:or :map :seon.error/base]]
            ;; 36a3714b4 split the kernel's error schemas
            [#'kernel/failure-value [:or :seon.sci.kernel/execution-error :seon.sci.kernel/error]]]]
-    (is (= expected (last (:malli/schema (meta candidate)))) (str candidate))))
+    (is (= expected (last (:malli/schema (meta candidate)))))))
 
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (let [selected (instrument/armable ['seon.flow])]
@@ -1396,7 +1390,7 @@
                       #'flow/stop-work-launcher!
                       #'flow/submit!]]
       (is (some? (mi/-schema boundary))
-          (str boundary " was omitted from Malli collection"))
+          "was omitted from Malli collection")
       (is (contains? selected boundary)))))
 
 (deftest dependency-free-linters-join-production-instrumentation
@@ -1475,8 +1469,7 @@
    (fn [_]
      (let [refusal (test-support/refusal-data
                     #(db/database-value-identity :seon.instrument-test/not-a-database))]
-       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal)
-           (seon.print.value/bounded-text refusal))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) refusal))
        (is (= :input (:seon.instrument/check refusal)))
        (is (= 'seon.db/database-value-identity (:seon.instrument/fn refusal)))
        (is (seq (:seon.error/problems refusal)))))))
@@ -1497,14 +1490,13 @@
            refusal (test-support/refusal-data #(wrapped {:seon.db/connection :absent}))
            message (:seon.error/message refusal)
            printed (pr-str refusal)]
-       (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal)
-           printed)
+       (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))
        (is (not (find refusal :seon.instrument/explanations)))
-       (is (not (str/includes? printed "#:seon.print")) printed)
+       (is (not (str/includes? printed "#:seon.print")))
        (is (= [[:seon.db/db]] (mapv :seon.error/path (:seon.error/problems refusal))))
-       (is (str/includes? message "at [:seon.db/db]") message)
-       (is (< (count message) 400) message)
-       (is (< (count printed) 2000) printed)))))
+       (is (str/includes? message "at [:seon.db/db]"))
+       (is (< (count message) 400))
+       (is (< (count printed) 2000))))))
 
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
   (arm-suite! '[seon.instrument-test/prefix-contract])
@@ -1524,12 +1516,12 @@
   (let [refusal (test-support/refusal-data #(problems/open-faults nil []))
         caller (:seon.instrument/caller refusal)
         message (:seon.error/message refusal)]
-    (is (= :seon.fn.arity/input (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
-    (is (str/starts-with? caller "seon.instrument-test") caller)
-    (is (not (str/includes? message "call_preparation")) message)
-    (is (str/includes? message "argument 0 `database`") message)
-    (is (str/includes? message "expected :seon.db/database-value (must be") message)
-    (is (not (str/includes? message "Fix: must be")) message)
+    (is (= :seon.fn.arity/input (:seon.error/member refusal)))
+    (is (str/starts-with? caller "seon.instrument-test"))
+    (is (not (str/includes? message "call_preparation")))
+    (is (str/includes? message "argument 0 `database`"))
+    (is (str/includes? message "expected :seon.db/database-value (must be"))
+    (is (not (str/includes? message "Fix: must be")))
     (is (= :seon.db/database-value
            (:seon.error/expected (first (:seon.error/problems refusal)))))))
 
@@ -1545,10 +1537,10 @@
                     {:seon.config.error/max-evidence-bytes 8192})
            refusal (test-support/refusal-data #(wrapped (db/db connection) []))
            message (:seon.error/message refusal)]
-       (is (= :seon.fn.arity/output (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
+       (is (= :seon.fn.arity/output (:seon.error/member refusal)))
        ;; the fix names the definition; the expectation is already the sentence's
-       (is (str/includes? message "seon.problems/open-faults refused its result") message)
-       (is (str/includes? message "Fix: Change seon/problems.clj:") message)
+       (is (str/includes? message "seon.problems/open-faults refused its result"))
+       (is (str/includes? message "Fix: Change seon/problems.clj:"))
        (is (str/starts-with? (:seon.error/fix (first (:seon.error/problems refusal)))
                              "Change seon/problems.clj:")
            "the problem's fix key carries the same location")))))
@@ -1597,9 +1589,10 @@
     (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))))
 
 (deftest every-instrument-function-declares-its-input-and-output
-  (doseq [[name candidate] (ns-interns 'seon.instrument)
-          :when (and (bound? candidate) (fn? @candidate))]
-    (is (some? (mi/-schema candidate)) (str name))))
+  (is (= [] (vec (for [[name candidate] (ns-interns 'seon.instrument)
+                       :when (and (bound? candidate) (fn? @candidate)
+                                  (nil? (mi/-schema candidate)))]
+                   name)))))
 
 (deftest an-invalid-refusal-retains-its-evidence-at-the-kernel-boundary
   (let [canonical (schema/handed-projection)

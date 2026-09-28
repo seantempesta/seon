@@ -6,8 +6,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as sci.eval]
-            [seon.test-support :as support]
-            [seon.print.value]))
+            [seon.test-support :as support]))
 
 (defn- evaluate-in
   ([ctx source] (evaluate-in ctx source (config/result-caps config/defaults)))
@@ -42,8 +41,7 @@
        (is (= :ok (get-in defined [:seon.sci.admit/record :seon.eval/outcome])))
        (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))))
        (let [refused (:seon.sci.admit/value (evaluate-in ctx "(twice \"a\")"))]
-         (is (= :input (:seon.instrument/check refused))
-             (seon.print.value/bounded-text refused)))))))
+         (is (= :input (:seon.instrument/check refused))))))))
 
 (deftest a-definition-without-a-contract-is-refused-and-restored
   (support/with-database
@@ -54,8 +52,8 @@
        (doseq [source ["(defn bare \"No contract.\" [x] (inc x))"
                        "(defn twice \"No contract.\" [x] (* 3 x))"]]
          (let [refusal (:seon.sci.admit/value (evaluate-in ctx source))]
-           (is (= 'seon.sci.eval/evaluate (:seon.error/operation refusal)) source)
-           (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)) source)))
+           (is (= 'seon.sci.eval/evaluate (:seon.error/operation refusal)))
+           (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)))))
        (is (= 'absent (:seon.sci.admit/value
                        (evaluate-in ctx "(if (resolve 'bare) 'present 'absent)")))
            "the refused definition never entered the context")
@@ -74,12 +72,12 @@
            printed (evaluate-in ctx "(do (println \"hi\") (binding [*out* *err*] (print \"é\")) 1)" caps)
            runaway (evaluate-in ctx "(do (dotimes [_ 100] (print \"0123456789\")) :done)" caps)
            refusal (:seon.sci.admit/value runaway)]
-       (is (= "hi\né" (:seon.cluster.eval/output printed)) (seon.print.value/bounded-text printed))
+       (is (= "hi\né" (:seon.cluster.eval/output printed)))
        (is (= "1" (:seon.eval/shown printed)))
        (is (= (apply str (repeat 6 "0123456789"))
               (:seon.cluster.eval/output runaway))
            "the exact text up to the bound is kept")
-       (is (= :seon.config.eval.result/max-bytes (:seon.error/member refusal)) (seon.print.value/bounded-text refusal))
+       (is (= :seon.config.eval.result/max-bytes (:seon.error/member refusal)))
        (is (= 64 (:seon.sci.admit/bound-bytes refusal)))
        (is (= 70 (:seon.sci.admit/bytes refusal)))))))
 
@@ -97,9 +95,9 @@
                        ;; A point-free def is a declaration since P2-A (1a7029d81): gated like any function.
                        "(def nested (comp inc inc))"]]
          (let [refusal (:seon.sci.admit/value (evaluate-in ctx source))]
-           (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)) source)
-           (is (absent? "nested") source)
-           (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))) source)))
+           (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)))
+           (is (absent? "nested"))
+           (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))))))
        (is (= :ok (get-in (evaluate-in ctx "(defrecord Pair [a b])")
                           [:seon.sci.admit/record :seon.eval/outcome]))
            "a record is one host-bound declaration, not gated")
@@ -115,8 +113,7 @@
          (evaluate-in ctx source))
        (doseq [call ["(one \"a\")" "(two \"a\")"]]
          (is (= :input (:seon.instrument/check
-                        (:seon.sci.admit/value (evaluate-in ctx call))))
-             call))))))
+                        (:seon.sci.admit/value (evaluate-in ctx call))))))))))
 
 (deftest ^{:seon/tasks #{"132fee0467c8"}} a-form-changes-the-program-by-one-indexed-declaration
   ;; The edge cases the S1 REPL probes exposed (landing lane-impl-repl-m1-2026-09-25.md).
@@ -135,13 +132,13 @@
                :when changed]
          (is (= #{(symbol "scratch.entry-gate" (str changed))}
                 (:seon.sci.eval/unindexed refusal))
-             (str source " is an unindexed change: " (seon.print.value/bounded-text refusal)))
-         (is (absent? (str changed)) source))
+             "is an unindexed change")
+         (is (absent? (str changed))))
        (value (str "(defn kept \"D.\" " contract " [x] (inc x))"))
        (doseq [source ["(def kept 42)" "(def kept nil)"]]
          (is (= '#{scratch.entry-gate/kept} (:seon.sci.eval/unindexed (value source)))
-             (str source ": a function replaced by a value is a definition change"))
-         (is (= 2 (value "(kept 1)")) source))
+             "a function replaced by a value is a definition change")
+         (is (= 2 (value "(kept 1)"))))
        (is (= '#{scratch.entry-gate/->One scratch.entry-gate/->Two}
               (set (:seon.sci.eval/declarations
                     (value "(do (defrecord One [x]) (defrecord Two [y]))"))))
@@ -192,8 +189,7 @@
        (is (true? (value (str "(identical? held (var " stored "))")))
            "every refusal and a later throw leave the stored entity's Var as it was")
        (let [admitted (evaluate-in ctx (str "(defn kept \"D.\" " contract " [x] (* 5 x))"))]
-         (is (= 'scratch.entry-gate/kept (get-in admitted [:seon.program/row :seon.fn/sym]))
-             (seon.print.value/bounded-text (:seon.sci.admit/value admitted)))
+         (is (= 'scratch.entry-gate/kept (get-in admitted [:seon.program/row :seon.fn/sym])))
          (is (= 5 (value "(kept 1)")))
          ((:seon.sci.eval/restore admitted))
          (is (= 2 (value "(kept 1)"))
@@ -219,8 +215,7 @@
        (let [admitted (evaluate-in ctx (str "(do\n  ;" declaration "\n  " declaration ")"))
              entity (:seon.program/row admitted)]
          (is (= 'scratch.entry-gate/echoed (:seon.fn/sym entity))
-             (str "a comment holding the same bytes is not the declaration: "
-                  (seon.print.value/bounded-text (:seon.sci.admit/value admitted))))
+             "a comment holding the same bytes is not the declaration")
          (is (= declaration (:seon.fn/source entity)))
          (is (not (contains? entity :seon.fn/form-span))
              "the span locates the entity within this form only")
@@ -251,9 +246,9 @@
            contract "{:malli/schema [:=> [:cat :int] :int]}"
            called (evaluate-in ctx (str "(do (defn inc1 \"Inc.\" " contract " [x] (inc x)) (inc1 \"a\"))"))]
        (is (= :input (:seon.instrument/check (:seon.sci.admit/value called)))
-           (str "the call inside the do meets the armed contract: " (seon.print.value/bounded-text (:seon.sci.admit/value called))))
+           "the call inside the do meets the armed contract")
        (is (re-find #"NOT ADMITTED.*scratch\.entry-gate/inc1" (str (:seon.cluster.eval/output called)))
-           (str "the failed form says its definition is no entity: " (seon.print.value/bounded-text (:seon.cluster.eval/output called))))
+           "the failed form says its definition is no entity")
        (is (= :input (:seon.instrument/check (value "(inc1 \"a\")")))
            "the private definition a failed form left stays armed")
        (let [admitted (evaluate-in ctx (str "(do (do (defn inc2 \"Inc.\" " contract " [x] (inc x))) (inc2 1))"))]
