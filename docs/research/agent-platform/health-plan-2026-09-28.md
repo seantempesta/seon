@@ -219,6 +219,37 @@ is adoption of every file onto an empty store, so a change proven by adoption on
 is proven for a fresh install too, and the drill is deleted. The boot-perf lane measures what differs between the two
 paths and what the from-scratch build redoes, to cost that cut.
 
+## 10. Warnings, and what the armed wrapper can capture
+
+**Warnings use the same path.** A warning is a finding that does not change the value: the same constructor, the same
+supplied context, the same links and blob references, a kind and a severity. It is recorded only when its measurement
+crosses a significance threshold (§2), deduplicated by signature, delivered beside the value of the evaluation that
+triggered it (as the contract warning is today), and shown in the health view. A task is created only above a declared
+severity. Nothing is a string in a log.
+
+**What every armed call can capture, by cost tier** (measured costs from the profiling research: the bracket is
+~31 ns; a LongAdder increment ~6.6 ns and flat under contention; a clock read up to 382 ns at 16 threads on macOS, so
+never add one; reading the bound world allocates 32 B):
+- **Always on (counter increments, no clock read, no allocation):** calls, the latency histogram, throws by class
+  (throws used as control flow: `malli->datahike-attr-in` threw 73,492 times in 1.79 M calls), contract failures by
+  side and Malli path, re-entry, in-flight concurrency (a gauge: contention and serialization show up as in-flight
+  counts), calls per evaluation from the world sink (N+1 and repeated work: thousands of calls to one function in one
+  evaluation), and functions never called since boot (dead or untested paths).
+- **Sampled (1 in N calls, or the first calls of each new digest):** allocated bytes per call (thread allocation
+  counter), argument and result sizes for counted collections, the dynamic caller edge (what calls what at runtime vs
+  the static graph), identical-argument repeats (a memoization or repeated-work finding: what Astra hunts by hand),
+  and blocking on the wrong thread (a Datahike writer or listener thread, a virtual thread pinned by a monitor).
+- **On demand, for one function:** an agent asks to capture the next N calls of `f` (arguments, results, timings,
+  callers) into a blob, like a debugger trace, and the capture stops itself.
+- **Process-level warnings** (the same shape, from existing readers): heap after GC trend, the cache near its budget
+  (92% today), a store commit's size, a proc that stops answering pings, a listener callback over its bound.
+
+**Warning kinds this gives, each with the clues a fix needs:** a p99 or allocation bucket that moved with a new digest
+(the change that caused it); repeated identical work in one evaluation (the caller and the repeat count); throws used
+as control flow; a function hot in production but reached by no test; contention on one function; blocking on the
+writer thread; memory or cache pressure with the kinds holding it. Every tier's cost is measured on the live JVM before
+it lands, parent against change.
+
 ## 7. Owner questions
 
 1. ~~Restart~~ ruled: stored buckets are enough; accumulators restart from zero.
