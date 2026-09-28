@@ -33,7 +33,7 @@
   proposed. The one transaction therefore holds only facts already validated
   in order."
   (:require [clojure.string :as str]
-            [seon.render.value :as render.value]))
+            [seon.print.value :as print.value]))
 
 (def ^:dynamic *world*
   "The world of the evaluation running on this thread: the entrant's world
@@ -153,7 +153,7 @@
   (let [text (:seon.batch/text (:seon.batch/version r))]
     (if (:seon.batch/span-invalid? r)
       ;; a span the read stage misreported: the form's own print is its source
-      {:seon.batch/source (render.value/bounded-text (:seon.batch/form r))}
+      {:seon.batch/source (print.value/bounded-text (:seon.batch/form r))}
       (let [[l c] (line-column text (:seon.batch/start r))]
         {:seon.batch/source (str/trimr (subs text (:seon.batch/start r) (:seon.batch/end r)))
          :seon.batch/line l :seon.batch/column c}))))
@@ -300,7 +300,7 @@
                      (update :seon.batch/diagnostics conj
                              {:seon.error/message (str "observe: " (count bad) " observed writes are not writes and were dropped")
                               :seon.batch/stage :observe :seon.batch/ordinal n
-                              :seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil (render.value/bounded-text %)) bad)))}}))
+                              :seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil (print.value/bounded-text %)) bad)))}}))
                    (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) good)
                    (assoc :seon.batch/form-writes (vec good))))))))
 
