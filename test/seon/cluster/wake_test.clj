@@ -74,6 +74,10 @@
          armer (async/chan (async/sliding-buffer 1))
          search (async/chan (async/sliding-buffer 1))
          faults (async/chan (async/sliding-buffer 1))]
+     ;; the connection's failure recorder, as boot installs it
+     ;; (seon.cluster.store/listen-failures!), here a channel the test reads
+     (alter-meta! (:wrapped-atom connection) assoc :listener-failure
+                  #(async/offer! faults (:exception %)))
      {:mailbox mailbox
       :armer armer
       :render render
@@ -419,10 +423,8 @@
           "the derivation names the attribute the index does not hold")
       (is (contains? (wake/unindexed-listened-attributes (db/db connection))
                      ::unindexed-notice))
-      (let [refusal (try (route-probe! connection
-                                       (async/chan (async/sliding-buffer 1)))
-                         (catch clojure.lang.ExceptionInfo failure
-                           (ex-data failure)))]
+      (let [refusal (:key (route-probe! connection
+                                        (async/chan (async/sliding-buffer 1))))]
         (is (contains? (:seon.cluster.wake/attributes refusal) ::unindexed-notice)
             "and registration refuses rather than routing into silence")))))
 
@@ -615,7 +617,14 @@
                   "the refusal identifies the registered listener")
               (is (= :seon.cluster.wake/mailbox
                      (:seon.cluster.wake/route (ex-data fault)))
-                  "and it names WHICH route, so the fault is actionable")))
+                  "and it names WHICH route, so the fault is actionable"))
+            (testing "after a refused delivery a later wake still reaches the mailbox"
+              (is (= ::filler (async/poll! mailbox)) "the mailbox is drained")
+              (is (map? (test-support/await-event!
+                         (future (db/transact! connection (message-tx "m-g")))
+                         "later transaction")))
+              (is (= :seon.cluster.wake/wake (async/poll! mailbox))
+                  "the routing listener survived the refusal")))
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key key})))))))

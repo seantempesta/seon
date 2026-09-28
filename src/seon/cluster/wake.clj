@@ -11,9 +11,10 @@
   catches each callback's exception independently
   (`reference-code/datahike/src/datahike/writer.cljc`, `notify-listeners!`).
   A returned transaction report therefore does not prove mailbox delivery.
-  A failed hand-off THROWS into Datahike, which retires the registration by
-  identity and hands the failure to the connection's handler
-  (`seon.cluster.store/listen-failures!`, one stored fault). Delivery never
+  A refused hand-off is a VALUE (`deliver!`), recorded by the callback through
+  the connection's failure recorder (`seon.cluster.store/listen-failures!`,
+  one stored fault) with the registration kept: a throw out of the callback
+  would make Datahike retire the cluster's one routing listener. Delivery never
   parks: it uses `offer!`, with `(sliding-buffer 1)` coalescing payload-free
   wakes.
 
@@ -69,6 +70,7 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [seon.db :as db]
+            [seon.fault :as fault]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -224,7 +226,7 @@
   refuses at the seam that admits the work instead of reading as health
   at four separate derivations."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:maybe :seon.error/value]]}
+                  [:maybe :seon.cluster.wake/unroutable-declarations-error]]}
   [database]
   (let [listened (wake-attributes database)
         inside (inside-attributes database)
@@ -268,7 +270,7 @@
   cluster runs is armed by nothing: `next-agent-work` answers, the work is
   real, and no graph exists to execute it until the next boot."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:maybe :seon.error/value]]}
+                  [:maybe :seon.cluster.wake/unroutable-declarations-error]]}
   [database]
   (when (empty? (arming-attributes database))
     (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/arming-refusal
@@ -376,19 +378,37 @@
 (defn- deliver!
   "`offer!` one payload-free wake and classify the answer.
   `fenced?` is a zero-arg derived check invoked only after a closed
-  offer. Throws on `::refused` into Datahike's listener-failure path.
-  Returns the delivery."
-  {:malli/schema [:=> [:cat :seon.cluster.wake/key :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]] :seon.cluster.wake/delivery]}
+  offer. A refused offer answers its `:seon.cluster.wake/undeliverable-wake-error`
+  naming the registration and the route; the callback records it."
+  {:malli/schema [:=> [:cat :seon.cluster.wake/key :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]]
+                  [:or :seon.cluster.wake/delivery :seon.cluster.wake/undeliverable-wake-error]]}
   [key route channel fenced?]
   (let [offered (async/offer! channel ::wake)
         outcome (delivery offered
                           (and (false? offered) (boolean (fenced?))))]
-    (when (= ::refused outcome)
-      (throw (ex-info "A wake route refused delivery."
-                      {:seon.cluster.wake/undeliverable-wake key
-                       ::key key
-                       ::route route})))
-    outcome))
+    (if (= ::refused outcome)
+      (seon.error.refusal/diagnostic
+       {:seon.error/at (java.util.Date.) :seon.error/layer ::routing
+        :seon.error/operation 'seon.cluster.wake/deliver!
+        :seon.error/message "A wake route refused delivery."
+        :seon.error/fix "A live route that cannot take a payload-free wake is losing it: give the route a (sliding-buffer 1), or fence the closed mailbox of a retired agent."
+        :seon.cluster.wake/undeliverable-wake key
+        ::key key
+        ::route route})
+      outcome)))
+
+(defn- record-refusal!
+  "Record one refused delivery as a core fault through the connection's
+  failure recorder (`seon.cluster.store/listen-failures!`), the listener
+  kept registered. A connection without one prints it as the unrecorded
+  fault it is (`seon.fault/print-unrecorded!`)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster.wake/key :map :seon.cluster.wake/undeliverable-wake-error] :nil]}
+  [connection key report refusal]
+  (if-let [record (:listener-failure (meta connection))]
+    (record {:listener-key key :exception (ex-info (:seon.error/message refusal) refusal)
+             :tx-report report :retired? false})
+    (fault/print-unrecorded! refusal []))
+  nil)
 
 (defn- wake-matchers
   "Compile schema recipients and authored constraints by attribute once.
@@ -479,24 +499,32 @@
   registration. A route with no render channel (a hosted branch, which
   serves no page) makes no second delivery.
 
-  A route refusing delivery THROWS and becomes a stored fault — a
-  swallowed failure nobody hears about is an invisible one. Only an exact mailbox route the agent owner derives as fenced is
+  A route refusing delivery becomes a stored fault, the route kept — a
+  swallowed failure nobody hears about is an invisible one, and a refused
+  wake to one agent must not end every agent's routing. Only an exact mailbox route the agent owner derives as fenced is
   benign; a closed render route is still a failure. Coalescing on every
   `(sliding-buffer 1)` target is safe by the standing argument: a wake
   says only look, and the woken pass derives everything from facts.
   L8 holds by construction: the armer's
   own work commits no wake-set attribute (arming writes nothing; the
-  prime is an `offer!`)."
+  prime is an `offer!`).
+
+  ## Errors
+
+  A declaration population that cannot route or arm (`declarations-refusal`,
+  `arming-refusal`) is RETURNED as that refusal and nothing is registered;
+  the proc that registers the route records it as its fault."
   {:malli/schema [:=> [:cat :seon.cluster.wake/route-request]
-                  :seon.cluster.wake/key]}
+                  [:or :seon.cluster.wake/key :seon.cluster.wake/unroutable-declarations-error]]}
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/channels
            :seon.cluster.wake/fenced?
            :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
            :seon.render.web/interest
            :seon.cluster.wake/key]}]
-  (when-let [refusal (or (declarations-refusal (d/db connection))
-                         (arming-refusal (d/db connection)))]
-    (throw (ex-info (:seon.error/message refusal) refusal)))
+  (if-let [refusal (or (declarations-refusal (d/db connection))
+                       (arming-refusal (d/db connection)))]
+    refusal
+  (do
   (d/listen
    connection
    key
@@ -507,7 +535,11 @@
      (let [matchers (wake-matchers (:db-after report))
            arming (arming-attributes (:db-after report))
            published-interest (some-> interest deref)
-           render? (volatile! (= :all published-interest))]
+           render? (volatile! (= :all published-interest))
+           refused (volatile! [])
+           offer-wake (fn [route channel fenced]
+                     (let [outcome (deliver! key route channel fenced)]
+                       (when (map? outcome) (vswap! refused conj outcome))))]
          ;; Logical datoms: a vector attribute's element lives in a cell; a
          ;; listen on it matches its owner, on append and on reorder.
          (doseq [datom (db/logical-datoms report)]
@@ -526,13 +558,13 @@
                (doseq [agent-eid (into (if (::schema? matcher) #{(:v datom)} #{})
                                       (keep #(% datom)) (::matches matcher))]
                  (if-let [channel (get (channels) agent-eid)]
-                   (deliver! key ::mailbox channel
-                             #(fenced? agent-eid channel))
+                   (offer-wake ::mailbox channel #(fenced? agent-eid channel))
                    (async/offer! armer-channel ::wake))))))
          (when (and @render? render-channel)
-           (deliver! key ::render render-channel
-                     (constantly false))))))
-  key)
+           (offer-wake ::render render-channel (constantly false)))
+         (doseq [refusal @refused]
+           (record-refusal! connection key report refusal)))))
+  key)))
 
 (defn unlisten!
   "Remove the wake handler.

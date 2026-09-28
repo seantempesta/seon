@@ -32,7 +32,7 @@
                       :seon.db/connection]
                      [:seon.cluster.wake/key :seon.cluster.wake/key]],
                     :undeliverable-wake [:or :seon.agent/id :seon.cluster.wake/key]
-                    :undeliverable-wake-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the registration whose wake could not be delivered"} [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake] [:seon.error/message :seon.error/message]]
+                    :undeliverable-wake-error [:and {:error/message "must identify the registration whose wake could not be delivered"} :seon.error/base [:map [:seon.cluster.wake/undeliverable-wake :seon.cluster.wake/undeliverable-wake]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.cluster.wake/error
@@ -48,6 +48,11 @@
 
  :seon.cluster.wake/error-recipient
  [:string {:min 1}]
+
+ :seon.cluster.wake/unroutable-declarations-error
+ [:and {:description "The installed wake declarations cannot carry a cluster (no listened or inside attribute, a listened attribute outside :avet) or can never arm a created agent; the attributes concerned. seon.cluster.wake/route! answers it and registers nothing."}
+  :seon.error/base
+  [:map [:seon.cluster.wake/attributes :seon.cluster.wake/attributes]]]
 
  :seon.cluster.wake/offer-observation
  [:and
