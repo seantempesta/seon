@@ -16,7 +16,7 @@
 (defn- evaluate!
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection :symbol :string] :seon.sci.eval/evaluation]}
   [ctx connection namespace-name source]
-  (let [result (eval/evaluate
+  (let [result (support/evaluate
                 {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                  :seon.db/connection connection
                  :seon.cluster.eval/ns [:seon.ns/name namespace-name]

@@ -6,7 +6,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.repl :as repl]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (deftest returned-refusal-is-a-schema-first-error-with-unchanged-history
@@ -22,7 +21,7 @@
            configuration (support/effective-config)
            source "(seon.db/transact! [[:db/add [:my.plan.item/id \"error/item\"] :my.plan.item/title 42]])"
            before (db/basis-t @connection)
-           result (evaluation/evaluate
+           result (support/evaluate
                    {:seon.cluster.eval/source source
                     :seon.sci.eval/ctx ctx
                     :seon.db/db @connection

@@ -3,7 +3,6 @@
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (deftest own-record-reads-supply-the-same-database-and-agent-as-explicit-calls
@@ -27,7 +26,7 @@
                            [(list sym)
                             (list sym '(seon.db/db) "supplied-database-agent")])
                          functions))
-           result (evaluation/evaluate
+           result (support/evaluate
                    {:seon.sci.eval/ctx ctx :seon.db/db database
                     :seon.agent/id "supplied-database-agent"
                     :seon.cluster.eval/source source

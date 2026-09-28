@@ -21,8 +21,11 @@
             [seon.profile :as profile]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.batch]
             [seon.sci.eval :as sci.eval]
-            [seon.test])
+            [seon.test]
+            [seon.turn]
+            [seon.turn.batch :as turn.batch])
   (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
@@ -337,12 +340,67 @@
                    (assoc :seon.store/store (:seon.store/store handle)))))))))))
 
 
+(defn evaluate
+  "`:seon.cluster.eval/source` evaluated through the one REPL path (the fold,
+  with the turn's evaluate and show stages) in the request's context: the
+  last form's evaluation map — value, shown text, error, record, ending
+  namespace — with every form's printed output, and `:seon.batch/unread`
+  when the text stops being readable. Nothing settles: the forms' program
+  facts are not proposed.
+
+  A context holding custody that has not acquired the request's database
+  acquires it first (`seon.sci.eval/acquire!`), as an agent's next run forks
+  onto its head. Without a context, a base context is built from
+  `:seon.schema/projection`; without a database, the executing member's is
+  read, since an agent's evaluation always has one."
+  {:malli/schema [:=> [:cat [:map [:seon.cluster.eval/source :string]
+                             [:seon.sci.admit/caps :map]]]
+                  :map]}
+  [{ctx :seon.sci.eval/ctx source :seon.cluster.eval/source namespace-ref :seon.cluster.eval/ns
+    limit :seon.sci.eval/time-limit-ms :as request}]
+  (let [ctx (or ctx (sci.eval/build-base-ctx (or (:seon.schema/projection request) (schema/handed-projection))))
+        database (or (:seon.db/db request)
+                     (some-> (get-in ctx [::sci.eval/custody :seon.db/connection]) db/db)
+                     (get-in ctx [::sci.eval/custody :seon.db/db])
+                     (some-> (:seon.sci.kernel/program-snapshot ctx) deref :seon.db/db)
+                     ;; an agent's evaluation always has one: the executing member's
+                     (db/db (:seon.db/connection (execution-handle nil))))
+        _ (when (and (contains? ctx ::sci.eval/custody) (not (sci.eval/acquired-database? ctx database)))
+            (sci.eval/acquire! {:seon.sci.eval/ctx (::sci.eval/base-ctx ctx ctx) :seon.db/db database}))
+        request (assoc request :seon.sci.eval/ctx ctx)
+        start (or (second namespace-ref) 'user)
+        limit (or limit (:seon.config.eval/time-limit-ms config/defaults))
+        world (cond-> {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
+                       :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
+                       :seon.batch/sink (seon.batch/sink)}
+                database (assoc :seon.db/db database)
+                (:seon.db/connection request) (assoc :seon.db/connection (:seon.db/connection request)))
+        batch (seon.batch/evaluate-batch
+               (-> (turn.batch/code-request
+                    {:seon.batch/world world
+                     :seon.batch/text source
+                     :seon.batch/start-ns start
+                     :seon.batch/evaluate #'seon.turn/evaluate-row
+                     :seon.batch/show #'seon.turn/show-row
+                     :seon.batch/ns-name (fn [{current :seon.turn/namespace-cursor}] @current)
+                     :seon.turn/namespace-cursor (volatile! start)
+                     :seon.turn/frame-request (fn [_ordinal namespace-name]
+                                                (assoc request :seon.cluster.eval/ns [:seon.ns/name namespace-name]))
+                     :seon.sci.eval/time-limit-ms limit})
+                   (dissoc :seon.batch/settle :seon.batch/derive :seon.batch/facts :seon.batch/apply
+                           :seon.batch/fold :seon.batch/observe)))
+        entries (:seon.batch/entries batch)
+        output (apply str (keep #(get-in % [:seon.batch/evaluation :seon.cluster.eval/output]) entries))]
+    (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries)))
+      (seq output) (assoc :seon.cluster.eval/output output)
+      (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch)))))
+
 (defn agent-value
   "Evaluate `source` at the boundary an AGENT actually calls, and return the
   value the agent reads.
 
   An agent never invokes a Var directly: its reply is read into forms and
-  each one crosses `seon.sci.eval/evaluate`, which is total by construction —
+  each one crosses the one REPL path (`evaluate` here), total by construction —
   every failure, a violated contract included, comes back as a flat
   `:seon.error` value in `:seon.sci.admit/value`. A test that calls an
   agent-facing function directly with an argument its DECLARED CONTRACT
@@ -358,7 +416,7 @@
   ([ctx source namespace-name]
    (let [decisions config/defaults]
      (:seon.sci.admit/value
-      (sci.eval/evaluate
+      (evaluate
        (cond-> {:seon.cluster.eval/source source
                 :seon.sci.eval/ctx ctx
                 :seon.sci.admit/caps (config/result-caps decisions)

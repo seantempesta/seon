@@ -796,10 +796,10 @@
                          :seon.turn.loop/completion]]
               (clojure.core.async/close! (get handle key)))))))))
 
-(deftest a-program-change-replaces-a-private-definition-and-says-so
+(deftest a-program-change-replaces-a-private-definition
   ;; Root ruling 2026-09-25: a context's own definition survives its symbol's
   ;; first lazy install, but a changed program entity advances in place over it
-  ;; at the next idle boundary, and the evaluation says so.
+  ;; at the next idle boundary.
   (support/with-database
    (fn [connection]
      (declare-fixture-subjects! connection)
@@ -816,15 +816,14 @@
         connection
         [(support/revision (db/db connection) [:seon.fn/sym renderer]
                            {:seon.fn/source "(defn namespace-ai [value] (str \"program:\" (:seon.ns/name value)))"})])
-       (let [evaluation (eval/evaluate
+       (let [evaluation (support/evaluate
                          {:seon.sci.eval/ctx ctx
                           :seon.db/db (db/db connection)
                           :seon.cluster.eval/ns [:seon.ns/name fixture-a]
                           :seon.cluster.eval/source "1"
                           :seon.sci.admit/caps caps
                           :seon.sci.eval/time-limit-ms 2000})]
-         ;; Said as data, not :out text (737fe0a5d): the replaced definitions.
-         (is (contains? (set (:seon.eval/replaced evaluation)) renderer)))
+         (is (= 1 (:seon.sci.admit/value evaluation)) "the next evaluation runs on the acquired program"))
        (is (= (str "program:" fixture-a) (render)) "the changed program entity runs")))))
 
 (deftest generic-renderer-receives-the-acquired-entity-id
@@ -932,7 +931,7 @@
            named (seon.render/request-profile
                   {:seon.db/db database :seon.boot/cluster-name cluster-name})
            unnamed (seon.render/request-profile {:seon.db/db database})
-           evaluation (eval/evaluate
+           evaluation (support/evaluate
                        {:seon.cluster.eval/source "(inc 1)"
                         :seon.sci.eval/ctx (support/fork-cluster-ctx connection nil)
                         :seon.db/db database

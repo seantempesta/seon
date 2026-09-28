@@ -5,7 +5,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
 (def ^:private caps
@@ -39,7 +38,7 @@
                  :seon.cluster.eval/ordinal ordinal
                  :seon.cluster.eval/at now}))
        (let [evaluation
-             (sci.eval/evaluate
+             (support/evaluate
               {:seon.cluster.eval/source
                (str
                 "(seon.db/transact! "

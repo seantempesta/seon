@@ -7,13 +7,12 @@
             [seon.env :as env]
             [seon.schema :as schema]
             [my.message :as message]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (defn- evaluate
   ([ctx connection source] (evaluate ctx connection source true))
   ([ctx connection source turn?]
-   (evaluation/evaluate
+   (support/evaluate
     (cond-> {:seon.sci.eval/ctx ctx :seon.db/db @connection
     :seon.db/connection connection :seon.agent/id "supplied-docs"
     :seon.cluster.eval/source source

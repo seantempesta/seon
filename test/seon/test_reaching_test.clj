@@ -248,7 +248,7 @@
             sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [entities] (apply max-key :seon.test/pass-count entities))"
                      "(clojure.test/deftest largest-customer-test (clojure.test/is (= {:seon.test/pass-count 9} (largest-customer [{:seon.test/pass-count 2} {:seon.test/pass-count 9}]))))"]]
         (doseq [source sources]
-          (let [evaluation (seon.sci.eval/evaluate
+          (let [evaluation (support/evaluate
                              {:seon.cluster.eval/source source
                               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                               :seon.sci.eval/ctx ctx

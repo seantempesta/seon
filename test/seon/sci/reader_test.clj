@@ -7,7 +7,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [sci.core :as sci]
-            [seon.config :as config]
             [seon.sci.eval :as eval]
             [seon.sci.reader :as reader]
             [seon.schema :as schema]
@@ -178,20 +177,24 @@
       (is (not-any? :seon.sci.reader/error read-events))
       (is (= text (apply str (event-slices text read-events)))))))
 
-(deftest evaluation-refuses-a-second-form-by-its-position
-  (doseq [[text line column offending] [["(+ 1 2) (+ 3 4)" 1 9 "(+ 3 4)"] ["1 2" 1 3 "2"]
-                                        ["1\n2" 2 1 "2"] [" ;; prose only" nil nil " ;; prose only"]]]
-    (let [refusal (:seon.sci.admit/value
-                   (eval/evaluate {:seon.schema/projection (schema/handed-projection)
-                                   :seon.cluster.eval/source text
-                                   :seon.sci.admit/caps (config/result-caps config/defaults)
-                                   :seon.sci.eval/time-limit-ms 2000}))]
-      (is (schema/valid-candidate-value? (schema/handed-projection)
-                                         :seon.sci.eval/reader-event-count-error refusal))
-      (is (= [:seon.cluster.eval/source offending]
-             [(:seon.error/member refusal) (:seon.error/offending refusal)]))
-      (is (= [line column] (mapv (:seon.error/data refusal {}) [:seon.sci.reader/line :seon.sci.reader/column])))
-      (when line (is (str/includes? (:seon.error/message refusal) "(do ...)"))))))
+(deftest a-declaration-source-of-other-than-one-form-is-refused-by-its-position
+  ;; The one-event rule reads a stored declaration's source (program
+  ;; acquisition); an agent's reply is read by the fold, form by form.
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))]
+    (doseq [[text line column offending] [["(+ 1 2) (+ 3 4)" 1 9 "(+ 3 4)"] ["1 2" 1 3 "2"]
+                                          ["1\n2" 2 1 "2"] [" ;; prose only" nil nil " ;; prose only"]]]
+      (let [refusal (try (#'eval/one-event text 'user ctx (count text))
+                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (schema/valid-candidate-value? (schema/handed-projection)
+                                           :seon.sci.eval/reader-event-count-error refusal)
+            "the refusal is the declared reader-event-count error")
+        (is (= [:seon.cluster.eval/source offending]
+               [(:seon.error/member refusal) (:seon.error/offending refusal)])
+            "the refusal names the source and the form past the first")
+        (is (= [line column] (mapv (:seon.error/data refusal {}) [:seon.sci.reader/line :seon.sci.reader/column]))
+            "the refusal names the second form's position")
+        (when line (is (str/includes? (:seon.error/message refusal) "(do ...)")
+                       "the refusal says how to wrap a sequence"))))))
 
 (deftest original-source-spans-preserve-crlf-and-utf16
   (let [text "; 😀 note\r\n(+ 1 2)\r\n\"😀\"\r\n"

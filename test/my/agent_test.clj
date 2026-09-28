@@ -5,7 +5,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci]
             [seon.test-support :as support]))
 
 (deftest settings-are-one-owned-component-with-a-derived-render-pair
@@ -58,7 +57,7 @@
   "Evaluate `source` as `agent-id` in `handle`'s context; its value or refusal."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id :string] :any]}
   [handle agent-id source]
-  (let [result (sci/evaluate
+  (let [result (support/evaluate
                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                  :seon.db/db (db/db (:seon.db/connection handle))
                  :seon.agent/id agent-id

@@ -224,7 +224,7 @@
                   {:optional true}
                   :seon.sci.eval/ctx]
                  [:seon.db/db {:optional true} :seon.sci.eval/database]
-                 [:seon.sci.eval/form {:optional true :description "The one path's already read form: evaluated once by the evaluation frame, never read again and never admitted here (the fold observes and derives)."} :seon.batch/form]
+                 [:seon.sci.eval/form {:description "The one path's already read form: evaluated once by the evaluation frame, never read again and never admitted here (the fold observes and derives)."} :seon.batch/form]
                  [:seon.db/read-evidence-sink
                   {:optional true}
                   :seon.db/read-evidence-sink]

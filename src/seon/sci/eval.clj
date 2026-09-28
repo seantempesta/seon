@@ -3414,12 +3414,12 @@
                                    {:seon.error/throwable failure})
     failure))
 
-(declare evaluate)
+(declare evaluate shown-result)
 
 (defn- evaluated-source
   "A render's REPL entries as the viewing agent's REPL shows them: each form
-  read once and evaluated through `evaluate` in `request`'s SCI world, then
-  `;=> ` and its shown result; comments keep their place. Answers
+  read once and evaluated by the frame (`evaluate` given the read form) in
+  `request`'s SCI world, then `;=> ` and its shown result (`shown-result`); comments keep their place. Answers
   `{:seon.render/source text}`, or `{:seon.error/value refusal}` naming the
   first form that could not be read or evaluated, so the floor prints the
   value beside that one diagnostic: a form is never shown without its result."
@@ -3448,23 +3448,25 @@
         (if-not event
           {:seon.render/source (apply str (conj shown (subs source offset)))}
           (let [end (:seon.sci.reader/source-end event)
+                form-request (-> request
+                                 (dissoc :seon.turn/id :seon.cluster.eval/ordinal :seon.repl/handle
+                                         :seon.render.call/function :seon.sci.eval/output-prefix
+                                         :seon.render.value/options)
+                                 (assoc :seon.cluster.eval/source (:seon.sci.reader/source event)
+                                        :seon.cluster.eval/ns [:seon.ns/name namespace-name]
+                                        ::rendering? true))
+                ;; the frame evaluates the form read here; its value prints
+                ;; through the one printer, as the fold's show stage does
                 evaluation (when-not (:seon.sci.reader/error event)
-                             (evaluate
-                              (-> request
-                                  (dissoc :seon.turn/id :seon.cluster.eval/ordinal :seon.repl/handle
-                                          :seon.render.call/function :seon.sci.eval/output-prefix
-                                          :seon.render.value/options)
-                                  (assoc :seon.cluster.eval/source (:seon.sci.reader/source event)
-                                         :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                                         :seon.sci.eval/event event
-                                         ::rendering? true))))]
+                             (evaluate (assoc form-request ::form (:seon.sci.reader/form event))))]
             (if (or (nil? evaluation) (:seon.cluster.eval/error evaluation))
               (refused (:seon.sci.reader/source event)
                        (str "A render form failed: "
                             (or (:seon.cluster.eval/error evaluation)
                                 (get-in event [:seon.sci.reader/error :seon.error/message]))))
               (recur more end (conj shown (subs source offset end) "\n;=> "
-                                    (:seon.eval/shown evaluation))))))))))
+                                    (:seon.eval/shown (shown-result (:seon.sci.admit/value evaluation) form-request
+                                                                    (:seon.sci.admit/record evaluation))))))))))))
 
 (defn- value-storage
   "How a printed value outlives this process: a cut value's artifact
@@ -3607,9 +3609,7 @@
     namespace-name :seon.sci.eval/namespace-name
     ending-namespace :seon.sci.eval/ending-namespace
     print-options :seon.print/options
-    duration-ms :seon.eval/duration-ms
-    acquisition-ms :seon.eval/acquisition-ms
-    replaced :seon.eval/replaced}]
+    duration-ms :seon.eval/duration-ms}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                    :seon.sci.eval/ending-ns ending-namespace
@@ -3626,12 +3626,9 @@
                    (:seon.eval/shown admitted))
             (:seon.cluster.eval/diagnostics admitted)
             (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics admitted)))
-    ;; HOW LONG THE EVALUATION TOOK IS A KEY OF THE EVALUATION: entrance to
-    ;; shown answer, less Seon's program acquisition, which is its own key.
+    ;; HOW LONG THE EVALUATION TOOK IS A KEY OF THE EVALUATION.
     ;; Allocation is the kernel's measurement, kept instead of dropped.
     :always (assoc :seon.eval/duration-ms duration-ms)
-    (pos? acquisition-ms) (assoc :seon.eval/acquisition-ms acquisition-ms)
-    (seq replaced) (assoc :seon.eval/replaced replaced)
     :always (merge (select-keys admitted value-size-keys))
     (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
     (assoc :seon.eval/allocated-bytes
@@ -3808,7 +3805,10 @@
          ::untrusted untrusted))
 
 (defn evaluate
-  "Evaluate one form source and return what may leave the boundary.
+  "The evaluation frame of the one REPL path: evaluate the already read
+  `::form` once and answer its evaluation. The fold's evaluate stage calls it
+  (`seon.turn/evaluate-row`); reading, program acquisition and printing are
+  the fold's other stages, never this frame's.
   Runs synchronously on the caller's `:compute` workload task — this
   never blocks and never submits, because the two jobs the quarry's
   Semaphore conflated (backpressure and parallelism) now belong to the
@@ -3823,11 +3823,9 @@
   3. arm through `kernel/with-arm` with `::time-limit-ms`, the ONLY limit —
      or INHERIT this context's active arm when one already governs this
      thread, so nested work never restarts the clock;
-  4. consume THE ONE reader event; source is never reparsed;
-  5. evaluate;
-  6. ADMIT the value — realized and bounded — while still armed;
-  7. disarm in `finally`.
-  Steps 4-6 answer the declared refusal instead of their value when the
+  4. evaluate the held form, keeping its value the moment SCI returns;
+  5. disarm in `finally`.
+  Step 4 answers the declared refusal instead of their value when the
   loaded program (`:seon.sci.eval/loaded-identity`, else the JVM's
   `loaded-identity`) changed while they ran: nothing waits for adoption.
 
@@ -3840,7 +3838,7 @@
   rides through with `fn-entries` and `allocated-bytes` intact."
   {:malli/schema [:=> [:cat :seon.sci.eval/request]
                   :seon.sci.eval/evaluation]}
-  [{:keys [:seon.cluster.eval/source :seon.sci.admit/caps]
+  [{:keys [:seon.sci.admit/caps]
     ctx :seon.sci.eval/ctx
     agent-id :seon.agent/id
     run-id :seon.turn/id
@@ -3904,12 +3902,9 @@
         ;; this namespace's own contract. The interrupt-fn needs no arm: it
         ;; is the ctx's stable process guard, inert until armed.
         started-at (System/nanoTime)
-        ;; Seon's own program acquisition inside the arm, subtracted from the
-        ;; evaluation's reported time and recorded beside it.
-        acquisition-nanos (volatile! 0)
-        ;; The reply's `:ms`: entrance to answer (shown text), without
-        ;; acquisition. One clock difference, approximate by design.
-        elapsed-ms (fn [] (quot (- (System/nanoTime) started-at @acquisition-nanos) 1000000))
+        ;; The reply's `:ms`: entrance to answer. One clock difference,
+        ;; approximate by design.
+        elapsed-ms (fn [] (quot (- (System/nanoTime) started-at) 1000000))
         arm-state (volatile! nil)
         record (fn [outcome]
                  (if-let [armed-record (::kernel/record @arm-state)]
@@ -3957,14 +3952,12 @@
         ;; A turn's fork carries the session's print options; a host caller
         ;; that forked nothing gets a carrier of its own for its own forms.
         print-session (or (::print-session evaluation-ctx) (atom {}))
-        ;; THE EVALUATION FRAME: a request holding its already read form
-        ;; (`::form`, the one path's live read) evaluates it once and answers
-        ;; the frame's evaluation: no read, no acquisition (the turn's fork
-        ;; holds its program; the batch observes its own writes), no
-        ;; admission and no print (the fold's show stage prints). Its value
-        ;; is kept the moment SCI returns (`raw`): a later check or
-        ;; construction failure is a diagnostic beside it, never its loss.
-        held? (contains? request ::form)
+        ;; THE EVALUATION FRAME: the already read form (`::form`, the one
+        ;; path's live read) is evaluated once: no read, no acquisition (the
+        ;; turn's fork holds its program; the batch observes its own writes)
+        ;; and no print (the fold's show stage prints). Its value is kept the
+        ;; moment SCI returns (`raw`): a later check or construction failure
+        ;; is a diagnostic beside it, never its loss.
         raw (volatile! raw-none)
         connection (get-in evaluation-ctx
                            [::custody :seon.db/connection])
@@ -3978,7 +3971,6 @@
         namespace-object (sci/create-ns namespace-name)
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
-        replaced (volatile! nil)
         projection-state
         (or (::projection-state evaluation-ctx)
             (atom {:seon.schema/projection
@@ -4047,8 +4039,7 @@
                                    :seon.sci.eval/namespace-name namespace-name
                                    :seon.sci.eval/ending-namespace @ending-namespace
                                    :seon.print/options @print-options
-                                   :seon.eval/duration-ms (elapsed-ms)
-                                   :seon.eval/acquisition-ms (quot @acquisition-nanos 1000000)})
+                                   :seon.eval/duration-ms (elapsed-ms)})
                (let [record (record (if (kernel/interrupted? throwable)
                                  :time :error))
                 arity-message (interpreted-arity-message throwable)
@@ -4059,13 +4050,10 @@
                            throwable record)
                         arity-message
                         (assoc :seon.error/message arity-message))
-                ;; The agent's failure is its whole flat error, shown AS DATA
-                ;; (owner 2026-09-27: "return data, not comments"): the floor
-                ;; prints the error map structurally, message, class, location
-                ;; and cause chain, bounded like any value, never a prose face.
-                admitted (if held?
-                           {:seon.sci.admit/value value :seon.sci.admit/record record}
-                           (shown-failure value request record))]
+                ;; The agent's failure is its whole flat error, AS DATA (owner
+                ;; 2026-09-27: "return data, not comments"); the fold's show
+                ;; stage prints it.
+                admitted {:seon.sci.admit/value value :seon.sci.admit/record record}]
           (failed-evaluation
            (cond-> {:seon.sci.eval/admitted admitted
                     :seon.sci.admit/caps caps
@@ -4089,40 +4077,10 @@
          (trusted-evaluation
           (:seon.sci.eval/loaded-identity request loaded-identity)
           (fn []
-          (when (and (not held?) (contains? evaluation-ctx ::custody))
-            (when-let [database (:seon.db/db request)]
-              (when-not (acquired-database? evaluation-ctx database)
-                (let [before-snapshot @(::kernel/program-snapshot evaluation-ctx)
-                      own (keys (turn-interns evaluation-ctx))
-                      base (or (::base-ctx evaluation-ctx) evaluation-ctx)
-                      acquired-at (System/nanoTime)
-                      result (acquire! {:seon.sci.eval/ctx base :seon.db/db database})
-                      _ (vswap! acquisition-nanos + (- (System/nanoTime) acquired-at))]
-                  (when-let [failure (first (::acquisition-refusals result))]
-                    (throw (ex-info "SCI program acquisition refused a declaration." failure)))
-                  (when-let [failure (::acquisition-recording-error result)]
-                    (throw (ex-info "SCI acquisition could not record a row fault." failure)))
-                  (when (::base-ctx evaluation-ctx)
-                    (regenerate-agent-context! evaluation-ctx base))
-                  ;; Recorded as data (:seon.eval/replaced): the program advanced
-                  ;; over these; a declared bound makes it a finding.
-                  (when-let [over (not-empty (replaced-definitions
-                                              before-snapshot
-                                              @(::kernel/program-snapshot evaluation-ctx) own))]
-                    (vreset! replaced over))))))
           (when-let [failure (first (:seon.test/acquisition-refusals
                                     (acquired-program evaluation-ctx)))]
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
-          (let [event (if held?
-                    {:seon.sci.reader/form (::form request)}
-                    (or (:seon.sci.eval/event request)
-                        (one-event
-                         source namespace-name evaluation-ctx
-                         (:seon.config.eval.result/max-source caps))))
-            _ (when-let [reader-error (:seon.sci.reader/error event)]
-                (throw (ex-info (:seon.error/message reader-error)
-                                reader-error)))
-            form (:seon.sci.reader/form event)
+          (let [form (::form request)
             execution-ctx evaluation-ctx
             ;; Runs `evaluate!` on this form's ctx inside its REPL frame.
             eval-in-form!
@@ -4182,29 +4140,17 @@
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
               evaluation-record (record :ok)
-              ;; A top-level call's contracted head names the root value's
-              ;; declared returns; any other form supplies no producer.
-              head (when-not held?
-                     (some-> (render/request-projection request)
-                             (render/head-function execution-ctx namespace-name form)))
               ;; the frame does not print: the fold's show stage does
-              admitted (if held?
-                         {:seon.sci.admit/value value :seon.sci.admit/record evaluation-record}
-                         (binding [db/*read-evidence-sink* form-sink]
-                           (shown-result value (cond-> request
-                                                 head (assoc :seon.render.call/function head))
-                                         evaluation-record)))]
+              admitted {:seon.sci.admit/value value :seon.sci.admit/record evaluation-record}]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
             :seon.sci.eval/printed printed
             :seon.sci.eval/output-prefix output-prefix
-            :seon.eval/replaced @replaced
             :seon.sci.eval/namespace-name namespace-name
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
-            :seon.eval/duration-ms (elapsed-ms)
-            :seon.eval/acquisition-ms (quot @acquisition-nanos 1000000)}))))
+            :seon.eval/duration-ms (elapsed-ms)}))))
         (catch Throwable throwable
           (failure-result throwable))
           )))

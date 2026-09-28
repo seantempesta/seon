@@ -27,7 +27,7 @@
 (defn- evaluate!
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] :seon.sci.eval/evaluation]}
   [handle source]
-  (let [result (sci/evaluate
+  (let [result (support/evaluate
                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                  :seon.db/db (db/db (:seon.db/connection handle))
                  :seon.agent/id (:seon.agent/id handle)

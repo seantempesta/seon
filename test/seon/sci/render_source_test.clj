@@ -46,7 +46,7 @@
    (fn [connection]
      (support/seed-cluster! connection "render-source" {})
      (let [ctx (support/fork-cluster-ctx connection)
-           run (fn [source handle] (evaluation/evaluate (request connection ctx source handle)))]
+           run (fn [source handle] (support/evaluate (request connection ctx source handle)))]
        (testing "a contract refusal: the pair's reads evaluated against the held refusal"
          (let [failed (run "(my.message/send {:my.message/to 42 :my.message/content \"Hello\"})" 'result/erendersource1)
                shown (:seon.eval/shown failed)]
@@ -82,7 +82,7 @@
          (is (str/includes? (get-in failing [:seon.error/value :seon.error/message]) "Divide by zero")))
        (testing "with no evaluator the floor prints the value beside one diagnostic"
          (let [error (:seon.sci.admit/value
-                      (evaluation/evaluate (request connection ctx "(/ 1 0)" 'result/erendersource5)))
+                      (support/evaluate (request connection ctx "(/ 1 0)" 'result/erendersource5)))
                shown (:seon.eval/shown (evaluation/shown-result
                                         error (dissoc (request connection ctx "(/ 1 0)" 'result/erendersource5)
                                                       :seon.sci.eval/time-limit-ms)

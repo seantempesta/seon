@@ -103,7 +103,7 @@
             live (:seon.sci.eval/ctx forked)
             evaluate
             (fn [source]
-              (sci.eval/evaluate
+              (test-support/evaluate
                {:seon.sci.eval/ctx live
                 :seon.agent/id agent-id
                 :seon.sci.admit/caps

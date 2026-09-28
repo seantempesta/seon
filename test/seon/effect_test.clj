@@ -808,7 +808,7 @@
       (let [ctx (test-support/fork-cluster-ctx connection)
             effective config/defaults
             evaluation
-            (sci.eval/evaluate
+            (test-support/evaluate
              {:seon.cluster.eval/source
               (str "(seon.effect/request! "
                    "#'seon.effect-test/capability-owner "

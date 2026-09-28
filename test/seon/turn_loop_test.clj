@@ -160,7 +160,7 @@
         ;; The freeze minted both evaluations; nothing separate starts one.
         (let [ctx (test-support/fork-cluster-ctx connection)
               first-evaluation
-              (sci.eval/evaluate
+              (test-support/evaluate
                {:seon.cluster.eval/source
                 "(when true (in-ns 'my.generated.after-resume))"
                 :seon.cluster.eval/ns [:seon.ns/name starting-ns]
@@ -945,7 +945,7 @@
   the one constructor of the value `settle!` declares."
   [connection ctx size]
   (let [decisions config/defaults]
-    (sci.eval/evaluate
+    (test-support/evaluate
      {:seon.cluster.eval/source
       (str "(def probe-staged-def (apply str (repeat " size " \"m\")))")
       :seon.sci.eval/ctx ctx
@@ -1093,7 +1093,7 @@
             decisions config/defaults
             evaluate
             (fn [ordinal]
-              (sci.eval/evaluate
+              (test-support/evaluate
                {:seon.cluster.eval/source (str "(+ " ordinal " 1)")
                 :seon.sci.eval/ctx ctx
                 :seon.cluster.eval/ns [:seon.ns/name 'user]

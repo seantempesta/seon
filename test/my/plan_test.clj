@@ -499,7 +499,7 @@
                             :seon.db/connection connection
                             :seon.agent/id agent-id}))]
                 (:seon.sci.admit/value
-                 (sci.eval/evaluate
+                 (support/evaluate
                   {:seon.sci.eval/ctx live
                    :seon.agent/id agent-id
                    :seon.sci.admit/caps

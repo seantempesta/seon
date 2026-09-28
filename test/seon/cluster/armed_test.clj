@@ -37,7 +37,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]
            [java.util.concurrent CountDownLatch]))
@@ -208,7 +207,7 @@
               right-ctx (:seon.sci.eval/ctx right-handle)
               request
               (fn [handle agent-id source]
-                (sci.eval/evaluate
+                (test-support/evaluate
                  {:seon.cluster.eval/source source
                   :seon.sci.admit/caps (:seon.sci.admit/caps handle)
                   :seon.sci.eval/time-limit-ms

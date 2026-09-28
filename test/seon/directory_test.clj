@@ -4,7 +4,6 @@
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (deftest an-empty-directory-observes-later-schema-declarations
@@ -24,7 +23,7 @@
            read! (fn [source]
                    (reset! captured [])
                    (binding [db/*read-evidence-sink* captured]
-                     (evaluation/evaluate
+                     (support/evaluate
                       {:seon.cluster.eval/source source
                        :seon.sci.eval/ctx ctx :seon.db/db @connection
                        :seon.sci.admit/caps (config/result-caps configuration)

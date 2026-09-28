@@ -4,7 +4,6 @@
             [my.program :as program]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]
             [seon.program :as seon-program]))
 
@@ -27,7 +26,7 @@
        (is (= before @(:env fork)))
        (is (= base-before @(:env ctx)))
        (let [decisions (support/effective-config)
-             result (evaluation/evaluate
+             result (support/evaluate
                      {:seon.sci.eval/ctx fork :seon.db/db database
                       :seon.db/connection connection
                       :seon.cluster.eval/source "(my.program/ns-unmap! 'seon.turn/open?)"
@@ -59,7 +58,7 @@
          (let [fork (sci/fork ctx)
                before @(:env fork)
                basis (db/basis-t (db/db connection))
-               result (evaluation/evaluate
+               result (support/evaluate
                        {:seon.sci.eval/ctx fork :seon.db/db (db/db connection)
                         :seon.db/connection connection :seon.cluster.eval/source source
                         :seon.sci.admit/caps caps

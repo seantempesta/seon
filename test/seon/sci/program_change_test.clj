@@ -8,7 +8,8 @@
             [sci.core :as sci]
             [seon.config :as config]
             [seon.schema :as schema]
-            [seon.sci.eval :as eval]))
+            [seon.sci.eval :as eval]
+            [seon.test-support :as test-support]))
 
 (defn- evaluation
   "Evaluate `source` in a fresh base context whose `user/change!` runs
@@ -16,7 +17,7 @@
   [identity-atom change! source]
   (let [ctx (eval/build-base-ctx (schema/handed-projection))]
     (sci/intern ctx (sci/find-ns ctx 'user) 'change! change!)
-    (eval/evaluate {:seon.schema/projection (schema/handed-projection)
+    (test-support/evaluate {:seon.schema/projection (schema/handed-projection)
                     :seon.sci.eval/ctx ctx
                     :seon.cluster.eval/source source
                     :seon.sci.admit/caps (config/result-caps config/defaults)

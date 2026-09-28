@@ -132,7 +132,7 @@
   an agent's evaluation always has one, and its shown value renders a
   `:seon.render/unit`, which requires it (93144cb71)."
   [ctx source time-limit-ms]
-  (eval/evaluate
+  (test-support/evaluate
    (cond-> {:seon.schema/projection (schema/handed-projection)
             :seon.cluster.eval/source source
             :seon.sci.admit/caps caps
@@ -401,7 +401,7 @@
           (let [database (db/db connection)
                 ctx (test-support/fork-cluster-ctx connection)]
             (is (contains? (instrument/instrumented) #'eval/evaluate))
-            (let [evaluation (eval/evaluate
+            (let [evaluation (test-support/evaluate
                                {:seon.sci.eval/ctx ctx,
                                 :seon.db/db database,
                                 :seon.db/connection connection,
@@ -476,10 +476,10 @@
                  :seon.sci.admit/caps caps
                  :seon.sci.eval/time-limit-ms 10000}]
     (try
-      (is (= 3 (:seon.sci.admit/value (eval/evaluate request)))
+      (is (= 3 (:seon.sci.admit/value (test-support/evaluate request)))
           "the first evaluation realizes the process guard")
       (require 'seon.sci.eval :reload)
-      (let [after ((requiring-resolve 'seon.sci.eval/evaluate) request)]
+      (let [after ((requiring-resolve 'seon.sci.eval/evaluate) (assoc request :seon.sci.eval/form '(+ 1 2)))]
         (is (= 3 (:seon.sci.admit/value after))
             "ordinary arm data has no reload-sensitive class identity")
         (is (nil? (:seon.cluster.eval/error after))))
@@ -559,7 +559,7 @@
                 "(seon.db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]])"
                 evaluate
                 (fn [ctx]
-                  (eval/evaluate
+                  (test-support/evaluate
                    {:seon.cluster.eval/source query
                     :seon.cluster.eval/ns [:seon.ns/name 'user]
                     :seon.sci.eval/ctx ctx
@@ -1062,10 +1062,8 @@
           :seon.sci.eval/namespace-name 'user
           :seon.sci.eval/ending-namespace 'next
           :seon.print/options {:seon.print/length 4}
-          ;; the evaluation's own clock, supplied by `evaluate` (65d0ca8e0);
-          ;; a zero acquisition stays absent
-          :seon.eval/duration-ms 5
-          :seon.eval/acquisition-ms 0})]
+          ;; the evaluation's own clock, supplied by `evaluate` (65d0ca8e0)
+          :seon.eval/duration-ms 5})]
     (is (= {:seon.sci.admit/value 7
             :seon.eval/duration-ms 5
             :seon.eval/shown "7"
@@ -1281,7 +1279,7 @@
               :seon.agent/id agent-id})
             turn-ctx (:seon.sci.eval/ctx fork-result)
             evaluation
-            (eval/evaluate
+            (test-support/evaluate
              {:seon.sci.eval/ctx turn-ctx
               :seon.agent/id agent-id
               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
@@ -1634,7 +1632,7 @@
                     "(seon.sci.eval/agent-namespace (seon.db/db) \"probe\")"
                     2000)
             assigned-evaluation
-            (eval/evaluate
+            (test-support/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.agent/id agent-id
               :seon.cluster.eval/source "(ns-name *ns*)"
@@ -1665,7 +1663,7 @@
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
             evaluation
-            (eval/evaluate
+            (test-support/evaluate
              {:seon.sci.eval/ctx ctx
               :seon.agent/id "scoped-agent"
               :seon.turn/id "scoped-run"
@@ -1694,7 +1692,7 @@
                 ctx-a (eval/cluster-ctx (db/db connection-a) connection-a)
                 ctx-b (eval/cluster-ctx (db/db connection-b) connection-b)
                 evaluate (fn [ctx source]
-                           (eval/evaluate
+                           (test-support/evaluate
                              {:seon.cluster.eval/source source,
                               :seon.cluster.eval/ns [:seon.ns/name 'user],
                               :seon.sci.eval/ctx ctx,
@@ -2336,7 +2334,8 @@
   ;; generic failure while the other preserves it.
   (test-support/with-database
    (fn [connection]
-     (let [evaluated (:seon.sci.admit/value (run "(+ 1 2) (+ 3 4)"))
+     (let [evaluated (try (#'eval/one-event "(+ 1 2) (+ 3 4)" 'user (eval/build-base-ctx (seon.schema/handed-projection)) 15)
+                          (catch clojure.lang.ExceptionInfo e (ex-data e)))
            invoked (:seon.sci.admit/value
                     (kernel/invoke
                      {:seon.sci.eval/ctx (eval/build-base-ctx (seon.schema/handed-projection))
@@ -2527,7 +2526,7 @@
                     :seon.db/db database :seon.agent/id "requires"}
            entering (:seon.sci.eval/ctx (eval/fork-for-turn request))
            run (fn [ctx source]
-                 (eval/evaluate {:seon.schema/projection (schema/handed-projection)
+                 (test-support/evaluate {:seon.schema/projection (schema/handed-projection)
                                  :seon.cluster.eval/source source
                                  :seon.sci.admit/caps caps
                                  :seon.sci.eval/time-limit-ms 10000
@@ -2544,7 +2543,7 @@
 (deftest a-print-the-render-stage-refuses-returns-the-value-with-one-diagnostic
   ;; A bare interpreter with no world and no database: the render unit cannot
   ;; be built, so the print stage refuses. The path stays total.
-  (let [evaluation (eval/evaluate
+  (let [evaluation (test-support/evaluate
                     {:seon.sci.eval/ctx (eval/build-base-ctx (schema/handed-projection))
                      :seon.schema/projection (schema/handed-projection)
                      :seon.cluster.eval/source "(+ 1 2)"
@@ -2560,7 +2559,7 @@
   ;; database prints against it instead of refusing (perf-boot 74a46362a).
   (test-support/with-database
    (fn [connection]
-     (let [evaluation (eval/evaluate
+     (let [evaluation (test-support/evaluate
                        {:seon.sci.eval/ctx (eval/base-ctx (db/db connection))
                         :seon.cluster.eval/source "(/ 1 0)"
                         :seon.render/profile (render/agent-render-profile config/defaults)

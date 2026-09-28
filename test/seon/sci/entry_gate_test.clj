@@ -5,13 +5,12 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
 (defn- evaluate-in
   ([ctx source] (evaluate-in ctx source (config/result-caps config/defaults)))
   ([ctx source caps]
-  (sci.eval/evaluate
+  (support/evaluate
    {:seon.cluster.eval/source source
     :seon.cluster.eval/ns [:seon.ns/name 'scratch.entry-gate]
     :seon.sci.eval/ctx ctx

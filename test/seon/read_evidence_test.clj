@@ -2,7 +2,6 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
 (defn- as-seen-by
@@ -39,7 +38,7 @@
            captured (atom [])
            evaluation
            (binding [db/*read-evidence-sink* captured]
-             (eval/evaluate
+             (test-support/evaluate
               {:seon.sci.eval/ctx ctx
                :seon.db/connection connection
                :seon.db/db @connection

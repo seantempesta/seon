@@ -4,7 +4,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
@@ -34,7 +33,7 @@
            :seon.db/connection connection
            :seon.schema/projection (:seon.schema/projection base-ctx)}))
         ctx (env/carry-state base-ctx (env/environment-state environment))]
-    (sci.eval/evaluate
+    (test-support/evaluate
      {:seon.cluster.eval/source
       "(seon.db-transact-shape-test/transaction-result-shape)"
       :seon.sci.eval/ctx ctx

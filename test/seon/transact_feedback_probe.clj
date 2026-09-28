@@ -5,7 +5,7 @@
             [seon.operator.runtime :as runtime]
             [seon.repl :as repl]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]))
+            [seon.test-support :as test-support]))
 
 (defn probe!
   "Run after the canonical Juniper fixture is installed with no-provider true."
@@ -32,7 +32,7 @@
              _ (dotimes [_ 1000] (#'db/write-error database projection transaction))
              average-ms (/ (- (System/nanoTime) started) 1e9)
              evaluation
-             (sci.eval/evaluate
+             (test-support/evaluate
               {:seon.cluster.eval/source source
                :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)

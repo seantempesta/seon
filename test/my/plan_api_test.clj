@@ -28,7 +28,7 @@
                                             :seon.db/connection connection
                                             :seon.agent/id "plan-api"})
             evaluate (fn [source]
-                       (let [result (sci.eval/evaluate
+                       (let [result (support/evaluate
                                      {:seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                                       :seon.db/db @connection :seon.db/connection connection
                                       :seon.agent/id "plan-api"
@@ -107,7 +107,7 @@
                                                    :seon.ns/name 'my.agents.objective-owner
                                                    :seon.cluster/name "default"}))
         handle (agent/acquire-context! parent "objective-owner" {:seon.agent/isolate? true})
-        evaluate #(let [result (sci.eval/evaluate
+        evaluate #(let [result (support/evaluate
                                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                                  :seon.db/db (db/db (:seon.db/connection handle))
                                  :seon.agent/id "objective-owner"

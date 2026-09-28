@@ -8,7 +8,6 @@
             [seon.fn :as function]
             [seon.issue :as issue]
             [seon.schema :as schema]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (deftest program-reads-name-the-referrers-and-propose-without-writing
@@ -132,7 +131,7 @@
            caps (config/result-caps decisions)
            ctx (support/fork-cluster-ctx connection)
            run (fn [source]
-                 (evaluation/evaluate
+                 (support/evaluate
                   {:seon.sci.eval/ctx ctx :seon.db/db database
                    :seon.db/connection connection
                    :seon.cluster.eval/source source

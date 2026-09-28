@@ -23,7 +23,6 @@
             [seon.fn :as functions]
             [seon.config :as config]
             [seon.program :as program]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support])
   (:import (java.nio.file Files)
            (java.nio.file.attribute FileAttribute)))
@@ -374,7 +373,7 @@
            _ (support/transacted! connection [{:seon.source/digest seal
                                                :seon.source/test-input-digest (apply str (repeat 64 "b"))}])
            ctx (support/fork-cluster-ctx connection)
-           evaluation (sci.eval/evaluate
+           evaluation (support/evaluate
                        {:seon.sci.eval/ctx ctx
                         :seon.cluster.eval/source
                         "(clojure.test/deftest fileless-selection (clojure.test/is (string? (seon.id/id))))"

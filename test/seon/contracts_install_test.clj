@@ -4,7 +4,7 @@
             [sci.core :as sci]
             [seon.contracts-fixture :as fixture]
             [seon.db :as db]
-            [seon.sci.eval :as evaluation]))
+            [seon.test-support :as test-support]))
 
 (def run5-function-literal
   "Exact refused run-5 definition, read from default on 2026-09-15."
@@ -23,7 +23,7 @@
   (fixture/with-agent
    (fn [connection ctx _]
      (let [function-symbol 'my.agents.juniper/largest-customer
-           rejected (evaluation/evaluate
+           rejected (test-support/evaluate
                      (fixture/request connection ctx run5-function-literal))
            value (:seon.sci.admit/value rejected)
            message (:seon.error/message value "")]
@@ -38,13 +38,13 @@
      (fixture/submit connection ctx nil fixture/run5-definition)
      (let [function-symbol 'my.agents.juniper/largest-customer
            accepted @(sci/resolve ctx function-symbol)
-           rejected (evaluation/evaluate
+           rejected (test-support/evaluate
                      (fixture/request connection ctx run5-function-literal))]
        (is (identical? accepted @(sci/resolve ctx function-symbol)))
        (is (= fixture/run5-definition
               (:seon.fn/source (db/pull @connection [:seon.fn/source]
                                        [:seon.fn/sym (str function-symbol)])))))
-     (let [result (evaluation/evaluate
+     (let [result (test-support/evaluate
                    (fixture/request connection ctx
                     "(defn positive-value {:malli/schema [:=> [:cat [:fn 'clojure.core/pos-int?]] :int]} [x] x)"))]
        (is (not (str/includes? (:seon.eval/shown result) "#object"))))))))

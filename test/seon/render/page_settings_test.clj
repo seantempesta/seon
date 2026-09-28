@@ -102,7 +102,7 @@
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 10000}
            evaluate (fn [source]
-                      (evaluation/evaluate (assoc request :seon.db/db @connection
+                      (support/evaluate (assoc request :seon.db/db @connection
                                                  :seon.cluster.eval/source source)))
            result (evaluate "(seon.agent/effective-settings)")
            groups (:seon.sci.admit/value result)

@@ -24,7 +24,7 @@
        (is (empty? @(::kernel/installed-functions ctx)))
        (is (empty? @(::kernel/installed-functions fork)))
        (is (nil? (:seon.db/db (evaluation/acquired-program ctx))))
-       (is (= 3 (:seon.sci.admit/value (evaluation/evaluate request))))
+       (is (= 3 (:seon.sci.admit/value (support/evaluate request))))
        (is (seq @(::kernel/installed-functions ctx)))
        (let [acquired @(::kernel/program-snapshot ctx)
              environment @(:env ctx)]
@@ -36,7 +36,7 @@
        (support/seed-cluster! connection "lazy-acquisition")
        (let [changed (db/db connection)
              previous @(::kernel/program-snapshot ctx)]
-         (is (= 3 (:seon.sci.admit/value (evaluation/evaluate request))))
+         (is (= 3 (:seon.sci.admit/value (support/evaluate request))))
          (is (not (identical? previous @(::kernel/program-snapshot ctx))))
          (is (= (db/committed-value-identity changed)
                 (db/committed-value-identity

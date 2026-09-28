@@ -24,7 +24,7 @@
   executing member's database: an agent's evaluation always has one, and its
   shown value renders a `:seon.render/unit`, which requires it."
   [ctx source time-limit-ms]
-  (eval/evaluate {:seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))
+  (test-support/evaluate {:seon.db/db (db/db (:seon.db/connection (test-support/execution-handle nil)))
                   :seon.schema/projection (schema/handed-projection)
                   :seon.cluster.eval/source source
                   :seon.sci.admit/caps (config/result-caps config/defaults)

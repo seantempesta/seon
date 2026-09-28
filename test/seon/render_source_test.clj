@@ -173,7 +173,7 @@
            ctx (support/fork-cluster-ctx connection)
            evaluate (fn [source]
                       (:seon.sci.admit/value
-                       (eval/evaluate
+                       (support/evaluate
                         {:seon.cluster.eval/source source
                          :seon.sci.eval/ctx ctx
                          :seon.sci.admit/caps caps

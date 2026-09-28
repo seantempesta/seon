@@ -140,7 +140,7 @@
                        [:seon.turn/id "render-results-turn"]
                        [:seon.effect/id "render-results-effect"]]]
          (let [raw (db/pull database '[*] lookup)
-               result (evaluation/evaluate
+               result (support/evaluate
                         {:seon.cluster.eval/source (pr-str (list 'seon.db/pull (list 'quote '[*])
                                                                  (list 'quote lookup)))
                          :seon.sci.eval/ctx ctx :seon.db/db database
@@ -203,7 +203,7 @@
            pattern [:seon.fn/sym :seon.fn/private?]
            lookup [:seon.fn/sym 'seon.db/q]
            raw (db/pull database pattern lookup)
-           result (evaluation/evaluate
+           result (support/evaluate
                     {:seon.cluster.eval/source
                      (pr-str (list 'seon.db/pull (list 'quote pattern) (list 'quote lookup)))
                      :seon.sci.eval/ctx ctx :seon.db/db database
@@ -254,7 +254,7 @@
                                   :seon.effect/result-edn payload
                                   :seon.effect/duration-ms 12}]))
                     ctx (support/fork-cluster-ctx connection "poll-render")
-                    result (evaluation/evaluate
+                    result (support/evaluate
                              {:seon.cluster.eval/source
                               "(my.background/poll {:my.background/result [:seon.effect/id \"poll-render-effect\"]})"
                               :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
@@ -688,7 +688,7 @@
                                        [:seon.agent/id "shape"]))))
            ctx (support/fork-cluster-ctx connection "shape")
            configuration (support/effective-config)
-           result (evaluation/evaluate
+           result (support/evaluate
                    {:seon.cluster.eval/source
                     "(seon.db/pull '[:seon.agent/id {:seon.agent/namespace [:seon.ns/name {:seon.ns/steward [:seon.agent/id]}]}] [:seon.agent/id \"shape\"])"
                     :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
@@ -773,7 +773,7 @@
            profile (assoc (render/agent-render-profile configuration)
                           :seon.render.profile/max-string-length 128)
            ctx (support/fork-cluster-ctx connection "string-floor")
-           result (evaluation/evaluate
+           result (support/evaluate
                     {:seon.cluster.eval/source "(apply str (repeat 3000 \"ab\"))"
                      :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.render/profile profile
@@ -857,7 +857,7 @@
            profile (assoc (render/agent-render-profile configuration)
                           :seon.render.profile/token-budget 1024)
            ctx (support/fork-cluster-ctx connection "dir-floor")
-           result (evaluation/evaluate
+           result (support/evaluate
                     {:seon.cluster.eval/source "(dir seon.turn)"
                      :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.render/profile profile
@@ -1285,7 +1285,7 @@
            handle 'result/elargerender1
            source (str "{:seon.render/ai (fn [_] (throw (ex-info \"boom\" {})))"
                        " :rows (mapv (fn [i] {:id i :title \"a title that takes some room\"}) (range 300))}")
-           evaluation (evaluation/evaluate
+           evaluation (support/evaluate
                        {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                         :seon.db/connection connection :seon.agent/id "large-render"
                         :seon.cluster.eval/source source :seon.repl/handle handle

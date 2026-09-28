@@ -24,7 +24,6 @@
             [seon.config :as config]
             [seon.agent]
             [seon.cluster.agent :as agent]
-            [seon.sci.eval :as sci.eval]
             [seon.turn :as turn]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
@@ -680,7 +679,7 @@
                "must retain its preceding forms")
            (when (vector? forms)
              (doseq [form forms]
-               (let [result (sci.eval/evaluate
+               (let [result (test-support/evaluate
                              {:seon.sci.eval/ctx ctx
                               :seon.cluster.eval/source (:seon.cluster.eval/source form)
                               :seon.sci.eval/time-limit-ms 2000

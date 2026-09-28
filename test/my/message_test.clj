@@ -16,7 +16,6 @@
             [seon.run :as run]
             [seon.db :as db]
             [seon.schema]
-            [seon.sci.eval :as sci]
             [seon.test-support :as support]))
 
 (defn- with-messages
@@ -233,7 +232,7 @@
                                [{:seon.message/id "ack-1" :seon.message/to [:seon.agent/id "ack-reader"]
                                  :seon.message/content "Acknowledge me."}])
         handle (cluster.agent/acquire-context! parent "ack-reader" {:seon.agent/isolate? true})
-        evaluate #(let [result (sci/evaluate
+        evaluate #(let [result (support/evaluate
                                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
                                  :seon.db/db (db/db (:seon.db/connection handle))
                                  :seon.agent/id "ack-reader"

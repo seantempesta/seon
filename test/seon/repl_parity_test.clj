@@ -4,7 +4,6 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.config :as config]
-            [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as sci.reader]
             [seon.test-support :as test-support]
             [seon.turn :as turn]))
@@ -45,7 +44,7 @@
      (reduce
       (fn [[namespace-name results] source]
         (let [evaluation
-              (sci.eval/evaluate
+              (test-support/evaluate
                (production-request db ctx namespace-name source))
               error (:seon.cluster.eval/error evaluation)
               shown (:seon.eval/shown evaluation)

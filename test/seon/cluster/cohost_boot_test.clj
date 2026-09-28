@@ -27,7 +27,6 @@
             [seon.cluster.boot :as boot]
             [seon.config :as config]
             [seon.instrument :as instrument]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
@@ -67,7 +66,7 @@
 
 (defn- evaluate-in
   [instance source]
-  (sci.eval/evaluate
+  (test-support/evaluate
    {:seon.cluster.eval/source source
     :seon.cluster.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)

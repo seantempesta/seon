@@ -8,7 +8,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.sci.eval :as sci]
             [seon.test-support :as support]))
 
 (defn caller-context
@@ -32,7 +31,7 @@
         result
         (try
           (let [evaluation
-                (sci/evaluate
+                (support/evaluate
                  {:seon.sci.eval/ctx (:seon.sci.eval/ctx execution)
                   :seon.db/db (db/db (:seon.db/connection execution))
                   :seon.cluster.eval/ns [:seon.ns/name 'seon.cluster.entrance-supplier-test]

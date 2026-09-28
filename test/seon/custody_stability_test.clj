@@ -10,7 +10,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
-            [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
 (def ^:private caps
@@ -150,7 +149,7 @@
 
 (defn- evaluate-in
   [ctx source]
-  (eval/evaluate
+  (test-support/evaluate
    {:seon.cluster.eval/source source
     :seon.cluster.eval/ns [:seon.ns/name 'user]
     :seon.sci.eval/ctx ctx

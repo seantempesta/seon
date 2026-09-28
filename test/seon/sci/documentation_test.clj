@@ -49,7 +49,7 @@
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
-                 (evaluation/evaluate
+                 (support/evaluate
                   {:seon.sci.eval/ctx ctx
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps config/defaults)
@@ -104,7 +104,7 @@
            run (fn [source]
                  (reset! captured [])
                  (binding [db/*read-evidence-sink* captured]
-                   (evaluation/evaluate
+                   (support/evaluate
                     {:seon.sci.eval/ctx ctx
                      :seon.db/db (db/db connection)
                      :seon.db/connection connection
@@ -219,7 +219,7 @@
                               {})
        (let [ctx (support/fork-cluster-ctx connection)
              run (fn [source]
-                   (evaluation/evaluate
+                   (support/evaluate
                     {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.db/connection connection :seon.agent/id "documentation"
                      :seon.cluster.eval/source source
@@ -279,7 +279,7 @@
      (support/transacted! connection (support/agent-tx @connection "clojure-test" 'fixture.clojure-test))
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
-                 (evaluation/evaluate
+                 (support/evaluate
                   {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                    :seon.db/connection connection :seon.agent/id "clojure-test"
                    :seon.cluster.eval/ns [:seon.ns/name 'fixture.clojure-test]
@@ -308,7 +308,7 @@
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
-                 (evaluation/evaluate
+                 (support/evaluate
                   {:seon.sci.eval/ctx ctx
                    :seon.cluster.eval/source source
                    :seon.sci.admit/caps (config/result-caps config/defaults)

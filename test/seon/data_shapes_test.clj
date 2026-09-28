@@ -346,7 +346,7 @@
                   (turn/receipt-start-tx
                    {:seon.turn/id "renderer-facts-turn"
                     :seon.cluster.eval/ordinal ordinal :seon.cluster.eval/at (java.util.Date.)}))
-         (let [evaluation (seon.sci.eval/evaluate
+         (let [evaluation (support/evaluate
                             {:seon.cluster.eval/source source
                              :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                              :seon.render/profile (seon.render/agent-render-profile configuration)

@@ -1990,7 +1990,7 @@
                                {:seon.turn/id "unbound-receipt-turn"
                                 :seon.cluster.eval/ordinal ordinal
                                 :seon.cluster.eval/at (java.util.Date.)}))
-         (let [evaluation (sci.eval/evaluate
+         (let [evaluation (support/evaluate
                            {:seon.cluster.eval/source source
                             :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                             :seon.render/profile (render/agent-render-profile configuration)
@@ -2204,7 +2204,7 @@
                             {:seon.turn.loop/cluster handle :seon.turn.loop/now now :seon.agent/id "printer"
                              :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal
                              :seon.sci.eval/evaluation
-                             (sci.eval/evaluate
+                             (support/evaluate
                               {:seon.cluster.eval/source source
                                :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db (db/db connection)
                                :seon.render/profile (render/agent-render-profile configuration)

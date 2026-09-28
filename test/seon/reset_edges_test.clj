@@ -12,7 +12,6 @@
             [seon.error :as error]
             [seon.db :as db]
             [seon.config :as config]
-            [seon.sci.eval :as evaluation]
             [seon.fn :as functions]
             [seon.program :as program]
             [seon.test-support :as support]))
@@ -164,7 +163,7 @@
      (let [ctx (support/fork-cluster-ctx connection)
            database (db/db connection)
            decisions (support/effective-config)
-           result (evaluation/evaluate
+           result (support/evaluate
                    {:seon.sci.eval/ctx ctx :seon.db/db database
                     :seon.db/connection connection
                     :seon.cluster.eval/source

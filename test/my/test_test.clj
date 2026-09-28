@@ -35,7 +35,7 @@
            scoped (env/scope (env/of ctx) {:seon.agent/id "owner"})
            _ (env/replace-environment! (get ctx env/state-carrier) scoped)
            source "(clojure.test/deftest my-cluster-is-reachable (clojure.test/is (= \"own-tests\" (:seon.cluster/name (seon.db/pull (seon.db/db) [:seon.cluster/name] [:seon.cluster/name \"own-tests\"])))))"
-           declared (evaluation/evaluate
+           declared (support/evaluate
                      {:seon.sci.eval/ctx ctx
                       :seon.db/db (db/db connection)
                       :seon.cluster.eval/source source

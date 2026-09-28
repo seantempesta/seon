@@ -135,4 +135,9 @@
              :kind :function
              :intent "(doc seon.render.value/tree) answers documentation-unavailable because tree is private, though every private function is contracted and is what an agent edits; source, dir and doc are not referred in an agent's user namespace ('Unable to resolve symbol: source') although help teaches them; (clojure.repl/source f) works but prints to :out and draws the :large-output finding that tells the agent to return the value instead. Doc of a public function splits its summary mid-sentence at the first line break. Give an agent doc and source of private declarations as data (the declaration's stored source and contract), referred like help's other names (repl-dogfood 2026-09-27)."
              :must-read #{seon.sci.eval/program-documentation seon.repl/response}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "replaced-and-acquisition-ms-have-no-producer"
+             :kind :function
+             :intent "The evaluation keys :seon.eval/replaced and :seon.eval/acquisition-ms were produced only by seon.sci.eval/evaluate's text path, which acquired the program on demand; the fold's evaluation frame never acquires, so nothing writes them. seon.turn still copies them into receipts (turn.clj evaluation facts) and seon.cluster.eval.edn declares them as attributes. Done when both attributes, their seon.config.eval and seon.turn readers and success-evaluation's handling are retired, or a fold-side producer (the run's fork acquisition) supplies them with a named consumer."
+             :must-read #{seon.sci.eval/evaluate seon.sci.eval/acquire! seon.sci.eval/fork-for-turn}
+             :evidence #{"resources/seon/schemas/seon.cluster.eval.edn"}}]

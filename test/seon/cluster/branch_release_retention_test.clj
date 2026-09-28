@@ -21,7 +21,7 @@
         connection (:seon.db/connection handle)]
     (try
       (is (pos? (db/q '[:find (count ?f) . :where [?f :seon.fn/sym]] @connection)))
-      (let [evaluation (eval/evaluate
+      (let [evaluation (support/evaluate
                         {:seon.cluster.eval/source "(+ 1 2)"
                          :seon.cluster.eval/ns [:seon.ns/name 'user]
                          :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)

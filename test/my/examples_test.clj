@@ -106,7 +106,7 @@
                                                       :seon.cluster.eval/author :agent}])]
                           (when-not (:db-after written)
                             (throw (ex-info "Example evaluation was not admitted." written)))
-                          (evaluation/evaluate
+                          (support/evaluate
                            {:seon.sci.eval/ctx ctx :seon.db/db @connection
                             :seon.db/connection connection :seon.agent/id "examples"
                             :seon.boot/cluster-name "examples" :seon.turn/id "examples"

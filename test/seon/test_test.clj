@@ -16,7 +16,7 @@
   (test-support/with-database
    (fn [connection]
      (let [ctx (test-support/fork-cluster-ctx connection)
-           evaluation (sci.eval/evaluate
+           evaluation (test-support/evaluate
                        {:seon.sci.eval/ctx ctx
                         :seon.cluster.eval/source
                         "(clojure.test/deftest bounded-test (loop [] (recur)))"
@@ -45,7 +45,7 @@
            _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before})
            stale (sci.eval/fork-cluster-ctx ctx before connection)
            source "(clojure.test/deftest admitted-fileless-test (clojure.test/is (seon.db/database-value? (seon.db/db))))"
-           evaluation (sci.eval/evaluate
+           evaluation (test-support/evaluate
                        {:seon.sci.eval/ctx ctx
                         :seon.cluster.eval/source source
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]

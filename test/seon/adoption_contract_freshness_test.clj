@@ -10,7 +10,6 @@
             [seon.instrument :as instrument]
             [seon.cluster.process :as operator.process]
             [seon.schema :as schema]
-            [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
 (def ^:private source-path "src/my/adoption_contract_probe.clj")
@@ -38,7 +37,7 @@
         configuration (schema/call-with-projection-state
                        (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance))
                        #(config/effective @connection "contract-freshness"))]
-    (evaluation/evaluate
+    (support/evaluate
      {:seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
       :seon.db/db @connection
       :seon.cluster.eval/ns [:seon.ns/name 'my.adoption-contract-probe]

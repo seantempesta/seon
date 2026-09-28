@@ -3,14 +3,13 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
-            [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
 (defn- run-in [ctx source time-limit-ms]
-  (eval/evaluate {:seon.sci.eval/ctx ctx
-                  :seon.cluster.eval/source source
-                  :seon.sci.admit/caps (config/result-caps config/defaults)
-                  :seon.sci.eval/time-limit-ms time-limit-ms}))
+  (test-support/evaluate {:seon.sci.eval/ctx ctx
+                          :seon.cluster.eval/source source
+                          :seon.sci.admit/caps (config/result-caps config/defaults)
+                          :seon.sci.eval/time-limit-ms time-limit-ms}))
 
 (deftest run4-reader-errors-name-the-reply-and-do-not-imply-retained-input
   (test-support/with-database
@@ -21,14 +20,12 @@
            sources (into {} (map (fn [[id source]] [id source])) captured)
            delimiter (run-in ctx (get sources "efb0cb76b2f4") 2000)
            comments (run-in ctx (get sources "9d7af271393f") 2000)]
-       (is (qualified-keyword? (get-in delimiter [:seon.sci.admit/value :seon.sci.reader/unreadable-member])))
-       (is (str/includes? (:seon.cluster.eval/error delimiter)
-                          "Unmatched delimiter"))
-       (is (str/includes? (:seon.cluster.eval/error delimiter)
-                          "). ... Admitted definitions are durable"))
-       (is (str/includes? (:seon.cluster.eval/error delimiter)
-                          "reads each reply from scratch; nothing is buffered between turns"))
-       (is (true? (get-in comments [:seon.sci.admit/value :seon.cluster.reply/no-forms])))
-       (is (= "Your reply had no form; only comments/prose. Send a form."
-              (:seon.cluster.eval/error comments)))
+       ;; The one path reads each reply from scratch: an unreadable reply is
+       ;; unread from where reading stopped, and nothing evaluates or is kept.
+       (is (= 0 (get-in delimiter [:seon.batch/unread :seon.batch/unread-from]))
+           "reading stops at the reply's first unreadable span")
+       (is (str/includes? (get-in delimiter [:seon.batch/unread :seon.batch/reason]) "Unmatched delimiter")
+           "the reason names the reader's delimiter failure")
+       (is (not (contains? delimiter :seon.sci.admit/value)) "an unread reply evaluates nothing")
+       (is (not (contains? comments :seon.sci.admit/value)) "a reply of prose alone evaluates nothing")
        (is (= 2 (:seon.sci.admit/value (run-in ctx "(+ 1 1)" 2000))))))))

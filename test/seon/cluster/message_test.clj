@@ -28,7 +28,6 @@
             [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -136,7 +135,7 @@
       (let [ctx (test-support/fork-cluster-ctx connection "message-test")
             evaluate-form
             (fn [source]
-              (sci.eval/evaluate
+              (test-support/evaluate
                {:seon.cluster.eval/source source
                 :seon.cluster.eval/ns [:seon.ns/name 'my.agents.bob]
                 :seon.agent/id "bob"
