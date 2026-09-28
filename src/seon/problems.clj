@@ -101,11 +101,7 @@
     (contains? pulled :seon.error/agent)
     (update :seon.error/agent restore-error-ref :seon.agent/id)
     (:seon.error/resolved-tx pulled)
-    (update :seon.error/resolved-tx restore-error-ref :db/id)
-    (:seon.error/issue pulled)
-    (update :seon.error/issue restore-error-ref :db/id)
-    (:seon.error/regressions pulled)
-    (update :seon.error/regressions #(into #{} (map (fn [r] (restore-error-ref r :db/id))) %))))
+    (update :seon.error/resolved-tx restore-error-ref :db/id)))
 
 (defn- error-signatures
   "Errors ordered by the sum of their occurrence counts; a resolved one carries its `seon.error/resolution`.

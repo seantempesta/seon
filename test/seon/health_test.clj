@@ -2,6 +2,7 @@
   "The health report: a finding is the named schema a value satisfies, ranked;
   derivations are retained by what they read; the report writes nothing."
   (:require [clojure.test :refer [deftest is]]
+            [malli.generator :as mg]
             [seon.cluster.boot :as boot]
             [seon.db :as db]
             [seon.env :as env]
@@ -101,3 +102,14 @@
        (is (#'health/identity-only? database projection ::every-function)
            "a stored schema constraining only an identity is refused")
        (is (not (#'health/identity-only? database projection ::uncontracted)))))))
+
+(deftest a-replaced-root-rides-the-report-as-instrument-reports-it
+  ;; bin/seon status refused its own report on default (2026-09-28): the report
+  ;; declared symbols where seon.instrument/replaced-roots answers its values.
+  (let [projection (schema/handed-projection)
+        root (mg/generate :seon.instrument/replaced-root
+                          {:registry (:seon.schema.projection/registry projection) :seed 7})]
+    (is ((schema/projection-validator projection :seon.health/replaced-roots) [root]))
+    (is (not ((schema/projection-validator projection :seon.health/replaced-roots)
+              [(:seon.instrument/replaced-var root)]))
+        "a bare Var name is not a replaced root")))

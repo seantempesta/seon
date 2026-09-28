@@ -356,7 +356,7 @@
   "The loaded first-party Vars whose root is not their namespace's compile.
   Retained until a Var root changes (`clojure.lang.Var/rev` advances on every
   root binding, `Var.java` bindRoot/alterRoot) or the program's files do."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :qualified-symbol]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.instrument/replaced-root]]}
   [database]
   (let [files (derived database ::function-files program-function-files)]
     (if (db/read-refusal? files)
