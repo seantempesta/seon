@@ -309,8 +309,8 @@
  ; WHOLE-STORE COLLECTION IS ON (root ruling 2026-09-26, C14): the plain
  ; collection (registry/plain-cutoff) keeps every roster branch's whole ancestry,
  ; proven against a held value, a non-head adopted commit and a concurrent writer
- ; (seon.cluster.registry-test); a test request collects after it unlinks its
- ; branches. Absent or false turns it off.
+ ; (seon.cluster.registry-test); the daily root/maintenance/compact schedule
+ ; reclaims the branches test requests unlink. Absent or false turns it off.
  :seon.config.maintenance/collect? true
 
  ; THE OPERATOR WAITS ON EVENTS, NEVER A FLAT OPERATION CLOCK. This is the

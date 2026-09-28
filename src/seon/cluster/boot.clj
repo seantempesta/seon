@@ -21,6 +21,7 @@
             [seon.error.refusal :as refusal]
             [seon.flow :as flow]
             [seon.fs :as fs]
+            [seon.maintenance :as maintenance]
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
@@ -620,6 +621,22 @@
       (let [instances (vec (vals (cond-> @running-instances name (select-keys [name]))))]
         (when (= 1 (count instances)) (env/of (:seon.sci.eval/ctx (first instances)))))))
 
+(defn- store-observation
+  "The root store's growth for `status`: its key count, and when the root was
+  last collected and what that reclaimed (`maintenance/last-collection` over a
+  running cluster's database, the typed never-collected refusal included).
+  Answers nothing when no cluster runs."
+  {:malli/schema [:=> [:cat :seon.operator/managed-root]
+                  [:or :nil [:map [:seon.operator/store :seon.operator.store/observation]]]]}
+  [managed-root]
+  (when-let [instance (first (vals @running-instances))]
+    {:seon.operator/store
+     {:seon.operator.store/files
+      (fs/entry-count (get-in instance [:seon.boot/config :seon.boot/store-dir]))
+      :seon.operator.store/last-collection
+      (maintenance/last-collection (db/db (:seon.boot/cluster-connection instance))
+                                   (.getCanonicalPath (io/file managed-root)))}}))
+
 (defn request!
   "One data request. Verify root and process identity before connected effects."
   {:malli/schema [:=> [:cat :seon.operator/request] :seon.operator/response]}
@@ -655,7 +672,8 @@
                                             (cond-> {:seon.render/value observation}
                                               (store/connection? connection)
                                               (assoc :seon.db/db (db/db connection)))))))
-                                     @running-instances)})
+                                     @running-instances)}
+                              (store-observation root))
                   (:seon.operator/verbose? request)
                   (assoc :seon.operator/footprint (fs/filesystem-space (str (io/file root "data")))))
         :open (let [instance (selected-instance name)]

@@ -1,5 +1,6 @@
 (ns seon.maintenance-test
   (:require [clojure.java.io :as io]
+            [datahike.api :as d]
             [clojure.string :as str]
             [malli.registry :as mr]
             [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
@@ -432,6 +433,31 @@
         (is (zero?
              (:seon.operator.collect/verification-pass-swept result)))
         (is (true? (:seon.operator.collect/complete? result))))
+      (finally
+        (test-support/delete-recursively! repository-root)))))
+
+(deftest a-branch-that-commits-after-its-root-was-recorded-still-verifies
+  ;; default's 2026-09-27 collection (receipt aa5e1e02c6dc) swept, then refused
+  ;; its own result: `:cluster-default` committed between recording its root
+  ;; and verifying it, and the check compared the moving head.
+  (let [repository-root (owned-root)
+        managed-root (.getCanonicalPath (io/file repository-root "managed"))]
+    (try
+      (#'maintenance/with-root-store!
+       managed-root
+       (fn [held]
+         (let [connection (:seon.store/connection-object held)
+               evidence (#'maintenance/collection-evidence held)
+               held-before (#'maintenance/konserve-key-set held)
+               recorded (:seon.source/commit-id
+                         (first (:seon.operator.collect/branches evidence)))]
+           (d/transact connection {:tx-data [{:db/ident ::marker
+                                              :db/valueType :db.type/string
+                                              :db/cardinality :db.cardinality/one}]})
+           (is (not= recorded (d/commit-id @connection)) "the head moved on")
+           (is (= {:seon.operator.collect/roots-verified? true
+                   :seon.operator.collect/unstored-digests 0}
+                  (#'maintenance/root-verification held evidence held-before))))))
       (finally
         (test-support/delete-recursively! repository-root)))))
 

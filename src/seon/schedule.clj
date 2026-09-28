@@ -56,7 +56,7 @@
     :seon.schedule.task/id "root/maintenance/rotate-logs"
     :seon.fn/sym 'seon.maintenance/rotate-logs!}
    {:seon.schedule/id "root/maintenance/compact-schedule"
-    :seon.schedule/expression "0 3 * * 0"
+    :seon.schedule/expression "0 3 * * *"
     :seon.schedule/zone-id "UTC"
     :seon.schedule.task/id "root/maintenance/compact"
     :seon.fn/sym 'seon.maintenance/collect!}])
@@ -201,7 +201,7 @@
   A task with no fire history measures dueness from its own creation:
   a nominal instant that predates the task never fires. Without this
   floor a fresh cluster's first boot fired every seeded portfolio task
-  at once — including the weekly store collection, whose reachability
+  at once — including the store collection, whose reachability
   sweep then refused any concurrent cluster start on the same store."
   ^Date [database task-eid]
   (or (db/q '[:find ?instant .

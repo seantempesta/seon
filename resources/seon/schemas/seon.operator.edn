@@ -230,7 +230,10 @@
                       [:enum :observed :faulted :unknown]]]]]
                   [:seon.operator/footprint
                    {:optional true}
-                   :seon.operator/footprint]]
+                   :seon.operator/footprint]
+                  [:seon.operator/store
+                   {:optional true}
+                   :seon.operator.store/observation]]
                  [:map
                   [:seon.boot/cluster-name :seon.boot/cluster-name]
                   [:seon.render.web/url :seon.render.web/url]]

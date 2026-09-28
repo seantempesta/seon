@@ -310,7 +310,7 @@
 (deftest a-nominal-predating-the-task-never-fires
   ;; The class this kills: a fresh task has no fire history, and reading
   ;; that absence as "overdue since the epoch" fired every seeded
-  ;; portfolio task at first boot — including the weekly store
+  ;; portfolio task at first boot — including the store
   ;; collection, whose reachability sweep refused a concurrent cluster
   ;; start on the same store (the cohost regression's red).
   (test-support/with-database

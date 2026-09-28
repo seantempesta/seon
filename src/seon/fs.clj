@@ -263,6 +263,19 @@
     (Files/readAttributes path BasicFileAttributes no-follow)
     (catch NoSuchFileException _ nil)))
 
+(defn entry-count
+  "The number of entries directly in `directory`, from one listing with no
+  per-entry attribute read; an absent directory is zero. A konserve file store
+  keeps one file per key, so this is the store's key count, the growth a
+  status reader sees.
+
+  Costs: unarmed, one directory listing proportional to its entries:
+  1,053,786 entries in 1,329 ms on 2026-09-28 (default's `data/store` before
+  its first successful collection)."
+  {:malli/schema [:=> [:cat :string] [:int {:min 0}]]}
+  [directory]
+  (count (or (.list (io/file directory)) [])))
+
 (defn tree-bytes
   "The bytes of the regular files under `root`; symbolic links are leaves of
   zero size and are never followed, and an absent root is zero.

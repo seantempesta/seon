@@ -1,0 +1,8 @@
+#:seon.operator.store{:files [:int {:min 0 :description "Entries in the root's konserve file store directory: one file per key, from one listing."}]
+                      :observation
+                      [:map {:description "The store's growth as `bin/seon status` shows it: its key count and when the root was last collected."}
+                       [:seon.operator.store/files :seon.operator.store/files]
+                       [:seon.operator.store/last-collection
+                        [:or :seon.maintenance/collection-record
+                         :seon.maintenance/root-never-collected-error
+                         :seon.db/error-result]]]}

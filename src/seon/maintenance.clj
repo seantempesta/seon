@@ -613,16 +613,23 @@
      :seon.operator.collect/digests
      (into #{} (mapcat #(branch-digests operation-store %)) branches)}))
 
-(defn- branch-reopens?
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch [:or :nil :seon.source/commit-id]] :boolean]}
-  [operation-store branch expected]
+(defn- commit-reopens?
+  "Whether the commit recorded for a branch still reopens and reads its first
+  EAVT datom. The recorded commit, not the branch's current head, is the root:
+  a live branch's head moves while a collection runs, and comparing the head
+  refused default's 2026-09-27 collection because `:cluster-default` had
+  committed during it (receipt aa5e1e02c6dc)."
+  {:malli/schema [:=> [:cat :seon.store/store [:or :nil :seon.source/commit-id]] :boolean]}
+  [operation-store expected]
   (boolean
    (when expected
-     (let [database
-           (d/branch-as-db
-            (:seon.store/connection-object operation-store) branch)]
+     (when-let [database
+                (d/commit-as-db
+                 (:seon.store/connection-object operation-store) expected)]
        (try
-         (= expected (d/commit-id database))
+         ;; Reading the first datom loads the index roots: a swept node throws.
+         (let [_first-datom (first (d/datoms database :eavt))]
+           (= expected (d/commit-id database)))
          (finally
            (d/release-materialized-db database)))))))
 
@@ -676,7 +683,7 @@
         unverified-branch
         (some (fn [{branch :seon.store/branch
                     expected :seon.source/commit-id}]
-                (when-not (branch-reopens? operation-store branch expected)
+                (when-not (commit-reopens? operation-store expected)
                   branch))
               (:seon.operator.collect/branches evidence))
         unverified-digest

@@ -30,7 +30,7 @@
     :seon.fn/sym 'seon.maintenance/rotate-logs!}
    {:seon.schedule.task/id "root/maintenance/compact"
     :seon.schedule/id "root/maintenance/compact-schedule"
-    :seon.schedule/expression "0 3 * * 0"
+    :seon.schedule/expression "0 3 * * *"
     :seon.schedule/zone-id "UTC"
     :seon.fn/sym 'seon.maintenance/collect!}])
 

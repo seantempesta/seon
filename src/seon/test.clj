@@ -2501,7 +2501,7 @@
                       outcome))
                   (finally
                     (when-let [request-handle @held-handle]
-                      ;; Unlink only: the weekly `seon.maintenance/collect!`
+                      ;; Unlink only: the daily `seon.maintenance/collect!`
                       ;; reclaims what no roster branch reaches.
                       (@release-context! request-handle))))
                 held-elsewhere (::held outcome)
