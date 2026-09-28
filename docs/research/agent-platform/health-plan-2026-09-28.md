@@ -49,7 +49,16 @@ processes, like agents, should be Flow; this will only increase with time." So t
 execution is exactly Flow's: a process that runs as a proc built by `var-process` gets the world, capture, linked
 faults, ping and awaited stop for free, and a process outside Flow is itself a finding. Callbacks (Datahike listeners,
 http-kit handlers) stay callbacks that only hand work to a proc. The inventory of execution outside Flow and its
-conversion order is `tmp/health-research/processes.md` (in progress).
+conversion order is `tmp/health-research/processes.md`: 32 execution contexts outside Flow — 7 become procs
+(MCP JVM-mode `jvm-run` through the agent's turn proc as SCI mode does; publication/adoption `refresh-source!` as an
+adopter proc in the cluster graph; the per-turn backstop observer; foreground effect dispatch and shell capture through
+the work launcher; one SSE painter proc per cluster instead of an unjoined loop per tab; test bodies as test agents),
+15 are callbacks that must only hand off (4 need a change), 9 stay inside dependencies, 4 are dead or duplicate
+(two graph-stop senders, the uncalled `:compute` root executor, a never-stopped `generator-server`, the raw FutureTask
+effect path). Work-launcher tasks (`seon.flow/execute-io-work!`, `src/seon/flow.clj:465`) need the same world binding
+as the step wrapper. A small process-level graph with one faults proc takes the three fault writers that run on
+foreign threads today (Datahike listener failures, JMX memory pressure, the uncaught-exception handler); store GC can
+move there later. Conversions run as their own slice after §8 step 1 lands, smallest risk first.
 
 ## 1. Detection: schemas and timings on the code graph
 
