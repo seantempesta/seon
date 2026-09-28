@@ -866,7 +866,6 @@
            captured (atom [])
            refused (binding [db/*read-evidence-sink* captured]
                      (db/q query @connection))
-           basis (db/basis-t @connection)
            evidence (db/read-evidence
                      [{:seon.db/db @connection
                        :seon.db/source-argument-position 0
@@ -883,8 +882,7 @@
        (test-support/transacted!
         connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "moved"})])
        (is (false? (db/read-evidence-current? @connection evidence))
-           "evidence retained before the check replays as a refusal")
-       (is (vector? (db/read-evidence-changes @connection evidence basis)))))))
+           "evidence retained before the check replays as a refusal")))))
 
 (deftest collection-bound-query-evidence-covers-every-input-attribute
   (test-support/with-database
@@ -2615,9 +2613,8 @@
                changed (filterv #(= :changed (:seon.turn/status %))
                                  (:seon.turn/forms preview))]
            (is (= 1 (count changed)) (pr-str preview))
-           (is (seq (:seon.turn/changes (first changed))))
            (is (str/includes? (:seon.turn/text (first changed) "") "after"))
-           (select-keys (first changed) [:seon.cluster.eval/source :seon.turn/text :seon.turn/changes])))
+           (select-keys (first changed) [:seon.cluster.eval/source :seon.turn/text])))
        (finally
          (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
            (async/close! (get handle channel-key)))))))))
@@ -2762,15 +2759,15 @@
            (str "50 cached reads took " hits " ms; 50 first declaration datoms took "
                 declaration-reads " ms"))))))
 
-;; Class: a read with no attribute set is witnessed by one seek. Its `{}`
-;; pattern scanned the whole since-history index per stale read (1400 ms and
-;; 2.4 GB each on default; 27 s for one 480-read evaluation).
-(deftest an-unnarrowed-reads-witness-is-the-first-transaction-after-its-basis
+;; Class: a read with no attribute set and no patterns is stale after any
+;; write, decided without scanning history. Its `{}` pattern scanned the whole
+;; since-history index per stale read (1400 ms and 2.4 GB each on default; 27 s
+;; for one 480-read evaluation).
+(deftest an-unnarrowed-read-is-stale-after-any-write-without-a-history-scan
   (test-support/with-database
    (fn [connection]
      (let [captured (atom [])
            flow (:db/id (db/pull @connection [:db/id] [:seon.ns/name 'seon.flow]))
-           basis (db/basis-t @connection)
            _ (binding [db/*read-evidence-sink* captured]
                (db/q '[:find [?a ...] :in $ ?e :where [?e ?a _]] @connection flow))
            ;; The retained patterns and replay inputs removed as data: what
@@ -2781,22 +2778,19 @@
                                   (update-in [:datahike.read/dependency-plan :datahike.query.dependency/sources]
                                              (fn [sources] (mapv #(dissoc % :seon.db/read-index-patterns) sources)))))
                             (db/read-evidence @captured))
-           report (test-support/transacted!
-                   connection
-                   (into (test-support/agent-tx @connection "db-test-recipient")
-                         [{:seon.message/id "unnarrowed-witness"
-                           :seon.message/to [:seon.agent/id "db-test-recipient"]
-                           :seon.message/content "unrelated"}]))
-           transaction (:tx (first (:tx-data report)))
+           _ (test-support/transacted!
+              connection
+              (into (test-support/agent-tx @connection "db-test-recipient")
+                    [{:seon.message/id "unnarrowed-witness"
+                      :seon.message/to [:seon.agent/id "db-test-recipient"]
+                      :seon.message/content "unrelated"}]))
            started (System/nanoTime)
-           changes (db/read-evidence-changes @connection unnarrowed basis)
+           current (db/read-evidence-current? @connection unnarrowed)
            elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
        (is (= :all (get-in unnarrowed [0 :datahike.read/dependency-plan :datahike.query.dependency/sources
                                        0 :datahike.query.source/attributes])))
-       (is (false? (db/read-evidence-current? @connection unnarrowed)))
-       (is (= [[transaction :db/txInstant transaction]] (mapv (juxt :e :a :tx) changes))
-           (pr-str changes))
-       (is (< elapsed-ms 100.0) (str "the witness took " elapsed-ms " ms"))))))
+       (is (false? current))
+       (is (< elapsed-ms 100.0) (str "currency took " elapsed-ms " ms"))))))
 
 ;; Class: a retained pattern is witnessed by the matcher its query used. A
 ;; read over an attribute set naming uninstalled attributes (the contract-finding
@@ -2806,7 +2800,6 @@
   (test-support/with-database
    (fn [connection]
      (let [captured (atom [])
-           basis (db/basis-t @connection)
            _ (binding [db/*read-evidence-sink* captured]
                (db/q '[:find [?f ...] :where [?f :seon.fn/sym _]] @connection))
            uninstalled :seon.fn.contract/finding
@@ -2826,9 +2819,18 @@
         connection [(test-support/namespace-entity (db/db connection) 'sample.witness)
                     (test-support/program-fn-entity (db/db connection) 'sample.witness/f "(defn f [x] x)")])
        (is (seq widened))
-       (is (false? (db/read-evidence-current? @connection widened)))
-       (is (= [:seon.fn/sym] (distinct (map :a (db/read-evidence-changes @connection widened basis))))
-           "the installed pattern witnesses its change; the uninstalled one witnesses none")))))
+       (is (false? (db/read-evidence-current? @connection widened))
+           "the installed pattern witnesses its change")
+       (is (true? (db/read-evidence-current?
+                   @connection
+                   (mapv (fn [evidence]
+                           (update-in evidence [:datahike.read/dependency-plan :datahike.query.dependency/sources]
+                                      (fn [sources]
+                                        (mapv #(assoc % :seon.db/read-index-patterns
+                                                      [{:seon.db/pattern-attribute uninstalled}])
+                                              sources))))
+                         widened)))
+           "the uninstalled pattern witnesses none, and never throws")))))
 
 (deftest equal-revisions-prove-a-read-current-without-scanning-history
   (test-support/with-database

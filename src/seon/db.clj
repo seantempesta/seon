@@ -955,6 +955,15 @@
     (when (some? (datahike.db/committed-value-identity database))
       {::context (:cache-context database)})))
 
+(defn- basis-instant
+  "The :db/txInstant of `database`'s basis transaction, or nil for a value
+  that is not a plain database. Datahike asserts it once per transaction and
+  never retracts it, so the current index answers it (one EAVT seek)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :inst]]}
+  [database]
+  (when (instance? DB database)
+    (:v (first (dbi/search database [(basis-t database) :db/txInstant])))))
+
 (defn- dependency-revision
   [database plan source-position]
   (let [{context ::context fixed-point ::fixed-point} (revision-source database)
@@ -1025,8 +1034,11 @@
                                  (cond-> source
                                    (= source-position
                                       (:datahike.query.source/argument-position source))
-                                   (assoc :seon.db/read-index-patterns patterns
-                                          :seon.db/read-basis-t (basis-t database))))
+                                   (-> (assoc :seon.db/read-index-patterns patterns
+                                              :seon.db/read-basis-t (basis-t database))
+                                       (as-> source (if-let [instant (basis-instant database)]
+                                                      (assoc source :seon.db/read-basis-instant instant)
+                                                      source)))))
                                sources)))
                plan)
              :datahike.read/revision
@@ -1167,46 +1179,6 @@
             value :seon.db/pattern-value}]
   (first (dbi/search changes [entity attribute value])))
 
-(declare read-evidence-current? datom->data schema-database)
-
-(defn read-evidence-changes
-  "Return one changed datom witnessing each retained index pattern.
-  Witnesses use the same matching operation as cache validity. Broad read
-  plans contribute an attribute-scoped witness; they do not acquire an
-  entity or value constraint that their reader did not retain. A read with
-  no attribute set (`:all`) is witnessed by the first transaction after its
-  basis: that transaction's `:db/txInstant` datom, found by one seek."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:vector :seon.db/read-evidence] :seon.db/basis-t]
-                  [:or :seon.db/datoms :seon.db/error-result]]}
-  [database retained basis]
-  (with-declarations database 'seon.db/read-evidence-changes
-   (fn [declarations]
-   (into []
-        (comp (map #(datom->data declarations database %)) (distinct))
-        (mapcat
-         (fn [{position :seon.db/source-argument-position
-               plan :datahike.read/dependency-plan :as evidence}]
-           (when-not (read-evidence-current? database [evidence])
-            (let [source (some #(when (= position (:datahike.query.source/argument-position %)) %)
-                              (:datahike.query.dependency/sources plan))
-                 attributes (:datahike.query.source/attributes source)
-                 patterns (or (:seon.db/read-index-patterns source)
-                              (when (set? attributes)
-                                (mapv #(hash-map :seon.db/pattern-attribute %) attributes)))
-                 since (or (:seon.db/read-basis-t source) basis)
-                 changes (d/since (d/history database) since)]
-             (if patterns
-               (keep #(index-pattern-change changes %) patterns)
-               ;; The since view materializes a whole index before filtering it
-               ;; (`datahike/db.cljc:173-191`): an unconstrained pattern cost
-               ;; 1400 ms and 2.4 GB per stale read on default. The first
-               ;; transaction after the basis is a changed datom of its own.
-               (when-let [next-tx (first (d/seek-datoms (schema-database database) :aevt
-                                                        :db/txInstant (inc (long since))))]
-                 (when (= :db/txInstant (:a next-tx))
-                   (take 1 (d/datoms changes :eavt (:e next-tx) :db/txInstant))))))))
-         retained)))))
 
 (defn- changed-read-attributes
   "The read attributes whose Datahike revision differs between `revision`
@@ -1226,15 +1198,25 @@
         (into #{} (remove #(= (get before %) (get after %))) attributes)))))
 
 (defn- index-evidence-current
-  "An exact index check when historical datoms retain the read's dependencies.
-  Return no decision for a different database origin or discarded history.
+  "Whether any datom changed since the read's basis matches one of its bound
+  patterns, by the query's own matcher: the one answer to whether a retained
+  read still holds. The captured patterns are the read's whole dependency (an attribute
+  of the plan with no pattern had no bound value to read, e.g. the steps of a
+  plan with none), so a write elsewhere to one of the plan's attributes leaves
+  the read current. Return no decision when the patterns cannot answer.
 
-  With `current`'s revisions, only the patterns of attributes whose revision
-  moved are checked: an unchanged revision already proves its attribute's
-  datoms (`changed-read-attributes`), and an entity-only pattern (a pulled
-  `:db/id`) reads nothing outside the plan's explicit attribute set. A moved
-  attribute without a pattern, or without history, gives no decision.
-  Without narrowing, every pattern needs an attribute with history.
+  - Lineage: the retained revision's connection (store and branch) must be
+    this value's. Within its generation the history is the read's own; a
+    later connection (a fresh JVM) must hold the read's basis transaction
+    with the retained `:seon.db/read-basis-instant`, which a branch recreated
+    under the same name does not.
+  - Within one generation, only patterns of attributes whose revision moved
+    are checked (`changed-read-attributes`); across generations revisions are
+    not comparable (datahike/query.cljc:3008-3012) and every pattern is.
+  - A checked pattern must be witnessable in the since view: its attribute
+    keeps history, or is `:db/txInstant` (asserted once per transaction,
+    never retracted). An entity-only pattern (a pulled entity collapsed past
+    the bound, `append-read-evidence!`) reads the plan's every attribute.
 
   A speculative value keeps its basis's connection and generation
   (`datahike.db/speculative-cache-context`, datahike db.cljc:444), so a read
@@ -1248,26 +1230,32 @@
         basis (:seon.db/read-basis-t source)
         context (:cache-context database)
         installed (dbi/-schema database)
-        history? (fn [attribute] (not (:db/noHistory (get installed attribute))))
-        changed (changed-read-attributes revision current)
-        ;; An entity-only pattern (a pulled entity collapsed past the bound,
-        ;; `append-read-evidence!`) reads every attribute of its entity, so it
-        ;; covers any changed attribute and is always checked.
+        history? (fn [attribute]
+                   (or (= :db/txInstant attribute)
+                       (not (:db/noHistory (get installed attribute)))))
+        read-attributes (:datahike.query.source/attributes source)
+        same-connection? (= (:datahike.cache/connection-id revision)
+                            (:datahike.cache/connection-id context))
+        same-generation? (and same-connection?
+                              (= (:datahike.cache/generation revision)
+                                 (:datahike.cache/generation context)))
+        same-lineage? (and same-connection?
+                           (or same-generation?
+                               (when-let [instant (:seon.db/read-basis-instant source)]
+                                 (= instant (:v (first (dbi/search database [basis :db/txInstant])))))))
+        changed (when same-generation? (changed-read-attributes revision current))
         entity-only? #(and (:seon.db/pattern-entity %) (nil? (:seon.db/pattern-attribute %)))
         checked (if changed
-                  (let [covered (into #{} (keep :seon.db/pattern-attribute) patterns)
-                        whole-entities? (some entity-only? patterns)]
-                    (when (and (or whole-entities? (every? covered changed)) (every? history? changed))
-                      (filterv #(or (entity-only? %) (contains? changed (:seon.db/pattern-attribute %))) patterns)))
-                  (when (every? (fn [pattern]
-                                  (when-let [attribute (:seon.db/pattern-attribute pattern)]
-                                    (history? attribute)))
-                                patterns)
-                    patterns))]
-    (when (and patterns basis checked
+                  (filterv #(or (entity-only? %) (contains? changed (:seon.db/pattern-attribute %))) patterns)
+                  patterns)
+        witnessable? (fn [pattern]
+                       (if-let [attribute (:seon.db/pattern-attribute pattern)]
+                         (history? attribute)
+                         (and (set? read-attributes) (every? history? read-attributes))))]
+    (when (and patterns basis
                (instance? DB database)
-               (= (select-keys revision [:datahike.cache/connection-id :datahike.cache/generation])
-                  (select-keys context [:datahike.cache/connection-id :datahike.cache/generation])))
+               (every? witnessable? checked)
+               same-lineage?)
       (or (empty? checked)
           (let [changes (d/since (d/history database) basis)]
             (not-any? #(index-pattern-change changes %) checked))))))
@@ -2262,9 +2250,14 @@
             (::failure attempt)
             (if (seq remaining) (recur remaining) (throw (::failure attempt)))
 
+            ;; Validated as the decode did before 53ab87bac: with the projection
+            ;; supplied (`ask-declarations`), which registered predicates such
+            ;; as `schema/malli-form?` read; unsupplied, they refuse valid values.
             (and (seq remaining)
                  (schema.datahike/edn-encoded-attr-in? projection candidate)
-                 (not ((schema/projection-validator projection candidate) (::value attempt))))
+                 (not (ask-declarations
+                       declarations
+                       #((schema/projection-validator % candidate) (::value attempt)))))
             (recur remaining)
 
             :else (::value attempt)))))

@@ -5,9 +5,30 @@
             [seon.sci.eval :as eval]
             [seon.test-support :as test-support]))
 
+(defn- as-seen-by
+  "`evidence` as a later check sees it: from this connection, from a fresh
+  connection to the same branch (a new JVM: another generation), or from a
+  branch recreated under the same name (another generation whose basis
+  transaction is not the read's)."
+  {:malli/schema [:=> [:cat [:enum :same-connection :fresh-connection :other-lineage]
+                       [:vector :seon.db/read-evidence]]
+                  [:vector :seon.db/read-evidence]]}
+  [seen-by evidence]
+  (case seen-by
+    :same-connection evidence
+    (mapv (fn [entry]
+            (cond-> (assoc-in entry [:datahike.read/revision :datahike.cache/generation] (random-uuid))
+              (= :other-lineage seen-by)
+              (update-in [:datahike.read/dependency-plan :datahike.query.dependency/sources]
+                         (fn [sources]
+                           (mapv #(cond-> % (:seon.db/read-basis-t %)
+                                    (assoc :seon.db/read-basis-instant #inst "2000-01-01"))
+                                 sources)))))
+          evidence)))
+
 (defn- inbox-evidence-after-message
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [recipient]
+  {:malli/schema [:=> [:cat :string [:enum :same-connection :fresh-connection :other-lineage]] :boolean]}
+  [recipient seen-by]
   (test-support/with-database
    (fn [connection]
      (is (some? (:db-after (db/transact!
@@ -28,7 +49,6 @@
                :seon.sci.admit/caps (config/result-caps config/defaults)
                :seon.sci.eval/time-limit-ms 5000}))
            evidence (db/read-evidence @captured)
-           basis (db/basis-t @connection)
            patterns (mapcat :seon.db/read-index-patterns
                             (mapcat #(get-in % [:datahike.read/dependency-plan
                                                :datahike.query.dependency/sources])
@@ -57,25 +77,32 @@
        (is (some? (:db-after (db/transact!
                   connection
                   [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message"}]))))
-       ;; Remove replay inputs as data: these assertions must be decided by
-       ;; retained index evidence, without re-executing the inbox.
-       (let [changes (db/read-evidence-changes @connection evidence basis)]
-         (if (= recipient "root")
-           (is (empty? changes) (pr-str changes))
-           (is (some #(and (= :seon.message/to (:a %))
-                           (= juniper (:v %))) changes)
-               (pr-str changes))))
+       ;; Replay inputs removed as data: currency is decided by the retained
+       ;; index patterns, without re-executing the inbox.
        (db/read-evidence-current?
         @connection
-        (mapv #(dissoc % :seon.db/read-request :seon.db/read-result-digest
-                      :seon.db/read-result)
-              evidence))))))
+        (as-seen-by seen-by
+                    (mapv #(dissoc % :seon.db/read-request :seon.db/read-result-digest
+                                   :seon.db/read-result)
+                          evidence)))))))
 
 (deftest another-recipients-message-keeps-junipers-inbox-current
-  (is (true? (inbox-evidence-after-message "root"))))
+  (is (true? (inbox-evidence-after-message "root" :same-connection))))
 
 (deftest junipers-message-invalidates-junipers-inbox
-  (is (false? (inbox-evidence-after-message "juniper"))))
+  (is (false? (inbox-evidence-after-message "juniper" :same-connection))))
+
+;; A read's currency is its bound patterns through the index; a fresh connection to the same branch (a new
+;; JVM) compared whole-attribute revisions of another generation and reported
+;; 9 of root's 10 retained reads changed with 0 changed datoms (2026-09-28).
+(deftest a-fresh-connection-keeps-an-unrelated-read-current
+  (is (true? (inbox-evidence-after-message "root" :fresh-connection))))
+
+(deftest a-fresh-connection-sees-a-related-write
+  (is (false? (inbox-evidence-after-message "juniper" :fresh-connection))))
+
+(deftest a-branch-recreated-under-the-same-name-proves-nothing-by-index
+  (is (false? (inbox-evidence-after-message "root" :other-lineage))))
 
 (deftest nested-patterns-and-find-pulls-retain-scoped-index-evidence
   (test-support/with-database

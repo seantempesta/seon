@@ -77,6 +77,10 @@
           ;; keeps none (seon.db/append-read-evidence!) and the writer refuses more.
           :read-index-patterns [:vector {:max 128} :seon.db/read-index-pattern],
           :read-basis-t :seon.db/basis-t,
+          ;; The basis transaction's :db/txInstant: a later connection to the
+          ;; same branch finds it again only on the lineage the read was taken
+          ;; on (seon.db/index-evidence-current).
+          :read-basis-instant [:and {:description "The :db/txInstant of the read's basis transaction, the lineage witness a later connection to the same branch checks."} :inst],
           :read-dependency-attributes [:or [:= :all] [:set :qualified-keyword]],
           :read-dependency-source
           [:map
@@ -84,7 +88,8 @@
            [:datahike.query.source/argument-position [:int {:min 0}]]
            [:datahike.query.source/attributes :seon.db/read-dependency-attributes]
            [:seon.db/read-index-patterns {:optional true} :seon.db/read-index-patterns]
-           [:seon.db/read-basis-t {:optional true} :seon.db/read-basis-t]],
+           [:seon.db/read-basis-t {:optional true} :seon.db/read-basis-t]
+           [:seon.db/read-basis-instant {:optional true} :seon.db/read-basis-instant]],
           :read-dependency-plan
           [:or
            [:= :all]

@@ -465,11 +465,13 @@ index or cache.
 
 ## Since-query diff
 
-The installed owner is `seon.turn/system-turn` (`src/seon/turn.clj:2227`)
-through `system-plan` (`:2104-2144`): a distinct read form whose latest
-read-only evaluation still satisfies `read-evidence-current?` is
-`:unchanged`; otherwise it is `:changed` and carries
-`seon.db/read-evidence-changes` (`src/seon/db.clj:1078`) since its read basis.
+The installed owner is `seon.turn/system-turn` (`src/seon/turn.clj:2325`)
+through `system-plan` (`:2197-2225`): a distinct read form whose latest
+read-only evaluation still satisfies `seon.db/read-evidence-current?`
+(`src/seon/db.clj:1263`) is `:unchanged`; otherwise it is `:changed`.
+Currency is the one answer: a retained read whose bound patterns match no
+datom changed since its basis is current, checked through the index across
+connections to the same branch lineage (`index-evidence-current`).
 
 For every distinct read form in the agent's history, use its latest
 evaluation's read evidence and `:t`. If a named dependency changed
