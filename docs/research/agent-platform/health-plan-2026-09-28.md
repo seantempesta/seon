@@ -137,6 +137,22 @@ schema, cached by the revisions of the attributes it reads. A warning disappears
 resolve or close; a task made from a signal refs the subject and the named warning schema, and its done condition is
 "the subject no longer satisfies it". The pipeline below applies to errors; warnings are read, never recorded.
 
+**Errors are part of the program, for the agents who write it (owner, 2026-09-28).** A function that can fail
+declares each failure as a named alternative of its output union and returns it (AGENTS.md "Nothing crashes"); the Var
+render shows a function's declared error alternatives beside its contract, so an agent calling it sees what it must
+handle. An error value a caller passes on into a function that does not accept it is an input violation blamed on the
+caller (§3), so an unhandled error becomes a finding on the code that ignored it. What is recorded: an error value that
+reaches an entrant (an evaluation's value, a reply, a proc step, a test body) and every refusal or throw; an error
+value a caller handles is ordinary data flow and is not recorded.
+
+**Refs without reads.** Every ref is written as a Datahike lookup ref or identity map in the transaction data
+(`[:seon.fn/sym+digest [sym digest]]`, `[:seon.error/signature sig]`, `[:seon.agent/id id]`), which the writer
+resolves by index seek inside the transaction it is already running — no read before the write. The identities are
+all values already in hand: the wrapper's cell key `[sym digest]`, the world's agent and evaluation ids, the schema
+key, the hashed signature. A ref whose target may not exist is written as an upsert map only where its identity is
+owned by that write (signature, occurrence); a program entity that may be absent on this branch keeps its value
+(`[sym digest]`) and joins at read time, never a placeholder entity.
+
 **One base, one pipeline for errors (owner question: "what is the common thing … or are we writing the
 instrumentation stuff separately?").** Every named error shares one base: the **occurrence context** — where (agent, branch,
 evaluation / turn / test member / proc, task: from the bound world), who (producer function + digest, caller function +
