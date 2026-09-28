@@ -488,6 +488,24 @@ handle))}}
         (is (str/includes? (.body known)
                            (str "action=\"/agent/" namespace-name "/context\"")))))))
 
+(deftest a-request-that-throws-answers-its-error-value-never-a-stack-trace
+  ;; Class regression (2026-09-27): POST action=system-turn answered HTTP 500
+  ;; whose body was the Throwable printed with 163 stack frames. Every throw
+  ;; in a request answers the error value through the error pair's HTML face.
+  (support/with-database
+    (fn [connection]
+      (let [failure (ex-info "The record refused its request."
+                             {:seon.error/at (java.util.Date.) :seon.error/layer :seon.turn/turn
+                              :seon.error/operation 'seon.turn/record-evaluated-tx
+                              :seon.error/message "The record refused its request."})
+            response (#'web/failure-response {:seon.store/connection-object connection} failure)]
+        (is (= 500 (:status response)))
+        (is (= "text/html; charset=utf-8" (get-in response [:headers "content-type"])))
+        (is (str/includes? (:body response) "The record refused its request.")
+            (:body response))
+        (is (not (re-find #"\n\s+at |\.java:\d+\)" (:body response)))
+            "no stack frame reaches the body")))))
+
 (deftest the-inbox-received-button-acknowledges-its-message
   ;; Owner ruling 2026-09-27: the inbox's HTML face offers the AI face's
   ;; (my.message/received! id) as a button; its POST commits the acknowledgement.

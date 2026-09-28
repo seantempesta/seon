@@ -3937,6 +3937,25 @@
        :headers {"content-type" "text/plain; charset=utf-8"}
        :body "cross-origin POST refused"})))
 
+(defn- failure-response
+  "The response to a request whose handling threw: the failure as one error
+  value, shown by the error pair's HTML face, status 500. The response never
+  throws: a face that fails answers the value's bounded text instead."
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.error/throwable]
+                  [:map [:status :int] [:headers [:map-of :string :string]] [:body :string]]]}
+  [service failure]
+  (let [value (seon.error.refusal/diagnostic
+               {:seon.error/at (java.util.Date.) :seon.error/layer :seon.render.web/request
+                :seon.error/operation 'seon.render.web/handler :seon.error/throwable failure})]
+    (try
+      {:status 500 :headers {"content-type" "text/html; charset=utf-8"}
+       :body (hiccup/->string (error/render-html {:seon.render/value value
+                                                  :seon.db/db (db/db (:seon.store/connection-object service))}))}
+      ;; Declared case: the face itself failed; the value still answers.
+      (catch Throwable _
+        {:status 500 :headers {"content-type" "text/plain; charset=utf-8"}
+         :body (value/bounded-text value)}))))
+
 (defn handler
   "Build the one Reitit Ring handler from the route table and service."
   {:malli/schema [:=> [:cat :seon.render.web/service]
@@ -3965,7 +3984,9 @@
       ;; EVERY THROW ANSWERS HERE. One escaping to http-kit is logged by its
       ;; printStackTrace, which prints the whole ex-data unbounded (the
       ;; 2026-09-26 OOM, task 80f54dd48aef). The request is this entrance's
-      ;; own execution: record the fault and answer the bounded floor text.
+      ;; own execution: record the fault and answer it as the error value it
+      ;; is, through the error pair's HTML face (errors are values; a stack
+      ;; trace printed as the body is not one).
       (try
         (schema/call-with-projection
          (sci.kernel/context-projection (:seon.sci.eval/ctx service))
@@ -3976,9 +3997,7 @@
                (catch Throwable unrecorded
                  (log/warn (str "seon.render.web: a request fault could not be recorded\n"
                                 (value/floor unrecorded)))))
-          {:status 500
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body (value/floor failure)})))))
+          (failure-response service failure))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle
