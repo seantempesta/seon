@@ -780,21 +780,14 @@
                 [:or :string [:vector [:ref schema-key]]]]]]
         (testing label
           (let [delta (registration-delta)
-                failure
-                (refusal
-                 #(schema/call-with-registration-delta
-                   delta (fn [] (schema/register! schema-key definition))))
-                data (ex-data failure)]
-            (is (instance? clojure.lang.ExceptionInfo failure)
-                "the admission gate returns a legible refusal")
-            (is (= :seon.schema/cyclic-reference
-                   (:seon.schema/error data)))
-            (is (= schema-key (:seon.schema/identity data)))
+                refused (schema/call-with-registration-delta
+                         delta (fn [] (schema/register! schema-key definition)))]
+            (is (= :seon.schema/cyclic-reference (:seon.error/member refused))
+                "the admission gate returns a legible refusal as a value")
+            (is (= schema-key (:seon.schema/registration-refused refused)))
+            (is (= schema-key (:seon.schema/identity refused)))
             (is (= [schema-key schema-key]
-                   (:seon.schema/cycle-path data)))
-            (is (= schema-key (:seon.schema/identity data)))
-            (is (str/includes? (ex-message failure)
-                               (pr-str [schema-key schema-key]))
+                   (:seon.schema/cycle-path refused))
                 "the refusal names the complete cycle")
             (is (nil? (schema/registration-delta-form delta schema-key))
                 "a refused declaration never reaches the delta"))))))
@@ -1972,3 +1965,24 @@
            (is (= renderer (get-in refusal [:seon.error/data :seon.render/function]))
                "the renderer with no declared contract is named by the admission refusal")
            (is (= basis (:max-tx @connection)) "nothing was written")))))))
+
+(deftest a-refused-registration-is-an-error-value-never-a-throw
+  ;; Owner 2026-09-28, AGENTS.md "Nothing crashes": register! is called only by
+  ;; agents; each population refusal answers as its declared error alternative.
+  (let [delta (registration-delta)
+        register (fn [k v] (schema/call-with-registration-delta delta #(schema/register! k v)))]
+    (doseq [[k v member] [[:seon.schema-test/nilable [:maybe :int] :seon.schema/nilable-value-schema]
+                          [:seon.schema-test/unreadable [:fn (fn [x] x)] :seon.schema/unreadable-form]
+                          [:seon.schema-test/unresolved [:map [:seon.schema-test/member :seon.schema-test/nowhere]]
+                           :seon.schema.edn/unresolved-reference]]]
+      (testing (str "a refused " (name k) " registration")
+        (let [refused (register k v)]
+          (is (= member (:seon.error/member refused)) "the refused kind is its member")
+          (is (= k (:seon.schema/registration-refused refused)) "it names the refused key")
+          (is (= 'seon.schema/register! (:seon.error/operation refused)))
+          (is (seq (:seon.error/chain refused)) "the population's refusal rides as the cause chain")
+          (is (nil? (schema/registration-delta-form delta k)) "nothing was admitted"))))
+    (testing "an admissible registration still answers its registration"
+      (is (= {:seon.schema/key :seon.schema-test/admitted :seon.schema/definition :int}
+             (select-keys (register :seon.schema-test/admitted :int)
+                          [:seon.schema/key :seon.schema/definition]))))))

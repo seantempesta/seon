@@ -277,11 +277,14 @@
     'ExceptionInfo 'clojure.lang.ExceptionInfo :default})
 
 (defn- rethrows?
-  "True when `body` (a catch clause's forms) throws its own `binding` again."
+  "True when `body` (a catch clause's forms) ends by throwing its own
+  `bound` again: nothing is converted. A rethrow inside a conditional
+  converts the declared cases and resurfaces the rest whole, the law's
+  \"catch only declared cases or resurface the whole cause\"."
   {:malli/schema [:=> [:cat :symbol [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] :boolean]}
   [bound body]
-  (boolean (some #(and (seq? %) (= 'throw (first %)) (= bound (second %)))
-                 (tree-seq coll? seq body))))
+  (let [tail (last body)]
+    (boolean (and (seq? tail) (= 'throw (first tail)) (= bound (second tail))))))
 
 (defn- form-sites
   "Every node of `form` that `site?` selects, each as its row and column and
@@ -848,6 +851,7 @@
 (defn rethrows-inner {:malli/schema [:=> [:cat :int] :int]} [x] (try (throw (ex-info \"inner\" {})) (catch Throwable t (throw t))))
 (defn wraps {:malli/schema [:=> [:cat :int] :int]} [x] (try (inc x) (catch Exception e (throw (ex-info \"wrapped\" {} e)))))
 (defn- helper {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"helper\" {})))
+(defn declared-cases {:malli/schema [:=> [:cat :int] :int]} [x] (try (throw (ex-info \"inner\" {:kind :k})) (catch clojure.lang.ExceptionInfo e (if (:kind (ex-data e)) 0 (throw e)))))
 (defn caller {:malli/schema [:=> [:cat :int] :int]} [x] (try (helper x) (catch Throwable _ 0)))
 (defn- leaky-helper {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"leaky\" {})))
 (defn leaky-caller {:malli/schema [:=> [:cat :int] :int]} [x] (leaky-helper x))
@@ -867,6 +871,7 @@
     (is (not (refused 'seon.probe/legacy)) "an unchanged function is not judged")
     (is (not (refused 'seon.probe/declares)) "an error alternative in the output union declares the failure")
     (is (not (refused 'seon.probe/refuse-call)) "a transaction function's throw is the writer's declared refusal")
+    (is (not (refused 'seon.probe/declared-cases)) "a catch that converts declared cases and resurfaces the rest converts")
     (is (every? #(str/includes? (:message %) ":seon.error/base")
                 (filter #(= :uncontained-throw (:type %)) findings))
         "each finding says how to declare the failure")

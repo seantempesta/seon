@@ -1707,6 +1707,30 @@
       (if (= :enum (m/type node)) (vec (m/children node)) []))
     []))
 
+(declare register-candidate!)
+
+(defn- registration-refusal
+  "The error value a refused registration of `k` as `v` answers with: the
+  population's own refusal (an `ex-info` naming its kind under
+  `:seon.schema/error` or `:seon.schema.edn/error`) with its whole cause
+  chain, the kind as its member and the authored form as the offending value."
+  {:malli/schema [:=> [:cat ::registry-key [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The refused authored form can be any value, a function object included.", :gen/elements [nil 0 :k [] {}]}] :seon.error/throwable]
+                  ::registration-refused-error]}
+  [k v refused]
+  (let [data (ex-data refused)]
+    (refusal/diagnostic
+     ;; the producer's fields (its kind, cycle path, missing reference...);
+     ;; the key and form are named once, below, never as an identity
+     (merge (apply dissoc data :seon.schema/key :seon.schema/definition
+                   (remove qualified-keyword? (keys data)))
+            {:seon.error/at (java.util.Date.) :seon.error/layer :seon.schema/registration
+             :seon.error/operation 'seon.schema/register!
+             :seon.error/message (ex-message refused)
+             :seon.error/member (or (:seon.schema/error data) (:seon.schema.edn/error data))
+             :seon.error/offending v
+             :seon.schema/registration-refused k
+             :seon.error/throwable refused}))))
+
 (defn register!
   "Define a new attribute so facts using it can be saved and queried.
 
@@ -1726,6 +1750,11 @@
    render pair shows the form it replaces, that check, and the schemas and
    contracts naming `k` (`seon.render.schema/usage`).
 
+   A registration the population refuses (an unreadable or non-round-tripping
+   form, a nilable value schema, an admission refusal) is RETURNED as a
+   `:seon.schema/registration-refused-error` naming the refused kind as its
+   member and the authored form as the offending value; nothing is admitted.
+
    Map render metadata stays in the authored form. Database storability and
    stable identity derive from installed attribute declarations; no map-level
    entity-kind marker is required.
@@ -1738,7 +1767,20 @@
                             [:seon.eval/id ...] ...])"
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]
                          [::definition ::definition]]
-                  ::registration]}
+                  [:or ::registration ::registration-refused-error]]}
+  [k v]
+  (try
+    (register-candidate! k v)
+    ;; Declared cases: the population's refusals, each naming its kind.
+    (catch clojure.lang.ExceptionInfo refused
+      (if (let [data (ex-data refused)] (or (:seon.schema/error data) (:seon.schema.edn/error data)))
+        (registration-refusal k v refused)
+        (throw refused)))))
+
+(defn- register-candidate!
+  "The body of [[register!]]: admit `v` as `k`, or throw the population's
+  refusal, which [[register!]] returns as its error value."
+  {:malli/schema [:=> [:cat ::registry-key ::definition] ::registration]}
   [k v]
   (internal/assert-non-nilable-value-schema! (candidate-forms) k (structural-schema v))
   (let [encoded (pr-str v)

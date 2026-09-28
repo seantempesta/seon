@@ -168,17 +168,17 @@
          ::admission/registry {:existing/alpha :int}}))))
 
 (defn- register-verdict
-  "`:admitted`, or the declared refusal kind, from `schema/register!` staged in
-   an isolated delta over `projection` with `source` admission."
+  "`:admitted`, or the refused kind `schema/register!` answers (its error
+   value's member), staged in an isolated delta over `projection` with
+   `source` admission."
   [projection source schema-key form]
-  (try
-    (schema/call-with-registration-delta
-     (schema/begin-registration-delta projection)
-     {:seon.schema.admission/source source}
-     #(schema/register! schema-key form))
-    :admitted
-    (catch clojure.lang.ExceptionInfo failure
-      (or (:seon.schema/error (ex-data failure)) :refused))))
+  (let [registered (schema/call-with-registration-delta
+                    (schema/begin-registration-delta projection)
+                    {:seon.schema.admission/source source}
+                    #(schema/register! schema-key form))]
+    (if (:seon.error/at registered)
+      (:seon.error/member registered)
+      :admitted)))
 
 (defn- hook-verdict
   "`:admitted`, or the first blocking finding's declared refusal kind."

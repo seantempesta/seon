@@ -222,4 +222,12 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.error.projection/entity}
  :seon.db/ref]
+
+ :seon.schema/registration-refused
+ [:keyword {:description "The schema key whose registration the population refused (seon.schema/register!)."}]
+
+ :seon.schema/registration-refused-error
+ [:and {:description "What seon.schema/register! answers when the schema population refuses the registration: the refused kind as :seon.error/member (e.g. :seon.schema/nilable-value-schema, :seon.schema.edn/unresolved-reference), the refused key as :seon.schema/registration-refused, the authored form as :seon.error/offending and the population's refusal as the cause chain. Nothing was admitted."}
+  :seon.error/base
+  [:map [:seon.error/member :seon.error/member] [:seon.schema/registration-refused :seon.schema/registration-refused]]]
 }
