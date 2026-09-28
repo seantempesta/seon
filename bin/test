@@ -40,16 +40,11 @@ trap stop_host EXIT HUP INT TERM
 
 started=$(date +%s)
 echo "bin/test --platform: booting the isolated host under $root" >&2
-# A nuke builds the root's program from committed HEAD. When HEAD does not
-# reach readiness it boots an older program and says so: that host would test
-# another program, so the request refuses it.
+# A nuke builds the root's program from committed HEAD; a HEAD that does not
+# reach readiness fails the nuke and leaves no JVM.
 if ! bin/seon --root "$root" nuke --force >"$root/boot.log" 2>&1; then
   echo "bin/test --platform: the isolated host did not boot; evidence kept in $root/boot.log" >&2
   tail -n 20 "$root/boot.log" >&2
-  exit 1
-fi
-if grep -q ':seon.operator/fallback-from' "$root/boot.log"; then
-  echo "bin/test --platform: HEAD did not boot; the host fell back to an older program; evidence kept in $root/boot.log" >&2
   exit 1
 fi
 booted=$(date +%s)

@@ -780,10 +780,9 @@
 ;;; working-tree hunk can break it. The program is a `git archive` of HEAD,
 ;;; content-keyed by commit under <root>/data/source/<sha>; each gitlink is an
 ;;; archive of its pin, never the moving checkout. The replacement JVM is launched with that directory as
-;;; its classpath source. A failed attempt's JVM is terminated by exact identity,
-;;; so no JVM survives with a deleted store; one retry covers a transient loss
-;;; (a racing start winning the replacement gap); a second failure returns both
-;;; complete causes and leaves no JVM.
+;;; its classpath source. A failed boot's JVM is terminated by exact identity,
+;;; so no JVM survives with a deleted store; the failure returns its complete
+;;; cause.
 
 (defn- command!
   "Run one argv to exit within `bound` ms; a non-zero exit or expiry refuses.
@@ -960,9 +959,6 @@
   "One destroy-and-rebuild from `source`; any failure leaves no JVM of this root."
   [request source]
   (let [root (:seon.operator/managed-root request)
-        began (System/nanoTime)
-        stopped (down! request (selected-processes root))
-        down-ms (elapsed-ms began)
         launched (System/nanoTime)
         outcome (try
                   (launch-child! (assoc request :seon.operator/command :start
@@ -974,10 +970,10 @@
         value (:seon.operator/value outcome)
         missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
         ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
-        phases {:seon.operator/down-ms down-ms :seon.operator/launch-ms (elapsed-ms launched)
+        phases {:seon.operator/launch-ms (elapsed-ms launched)
                 :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])}]
     (if ready?
-      (assoc value :seon.operator/phases phases :seon.operator/stopped-processes (:seon.operator/stopped-processes stopped))
+      (assoc value :seon.operator/phases phases)
       ;; Partial boot keeps its REPL for an ordinary start; a nuke never leaves
       ;; a JVM beside a deleted store, so every process of this root ends.
       (let [terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))]
@@ -1050,94 +1046,33 @@
      :seon.operator/deleted (into deleted advertisements)
      :seon.operator/kept-shared (vec (sort kept-shared))}))
 
-(def ^:private nuke-fallback-boots
-  "Distinct older programs a nuke boots after HEAD fails twice (plan §7, B)."
-  4)
-
-(defn- same-program?
-  "Whether two commits' trees agree outside documentation."
-  [repository a b]
-  (let [child (.start (doto (ProcessBuilder. ^java.util.List
-                                             ["git" "diff" "--quiet" a b "--" "." ":(exclude)docs"])
-                        (.directory (io/file repository))
-                        (.redirectErrorStream true)))]
-    (when-not (.waitFor child 30000 TimeUnit/MILLISECONDS)
-      (reap-child! child 30000 {:seon.operator/commits [a b]})
-      (fail! "git diff did not exit within its bound." {:seon.operator/commits [a b]}))
-    (case (.exitValue child)
-      0 true
-      1 false
-      (fail! "git diff failed." {:seon.operator/commits [a b] :seon.operator/exit (.exitValue child)
-                                 :seon.operator/output (slurp (.getInputStream child))}))))
-
-(defn- program-candidates
-  "Newest first-parent commits from `revision`, one per distinct program."
-  [revision]
-  (let [repository (committed-repository)
-        shas (str/split-lines
-              (command! ["git" "rev-list" "--first-parent" "-n" "64"
-                         (str revision "^{commit}")] repository 30000))]
-    (reduce (fn [kept sha]
-              (cond
-                (<= (inc nuke-fallback-boots) (count kept)) (reduced kept)
-                (and (seq kept) (same-program? repository (peek kept) sha)) kept
-                :else (conj kept sha)))
-            [] shas)))
-
 (defn nuke!
   "Delete the store and every derived cache, then rebuild `default` from
-  committed inputs. Never leaves a JVM with a deleted store and never stops
-  at stale state: HEAD twice, then the newest older distinct programs, each
-  terminated when it does not reach readiness. HEAD's failure is reported first."
+  committed HEAD and report. A HEAD that does not reach readiness leaves no
+  JVM of this root and answers its whole failure."
   [request]
   (let [began (System/nanoTime)
         root (:seon.operator/managed-root request)
-        ;; Committed inputs are resolved before anything is stopped or deleted.
-        candidates (program-candidates "HEAD")
-        began-down (System/nanoTime)
+        ;; Committed input is resolved before anything is stopped or deleted.
+        sha (str/trim (command! ["git" "rev-parse" "--verify" "HEAD^{commit}"] (committed-repository) 30000))
         stopped (down! request (selected-processes root))
-        down-ms (elapsed-ms began-down)
+        down-ms (elapsed-ms began)
         wiped (wipe-derived-state! root)
-        wipe-ms (- (elapsed-ms began-down) down-ms)
-        plan (into [(first candidates) (first candidates)] (rest candidates))
-        attempts (loop [[sha & more] plan attempts []]
-                   (let [started (System/nanoTime)
-                         source (committed-source! root sha)
-                         source-ms (elapsed-ms started)
-                         result (assoc (nuke-attempt! request (:seon.operator/source-root source))
-                                       :seon.operator/source source
-                                       :seon.operator/source-ms source-ms)
-                         attempts (conj attempts result)]
-                     (if (and (:seon.operator/failed-attempt result) (seq more))
-                       (recur more attempts)
-                       attempts)))
-        final (peek attempts)
-        failures (into [] (keep (fn [attempt]
-                                  (when-let [failed (:seon.operator/failed-attempt attempt)]
-                                    (assoc failed :seon.operator/source (:seon.operator/source attempt)))))
-                       attempts)
+        wipe-ms (- (elapsed-ms began) down-ms)
+        started (System/nanoTime)
+        source (committed-source! root sha)
+        result (assoc (nuke-attempt! request (:seon.operator/source-root source))
+                      :seon.operator/source source :seon.operator/source-ms (elapsed-ms started))
         report {:seon.operator/stopped-processes (:seon.operator/stopped-processes stopped)
                 :seon.operator/wiped wiped
                 :seon.operator/phases {:seon.operator/down-ms down-ms :seon.operator/wipe-ms wipe-ms}
-                :seon.operator/candidates candidates
-                :seon.operator/total-ms (elapsed-ms began)}
-        head (first candidates)
-        ready-sha (get-in final [:seon.operator/source :seon.source/git-sha])]
-    (cond
-      (:seon.operator/failed-attempt final)
-      (assoc (diagnostic (str "Nuclear rebuild failed on HEAD " head " and every older distinct program tried; no JVM of this root remains.")
-                         (merge report {:seon.operator/failed-attempts failures}) :client-failed)
+                :seon.operator/total-ms (elapsed-ms began)}]
+    (if-let [failed (:seon.operator/failed-attempt result)]
+      (assoc (diagnostic (str "Nuclear rebuild failed on HEAD " sha "; no JVM of this root remains.")
+                         (merge report failed {:seon.operator/source source}) :client-failed)
              :seon.operator/process-exit? true)
-      (= head ready-sha)
-      (cond-> (merge (dissoc final :seon.operator/phases) report
-                     {:seon.operator/attempt-phases (:seon.operator/phases final)})
-        (seq failures) (assoc :seon.operator/failed-attempts failures))
-      :else
-      (merge (dissoc final :seon.operator/phases) report
-             {:seon.operator/head-failure (first failures)
-              :seon.operator/fallback-from head
-              :seon.operator/failed-attempts failures
-              :seon.operator/attempt-phases (:seon.operator/phases final)}))))
+      (merge (dissoc result :seon.operator/phases) report
+             {:seon.operator/attempt-phases (:seon.operator/phases result)}))))
 
 ;;; Move to HEAD (owner 2026-09-23: "isn't a nuke more disruptive?" / "Then
 ;;; load head. Don't keep a broken system running."). The nuke's committed
@@ -1650,8 +1585,7 @@
 
 (defn failure-cause
   "The first message beneath a failed result's own: the failed child's root
-  cause (`Throwable->map`'s `:cause`), its message, a nuke's first failed
-  attempt's, its adoption's, then the last link of the result's own cause chain."
+  cause (`Throwable->map`'s `:cause`), its message, its adoption's, then the last link of the result's own cause chain."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [result]
   (let [evidence (:seon.error/offending result)
@@ -1659,8 +1593,6 @@
     (some #(when (and (string? %) (not= % (:seon.error/message result))) %)
           [(get-in child [:seon.error/cause :cause])
            (:seon.error/message child)
-           ;; a nuke's: its first failed attempt's child
-           (get-in evidence [:seon.operator/failed-attempts 0 :seon.operator/value :seon.error/message])
            (get-in evidence [:seon.operator/adoption :seon.error/message])
            ;; the primary chain's root: suppressed links (flat, naming their
            ;; relation) follow it
@@ -1668,17 +1600,15 @@
                                               (:seon.error/chain result))))])))
 
 (defn exit-code
-  "0 success; 3 ready on an older program because HEAD failed (nuke); 4 failed
-  and the previous program runs again; 5 failed and no JVM of this root runs
+  "0 success; 4 failed and the previous program runs again; 5 failed and no JVM of this root runs
   (observed: `live?`); 1 any other failure."
-  {:malli/schema [:=> [:cat :map :boolean] [:enum 0 1 3 4 5]]}
+  {:malli/schema [:=> [:cat :map :boolean] [:enum 0 1 4 5]]}
   [result live?]
   (cond
     (:seon.error/message result)
     (cond (true? (get-in result [:seon.error/offending :seon.operator/resumed :seon.operator/ready?])) 4
           (not live?) 5
           :else 1)
-    (:seon.operator/fallback-from result) 3
     :else 0))
 
 (defn headline
@@ -1699,7 +1629,7 @@
                 (when-let [cause (failure-cause result)] (str " CAUSE: " (first-line cause)))
                 (when missing (str " MISSING: " (pr-str missing)))
                 (when diagnostic-path (str " DIAGNOSTIC: " diagnostic-path)))
-           (str (if (= 3 code) "READY ON AN OLDER PROGRAM (exit 3)" "OK")
+           (str "OK"
                 (some->> (get-in result [:seon.operator/source :seon.source/git-sha]) (str " "))
                 (some->> (get-in result [:seon.operator/phases :seon.operator/total-ms]) (str " total-ms "))
                 (some->> (get-in result [:seon.operator/phases :seon.operator/class-fill-ms]) (str " class-fill-ms "))

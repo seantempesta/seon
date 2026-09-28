@@ -54,7 +54,6 @@
                :seon.dev-cache/dependency-classes {:seon.dev-cache/status :miss
                                                    :seon.dev-cache/reason :no-matching-cache}}]
     (is (= 0 (operator/exit-code ready true)))
-    (is (= 3 (operator/exit-code (assoc ready :seon.operator/fallback-from "def") true)))
     (is (= "SEON start --head OK abc total-ms 12000 class-fill-ms 111000 ready-ms 9000 classes miss no-matching-cache"
            (operator/headline move-request ready nil 0))
         "a class-cache fill and a miss are visible on the outcome line")))
