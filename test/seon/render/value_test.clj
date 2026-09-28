@@ -530,16 +530,16 @@
   (let [projection (value/prepare (unit {:reference (atom {:private/value 42})}))
         tree (:seon.render.value/tree projection)
         [_ reference] (first (:seon.print/entries tree))]
-    (is (= #{:seon.print/face :seon.print/class :seon.render.data/path}
+    (is (= #{:seon.print/face :seon.print/class :seon.print/rep :seon.render.data/path}
            (set (keys reference)))
-        "an opaque reference carries no value or representation field")
+        "an opaque reference carries its class and identity, never its value")
     (is (= :seon.print/object (:seon.print/face reference)))
     (is (= "clojure.lang.Atom" (:seon.print/class reference)))
-    (is (= "{:reference #object[clojure.lang.Atom]}"
-           (value/render-ai-data projection)))
-    (is (= "#object[clojure.lang.Atom]"
-           (value/render-ai (unit (atom {:private/value 42}))))
-        "a live reference is named even when no serialization exists")))
+    (is (re-matches #"\{:reference #object\[clojure.lang.Atom 0x[0-9a-f]+\]\}"
+                    (value/render-ai-data projection)))
+    (is (re-matches #"#object\[clojure.lang.Atom 0x[0-9a-f]+\]"
+                    (value/render-ai (unit (atom {:private/value 42}))))
+        "a live reference is named by class and identity even when no serialization exists")))
 
 (deftest a-lazy-result-that-throws-while-printing-is-shown-with-its-failure
   ;; The printer realizes a lazy result as far as it prints (root, dogfood
@@ -965,12 +965,15 @@
 
 (deftest a-value-s-own-inline-function-renders-it
   ;; The master override's third form (AGENTS render law): an inline function
-  ;; is invoked under the same arm as a named producer, at the root or nested.
+  ;; is invoked under the same arm as a named producer, at the root only. The
+  ;; value printer never re-dispatches (AGENTS.md, renders return data): a
+  ;; nested value prints as the data it is.
   (support/with-database
    (fn [connection]
      (let [text #(:seon.render.value/text (value/prepare (render-request connection %)))]
        (is (= "hello 1" (text {:seon.render/ai (fn [unit] (str "hello " (:x unit))) :x 1})))
-       (is (= "{:a \"inner\"}" (text {:a {:seon.render/ai (fn [_] "inner")}})))))))
+       (is (str/starts-with? (text {:a {:seon.render/ai (fn [_] "inner")}}) "{:a {:seon.render/ai #object[")
+           (text {:a {:seon.render/ai (fn [_] "inner")}}))))))
 
 (deftest ^{:seon/tasks #{"135d92ea1308"}} a-failing-renderer-never-replaces-the-value
   ;; AGENTS.md, the REPL path is total: a renderer that throws or refuses
@@ -979,29 +982,29 @@
   (support/with-database
    (fn [connection]
      (let [boom (fn [_] (throw (ex-info "boom" {})))
-           prepared (value/prepare (render-request connection
-                                                   [{:seon.render/ai boom :a 1}
-                                                    {:b {:seon.render/ai boom :c 2}}]))
+           prepared (value/prepare (render-request connection {:seon.render/ai boom :a 1 :b {:c 2}}))
            shown (:seon.render.value/text prepared)
            {diagnostics true value-lines false}
            (group-by #(str/starts-with? % ";; renderer failed") (str/split-lines shown))
            ;; Where the value breaks depends on its compiled fn class name's
            ;; width; the value printed as data is what matters, not its layout.
-           value-text (str/replace (str/join " " value-lines) #"\s+" " ")]
-       (is (str/starts-with? value-text "[{:seon.render/ai #object[") shown)
-       (is (str/includes? value-text ":a 1}") shown)
-       (is (str/includes? value-text ":c 2}}]") shown)
+           value-text (str/replace (str/join " " value-lines) #"\s+" " ")
+           nested (value/prepare (render-request connection [{:seon.render/ai boom :a 1}]))]
+       (is (str/includes? value-text ":a 1") shown)
+       (is (str/includes? value-text ":b {:c 2}") shown)
+       (is (str/includes? value-text ":seon.render/ai #object[") shown)
        (is (= 1 (count diagnostics)) shown)
-       (is (str/starts-with? (first diagnostics) ";; renderer failed at [0]") shown)
-       (is (str/ends-with? shown "(and 1 further renderer failures)") shown)
-       (is (= 2 (count (:seon.render.value/diagnostics prepared))))))))
+       (is (str/starts-with? (first diagnostics) ";; renderer failed at []") shown)
+       (is (= 1 (count (:seon.render.value/diagnostics prepared))))
+       (is (nil? (:seon.render.value/diagnostics nested))
+           "a nested render is never invoked, so it cannot fail")))))
 
 (deftest selection-is-one-rule-at-every-depth
   ;; Render-specificity audit slice 2 (owner 2026-09-26: "No specific 'if
-  ;; s/error/' shit"): the floor asks the one `render/selection` for every
-  ;; map it reaches. A producer's declared schema selects its pair at the root
-  ;; and nested in a vector or map alike; an error nobody declared is data,
-  ;; printed whole by the floor, and its members select nothing.
+  ;; s/error/' shit"): the value printer asks the one `render/selection` for
+  ;; the root only and never re-dispatches (AGENTS.md, renders return data): a
+  ;; nested error prints as the data it is, its message among its short
+  ;; members; an error nobody declared is data too.
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)

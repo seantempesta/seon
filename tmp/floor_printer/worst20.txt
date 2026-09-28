@@ -1,0 +1,60 @@
+schema map                 tokens  959 ->  929  keys [32 2548]  -> [32 2548]  badness   2748 ->   2746
+  before: {:seon.error.occurrence/id / #:db{:ident :seon.error.occurrence/id, / :valueType :db.type/string, / :cardinality :db.cardinality/one,
+  after:  {:seon.error.occurrence/id / #:db{:ident :seon.error.occurrence/id, / :valueType :db.type/string, / …2 (get-in result/e0a1b2c3d4e5f [:seon.error.occurrence/id])},
+function 3936              tokens  991 ->  951  keys [8 21]     -> [21 21]    badness    570 ->     48
+  before: {:seon.fn/sym seon.error/prepare, / :db/id 3936, / :seon.fn/arglists / "([{:seon.error/keys [source at process basis-t declared-schema] evidence-bytes :seon.config.error/max-evidence-bytes projection :seon.schema/pro"…+169 (subs (get-in result/e0a1b2c3d4e5f [:
+  after:  {:seon.fn/sym seon.error/prepare, / :db/id 3936, / :seon.fn/defined-by clojure.core/defn, / :seon.fn/file [:seon.fn.file/relative-path "src/seon/error.clj"],
+function 2010              tokens  985 ->  953  keys [10 20]    -> [20 20]    badness    449 ->     48
+  before: {:seon.fn/sym my.agent/branch, / :db/id 2010, / :seon.fn/arglists / "([{agent-id :seon.agent/id {connection :seon.db/connection roster :seon.agent/routing} :my.program/context}])",
+  after:  {:seon.fn/sym my.agent/branch, / :db/id 2010, / :seon.fn/defined-by clojure.core/defn, / :seon.fn/file [:seon.fn.file/relative-path "src/my/agent.clj"],
+function 4652              tokens  985 ->  963  keys [12 21]    -> [21 21]    badness    409 ->     48
+  before: {:seon.fn/sym seon.maintenance/collect!, / :db/id 4652, / :seon.fn/arglists "([{root :seon.operator/managed-root :as request}])", / :seon.fn/arities
+  after:  {:seon.fn/sym seon.maintenance/collect!, / :db/id 4652, / :seon.fn/defined-by clojure.core/defn, / :seon.fn/file [:seon.fn.file/relative-path "src/seon/maintenance.clj"],
+evaluation 51689           tokens  951 ->  946  keys [11 17]    -> [17 17]    badness    288 ->     47
+  before: {:seon.cluster.eval/id "003a6d5d1f38", / :db/id 51689, / :seon.cluster.eval/at #inst "2026-09-27T01:43:27.993Z", / :seon.cluster.eval/author :system,
+  after:  {:seon.cluster.eval/id "003a6d5d1f38", / :db/id 51689, / :seon.cluster.eval/at #inst "2026-09-27T01:43:27.993Z", / :seon.cluster.eval/author :system,
+evaluation 54381           tokens  867 ->  903  keys [7 10]     -> [10 10]    badness    223 ->     45
+  before: {:seon.db/invalid-read true, / :seon.db/refused-read-operation seon.db/pull, / :seon.error/at #inst "2026-09-28T01:53:25.552Z", / :seon.error/chain
+  after:  {:seon.db/invalid-read true, / :seon.db/refused-read-operation seon.db/pull, / :seon.error/at #inst "2026-09-28T01:53:25.552Z", / :seon.error/exception-class clojure.lang.ExceptionInfo,
+evaluation 47054           tokens  866 ->  903  keys [7 10]     -> [10 10]    badness    223 ->     45
+  before: {:seon.db/invalid-read true, / :seon.db/refused-read-operation seon.db/pull, / :seon.error/at #inst "2026-09-28T01:53:25.373Z", / :seon.error/chain
+  after:  {:seon.db/invalid-read true, / :seon.db/refused-read-operation seon.db/pull, / :seon.error/at #inst "2026-09-28T01:53:25.373Z", / :seon.error/exception-class clojure.lang.ExceptionInfo,
+evaluation 40825           tokens  866 ->  903  keys [7 10]     -> [10 10]    badness    223 ->     45
+  before: {:seon.db/invalid-read true, / :seon.db/refused-read-operation seon.db/pull, / :seon.error/at #inst "2026-09-28T01:53:25.575Z", / :seon.error/chain
+  after:  {:seon.db/invalid-read true, / :seon.db/refused-read-operation seon.db/pull, / :seon.error/at #inst "2026-09-28T01:53:25.575Z", / :seon.error/exception-class clojure.lang.ExceptionInfo,
+test run 49183             tokens  997 ->  992  keys [13 17]    -> [17 17]    badness    210 ->     50
+  before: {:seon.test.run/id "5181546d401a", / :db/id 49183, / :seon.test.run/at #inst "2026-09-27T00:46:07.497Z", / :seon.test.run/basis-t 536874935,
+  after:  {:seon.test.run/id "5181546d401a", / :db/id 49183, / :seon.test.run/at #inst "2026-09-27T00:46:07.497Z", / :seon.test.run/basis-t 536874935,
+test run 94434             tokens  997 ->  968  keys [11 15]    -> [15 15]    badness    210 ->     48
+  before: {:seon.test.run/id "6a82967197a2", / :db/id 94434, / :seon.test.run/at #inst "2026-09-28T00:43:20.372Z", / :seon.test.run/basis-t 536886627,
+  after:  {:seon.test.run/id "6a82967197a2", / :db/id 94434, / :seon.test.run/at #inst "2026-09-28T00:43:20.372Z", / :seon.test.run/basis-t 536886627,
+test run 87858             tokens  995 ->  970  keys [11 15]    -> [15 15]    badness    210 ->     49
+  before: {:seon.test.run/id "b802ad676584", / :db/id 87858, / :seon.test.run/at #inst "2026-09-27T23:35:40.256Z", / :seon.test.run/basis-t 536884778,
+  after:  {:seon.test.run/id "b802ad676584", / :db/id 87858, / :seon.test.run/at #inst "2026-09-27T23:35:40.256Z", / :seon.test.run/basis-t 536884778,
+test run 46466             tokens  994 ->  962  keys [12 16]    -> [16 16]    badness    210 ->     48
+  before: {:seon.test.run/id "ce28250aee2d", / :db/id 46466, / :seon.test.run/at #inst "2026-09-27T00:07:42.305Z", / :seon.test.run/basis-t 536873889,
+  after:  {:seon.test.run/id "ce28250aee2d", / :db/id 46466, / :seon.test.run/at #inst "2026-09-27T00:07:42.305Z", / :seon.test.run/basis-t 536873889,
+test run 58478             tokens  993 ->  957  keys [11 15]    -> [15 15]    badness    210 ->     48
+  before: {:seon.test.run/id "e690202d4ce1", / :db/id 58478, / :seon.test.run/at #inst "2026-09-27T05:17:55.361Z", / :seon.test.run/basis-t 536879108,
+  after:  {:seon.test.run/id "e690202d4ce1", / :db/id 58478, / :seon.test.run/at #inst "2026-09-27T05:17:55.361Z", / :seon.test.run/basis-t 536879108,
+test run 55238             tokens  990 ->  963  keys [12 16]    -> [16 16]    badness    210 ->     48
+  before: {:seon.test.run/id "85671bf4c762", / :db/id 55238, / :seon.test.run/at #inst "2026-09-27T02:44:55.211Z", / :seon.test.run/basis-t 536876958,
+  after:  {:seon.test.run/id "85671bf4c762", / :db/id 55238, / :seon.test.run/at #inst "2026-09-27T02:44:55.211Z", / :seon.test.run/basis-t 536876958,
+test run 46686             tokens  988 ->  969  keys [12 16]    -> [16 16]    badness    209 ->     48
+  before: {:seon.test.run/id "1a418c6f921b", / :db/id 46686, / :seon.test.run/at #inst "2026-09-27T00:12:00.962Z", / :seon.test.run/basis-t 536874084,
+  after:  {:seon.test.run/id "1a418c6f921b", / :db/id 46686, / :seon.test.run/at #inst "2026-09-27T00:12:00.962Z", / :seon.test.run/basis-t 536874084,
+test run 45314             tokens  986 ->  962  keys [10 14]    -> [14 14]    badness    209 ->     48
+  before: {:seon.test.run/id "00430a846030", / :db/id 45314, / :seon.test.run/at #inst "2026-09-26T23:44:55.714Z", / :seon.test.run/basis-t 536873536,
+  after:  {:seon.test.run/id "00430a846030", / :db/id 45314, / :seon.test.run/at #inst "2026-09-26T23:44:55.714Z", / :seon.test.run/basis-t 536873536,
+evaluation 59703           tokens  938 ->  948  keys [13 17]    -> [17 17]    badness    207 ->     47
+  before: {:seon.cluster.eval/id "94b850a4178b", / :db/id 59703, / :seon.cluster.eval/at #inst "2026-09-27T16:17:09.667Z", / :seon.cluster.eval/author :system,
+  after:  {:seon.cluster.eval/id "94b850a4178b", / :db/id 59703, / :seon.cluster.eval/at #inst "2026-09-27T16:17:09.667Z", / :seon.cluster.eval/author :system,
+evaluation 47048           tokens  911 ->  941  keys [10 14]    -> [14 14]    badness    206 ->     47
+  before: {:seon.cluster.eval/id "c08869bd51be", / :db/id 47048, / :seon.cluster.eval/at #inst "2026-09-27T00:16:34.414Z", / :seon.cluster.eval/author :system,
+  after:  {:seon.cluster.eval/id "c08869bd51be", / :db/id 47048, / :seon.cluster.eval/at #inst "2026-09-27T00:16:34.414Z", / :seon.cluster.eval/author :system,
+evaluation 40819           tokens  889 ->  957  keys [10 14]    -> [14 14]    badness    204 ->     48
+  before: {:seon.cluster.eval/id "19094d80854e", / :db/id 40819, / :seon.cluster.eval/at #inst "2026-09-26T22:28:52.833Z", / :seon.cluster.eval/author :system,
+  after:  {:seon.cluster.eval/id "19094d80854e", / :db/id 40819, / :seon.cluster.eval/at #inst "2026-09-26T22:28:52.833Z", / :seon.cluster.eval/author :system,
+function 3329              tokens  980 ->  985  keys [18 21]    -> [21 21]    badness    169 ->     49
+  before: {:seon.fn/sym seon.contracts-compile-test/predicate-bindings, / :db/id 3329, / :seon.fn/arglists "([root definitions])", / :seon.fn/arities
+  after:  {:seon.fn/sym seon.contracts-compile-test/predicate-bindings, / :db/id 3329, / :seon.fn/arglists "([root definitions])", / :seon.fn/defined-by clojure.core/defn-,

@@ -1,14 +1,45 @@
 (ns seon.render.value
-  "One structural value renderer: profile-bounded AI and complete HTML.
+  "The value printer: the last stage every shown value passes through, render
+  output included, as AI text and as HTML from one selection.
+
+  ## Rules
+
+  General rules only; a value they print badly needs a render function, never
+  a rule here.
+
+  1. One budget. The profile's token budget bounds the laid-out text, render
+     output included; nothing else clips.
+  2. Breadth before depth. Every member of one level is admitted before any
+     member of the next, so a map shows all its keys before a value expands.
+  3. Collapsed, then expanded. A collection not yet expanded shows its
+     brackets, its count and a dig form; a nested entity shows its identity
+     first.
+  4. Identity first, short before long. In a keyword-keyed map of at most 64
+     keys, installed `:db.unique/identity` attributes lead, then scalars and
+     references, then long strings, then collections.
+  5. Long strings show their head. A string grows by doubling chunks, one per
+     level, and a cut shows the characters left and the `subs` form.
+  6. Every cut says what it cut: the count or characters omitted, its path,
+     the bound that cut it, and a dig form on the result handle
+     (`(drop 32 (get-in result/e… [:k]))`) that reads the rest.
+  7. Laziness within budget. A lazy or infinite seq is realized only as far
+     as it prints; an unknown tail is `…?`.
+  8. Host objects are class and identity (`#object[Class 0x…]`), never their
+     contents: live, not data a later evaluation reads back.
+  9. Cycles and depth are safe: host objects are opaque, the walk uses an
+     explicit stack, and `:max-depth` bounds it.
+  10. No re-dispatch. The root is offered to its render once; every value
+      beneath prints as data. A quoted form prints as `'x`, as typed.
 
   ## Recommendations
 
   - When the projection, profile or admission may be what broke, print with
-    [[bounded-text]] or [[floor]]: they read no database and no config."
+    `seon.print.value`: it reads no database and no config."
   (:require [clojure.string :as str]
             [seon.id :as id]
             [seon.db :as db]
             [seon.print :as print]
+            [seon.print.value :as print.value]
             [seon.schema.edn :as schema.edn]
             [seon.schema :as schema]
             [seon.env :as env]
@@ -36,147 +67,22 @@
   (delay (requiring-resolve 'seon.render/viewer)))
 
 
-;;; THE PROJECTION-FREE TOTAL CORE: bounded text of any value and any Throwable,
-;;; for when the projection, profile or admission below is what broke. Rules:
-;;; (1) only clojure.core data prints (EDN scalars and Vars), `clojure.lang` collections walked to
-;;; `:items` members and `:depth` levels (a lazy seq realizes a chunk at most);
-;;; (2) every other object prints as `#object[Class 0xidentity-hash]`, never
-;;; through its print-method, toString or deref; (3) a writer refuses output
-;;; past the limit. Compiled caps, never read from the database.
-
-(def ^:private text-limits
-  ;; Measured 2026-09-23, armed on default: a three-link chain holding a
-  ;; 1e6-char string, a 1e5 vector, (range), an atom and a throwing toString
-  ;; renders 1,339 chars in 345 us.
-  {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 10 :suppressed 3 :floor-chars 8192})
-
-(def ^:private text-full
-  (doto (Exception. "bounded text limit reached") (.setStackTrace (make-array StackTraceElement 0))))
-
-(defn- datum
-  "`x` as clojure.core data at most `level` collections deep (rules 1 and 2):
-  `...` marks a cut collection or its omitted members."
-  {:malli/schema [:=> [:cat :seon.schema/value :int] :seon.schema/value]}
-  [x level]
-  (let [items (:items text-limits)]
-    (cond
-      (or (nil? x) (boolean? x) (number? x) (string? x) (char? x) (ident? x) (var? x)
-          (uuid? x) (instance? java.util.Date x)) x
-      (not (and (coll? x) (.startsWith (.getName (class x)) "clojure.lang.")))
-      (symbol (str "#object[" (.getName (class x)) " 0x" (Integer/toHexString (System/identityHashCode x)) "]"))
-      (zero? level) '...
-      :else (let [walk #(datum % (dec level))
-                  members (cond-> (mapv (if (map? x) (fn [[k v]] [(walk k) (walk v)]) walk) (take items x))
-                            (> (bounded-count (inc items) x) items) (conj (if (map? x) ['... '...] '...)))]
-              (cond (map? x) (into {} members) (vector? x) members
-                    (set? x) (set members) :else (apply list members))))))
-
 (defn bounded-text
-  "`value` as at most `limit` characters.
-
-  Rule 3 over `datum`: `…` marks the limit, `#unprintable[value-class failure-class]` a value whose printing throws.
-  The projection-free core, kept beside the selection with [[floor]] (root
-  ruling 2026-09-26) because diagnosis must survive the renderer failing.
-
-  ## Edge cases
-
-  - A 200-deep map prints as `{:k 199, :v {:k 198, :v {:k 197, :v ...}}}`: the
-    walk stops at `:depth` levels whatever the value's depth.
-  - A host object prints as `#object[Class 0xhash]`, never through its
-    `toString`, print-method or `deref`.
-
-  ## Costs
-
-  - `(vec (range 100000))`: 4.4 µs unarmed, 474 µs armed (default, 2026-09-26).
-    The walk is bounded by `limit`, but the armed input contract validates the
-    whole value first, so the armed call is linear in the value's size.
-
-  ## Recommendations
-
-  - Use it for diagnostics that must survive renderer failure; an agent's
-    result goes through [[prepare]], which honours the render profile."
+  "`value` as at most `limit` characters: `seon.print.value/bounded-text`, the
+  projection-free core, which moved there so namespaces below the projection
+  and babashka print through it. Callers convert to it; this delegate then
+  goes."
   {:malli/schema [:function [:=> [:cat :seon.schema/value] :string]
                   [:=> [:cat :seon.schema/value [:int {:min 1}]] :string]]}
-  ([value] (bounded-text value (:chars text-limits)))
-  ([value limit]
-   (let [out (StringBuilder.)
-         put (fn [^String s]
-               (let [room (- limit (.length out))]
-                 (.append out s 0 (int (min room (.length s))))
-                 (when (> (.length s) room) (throw text-full))))
-         writer (proxy [java.io.Writer] []
-                  (write ([x] (put (cond (string? x) x (int? x) (str (char x)) :else (String. ^chars x))))
-                         ([x off len] (put (if (string? x) (subs x off (+ off len)) (String. ^chars x (int off) (int len))))))
-                  (flush []) (close []))]
-     (try
-       (binding [*print-length* nil *print-level* nil *print-meta* false *print-readably* true
-                 *print-dup* false *print-namespace-maps* false]
-         (print-method (datum value (:depth text-limits)) writer))
-       (str out)
-       (catch Throwable failure
-         (str out (if (identical? failure text-full) "…"
-                    (str "#unprintable[" (.getName (class value)) " " (.getName (class failure)) "]"))))))))
-
-(defn- causes
-  "`throwable` and its causes, outermost first, each once, at most `:links`."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :seon.error/throwable]]}
-  [throwable]
-  (loop [link throwable seen []]
-    (if (or (nil? link) (= (:links text-limits) (count seen)) (some #(identical? link %) seen))
-      seen
-      (recur (.getCause ^Throwable link) (conj seen link)))))
-
-(defn- link-lines
-  "One link's lines: class and message, ex-data entries, the frames nearest the
-  throw and suppressed throwables, each list counting what it leaves out; a
-  link whose accessors throw prints its class and the failure's."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :string]]}
-  [^Throwable link]
-  (let [{:keys [entries frames suppressed]} text-limits
-        frame (fn [^StackTraceElement f]
-                [(symbol (.getClassName f)) (symbol (.getMethodName f)) (str (.getFileName f)) (long (.getLineNumber f))])]
-    (try
-      (let [trace (vec (.getStackTrace link))]
-        (into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
-              (concat
-               (for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
-               (when (> (bounded-count (inc entries) (ex-data link)) entries) ["  … further ex-data entries"])
-               (for [[class-name _ file line] (map frame (take frames trace))]
-                 (str "  at " (clojure.lang.Compiler/demunge (str class-name)) " (" file ":" line ")"))
-               (when (> (count trace) frames)
-                 [(str "  … " (- (count trace) frames) " further frames")])
-               (for [^Throwable other (take suppressed (.getSuppressed link))]
-                 (str "  suppressed " (.getName (class other)) ": " (bounded-text (ex-message other)))))))
-      (catch Throwable failure
-        [(str (.getName (class link)) " #unprintable[" (.getName (class failure)) "]")]))))
+  ([value] (print.value/bounded-text value))
+  ([value limit] (print.value/bounded-text value limit)))
 
 (defn floor
-  "An unhandled Throwable as bounded text from the Throwable alone.
-
-  One block of `link-lines` per cause. The leaf an error's rendering degrades to, never a
-  stored member. Its selection is general — the frames nearest each throw, with
-  a count of the rest — and which frames matter is the error pair's to say
-  (AGENTS.md, three points).
-
-  ## Edge cases
-
-  - A cyclic cause chain terminates: each link is walked once, by identity,
-    unlike [[seon.fault/carried-receipt]] (task [[task:465ff60ccda0]]), whose
-    walk should copy this one.
-
-  ## Costs
-
-  - A 13-link `ex-info` chain with a 50-item payload per link (714 characters
-    out): 783 µs unarmed, 977 µs armed (default, 2026-09-26)."
+  "An unhandled Throwable as bounded text: `seon.print.value/throwable-text`.
+  Callers convert to it; this delegate then goes."
   {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
   [throwable]
-  (let [chain (causes throwable)
-        text (str/join "\n" (concat (mapcat (fn [position link]
-                                              (cond-> (link-lines link) (pos? position) (update 0 #(str "caused by " %))))
-                                            (range) chain)
-                                    (when (and (= (:links text-limits) (count chain)) (ex-cause (peek chain)))
-                                      ["… further causes"])))]
-    (if (> (count text) (:floor-chars text-limits)) (str (subs text 0 (:floor-chars text-limits)) "…") text)))
+  (print.value/throwable-text throwable))
 
 (defn transacted
   "Restore a pulled entity to its transaction shape.
@@ -302,7 +208,7 @@
   (`src/seon/render.clj:196`) removes `:seon.render.call/id` before invoking a
   DECLARED producer, and the page's walk request
   (`src/seon/render/web.clj:2977`) supplies no `:seon.render.value/root`, so a
-  declared producer that delegates its own value to this floor — `seon.ai/
+  declared producer that delegates its own value to this value printer — `seon.ai/
   attempt-html`, whose contract promises `:seon.render/hiccup` — reached
   `node-id` with nothing and returned a refusal where its own contract
   required Hiccup.
@@ -384,12 +290,13 @@
       :else (assoc profile :seon.print/requery-refusal
                    "the value has no result handle"))))
 
-;;; THE FLOOR'S SELECTION (design one-render-path §3a–§3d). Every reached
-;;; object is classified by its EXACT class into a row of permitted operations
-;;; before anything else touches it; an unlisted class is opaque. Members are
-;;; admitted in shell order (a member's shell is the largest of its depth and
-;;; the ordinals on its path), so each branch of a large value shows a prefix
-;;; before any branch shows more. The charge is the laid-out length itself:
+;;; THE VALUE PRINTER'S SELECTION (design one-render-path §3a–§3d). Every
+;;; reached object is classified by its EXACT class into a row of permitted
+;;; operations before anything else touches it; an unlisted class is opaque.
+;;; Members are admitted level by level, breadth before depth: every member of
+;;; one level (each collapsed to its count and dig form) before any member of
+;;; the next, so a map shows all its keys before any value expands, and a long
+;;; string grows one doubling chunk per level. The charge is the laid-out length itself:
 ;;; flat width plus the indentation of every group fipp will break (its own
 ;;; fits test, reference-code/fipp/src/fipp/engine.cljc:203-208), so the saved
 ;;; text is at most B. The queue and the charge are one value threaded through
@@ -471,19 +378,38 @@
       (and more? (counted? x)) (assoc :total (count x))
       (or pending? (and more? (not (counted? x)))) (assoc :pending? true))))
 
+(defn- member-rank
+  "Where one keyword-keyed member sorts: installed identity attributes first;
+  then a scalar, a short string or a pair of scalars (a reference) before a
+  long string before a collection."
+  {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword] :keyword] [:vector :int]]}
+  [member identity-attributes k]
+  (let [v (when (map-entry? member) (val member))]
+    [(if (contains? identity-attributes k) 0 1)
+     (cond (and (coll? v) (counted? v) (<= (count v) 2) (not-any? coll? (if (map? v) (vals v) v))) 0
+           (coll? v) 2
+           (and (string? v) (> (count v) scalar-bound)) 1
+           :else 0)]))
+
 (defn- held-order
   "Members in held order, each `[index member]` with `index` its place in
-  `seq`: an exact hash map or set of at most 64 exact keywords is sorted,
-  identity attributes first (design §3b). A typed path step names the
+  `seq`. An exact map or hash set of at most 64 exact keywords shows identity
+  and short members first (`member-rank`), a hash map or set then alphabetically, an
+  array map then in its own order (design §3b). A typed path step names the
   index, so a sorted display still addresses the held value."
   {:malli/schema [:=> [:cat :seon.schema/value [:set :qualified-keyword] [:fn clojure.core/ifn?]] :seon.schema/value]}
   [x identity-attributes key-of]
-  (let [members (map-indexed vector x)]
-    (if (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet} (class x))
+  (let [members (map-indexed vector x)
+        c (class x)]
+    (if (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet clojure.lang.PersistentArrayMap} c)
              (<= (count x) sorted-bound)
              (every? #(identical? (class (key-of (second %))) clojure.lang.Keyword) members))
-      (sort-by (fn [[_ member]] (let [k (key-of member)]
-                                  [(if (contains? identity-attributes k) 0 1) (namespace k) (name k)]))
+      (sort-by (fn [[index member]]
+                 (let [k (key-of member)]
+                   (into (member-rank member identity-attributes k)
+                         (if (identical? c clojure.lang.PersistentArrayMap)
+                           [index]
+                           [(namespace k) (name k)]))))
                members)
       members)))
 
@@ -598,9 +524,12 @@
       (identical? c Class) {:kind :scalar :node {::print/face ::print/class ::print/name (.getName ^Class x)}}
       (and (instance? Throwable x) (throwable-safe? c))
       (assoc (classify (throwable-value x) identity-attributes limit) :prefix "#error " :face ::print/throwable)
+      ;; Any other object is its class and identity, never its contents: a
+      ;; live object, not data a later evaluation could read back.
       :else
       {:kind :scalar :node {::print/face ::print/object
-                            ::print/class (clojure.lang.Compiler/demunge (.getName c))}})))
+                            ::print/class (clojure.lang.Compiler/demunge (.getName c))
+                            ::print/rep (str "0x" (Integer/toHexString (System/identityHashCode x)))}})))
 
 (defn- tuple-node
   "A short sequential value whose every member is a scalar, a name or a short
@@ -638,20 +567,13 @@
     (::print/text node) (count (::print/text node))
     (= ::print/var (::print/face node)) (+ 2 (count (::print/name node)))
     (= ::print/class (::print/face node)) (count (::print/name node))
-    (= ::print/object (::print/face node)) (+ 9 (count (::print/class node)))
+    (= ::print/object (::print/face node))
+    (+ 9 (count (::print/class node)) (if-some [rep (::print/rep node)] (inc (count rep)) 0))
     (and (pos? depth) (= ::print/projected (::print/face node))
          (= :seon.render/ai (:seon.render/output node)))
     (count (pr-str (::print/value node)))
     :else (count (print/emit-text node {::print/width 0 ::print/length nil ::print/level nil
                                         ::print/namespace-maps? false}))))
-
-(defn keyword-entry
-  "The value at keyword `k` in a map `keyword-lookup?` permits; nil otherwise.
-  Never calls `get`, a refusing comparator or a host Map on an unclassified value."
-  {:malli/schema [:=> [:cat :seon.schema/value :keyword] :seon.schema/value]}
-  [value k]
-  (when (keyword-lookup? value)
-    (some-> (find value k) val)))
 
 (defn- node-continuation
   "The form a cut of `node` prints to read its rest (`seon.print/continuation`):
@@ -833,7 +755,7 @@
   {:malli/schema [:=> [:cat :seon.render.data/path [:or :seon.error/throwable :map] :int] :string]}
   [path failure further]
   (str ";; renderer failed at " (pr-str path) ", value printed as data: "
-       (bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
+       (print.value/bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
        (when (pos? further) (str " (and " further " further renderer failures)"))))
 
 (defn- make-node
@@ -841,7 +763,10 @@
   {:malli/schema [:=> [:cat :map :seon.schema/value :int :int :seon.render.data/path [:maybe :int] :map] :map]}
   [context value id depth path parent position]
   (let [{:keys [unit output ceiling identity-attributes]} context
-        answer (declared unit value path output)
+        ;; RENDER OUTPUT GOES STRAIGHT TO THE VALUE PRINTER, WHICH NEVER
+        ;; RE-DISPATCHES (AGENTS.md, renders return data): only the root is
+        ;; offered to its render; every value beneath prints as data.
+        answer (when (zero? id) (declared unit value path output))
         declared (::print/node answer)
         value (if (contains? answer :value) (:value answer) value)
         base (cond-> {:id id :depth depth :path path :parent parent :indent (:indent position 0)
@@ -856,13 +781,16 @@
                             (::print/value declared))
                      ;; A render's text past the value's budget keeps being the
                      ;; render (its producer, printed as REPL text, not a quoted
-                     ;; string): its first B characters, then `…+N`. The value
-                     ;; itself is read through its handle, not the render text.
-                     declared (if (and text (> (count text) ceiling))
+                     ;; string): its head, then `…+N`, within B characters and
+                     ;; charged like any other node, so no render escapes the
+                     ;; one budget. The value itself is read through its handle.
+                     kept (when (and text (> (count text) ceiling))
+                            (max 0 (- ceiling (count (str "…+" (count text))))))
+                     declared (if kept
                                 (assoc declared ::print/value
-                                       (str (subs text 0 ceiling) "…+" (- (count text) ceiling)))
+                                       (str (subs text 0 kept) "…+" (- (count text) kept)))
                                 declared)]
-                 (assoc base :kind :leaf :node declared :rendered? true))
+                 (assoc base :kind :leaf :node declared))
                (let [;; A root continuation pages from its absolute offset.
                      c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))
                      ;; A root paged from an offset keeps its members addressable.
@@ -885,25 +813,28 @@
 (defn- charge
   {:malli/schema [:=> [:cat :map] :int]}
   [state]
-  (+ (:reserve state) (get-in state [:nodes 0 :flat]) (:extras state) (- (:rendered state))))
+  (+ (:reserve state) (get-in state [:nodes 0 :flat]) (:extras state)))
 
 (defn- push-work
+  "Queue `work` at `level`: every member at one level is admitted before any
+  at the next, members before the growth of a string at that level (`rank`
+  0, a chunk 1), then by `ordinal` within the parent."
   {:malli/schema [:=> [:cat :map :int :int :int :map] :map]}
-  [state shell depth ordinal work]
-  (let [key [shell depth ordinal (:seq state)]]
+  [state level rank ordinal work]
+  (let [key [level rank ordinal (:seq state)]]
     (-> state (update :seq inc) (update :queue assoc key work))))
 
 (defn- schedule
-  "Push a node's first refinement: its next chunk, or its first member."
-  {:malli/schema [:=> [:cat :map :map :int :map] :map]}
-  [state node shell context]
+  "Push a node's first refinement: its next chunk, one level down, or its
+  first member at the next level."
+  {:malli/schema [:=> [:cat :map :map :map] :map]}
+  [state node context]
   (case (:kind node)
     (:string :name) (cond-> state (more? node)
-                      (push-work (max shell 2) (:depth node) 2 {:op :chunk :id (:id node) :k 2 :shell shell}))
+                      (push-work (inc (:depth node)) 1 2 {:op :chunk :id (:id node) :k 2}))
     (:map :coll) (cond-> state
                    (and (seq (:pending node)) (< (:depth node) (:max-depth context)))
-                   (push-work (max shell (inc (:depth node))) (inc (:depth node)) 1
-                              {:op :member :parent (:id node) :ord 1 :shell shell}))
+                   (push-work (inc (:depth node)) 0 1 {:op :member :parent (:id node) :ord 1}))
     state))
 
 (defn- grown-to
@@ -931,14 +862,14 @@
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
   (let [node (get-in state [:nodes (:id work)])
-        to (min (:total node) (+ (:shown node) chunk-width) (:max-string context))
+        ;; Each chunk doubles what the string shows, one level per chunk.
+        to (min (:total node) (+ (:shown node) (max chunk-width (:shown node))) (:max-string context))
         next (grown-to state node to context)]
     (when (and (> to (:shown node))
                (<= (charge next) (:budget context)))
       (cond-> next
         (< to (:total node))
-        (push-work (max (:shell work) (inc (:k work))) (:depth node) (inc (:k work))
-                   (update work :k inc))))))
+        (push-work (+ (:depth node) (:k work)) 1 (inc (:k work)) (update work :k inc))))))
 
 (defn- referent-identity
   "The referent of entity id `eid` named by its identity: `[attribute value]`
@@ -984,7 +915,6 @@
         [held & more] (:pending parent)
         ordinal (:ord work)
         depth (inc (:depth parent))
-        shell (max (:shell work) depth ordinal)
         indent (+ (:indent parent) (nest parent))
         next-id (:next-id state)
         ;; The member's coordinate in the held value (`seon.print/path-step`):
@@ -1011,14 +941,13 @@
             [[c] next-id]))
         grown (-> (reduce #(assoc-in %1 [:nodes (:id %2)] %2) state added)
                   (assoc :next-id (+ next-id (count added)))
-                  (update :rendered + (transduce (comp (filter :rendered?) (map :width)) + 0 added))
                   (update-in [:nodes (:id parent)] #(-> % (update :kids conj kid) (update :n inc) (assoc :pending more))))
         next (settle state grown kid (:width context))]
     (cond
       (<= (charge next) (:budget context))
-      (cond-> (reduce #(schedule %1 %2 shell context) next (remove #(= :entry (:kind %)) added))
+      (cond-> (reduce #(schedule %1 %2 context) next (remove #(= :entry (:kind %)) added))
         (seq more)
-        (push-work (max (:shell work) depth (inc ordinal)) depth (inc ordinal) (update work :ord inc)))
+        (push-work depth 0 (inc ordinal) (update work :ord inc)))
       ;; The root's first member is the least any page must show (§3c):
       ;; its charge is what an insufficient budget reports.
       (and (zero? (:id parent)) (zero? (:n parent))) (assoc state :first-refused (charge next))))))
@@ -1049,13 +978,22 @@
                          (<= (- (charge admitted) (if (more? grown) (count (cut-text grown)) 0)) before))
                 (recur admitted (inc ordinal))))))))))
 
+(defn- budget-refused?
+  "True when `work` was refused for the budget, not for a member or string bound."
+  {:malli/schema [:=> [:cat :map :map :map] :boolean]}
+  [state work context]
+  (if (= :chunk (:op work))
+    (let [node (get-in state [:nodes (:id work)])]
+      (< (:shown node) (min (:total node) (:max-string context))))
+    (<= (:ord work) (:max-children context))))
+
 (defn- insufficient-budget
   "The declared refusal when B cannot show the root, or a page's first member
   (design §3c): a cut that repeated its own offset would make no progress."
   {:malli/schema [:=> [:cat :map :int] :seon.render.value/insufficient-floor-budget-error]}
   [context needed]
   (assoc (refusal/diagnostic (java.util.Date.) :seon.render.value/select 'seon.render.value/prepare
-          {:seon.error/message (str "The floor budget of " (:budget context) " characters cannot show this value's "
+          {:seon.error/message (str "The value printer's budget of " (:budget context) " characters cannot show this value's "
                                     "first part, which needs " needed ".")
            :seon.error/member :seon.render.profile/token-budget
            :seon.error/expected "a budget covering the root and its first member"
@@ -1086,23 +1024,28 @@
                (and (pos? offset) (#{:map :coll} (:kind root)))
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
-        state {:nodes {0 root} :queue (sorted-map) :seq 0 :next-id 1 :extras 0
-               :rendered (if (:rendered? root) (:width root) 0) :reserve 0}
+        state {:nodes {0 root} :queue (sorted-map) :seq 0 :next-id 1 :extras 0 :reserve 0}
         state (settle {:nodes {}} state 0 (:width context))
         ;; The root is mandatory.
         root-charge (charge state)]
     (if (> root-charge (:budget context))
       (insufficient-budget context root-charge)
-      (let [state (loop [state (schedule state root 0 context)]
-                    (if-let [[key work] (first (:queue state))]
-                      (let [state (update state :queue dissoc key)
-                            admitted (case (:op work)
-                                       :chunk (or (admit-chunk state work context)
-                                                  (complete-chunk state work context))
-                                       :member (or (admit-member state work context)
-                                                   (complete-tail state work context)))]
-                        (recur (or admitted state)))
-                      state))]
+      (let [state (loop [state (schedule state root context)]
+                    (let [[key work] (first (:queue state))]
+                      ;; The first level the budget refused is the last one
+                      ;; tried: nothing deeper fills in around it.
+                      (if (and work (<= (first key) (:refused-level state Long/MAX_VALUE)))
+                        (let [state (update state :queue dissoc key)
+                              admitted (case (:op work)
+                                         :chunk (or (admit-chunk state work context)
+                                                    (complete-chunk state work context))
+                                         :member (or (admit-member state work context)
+                                                     (complete-tail state work context)))]
+                          (recur (or admitted
+                                     (cond-> state
+                                       (budget-refused? state work context)
+                                       (update :refused-level (fnil min Long/MAX_VALUE) (first key))))))
+                        state)))]
         (if (and (:first-refused state) (zero? (get-in state [:nodes 0 :n])))
           (insufficient-budget context (:first-refused state))
           state)))))
@@ -1179,7 +1122,7 @@
       (get built 0))))
 
 (defn- omitted-characters
-  "An estimate of the characters a selection left out, from what the floor
+  "An estimate of the characters a selection left out, from what the value printer
   already knows at each cut, never by printing the value: a string's
   unshown characters exactly, and a collection's omitted members at the mean
   width of the members it did show (the mean over every shown collection
@@ -1212,12 +1155,12 @@
           (range (count path)))]))
 
 (defn- plain-projection
-  "The total floor's last answer: `value` as plain bounded Clojure text, with
-  the one diagnostic naming the failure that stopped the structural floor."
+  "The value printer's last answer: `value` as plain bounded Clojure text, with
+  the one diagnostic naming the failure that stopped the structural selection."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.error/throwable :seon.render.data/path]
                   :seon.render.value/projection]}
   [value failure path]
-  (let [value-text (bounded-text value (:floor-chars text-limits))
+  (let [value-text (print.value/bounded-text value 8192)
         text (str value-text "\n" (diagnostic-line path failure 0))]
     {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
      :seon.render.value/options (print/default-options)
@@ -1232,7 +1175,7 @@
   emit the one tree as laid-out AI text and structural HTML.
 
   TOTAL (AGENTS.md, the REPL path is total): a renderer that fails leaves its
-  node printed as data, a failure of the floor itself prints the value as
+  node printed as data, a failure of the value printer itself prints the value as
   plain bounded Clojure text, and either failure is shown once beside the
   value and returned as `:seon.render.value/diagnostics` for the caller to
   record as a core fault."
@@ -1304,12 +1247,12 @@
              ;; Shown once, beside the value and outside its budget.
              diagnostic (when-let [node (first failed)]
                           (diagnostic-line (:path node) (:diagnostic node) (dec (count failed))))]
-         ;; The charge is the laid-out length (design §3d); a longer text is
-         ;; the allocator's defect, never a second attempt. Declared renderer
-         ;; text lays out on its own terms and is exempt.
-         (when (and (zero? (:rendered state)) (> (count text) limit))
+         ;; The charge is the laid-out length (design §3d), declared render
+         ;; text included; a longer text is the allocator's defect, never a
+         ;; second attempt.
+         (when (> (count text) limit)
            (let [refusal (refusal/diagnostic (java.util.Date.) :seon.render.value/select 'seon.render.value/prepare
-                          {:seon.error/message "The floor's saved text exceeded its charge."
+                          {:seon.error/message "The value printer's saved text exceeded its charge."
                            :seon.error/expected "text length at most the charge"
                            :seon.error/offending (count text)
                            :seon.error/data {:seon.print/charge limit :seon.render.data/path path}})]
@@ -1338,18 +1281,18 @@
        (catch Throwable failure
          (if (get-in unit [:seon.render.value/options :seon.render.value/structural?])
            (plain-projection (:seon.render/value unit) failure path)
-           ;; A FAILED RENDER STILL PRINTS THROUGH THE FLOOR: the same
+           ;; A FAILED RENDER STILL PRINTS THROUGH THE VALUE PRINTER: the same
            ;; selection, without the render pairs, under the same budget, so
            ;; the value keeps its cuts and its whole-size estimate (LARGE
            ;; VALUE reads it). The failure is the one diagnostic beside it;
-           ;; only a floor that fails structurally too prints plain text.
+           ;; only a value printer that fails structurally too prints plain text.
            (let [projection (prepare (assoc-in unit [:seon.render.value/options
                                                      :seon.render.value/structural?] true)
                                      output)
                  line (diagnostic-line path failure 0)]
              ;; A structural projection carries diagnostics only when the
-             ;; floor itself failed (it runs no declared render): print plain
-             ;; text once, with the floor's own distinct failures recorded.
+             ;; value printer itself failed (it runs no declared render): print plain
+             ;; text once, with the value printer's own distinct failures recorded.
              (if (or (not (:seon.render.value/text projection))
                      (seq (:seon.render.value/diagnostics projection)))
                (update (plain-projection (:seon.render/value unit) failure path)
@@ -1448,7 +1391,7 @@
         (render-ai-data projection)))))
 
 (defn render-ai
-  "Render any floor unit through the admitted text sink."
+  "Render any value-printer unit through the admitted text sink."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
@@ -1456,7 +1399,7 @@
   (render-prepared unit :seon.render/ai))
 
 (defn render-html
-  "Render any floor unit through the admitted hiccup sink."
+  "Render any value-printer unit through the admitted hiccup sink."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}

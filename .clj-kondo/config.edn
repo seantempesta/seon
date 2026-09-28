@@ -95,10 +95,12 @@
 
  ;; The one bounded await owner is the only namespace allowed the bare forms.
  ;; The print owners are the only namespaces allowed the bare printers: the
- ;; value printer and its layout (seon.render.value, seon.print) and the canonical
+ ;; value printer, its projection-free core and its layout (seon.render.value,
+ ;; seon.print.value, seon.print) and the canonical
  ;; EDN text every identity hashes (seon.id).
  :config-in-ns
  {seon.render.value {:linters {:discouraged-var {clojure.core/pr-str {:level :off}}}}
+  seon.print.value {:linters {:discouraged-var {clojure.core/pr-str {:level :off}}}}
   seon.print {:linters {:discouraged-var {clojure.core/pr-str {:level :off}}}}
   seon.id {:linters {:discouraged-var {clojure.core/pr {:level :off}}}}
   seon.await

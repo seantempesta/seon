@@ -1,0 +1,1 @@
+{:before {:essence-missing 48, :errors 0, :cuts-without-dig 0, :max-ms 22.709542, :cuts 218, :missing-top-keys 103, :string-dominated 40, :count 198, :tokens 88945, :max-tokens 999}, :after {:essence-missing 45, :errors 0, :cuts-without-dig 0, :max-ms 15.291041, :cuts 365, :missing-top-keys 0, :string-dominated 40, :count 198, :tokens 86741, :max-tokens 995}}

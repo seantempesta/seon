@@ -16,6 +16,7 @@
             [malli.instrument :as mi]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.print.value :as print.value]
             [seon.render.value :as value]
             [seon.test-support :as test-support]
             [seon.test.runner :as runner]))
@@ -139,7 +140,7 @@
        (is (some? failure) "the fixture write is refused")
        (is (vector? committed) (pr-str committed))
        (is (= reported shown) "the stored shown text is the reporter's text")
-       (is (<= (count reported) (inc (:floor-chars @#'value/text-limits)))
+       (is (<= (count reported) (inc (:throwable-chars @#'print.value/text-limits)))
            "the shown text is bounded by the floor")
        (is (string? digest) "the stored failure references its whole value")
        (is (nil? (:seon.render.value/unreadable-artifact artifact)) (pr-str artifact))

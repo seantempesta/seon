@@ -48,6 +48,7 @@
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
+            [seon.print.value :as print.value]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.render.web :as web]
@@ -2156,7 +2157,7 @@ handle))}}
         (is (= 500 (:status response)))
         (is (str/includes? (:body response) "IllegalArgumentException"))
         (is (<= (count (:body response))
-                (inc (:floor-chars @#'value/text-limits))))))))
+                (inc (:throwable-chars @#'print.value/text-limits))))))))
 
 (deftest start-refuses-a-flat-process-write-before-binding
   (support/with-database

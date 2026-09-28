@@ -212,7 +212,7 @@
 (defn path-step
   "The member one path step names in `parent`, or `missing`.
 
-  Design one-render-path §3b. The floor emits a typed step wherever a plain key
+  Design one-render-path §3b. The value printer emits a typed step wherever a plain key
   would be ambiguous: `[:seon.render.data/entry i :seon.render.data/key]` or
   `[... :seon.render.data/val]` is entry `i` of a map in its iteration order,
   `[:seon.render.data/nth i]` member `i` of a set or seq. A plain step is
@@ -337,7 +337,7 @@
 (defn elided-text
   "The one text of a cut: `…N` after shown members, `\"prefix\"…+N`
   after a string's shown characters, `…?` for a pending tail, each followed by
-  its continuation form when the cut has a source. The floor's allocator
+  its continuation form when the cut has a source. The value printer's allocator
   measures cuts with this same function."
   {:malli/schema [:=> [:cat :map] :string]}
   [node]
@@ -362,7 +362,7 @@
   `total` are the reader's COORDINATES into the value, not display sizes:
   `seon.render.value-test/explicit-structural-results-retain-attributes-through-real-evaluation`
   derives both from `(count original)` and then executes the requery form
-  against them. Restating a coordinate in a floored estimate would leave the
+  against them. Restating a coordinate in a rounded-down estimate would leave the
   cut naming a position that does not exist — one honest number replaced by
   three that no longer add up. A member cut has no derivable token size, so
   the field is absent there rather than invented.
@@ -435,7 +435,7 @@
   [node depth]
   (let [value (::value node)]
     (case (::face node)
-      ;; A scalar the floor selected carries its classified spelling in
+      ;; A scalar the value printer selected carries its classified spelling in
       ;; `::text`, made from the value's own fields, never through `pr-str`.
       ::nil [(text-op ::nil "nil")]
       (::boolean ::number ::keyword ::symbol ::char ::string)
@@ -506,6 +506,11 @@
   [node options depth path]
   ;; Held order: the producer's order is the printed order (design §3b).
   (let [children (vec (or (::items node) (::entries node)))
+        ;; A quoted form prints as the reader writes it, `'x`, so a dig or
+        ;; requery form inside data reads as the form an agent would type.
+        quoted? (and (= ::list (::face node)) (= 2 (count children))
+                     (= ::symbol (::face (first children))) (= 'quote (::value (first children))))
+        children (if quoted? (subvec children 1) children)
         length (::length options)
         shown (if (and length (< length (count children))) (into [] (take length) children) children)
         cut? (< (count shown) (count children))
@@ -514,10 +519,10 @@
                  (same-key-namespace (filterv vector? shown)))
         shown (if lifted (mapv #(if (vector? %) (update % 0 unqualified-key-node) %) shown) shown)
         open (case (::face node)
-               ::vector "[" ::list "(" ::set "#{"
+               ::vector "[" ::list (if quoted? "'" "(") ::set "#{"
                ::map (str (when lifted (str "#:" lifted)) "{")
                ::record (str "#" (::name node) "{"))
-        close (case (::face node) ::vector "]" ::list ")" "}")
+        close (case (::face node) ::vector "]" ::list (if quoted? "" ")") "}")
         indent (fn [offset] {:op :nest :offset (if (< depth nest-depth) offset 0)})
         d (inc depth)
         fill? (and (not map-like?) (every? (comp scalar-kinds ::face) shown))
