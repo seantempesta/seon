@@ -105,6 +105,17 @@ happens anyway costs ~0 bytes (+240 B) and +2–4 ms per 100 upserts.
 8. **Test member run times** go into the test batch's one commit (today computed, `src/seon/test.clj:2013-2016`, never
    stored).
 
+9. **Every transaction describes the work that produced it (owner: "a data model written efficiently during
+   transactions … so a single query knows everything that's slow or has too many calls").** The one seam every write
+   passes, `seon.db/stamp-transaction` (`src/seon/db.clj:3523`), already receives the bound world and stamps
+   `:seon.db.transaction/process`, `/operation`, `/agent`. It adds, from the world's call sink (a pure
+   `seon.profile/transaction-observation`, its delta since that world's previous transaction): `/ms` (the work's
+   elapsed time), `/calls` (armed calls), `/hot` (top 5 `[sym digest calls self-ms]` by self time), `/repeated`
+   (`[sym digest calls]` over the repeat threshold). A handful of datoms per transaction, ∝ functions that work ran,
+   ~0 extra bytes. Needs self time in the sink (profiling Part A). One query over transaction entities then answers
+   slow or call-heavy work, who did it and what dominated it; the per-digest subject buckets (item 4) answer each
+   function's current state; the named warning schemas are these conditions, declared once.
+
 Never: a commit of its own, per event or per timer.
 
 ## 2b. The event graph: what is written, as refs, when something happens
