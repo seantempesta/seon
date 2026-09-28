@@ -72,3 +72,37 @@
         (dump "notes.txt" 3000)
         (is (= [newer older] (#'operator/heap-dumps (str root)))))
       (finally (test-support/delete-recursively! root)))))
+
+(deftest a-class-directory-a-live-process-names-is-never-pruned
+  ;; Two roots starting at once (2026-09-28): one start's prune deleted the
+  ;; class directory the other JVM was loading from (NoSuchFileException).
+  (let [repository (str (java.nio.file.Files/createTempDirectory
+                         "seon-prune" (make-array java.nio.file.attribute.FileAttribute 0)))
+        classes (java.io.File. repository "target/dev-program-classes")
+        directory (fn [name age-ms]
+                    (doto (java.io.File. classes name) .mkdirs
+                      (.setLastModified (- (System/currentTimeMillis) age-ms))))
+        program (directory "program" 0)
+        held (directory "held-oldest" 900000)
+        _ (doseq [i (range 4)] (directory (str "recent-" i) (* 1000 (inc i))))
+        ;; Held as a launched JVM holds it: on its classpath. (macOS hides a
+        ;; platform binary's arguments, so the holder is this JVM's java.)
+        java (str (System/getProperty "java.home") "/bin/java")
+        holder (.start (ProcessBuilder. ^java.util.List
+                                        [java "-cp" (str (.getCanonicalPath held) ":" (System/getProperty "java.class.path"))
+                                         "clojure.main" "-e" "(Thread/sleep 30000)"]))]
+    (try
+      ;; Its arguments are readable once the process is up.
+      (loop [tries 50]
+        (when (and (pos? tries)
+                   (not (some #(.contains ^String % (.getCanonicalPath held)) (#'operator/live-arguments))))
+          (Thread/sleep 100)
+          (recur (dec tries))))
+      (#'operator/prune-program-classes! repository (.getCanonicalPath program))
+      (is (.isDirectory held) "the directory a live process names survives")
+      (is (.isDirectory program))
+      (is (= 3 (count (filter #(.startsWith (.getName ^java.io.File %) "recent-") (.listFiles classes))))
+          "the most recently used unheld directories are kept, the rest pruned")
+      (finally
+        (.destroy holder)
+        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))

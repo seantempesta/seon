@@ -600,12 +600,31 @@
         (.getCanonicalPath (io/file repository program-classes-root
                                     (apply str (map #(format "%02x" (bit-and % 0xff)) digest))))))))
 
+(defn- live-arguments
+  "Every live process's argument strings on this machine: a launched JVM's
+  classpath argument names the class directories it loads from."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  []
+  (with-open [stream (java.lang.ProcessHandle/allProcesses)]
+    (into []
+          (mapcat (fn [handle]
+                    (let [args (.arguments (.info handle))]
+                      (when (.isPresent args) (vec (.get args))))))
+          (iterator-seq (.iterator stream)))))
+
 (defn- prune-program-classes!
   "Keep `program` and the most recently used class directories; delete the
-  rest and any staging a day old (a launch that died filling it)."
+  rest and any staging a day old (a launch that died filling it). A directory
+  a live process names on its classpath is never deleted: a concurrent start
+  on another program still loads classes from it lazily (two drill roots
+  starting at once: NoSuchFileException on a class the other JVM needed)."
   {:malli/schema [:=> [:cat :string :string] :nil]}
   [repository program]
-  (let [directories (or (.listFiles (io/file repository program-classes-root)) [])
+  (let [held? (let [arguments (live-arguments)]
+                (fn [^java.io.File directory]
+                  (let [path (.getCanonicalPath directory)]
+                    (some #(str/includes? % path) arguments))))
+        directories (remove held? (or (.listFiles (io/file repository program-classes-root)) []))
         {staging true complete false} (group-by #(str/includes? (.getName ^java.io.File %) ".staging-")
                                                 directories)
         stale (concat (drop program-classes-kept
@@ -769,13 +788,17 @@
 ;;; complete causes and leaves no JVM.
 
 (defn- command!
-  "Run one argv to exit within `bound` ms; a non-zero exit or expiry refuses."
-  [argv directory bound]
+  "Run one argv to exit within `bound` ms; a non-zero exit or expiry refuses.
+  `environment` adds variables to the inherited ones."
+  ([argv directory bound] (command! argv directory bound {}))
+  ([argv directory bound environment]
   (let [out (java.io.File/createTempFile "seon-operator" ".out")
-        child (.start (doto (ProcessBuilder. ^java.util.List argv)
-                        (.directory (io/file directory))
-                        (.redirectErrorStream true)
-                        (.redirectOutput out)))]
+        builder (doto (ProcessBuilder. ^java.util.List argv)
+                  (.directory (io/file directory))
+                  (.redirectErrorStream true)
+                  (.redirectOutput out))
+        _ (doseq [[variable value] environment] (.put (.environment builder) variable value))
+        child (.start builder)]
     (try
       (when-not (.waitFor child bound TimeUnit/MILLISECONDS)
         (reap-child! child bound {:seon.operator/argv argv})
@@ -786,7 +809,7 @@
                                     :seon.operator/output text}))
         text)
       ;; A survivor may still write its output file; it is kept for inspection.
-      (finally (when-not (.isAlive child) (.delete out))))))
+      (finally (when-not (.isAlive child) (.delete out)))))))
 
 (defn- gitlinks
   "Every submodule path and pinned commit recorded in `sha`'s tree."
@@ -1079,7 +1102,9 @@
         down-ms (elapsed-ms began-down)
         wiped (wipe-derived-state! root)
         wipe-ms (- (elapsed-ms began-down) down-ms)
-        plan (into [(first candidates) (first candidates)] (rest candidates))
+        ;; A drill judges one program: it boots only that one, twice.
+        plan (into [(first candidates) (first candidates)]
+                   (when-not (:seon.operator/single-program? request) (rest candidates)))
         attempts (loop [[sha & more] plan attempts []]
                    (let [started (System/nanoTime)
                          source (committed-source! root sha)
@@ -1105,7 +1130,9 @@
         ready-sha (get-in final [:seon.operator/source :seon.source/git-sha])]
     (cond
       (:seon.operator/failed-attempt final)
-      (assoc (diagnostic (str "Nuclear rebuild failed on HEAD " head " and every older distinct program tried; no JVM of this root remains.")
+      (assoc (diagnostic (if (:seon.operator/single-program? request)
+                           (str "Rebuild from scratch failed on " head " (booted twice); no JVM of this root remains.")
+                           (str "Nuclear rebuild failed on HEAD " head " and every older distinct program tried; no JVM of this root remains."))
                          (merge report {:seon.operator/failed-attempts failures}) :client-failed)
              :seon.operator/process-exit? true)
       (= head ready-sha)
@@ -1516,6 +1543,99 @@
                            :client-failed)
                :seon.operator/process-exit? (not (:seon.operator/ready? resumed)))))))
 
+(declare failure-cause)
+
+(defn- drill-revision!
+  "The commit a drill rehearses: `revision`, or with `paths` a commit object
+  whose tree is `revision`'s with those working-tree files (written through a
+  temporary index; HEAD, the shared index and the working tree are untouched)."
+  [repository revision paths]
+  (let [sha (str/trim (command! ["git" "rev-parse" "--verify" (str revision "^{commit}")] repository 30000))]
+    (if (empty? paths)
+      sha
+      (let [index (str (fs/create-temp-file {:prefix "seon-drill-index"}))
+            environment {"GIT_INDEX_FILE" index}]
+        (try
+          (command! ["git" "read-tree" sha] repository 30000 environment)
+          (command! (into ["git" "add" "--"] paths) repository 60000 environment)
+          (let [tree (str/trim (command! ["git" "write-tree"] repository 30000 environment))]
+            (str/trim (command! ["git" "commit-tree" tree "-p" sha "-m"
+                                 (str "drill: " revision " + " (str/join " " paths))]
+                                repository 30000)))
+          (finally (fs/delete-if-exists index)))))))
+
+(defn- drill-step
+  "One drill step's verdict from its operator result, the result written whole
+  beside the drill root."
+  [drill-root step result]
+  (let [file (io/file drill-root (str "drill-" (name step) ".edn"))
+        missing (get-in result [:seon.boot/readiness :seon.boot/missing-layers])]
+    (spit file (str (pr-str result) "\n"))
+    (cond-> {:seon.operator/step step
+             :seon.operator/pass? (and (not (:seon.error/message result))
+                                       (not (:seon.operator/fallback-from result))
+                                       (empty? missing))
+             :seon.operator/result-path (.getCanonicalPath file)}
+      (:seon.error/message result) (assoc :seon.error/message (:seon.error/message result))
+      (failure-cause result) (assoc :seon.operator/cause (failure-cause result))
+      (seq missing) (assoc :seon.boot/missing-layers missing)
+      (get-in result [:seon.operator/phases :seon.boot/ready-ms])
+      (assoc :seon.boot/ready-ms (get-in result [:seon.operator/phases :seon.boot/ready-ms]))
+      (get-in result [:seon.boot/readiness :seon.boot/ready-ms])
+      (assoc :seon.boot/ready-ms (get-in result [:seon.boot/readiness :seon.boot/ready-ms])))))
+
+(defn drill!
+  "Rehearse a program before it lands, on a disposable root under the managed
+  root's `tmp/drill/`: build a store from scratch on the base program (the one
+  the root's live JVM runs, else the revision's parent), move it onto the
+  revision (`start --head`), then build a store from scratch on the revision
+  (the nuke path: publish, adopt, arm). Each boot is the operator's own
+  (`nuke!` judging one program, `move-to-head!`); a fallback is a failure.
+  `:seon.source/revision` defaults to HEAD; `:seon.operator/with-paths` rehearses
+  working-tree files on top of it (`drill-revision!`). The drill root's JVMs
+  always stop; a passing drill root is deleted, a failing one is kept and named."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [request]
+  (let [began (System/nanoTime)
+        root (:seon.operator/managed-root request)
+        repository (committed-repository)
+        revision (drill-revision! repository (get request :seon.source/revision "HEAD")
+                                  (:seon.operator/with-paths request))
+        base (or (some-> (advertisement root nil) program-source :seon.operator/source-root io/file .getName)
+                 (str/trim (command! ["git" "rev-parse" "--verify" (str revision "^")] repository 30000)))
+        drill-root (io/file root "tmp" "drill" (str (subs revision 0 12) "-" (System/currentTimeMillis)))
+        drill-path (.getCanonicalPath (doto drill-root .mkdirs))
+        boot (fn [overrides] (merge {:seon.operator/managed-root drill-path :seon.operator/force? true
+                                     :seon.operator/single-program? true} overrides))
+        steps (try
+                (let [scratch-base (drill-step drill-path :base-from-scratch
+                                               (nuke! (boot {:seon.operator/command :nuke
+                                                             :seon.source/revision base})))
+                      move (when (:seon.operator/pass? scratch-base)
+                             (drill-step drill-path :move
+                                         (move-to-head! (boot {:seon.operator/command :start
+                                                               :seon.operator/head? true
+                                                               :seon.source/revision revision}))))
+                      scratch (drill-step drill-path :revision-from-scratch
+                                          (nuke! (boot {:seon.operator/command :nuke
+                                                        :seon.source/revision revision})))]
+                  (filterv some? [scratch-base move scratch]))
+                (finally (down! {:seon.operator/managed-root drill-path}
+                                (selected-processes drill-path))))
+        pass? (and (= 3 (count steps)) (every? :seon.operator/pass? steps))
+        report {:seon.operator/drill {:seon.operator/base base :seon.source/revision revision
+                                      :seon.operator/steps steps}
+                :seon.operator/phases {:seon.operator/total-ms (elapsed-ms began)}}]
+    (if pass?
+      (do (fs/delete-tree drill-path)
+          report)
+      (let [failed (first (remove :seon.operator/pass? steps))]
+        (diagnostic (str "Drill failed at " (name (:seon.operator/step failed)) " of " revision
+                         (when-let [cause (or (:seon.operator/cause failed) (:seon.error/message failed))]
+                           (str ": " (first (str/split-lines cause))))
+                         "; drill root kept at " drill-path)
+                    (assoc report :seon.operator/drill-root drill-path) :client-failed)))))
+
 (defn request! [request]
   (try
     (case (:seon.operator/command request)
@@ -1528,6 +1648,7 @@
                   (:seon.boot/pid result) (merge (program-source result))))
       :stop (if (:seon.operator/force? request) (force-stop! request) (connected! request))
       :down (down! request (selected-processes (:seon.operator/managed-root request)))
+      :drill (drill! request)
       ;; reset = the running JVM unlinks the branch and forks a fresh one,
       ;; keeping every cache; nuke = delete the store and every cache.
       :reset (do (when-not (:seon.operator/force? request)
@@ -1574,6 +1695,12 @@
                            manifest (edn/read-string (slurp (second args)))]
                          (when-not (map? manifest) (fail! "Manifest must be a map." {}))
                          (recur (nnext args) (assoc request :seon.config/manifest manifest) positionals))
+          "--revision" (if (= :drill command)
+                         (recur (nnext args) (assoc request :seon.source/revision (second args)) positionals)
+                         (fail! "--revision is supported only by drill." request))
+          "--with" (if (and (= :drill command) (seq (next args)))
+                     (recur nil (assoc request :seon.operator/with-paths (vec (next args))) positionals)
+                     (fail! "--with PATH... is supported only by drill." request))
           "--changed" (if (seq (next args))
                          ;; Canonical, as bin/test-check sends them: a relative path would
                          ;; resolve in the JVM's source directory, not the caller's.
@@ -1597,7 +1724,7 @@
             :export (if (= 1 (count positionals))
                       (assoc request :seon.operator/destination (.getCanonicalPath (io/file (first positionals))))
                       (fail! "Use export PATH." request))
-            (:status :down :nuke)
+            (:status :down :nuke :drill)
             (do (when (seq positionals) (fail! "Command takes no cluster name." request))
                 (when (and (#{:reset :nuke} command) (not (:seon.operator/force? request)))
                   (fail! (str (if (= :reset command) "Reset" "Nuclear rebuild") " requires --force.")
@@ -1628,8 +1755,8 @@
 
 (defn failure-cause
   "The first message beneath a failed result's own: the failed child's root
-  cause (`Throwable->map`'s `:cause`), its message, its adoption's, then the
-  last link of the result's own cause chain."
+  cause (`Throwable->map`'s `:cause`), its message, a nuke's first failed
+  attempt's, its adoption's, then the last link of the result's own cause chain."
   {:malli/schema [:=> [:cat :map] [:maybe :string]]}
   [result]
   (let [evidence (:seon.error/offending result)
@@ -1637,7 +1764,11 @@
     (some #(when (and (string? %) (not= % (:seon.error/message result))) %)
           [(get-in child [:seon.error/cause :cause])
            (:seon.error/message child)
+           ;; a nuke's: its first failed attempt's child
+           (get-in evidence [:seon.operator/failed-attempts 0 :seon.operator/value :seon.error/message])
            (get-in evidence [:seon.operator/adoption :seon.error/message])
+           ;; a drill's: its first failed step's
+           (some :seon.operator/cause (get-in evidence [:seon.operator/drill :seon.operator/steps]))
            ;; the primary chain's root: suppressed links (flat, naming their
            ;; relation) follow it
            (:seon.error/message (last (remove #(or (:seon.error/suppressed-by %) (:seon.error/cause-of %))
@@ -1700,7 +1831,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH | drill [--revision REV] [--with PATH...]"}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.

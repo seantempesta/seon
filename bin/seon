@@ -17,7 +17,8 @@ fi
 # `start --head` moves the root to HEAD, so it runs HEAD's operator; every
 # other command runs the commit of the root's live JVM (HEAD when none runs).
 which=running
-if [[ "${1:-}" == start && " $* " == *" --head "* ]]; then
+if [[ "${1:-}" == start && " $* " == *" --head "* ]] || [[ "${1:-}" == drill ]]; then
+  # A drill rehearses on a disposable root with HEAD's operator.
   which=head
 fi
 program="$("$SEON_SOURCE_ROOT/bin/_operator-program" "$SEON_OPERATOR_ROOT" "$which")"
