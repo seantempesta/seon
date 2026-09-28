@@ -79,6 +79,11 @@ an entrant (an evaluation's value, a reply, a proc step, a test body). An error 
   32 B; every fact rides a commit already happening (~0 extra bytes; a separate commit keeps ≥1.15 MB). A function
   failing a million times writes K occurrences and one counter. In-memory accumulators restart from zero on boot.
 
+- **Never a drain (owner, hard rule).** Health may not noticeably load the system or grow the store: no commit of its
+  own, no background work that scales with call volume, nothing measured in gigabytes. Every slice's proof states
+  bytes added per 1,000 ordinary evaluations (target ~0) and per 1,000 failures, and probes stay under ~50 MB of store
+  (a model-proof probe that committed per item added 17 GB in ten minutes).
+
 ## 3. Reading it: queries, then renders
 
 - **Everything is a query over the graph.** "What is slow or doing too much": transactions with `/ms` or `/calls` over
