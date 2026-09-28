@@ -537,3 +537,11 @@
                           (get-in observed [:seon.dev.mcp/open-faults :seon.dev.mcp/top]))))
            (println "STATUS-FAULTED" elapsed-ms "ms"))
          (finally (swap! runtime/running-instances dissoc cluster-name)))))))
+
+(deftest a-failure-with-no-cluster-database-has-no-world-and-never-panics
+  ;; A boot refused before its database stood (the 706e407396 indexing
+  ;; refusal, 2026-09-28T02:01Z) threw "SEON CORE FAULT (panic)" from
+  ;; request-world inside request!'s catch; request! now answers the failure
+  ;; as its value with an unrecorded receipt.
+  (is (nil? (#'boot/request-world "no-such-cluster-for-this-test"
+                                  (ex-info "Program indexing transaction was refused." {})))))

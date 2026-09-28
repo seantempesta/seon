@@ -611,18 +611,14 @@
 
 (defn- request-world
   "The world a failed request records in: the environment the failure carries,
-  else the named (or sole) live instance's. None means no database to record
-  in, which panics in both modes."
-  {:malli/schema [:=> [:cat [:maybe :string] :seon.error/throwable] :seon.env/environment]}
+  else the named (or sole) live instance's. Nil when no cluster database
+  stands (a boot refused before its database stood): the failure is then
+  answered unrecorded, as the request's value."
+  {:malli/schema [:=> [:cat [:maybe :string] :seon.error/throwable] [:maybe :seon.env/environment]]}
   [name failure]
   (or (carried-environment failure)
       (let [instances (vec (vals (cond-> @running-instances name (select-keys [name]))))]
-        (when (= 1 (count instances)) (env/of (:seon.sci.eval/ctx (first instances)))))
-      ;; The unrecordable failure's own message leads, so the panic never
-      ;; hides what failed (a boot refused before its database stood).
-      (throw (ex-info (str "SEON CORE FAULT (panic): no live cluster database to record this failure in: "
-                           (ex-message failure))
-                      {:seon.boot/cluster-name (or name :absent)} failure))))
+        (when (= 1 (count instances)) (env/of (:seon.sci.eval/ctx (first instances)))))))
 
 (defn request!
   "One data request. Verify root and process identity before connected effects."
@@ -773,12 +769,20 @@
                                  (if refused? :refused :operation-failed) cause)]
         (if refused?
           response
+          ;; With no cluster database to record in, the failure is still this
+          ;; request's value, its receipt saying it was not stored; the
+          ;; operator writes the response to its start log.
           (assoc response :seon.fault/recorded
-                 (fault/fault! (request-world name cause) cause
-                               {:seon.error/layer :seon.operator/operation
-                                :seon.error/operation `request!
-                                :seon.db.process/id
-                                (cluster/process-identity (process/current-identity))})))))))
+                 (if-let [world (request-world name cause)]
+                   (fault/fault! world cause
+                                 {:seon.error/layer :seon.operator/operation
+                                  :seon.error/operation `request!
+                                  :seon.db.process/id
+                                  (cluster/process-identity (process/current-identity))})
+                   {:seon.boot/cluster-name (or name "default")
+                    :seon.error/layer :seon.operator/operation
+                    :seon.error/operation `request!
+                    :seon.fault/committed? false})))))))
 
 (defn banner
   "Render observed readiness without treating missing layers as ready."
