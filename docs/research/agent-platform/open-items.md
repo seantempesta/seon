@@ -112,15 +112,55 @@ duplicates deleted. Unverified commits are debt. Two lessons from 2026-09-25: a 
 real values against the declared contract before committing); a new attribute must install before its first write on an
 EXISTING store (prove adoption on a branch of the live store, never only on a fresh one).
 
-### Platform state (rewritten in place 2026-09-28)
-- **Default:** 29bdfce8d, ready in 16.6 s. Moves (`start --head`) boot. A FROM-SCRATCH build or nuke may still fail on
-  "Program indexing found conflicting entity maps" from 6f7cee1f2 onward. Root fixed that class in 29bdfce8d (a
-  ref-by-identity is a reference), but it is not yet re-drilled from scratch.
-- **Last night's out-of-memory:** default died at 21:07 during test round r13 ("Requested array size exceeds VM
-  limit"). Dump `data/heap/java_pid3360.hprof` (10.6 GB), unanalyzed. The earlier OOM of the same class was an
-  unbounded `pr-str` in a probe.
-- **Last full signal:** r13 was cut by that OOM, with 22 green among those that ran. No full central round has run on
-  the current HEAD. Unrun: sci.eval, sci.kernel, turn, test.*.
+### Platform state (rewritten in place 2026-09-28, pre-compaction)
+- **Default:** 52e163bee, healthy. After the owner's Claude Code restart, MCP works in both JVM and SCI modes, and every
+  reply carries the call profile (`:calls`, `:repeated`).
+- **Faults are still open on default:** root's system turn refused three times at 17:07Z ("A generated context read
+  depends on the agent's own turn-taking"), so the turn proc parked again. The disposition Datom cast is resolved by
+  its digest. A publish Datom→Map$Entry cast came from the data-renders branch.
+- **HEAD 8bd3d4d91 is ahead of default:**
+  - Astra's set-difference publication, 3b86a7ba1;
+  - no-crash's contract-gate rule plus cause chains, 8bd3d4d91.
+- **Uncommitted work in the tree, from lanes paused for the restart:**
+  - batch.clj and turn.clj (one-path-impl-2);
+  - cluster.clj and fn.clj (the Astra fixer);
+  - seon.batch.edn, seon.test.edn, test/seon/analysis_identity_test.clj, reload_measure.clj and hook_measure.clj.
+  Owners resume them.
+- **Store:** 57 GB after the GC (165 GB reclaimed). The daily GC is fixed.
+- **Tests:** no complete central round yet. r14 and r15 were cut short: by a live crash, then by the pause.
+- **Lines:** S8 plus S10 deleted about 1,550 src lines. `src` is roughly 94k lines.
+
+### Lanes to resume (all paused; each lane's detail is in the ledger tail)
+1. **one-path-impl-2** (Opus; owns turn, sci/*, batch, forgive, instrument, call_preparation, profile, repl, my/agent,
+   test/accretion). Next:
+   - the parked root turn fault;
+   - the value zoo, with every stage guarded and stages returning error values;
+   - derive refusals as the form's error;
+   - S10b, then deleting accretion's install-gate machinery;
+   - dogfood frictions: one deletion path for `ns-unmap!`, the deftest status render, reacquiring compiled callers;
+   - the debug page as one assembly;
+   - profiling Part A (8e9a5f320);
+   - audit findings 2, 3, 5 and 6.
+2. **Astra fixer** (Codex `astra-algorithmic-audit`; owns db, test/runner, test.clj, cluster, schema/datahike, fn, id,
+   cache, program). Next: the store-write audit fixes 2–6 (ce8fbea66):
+   - batched test recording;
+   - lint identity and the 8,332-digest churn;
+   - deleting adoption-identities;
+   - transaction provenance;
+   - the branching factor.
+   Then apply `tmp/data-renders/patches/transaction-report-data.patch`. Then shrink S4a's additions and dbe5edf1d.
+3. **dogfood-loop** (Opus). Loop 1 on `loop1-uncut-total` (`seon.render.value/tree`, task 36aa005ffd4e): propose →
+   prepare → accept → write-back → drill, then loop 2. The B7 SCI fix is in 77dda7bcf (live).
+4. **no-crash** (Opus). The census of 518 throws; boundaries proven by forced failures; producer conversions. The gate
+   rule landed in 8bd3d4d91.
+5. **mcp-thin-bridge** (Opus; owns script/seon/dev/mcp.clj): one stable data entrance, so JVM renames never need a
+   Claude Code restart. It needs ONE more owner restart after it lands.
+6. **test-data-assertions** (Opus). Phase 2 continues from db_test onward. The lint hook that errors on non-prose `is`
+   messages lands after one-path applies phase1-one-path-files.patch. `tmp/test-data-assertions/golden-marker.patch`
+   (schema) waits for the next drill batch.
+7. **Central round:** a full, frozen-HEAD round once the lanes' landings settle.
+Owner decision pending: history retention (the audit says the per-commit cost, not the data, is the waste; fix writes
+first).
 
 ### Reflection (2026-09-28): what worked, what didn't, and the rule each lesson became
 - **Worked:**
