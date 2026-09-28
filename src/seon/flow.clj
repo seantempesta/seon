@@ -418,12 +418,6 @@
                 (update :args #(merge args %))
                 (assoc-in [:outs ::flow/error] (fault-port dispose!))))))))))
 
-(defn bounded-platform-executor
-  "Create a bounded executor whose workers are platform threads."
-  {:malli/schema [:=> [:catn [::parallelism ::parallelism]] ::executor]}
-  [parallelism]
-  (Executors/newFixedThreadPool (int parallelism)))
-
 (defn- carried-arm
   [work]
   (:seon.sci.kernel/arm (env/of work)))
