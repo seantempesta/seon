@@ -271,7 +271,7 @@ handle))}}
                         :seon.cluster.wake/fault-channel fault-channel
                         :seon.cluster.wake/key ::route})
           (reset! server (web/start!
-                          {:seon.turn.loop/cluster handle
+                          (cond-> {:seon.turn.loop/cluster handle
                            :seon.store/connection-object connection
                            :seon.agent/id agent-id
                            :seon.sci.admit/caps caps
@@ -284,8 +284,10 @@ handle))}}
                            :seon.render.web/registration registration
                            :seon.render.web/latest-packages latest-packages
                            :seon.render.web/render-channel render-channel
-                           :seon.render.web/fault-channel fault-channel
-                           :seon.render.web/http (:seon.render.web/http service)}))
+                           :seon.render.web/fault-channel fault-channel}
+                            ;; a declared member is present or absent, never nil
+                            (:seon.render.web/http service)
+                            (assoc :seon.render.web/http (:seon.render.web/http service)))))
           (body connection @server
                 {:graph graph
                  :pages-mult pages-mult
@@ -1116,7 +1118,8 @@ handle))}}
                              :seon.ns/name 'my.agents.page-key}))
       ;; Read evidence checks and page derivations are read from their armed
       ;; counters; which blocks re-derived is read from the retained calls
-      ;; themselves: a re-derived call is a new entry, a retained one the same.
+      ;; themselves: a re-derived call has a new render basis, a retained one
+      ;; keeps its basis (a checked call only advances its database value).
       (let [read-attributes (web-private 'read-attributes)
             calls #(get-in @(render/shared-cache (:ctx context)) [::web/calls "page-key"] {})
             observe (fn []
@@ -1125,7 +1128,14 @@ handle))}}
                             (support/armed-calls '#{seon.db/read-evidence-current? seon.render.web/page-result}
                                                  #(fetch server "/agent/page-key"))
                             after (calls)
-                            re-derived (remove (fn [[id entry]] (identical? entry (get before id))) after)]
+                            ;; block calls only: the root acquisition is refreshed
+                            ;; by its own check (`refresh-root`), not as a block
+                            re-derived (filter (fn [[id entry]]
+                                                 (and (contains? before id)
+                                                      (not= ::web/root-acquisition (first id))
+                                                      (not= (:seon.render.call/basis-transaction entry)
+                                                            (:seon.render.call/basis-transaction (get before id)))))
+                                               after)]
                         (is (= 200 (.statusCode response)))
                         {:evidence (get counted 'seon.db/read-evidence-current?)
                          :derivations (get counted 'seon.render.web/page-result)
@@ -1340,19 +1350,19 @@ handle))}}
                                (if (bytes? content)
                                  (throw (ex-info "injected writer failure" {}))
                                  (http/send! channel content close-after-send?)))}}
-    (fn [_connection server context]
-        (let [stream (open-feed server (str "/feed/" agent-id))]
+    (fn [connection server _context]
+        (let [stream (open-feed server (str "/feed/" agent-id))
+              ;; the one fault route: the failure is a recorded fault fact
+              feed-faults (fn [database]
+                            (db/q '[:find [(pull ?e [:seon.error/layer :seon.error/operation]) ...]
+                                    :where [?e :seon.error/layer :seon.render.web/feed]]
+                                  database))]
           (try
-            (let [fault (support/await-event!
-                         (:fault-channel context)
-                         [:feed-writer-fault])
-                  data (ex-data (:clojure.core.async.flow/ex fault))]
-              (is (= :seon.render.web/feed
-                     (:clojure.core.async.flow/pid fault)))
-              (is (= agent-id (:seon.agent/id fault)))
-              (is (string? (:seon.render.web/tab-id data)))
-              (is (= agent-id (:seon.render.web/page data)))
-              (is (= :seon.render/html (:seon.render/output data))))
+            (is (= [{:seon.error/layer :seon.render.web/feed
+                     :seon.error/operation 'seon.render.web/feed-response}]
+                   (feed-faults (support/await-event! connection [:feed-writer-fault]
+                                                      #(seq (feed-faults %)))))
+                "the feed writer's failure is recorded as its entrance's fault")
             (finally (.close stream)))))))
 
 (deftest reconnect-is-repaint

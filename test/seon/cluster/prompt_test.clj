@@ -1,4 +1,5 @@
-(ns seon.cluster.prompt-test
+(ns ^{:seon.test/golden "The provider prompt is the transcript a model reads: its retained history, frame and budget line are asserted as the text sent."}
+  seon.cluster.prompt-test
   "Recurring acceptance for the prompt's append-only REPL history."
   (:require [clojure.core.async :as async]
             [clojure.string :as str]

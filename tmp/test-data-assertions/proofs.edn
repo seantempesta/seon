@@ -142,4 +142,15 @@
  :db-test-patch
  {"phase2-db-test.patch"
   {unique-rejection-names-the-existing-owner-as-data {:head [10 0 0] :broken [7 3 0] :note "red on 52e163bee before conversion: the rejection message is the raw Datahike exception (task a-unique-rejection-message-is-the-raw-exception); the owner is asserted as data"}
-   a-write-naming-another-clusters-branch-is-refused-naming-both {:head [8 0 0] :note "removal only: the branches are asserted as data"}}}}
+   a-write-naming-another-clusters-branch-is-refused-naming-both {:head [8 0 0] :note "removal only: the branches are asserted as data"}}}
+ :web-test-seams-adopted
+ {:note "default 52e163bee runs the web.clj seams (a516a7c95)"
+  accepted-socket-writes-have-a-loud-drain-backstop {:head [4 0 0] :broken [0 4 0] :breaker "the socket drains at once"}
+  failed-ephemeral-bind-preserves-the-bind-failure {:head [4 0 0] :broken [1 3 0] :breaker "the service's run-server leaf dropped"}
+  start-refuses-a-flat-process-write-before-binding {:head [2 0 0] :broken [0 2 0] :breaker "the service's writer dropped"}
+  runtime-evaluation-cannot-be-displaced-by-a-database-wake {:head [9 0 0] :broken [7 2 0] :breaker "page-result's counter reads zero"}
+  an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block {:head [16 0 0] :broken [15 1 0] :breaker "retained calls dropped at each acquisition"
+   :note "re-derivation is a retained block call whose render basis moved; the root acquisition is its own check"}
+  a-feed-writer-failure-enters-the-cluster-fault-path {:head [2 0 0] :note "was red at 52e163bee: it awaited the fault channel; the failure is now asserted as its recorded fault fact; no breaker run"}
+  two-tabs-each-get-their-own-complete-paint {:head [6 0 0] :note "breaker did not reach the counted leaf; unverified negative"}
+  :with-server-fix "a516a7c95 passed :seon.render.web/http nil to start! when a test named none, so every with-server test without a socket leaf was refused at start!; fixed (present or absent, never nil)"}}
