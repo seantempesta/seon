@@ -345,8 +345,7 @@
                     (let [c (:seon.db/connection execution)
                           written (db/transact! c [(entity c '[:seon.fn/sym scratch.gate-class/f] "(defn f {:malli/schema [:=> [:cat] :int]} [] 2)")])]
                       (is (:db-after written))
-                      #{[:seon.fn/sym 'scratch.gate-class/f]}))
-                  (constantly #{}))]
+                      #{[:seon.fn/sym 'scratch.gate-class/f]})))]
         (is (true? (:seon.test/passed? gate)))
         (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
       (let [execution (cluster.agent/acquire-context! target nil {:seon.agent/branch s})]

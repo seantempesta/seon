@@ -916,7 +916,7 @@
                                  touched (when-not (:seon.error/at written) (fn/report-identities written))]
                              (run! #(when (:seon.error/at %) (throw (ex-info "The merge delta was refused." %))) [written touched])
                              (into (into delta touched) (map #(vector :seon.test/sym %)) proofs)))
-                  gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (constantly #{}))
+                  gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write!)
                   run (:seon.source/gate-run gate)
                   ;; Missing coverage refuses by name: every proof is a member.
                   answered (set (map :seon.test/sym (:seon.test/results run)))
