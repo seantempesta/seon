@@ -1,0 +1,99 @@
+--- a/src/seon/db.clj
++++ b/src/seon/db.clj
+@@ -29,6 +29,7 @@
+             [datalog.parser.impl :as parser.impl]
+             [datalog.parser.type :as parser.type]
+             [clojure.test.check.generators :as gen]
++            [seon.cache]
+             [seon.env :as env]
+             [seon.error.refusal :as error.refusal]
+             [seon.id :as id]
+@@ -4273,14 +4274,23 @@
+      ::checked (count checked)
+      ::edges (count edges)}))
+ 
+-(defonce ^:private arity-base-cache
+-  ;; Four recent bases; each key holds the read attributes' datom vectors,
+-  ;; whose unchanged datoms are the index's own objects.
+-  (cache/lru-cache-factory {} :threshold 4))
+-
+-(defonce ^:private arity-commit-cache
+-  ;; Commit id -> the same derived base; small keys, so it retains more.
+-  (cache/lru-cache-factory {} :threshold 16))
++(defn- arity-base-weight
++  "Estimated retained bytes of an arity base and the content key naming it.
++
++  Calibrated on default's heap (data/heap/live-1725, 2026-09-26: a base of
++  99,659 edges retained 54 MB, about 540 bytes per edge across the edge set and
++  its caller and callee indexes); a key datom about 100 bytes. The two caches
++  that held bases (LRU 4 by content, LRU 16 by commit) retained 271 MB outside
++  any byte budget in the OOM dump of pid 42397 (2026-09-27)."
++  {:malli/schema [:=> [:cat :map [:int {:min 0}]] [:int {:min 0}]]}
++  [base key-datoms]
++  (+ (* 540 (count (::edge-set base))) (* 100 key-datoms)))
++
++(defn- arity-key-datoms
++  "The datom count of an arity content key."
++  {:malli/schema [:=> [:cat [:tuple :qualified-keyword [:vector :seon.schema/value]]] [:int {:min 0}]]}
++  [[_ attribute-datoms]]
++  (reduce + 0 (map (comp count second) attribute-datoms)))
+ 
+ (defn- arity-content-key
+   "The arity cache key naming a value by the datoms the gate reads."
+@@ -4319,12 +4329,14 @@
+     ;; to build the content key, and a new commit of seen content still hits.
+     ;; A report seeds its final value's base (`report-arity-comparison`), so
+     ;; the first write on a fork of a just-written head hits too.
+-    (let [by-content #(deref (cache/lookup-or-miss
+-                              arity-base-cache (arity-content-key database)
+-                              (fn [_] (delay (derive)))))
++    ;; Both kinds live in the one byte-bounded process cache (`seon.cache`).
++    (let [by-content #(let [content-key (arity-content-key database)
++                            key-datoms (arity-key-datoms content-key)]
++                        (seon.cache/lookup ::arity-base content-key
++                                           (fn [base] (arity-base-weight base key-datoms)) derive))
+           {:datahike.cache/keys [committed? commit-id]} (:cache-context database)]
+       (if (and committed? commit-id)
+-        @(cache/lookup-or-miss arity-commit-cache commit-id (fn [_] (delay (by-content))))
++        (seon.cache/lookup ::arity-commit commit-id (fn [base] (arity-base-weight base 0)) by-content)
+         (by-content)))))
+ 
+ (defn- advanced-arity-base
+@@ -4416,10 +4428,14 @@
+                      ::checked (+ (- (::checked base) (::checked prior)) (::checked current))
+                      ::edges (+ (- (::edges base) (::edges prior)) (::edges current))
+                      ::bounds bounds}]
+-                ;; Seed the final value's base lazily: a later write whose
+-                ;; `:db-before` holds these datoms (a fork of this head) hits.
+-                (cache/lookup-or-miss arity-base-cache (arity-content-key after)
+-                                      (fn [_] (delay (advanced-arity-base base removed affected comparison))))
++                ;; Seed the final value's base (an O(changed edges) update of
++                ;; the prior base): a later write whose `:db-before` holds
++                ;; these datoms (a fork of this head) hits.
++                (let [content-key (arity-content-key after)
++                      key-datoms (arity-key-datoms content-key)]
++                  (seon.cache/lookup ::arity-base content-key
++                                     (fn [base] (arity-base-weight base key-datoms))
++                                     #(advanced-arity-base base removed affected comparison)))
+                 comparison))))))
+ 
+ (defn- prepared-arity-bounds
+--- a/test/seon/db_test.clj
++++ b/test/seon/db_test.clj
+@@ -1,6 +1,6 @@
+ (ns seon.db-test
+   (:require [clojure.core.async :as async]
+-            [clojure.core.cache :as cache]
++            [seon.cache]
+             [clojure.edn :as edn]
+             [clojure.string :as str]
+             [clojure.test :refer [deftest is testing use-fixtures]]
+@@ -2060,7 +2060,7 @@
+                                     {:seon.fn/call-arities #{['clojure.core/str 1]}})])
+      (let [head (db/db connection)
+            content-key (@#'db/arity-content-key head)
+-           seeded? (cache/has? @@#'db/arity-base-cache content-key)
++           seeded? (contains? (seon.cache/retained ::db/arity-base) content-key)
+            ;; The writer's own questions read arities through their cells.
+            storage-q (partial @#'db/storage-q-in (db/carried-projection head))
+            edges (@#'db/call-edges storage-q head)
