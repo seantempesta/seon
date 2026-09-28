@@ -12,14 +12,25 @@
             [seon.operator.runtime :as operator.runtime]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [clojure.edn]
+            [seon.profile]
             [seon.schema.datahike :as schema.datahike]))
 
+(defn- candidate-projection
+  "The packaged population with a candidate seon.runtime.edn merged over it.
+  (Stage 1 was first proven, 2026-09-28 21:56Z, by reading the candidate
+  archive's resources through schema.edn/*resources*, since removed.)"
+  [runtime-edn]
+  (let [candidate (clojure.edn/read-string (slurp runtime-edn))
+        forms (merge (into {} (remove #(= "seon.runtime" (namespace (key %)))) (schema.edn/packaged-forms))
+                     candidate)]
+    (schema/declaration-projection forms)))
+
 (defn- candidate-declaration
-  "The projection and Datahike declaration the candidate archive's resources derive."
-  [directory attribute]
-  (binding [schema.edn/*resources* (str directory "/resources")]
-    (let [projection (schema/declaration-projection (schema.edn/packaged-forms))]
-      [projection (schema.datahike/malli->datahike-attr-in projection attribute)])))
+  "The projection and Datahike declaration the candidate derives."
+  [runtime-edn attribute]
+  (let [projection (candidate-projection runtime-edn)]
+    [projection (schema.datahike/malli->datahike-attr-in projection attribute)]))
 
 (defn- counts [database]
   {:turns (count (d/datoms database :aevt :seon.turn/id))
@@ -53,7 +64,7 @@
 (defn two-stage
   "Stage 1 adopts the plain-ref form; stage 2 retires the attribute."
   [directory]
-  (let [[projection declaration] (candidate-declaration directory :seon.runtime/turns)]
+  (let [[projection declaration] (candidate-declaration (str directory "/resources/seon/schemas/seon.runtime.edn") :seon.runtime/turns)]
     (on-branch
      (fn [connection]
        (let [before (counts @connection)
@@ -70,7 +81,7 @@
   "What removing the declaration in ONE step would do: the component form's
   retirement retracts each turn as an entity."
   [directory]
-  (let [[projection _] (candidate-declaration directory :seon.runtime/turns)]
+  (let [[projection _] (candidate-declaration (str directory "/resources/seon/schemas/seon.runtime.edn") :seon.runtime/turns)]
     (on-branch
      (fn [connection]
        (let [tx (cluster/attribute-change-tx @connection [:seon.runtime/turns] {} projection)]
@@ -125,10 +136,23 @@
                :open (validation-ms database (open-shape database agent-id edge?))
                :close (when (d/q '[:find ?t . :in $ ?id :where [?a :seon.agent/id ?id] [?t :seon.turn/agent ?a]] database agent-id)
                         (validation-ms database (close-shape database agent-id)))})
-        [projection declaration] (candidate-declaration directory :seon.runtime/turns)]
+        [projection declaration] (candidate-declaration (str directory "/resources/seon/schemas/seon.runtime.edn") :seon.runtime/turns)]
     {:before (mapv #(row head % true) [small-agent "root"])
      :after (on-branch
              (fn [connection]
                (timed-transact connection (cluster/attribute-change-tx @connection [:seon.runtime/turns]
                                                                        {:seon.runtime/turns declaration} projection))
                (mapv #(row @connection % false) [small-agent "root"])))}))
+
+(defn retire-plain
+  "Stage 2 on a branch of default's current head: the candidate (no
+  :seon.runtime/turns) retires the installed plain-ref attribute."
+  [runtime-edn]
+  (let [projection (candidate-projection runtime-edn)]
+    (on-branch
+     (fn [connection]
+       (let [before (counts @connection)
+             tx (cluster/attribute-change-tx @connection [:seon.runtime/turns] {} projection)]
+         {:before before :op-kinds (frequencies (map first tx))
+          :declared-in-candidate? (contains? (:seon.schema.projection/forms projection) :seon.runtime/turns)
+          :result (timed-transact connection tx)})))))
