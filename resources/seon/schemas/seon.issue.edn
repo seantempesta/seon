@@ -30,7 +30,9 @@
              :agent     [:and {:description "The agent working it; asserted by start! in the transaction that creates the agent and opens its first turn. A LISTENED ATTRIBUTE: the assignment IS the worker's first wake, so the worker takes a turn about its issue without anyone sending it a message. Asserted exactly once and retained on resume. Its assertion anchors the total issue turn budget; later messages do not refill it."
                                :seon.db/index true
                                :seon.wake/listen true
-                               :seon.wake/opens-turn? true} :seon.db/ref]
+                               :seon.wake/opens-turn? true
+                               :seon.render/ai seon.issue.opening/render-ai
+                               :seon.render/form seon.issue.opening/render-form} :seon.db/ref]
              :created-by [:and {:description "The author agent. Its first assertion is the enduring retraction authority, including after unassignment."} :seon.db/ref]
              :detector  [:and {:description "The detector function's program entity for a generated issue. With the subject's own identity value it is the issue's identity, so a detector run upserts its issues instead of duplicating them. Absent on an authored issue."} :seon.db/ref]
              :budget    [:int {:min 1 :description "Total ordinary turns since assignment; start! resumes the same worker by increasing this budget and its settings overlay."}]

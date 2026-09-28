@@ -1,28 +1,22 @@
 (ns seon.issue.opening
-  "Candidate AI openings for a worker's issue block, one per trial rendering.
+  "An issue worker's opening, as data: one per issue it works.
 
-  The agent identity renderer emits these ordinary generated read forms.
-  The issue schema's AI/HTML pair renders the resulting data. The dial
-  that selects one: `:seon.config.render/issue-opening`, a per-agent config
-  enum, read from the worker named by `:seon.issue/agent`. An issue with no
-  worker, or a worker with no dial, renders `:bare` — the floor the family
-  shipped with.
-
-  Every candidate obeys the family's rulings: it LINKS rather than copies
-  (function and test source are read with `doc` or `seon.db/pull`), it emits
-  only reads, and every completing call it names is exact and executable.
-  The forms a candidate emits are evaluated as ordinary generated reads in
-  the worker's system turn, so a write here would be refused by the loop
-  rather than by a reviewer.
+  `openings` is the AI face of the agent's `:seon.issue/_agent` concern: for
+  each issue, what decides done (its exact tests with their recorded
+  outcomes, or its detector), what the worker's dialled candidate adds, and
+  the reads offered (`(my.issue/status ...)` last). The value printer prints
+  it; nothing evaluates it. The dial, `:seon.config.render/issue-opening`, is
+  a per-agent config enum read from the worker named by `:seon.issue/agent`;
+  no worker or no dial is `:bare`. A candidate only chooses data and offered
+  reads: it links rather than copies, and every call it names is exact and
+  executable.
 
   The trial that compares them is
   docs/prds/steward-platform/plan/issue-context-trials-2026-09-16.md."
   (:require [seon.error.refusal]
-            [clojure.string :as str]
             [seon.ai :as ai]
             [seon.db :as db]
-            [seon.test :as test]
-            [seon.repl :as repl]))
+            [seon.test :as test]))
 
 (def dial
   "The per-agent config attribute that selects one candidate."
@@ -93,119 +87,114 @@
                       {:seon.fn/file [:seon.fn.file/relative-path]}])
         [:seon.fn/sym function-symbol]))
 
-(defn- commented-form
-  "One form, printed as the agent would write it, as comment lines."
-  [form]
-  (str/join "\n" (map #(str ";;   " %) (str/split-lines (repl/source-text form)))))
-
-(defn- comment-lines [lines]
-  (str/join "\n" (map #(if (str/blank? %) ";;" (str ";; " %)) lines)))
-
-(defn- block [& parts]
-  (str (str/join "\n" (remove str/blank? parts)) "\n"))
-
 ;;; ---------------------------------------------------------------------------
-;;; The candidates
+;;; The opening as data: what the worker's context shows of each issue
 ;;; ---------------------------------------------------------------------------
 
-(defmulti ^:private render-candidate
-  "One candidate rendering of an issue block, keyed by the dial."
-  (fn [selected _links] selected))
+(defn- outcome
+  "One linked test's recorded outcome, or :unrun when none is recorded."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:enum :pass :fail :error :unrun]]}
+  [result]
+  (cond
+    (or (not (map? result)) (:seon.error/at result)) :unrun
+    (pos? (get result :seon.test/error-count 0)) :error
+    (pos? (get result :seon.test/fail-count 0)) :fail
+    :else :pass))
 
-(defmethod render-candidate :bare
-  [_ {:seon.issue/keys [id]}]
-  (block ";; My issue. The system decides completion from the condition above."
-         (repl/source-text (status-form id))))
+(declare context)
 
-(defmethod render-candidate :plan-first
-  [_ {:seon.issue/keys [id] :seon.test/keys [syms]}]
-  (block (comment-lines
-          ["My plan's steps carry this issue; its tests decide done."
-           "The one call that proves it finished:"])
-         (commented-form (check-form syms))
-         (repl/source-text (status-form id))))
+(defmulti ^:private candidate-data
+  "What one dialled candidate adds to the opening: data it reads now, and the
+  reads it offers in the order it recommends them."
+  (fn [selected _database _links] selected))
 
-(defmethod render-candidate :evidence-first
-  [_ {:seon.issue/keys [id problem] :seon.test/keys [syms] fn-syms :seon.fn/syms}]
-  (apply block
-         (concat
-          [";; The red test, first: its own source and its last failure."]
-          (map #(repl/source-text (test-pull-form %)) syms)
-          [";; Then each function the test reaches."]
-          (map #(repl/source-text (function-pull-form %)) fn-syms)
-          [(comment-lines (into ["The problem, last:"] (str/split-lines (or problem ""))))
-           (repl/source-text (status-form id))])))
+(defmethod candidate-data :default [_ _ _] {})
 
-(defmethod render-candidate :walkthrough
-  [_ {:seon.issue/keys [id] :seon.test/keys [syms] fn-syms :seon.fn/syms
-      paths :seon.fn.file/relative-paths}]
-  (block (comment-lines ["One worked way through an issue like this one, in order."
-                         "1. Read the test:"])
-         (commented-form (test-pull-form (first syms)))
-         (comment-lines ["2. Read each function it reaches:"])
-         (commented-form (function-pull-form (first fn-syms)))
-         (comment-lines ["3. Read the file around the form:"])
-         (commented-form (list 'my.fs/read {:my.fs/path (first paths)}))
-         (comment-lines ["4. Evaluate the corrected definition with its contract."
-                         "5. Observe the exact tests:"])
-         (commented-form (check-form syms))
-         (comment-lines ["Every step is a call; nothing here is a summary of a call."])
-         (comment-lines (map #(str "The file: " %) paths))
-         ";; Start at step 1."
-         (repl/source-text (test-pull-form (first syms)))
-         (repl/source-text (status-form id))))
+(defmethod candidate-data :plan-first
+  [_ _ {:seon.test/keys [syms]}]
+  {:seon.render/operations [(check-form syms)]})
 
-(defmethod render-candidate :questions
-  [_ {:seon.issue/keys [id] :seon.test/keys [syms] fn-syms :seon.fn/syms
-      ns-names :seon.ns/names}]
-  (block (comment-lines ["Three questions. Answer each one with a form, not a guess."
-                         "Which function throws?"])
-         (commented-form (function-pull-form (first fn-syms)))
-         (comment-lines ["What does the test expect?"])
-         (commented-form (test-pull-form (first syms)))
-         (comment-lines ["What else lives beside it?"])
-         (commented-form (list 'dir (symbol (first ns-names))))
-         (repl/source-text (status-form id))))
+(defmethod candidate-data :evidence-first
+  [_ database {:seon.issue/keys [id problem]}]
+  (cond-> (select-keys (context {:seon.db/db database :seon.issue/id id})
+                       [:seon.issue/tests :seon.issue/functions])
+    problem (assoc :seon.issue/problem problem)))
 
-(defmethod render-candidate :namespace-picture
-  [_ {:seon.issue/keys [id] ns-names :seon.ns/names}]
-  (apply block
-         (concat
-          [";; I am the steward of these namespaces. The picture first."]
-          (map #(repl/source-text (list 'dir (symbol %))) ns-names)
-          [";; One of its issues is mine."
-           (repl/source-text (status-form id))])))
+(defmethod candidate-data :walkthrough
+  [_ database {:seon.test/keys [syms] fn-syms :seon.fn/syms paths :seon.fn.file/relative-paths}]
+  {:seon.issue.opening/first-test (test/recorded-result database (first syms))
+   :seon.render/operations (cond-> [(test-pull-form (first syms))]
+                             (seq fn-syms) (conj (function-pull-form (first fn-syms)))
+                             (seq paths) (conj (list 'my.fs/read {:my.fs/path (first paths)}))
+                             true (conj (check-form syms)))})
 
-(defmethod render-candidate :minimal-retrieval
-  [_ {:seon.issue/keys [id]}]
-  (block ";; My issue. The system decides completion from the condition above."
-         (comment-lines ["One hop more is available, but only if I ask for it:"])
-         (commented-form (list 'seon.issue.opening/context
-                               {:seon.issue/id id :seon.render/distance 2}))
-         (repl/source-text (status-form id))))
+(defmethod candidate-data :questions
+  [_ _ {:seon.test/keys [syms] fn-syms :seon.fn/syms ns-names :seon.ns/names}]
+  {:seon.render/operations (cond-> []
+                             (seq fn-syms) (conj (function-pull-form (first fn-syms)))
+                             true (conj (test-pull-form (first syms)))
+                             (seq ns-names) (conj (list 'dir (symbol (first ns-names)))))})
 
-(defmethod render-candidate :default
-  [_ link-entity]
-  (render-candidate default-candidate link-entity))
+(defmethod candidate-data :namespace-picture
+  [_ _ {ns-names :seon.ns/names}]
+  {:seon.ns/names ns-names
+   :seon.render/operations (mapv #(list 'dir (symbol %)) ns-names)})
 
-(defn source
-  "Render one issue's opening block through the candidate its worker is dialled to."
+(defmethod candidate-data :minimal-retrieval
+  [_ _ {:seon.issue/keys [id]}]
+  {:seon.render/operations [(list 'seon.issue.opening/context {:seon.issue/id id :seon.render/distance 2})]})
+
+
+(defn opening
+  "One issue's opening as data: its id and title, what decides done (its exact
+  tests with their recorded outcomes, or its detector), what the worker's
+  dialled candidate adds, and the status read and completing check offered."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.issue/id]
-                  [:or :seon.render/source :seon.error/value]]}
+                  [:or :seon.issue.opening/view :seon.error/value]]}
   [database issue-id]
-  (if-let [link-entity (links database issue-id)]
-    (block
-     (comment-lines
-      (if (seq (:seon.test/syms link-entity))
-        [(str "Done when these exact tests pass: " (str/join ", " (:seon.test/syms link-entity)) ".")
-         "After each turn the system checks changed evidence and reports passed and failed tests."]
-        [(str "Done when (" (:seon.issue/detector link-entity)
-              " (seon.db/db)) no longer names this issue's subject.")
-         "The system checks the detector after each turn and reports whether the issue is still open."]))
-     (render-candidate (if (seq (:seon.test/syms link-entity))
-                         (candidate database issue-id) :bare) link-entity))
-    (seon.error.refusal/diagnostic (java.util.Date.) :seon.issue/opening 'seon.issue.opening/source
+  (if-let [{:seon.test/keys [syms] :as link-entity} (links database issue-id)]
+    (let [selected (if (seq syms) (candidate database issue-id) :bare)
+          added (candidate-data selected database link-entity)]
+      (cond-> (merge (dissoc added :seon.render/operations)
+                     {:seon.issue/id issue-id
+                      :seon.issue/title (:seon.issue/title link-entity)
+                      :seon.render/operations (into (vec (:seon.render/operations added))
+                                                    [(status-form issue-id)])})
+        (seq syms) (assoc :seon.issue.opening/done-when-tests
+                          (into (sorted-map) (map (juxt identity #(outcome (test/recorded-result database %)))) syms))
+        (empty? syms) (assoc :seon.issue.opening/detector (:seon.issue/detector link-entity))
+        (not= :bare selected) (assoc :seon.issue.opening/candidate selected)))
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.issue/opening 'seon.issue.opening/opening
      {:seon.error/message (str "No current issue " issue-id)})))
+
+(defn openings
+  "The openings of every issue `agent-id` works, by issue id."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or [:vector [:or :seon.issue.opening/view :seon.error/value]] :seon.db/error-result]]}
+  [database agent-id]
+  (let [issues (db/q '[:find [?issue-id ...] :in $ ?agent-id
+                       :where [?agent :seon.agent/id ?agent-id]
+                       [?issue :seon.issue/agent ?agent]
+                       [?issue :seon.issue/id ?issue-id]]
+                     database agent-id)]
+    (if (db/read-refusal? issues)
+      issues
+      (mapv #(opening database %) (sort issues)))))
+
+(defn render-ai
+  "The agent's issue openings as data (`openings`), an empty vector for an
+  agent working none. Its reads are the shown unit's read evidence, so a
+  recorded test result or a new assignment changes the shown read."
+  {:malli/schema [:=> [:cat :seon.render/unit]
+                  [:or [:vector [:or :seon.issue.opening/view :seon.error/value]] :seon.db/error-result]]}
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (openings database agent-id))
+
+(defn render-form
+  "The read that finds the agent's issue openings again. Shown, never executed."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  [{agent-id :seon.agent/id}]
+  (list 'seon.issue.opening/openings '(seon.db/db) agent-id))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The retrieval call candidate :minimal-retrieval offers
