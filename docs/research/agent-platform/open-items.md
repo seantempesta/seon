@@ -198,6 +198,28 @@ Sequence:
       - Deleted: the :seon.eval/feedback stage, the uncontracted-defn warning code and the REPL install gate. Merge
         acceptance is the one refusal point.
       - The same pattern follows for ns-unmap, register!, in-ns, errors, deftest, tasks and merge proposals.
+  d3. **Feedback render pairs for every core entity (owner).** "useful renders that pull in better info for the ai and html
+      for each core piece of data". Rules for every render:
+      - delta first;
+      - health inline;
+      - one hop of context, with the rest as runnable requery forms;
+      - next actions as data;
+      - one query with two outputs (AI and HTML);
+      - numbers stay numbers.
+      Design: `feedback-renders-2026-09-27.md` (feedback-renders-opus).
+      SCHEDULE:
+      - NOW (feedback-renders-opus, REPL-driven, judged on concise and fixable-from-the-reply): the ERROR render, then the
+        SCHEMA render.
+      - After the one-path S3a fix and C1–C6 (one-path lane): the Var render, which replaces the feedback stage and the
+        REPL gate.
+      - Then, one lane each once their files are free, in order:
+        - test and test-run;
+        - namespace;
+        - removals;
+        - task;
+        - merge proposal;
+        - agent, session and turn;
+        - message, branch, config dial, blob and read evidence.
   e. Beside it:
      - test agents: design 38e5a6d47 and prototype 33e878596, 13/13 proofs; Astra is re-reviewing; it lands after spec
        step S12;
