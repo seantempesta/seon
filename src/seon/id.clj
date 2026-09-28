@@ -5,7 +5,7 @@
   (:require [clojure.string :as str])
   (:import [java.io BufferedWriter OutputStream OutputStreamWriter StringWriter Writer]
            [java.nio.charset StandardCharsets]
-           [java.security DigestOutputStream MessageDigest]
+           [java.security MessageDigest]
            [java.util HexFormat]))
 
 (def default-length
@@ -68,9 +68,15 @@
   (let [digester (MessageDigest/getInstance "SHA-256")
         ;; The encoder, not a per-write getBytes, so a surrogate pair split
         ;; across two writes encodes exactly as String.getBytes would.
-        writer (BufferedWriter. (OutputStreamWriter. (DigestOutputStream. (OutputStream/nullOutputStream) digester)
-                                                     StandardCharsets/UTF_8)
-                                8192)]
+        ;; A proxy, not java.security.DigestOutputStream: the operator loads
+        ;; this namespace in babashka, which has no DigestOutputStream class.
+        sink (proxy [OutputStream] []
+               (write
+                 ([b] (if (bytes? b)
+                        (.update digester ^bytes b)
+                        (.update digester (unchecked-byte b))))
+                 ([^bytes bs off len] (.update digester bs (int off) (int len)))))
+        writer (BufferedWriter. (OutputStreamWriter. ^OutputStream sink StandardCharsets/UTF_8) 8192)]
     (print-canonical! data writer)
     (.flush writer)
     (.formatHex (HexFormat/of) (.digest digester))))
