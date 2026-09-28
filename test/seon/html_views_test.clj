@@ -93,7 +93,7 @@
         (readable! (message/render-html unit) ["Hello\nagain" "unread" "alice" "bob" "title="])
         (readable! (message/render-inbox-html [entity] @connection) ["Messages (1)" "unread"])
         (is (= {:seon.message/id "hello" :seon.message/from "bob" :seon.message/to "alice"
-                :seon.message/content "Hello\nagain" :seon.message/received? false}
+                :seon.message/lines ["Hello" "again"] :seon.message/received? false}
                (dissoc (message/render-ai unit) :seon.message/at)))
         (is (= [['(my.message/received! "hello")]]
                (mapv :seon.render/operations

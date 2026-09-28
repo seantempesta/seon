@@ -13,7 +13,8 @@
 
   The trial that compares them is
   docs/prds/steward-platform/plan/issue-context-trials-2026-09-16.md."
-  (:require [seon.error.refusal]
+  (:require [clojure.string :as str]
+            [seon.error.refusal]
             [seon.ai :as ai]
             [seon.db :as db]
             [seon.test :as test]))
@@ -118,7 +119,8 @@
   [_ database {:seon.issue/keys [id problem]}]
   (cond-> (select-keys (context {:seon.db/db database :seon.issue/id id})
                        [:seon.issue/tests :seon.issue/functions])
-    problem (assoc :seon.issue/problem problem)))
+    ;; the problem is markdown for the reader: its lines print unescaped
+    problem (assoc :seon.issue.opening/problem-lines (str/split-lines problem))))
 
 (defmethod candidate-data :walkthrough
   [_ database {:seon.test/keys [syms] fn-syms :seon.fn/syms paths :seon.fn.file/relative-paths}]

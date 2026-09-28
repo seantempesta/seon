@@ -166,8 +166,9 @@
 
 (defn function-ai
   "A function node as data: its name and doc line; beyond distance zero its
-  authored source, its contract where the source does not carry it, and the
-  program functions it calls and that call it, by name."
+  authored source as its lines (text the printer shows unescaped, layout
+  kept), its contract where the source does not carry it, and the program
+  functions it calls and that call it, by name."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render.ns/function-view :seon.db/invalid-read-error]]}
   [unit]
   (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec calls :seon.fn/calls}
@@ -181,7 +182,7 @@
       (db/read-refusal? neighbours) neighbours
       :else
       (cond-> (assoc named :seon.render.ns/calls (vec (sort callees)))
-        source (assoc :seon.fn/source source)
+        source (assoc :seon.render.ns/source-lines (str/split-lines source))
         (and spec (not (and source (str/includes? source ":malli/schema")))) (assoc :seon.fn/spec spec)
         (<= (count callers) callers-named) (assoc :seon.render.ns/called-by (vec (sort callers)))
         (> (count callers) callers-named)

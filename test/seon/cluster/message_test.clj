@@ -102,13 +102,13 @@
             message {:seon.message/id "message-1" :seon.message/from [:seon.agent/id "alice"]
                      :seon.message/to [:seon.agent/id "bob"] :seon.message/content "hello"}
             view message/render-ai]
-        (is (= {:seon.message/id "message-1" :seon.message/to "bob" :seon.message/content "hello"
+        (is (= {:seon.message/id "message-1" :seon.message/to "bob" :seon.message/lines ["hello"]
                 :seon.message/received? false}
                (view (assoc message :seon.db/db before :seon.agent/id "alice")))
             "the sender, before the write reached its database")
         (test-support/transacted! connection [message])
         (is (= {:seon.message/id "message-1" :seon.message/from "alice"
-                :seon.message/content "hello"
+                :seon.message/lines ["hello"]
                 :seon.render/operations ['(my.message/received! "message-1")]}
                (dissoc (view (assoc message :seon.db/db @connection :seon.agent/id "bob"))
                        :seon.message/at))
@@ -270,7 +270,7 @@
             shown (binding [db/*read-evidence-sink* captured]
                     (message/render-inbox-ai recipient @connection))
             evidence (db/read-evidence @captured)]
-        (is (= [{:my.message/id "inbox/1" :my.message/from "alice" :my.message/content "first"
+        (is (= [{:my.message/id "inbox/1" :my.message/from "alice" :seon.message/lines ["first"]
                  :seon.render/operations ['(my.message/received! "inbox/1")]}]
                shown)
             "the unread, oldest first: sender, content and the acknowledgement offered")

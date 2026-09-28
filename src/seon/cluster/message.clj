@@ -380,7 +380,8 @@
                   (and from (not= viewer from)) (conj [:seon.message/from from])
                   (and to (not recipient?)) (conj [:seon.message/to to])
                   at (conj [:seon.message/at at])
-                  true (conj [:seon.message/content (:seon.message/content message)])
+                  ;; content is text for the reader: its lines print unescaped
+                  true (conj [:seon.message/lines (str/split-lines (str (:seon.message/content message)))])
                   (:seon.message/about message) (conj [:seon.message/about (:seon.message/about message)])
                   (:seon.message/assignment message) (conj [:seon.message/assignment (:seon.message/assignment message)])
                   (:my.message/reason message) (conj [:my.message/reason (:my.message/reason message)])
@@ -510,8 +511,9 @@
 
   An agent's own `:seon.message/_to` concern hands its recipient reference:
   the render reads its unread messages, oldest first, as [[inbox-form]]
-  finds them, each its sender, content and `(my.message/received! id)`;
-  order carries the time, so the instant is left to the read. The
+  finds them, each its sender, its content as lines and
+  `(my.message/received! id)`; order carries the time, so the instant is
+  left to the read. The
   read names `:seon.message/to` and `:seon.message/received-tx`, so a new,
   changed or acknowledged message changes the shown read.
   Handed the acquired messages, it shows the unread oldest first and the
@@ -529,7 +531,11 @@
                      :received (count (filter received? views))})
     (if-let [agent-id (agent-reference-id database recipient-or-inbox)]
       (let [unread (inbox* database agent-id nil)]
-        (if (vector? unread) (mapv #(dissoc % :my.message/at) unread) unread))
+        (if (vector? unread)
+          (mapv #(-> % (dissoc :my.message/at :my.message/content)
+                     (assoc :seon.message/lines (str/split-lines (:my.message/content %))))
+                unread)
+          unread))
       (seon.error.refusal/diagnostic
        (java.util.Date.) :seon.message/delivery 'seon.cluster.message/render-inbox-ai
        {:seon.error/message "The inbox's recipient names no agent."

@@ -8,6 +8,6 @@
   [:seon.issue.opening/first-test {:optional true} :map]
   [:seon.issue/tests {:optional true} [:vector :map]]
   [:seon.issue/functions {:optional true} [:vector :map]]
-  [:seon.issue/problem {:optional true} :seon.issue/problem]
+  [:seon.issue.opening/problem-lines {:optional true} [:vector :string]]
   [:seon.ns/names {:optional true} [:vector :symbol]]
   [:seon.render/operations :seon.render/operations]]}

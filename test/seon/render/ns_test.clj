@@ -153,8 +153,7 @@
            database @connection
            unit (fn [lookup distance]
                   (let [value (db/pull database '[*] lookup)]
-                    (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))
-           forms (fn [source] (read-string (str "[" source "]")))]
+                    (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))]
        (is (:seon.task/changed? indexed) (pr-str indexed))
        (testing "a task at distance 0 is its name"
          (is (= {:seon.task/id handle :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
@@ -213,7 +212,9 @@
         (is (= {:seon.fn/sym 'seon.flow/start-work-launcher!
                 :seon.fn/doc (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1))))}
                (sut/function-ai (unit 'seon.flow/start-work-launcher! 0))))
-        (is (= (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)) (:seon.fn/source launcher)))
+        (is (= (str/split-lines (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)))
+               (:seon.render.ns/source-lines launcher))
+            "the source is its lines, so the printer shows its layout unescaped")
         (is (vector? (:seon.render.ns/calls launcher)))
         (is (< 20 (:seon.render.ns/called-by-count query)))
         (is (= ['(my.program/callers {:seon.program/subject 'seon.db/q})] (:seon.render/operations query))
