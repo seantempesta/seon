@@ -3,10 +3,11 @@
 
   A request identity derives from turn, form ordinal, and effect ordinal.
   Its receipt is
-  committed before the protected JVM handler runs on the process-root `:io`
-  executor; terminal data is bounded and committed once. Recovery interrupts
+  committed before the protected JVM handler runs as bounded io work on its
+  cluster's work launcher (foreground and background alike); terminal data is
+  bounded and committed once. Recovery interrupts
   an open receipt and never dispatches it again."
-  (:require [clojure.core.async.impl.dispatch :as async.dispatch]
+  (:require [clojure.core.async :as async]
             [clojure.edn :as edn]
             [malli.core :as m]
             [malli.util :as mu]
@@ -30,9 +31,7 @@
             [seon.schema.internal :as internal])
   (:import [java.io ByteArrayInputStream]
            [java.nio.charset StandardCharsets]
-           [java.util Date]
-           [java.util.concurrent ExecutionException FutureTask]
-           [java.util.concurrent Executor]))
+           [java.util Date]))
 
 (def ^:dynamic *request-context*
   "The current evaluation's durable identity and projection controls."
@@ -459,44 +458,81 @@
       (work))))
 
 (defn- dispatch
+  "Run one foreground capability handler as bounded io work on the request's
+  cluster work launcher, and await its result under the evaluation's limit.
+
+  The work carries the requesting thread's arm (`dispatching-environment`)
+  and its request context as data (`with-request-context`), as background
+  work does. A handler's throw comes back as `{::thrown throwable}` for the
+  caller to settle as the handler's failure, never as a launcher fault. At
+  the limit the work is interrupted (`seon.flow/interrupt-work!`) and the
+  bound's timeout is answered; the launcher keeps the submission until the
+  work actually returns, so its slot is never reused while it still runs.
+
+  ## Errors
+
+  - No environment, or one without its cluster's work launcher (a subset
+    environment stood up without graphs): a refusal naming the missing
+    member, before anything runs.
+  - A launcher that does not admit the work (queue full, stopping) answers
+    its own refusal value.
+
+  ## Costs
+
+  - The launcher round trip adds about 0.1 ms per call (armed, default
+    2026-09-28: 130 us against 28 us for the old FutureTask); a foreground
+    `my.fs/stat` measured 45-76 ms end to end."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :qualified-symbol :seon.effect/id :seon.schema/value :seon.config/effective]
+                  :seon.schema/value]}
   [handler owner-sym effect-id request effective]
-  (let [executor (async.dispatch/executor-for :io)
-        ;; Captured on THIS thread and closed over as data, so the executor
-        ;; thread reads the arm from the crossing rather than from a binding
-        ;; frame it happens to have inherited.
-        carried-arm (:seon.sci.kernel/arm (dispatching-environment))
-        task (FutureTask. ^java.util.concurrent.Callable
-                          (bound-fn []
-                            (kernel/adopt-arm
-                             carried-arm
-                             #(handler request effective))))]
-    (.execute ^Executor executor task)
-    (try
-      (let [result
-            (await/await!
-             {:seon.await/bound
-              {:seon.await/config-attribute :seon.config.eval/time-limit-ms
-               :seon.await/config-value
-               (:seon.config.eval/time-limit-ms effective)}
-              :seon.await/diagnostic
-              {:seon.error/layer :effect
-               :seon.error/operation ::handler-completion
-               :seon.error/expected ::handler-result
-               :seon.error/offending ::pending
-               :seon.await/subject {:seon.effect/id effect-id
-                :seon.turn/id
-                (:seon.turn/id *request-context*)}
-             :seon.error/member {:seon.effect/id effect-id
-                :seon.fn/sym owner-sym}}
-              :seon.await/future task})]
-        (when (:seon.await/elapsed-ms result)
-          (.cancel task true))
-        result)
-      (catch InterruptedException interrupted
-        ;; Waiting stopped, so the capability task must stop too. Capability
-        ;; handlers own their resource-specific cleanup on interruption.
-        (.cancel task true)
-        (throw interrupted)))))
+  (let [context *request-context*
+        environment (dispatching-environment)
+        ;; the launcher is a member of the request's world: its cluster's
+        ;; environment, which every execution handle and turn carries
+        launcher (:seon.flow/work-launcher environment)
+        completion (async/promise-chan)]
+    (if-not (and launcher environment)
+      (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/dispatch
+       {:seon.error/message "A capability call runs on its cluster's work launcher; this request context names none. Evaluate it inside a turn or a context acquired from a running cluster."
+        :seon.error/member (if environment :seon.flow/work-launcher :seon.env/environment)
+        :seon.error/expected "a request context holding its cluster's work launcher and environment"
+        :seon.effect/id effect-id})
+      (do
+        (flow/submit! launcher
+                      {:seon.env/environment environment
+                       ::flow/submission-id effect-id
+                       ::flow/workload :io
+                       ::flow/work-fn
+                       (fn [_]
+                         (try (with-request-context context #(handler request effective))
+                              (catch Throwable thrown {::thrown thrown})))
+                       ::flow/complete! (fn [terminal] (async/put! completion terminal) nil)})
+        (try
+          (let [terminal
+                (await/await!
+                 {:seon.await/bound
+                  {:seon.await/config-attribute :seon.config.eval/time-limit-ms
+                   :seon.await/config-value
+                   (:seon.config.eval/time-limit-ms effective)}
+                  :seon.await/diagnostic
+                  {:seon.error/layer :effect
+                   :seon.error/operation ::handler-completion
+                   :seon.error/expected ::handler-result
+                   :seon.error/offending ::pending
+                   :seon.await/subject {:seon.effect/id effect-id
+                                        :seon.turn/id (:seon.turn/id context)}
+                   :seon.error/member {:seon.effect/id effect-id
+                                       :seon.fn/sym owner-sym}}
+                  :seon.await/port-operations [completion]})]
+            (if (:seon.await/elapsed-ms terminal)
+              (do (flow/interrupt-work! launcher effect-id)
+                  terminal)
+              (::flow/value terminal)))
+          (catch InterruptedException interrupted
+            ;; Waiting stopped, so the capability work must stop too. Capability
+            ;; handlers own their resource-specific cleanup on interruption.
+            (flow/interrupt-work! launcher effect-id)
+            (throw interrupted)))))))
 
 (def ^:private byte-array-class (class (byte-array 0)))
 
@@ -863,7 +899,7 @@
                               requesting-context effect-id owner-sym opened-at
                               threshold refusal-validators)]
                          (flow/submit!
-                          (:seon.flow/work-launcher *request-context*)
+                          (:seon.flow/work-launcher (env/of *request-context*))
                           {:seon.env/environment
                            (env/refuse-incomplete-environment!
                             (env/scope
@@ -895,13 +931,21 @@
                                       effect-id
                                       (:seon.sci.admit/value projected-request)
                                       effective)]
-                                 (if (= :interrupted
+                                 (cond
+                                   (::thrown handler-value)
+                                   (settle-value!
+                                    connection dials effect-id opened-at
+                                    threshold (handler-failure owner-sym (::thrown handler-value)) nil)
+
+                                   (= :interrupted
                                         (:seon.effect/disposition
                                          handler-value))
                                    (interrupt!
                                     connection effect-id
                                     (dissoc handler-value
                                             :seon.effect/disposition))
+
+                                   :else
                                    (settle-value!
                                     connection dials effect-id opened-at
                                     threshold handler-value
@@ -909,10 +953,6 @@
                                       refusal-validators))))
                                (catch InterruptedException _
                                  (interrupt! connection effect-id))
-                               (catch ExecutionException failure
-                                 (settle-value!
-                                  connection dials effect-id opened-at
-                                  threshold (handler-failure owner-sym failure) nil))
                                (catch Throwable failure
                                  (settle-value!
                                   connection dials effect-id opened-at

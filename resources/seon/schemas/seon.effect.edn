@@ -128,14 +128,11 @@
                  :description
                  "This evaluation's schema projection state, named so a detached handler can rebuild the frame instead of hoping its executor inherited one."}
                 :seon.sci.eval/projection-state]
-               [:seon.flow/work-launcher
-                {:optional true}
-                :seon.flow/work-launcher]
                [:seon.sci.eval/ctx
                 {:description "The requesting evaluation's SCI ctx; the declared capability handler resolves in it."}
                 :seon.sci.eval/ctx]
                [:seon.effect/dispatch {:optional true} :seon.effect/dispatch]],
-              :dispatch [:=> {:description "How request! runs a capability handler and waits for it: handler, owner symbol, effect id, projected request and effective configuration to the handler's value. seon.effect's executor dispatch when absent."}
+              :dispatch [:=> {:description "How request! runs a capability handler and waits for it: handler, owner symbol, effect id, projected request and effective configuration to the handler's value. seon.effect/dispatch (bounded io work on the request world's cluster work launcher) when absent."}
                          [:cat [:fn clojure.core/ifn?] :qualified-symbol :string :seon.schema/value :map] :seon.schema/value],
               :notify [:and #:seon.db{:index true} :seon.db/ref],
               :interrupted-error

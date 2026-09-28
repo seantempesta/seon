@@ -11,6 +11,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.env :as env]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
             [seon.flow :as flow]
@@ -188,25 +189,34 @@
      {:seon.config.effect.background/time-limit-ms background-limit-ms}})))
 
 (defn- request-context
+  "A request's context in the executing member's own world (its connection's
+  environment state, as `seon.test` hands it), where capability work runs on
+  the world's work launcher. A started `launcher` replaces the world's, so a
+  scenario bounds its own; a stand-in that is not a launcher (a scenario
+  replacing submission) leaves the world's."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/connection] :seon.effect/request-context]
+                  [:=> [:cat :seon.db/connection [:or :nil :qualified-keyword :seon.flow/work-launcher]]
+                   :seon.effect/request-context]]}
   ([connection]
    (request-context connection nil))
   ([connection launcher]
-   {:seon.env/environment @test-environment
-    :seon.db/connection connection
-    :seon.agent/id "effect-agent"
-    :seon.turn/id "effect-run"
-    :seon.cluster.eval/ordinal 3
-    :seon.boot/cluster-name "default"
-    :seon.flow/work-launcher launcher
-    :seon.sci.admit/caps (config/result-caps config/defaults)
-    ;; Handed explicitly, exactly as `seon.sci.eval` hands it: a DETACHED
-    ;; handler rebuilds this frame from the submission, and without it any
-    ;; declaration it resolves refuses with :seon.schema/missing-projection.
-    :seon.sci.eval/projection-state
-    (atom {:seon.schema/projection
-           (db/carried-projection (db/db connection))})
-    :seon.sci.eval/ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
-    :seon.effect/counter (atom -1)}))
+   (let [world (cond-> @(:seon.sci.eval/projection-state (meta connection))
+                 (map? launcher) (assoc :seon.flow/work-launcher launcher))]
+     {:seon.env/environment world
+      :seon.db/connection connection
+      :seon.agent/id "effect-agent"
+      :seon.turn/id "effect-run"
+      :seon.cluster.eval/ordinal 3
+      :seon.boot/cluster-name "default"
+      :seon.sci.admit/caps (config/result-caps config/defaults)
+      ;; Handed exactly as `seon.sci.eval` and `seon.test` hand it: the
+      ;; world's replacement state, from which a detached handler rebuilds its
+      ;; frame (without it a resolved declaration refuses with
+      ;; :seon.schema/missing-projection) and the effect finds its launcher.
+      :seon.sci.eval/projection-state (env/environment-state world)
+      :seon.sci.eval/ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
+      :seon.effect/counter (atom -1)})))
 
 (deftest background-settlement-carries-its-connection-across-a-thread-hop
   (test-support/with-database

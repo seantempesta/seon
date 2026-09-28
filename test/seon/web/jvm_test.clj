@@ -230,8 +230,13 @@
      ((handler-var 'seon.web.jvm 'fetch) request effective))))
 
 (defn- effect-context
+  "A fetch request's context in the executing member's own world, whose work
+  launcher runs the fetch."
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.effect/request-context]}
   [connection]
   {:seon.db/connection connection
+   ;; the executing member's own world, whose work launcher runs the fetch
+   :seon.env/environment (:seon.env/environment (support/execution-handle connection))
    :seon.agent/id "web-agent"
    :seon.turn/id "web-receipt-run"
    :seon.cluster.eval/ordinal 0

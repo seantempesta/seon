@@ -393,7 +393,11 @@
                 _ (is (contains? configured :seon.reconcile/operations))
                 context
                 {:seon.db/connection connection
-                 :seon.env/environment (support/environment "shell-test" connection)
+                 ;; the world holds the executing member's work launcher, where the shell runs
+                 :seon.env/environment (assoc (support/environment "shell-test" connection)
+                                              :seon.flow/work-launcher
+                                              (:seon.flow/work-launcher
+                                               (:seon.env/environment (support/execution-handle connection))))
                  :seon.agent/id "shell-author"
                  :seon.turn/id "shell-time-limit"
                  :seon.cluster.eval/ordinal 0

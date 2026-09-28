@@ -467,6 +467,13 @@
                            ::active? ::task)))))))))
 
 (defn- execute-io-work!
+  "Start one admitted io submission on `task-executor` in its world; true
+  when it started, nil when it was already settled (interrupted or stopped
+  while queued) and so never runs."
+  {:malli/schema [:=> [:cat :seon.flow/executor :seon.flow/channel :seon.flow/active-work
+                       [:fn {:error/message "must be the launcher's io-submissions atom"} seon.flow/atom-reference?]
+                       :seon.flow/io-submission]
+                  [:maybe :boolean]]}
   [task-executor completion active-work submissions
    {::keys [submission-id work-fn status active? task] :as work}]
   (when (compare-and-set! status ::queued ::running)
@@ -478,6 +485,9 @@
             ::platform-thread? false})
     (let [runnable
           (fn []
+            ;; the running thread replaces the FutureTask: from here an
+            ;; interruption reaches the work itself (`interrupt-task!`)
+            (reset! task (Thread/currentThread))
             (swap! active-work
                    update submission-id
                    assoc
@@ -508,6 +518,45 @@
            {::started-at (System/nanoTime)
             ::throwable throwable}))))
     true))
+
+(defn- interrupt-task!
+  "Interrupt one io submission's work: its running thread once the work runs
+  (core.async's `:io` executor gives each task its own virtual thread, so a
+  later interrupt never lands on other work), else cancel its FutureTask
+  before it starts."
+  {:malli/schema [:=> [:cat [:fn {:error/message "must be the submission's task atom"} seon.flow/atom-reference?]] :nil]}
+  [task]
+  (let [running @task]
+    (if (instance? Thread running)
+      (.interrupt ^Thread running)
+      (some-> ^Future running (.cancel true))))
+  nil)
+
+(defn interrupt-work!
+  "Interrupt the admitted io submission `submission-id` of `work-launcher`: a
+  running one's thread is interrupted and the launcher keeps the submission
+  (its slot, its completion) until the work actually returns; one still
+  queued is settled now with an interrupted value and never runs. Answers
+  whether a submission was found.
+
+  ## Costs
+
+  - One map lookup and one interrupt; no wait."
+  {:malli/schema [:=> [:cat :seon.flow/work-launcher ::submission-id] :boolean]}
+  [{::keys [io-submissions]} submission-id]
+  (if-let [{::keys [status task] :as work} (get @io-submissions submission-id)]
+    (do (if (= ::queued @status)
+          (io-terminal! io-submissions work
+                        {::started-at (System/nanoTime)
+                         ::value {:seon.error/at (java.util.Date.)
+                                  :seon.error/layer ::submission
+                                  :seon.error/operation 'seon.flow/interrupt-work!
+                                  ::submission-id submission-id
+                                  :seon.error/message "The submission was interrupted before it started."
+                                  :seon.error/expected "a submission that runs to completion"}})
+          (interrupt-task! task))
+        true)
+    false))
 
 (defn- with-submission-filter
   [{::keys [io-parallelism io-active-count] :as state}]
@@ -661,8 +710,7 @@
   (when graph
     (reset! accepting? false)
     (doseq [[_ {::keys [task] :as work}] @io-submissions]
-      (when-let [^Future running @task]
-        (.cancel running true))
+      (interrupt-task! task)
       ;; The graph is stopping, so no proc counter needs a completion input.
       (reset! (::active? work) false)
       (io-terminal!

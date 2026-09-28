@@ -265,17 +265,19 @@
     {:file file :path (.getCanonicalPath file) :artifact artifact}))
 
 (defn- write-back-request-context
+  "An edit request's context in the executing member's own world, whose work
+  launcher runs the edit."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster.eval/ordinal] :seon.effect/request-context]}
   [connection ordinal]
-  {:seon.env/environment (test-support/environment "seon.edit-test")
+  {:seon.env/environment @(:seon.sci.eval/projection-state (meta connection))
    :seon.db/connection connection
    :seon.agent/id "edit-agent"
    :seon.turn/id "edit-run"
    :seon.cluster.eval/ordinal ordinal
    :seon.boot/cluster-name "default"
    :seon.sci.admit/caps (config/result-caps config/defaults)
-   ;; Handed explicitly, exactly as `seon.sci.eval` hands it.
-   :seon.sci.eval/projection-state
-   (atom {:seon.schema/projection (db/carried-projection (db/db connection))})
+   ;; Handed exactly as `seon.sci.eval` and `seon.test` hand it: the world's state.
+   :seon.sci.eval/projection-state (:seon.sci.eval/projection-state (meta connection))
    :seon.sci.eval/ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
    :seon.effect/counter (atom -1)})
 
