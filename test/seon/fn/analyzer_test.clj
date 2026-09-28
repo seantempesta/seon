@@ -275,9 +275,12 @@
 
 (deftest a-first-party-entry-whose-source-is-gone-is-rebuilt-from-the-classpath
   ;; The shared cache outlives the checkout that wrote it: an entry naming
-  ;; another archive's deleted mirror is stale (source absent). Deleting it
-  ;; without a rebuild left the namespace unanalyzed, so boot refused every
-  ;; call into it (start --head b605b2144, 2026-09-26).
+  ;; another archive's deleted mirror, built from other bytes than the
+  ;; namespace's current file, is stale (source absent). Deleting it without a
+  ;; rebuild left the namespace unanalyzed, so boot refused every call into it
+  ;; (start --head b605b2144, 2026-09-26). Staleness is decided by content: an
+  ;; entry whose recorded digest matches the current bytes answers wherever
+  ;; its path went (a-cache-entry-answers-by-content-not-by-path).
   (let [directory (fixture-directory (str (random-uuid)))
         cache-root (.getPath (io/file directory "cache"))
         caller (write-fixture! directory "gone_caller.clj"
@@ -291,7 +294,9 @@
                     (transit/read (transit/reader input :json)))]
         (with-open [output (io/output-stream entry)]
           (transit/write (transit/writer output :json)
-                         (assoc value :filename (.getPath (io/file directory "gone" "id.clj"))))))
+                         (assoc value :filename (.getPath (io/file directory "gone" "id.clj")))))
+        ;; built from other bytes: its recorded content digest is not the current file's
+        (spit (str (.getPath entry) ".sha256") (apply str (repeat 64 "0"))))
       (let [analysis (analyze)
             stale (::analyzer/stale (::analyzer/cache analysis))]
         (is (= [::analyzer/source-absent] (mapv ::analyzer/reason stale)))
