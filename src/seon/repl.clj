@@ -235,10 +235,13 @@
                                         (not (:seon.repl/changed-since? emission)))
                                (str duration))
                 ;; THE EVALUATION'S CALL PROFILE, AS DATA: its armed calls,
-                ;; and each function it called more than seon.batch/repeated-calls
-                ;; times as [sym calls ms], so repetition shows where it happened
+                ;; and, only when the run was over its time bound (a :slow finding),
+                ;; each function it called more than seon.batch/repeated-calls
+                ;; times as [sym calls ms], as the clue that explains it. A fast
+                ;; reply carries none: the tx stamps and health report hold it.
                 :seon.repl/calls (when (pos-int? call-count) (str call-count))
-                :seon.repl/repeated (when (seq repeated)
+                :seon.repl/repeated (when (and (seq repeated)
+                                              (some (comp #{:slow} :seon.repl/finding) found))
                                       (print.value/bounded-text (vec (sort-by (comp - second) repeated))))}]
     (into []
           (keep (fn [response-key]
