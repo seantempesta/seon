@@ -143,7 +143,10 @@
         (try
           (let [database @connection
                 projection (schema/projection-from-database database)
-                state (sci.eval/projection-state database projection)]
+                ;; the private branch is this fixture's cluster: a published
+                ;; program root holds no cluster row, so the world must name it
+                ;; (seon.sci.eval/carried-cluster-name refuses to guess one)
+                state (sci.eval/projection-state database projection (name branch))]
             (db/carry-connection-projection-state! connection state)
             (schema/call-with-projection-state state #(body connection)))
           (finally
