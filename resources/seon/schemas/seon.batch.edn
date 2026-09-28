@@ -197,6 +197,7 @@
            [:seon.batch/working {:optional true} :seon.db/database-value]]
  :commit [:or
           [:map [:seon.batch/applied :seon.batch/applied] [:seon.batch/tx-count :seon.batch/tx-count]
+           [:seon.batch/measurement-error {:optional true :description "The settle's measuring failed (seon.profile.measurement/significant-tx); the commit went on without measurements."} :seon.error/base]
            [:seon.batch/after {:optional true} :seon.db/database-value]
            [:seon.batch/first-refusal {:optional true} :map]
            [:seon.batch/settled {:optional true} :seon.batch/settled]]

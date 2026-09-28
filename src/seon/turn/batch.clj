@@ -680,8 +680,10 @@
         writer (:seon.db/writer world)
         head (db/db conn)
         ;; once for every attempt: measuring advances the cells' marks
-        measured (measurement/significant-tx
-                  head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
+        measuring (measurement/significant-tx
+                   head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
+        ;; a measuring failure rides the answer as a diagnostic; the commit proceeds without it
+        measured (if (:seon.error/at measuring) [] measuring)
         commit! (fn [tx] (let [r (writer conn tx)]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
@@ -698,7 +700,7 @@
                                 {:seon.batch/applied true :seon.batch/tx-count (count tx) :seon.batch/after r})))))
         settled (fn [b] (select-keys b [:seon.batch/entries :seon.batch/program :seon.batch/working]))
         first-try (try (attempt batch) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
-    (if-not (:seon.batch/writer-refusal first-try)
+    (cond-> (if-not (:seon.batch/writer-refusal first-try)
       ;; every path answers the state it settled
       (assoc first-try :seon.batch/settled (settled batch))
       ;; the head moved: re-derive on it; the settled state is what commits
@@ -706,7 +708,8 @@
             second-try (try (attempt rebased) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
         (assoc second-try
                :seon.batch/settled (settled rebased)
-               :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))))
+               :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))
+      (:seon.error/at measuring) (assoc :seon.batch/measurement-error measuring))))
 
 (defn- printed
   "The show stage's answer from the one printer's shown value, kept whole:

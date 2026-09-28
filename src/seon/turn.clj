@@ -3530,7 +3530,7 @@
   "`receipt` with `error` delivered beside its value: appended to its
   :seon.cluster.eval/diagnostics as bounded data (a later stage's failure
   never replaces the value)."
-  {:malli/schema [:=> [:cat :map [:maybe :seon.plan/refusal]] :map]}
+  {:malli/schema [:=> [:cat :map [:maybe [:or :seon.plan/refusal :seon.error/base]]] :map]}
   [receipt error]
   (cond-> receipt
     error (update :seon.cluster.eval/diagnostics
@@ -3796,6 +3796,11 @@
         measured (measurement/significant-tx
                   (db/db connection)
                   (into #{} (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/executed])) requests))
+        ;; a measuring failure is delivered beside the values, never fails the settlement
+        prepared (if (:seon.error/at measured)
+                   (mapv #(update % :seon.turn.loop/receipt with-diagnostic measured) prepared)
+                   prepared)
+        measured (if (:seon.error/at measured) [] measured)
         ;; Built inside the committed phase: a refused read of the fault
         ;; window is a refused settlement the arm below closes, never an escape.
         transaction

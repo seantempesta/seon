@@ -23,6 +23,7 @@
   the first window of each definition is compared with what the database
   stored before it."
   (:require [seon.db :as db]
+            [seon.error.refusal :as error.refusal]
             [seon.id :as id]
             [seon.profile :as profile]
             [seon.schema.edn :as schema.edn])
@@ -149,8 +150,14 @@
   Measuring a window advances its cells' marks, written or not, so the next
   window starts there. A definition with no digest, no cells or too few calls
   is left accumulating. A store without the measurement attribute (not yet
-  adopted) or a refused read answers no data: the commit never waits for or
-  fails on this.
+  adopted) answers no data.
+
+  # Errors
+  A refused read of the stored measurements, or any failure measuring, is
+  returned as one error value (`seon.error.refusal/diagnostic`, operation
+  `seon.profile.measurement/significant-tx`, the cause chain whole): the
+  settle writers commit without measurements and deliver it beside the
+  settlement as a diagnostic, so measuring never fails a settlement.
 
   # Costs
   Proportional to `executed-keys`: 41 counter sums per cell and, when a window
@@ -158,8 +165,9 @@
   2026-09-28: 10 definitions 28 us to 3.9 ms, 1,000 definitions 2.2 ms (all
   under `min-calls`) to 289 ms (all measured, 1,000 ids in one query)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or [:set :seon.batch/executed-key] [:sequential :seon.batch/executed-key]]]
-                  :seon.store/transaction-data]}
+                  [:or :seon.store/transaction-data :seon.error/base]]}
   [database executed-keys]
+  (try
   (if-not (get (:schema database) :seon.profile.measurement/id)
     []
     (let [measured (into []
@@ -175,7 +183,7 @@
           at (java.util.Date.)]
       (run! advance! measured)
       (if (:seon.error/at stored)
-        []
+        stored
         (into []
               (keep (fn [{[sym digest] ::key i ::id calls :seon.profile/calls counted :seon.profile/window-counts}]
                       (let [now (measure counted calls)]
@@ -187,4 +195,9 @@
                                   :seon.profile.measurement/at at}
                                  (select-keys now [:seon.profile.measurement/p50 :seon.profile.measurement/p99
                                                    :seon.profile.measurement/errors]))))))
-              measured)))))
+              measured))))
+  (catch Throwable failure
+    (error.refusal/diagnostic {:seon.error/at (java.util.Date.)
+                               :seon.error/layer ::measurement
+                               :seon.error/operation `significant-tx
+                               :seon.error/throwable failure}))))
