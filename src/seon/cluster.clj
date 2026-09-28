@@ -197,7 +197,7 @@
 
 (defn render-form
   "The read that finds this cluster again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/read-form]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
     (list 'seon.db/pull (list 'quote cluster-selector) [:seon.cluster/name name])))

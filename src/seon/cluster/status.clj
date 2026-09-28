@@ -189,7 +189,7 @@
 
 (defn render-form
   "The read that finds my cluster and adopted source again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [_unit]
   (list 'seon.db/q (list 'quote cluster-query) '(seon.db/db)))
 

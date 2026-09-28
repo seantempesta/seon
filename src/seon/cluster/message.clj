@@ -493,7 +493,7 @@
   acknowledgement changes it. Each entry offers `(my.message/received! id)`;
   acknowledged messages are one `(my.message/read ...)` away. A recipient
   handed as an entity id is resolved in the form itself."
-  {:malli/schema [:=> [:cat :seon.message/to] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.message/to] :seon.render/read-form]}
   [recipient]
   (list 'my.message/inbox
         {:seon.agent/id

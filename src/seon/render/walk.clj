@@ -771,7 +771,7 @@
                                               (not (and (= output :seon.render/form)
                                                         ((schema/projection-validator
                                                           (db/carried-projection database)
-                                                          :seon.render/form)
+                                                          :seon.render/read-form)
                                                          rendered))))
                                      rendered)
                            failure-outcome

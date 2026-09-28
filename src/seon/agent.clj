@@ -172,7 +172,7 @@
 
 (defn render-settings-form
   "The read that finds my setting overrides again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [{agent-id :seon.agent/id}]
   (list 'seon.agent/settings '(seon.db/db) agent-id))
 

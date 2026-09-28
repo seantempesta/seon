@@ -2060,7 +2060,7 @@
 (defn render-form
   "The form that finds this data again: the reply over the held error, when
   the viewer holds it. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/form]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/read-form]]}
   [unit]
   (when-let [held (held-reference unit)]
     (list 'seon.error/reply-value held)))
@@ -2212,7 +2212,7 @@
   with zero evaluations and one `:seon.render/unknown` fault. Absence of a
   fault is ordinary — it emits no form, exactly as an agent with faults but
   no readable identity already did."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.render/form :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.render/read-form :seon.db/error-result]]}
   [unit]
   (when-let [entity (faults-input unit)]
    (let [entity-map (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]

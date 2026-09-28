@@ -16,7 +16,10 @@
               :context-request [:or :seon.cluster.prompt/request
                                 :seon.render/context-change-request],
               :context-change-result [:map [:seon.db/db :seon.db/database-value]],
-              :ai [:or :qualified-symbol :string],
+              :ai [:and {:seon.fn/reference-to :seon.fn/sym
+                         :seon.db/index true
+                         :description "A schema's AI renderer: a ref to the function entity its declaration names, own or inherited along Malli's reference chain (seon.schema.datahike/declared-reference). Authored as a symbol property; the schema bridge stores the ref. Optional peer ref: removing the function sweeps it and the writer refuses by name while the schema still declares it."}
+                   :seon.db/ref],
               :viewer-functions [:vector :qualified-symbol],
               :call-request
               [:map
@@ -161,8 +164,13 @@
                [:seon.db/db :seon.db/database-value]
                [:seon.render/namespace :seon.render/namespace]
                [:seon.error/value :seon.error/value]],
-              :form
-              [:or :seon.repl/expression :seon.repl/entry
+              :form [:and {:seon.fn/reference-to :seon.fn/sym
+                           :seon.db/index true
+                           :description "A schema's form renderer (how to find this data again): a ref to the function entity its declaration names, own or inherited, stored exactly as :seon.render/ai is."}
+                     :seon.db/ref],
+              :read-form
+              [:or {:description "What a form renderer returns: the form that finds this data again, shown and never executed (one expression, one REPL entry, or entries)."}
+               :seon.repl/expression :seon.repl/entry
                :seon.repl/entries],
               :hiccup
               [:fn
@@ -170,7 +178,10 @@
                 "must be Hiccup accepted by Seon's HTML serializer"
                 :gen/gen seon.render.hiccup/hiccup-generator}
                seon.render.hiccup/hiccup?],
-              :html [:or :qualified-symbol :seon.render/hiccup],
+              :html [:and {:seon.fn/reference-to :seon.fn/sym
+                           :seon.db/index true
+                           :description "A schema's HTML renderer: a ref to the function entity its declaration names, own or inherited along Malli's reference chain, stored exactly as :seon.render/ai is."}
+                     :seon.db/ref],
               :units
               [:vector
                {:description
@@ -179,7 +190,7 @@
               :namespace :symbol,
               :output
               [:enum :seon.render/ai :seon.render/html :seon.render/form],
-              :rendered [:or :string :seon.render/hiccup :seon.render/form :seon.render/ai-data],
+              :rendered [:or :string :seon.render/hiccup :seon.render/read-form :seon.render/ai-data],
               :ai-data [:any {:description "An AI face: the pruned, processed data an agent cares about, printed by the value printer and never evaluated; offered operations and requery forms are data inside it."
                               :seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                               :seon.schema.admission/reason "A render's AI face is whatever data its schema-specific render selects."

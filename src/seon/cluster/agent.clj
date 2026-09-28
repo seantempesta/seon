@@ -242,7 +242,7 @@
 
 (defn situation-form
   "Return the opening question and bare root form for an agent situation."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [_unit]
   {:seon.repl/comment
    "; A new run just opened. Why am I awake — do I have messages?"
@@ -255,7 +255,7 @@
 
 (defn identity-form
   "Return the database read that reproduces an agent's identity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
   {:seon.repl/comment ";; I should know my identity, namespace, and its steward."
    :seon.repl/form (list 'seon.db/pull (list 'quote identity-selector)

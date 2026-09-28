@@ -29,6 +29,6 @@
 (defn usage-form
   "Render the lifecycle usage request."
   {:seon.fn/internal? true
-   :malli/schema [:=> [:cat :my.turn/usage-unit] :seon.render/form]}
+   :malli/schema [:=> [:cat :my.turn/usage-unit] :seon.render/read-form]}
   [request]
   (run/usage-form request))

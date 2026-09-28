@@ -1467,7 +1467,7 @@
 
 (defn render-ready-items-form
   "The read that finds these ready steps again. Shown, never executed."
-  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/form]}
+  {:malli/schema [:=> [:cat :my.plan/ready-items] :seon.render/read-form]}
   [plan-steps]
   (list 'seon.plan/items {:seon.db/db '(seon.db/db) :my.plan/item-ids (mapv :my.plan.item/id plan-steps)}))
 
@@ -1533,7 +1533,7 @@
 
 (defn render-plan-form
   "The read that finds my plan again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [{agent-id :seon.agent/id}]
   (list 'seon.plan/plan {:seon.db/db '(seon.db/db) :seon.agent/id agent-id}))
 

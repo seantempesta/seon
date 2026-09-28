@@ -799,7 +799,7 @@
 
 (defn message-form
   "Return the ordinary message read form for one message entity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
   (list 'my.message/read {:my.message/id (:seon.message/id unit)}))
 
@@ -1055,7 +1055,7 @@
 
 (defn render-runtime-form
   "The read that finds my trigger and listens again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/form :seon.render.transcript/error-result]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/read-form :seon.render.transcript/error-result]]}
   [unit]
   (let [agent-id (runtime-owner unit)]
     (if (:seon.render.transcript/refused-member agent-id)

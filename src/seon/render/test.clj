@@ -63,7 +63,7 @@
 
 (defn render-form
   "The read that finds this test's recorded result again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
   (list 'seon.test/recorded-result '(seon.db/db)
         (list 'quote (:seon.test/sym (or (:seon.render/value unit) unit)))))
@@ -92,7 +92,7 @@
 
 (defn render-run-form
   "The read that finds this run whole again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
   (list 'seon.db/pull ''[*] [:seon.test.run/id (:seon.test.run/id (or (:seon.render/value unit) unit))]))
 

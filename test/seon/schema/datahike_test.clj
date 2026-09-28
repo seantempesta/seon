@@ -486,9 +486,9 @@
             :seon.render/html 'my.agents.render-codec/render-plan-html
             :seon.render/form 'my.agents.render-codec/render-plan-form}
            outputs
-           {:seon.render/ai :seon.render/ai
-            :seon.render/html :seon.render/html
-            :seon.render/form :seon.render/form}
+           {:seon.render/ai :string
+            :seon.render/html :seon.render/hiccup
+            :seon.render/form :seon.render/read-form}
            entity-tx (ns-resolve 'seon.turn 'row-tx)
            transact-entity!
            (fn [entity-map]
@@ -541,10 +541,12 @@
              selected-entity
              (some #(when (= shape (:seon.schema/key %)) %)
                    (schema/matching-shapes-in projection entity))]
-         (testing "storage uses the declared encoded representation"
-           (is (= (update-vals renderers pr-str) raw-entity)))
-         (testing "database reads restore the logical qualified symbols"
-           (is (= renderers logical-entity)))
+         (testing "each face is stored as a ref to its function's entity"
+           (is (= (update-vals renderers
+                               #(select-keys (d/pull (db/db connection) [:db/id] [:seon.fn/sym %]) [:db/id]))
+                  raw-entity)))
+         (testing "a database read answers the ref, never a symbol to re-resolve"
+           (is (= raw-entity logical-entity)))
          (testing "cold acquisition preserves the declarations used by selection"
            (is (= renderers (select-keys selected-entity (keys renderers))))))))))
 

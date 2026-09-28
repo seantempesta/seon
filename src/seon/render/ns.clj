@@ -41,7 +41,7 @@
 
 (defn render-alias-form
   "The `dir` of the aliased namespace: how to look there. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.ns.alias/binding] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.ns.alias/binding] :seon.render/read-form]}
   [{target :seon.ns.alias/target-ns}]
   (list 'dir target))
 
@@ -62,7 +62,7 @@
 
 (defn render-refer-form
   "The `doc` of the referred Var. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.ns.refer/binding] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.ns.refer/binding] :seon.render/read-form]}
   [{target-ns :seon.ns.refer/target-ns target-name :seon.ns.refer/target-name}]
   (list 'doc (symbol (str target-ns) (str target-name))))
 
@@ -92,7 +92,7 @@
 
 (defn namespace-form
   "Return the ordinary `dir` form for a namespace entity."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
   (list 'dir (list 'quote (:seon.ns/name unit))))
 
@@ -125,7 +125,7 @@
 
 (defn task-form
   "The read of a task's edges. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
   (list 'seon.issue/task-edges '(seon.db/db) (:seon.task/id (or (:seon.render/value unit) unit))))
 

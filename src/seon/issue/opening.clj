@@ -194,7 +194,7 @@
 
 (defn render-form
   "The read that finds the agent's issue openings again. Shown, never executed."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [{agent-id :seon.agent/id}]
   (list 'seon.issue.opening/openings '(seon.db/db) agent-id))
 
