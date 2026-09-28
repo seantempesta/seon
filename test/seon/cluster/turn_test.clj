@@ -213,6 +213,20 @@
                    :seon.config.flow.io/queue-depth 2
                    :seon.config.flow.io/concurrency 2)})]
      (try
+      ;; ONE BRANCH, ONE CLUSTER: every reader of cluster config reads the
+      ;; branch's one config row. A world branched from the executing test's
+      ;; database carries that cluster's row, and beside it "turn-test"'s
+      ;; declared cap of 1 lost to the inherited 100 (39 provider calls in
+      ;; generated-opening-preserves-one-provider-turn-budget).
+      (let [inherited (db/q '[:find [?name ...] :where [_ :seon.config/cluster ?name]] @connection)
+            result (when (seq inherited)
+                     (db/transact! connection
+                                   (into [] (mapcat (fn [cluster-name]
+                                                      [[:db/retractEntity [:seon.config/cluster cluster-name]]
+                                                       [:db/retractEntity [:seon.cluster/name cluster-name]]]))
+                                         inherited)))]
+        (when (:seon.db.write.attempt/request-id result)
+          (throw (ex-info "Turn fixture could not retire the inherited cluster." result))))
       ;; Apply the final manifest once; cluster and agent facts need that config.
       (let [result
             (config/apply!
@@ -827,13 +841,13 @@
                     "the refusal closes in its terminal pass")
                 (is (= 1 (count evaluations)))
                 (is (turn/terminal? (first evaluations)))
-                (is (= "injected terminal program refusal"
-                       (:seon.cluster.eval/error (first evaluations))))
-                (is (= "injected terminal program refusal"
-                       (:seon.error/message
-                        (edn/read-string
-                         (:seon.eval/shown
-                          (first evaluations))))))
+                (is (some? (:seon.cluster.eval/error (first evaluations)))
+                    "the form carries the refused settlement as its error")
+                (is (= [{:seon.error/operation 'seon.db/transact! :seon.error/layer :seon.db/invocation}]
+                       (mapv #(select-keys (db/pull db [:seon.error/operation :seon.error/layer] %)
+                                           [:seon.error/operation :seon.error/layer])
+                             error-facts))
+                    "the one recorded error is the writer's refusal")
                 (is (= 1 (count error-facts))
                     "one refusal records exactly one durable error")
                 (let [work (turn/next-agent-work db (request connection "agent-a"))

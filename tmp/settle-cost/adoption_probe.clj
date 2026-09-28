@@ -156,3 +156,14 @@
          {:before before :op-kinds (frequencies (map first tx))
           :declared-in-candidate? (contains? (:seon.schema.projection/forms projection) :seon.runtime/turns)
           :result (timed-transact connection tx)})))))
+
+(defn retire-inherited-cluster
+  "Can a world branched from default drop default's cluster and config so the
+  test cluster is the branch's one cluster?"
+  []
+  (on-branch
+   (fn [connection]
+     (let [tx [[:db/retractEntity [:seon.config/cluster "default"]]
+               [:db/retractEntity [:seon.cluster/name "default"]]]]
+       (assoc (timed-transact connection tx)
+              :configs-after (d/q '[:find [?n ...] :where [_ :seon.config/cluster ?n]] @connection))))))
