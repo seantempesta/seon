@@ -1539,16 +1539,6 @@
           (is (nil? (db/pull @connection [:db/id]
                             [:seon.fn/sym (quote valid.core/value)]))))))))
 
-(deftest indexing-refuses-an-already-populated-branch
-  (test-support/with-database
-    (fn [connection]
-      (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo
-           #"fresh source scratch"
-           (seon.fn/index! {:seon.db/connection connection
-                           :seon.db/process boot-process
-                           :seon.source/database @connection}))))))
-
 (deftest ^{:seon.test/long
            "One complete canonical program population into a fresh memory store verifies exclusive component ownership."
            :seon.test/long-ms 180000}

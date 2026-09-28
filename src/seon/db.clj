@@ -1573,12 +1573,17 @@
   "The projection a cold boundary supplied for a value with no declaration rows.
 
   Genesis and first population write before any declaration row exists, so
-  their value cannot derive a projection. This is the one remaining read of
-  construction metadata; the projection-as-a-read sweep's cold-owner table
-  replaces it with explicit arguments. Absent, it refuses by name."
+  their value cannot derive a projection: it reads the construction metadata
+  the value carries, else the projection its caller handed
+  (`schema/handed-projection`). The writer hands its transaction functions a
+  value without metadata, so a population reconciled inside the writer onto an
+  empty store (`seon.fn/reconcile-call`, which binds its projection) reads the
+  handed one; that is what lets a first population take the same path as every
+  later one. Absent both, it refuses by name."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
   [database]
   (or (:seon.schema/projection (meta database))
+      (schema/handed-projection)
       (let [failure (projection-fallback 'seon.db/carried-projection)]
         (throw (ex-info (:seon.error/message failure) failure)))))
 

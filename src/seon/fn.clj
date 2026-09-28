@@ -3427,21 +3427,6 @@
       progress!
       (when partial? projection)))))
 
-(defn- commit-index-phase!
-  [connection process progress! phase tx-data]
-  (when (seq tx-data)
-    (let [total (count tx-data)]
-      (require-committed!
-       (db/transact!
-        connection
-        (cond-> {:tx-data (vec tx-data)}
-          process (assoc :tx-meta {:seon.db/process process})))
-       phase)
-      (report-index-progress!
-       progress!
-       (str (name phase) ": " total "/" total))))
-  nil)
-
 (defn- index-tempids
   {:malli/schema [:=> [:cat [:vector :map] [:seqable :qualified-keyword]] [:map-of [:tuple :qualified-keyword :seon.schema/value] :string]]}
   [entities identity-attributes]
@@ -4029,14 +4014,15 @@
           [(reconcile-call projection (program/shapes-in projection) entities (vec identities))]))))
 
 (defn index!
-  "Populate one fresh source scratch branch from static analysis.
+  "Reconcile one branch's program entities with static analysis.
 
-  The optional callback receives bounded progress lines while contract rows
-  are derived and after each ordered phase commits. Observation never changes
-  transaction boundaries; the scratch branch remains unpublished until every
-  phase and the source seal commit. An explicit previous source database
-  selects in-place reconciliation for an opted-in development cluster.
-  Fresh publication uses its supplied construction projection."
+  ONE path for every population: the desired entities replace the core
+  entities of `:seon.source/previous-database` (default: the branch's own
+  current value) in one writer transaction (`reconcile-call`). A first
+  population is the same reconciliation against an empty value, so a change
+  proven by an incremental publication is proven for a fresh store too. The
+  optional callback receives bounded progress lines; observation never
+  changes transaction boundaries."
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/index-request]
@@ -4081,20 +4067,8 @@
              _ (when-not (or (:seon.fn/changed-paths request)
                              (:seon.reconcile/adopt-identities request))
                  (assert-populated! entity-maps))
-             existing (some (fn [identity-attribute]
-                              (db/q '[:find ?entity .
-                                     :in $ ?attribute
-                                     :where [?entity ?attribute]]
-                                    @connection identity-attribute))
-                            [:seon.ns/name :seon.fn/sym :seon.test/sym])]
-     ;; A read that could not answer is not an existing entity.
-     (when (db/read-refusal? existing)
-       (throw (ex-info "Program indexing could not read its scratch branch." existing)))
-     (when (and existing (not previous-database))
-       (throw (ex-info "Program indexing requires a fresh source scratch branch."
-                       {::existing-program-entity existing :seon.fn/index-refused true})))
-     (if previous-database
-       (let [reconciled (when-not (:seon.reconcile/adopt-identities request)
+             previous-database (or previous-database (db/db connection))
+             reconciled (when-not (:seon.reconcile/adopt-identities request)
                           (reconciled-paths request))
              previous-identities
              (if-let [identities (:seon.reconcile/adopt-identities request)]
@@ -4179,25 +4153,4 @@
          {:seon.reconcile/converged? (empty? changed-identities)
           :seon.reconcile/operations (count changed-identities)
           :seon.db/transaction-report report
-          :seon.reconcile/adopt-identities changed-identities})
-       ;; Fresh branches have installed attributes, but their canonical schema
-       ;; entities arrive in this transaction. Capture the supplied construction
-       ;; projection instead of deriving an empty declaration world from @conn.
-       (let [database (db/db connection)
-             projection (or (db/carried-projection database)
-                            (schema/projection-from-database database))
-             identity-attributes (db/identity-attributes database)
-             {entities :seon.fn/index-entities
-              identity-operations :seon.fn/index-identity-operations
-              keyword-operations :seon.fn/index-keyword-operations}
-             (compile-index-transaction projection entity-maps identity-attributes)]
-       (report-index-progress!
-        progress!
-        (str "program population compiled: " (count entities)
-             " entities, " (count identity-operations) " identities, "
-             (count keyword-operations) " keyword facts"))
-       (commit-index-phase! connection process progress! :seon.fn/population
-                            (into (into identity-operations entities)
-                                  keyword-operations))
-       {:seon.reconcile/converged? false
-        :seon.reconcile/operations (count entity-maps)})))))))
+          :seon.reconcile/adopt-identities changed-identities})))))

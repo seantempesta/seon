@@ -1,0 +1,1 @@
+{:same-program? true, :rows 14418, :before {:writer :fresh, :ms 11411.830958, :datoms 526884}, :after {:writer :reconcile, :ms 8939.425208, :datoms 526884}, :different-identities []}
