@@ -107,7 +107,7 @@
          [:namespace [:map [:seon.batch/op [:= :namespace]] [:seon.batch/ns :seon.batch/ns]
                       [:seon.batch/ordinal {:optional true} :seon.cluster.eval/ordinal]]]]
  :join-kind [:enum {:description "How a definition write joined the form's analysis; :value is a def whose root is neither a function nor a test, the agent's private state."} :matched :member :rebound :unanalyzed :value]
- :join-reason [:enum :no-definition-at-origin :ambiguous :captures-locals :no-source :not-a-function]
+ :join-reason [:enum {:description "Why a definition write joined no analyzed definition; :no-complete-span is an origin without its end position (seon.turn.batch/join-write)."} :no-definition-at-origin :ambiguous :captures-locals :no-source :not-a-function :no-complete-span]
  :join [:map [:seon.batch/join :seon.batch/join-kind]
         [:seon.batch/sym {:optional true} :seon.batch/sym]
         [:seon.batch/reason {:optional true} :seon.batch/join-reason]
