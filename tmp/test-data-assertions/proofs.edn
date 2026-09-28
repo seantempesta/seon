@@ -153,4 +153,8 @@
    :note "re-derivation is a retained block call whose render basis moved; the root acquisition is its own check"}
   a-feed-writer-failure-enters-the-cluster-fault-path {:head [2 0 0] :note "was red at 52e163bee: it awaited the fault channel; the failure is now asserted as its recorded fault fact; no breaker run"}
   two-tabs-each-get-their-own-complete-paint {:head [6 0 0] :note "breaker did not reach the counted leaf; unverified negative"}
-  :with-server-fix "a516a7c95 passed :seon.render.web/http nil to start! when a test named none, so every with-server test without a socket leaf was refused at start!; fixed (present or absent, never nil)"}}
+  :with-server-fix "a516a7c95 passed :seon.render.web/http nil to start! when a test named none, so every with-server test without a socket leaf was refused at start!; fixed (present or absent, never nil)"}
+ :page-review-test
+ {turn-headers-and-all-evaluations-have-one-place-each {:head [22 0 1] :broken [19 3 1] :note "the error is pre-existing at 52e163bee after the converted section: 'A declared bound is missing; supply the required cap.'"}}
+ :host-test
+ {:note "not converted: a-refused-settlement-is-its-forms-refusal-and-the-run-closes (head [9 5 0]) and a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it (head [26 8 0]) are red at 52e163bee on their recorded-proposal data, so no conversion of them can be proved"}}

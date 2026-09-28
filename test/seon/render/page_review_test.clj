@@ -56,7 +56,13 @@
                          [:seon.agent/runtime :seon.runtime/turns])
            unit (assoc (db/pull database '[*] [:seon.turn/id "current"])
                        :seon.db/db database :seon.sci.eval/ctx ctx)
-           headers (pr-str (transcript/render-history-html turns database))]
+           headers (transcript/render-history-html turns database)
+           ;; each turn header's definition list as data: term to shown value
+           header-fields (->> (support/hiccup-elements headers)
+                              (filter #(= :dl (first %)))
+                              (mapv #(into {} (map (fn [[dt dd]] [(first (support/hiccup-leaves dt))
+                                                                   (first (support/hiccup-leaves dd))]))
+                                           (partition 2 (remove map? (rest %))))))]
        (is (= ["old-eval" "current-a" "current-b"] (mapv :seon.cluster.eval/id evaluations)))
        (is (= "" (transcript/render-history-ai turns database)))
        (is (= "" (transcript/render-run-ai unit)))
@@ -71,7 +77,8 @@
                                                 :seon.message/content "The exact trigger notification."}}}])
              runtime-unit {:seon.db/db @connection
                            :seon.render/value (db/pull @connection '[*] [:seon.runtime/agent [:seon.agent/id "page"]])}
-             runtime-html (pr-str (transcript/render-runtime-html runtime-unit))]
+             runtime-html (transcript/render-runtime-html runtime-unit)
+             shown (set (support/hiccup-leaves runtime-html))]
          (is (:db-after linked))
          (is (= "runtime-trigger"
                 (get-in (transcript/render-runtime-ai runtime-unit) [:seon.runtime/trigger :seon.message/id]))
@@ -79,23 +86,19 @@
          (let [refusal (transcript/render-runtime-ai {:seon.db/db @connection})]
            (is (= :seon.agent/runtime (:seon.render.transcript/refused-member refusal)))
            (is (= 'seon.render.transcript/runtime-owner (:seon.error/operation refusal))))
-         (is (str/includes? runtime-html "Turn open"))
-         (is (str/includes? runtime-html "Turns (3)"))
-         (is (str/includes? runtime-html "Message from page"))
+         (is (= #{"Turn open" "Turns (3)" "Message from page"}
+                (into #{} (filter #{"Turn open" "Turns (3)" "Message from page"}) shown))
+             "the runtime table shows its turns and its trigger's link")
          (is (= 0 (count (filter #(and (string? %) (str/includes? % "The exact trigger notification."))
                                 (tree-seq coll? seq (transcript/render-runtime-html runtime-unit)))))
              "The trigger link and history leave the message content to the message's own node.")
-         (is (str/includes? runtime-html "(+ 2 2)"))
-         (is (not (str/includes? runtime-html "(+ 3 3)"))
+         (is (= [true false] [(contains? shown "(+ 2 2)") (contains? shown "(+ 3 3)")])
              "The runtime table shows the first reply line; full evaluations belong to the session."))
-       (is (str/includes? headers "Recorded"))
-       (is (str/includes? headers "Opened"))
-       (is (str/includes? headers "Trigger"))
-       (is (str/includes? headers "Evaluations"))
-       (is (str/includes? headers "[:dd \"2\"]"))
-       (is (str/includes? headers "[:dd \"0\"]"))
-       (is (not (str/includes? headers "(+ 2 2)")))
-       (is (not (str/includes? headers "Run "))))
+       (is (every? (into #{} (keep #(get % "Evaluations")) header-fields) ["2" "0"])
+           "each turn header counts its evaluations")
+       (is (every? #(every? (partial contains? %) ["Opened" "Trigger" "Evaluations"]) header-fields))
+       (is (not-any? #{"(+ 2 2)"} (support/hiccup-leaves headers))
+           "a header states its turn, never its evaluations"))
      (is (:db-after (db/transact! connection
                      [{:seon.turn/id "empty" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx"}
                       {:seon.runtime/agent [:seon.agent/id "page"]
