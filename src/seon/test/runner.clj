@@ -942,9 +942,10 @@
 
   ## Costs
 
-  - All 2,387 tests on default, armed callers, 2026-09-28: 1.08 s and 1.24 GB
-    allocated, where `seon.id/digest` over the same closures printed about
-    600 MB of text in 16.7 s and allocated 18.3 GB."
+  - All 2,387 tests on default (9,113 nodes, 6,870 schema nodes), unarmed,
+    2026-09-28: 1.0 s and 1.24 GB allocated; the armed input check adds about
+    0.27 ms a call (0.63 s for all). `seon.id/digest` over the same closures
+    printed about 600 MB of text in 16.7 s and allocated 18.3 GB."
   {:malli/schema [:=> [:cat :seon.test/sym [:map-of :seon.schema/value [:maybe :map]] [:vector :seon.schema/value]
                        [:map-of :seon.schema/value [:maybe :map]] [:vector :seon.schema/value]]
                   [:string {:min 64 :max 64}]]}
@@ -1012,8 +1013,8 @@
   tests reaching `seon.fn/gate-set` (3,568 names, 4,241 schema keys): 36 ms
   on a freshly committed head beside the 16 ms declaration read, 49 ms
   warm; 199 tests 120-180 ms; all 2,378 tests 951 ms when their digests are
-  cached. A digest miss costs about 0.45 ms a test ([[closure-digest]]):
-  every test's digest from scratch took 1.08 s on 2026-09-28, where
+  cached. A digest miss costs about 0.7 ms a test armed ([[closure-digest]]):
+  every test's digest from scratch about 1.6 s on 2026-09-28, where
   printing each closure through `seon.id/digest` took 16.7 s."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
   [database test-symbols]
