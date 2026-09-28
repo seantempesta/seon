@@ -1,0 +1,28 @@
+--- a/src/seon/cluster/status.clj	2026-09-28 15:46:56.831299379 -0600
++++ b/src/seon/cluster/status.clj	2026-09-28 15:47:55.744117629 -0600
+@@ -64,6 +64,15 @@
+          {:seon.cluster/name (:seon.cluster/name cluster)
+           :seon.cluster.status/heap-used (.getUsed heap)
+           :seon.cluster.status/heap-max (.getMax heap)
++          ;; Used heap counts garbage G1 has not yet collected (4.56 GB used
++          ;; beside 0.97 GB live after a full collection, default
++          ;; 2026-09-28). What the collected pools held after their last
++          ;; collection bounds the live set from above without forcing one
++          ;; (1.63 GB just after boot; old regions wait for a mixed cycle).
++          :seon.cluster.status/heap-live
++          (reduce + 0 (keep #(when (= java.lang.management.MemoryType/HEAP (.getType ^java.lang.management.MemoryPoolMXBean %))
++                               (some-> (.getCollectionUsage ^java.lang.management.MemoryPoolMXBean %) .getUsed))
++                            (ManagementFactory/getMemoryPoolMXBeans)))
+           :seon.cluster.status/store-bytes
+           (unknown "Store bytes are not scanned during a cluster observation. Use bin/seon status --verbose for an explicit footprint measurement.")
+           :seon.cluster.status/adopted-commit
+--- a/resources/seon/schemas/seon.cluster.status.edn	2026-09-28 15:46:56.841803870 -0600
++++ b/resources/seon/schemas/seon.cluster.status.edn	2026-09-28 15:47:55.744253505 -0600
+@@ -36,6 +36,7 @@
+   [:seon.cluster/name :seon.cluster/name]
+   [:seon.cluster.status/heap-used :seon.cluster.status/count]
+   [:seon.cluster.status/heap-max :int]
++  [:seon.cluster.status/heap-live {:optional true :description "Heap bytes the collected pools held after their last collection: an upper bound of the live set, beside heap-used's uncollected garbage."} :int]
+   [:seon.cluster.status/platform-threads :seon.cluster.status/measurement]
+   [:seon.cluster.status/virtual-threads :seon.cluster.status/measurement]
+   [:seon.cluster.status/store-bytes :seon.cluster.status/measurement]
