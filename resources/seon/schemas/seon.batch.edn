@@ -13,6 +13,7 @@
          [:seon.batch/sink {:optional true :description "This world's armed-call counts (seon.batch/sink): a test agent's counters see only its own calls."} :seon.batch/sink]
          [:seon.batch/reads {:optional true :description "One form's read sink: the atom seon.turn.world/with-world binds as seon.db/*read-evidence-sink*, so the form's reads and those of work it starts land in it."} :seon.db/read-evidence-sink]
          [:seon.batch/in-flight {:optional true} :seon.batch/owned]
+         [:seon.batch/stamped-ns {:optional true :description "When this world last stamped a transaction (its start before the first): seon.profile/transaction-observation reads and moves it, so a transaction's :seon.db.transaction/ms is the work since the world's previous one."} :seon.batch/stamped-ns]
          [:seon.batch/ordinal {:optional true :description "The ordinal of the form this world is running."} :seon.cluster.eval/ordinal]
          [:seon.batch/form-sink {:optional true :description "The running form's own call sink: the evaluator binds it as the world's sink around the form's code (seon.sci.eval/evaluate), so the definitions the form executed are its code evidence."} :seon.batch/sink]
          [:seon.agent/id {:optional true} :seon.agent/id]
@@ -180,7 +181,8 @@
          [:seon.batch/shown-map {:optional true :description "The show stage's whole shown value (size keys, renderer, diagnostics), kept beside the text."} :map]]
  :applied :boolean
  :tx-count nat-int?
- :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos] (java.util.concurrent.atomic.AtomicLongArray, seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
+ :stamped-ns [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLong" :description "A world's clock: System/nanoTime of its previous transaction stamp." :gen/gen seon.turn.world/owned-generator} seon.batch/stamped-clock?]
+ :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos self-nanos calls-stamped self-stamped] (java.util.concurrent.atomic.AtomicLongArray, seon.profile/new-adder)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
  :printed [:map {:description "The show stage's answer: the one print and its whole shown value, whose diagnostics (a renderer that refused) are the agent's."}
            [:seon.batch/shown :string]
            [:seon.batch/shown-map {:optional true} :map]]

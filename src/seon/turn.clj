@@ -23,6 +23,7 @@
             [seon.flow :as seon.flow]
             [seon.id :as id]
             [seon.plan :as plan]
+            [seon.profile.measurement :as measurement]
             [seon.program :as program]
             [seon.print.value :as print.value]
             [seon.render :as render]
@@ -3790,6 +3791,11 @@
                            (update entry :seon.turn.loop/receipt with-diagnostic refusal)
                            entry))
                        requests prepared)
+        ;; The definitions these forms executed whose measurement moved,
+        ;; once for every attempt: measuring advances their cells' marks.
+        measured (measurement/significant-tx
+                  (db/db connection)
+                  (into #{} (mapcat #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/executed])) requests))
         ;; Built inside the committed phase: a refused read of the fault
         ;; window is a refused settlement the arm below closes, never an escape.
         transaction
@@ -3802,6 +3808,7 @@
              (into (receipt-settle-batch-tx
                     (with-fault-windows (db/db connection) requests (mapv :seon.turn.loop/receipt prepared))))
              (into (mapcat :seon.db/tx-data) prepared)
+             (into measured)
              ;; The close precedes plan/settle-call, as in close-turn; a
              ;; settlement that already closes the turn needs no fold.
              (cond-> (not (some closing-settlement? prepared))
@@ -5220,6 +5227,7 @@
                        :seon.db/connection connection :seon.db/db basis :seon.db/writer db/transact!
                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
                        :seon.render/profile profile :seon.batch/sink (seon.batch/sink)
+                       :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
                        :seon.agent/id agent-id}
                 run-id (assoc :seon.turn/id run-id)
                 (env/of cluster) (assoc :seon.env/environment (env/of cluster))

@@ -16,6 +16,7 @@
 (schema/register-core-predicate! 'seon.batch/sink? seon.batch/sink?)
 
 (schema/register-core-predicate! 'seon.batch/owned? seon.batch/owned?)
+(schema/register-core-predicate! 'seon.batch/stamped-clock? seon.batch/stamped-clock?)
 
 (def sink-generator
   "Fresh, empty call sinks."
@@ -46,6 +47,7 @@
              :seon.sci.eval/ctx (eval/fork-cluster-ctx base db conn)
              :seon.sci.eval/base-ctx base
              :seon.batch/sink (seon.batch/sink)
+             :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
              :seon.sci.eval/time-limit-ms (or limit 30000)}
       agent-id (assoc :seon.agent/id agent-id)
       turn-id (assoc :seon.turn/id turn-id)
@@ -71,7 +73,8 @@
                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
   (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
            :seon.db/writer (or writer db/transact!)
-           :seon.batch/sink (seon.batch/sink)}
+           :seon.batch/sink (seon.batch/sink)
+           :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
     agent-id (assoc :seon.agent/id agent-id)
     turn-id (assoc :seon.turn/id turn-id)
     ctx (assoc :seon.sci.eval/ctx ctx)

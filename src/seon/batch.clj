@@ -63,6 +63,12 @@
   [x]
   (instance? java.util.concurrent.ConcurrentHashMap x))
 
+(defn stamped-clock?
+  "True for a world's stamp clock."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [x]
+  (instance? java.util.concurrent.atomic.AtomicLong x))
+
 (defn owned?
   "True for a form's owned-work count."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "A predicate answers for any value." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -119,9 +125,12 @@
   (reduce (fn [m [[sym _] n]] (update m sym (fnil + 0) n)) {} (executed s)))
 
 (def ^:private ^java.util.function.Function new-adder
-  "A sink's `[calls nanos]` counter for a key it has not seen."
+  "A sink's counter for a key it has not seen, the same five slots as
+  `seon.profile/new-adder` makes: calls, nanos, self nanos and the two marks
+  `seon.profile/transaction-observation` keeps (seon.profile requires this
+  namespace, so the constructor is repeated here)."
   (reify java.util.function.Function
-    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 2))))
+    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 5))))
 
 (defn- ms-since
   {:malli/schema [:=> [:cat :int] :double]}
@@ -430,10 +439,11 @@
         in-flight (.get owned)
         executed-now (executed s)]
     (when-let [^java.util.concurrent.ConcurrentHashMap batch-sink (:seon.batch/sink (:seon.batch/world request))]
-      (doseq [[k [n t]] (counters s)
+      (doseq [[k ^java.util.concurrent.atomic.AtomicLongArray form-counter] s
               :let [^java.util.concurrent.atomic.AtomicLongArray c (.computeIfAbsent batch-sink k new-adder)]]
-        (.addAndGet c 0 (long n))
-        (.addAndGet c 1 (long t))))
+        (.addAndGet c 0 (.get form-counter 0))
+        (.addAndGet c 1 (.get form-counter 1))
+        (when (< 2 (.length form-counter)) (.addAndGet c 2 (.get form-counter 2)))))
     (last-entry batch
                 #(cond-> (assoc % :seon.batch/reads @reads :seon.batch/read-sink reads :seon.batch/executed executed-now
                                 :seon.batch/call-profile (call-profile s)

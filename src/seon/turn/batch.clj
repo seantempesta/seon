@@ -29,6 +29,7 @@
             [seon.fn :as sfn]
             [seon.batch]
             [seon.fn.analyzer :as analyzer]
+            [seon.profile.measurement :as measurement]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -678,10 +679,15 @@
   (let [conn (world/settlement-connection world)
         writer (:seon.db/writer world)
         head (db/db conn)
+        ;; once for every attempt: measuring advances the cells' marks
+        measured (measurement/significant-tx
+                  head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
         commit! (fn [tx] (let [r (writer conn tx)]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
-                  (let [tx (try (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))
+                  (let [tx (try (let [tx (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))]
+                                  ;; measurements ride a commit that happens anyway, never one of their own
+                                  (cond-> tx (and (vector? tx) (seq tx)) (into measured)))
                                 (catch Throwable t {:seon.error/message (ex-message t) :seon.error/data (ex-data t)}))]
                     (cond
                       (map? tx) {:seon.batch/writer-refusal tx}
