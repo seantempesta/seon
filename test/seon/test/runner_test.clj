@@ -9,9 +9,58 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
+
+(deftest a-batch-records-every-outcome-and-observed-exit-in-one-commit
+  (test-support/with-database
+   (fn [connection]
+     (let [symbols (vec (take 100 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]]
+                                              (db/db connection)))))
+           cluster (:seon.cluster/name (test-support/execution-handle connection))]
+       (is (= 100 (count symbols)))
+       (doseq [n [1 10 100]]
+         (let [database (db/db connection)
+               selected (subvec symbols 0 n)
+               provenance (runner/provenance database)
+               run-id (:seon.test.run/id provenance)
+               admission {:seon.test.run/provenance provenance
+                          :seon.test.run/cluster [:seon.cluster/name cluster]
+                          :seon.test.run/input-digest
+                          (db/q '[:find ?d . :where [_ :seon.source/test-input-digest ?d]] database)
+                          :seon.test.run/policy :named :seon.test.run/include-long? false
+                          :seon.test.run/members
+                          (mapv #(hash-map :seon.test.member/symbol % :seon.test.member/reasons #{:named}) selected)}
+               _ (test-support/transacted! connection [[:db.fn/call sut/admit-run admission]])
+               results (mapv #(hash-map :seon.test/sym % :seon.test/pass-count 1
+                                        :seon.test/fail-count 0 :seon.test/error-count 0
+                                        :seon.test.member/began? true :seon.test.member/ended? true
+                                        :seon.test.run/terminated? true) selected)
+               [recorded calls]
+               (test-support/armed-calls
+                '#{seon.db/transact!}
+                #(runner/commit-results!
+                  connection {:seon.test.runner/results results
+                              :seon.test.run/provenance provenance
+                              :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                              :seon.test/run-at (:seon.test.run/at provenance)
+                              :seon.test.run/terminated? false}))
+               txs (db/q '[:find ?completed ?terminated :in $ ?run-id
+                           :where [?run :seon.test.run/id ?run-id]
+                                  [?run :seon.test.run/members ?member]
+                                  [?member :seon.test.member/completed-tx ?completed]
+                                  [?member :seon.test.member/terminated-tx ?terminated]]
+                         (db/db connection) run-id)]
+           (is (= n (count recorded)))
+           (is (= (set selected) (set (map :seon.test/sym recorded))))
+           (is (= 1 (get calls 'seon.db/transact!)))
+           (is (= 1 (count txs)))
+           (is (apply = (first txs)))
+           (let [read-back (runner/run-results (db/db connection) run-id)]
+             (is (vector? read-back))
+             (is (= n (count read-back))))))))))
 
 (deftest reach-digests-and-memberships-share-content-valid-work
   (test-support/with-database

@@ -1536,6 +1536,7 @@
                (execution-refusal! operation run-id :seon.test/population-unknown
                                    :complete-outcome-events result))
              {:seon.test.member/value member :seon.test.member/outcome outcome
+              :seon.test.run/terminated? (or terminated? (true? (:seon.test.run/terminated? result)))
               :seon.test.report/values reports})) results)
         _ (when (not= (count results) (count (set (map :seon.test/sym results))))
             (execution-refusal! operation run-id :seon.test.run/immutable
@@ -1557,6 +1558,7 @@
     (into report-tx
           (mapcat
            (fn [{member :seon.test.member/value outcome :seon.test.member/outcome
+                 terminated? :seon.test.run/terminated?
                  reports :seon.test.report/values}]
              (let [eid (:db/id member)
                    report-ids (set (map :seon.test.report/id reports))
@@ -1937,23 +1939,28 @@
                   [:or :seon.test/results :seon.db/error-result]]}
   [connection completion ^Throwable failure]
   (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
-        open (remove :seon.test.member/completed-tx
-                     (execution-members (db/db connection) run-id))
+        members (execution-members (db/db connection) run-id)
+        completed (into #{} (keep #(when (:seon.test.member/completed-tx %) (:seon.test.member/symbol %))) members)
+        captured (remove #(completed (:seon.test/sym %)) (:seon.test.runner/results completion))
+        captured-symbols (set (map :seon.test/sym captured))
+        open (remove #(or (:seon.test.member/completed-tx %)
+                          (captured-symbols (:seon.test.member/symbol %)))
+                     members)
         message (str "Interrupted: request " run-id " threw before this member finished.\n"
                      (value/floor failure))]
-    (if (empty? open)
+    (if (and (empty? open) (empty? captured))
       []
       (commit-results!
        connection
        (assoc completion
               :seon.test.run/terminated? true
               :seon.test.runner/results
-              (mapv (fn [member]
+              (into (vec captured) (map (fn [member]
                       {:seon.test/sym (:seon.test.member/symbol member)
                        :seon.test.member/began? false :seon.test.member/ended? false
                        :seon.test/pass-count 0 :seon.test/fail-count 0 :seon.test/error-count 1
                        :seon.test/failure-message message})
-                    open))))))
+                    open)))))))
 
 (def ^:private run-result-query
   '[:find ?symbol ?pass ?fail ?error ?id ?at ?basis ?program ?inputs

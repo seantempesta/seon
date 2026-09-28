@@ -2404,60 +2404,69 @@
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [run-id (:seon.test.run/id batch-provenance)
-                        ;; The exit only: the recorded outcome is never re-sent.
-                        ;; A cleanup failure is recorded even when the exit write panics.
+                        ;; Shared only with this batch's asynchronous exit callbacks.
+                        ;; The atomic handoff fences exits racing its one recording.
+                        observed (atom {::exited #{} ::results [] ::recorded? false})
                         record-exit! (fn [test-symbol cleanup-failure]
-                                       (try (own-write! `runner/record-exit!
-                                                        (runner/record-exit! recording run-id test-symbol))
+                                       (try (when (::recorded? (swap! observed update ::exited conj test-symbol))
+                                              (own-write! `runner/record-exit!
+                                                          (runner/record-exit! recording run-id test-symbol)))
                                             (finally (some->> cleanup-failure (core-fault! `release-context!))))
-                                       nil)]
+                                       nil)
+                        captured (fn [{::keys [results exited]}]
+                                   (mapv #(assoc % :seon.test.run/terminated?
+                                                (or (true? (:seon.test.run/terminated? %))
+                                                    (contains? exited (:seon.test/sym %)))) results))]
                     ;; A throw leaves no admitted member open: each unrecorded
                     ;; member is recorded red with the throwable, which is rethrown.
                     (try
+                    (let [outcome
                     (loop [remaining members outcome outcome]
                       (if-let [test-symbol (first remaining)]
                         (if-not (pos? (remaining-ms))
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
-                          (let [exited (volatile! false)
-                                {result :seon.test/result timings :seon.test/timings}
+                          (let [{result :seon.test/result timings :seon.test/timings}
                                 (member-result (request-handle!) since test-symbol (remaining-ms)
-                                               #(do (vreset! exited true) (record-exit! test-symbol %))
+                                               #(record-exit! test-symbol %)
                                (contains? effect-reach test-symbol))]
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]
                             (assoc outcome ::stopped (vec remaining) ::stop-cause cause)
-                          (let [committed (own-write! `runner/commit-results!
-                                          (runner/commit-results!
-                                           recording
-                                           (recording-completion
-                                            batch-provenance [(dissoc result :seon.agent/branch)]
-                                            (true? (:seon.test.run/terminated? result)))))
+                          (let [_ (swap! observed update ::results conj (dissoc result :seon.agent/branch))
                                 outcome (-> outcome
                                             (update :seon.test/timings conj
                                                     (assoc timings :seon.test/sym test-symbol))
-                                            (update :seon.test/results conj
-                                                    (if (:seon.error/at committed)
-                                                      (assoc result :seon.test/recording-refusal committed)
-                                                      (merge result (first committed)))))]
+                                            (update :seon.test/results conj result))]
                             (cond
-                              (:seon.error/at committed)
-                              (assoc outcome :seon.test/recording-refusal committed
-                                             ::stopped (vec (next remaining)) ::stop-cause :recording-refused)
                               (not (:seon.test.run/terminated? result))
-                              (do ;; A watcher that saw the exit before this result
-                                  ;; existed wrote nothing; this write records it.
-                                  (when @exited (record-exit! test-symbol nil))
-                                  (assoc outcome :seon.test/unfinished [result]
-                                                 ::stopped (vec (next remaining)) ::stop-cause :member-unfinished))
+                              (assoc outcome :seon.test/unfinished [result]
+                                             ::stopped (vec (next remaining)) ::stop-cause :member-unfinished)
                               (and (platform? test-symbol) (not (green? result)))
                               (assoc outcome ::stopped (vec (next remaining)) ::stop-cause :platform-red)
                               :else (recur (next remaining) outcome))))))
                         outcome))
+                          results (captured @observed)
+                          committed (when (seq results)
+                                      (own-write! `runner/commit-results!
+                                                  (runner/commit-results!
+                                                   recording (recording-completion batch-provenance results false))))]
+                      (if (:seon.error/at committed)
+                        (assoc outcome :seon.test/recording-refusal committed
+                                       ::stopped [] ::stop-cause :recording-refused)
+                        (let [[before] (swap-vals! observed assoc ::recorded? true)
+                              folded (into #{} (keep #(when (:seon.test.run/terminated? %) (:seon.test/sym %))) results)
+                              by-symbol (into {} (map (juxt :seon.test/sym identity)) committed)]
+                          ;; An exit between capture and commit was not in the
+                          ;; transaction; later exits are owned by the callback.
+                          (doseq [sym (remove folded (::exited before))]
+                            (own-write! `runner/record-exit! (runner/record-exit! recording run-id sym)))
+                          (update outcome :seon.test/results
+                                  #(mapv (fn [result] (merge result (by-symbol (:seon.test/sym result)))) %)))))
                     (catch Throwable failure
                       (try
                         (let [recorded (runner/record-interrupted!
-                                        recording (recording-completion batch-provenance [] true) failure)]
+                                        recording (recording-completion batch-provenance (captured @observed) true) failure)]
                           (when (:seon.error/at recorded)
                             (.addSuppressed failure (ex-info (:seon.error/message recorded) recorded))))
                         (catch Throwable recording-failure

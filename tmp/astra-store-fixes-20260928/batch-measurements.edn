@@ -1,0 +1,10 @@
+{:process 53829
+ :source "17087c432788326aeb8db70fc514ead500098f6b"
+ :admitted-commit #uuid "6aba9424-6cd4-5b21-9e57-7513b537f7f2"
+ :measurements
+ [{:n 1 :batched? false :commits 1 :terminated 1 :ms 96.46225 :nodes 20 :files 14 :bytes 1044756}
+  {:n 1 :batched? true :commits 1 :terminated 1 :ms 91.205875 :nodes 20 :files 14 :bytes 1044756}
+  {:n 10 :batched? false :commits 10 :terminated 10 :ms 523.890208 :nodes 203 :files 143 :bytes 10630532}
+  {:n 10 :batched? true :commits 1 :terminated 10 :ms 82.032958 :nodes 25 :files 19 :bytes 1349146}
+  {:n 100 :batched? false :commits 100 :terminated 100 :ms 4761.626417 :nodes 2023 :files 1423 :bytes 108183483}
+  {:n 100 :batched? true :commits 1 :terminated 100 :ms 271.629291 :nodes 28 :files 22 :bytes 1583135}]}

@@ -82,6 +82,8 @@
                branches (map :seon.agent/branch (:seon.test/timings result))]
            (is (true? (:seon.test/passed? result)))
            (is (= 2 (:seon.test/executed-count result)))
+           (is (= 1 (count (set (map :seon.test.member/completed-tx (:seon.test/results result)))))
+               "the request records its two executed members in one batch transaction")
            (is (= 2 (count (set branches))))
            (is (not-any? (set (registry/roster store)) branches)
                "every member branch is unlinked once its body exits")
