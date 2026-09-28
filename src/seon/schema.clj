@@ -1832,20 +1832,22 @@
   "Stage removal of one schema from the current evaluation delta.
 
    Removal is published only if the evaluation's terminal transaction
-   commits. Calling this outside an isolated registration delta refuses rather
-   than mutating the process-wide candidate population."
+   commits. Called outside an isolated registration delta it returns
+   `:seon.schema/unregister-outside-delta-error` rather than mutating the
+   process-wide candidate population."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
-                  ::registry-key]}
+                  [:or ::registry-key ::unregister-outside-delta-error]]}
   [k]
-  (when-not *candidate-forms-overlay*
-    (throw
-     (ex-info
-      "schema/unregister! requires an evaluation registration delta."
-      {:seon.schema/error :seon.schema/unregister-outside-delta
-       :seon.schema/key k
-       :seon.schema/unregister-outside-delta k})))
-  (swap! *candidate-forms-overlay* dissoc k)
-  k)
+  (if *candidate-forms-overlay*
+    (do (swap! *candidate-forms-overlay* dissoc k)
+        k)
+    (refusal/diagnostic
+     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.schema/registration
+      :seon.error/operation 'seon.schema/unregister!
+      :seon.error/message "schema/unregister! requires an evaluation registration delta."
+      :seon.error/member :seon.schema/unregister-outside-delta
+      :seon.error/fix "Unregister inside an agent evaluation, whose run stages the removal and publishes it when its settlement commits."
+      :seon.schema/unregister-outside-delta k})))
 
 (defn ^:no-doc contribute-candidate-forms!
   "Merge a prevalidated population into the candidate collector."

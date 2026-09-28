@@ -1986,3 +1986,12 @@
       (is (= {:seon.schema/key :seon.schema-test/admitted :seon.schema/definition :int}
              (select-keys (register :seon.schema-test/admitted :int)
                           [:seon.schema/key :seon.schema/definition]))))))
+
+(deftest schema-changes-outside-an-evaluation-answer-their-refusal
+  ;; Registration and unregistration stage into an evaluation's delta; outside
+  ;; one, each answers its declared refusal instead of throwing.
+  (is (= :seon.schema/registration-outside-delta
+         (:seon.error/member (schema/register! :seon.schema-test/outside :int))))
+  (let [refused (schema/unregister! :seon.schema-test/outside)]
+    (is (= :seon.schema/unregister-outside-delta (:seon.error/member refused)))
+    (is (= :seon.schema-test/outside (:seon.schema/unregister-outside-delta refused)))))

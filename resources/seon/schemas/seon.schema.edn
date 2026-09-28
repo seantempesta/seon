@@ -145,7 +145,7 @@
               :non-round-tripping-form :seon.schema/key
               :non-round-tripping-form-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema whose form does not round-trip as EDN"} [:seon.schema/non-round-tripping-form :seon.schema/non-round-tripping-form] [:seon.error/message :seon.error/message]]
               :unregister-outside-delta :seon.schema/key
-              :unregister-outside-delta-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema unregistration requested outside an evaluation delta"} [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta] [:seon.error/message :seon.error/message]]
+              :unregister-outside-delta-error [:and {:error/message "must identify the schema unregistration requested outside an evaluation delta"} :seon.error/base [:map [:seon.schema/unregister-outside-delta :seon.schema/unregister-outside-delta]]]
               :malformed-projection-row [:= true]
               :malformed-projection-row-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must mark a committed projection entity with an invalid shape"} [:seon.schema/malformed-projection-row :seon.schema/malformed-projection-row] [:seon.error/message :seon.error/message]]
               :malformed-projection-form [:= true]
