@@ -3630,12 +3630,15 @@
     found))
 
 (defn- reconcile-tx-in
-  "Replace source definitions, owning entities by the shapes `entity-shapes` carries."
+  "Replace source definitions, owning entities by the shapes `entity-shapes` carries.
+  Adoption ignores a file derivation-digest-only change: publication consumes
+  that key, while an adopter consumes the file and declaration content. Decide
+  against the writer database; genuine file changes still adopt the entire row."
   {:malli/schema
    [:=> [:cat :seon.program/shapes :seon.db/database-value
-         [:vector :map] [:sequential :seon.db/ref]]
+         [:vector :map] [:sequential :seon.db/ref] :boolean]
     [:or :seon.db/tx-data :seon.error/value]]}
-  [entity-shapes database entity-maps previous-identities]
+  [entity-shapes database entity-maps previous-identities adoption?]
   (let [projection (or (db/carried-projection database)
                        (schema/projection-from-database database))
         identity-attributes (db/identity-attributes database)
@@ -3682,7 +3685,11 @@
                                 [normalized-current normalized-desired])]
               (cond
                 refusal refusal
-                (same-indexed-entity? normalized-current normalized-desired)
+                (or (same-indexed-entity? normalized-current normalized-desired)
+                    (and adoption?
+                         (:seon.fn.file/relative-path normalized-current)
+                         (= (dissoc normalized-current :seon.fn.file/derivation-digest)
+                            (dissoc normalized-desired :seon.fn.file/derivation-digest))))
                 (recur (next pending) changes)
                 (nil? current)
                 (recur (next pending) (conj changes {:seon.program/row entity-map :seon.fn/retractions []}))
@@ -3726,7 +3733,7 @@
     [:or [:vector :seon.schema/value] :seon.error/value]]}
   [database entities previous-identities]
   (reconcile-tx-in (program/shapes-in (db/carried-projection database))
-                   database entities previous-identities))
+                   database entities previous-identities false))
 
 (defn report-identities
   "Identities touched by a writer report or datoms between two database values.
@@ -3991,14 +3998,14 @@
   hands its current db to `reconcile-tx-in`, so the authority decides the diff,
   and a refused diff throws with its whole value."
   {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :seon.program/shapes
-                       [:vector :map] [:sequential :seon.db/ref]]
+                       [:vector :map] [:sequential :seon.db/ref] :boolean]
                   :seon.store/transaction-operation]}
-  [projection entity-shapes entities previous-identities]
+  [projection entity-shapes entities previous-identities adoption?]
   [:db.fn/call
    (fn [database]
      (let [tx-data (schema/call-with-projection
                     projection
-                    #(reconcile-tx-in entity-shapes database entities previous-identities))]
+                    #(reconcile-tx-in entity-shapes database entities previous-identities adoption?))]
        (if (and (map? tx-data) (contains? tx-data :seon.error/at))
          (throw (ex-info (:seon.error/message tx-data) tx-data))
          tx-data)))])
@@ -4014,7 +4021,7 @@
     (if (map? entities)
       entities
       (do (assert-one-entity-per-identity! entities)
-          [(reconcile-call projection (program/shapes-in projection) entities (vec identities))]))))
+          [(reconcile-call projection (program/shapes-in projection) entities (vec identities) true)]))))
 
 (defn index!
   "Reconcile one branch's program entities with static analysis.
@@ -4108,7 +4115,8 @@
               (db/transact!
                connection
                (cond-> {:tx-data
-                        (cond->> [(reconcile-call projection entity-shapes entity-maps previous-identities)]
+                        (cond->> [(reconcile-call projection entity-shapes entity-maps previous-identities
+                                                 (boolean (:seon.reconcile/adopt-identities request)))]
                           ;; Entities derived from one published commit refuse at
                           ;; the writer once another publication moved its head.
                           expected-head (cons [:db.fn/call registry/head-guard-tx expected-head])
@@ -4138,7 +4146,7 @@
                                                   :seon.fn/population)
                      tx-data (require-committed!
                               (reconcile-tx-in entity-shapes database findings
-                                               (mapv program/row-identity previous))
+                                               (mapv program/row-identity previous) false)
                               :seon.fn/population)]
                  ;; This unpublished connection is owned by this population;
                  ;; nothing can change its database between this diff and write.

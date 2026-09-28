@@ -1827,6 +1827,38 @@
   the same seam `index!` itself calls with the shapes it derived once."
   @#'seon.fn/reconcile-tx-in)
 
+(deftest adoption-ignores-only-file-derivation-digests
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           shapes (program/shapes-in (db/carried-projection database))
+           identities (mapv #(vector :seon.fn.file/relative-path %)
+                            (take 100 (sort (db/q '[:find [?p ...]
+                                                   :where [_ :seon.fn.file/relative-path ?p]] database))))
+           rows (seon.fn/published-index-entities database identities)
+           desired (mapv #(assoc % :seon.fn.file/derivation-digest
+                                  (id/digest 64 ["adoption-derivation-only" (:seon.fn.file/relative-path %)])) rows)]
+       (is (= 100 (count rows)))
+       (doseq [n [1 10 100]]
+         (let [selected (subvec desired 0 n)
+               refs (subvec identities 0 n)
+               [tx calls] (test-support/armed-calls
+                           '#{seon.db/pull-many seon.fn/normalized-index-entity}
+                           #(reconcile-in shapes database selected refs true))]
+           (is (empty? tx))
+           (is (= 1 (get calls 'seon.db/pull-many 0)))
+           (is (= (* 2 n) (get calls 'seon.fn/normalized-index-entity 0)))
+           (is (seq (reconcile-in shapes database selected refs false)))
+           (let [changed (assoc-in selected [0 :seon.fn.file/digest]
+                                  (id/digest 64 ["changed-file-bytes"]))]
+             (is (seq (reconcile-in shapes database changed refs true))))))
+       (let [report (test-support/transacted!
+                     connection
+                     (reconcile-in shapes database desired identities false))
+             written (seon.fn/published-index-entities (db/db connection) identities)]
+         (is (map? report))
+         (is (= desired written)))))))
+
 (deftest refused-index-reads-never-become-publication-entities
   (test-support/with-database
    (fn [connection]
@@ -1865,7 +1897,7 @@
                                    (if (identical? database (first arguments))
                                      refusal
                                      (apply pull arguments)))]
-             (reconcile-in shapes database [entity] []))]
+             (reconcile-in shapes database [entity] [] false))]
        (is (= refusal index-result)
            "the published-entity query refusal is the publication result")
        (is (= refusal reconcile-result)
@@ -1919,7 +1951,7 @@
                           ::identity-value identity-pair
                           ::identity-ref identity-pair}])
              tx-data (reconcile-in (program/shapes-in entity-projection)
-                                   database entities [])
+                                   database entities [] false)
              target-tempid
              (some (fn [[operation tempid attribute value]]
                      (when (and (= :db/add operation)
@@ -2018,7 +2050,7 @@
                                   (db/db connection)
                                   [(program/canonical-row
                                     (program/shapes-in (seon.schema/build-projection declared)) emitted)]
-                                  []))]
+                                  [] false))]
                      (is (:db-after report))
                      (is (= "carried"
                             (::declared-after
