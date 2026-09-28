@@ -124,8 +124,8 @@
   whose expansion made it. A write with no origin rebinds a Var outside any
   definition (intern, alter-var-root) and keeps its value unpersisted. A
   write whose producer names its member (a record's constructor helper)
-  belongs to that declaration. On the pinned SCI the origin is a start
-  position only; the same rules then join by that start."
+  belongs to that declaration. An origin without its complete span joins
+  nothing."
   {:malli/schema [:=> [:cat :map :map :seon.batch/write] :seon.batch/join]}
   [analysis coords {sym :seon.batch/sym origin :seon.batch/origin member :seon.batch/member-of}]
   (let [a (:seon.fn/analysis analysis)
@@ -133,22 +133,21 @@
     (cond
       member {:seon.batch/join :member :seon.batch/member-of member}
       (nil? origin) {:seon.batch/join :rebound}
+      (not (and (:end-line origin) (:end-column origin)))
+      {:seon.batch/join :unanalyzed :seon.batch/reason :no-complete-span}
       :else
-      (let [pos (synthetic coords [(:line origin) (:column origin)])
-            end (when (:end-line origin) (synthetic coords [(:end-line origin) (:end-column origin)]))
-            call (first (filter #(= pos [(::analyzer/row %) (::analyzer/col %)]) (::analyzer/var-usages a)))
+      (let [span (into (synthetic coords [(:line origin) (:column origin)])
+                       (synthetic coords [(:end-line origin) (:end-column origin)]))
+            ;; a generated definition's owning macro call, by its complete span
+            call (when (:expanded-by origin)
+                   (first (filter #(= span (span-of %)) (::analyzer/var-usages a))))
             op (when call (symbol (str (::analyzer/to call)) (str (::analyzer/name call))))
-            at (filter #(= pos [(::analyzer/row %) (::analyzer/col %)]) same)
-            inside (when call (filter #(and (contains-pos? call [(::analyzer/row %) (::analyzer/col %)])
-                                            (= op (::analyzer/defined-by %))) same))
             cs (distinct
-                (cond
-                  ;; an authored definition's complete span: that span exactly, no fallback
-                  (and end (not (:expanded-by origin))) (filter #(= (into pos end) (span-of %)) same)
-                  ;; a generated definition: inside the one owning call occurrence
-                  (:expanded-by origin) inside
-                  ;; the pinned adapter's start-only origin (prototype-only)
-                  :else (concat at inside)))]
+                (if (:expanded-by origin)
+                  (when call (filter #(and (contains-pos? call [(::analyzer/row %) (::analyzer/col %)])
+                                           (= op (::analyzer/defined-by %))) same))
+                  ;; an authored definition: its complete span exactly
+                  (filter #(= span (span-of %)) same)))]
         (case (count cs)
           0 {:seon.batch/join :unanalyzed :seon.batch/reason :no-definition-at-origin}
           1 (cond-> {:seon.batch/join :matched :seon.batch/definition (first cs)}
@@ -200,25 +199,17 @@
         off (fn [l col] (+ (get ls (dec l)) (dec col)))]
     (subs t (off r c) (off er ec))))
 
-(defn expansion-hooks
-  "clj-kondo `:analyze-call` hooks carrying the expansions the evaluation
-  observed: for each expanded macro, a hook that answers the recorded
-  expansion for the call node at exactly an observed occurrence (row and
-  column within the analyzed text, which places the form at `first-row`), and
-  leaves every other call as written. Nil when none was observed."
-  {:malli/schema [:=> [:cat [:vector :seon.batch/write] pos-int?] [:maybe :map]]}
-  [writes first-row]
-  (let [by-macro (group-by :seon.batch/macro (filter #(= :expansion (:seon.batch/op %)) writes))]
-    (when (seq by-macro)
-      {:__dangerously-allow-string-hooks__ true
-       :analyze-call
-       (into {} (for [[macro events] by-macro
-                      :let [at (into {} (for [{[l c] :seon.batch/call-span e :seon.batch/expansion} events]
-                                          [[(+ l (dec first-row)) c] e]))]]
-                  [macro (str "(require '[clj-kondo.hooks-api :as api])\n"
-                              "(let [at '" (pr-str at) "]\n"
-                              "  (fn [{:keys [node]}] (let [{:keys [row col]} (meta node)]"
-                              " (when-some [e (get at [row col])] {:node (api/coerce e)}))))")]))})))
+(defn- form-relative-expansions
+  "The form's observed expansions, their call spans moved from the batch's
+  text coordinates to the form's own (its first line 1, its first column 1):
+  the analyzer places them at the form's first row."
+  {:malli/schema [:=> [:cat :seon.batch/entry [:vector :seon.batch/write]] [:vector :seon.batch/write]]}
+  [{line :seon.batch/line column :seon.batch/column} writes]
+  (let [relative (fn [[l c]] [(inc (- l line)) (if (= l line) (inc (- c column)) c)])]
+    (into [] (comp (filter #(= :expansion (:seon.batch/op %)))
+                   (map (fn [{[l c el ec] :seon.batch/call-span :as w}]
+                          (assoc w :seon.batch/call-span (into (relative [l c]) (relative [el ec]))))))
+          writes)))
 
 (defn- analyze-form
   "One clj-kondo analysis of `source` in `namespace-name`, every Var the batch has
@@ -317,7 +308,7 @@
                              {} writes))
         analyzed (when (and (seq finals) (:seon.batch/source entry))
                    (analyze-form ctx working (:seon.batch/ns-before entry) (:seon.batch/source entry) declared
-                                 (filterv #(= :expansion (:seon.batch/op %)) writes)))
+                                 (form-relative-expansions entry writes)))
         by-var (into {} (map (fn [w] [(:seon.batch/var w)
                                       (if analyzed
                                         (write-entity ctx working entry analyzed w declared)
@@ -625,10 +616,16 @@
   A storage failure keeps every value and answers the error."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/commit]}
   [{world :seon.batch/world :as request} batch]
-  (let [batch (gate/gate-deferred request batch)
-        conn (world/settlement-connection world)
+  (let [conn (world/settlement-connection world)
         writer (:seon.db/writer world)
         head (db/db conn)
+        ;; a form whose deferred gate refuses is withdrawn whole: the survivors
+        ;; fold again on the head and the feedback is concluded from them
+        gated (gate/gate-deferred request batch)
+        batch (if (= (map :seon.batch/facts-error (:seon.batch/entries gated))
+                     (map :seon.batch/facts-error (:seon.batch/entries batch)))
+                gated
+                (let [r (rebase request gated head)] (merge r (conclude request r))))
         commit! (fn [tx] (let [r (writer conn tx)]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
@@ -641,17 +638,19 @@
                               (if (and (map? r) (:seon.error/message r))
                                 {:seon.batch/writer-refusal r}
                                 {:seon.batch/applied true :seon.batch/tx-count (count tx) :seon.batch/after r})))))
+        settled (fn [b] (select-keys b [:seon.batch/entries :seon.batch/program :seon.batch/working
+                                        :seon.eval/feedback :seon.eval/contract-note :seon.eval/contract-warning]))
         first-try (try (attempt batch) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
     (if-not (:seon.batch/writer-refusal first-try)
-      first-try
+      ;; every path answers the state it settled
+      (assoc first-try :seon.batch/settled (settled batch))
       ;; the head moved: re-derive on it, and conclude again from the state
       ;; that will commit, so the feedback is the committed facts' feedback
       (let [rebased (rebase request batch head)
             rebased (merge rebased (conclude request rebased))
             second-try (try (attempt rebased) (catch Throwable t {:seon.batch/storage-error (ex-message t)}))]
         (assoc second-try
-               :seon.batch/rebased (select-keys rebased [:seon.batch/entries :seon.batch/program :seon.batch/working
-                                                        :seon.eval/feedback :seon.eval/contract-note :seon.eval/contract-warning])
+               :seon.batch/settled (settled rebased)
                :seon.batch/first-refusal (:seon.batch/writer-refusal first-try))))))
 
 (defn- reaching-tests
@@ -813,6 +812,7 @@
           :seon.batch/around sci.batch/around
           :seon.batch/show show
           :seon.batch/fault world/record-fault
+          :seon.batch/within world/with-world
           :seon.batch/start-ns 'user
           :seon.batch/mode :code
           :seon.sci.batch/delta (schema/begin-registration-delta (db/carried-projection db))}
@@ -911,6 +911,7 @@
                                (binding [*ns* (create-ns n)] (refer-clojure) (body)))
           :seon.batch/show jvm-show
           :seon.batch/fault world/record-fault
+          :seon.batch/within world/with-world
           :seon.batch/settle settle
           :seon.batch/conclude conclude
           :seon.batch/start-ns 'user}
@@ -934,5 +935,6 @@
           :seon.batch/evaluate (fn [_ _ _] (body))
           :seon.batch/ns-name (fn [_] 'user)
           :seon.batch/settle settle
-          :seon.batch/fault world/record-fault}
+          :seon.batch/fault world/record-fault
+          :seon.batch/within world/with-world}
          request))

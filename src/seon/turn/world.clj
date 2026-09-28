@@ -39,9 +39,9 @@
              :seon.db/writer (or writer db/transact!)
              :seon.sci.eval/ctx (eval/fork-cluster-ctx base db conn)
              :seon.sci.eval/base-ctx base
-             :seon.agent/id agent-id
              :seon.batch/sink (seon.batch/sink)
              :seon.sci.eval/time-limit-ms (or limit 30000)}
+      agent-id (assoc :seon.agent/id agent-id)
       turn-id (assoc :seon.turn/id turn-id)
       environment (assoc :seon.env/environment environment)
       process (assoc :seon.db.process/id process)
@@ -63,8 +63,9 @@
   [cluster conn {agent-id :seon.agent/id turn-id :seon.turn/id writer :seon.db/writer
                  environment :seon.env/environment process :seon.db.process/id profile :seon.render/profile}]
   (cond-> {:seon.boot/cluster-name cluster :seon.db/connection conn :seon.db/db (db/db conn)
-           :seon.db/writer (or writer db/transact!) :seon.agent/id agent-id
+           :seon.db/writer (or writer db/transact!)
            :seon.batch/sink (seon.batch/sink)}
+    agent-id (assoc :seon.agent/id agent-id)
     turn-id (assoc :seon.turn/id turn-id)
     environment (assoc :seon.env/environment environment)
     process (assoc :seon.db.process/id process)
@@ -77,7 +78,8 @@
   {:malli/schema [:=> [:cat :seon.batch/world :seon.db/database-value] :seon.batch/world]}
   [world db]
   (-> world
-      (dissoc :seon.db/connection :seon.db/writer :seon.batch/settlement)
+      ;; a read-only world writes nothing and counts into nobody's sink
+      (dissoc :seon.db/connection :seon.db/writer :seon.batch/settlement :seon.batch/sink)
       (assoc :seon.db/db db :seon.sci.eval/ctx (sci/fork (:seon.sci.eval/ctx world)))))
 
 (defn merge-world
@@ -90,14 +92,16 @@
 (defn with-world
   "Run `f` with the world's bindings re-established on this thread: its
   custody (the connection, when it has one) for the elided seon.db arities,
-  and its value as the read basis. A body moved to another thread (a
-  compute-pool hop) carries the world as a value and calls this; nothing is
-  inherited from the submitting thread."
+  its value as the read basis, and the running evaluation's observation
+  scope (`:seon.batch/scope`, the observer's bindings). A body moved to
+  another thread (a compute-pool hop) carries the world as a value and calls
+  this; nothing is inherited from the submitting thread."
   {:malli/schema [:=> [:cat :seon.batch/world [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "Any body runs in the world: its value passes through unchanged." :gen/elements [nil false 0 "" :k [] {}]}]]}
   [world f]
   (db/call-with-custody (select-keys world [:seon.db/connection])
-                        #(binding [db/*read-database* (:seon.db/db world)
-                                   seon.batch/*world* world]
+                        #(with-bindings (merge (:seon.batch/scope world {})
+                                               {#'db/*read-database* (:seon.db/db world)
+                                                #'seon.batch/*world* world})
                            (f))))
 
 

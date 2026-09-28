@@ -4,7 +4,8 @@
   only on its own contract, and its reaching tests, each run as a test agent
   in its own namespace, block only when newly red (red after, not red on the
   batch's basis). Its evidence is data (`:seon.batch/gate`)."
-  (:require [sci.core :as sci]
+  (:require [clojure.string :as str]
+            [sci.core :as sci]
             [seon.batch]
             [seon.config :as config]
             [seon.db :as db]
@@ -107,23 +108,28 @@
 
 (defn gate-deferred
   "The install gate for entities whose callees were unbound when they were
-  defined (`:seon.batch/deferred`), on the batch's final working value: a
-  refusal is the defining form's facts error and withdraws the row."
+  defined (`:seon.batch/deferred`), on the batch's final working value. A
+  form any of whose deferred entities the gate refuses is refused whole: the
+  refusal is its facts error, naming every refused entity, and its change is
+  withdrawn; the caller re-folds the surviving changes."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
   [request batch]
   (reduce (fn [b [i e]]
             (let [entities (for [s (get-in e [:seon.batch/change :seon.batch/deferred])
-                             :let [row (get-in b [:seon.batch/program :entities s])]
-                             :when (and (map? row) (:seon.fn/spec row))]
-                         row)
-                  refused (first (filter :seon.gate/blocks?
-                                         (map #(gate-entity request (:seon.batch/working b) %) entities)))]
-              (if refused
-                (-> b
-                    (assoc-in [:seon.batch/entries i :seon.batch/facts-error]
-                              (assoc refused :seon.error/message (str "The install gate refused " (:seon.gate/sym refused))))
-                    (update-in [:seon.batch/program :entities] dissoc (:seon.gate/sym refused)))
+                                 :let [row (get-in b [:seon.batch/program :entities s])]
+                                 :when (and (map? row) (:seon.fn/spec row))]
+                             row)
+                  refused (vec (filter :seon.gate/blocks?
+                                       (map #(gate-entity request (:seon.batch/working b) %) entities)))]
+              (if (seq refused)
+                (update-in b [:seon.batch/entries i]
+                           #(-> %
+                                (dissoc :seon.batch/change)
+                                (assoc :seon.batch/facts-error
+                                       (assoc (first refused)
+                                              :seon.error/message (str "The install gate refused "
+                                                                       (str/join ", " (map :seon.gate/sym refused)))
+                                              :seon.gate/refused (mapv :seon.gate/sym refused)))))
                 b)))
           batch
           (map-indexed vector (:seon.batch/entries batch))))
-

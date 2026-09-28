@@ -189,6 +189,24 @@
            [(assoc entry :seon.batch/shown (:seon.batch/shown p)) nil (:seon.batch/print-diagnostics p)]))
        (catch Throwable t [(assoc entry :seon.batch/shown (unprintable entry)) t nil])))
 
+(defn- write?
+  "Whether an observation is a write the batch records: a map of the declared
+  operations with its operation's members (`:seon.batch/write`). Total: an
+  observation whose own lookup throws (a sorted map of other keys) is not."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason "An observer stage may hand anything; this predicate decides what the batch records." :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [w]
+  (boolean
+   (try
+     (and (map? w)
+          (case (get w :seon.batch/op)
+            :bind (and (some? (get w :seon.batch/var)) (keyword? (get w :seon.batch/kind))
+                       (let [s (get w :seon.batch/sym ::none)] (or (= ::none s) (qualified-symbol? s))))
+            :unmap (qualified-symbol? (get w :seon.batch/sym))
+            (:remove-ns :namespace) (symbol? (get w :seon.batch/ns))
+            :expansion (and (symbol? (get w :seon.batch/macro)) (vector? (get w :seon.batch/call-span)))
+            false))
+     (catch Throwable _ false))))
+
 (defn- evaluate-step
   "Evaluate the read form once, and print its value, under one observation
   scope, then publish the outcome. Never throws.
@@ -221,15 +239,25 @@
         measured (volatile! nil)
         measure! (fn [] (vreset! measured {:seon.batch/duration-ms (ms-since t0)
                                            :seon.batch/allocated-bytes (- (allocated-bytes) bytes0)}))
-        run (fn []
-              (let [v (binding [*world* world]
-                        ((:seon.batch/evaluate request) request (:seon.batch/form r) (:seon.batch/working batch)))]
-                (vreset! returned v)
-                (measure!)
-                (when (:seon.batch/show request)
-                  (vreset! printed (binding [*world* world]
-                                     (print-into request (merge base @measured {:seon.batch/value v})))))
-                v))
+        ;; the entrant's world boundary (custody, read basis, *world*), around
+        ;; every evaluation and print on this thread
+        within* (fn [w f]
+                  (if-let [boundary (:seon.batch/within request)]
+                    (boundary w f)
+                    (with-bindings (assoc (:seon.batch/scope w {}) #'*world* w) (f))))
+        within (fn [f] (within* world f))
+        run (fn run
+              ([] (run {}))
+              ([scope]
+               ;; an observer's scope (its bindings) rides the world
+               (within* (cond-> world (seq scope) (assoc :seon.batch/scope scope))
+               (fn []
+                 (let [v ((:seon.batch/evaluate request) request (:seon.batch/form r) (:seon.batch/working batch))]
+                   (vreset! returned v)
+                   (measure!)
+                   (when (:seon.batch/show request)
+                     (vreset! printed (print-into request (merge base @measured {:seon.batch/value v}))))
+                   v)))))
         refused (:seon.batch/refused r)
         failure (try
                   (cond
@@ -243,7 +271,6 @@
         _ (.set open false)
         _ (when-not @measured (measure!))
         base (merge base @measured)
-        observed (vec writes)
         value? (not (identical? none @returned))
         entry (cond
                 refused (assoc base :seon.batch/error (ex-info "Only the REPL writes responses: this map was not evaluated."
@@ -253,22 +280,30 @@
                 :else (assoc base :seon.batch/error failure))
         [entry print-failure print-notes] (if (or (contains? entry :seon.batch/shown) (not (:seon.batch/show request)))
                                             [entry (second @printed) (nth @printed 2 nil)]
-                                            (print-into request entry))
-        {good true bad false} (group-by map? observed)
-        diagnostics (cond-> []
-                      (and value? failure) (conj (diagnostic :observe n failure))
-                      print-failure (conj (diagnostic :show n print-failure))
-                      print-notes (conj {:seon.error/message (str "show: " print-notes) :seon.batch/stage :show
-                                         :seon.batch/ordinal n})
-                      (seq bad) (conj {:seon.error/message (str "observe: " (count bad) " observed writes were not maps and were dropped")
-                                       :seon.batch/stage :observe :seon.batch/ordinal n
-                                       :seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil %) bad)))}}))]
-    (-> batch
-        (update :seon.batch/entries conj (assoc entry :seon.batch/total-ms (ms-since t0)))
-        (update :seon.batch/diagnostics into diagnostics)
-        (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) good)
-        (assoc :seon.batch/form-writes (vec good))
-        (clock :evaluate t0))))
+                                            (within #(print-into request entry)))
+        ;; published before any observation is normalized: a malformed
+        ;; observation is a diagnostic beside the value, never its loss
+        published (-> batch
+                      (update :seon.batch/entries conj (assoc entry :seon.batch/total-ms (ms-since t0)))
+                      (update :seon.batch/diagnostics into
+                              (cond-> []
+                                (and value? failure) (conj (diagnostic :observe n failure))
+                                print-failure (conj (diagnostic :show n print-failure))
+                                print-notes (conj {:seon.error/message (str "show: " print-notes) :seon.batch/stage :show
+                                                   :seon.batch/ordinal n})))
+                      (assoc :seon.batch/form-writes [])
+                      (clock :evaluate t0))]
+    (guard published :observe
+           (fn [b]
+             (let [{good true bad false} (group-by write? (vec writes))]
+               (-> b
+                   (cond-> (seq bad)
+                     (update :seon.batch/diagnostics conj
+                             {:seon.error/message (str "observe: " (count bad) " observed writes are not writes and were dropped")
+                              :seon.batch/stage :observe :seon.batch/ordinal n
+                              :seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil (pr-str %)) bad)))}}))
+                   (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) good)
+                   (assoc :seon.batch/form-writes (vec good))))))))
 
 (defn- place-step
   "The namespace the published entry ran in and ended in."
@@ -395,9 +430,9 @@
                     (guard :settle #(let [t1 (System/nanoTime)
                                           commit ((:seon.batch/settle request) request %)]
                                       (clock (cond-> (-> %
-                                                             ;; a settlement that rebased answers the state it committed
-                                                             (merge (:seon.batch/rebased commit))
-                                                             (assoc :seon.batch/commit (dissoc commit :seon.batch/rebased)))
+                                                             ;; the settlement answers the state it settled
+                                                             (merge (:seon.batch/settled commit))
+                                                             (assoc :seon.batch/commit (dissoc commit :seon.batch/settled)))
                                                ;; a refusal or storage failure stays beside the values and
                                                ;; reaches the fault stage
                                                (or (:seon.batch/writer-refusal commit) (:seon.batch/storage-error commit))

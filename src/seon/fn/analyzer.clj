@@ -55,6 +55,33 @@
            :redundant-primitive-coercion :equals-float :not-empty?
            :constant-condition]))
 
+(defn expansion-hooks
+  "clj-kondo `:analyze-call` hooks carrying the macro expansions an evaluation
+  observed (the SCI fork's expansion observer): for each expanded macro, a
+  hook answering the recorded expansion for the call node whose COMPLETE span
+  is an observed occurrence's, and leaving every other call as written. Each
+  occurrence's span is the form's own (its first line 1, first column 1);
+  the form sits at `first-row` of the analyzed text. Nil when none was
+  observed."
+  {:malli/schema [:=> [:cat [:sequential [:map [:seon.batch/macro :qualified-symbol]
+                                          [:seon.batch/call-span [:tuple pos-int? pos-int? pos-int? pos-int?]]
+                                          [:seon.batch/expansion :seon.batch/form]]]
+                       pos-int?]
+                  [:maybe :map]]}
+  [expansions first-row]
+  (let [by-macro (group-by :seon.batch/macro expansions)
+        row (fn [r] (+ r (dec first-row)))]
+    (when (seq by-macro)
+      {:__dangerously-allow-string-hooks__ true
+       :analyze-call
+       (into {} (for [[macro events] by-macro
+                      :let [at (into {} (for [{[l c el ec] :seon.batch/call-span e :seon.batch/expansion} events]
+                                          [[(row l) c (row el) ec] e]))]]
+                  [macro (str "(require '[clj-kondo.hooks-api :as api])\n"
+                              "(let [at '" (pr-str at) "]\n"
+                              "  (fn [{:keys [node]}] (let [{:keys [row col end-row end-col]} (meta node)]"
+                              " (when-some [e (get at [row col end-row end-col])] {:node (api/coerce e)}))))")]))})))
+
 (defn- present-values
   [entry selected-keys]
   (into {}
@@ -769,6 +796,7 @@
       [::paths {:optional true} [:vector {:min 1} [:string {:min 1}]]]
       [::cache-root {:optional true} :string]
       [::config-root {:optional true} :string]
+      [::hooks {:optional true :description "clj-kondo :hooks merged into the analysis config (expansion-hooks)."} :map]
       [::sources {:optional true}
        [:map-of {:min 1} [:string {:min 1}] :string]]]]
     [:map
@@ -784,7 +812,7 @@
      [::mentioned-symbols [:set :qualified-symbol]]
      [::cache [:map [::examined :int] [::stale [:vector :map]]
                [::rebuilt [:vector :string]]]]]]}
-  [{::keys [paths sources cache-root config-root]}]
+  [{::keys [paths sources cache-root config-root hooks]}]
   (when-not (or (seq paths) (seq sources))
     (throw (ex-info "Analysis requires either captured sources or paths."
                     {})))
@@ -815,7 +843,7 @@
                   ;; later analysis in this JVM. A mirror is not a decoy: it
                   ;; carries the checkout file's own captured bytes, and
                   ;; `checkout-source?` reads the source path back out of it.
-                  (cond-> {:lint lint-paths :config publication-config}
+                  (cond-> {:lint lint-paths :config (cond-> publication-config hooks (assoc :hooks hooks))}
                     cache-root (assoc :cache-dir cache-root)
                     config-root (assoc :config-dir config-root)
                     (and (nil? cache-root) (not (every? checkout-source? lint-paths)))

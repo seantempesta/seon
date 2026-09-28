@@ -946,7 +946,11 @@
   Existing declarations supply the same namespace context as admission lint.
   Every form retains its exact source row span, excluding context declarations.
   Unknown-namespace usages carry no target identity and are excluded by the
-  shared usage projection instead of being remapped to the calling namespace."
+  shared usage projection instead of being remapped to the calling namespace.
+  A request's observed macro expansions (`:seon.batch/expansions`, in the
+  form's own coordinates) become the analyzer's hooks at that form's first
+  row, so a generated definition is analyzed at its call."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :map]}
   [database requests]
   (let [namespace-names (vec (distinct (map :namespace-name requests)))
         available-functions
@@ -1001,9 +1005,15 @@
                      group)))
          {:source (if (seq prelude) (str prelude "\n") "") :spans []}
          (partition-by :namespace-name requests))
+        ;; the expansions each form's evaluation observed, placed at that
+        ;; form's first row: a generated definition is analyzed at its call
+        hooks (reduce (fn [acc [request [first-row _]]]
+                        (merge-with merge acc (analyzer/expansion-hooks (:seon.batch/expansions request) first-row)))
+                      nil
+                      (map vector requests spans))
         analysis
         (with-in-str source
-          (analyzer/analyze {::analyzer/paths ["-"]}))]
+          (analyzer/analyze (cond-> {::analyzer/paths ["-"]} hooks (assoc ::analyzer/hooks hooks))))]
     {:seon.fn/analysis analysis
      :seon.fn/source source
      :seon.fn/source-spans spans

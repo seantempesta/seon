@@ -144,7 +144,7 @@
 (defn scratch [] (edn/read-string (slurp (str dir "scratch-results.edn"))))
 
 (defproof :sci-suite :sci-fork
-  "SCI's own clj suite on the patched clone: 397 tests, the same 5 failures as the pinned fork's 393, 0 new"
+  "SCI's own clj suite on the patched clone: 398 tests, the same 5 failures as the pinned fork's 393, 0 new"
   (let [{:keys [patched base]} (:suite (scratch))]
     {:pass? (and (= (:failures base) (:failures patched)) (= 0 (:errors patched)) (> (:tests patched) (:tests base)))
      :patched (dissoc patched :failures) :base (dissoc base :failures) :failures (:failures patched)}))
@@ -284,7 +284,7 @@
   the live projection): {:schema-errors [...]}, empty when valid (B5: no
   member installed as nil)."
   [w]
-  (let [forms (update-keys (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))
+  (let [forms (update-keys (edn/read-string (slurp "/Users/sean/src/seon/resources/seon/schemas/seon.batch.edn"))
                            #(keyword "seon.batch" (name %)))
         registry (mr/composite-registry forms (:seon.schema.projection/registry (db/carried-projection (wdb w))))]
     {:schema-errors (mapv #(select-keys % [:in :value]) (:errors (m/explain :seon.batch/world w {:registry registry})))}))
@@ -531,6 +531,17 @@
        :gate gate
        :refusal (dissoc refusal :seon.error/operation)})))
 
+(defn tree-expansion-hooks
+  "seon.fn.analyzer/expansion-hooks as the working tree has it, evaluated in a
+  scratch namespace (the installed analyzer predates it until the restart)."
+  [expansions first-row]
+  (let [src (slurp "/Users/sean/src/seon/src/seon/fn/analyzer.clj")
+        form (read-string (subs src (str/index-of src "(defn expansion-hooks")))]
+    (binding [*ns* (create-ns 'one-path-proof.analyzer)]
+      (refer-clojure)
+      (eval form))
+    ((ns-resolve 'one-path-proof.analyzer 'expansion-hooks) expansions first-row)))
+
 ;;; --- Astra revision-3 execution blockers (review f3c1db347) -----------------
 ;; Each imported from tmp/one-path-review/proof.clj, stated against these
 ;; namespaces; each failed on the reviewed prototype.
@@ -685,7 +696,7 @@
   (let [src "(defmacro single [] (list 'def 'made 7))\n(single)\n(comment (single))"
         events [{:seon.batch/op :expansion :seon.batch/macro 'user/single
                  :seon.batch/call-span [2 1 2 9] :seon.batch/expansion '(def made 7)}]
-        hooks (turn.batch/expansion-hooks events 1)
+        hooks (tree-expansion-hooks events 1)
         a (:analysis (with-in-str src (clj-kondo.core/run! {:lint ["-"] :cache false
                                                             :config {:output {:format :none} :hooks hooks :analysis true}})))
         made (filterv #(= 'made (:name %)) (:var-definitions a))]
@@ -787,7 +798,7 @@
   "S3 rehearsal: every :seon.batch/* declaration the landing publishes registers through the one path on a disposable branch of the live store, applied and stored, with no refusal"
   (on-fresh-branch
    (fn []
-     (let [forms (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))
+     (let [forms (edn/read-string (slurp "/Users/sean/src/seon/resources/seon/schemas/seon.batch.edn"))
            refs (fn [f] (into #{} (filter #(and (keyword? %) (contains? forms %))) (tree-seq coll? seq f)))
            ;; declarations before their users, as one resource publishes them together
            ordered (loop [done [] seen #{} left (set (keys forms))]
@@ -810,7 +821,8 @@
                      sink-bound (set (filter #(reaches-sink? % #{%}) (keys forms)))]
                  (and (applied? b) (empty? (facts-errors b))
                       (every? (fn [e] (some #(str/includes? e (str %)) sink-bound)) errors)
-                      (= (- (count forms) (count sink-bound)) stored)))
+                      ;; every declared key is stored (keys an earlier landing stored stay)
+                      (<= (- (count forms) (count sink-bound)) stored)))
         :keys (count forms) :stored stored :ms (ms-since t0) :errors (vec (take 3 errors)) :facts-errors (vec (take 3 (facts-errors b)))
         :notes (vec (take 3 (mapcat :seon.batch/notes (:seon.batch/entries b))))}))))
 
@@ -821,7 +833,7 @@
       (let [files (->> (.listFiles (io/file root "resources/seon/schemas"))
                        (filter #(.endsWith (.getName ^java.io.File %) ".edn")) (sort-by #(.getName ^java.io.File %)))
             all (apply merge (map #(edn/read-string (slurp %)) files))
-            mine (set (keys (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))))
+            mine (set (keys (edn/read-string (slurp "/Users/sean/src/seon/resources/seon/schemas/seon.batch.edn"))))
             admit (fn [forms] (try {:admitted (count (seon.schema.edn/admit {:seon.schema/forms (seon.schema.edn/derive-config-forms forms)}))}
                                    (catch Throwable t {:refused (ex-message t)})))
             head (admit (apply dissoc all mine))
@@ -974,6 +986,175 @@
            b (run w (str "(seon.blob/get " (pr-str digest) ")"))]
        {:pass? (= ["the whole value"] (values b)) :values (values b) :digest digest}))))
 
+;;; --- Astra rev-4 execution blockers (52b8cefc2) --------------------------------
+
+(defproof :c1-malformed-map-observation :totality
+  "C1: an observation that is a map but no write (a sorted map of other keys, whose own lookup throws) keeps the evaluated 42, with one observe diagnostic"
+  (let [b (batch/evaluate-batch (assoc (tiny-request 42) :seon.batch/observe
+                                       (fn [_ _ write! run] (run) (write! (sorted-map 1 :bad)))))]
+    {:pass? (and (kept? b 42) (= 1 (count (diags b))) (str/starts-with? (first (diags b)) "observe:"))
+     :diagnostics (diags b)}))
+
+(defproof :c2-watch-rebinding-origin :sci-fork
+  "C2 (needs the JVM on SCI ead49957): a watch's alter-var-root during (def watched 2) is a rebinding with no origin: the live value 3 is not stored as the def's source, the definition stays private"
+  (on-fresh-branch
+   (fn []
+     (let [b (run (world) "(def watched 0)\n(add-watch #'watched :once (fn [_ v _ _] (remove-watch v :once) (alter-var-root v inc)))\n(def watched 2)\nwatched")
+           source (:seon.fn/source (db/pull (after b) [:seon.fn/source] [:seon.fn/sym 'user/watched]))]
+       {:pass? (and (= 3 (last (values b))) (not= "(def watched 2)" source)
+                    (= :rebound (get (private-reasons b) 'user/watched)))
+        :source source :private (private-reasons b)}))))
+
+(defproof :c3-producer-spans :join
+  "C3: the one reader reads with end locations: a literal definition's producer origin carries all four coordinates, and it joins its analyzed definition by that exact span (not a start position)"
+  (on-fresh-branch
+   (fn []
+     (let [w (world)
+           seen (atom [])
+           req (update (turn.batch/code-request (request w "(def spanned 1)\n  (defn indented [x] x)" {}))
+                       :seon.batch/observe (fn [obs] (fn [r working on-write thunk]
+                                                       (obs r working #(do (swap! seen conj %) (on-write %)) thunk))))
+           b (batch/evaluate-batch req)
+           origins (into {} (keep (fn [w] (when (= :bind (:seon.batch/op w)) [(:seon.batch/sym w) (:seon.batch/origin w)]))) @seen)]
+       {:pass? (and (applied? b) (stored? (after b) 'user/spanned) (stored? (after b) 'user/indented)
+                    (= {:line 1 :column 1 :end-line 1 :end-column 16} (select-keys (origins 'user/spanned) [:line :column :end-line :end-column]))
+                    (= {:line 2 :column 3 :end-line 2 :end-column 24} (select-keys (origins 'user/indented) [:line :column :end-line :end-column])))
+        :origins origins}))))
+
+(defproof :c3-generated-full-span :join
+  "C3: a generated definition joins only when its owning macro call's COMPLETE span is the producer's; a call analyzed at [1 1 1 30] refuses an origin [1 1 1 12] expanded-by defn"
+  (let [analysis {:seon.fn/analysis
+                  {:seon.fn.analyzer/var-definitions
+                   [{:seon.fn.analyzer/name 'f :seon.fn.analyzer/ns 'user :seon.fn.analyzer/defined-by 'clojure.core/defn
+                     :seon.fn.analyzer/row 1 :seon.fn.analyzer/col 1 :seon.fn.analyzer/end-row 1 :seon.fn.analyzer/end-col 30}]
+                   :seon.fn.analyzer/var-usages
+                   [{:seon.fn.analyzer/name 'defn :seon.fn.analyzer/to 'clojure.core
+                     :seon.fn.analyzer/row 1 :seon.fn.analyzer/col 1 :seon.fn.analyzer/end-row 1 :seon.fn.analyzer/end-col 30}]}}
+        j (fn [end] (turn.batch/join-write analysis {:first-row 1 :line 1 :column 1}
+                                           {:seon.batch/sym 'user/f :seon.batch/origin {:line 1 :column 1 :end-line 1 :end-column end :expanded-by 'defn}}))]
+    {:pass? (and (= :unanalyzed (:seon.batch/join (j 12))) (= :matched (:seon.batch/join (j 30))))
+     :short (j 12) :exact (:seon.batch/join (j 30))}))
+
+(defproof :c3-hook-spans :join
+  "C3: the observer emits each macro call's expansion with its complete span (SCI's :end-row/:end-col), moved to the form's own coordinates: a call on a later, indented line; the analyzer's hooks key by that complete span"
+  (on-fresh-branch
+   (fn []
+     (let [w (world)
+           seen (atom [])
+           text "(defmacro pair [] (list 'do (list 'def 'pa 1) (list 'def 'pb 2)))\n(do\n    (pair))"
+           req (update (turn.batch/code-request (request w text {}))
+                       :seon.batch/observe (fn [obs] (fn [r working on-write thunk]
+                                                       (obs r working #(do (swap! seen conj %) (on-write %)) thunk))))
+           b (batch/evaluate-batch req)
+           e (first (filter #(= 'user/pair (:seon.batch/macro %)) @seen))
+           entry (second (:seon.batch/entries b))
+           relative (#'turn.batch/form-relative-expansions entry [e])
+           hooks (tree-expansion-hooks relative 7)]
+       {:pass? (and (= [3 5 3 11] (:seon.batch/call-span e))
+                    (= [2 5 2 11] (:seon.batch/call-span (first relative)))
+                    (str/includes? (get-in hooks [:analyze-call 'user/pair]) "[8 5 8 11]"))
+        :observed (:seon.batch/call-span e) :relative (mapv :seon.batch/call-span relative)}))))
+
+(defproof :c3-generated-stored-and-reacquired :join
+  "C3 (needs the JVM on the analyzer hooks, after the restart): a macro call on a later, indented line generating two definitions stores both as entities at the call, and reacquiring the stored sources in a fresh world reproduces them"
+  (on-fresh-branch
+   (fn []
+     (let [text "(defmacro pair [] (list 'do (list 'def 'pa 1) (list 'def 'pb 2)))\n(do\n    (pair))"
+           b (run (world) text)
+           a (after b)
+           srcs (mapv #(:seon.fn/source (db/pull a [:seon.fn/source] [:seon.fn/sym %])) '[user/pair user/pa user/pb])
+           fresh (world)
+           _ (batch/evaluate-batch (seon.sci.batch/acquire-request {:seon.batch/text (str/join "\n" (distinct srcs)) :seon.batch/world fresh}))
+           got (values (batch/evaluate-batch (seon.sci.batch/acquire-request {:seon.batch/text "[pa pb]" :seon.batch/world fresh})))]
+       {:pass? (and (applied? b) (every? some? srcs) (= [[1 2]] got))
+        :sources srcs :private (private-reasons b) :reacquired got}))))
+
+(defproof :c4-deferred-gates :gate
+  "C4: a form whose deferred definitions fail their gate is withdrawn whole (no member stored), its refusal names both, the survivors fold again, and the stored evaluation, the MCP reply and the next agent reply all carry the refusal; the feedback names no withdrawn definition"
+  (on-fresh-branch
+   (fn []
+     (let [text "(declare late)\n(do\n  (defn deferred-a {:malli/schema [:=> [:cat] :int]} [] (late))\n  (defn deferred-b {:malli/schema [:=> [:cat] :int]} [] (late)))\n(defn late {:malli/schema [:=> [:cat] :string]} [] \"bad\")\n42"
+           w (world)
+           b (run w text)
+           a (after b)
+           r (turn.batch/reply b)
+           refusal (get-in r [:seon.batch/evaluations 1 :seon.batch/facts-error])
+           stored-error (first (filter #(str/includes? % "deferred-a")
+                                       (db/q '[:find [?e ...] :where [?ev :seon.cluster.eval/ordinal 1] [?ev :seon.cluster.eval/error ?e]] a)))
+           agent (on-fresh-branch #(turn.batch/reply (run (world) text {:mode :reply})))]
+       {:pass? (and (applied? b) (= 42 (last (values b)))
+                    (not (stored? a 'user/deferred-a)) (not (stored? a 'user/deferred-b))
+                    (some? refusal) (str/includes? refusal "deferred-a") (str/includes? refusal "deferred-b")
+                    (some? stored-error)
+                    (not-any? #{'user/deferred-a 'user/deferred-b} (get-in b [:seon.eval/feedback :seon.feedback/changed]))
+                    (str/includes? (str (get-in agent [:seon.batch/evaluations 1 :seon.batch/facts-error])) "deferred-a"))
+        :refusal refusal :stored-error stored-error :feedback (:seon.eval/feedback b)}))))
+
+(defproof :c5-constructor-absence :world
+  "C5: a world built without an agent holds no :seon.agent/id (never nil); a read-only world holds no call sink; both validate"
+  (let [aw (world/agent-world *exec* {})
+        jw (world/jvm-world "default" (:seon.db/connection *exec*) {})
+        ro (world/read-only-world (world) (wdb (world)))]
+    {:pass? (and (not (contains? aw :seon.agent/id)) (not (contains? jw :seon.agent/id))
+                 (not (contains? ro :seon.batch/sink))
+                 (every? #(empty? (:schema-errors (world-errors %))) [aw jw ro]))
+     :errors (mapv #(:schema-errors (world-errors %)) [aw jw ro])}))
+
+(defproof :c5-error-print-world :world
+  "C5: a throwing evaluation's error is printed inside the evaluation's world (seon.batch/*world* bound at print), as a value is"
+  (let [seen (atom [])
+        w (world)
+        req (-> (turn.batch/code-request (request w "(throw (ex-info \"x\" {}))\n42" {}))
+                (update :seon.batch/show (fn [show] (fn [r e] (swap! seen conj (some? seon.batch/*world*)) (show r e)))))
+        b (batch/evaluate-batch req)]
+    {:pass? (and (= [true true] @seen) (= 42 (last (values b)))) :world-at-print @seen}))
+
+(defproof :c5-jvm-custody :entrant
+  "C5: JVM mode evaluates inside its world: an elided seon.db read reaches the world's branch, as in SCI"
+  (let [b (batch/evaluate-batch (turn.batch/jvm-request (request (world) "(seon.db/pull [:seon.agent/id] [:seon.agent/id \"root\"])" {:seon.batch/start-ns 'one-path-proof.host})))]
+    {:pass? (= [{:seon.agent/id "root"}] (values b)) :values (values b)}))
+
+(defproof :c6-nested-world-sink :world
+  "C6: the armed wrapper as it lands (seon.profile's with-cell and timed, loaded from its source into a scratch namespace) counts a call made in a nested world into that world's sink, keeps same-world re-entry uncounted, restores the outer entry, and counts a throwing call"
+  (let [src (slurp "/Users/sean/src/seon/src/seon/profile.clj")
+        scratch (-> src
+                    (str/replace-first #"\(ns seon\.profile" "(ns one-path-proof.profile")
+                    (str/replace "seon.profile/new-adder" "one-path-proof.profile/new-adder")
+                    (str/replace "seon.profile/host-entry" "one-path-proof.profile/host-entry"))
+        _ (load-string scratch)
+        wa {:seon.batch/sink (batch/sink)} wb {:seon.batch/sink (batch/sink)}
+        f (eval '(let [cell (one-path-proof.profile/cell {:seon.profile/sym (quote review/f)})]
+                   (one-path-proof.profile/with-cell cell
+                     (fn f [mode wb]
+                       (one-path-proof.profile/timed
+                        (case mode
+                          :nested (do (binding [seon.batch/*world* wb] (f :inner wb)) (f :same wb))
+                          :same :same
+                          :inner :inner
+                          :throw (throw (ex-info "boom" {}))))))))
+        _ (binding [batch/*world* wa] (f :nested wb))
+        _ (binding [batch/*world* wa] (try (f :throw wb) (catch Exception _ nil)))]
+    {:pass? (and (= {'review/f 2} (batch/calls (:seon.batch/sink wa)))
+                 (= {'review/f 1} (batch/calls (:seon.batch/sink wb))))
+     :a (batch/calls (:seon.batch/sink wa)) :b (batch/calls (:seon.batch/sink wb))}))
+
+(defproof :hop-plain-executor :world
+  "A form that hops to a plain executor (no binding conveyance) and re-establishes only its world value (seon.turn.world/with-world) is observed: its definition is stored, from the world's observation scope, never an inherited binding"
+  (on-fresh-branch
+   (fn []
+     (let [pool (java.util.concurrent.Executors/newFixedThreadPool 1)]
+       (try
+         (let [req (assoc (turn.batch/code-request (request (world) "(defn hopped [x] x)\n(hopped 7)" {}))
+                          :seon.batch/evaluate
+                          (fn [req form working]
+                            (let [w seon.batch/*world*
+                                  ^Callable task (fn [] (world/with-world w #(seon.sci.batch/evaluate req form working)))]
+                              (.get (.submit pool task)))))
+               b (batch/evaluate-batch req)]
+           {:pass? (and (applied? b) (stored? (after b) 'user/hopped) (= 7 (last (values b))))
+            :values (mapv str (values b))})
+         (finally (.shutdown pool)))))))
+
 (def landing-files
   "The six namespaces and the schema resource step S3 copies into the tree."
   ["src/seon/batch.clj" "src/seon/sci/forgive.clj" "src/seon/sci/batch.clj" "src/seon/sci/arm.clj"
@@ -989,7 +1170,7 @@
     (sh "sh" "-c" (str "mkdir -p " root " && cd /Users/sean/src/seon && git archive HEAD | tar -x -C " root))
     (doseq [f landing-files]
       (io/make-parents (io/file root f))
-      (io/copy (io/file dir f) (io/file root f)))
+      (io/copy (io/file "/Users/sean/src/seon" f) (io/file root f)))
     root))
 
 (defproof :b5-contracts-gate :landing
@@ -1246,15 +1427,15 @@
 ;;; --- Static proofs: the cut's names and requires --------------------------------
 
 (defn- new-contracts []
-  (for [n '[seon.batch seon.sci.batch seon.sci.arm seon.sci.forgive seon.turn.batch]
+  (for [n '[seon.batch seon.sci.batch seon.sci.arm seon.sci.forgive seon.sci.observe seon.turn.world seon.turn.gate seon.turn.batch]
         [s v] (ns-interns n) :let [c (:malli/schema (meta v))] :when c]
     [(symbol (str n) (str s)) c]))
 
 (defproof :v2-7-schema-names :static
-  "V2-7: every new :seon.batch name is free in the live registry; every new form and every new contract compiles against the live registry plus the new forms (an undeclared reference fails to compile)"
-  (let [forms (edn/read-string (slurp (str dir "resources/seon/schemas/seon.batch.edn")))
+  "V2-7: every :seon.batch name is this landing's own (no other owner's key in the live registry is redefined: a live key outside the seon.batch namespace is taken); every form and every contract compiles against the live registry plus the tree's forms (an undeclared reference fails to compile)"
+  (let [forms (edn/read-string (slurp "/Users/sean/src/seon/resources/seon/schemas/seon.batch.edn"))
         proj (db/carried-projection (wdb (world)))
-        taken (filter #(contains? (:seon.schema.projection/forms proj) %) (keys forms))
+        taken (filter #(and (contains? (:seon.schema.projection/forms proj) %) (not= "seon.batch" (namespace %))) (keys forms))
         ;; :seon.db/writer is declared at HEAD (6eadf4b62) but not in this JVM's older registry
         head-db-forms (edn/read-string (:out (clojure.java.shell/sh "git" "-C" "/Users/sean/src/seon" "show" "HEAD:resources/seon/schemas/seon.db.edn")))
         registry (mr/composite-registry forms (select-keys head-db-forms [:seon.db/writer]) (:seon.schema.projection/registry proj))
@@ -1287,7 +1468,7 @@
 (defproof :v2-7-no-reverse-requires :static
   "V2-7: with the landing's new edges (seon.turn -> seon.turn.batch; seon.sci.eval -> seon.batch, seon.sci.batch, seon.sci.forgive), the require graph of src + the new namespaces has no cycle through them"
   (let [graph (merge-with into
-                          (require-graph ["/Users/sean/src/seon/src" (str dir "src")])
+                          (require-graph ["/Users/sean/src/seon/src"])
                           '{seon.turn #{seon.turn.batch} seon.sci.eval #{seon.batch seon.sci.batch seon.sci.forgive}})
         cyc (vec (cycles-through graph '[seon.batch seon.sci.batch seon.sci.arm seon.sci.forgive seon.turn.batch seon.turn seon.sci.eval]))]
     {:pass? (empty? cyc) :cycles cyc}))
@@ -1447,7 +1628,7 @@
                                   (update :seon.cluster.eval/read-evidence #(mapv (comp whole :db/id) %)))))))
 
 (defproof :turn-overhead :timing
-  "Dogfood 5: the agent turn prelude on default, profiled. Wake-to-open is seon.turn/system-turn, dominated by seon.turn/latest-evaluations decoding every stored read plan of the agent's history; the one path reads the evidence of the kept evaluations only, with the same result, in under a fifth of the time (the rest is one producer's 4.5 M-char plan). The remainder is named (the largest stored plan, seon.eval/of-agent and per-render call reach: root-owned patches); the 300 ms target is judged after they land"
+  "Dogfood 5: the agent turn prelude on default, profiled. Wake-to-open is seon.turn/system-turn, dominated by seon.turn/latest-evaluations decoding every stored read plan of the agent's history; the one path reads the evidence of the kept evaluations only, with the same result (installed since a3c1bcf81: 3.5 s became under 1 s; the rest is one producer's 4.5 M-char plan). The remainder is named (the largest stored plan, seon.eval/of-agent and per-render call reach: root-owned patches); the 300 ms target is judged after they land"
   (let [database (live-db)
         tm (fn [f] (let [t (System/nanoTime) r (f)] [(ms-since t) r]))
         [old-ms old] (tm #(#'seon.turn/latest-evaluations database "root"))
@@ -1456,7 +1637,9 @@
         plans (for [e (vals new) r (:seon.cluster.eval/read-evidence e)] (count (pr-str (:datahike.read/dependency-plan r))))
         [sys-ms _] (tm #(seon.turn/system-turn {:seon.turn.loop/cluster (:seon.turn.loop/cluster (get @@(requiring-resolve 'seon.operator.runtime/running-instances) "default"))
                                                :seon.agent/id "root" :seon.turn/write? false}))]
-    {:pass? (and (= (set (keys old)) (set (keys new))) (= (strip old) (strip new)) (< (* 5 new-ms) old-ms))
+    ;; since a3c1bcf81 the installed latest-evaluations reads the kept
+    ;; evidence only: it equals the one path's and is as fast
+    {:pass? (and (= (set (keys old)) (set (keys new))) (= (strip old) (strip new)) (< old-ms 1000) (< new-ms 1000))
      :equal? (= (strip old) (strip new))
      :system-turn-preview-ms sys-ms
      :latest-evaluations-ms {:current old-ms :one-path new-ms}
@@ -1489,6 +1672,20 @@
                    (pos? (get-in on-head [:seon.feedback/counts :stale] 0)) (< head-ms 50))
        :bounded-text small :shown-value mid :config-effective big
        :default-head {:ms head-ms :counts (:seon.feedback/counts on-head)}})))
+
+(defn- used-heap []
+  (System/gc) (System/gc)
+  (.getUsed (.getHeapMemoryUsage (java.lang.management.ManagementFactory/getMemoryMXBean))))
+
+(defn retained-mb
+  "[value retained-MB]: the heap still used, after full collections, while
+  `f`'s value (a batch) is held, over the heap used before it ran. Other
+  threads' allocation is included, so it is an upper bound."
+  [f]
+  (let [before (used-heap)
+        v (f)
+        held (used-heap)]
+    [v (/ (Math/round (/ (- held before) 1e4)) 100.0) (identity v)]))
 
 (defproof :time-one-defn :timing
   "One contracted defn, warm: read, evaluate, derive, validated apply, gate, recorded commit"

@@ -9,6 +9,7 @@
          [:seon.sci.eval/base-ctx {:optional true :description "The cluster context the agent's fork came from: a reaching test's before-world forks it at the basis."} :seon.sci.eval/ctx]
          [:seon.env/environment {:optional true :description "Where the fault stage records: the execution's environment."} :seon.env/environment]
          [:seon.db.process/id {:optional true} :seon.db.process/id]
+         [:seon.batch/scope {:optional true} :seon.batch/scope]
          [:seon.batch/sink {:optional true :description "This world's armed-call counts (seon.batch/sink): a test agent's counters see only its own calls."} :seon.batch/sink]
          [:seon.agent/id {:optional true} :seon.agent/id]
          [:seon.task/id {:optional true} :seon.task/id]
@@ -151,15 +152,16 @@
  :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of symbol -> LongAdder (seon.batch/sink)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
  :printed [:map {:description "The show stage's answer: the one print, and the printer's own diagnostics (a renderer that refused) as text."}
            [:seon.batch/shown :string] [:seon.batch/print-diagnostics {:optional true} :string]]
+ :scope [:map-of {:description "A running evaluation's observation scope: the observer's dynamic bindings (Var -> value), carried in its world so any thread re-establishing the world observes that evaluation."} :any :any]
  :storage-error :string
  :writer-refusal [:map {:description "The settlement writer's refusal of the recording: kept beside the values as data, and delivered as a diagnostic through the fault stage."}
                   [:seon.error/message :string]]
- :rebased [:map {:description "What a settlement that re-derived on a moved head committed: its entries, program, working value and the feedback concluded from it."}]
+ :settled [:map {:description "The state a settlement settled, on every path: its entries (withdrawn forms with their refusals), program, working value and the feedback concluded from it."}]
  :commit [:or
           [:map [:seon.batch/applied :seon.batch/applied] [:seon.batch/tx-count :seon.batch/tx-count]
            [:seon.batch/after {:optional true} :seon.db/database-value]
            [:seon.batch/first-refusal {:optional true} :map]
-           [:seon.batch/rebased {:optional true} :seon.batch/rebased]]
+           [:seon.batch/settled {:optional true} :seon.batch/settled]]
           [:map [:seon.batch/writer-refusal :seon.batch/writer-refusal] [:seon.batch/first-refusal {:optional true} :map]]
           [:map [:seon.batch/storage-error :seon.batch/storage-error]]]
  :feedback [:map {:description "Feedback queried from the batch's validated working value, scoped by the definitions it changed (the feedback-from-facts interface: :seon.eval/feedback)."}
@@ -208,6 +210,7 @@
            [:seon.batch/fold {:optional true} [:=> [:cat :map :map :seon.batch/change] :map]]
            [:seon.batch/conclude {:optional true} [:=> [:cat :map :seon.batch/batch] :map]]
            [:seon.batch/settle {:optional true} [:=> [:cat :map :seon.batch/batch] :seon.batch/commit]]
+           [:seon.batch/within {:optional true :description "The entrant's world boundary: (within world thunk) establishes the world on this thread (custody, read basis, seon.batch/*world*) around each evaluation and print (seon.turn.world/with-world)."} [:=> [:cat :seon.batch/world [:=> [:cat] :seon.batch/value]] :seon.batch/value]]
            [:seon.batch/show {:optional true} [:=> [:cat :map :seon.batch/entry] [:or :string :seon.batch/printed]]]
            [:seon.batch/fault {:optional true} [:=> [:cat :map :seon.batch/diagnostic] :any]]
            ]

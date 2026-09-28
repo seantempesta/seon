@@ -1,11 +1,14 @@
+OpenJDK 64-Bit Server VM warning: Options -Xverify:none and -noverify were deprecated in JDK 13 and will likely be removed in a future release.
 
-Running tests in #{"test"}
-
-Testing sci.array-test
+lein test sci.array-test
 === Integer-Type-test
 
 
-Testing sci.core-protocols-test
+lein test sci.copy-ns-test-ns
+
+lein test sci.copy-var-inlined-clash-ns
+
+lein test sci.core-protocols-test
 === instance-test
 
 === swap-test
@@ -17,7 +20,7 @@ Testing sci.core-protocols-test
 === deref-test
 
 
-Testing sci.core-test
+lein test sci.core-test
 === source-fn-test
 
 === copy-var-private-test
@@ -79,9 +82,13 @@ Testing sci.core-test
 === function-results-dont-have-metadata
 
 
+lein test :only sci.core-test/function-results-dont-have-metadata
+
 FAIL in (function-results-dont-have-metadata) (core_test.cljc:1335)
 expected: (nil? (eval* "(meta (fn []))"))
   actual: (not (nil? #:sci.impl{:root-data #:sci.root{:form (fn* ([])), :captures []}}))
+
+lein test :only sci.core-test/function-results-dont-have-metadata
 
 FAIL in (function-results-dont-have-metadata) (core_test.cljc:1336)
 expected: (nil? (eval* "(meta (fn ([]) ([_])))"))
@@ -91,13 +98,17 @@ expected: (nil? (eval* "(meta (fn ([]) ([_])))"))
 === error-location-test
 
 
+lein test :only sci.core-test/error-location-test
+
 FAIL in (error-location-test) (core_test.cljc:559)
 expected: (sci.test-utils/submap? {:type :sci/error, :line 1, :column 15, :message #"Wrong number of args \(1\) passed to: user/foo"} (try (eval* "(defn foo []) (foo 1)") (catch clojure.lang.ExceptionInfo ex (let [d (ex-data ex)] d))))
-  actual: (not (sci.test-utils/submap? {:type :sci/error, :line 1, :column 15, :message #"Wrong number of args \(1\) passed to: user/foo"} {:type :sci/error, :line 1, :column 15, :message "Wrong number of args (1) passed to: function of arity 0", :sci.impl/callstack #object[clojure.lang.Volatile 0x5b8fa102 {:status :ready, :val (#sci.impl.utils.StackFrame{:line 1, :column 15, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :file nil, :f-meta {:arglists ([]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :name foo, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 1, :column 15, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :file nil, :f-meta {:arglists ([]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :name foo, :file nil}, :special false})}], :file nil}))
+  actual: (not (sci.test-utils/submap? {:type :sci/error, :line 1, :column 15, :message #"Wrong number of args \(1\) passed to: user/foo"} {:type :sci/error, :line 1, :column 15, :message "Wrong number of args (1) passed to: function of arity 0", :sci.impl/callstack #object[clojure.lang.Volatile 0x3d876f9e {:status :ready, :val (#sci.impl.utils.StackFrame{:line 1, :column 15, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :file nil, :f-meta {:arglists ([]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :name foo, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 1, :column 15, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :file nil, :f-meta {:arglists ([]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :name foo, :file nil}, :special false})}], :file nil}))
+
+lein test :only sci.core-test/error-location-test
 
 FAIL in (error-location-test) (core_test.cljc:567)
 expected: (sci.test-utils/submap? {:type :sci/error, :line 1, :column 21, :message #"Wrong number of args \(0\) passed to: user/foo"} (try (eval* "(defn foo [x & xs]) (foo)") (catch clojure.lang.ExceptionInfo ex (let [d (ex-data ex)] d))))
-  actual: (not (sci.test-utils/submap? {:type :sci/error, :line 1, :column 21, :message #"Wrong number of args \(0\) passed to: user/foo"} {:type :sci/error, :line 1, :column 21, :message "Wrong number of args (0) passed to: function of arity 1", :sci.impl/callstack #object[clojure.lang.Volatile 0x729c251b {:status :ready, :val (#sci.impl.utils.StackFrame{:line 1, :column 21, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :file nil, :f-meta {:arglists ([x & xs]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :name foo, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 1, :column 21, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :file nil, :f-meta {:arglists ([x & xs]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0xab85d63 "user"], :name foo, :file nil}, :special false})}], :file nil}))
+  actual: (not (sci.test-utils/submap? {:type :sci/error, :line 1, :column 21, :message #"Wrong number of args \(0\) passed to: user/foo"} {:type :sci/error, :line 1, :column 21, :message "Wrong number of args (0) passed to: function of arity 1", :sci.impl/callstack #object[clojure.lang.Volatile 0x3248b221 {:status :ready, :val (#sci.impl.utils.StackFrame{:line 1, :column 21, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :file nil, :f-meta {:arglists ([x & xs]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :name foo, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 1, :column 21, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :file nil, :f-meta {:arglists ([x & xs]), :line 1, :column 1, :ns #object[sci.lang.Namespace 0x24bbe3c6 "user"], :name foo, :file nil}, :special false})}], :file nil}))
 === metadata-on-var-test
 
 === sandbox-print-method-test
@@ -323,7 +334,7 @@ expected: (sci.test-utils/submap? {:type :sci/error, :line 1, :column 21, :messa
 === clojure-walk-test
 
 
-Testing sci.defrecords-and-deftype-test
+lein test sci.defrecords-and-deftype-test
 === deftype-fn-test
 
 === ns-with-special-chars-test
@@ -401,7 +412,7 @@ Testing sci.defrecords-and-deftype-test
 === ns-map-includes-types-test
 
 
-Testing sci.error-test
+lein test sci.error-test
 === inherited-ex-data-is-encapsulated
 
 === thread-test
@@ -419,18 +430,20 @@ Testing sci.error-test
 === arity-error-test
 
 
+lein test :only sci.error-test/arity-error-test
+
 FAIL in (arity-error-test) (error_test.cljc:94)
 The name of the correct function is reported
 expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(0\) passed to: foo/echo-msg" (eval-string "\n(ns foo)\n\n(defn echo-msg [msg]\n  msg)\n\n(ns bar (:require foo))\n\n(defn main []\n  (foo/echo-msg))  ;; called with the wrong arity\n\n(main)"))
   actual: #error {
- :cause "Wrong number of args (0) passed to: sci.impl.fns/fun/arity-1--4646"
+ :cause "Wrong number of args (0) passed to: sci.impl.fns/fun/arity-1--3890"
  :via
  [{:type clojure.lang.ExceptionInfo
    :message "Wrong number of args (0) passed to: function of arity 1"
-   :data {:type :sci/error, :line 10, :column 3, :message "Wrong number of args (0) passed to: function of arity 1", :sci.impl/callstack #object[clojure.lang.Volatile 0x51bce17f {:status :ready, :val (#sci.impl.utils.StackFrame{:line 12, :column 1, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x6b1e1a07 "bar"], :file nil, :f-meta {:arglists ([]), :line 9, :column 1, :ns #object[sci.lang.Namespace 0x6b1e1a07 "bar"], :name main, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 12, :column 1, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x6b1e1a07 "bar"], :file nil, :f-meta {:arglists ([]), :line 9, :column 1, :ns #object[sci.lang.Namespace 0x6b1e1a07 "bar"], :name main, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 10, :column 3, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x6b1e1a07 "bar"], :file nil, :f-meta {:arglists ([msg]), :line 4, :column 1, :ns #object[sci.lang.Namespace 0x1676d8e7 "foo"], :name echo-msg, :file nil}, :special false})}], :file nil}
+   :data {:type :sci/error, :line 10, :column 3, :message "Wrong number of args (0) passed to: function of arity 1", :sci.impl/callstack #object[clojure.lang.Volatile 0x4f6e663b {:status :ready, :val (#sci.impl.utils.StackFrame{:line 12, :column 1, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x2554d217 "bar"], :file nil, :f-meta {:arglists ([]), :line 9, :column 1, :ns #object[sci.lang.Namespace 0x2554d217 "bar"], :name main, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 12, :column 1, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x2554d217 "bar"], :file nil, :f-meta {:arglists ([]), :line 9, :column 1, :ns #object[sci.lang.Namespace 0x2554d217 "bar"], :name main, :file nil}, :special false} #sci.impl.utils.StackFrame{:line 10, :column 3, :end-line nil, :end-column nil, :ns #object[sci.lang.Namespace 0x2554d217 "bar"], :file nil, :f-meta {:arglists ([msg]), :line 4, :column 1, :ns #object[sci.lang.Namespace 0x95a02c0 "foo"], :name echo-msg, :file nil}, :special false})}], :file nil}
    :at [sci.impl.utils$rethrow_with_location_of_node invokeStatic "utils.cljc" 180]}
   {:type clojure.lang.ArityException
-   :message "Wrong number of args (0) passed to: sci.impl.fns/fun/arity-1--4646"
+   :message "Wrong number of args (0) passed to: sci.impl.fns/fun/arity-1--3890"
    :at [clojure.lang.AFn throwArity "AFn.java" 429]}]
  :trace
  [[clojure.lang.AFn throwArity "AFn.java" 429]
@@ -439,15 +452,15 @@ expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(
   [clojure.lang.AFn applyTo "AFn.java" 144]
   [clojure.lang.AFunction$1 doInvoke "AFunction.java" 31]
   [clojure.lang.RestFn invoke "RestFn.java" 397]
-  [sci.lang.Var invoke "lang.cljc" 232]
-  [sci.impl.analyzer$return_call$reify__5824 eval "analyzer.cljc" 1794]
-  [sci.impl.fns$fun$arity_0__4642 invoke "fns.cljc" 129]
+  [sci.lang.Var invoke "lang.cljc" 238]
+  [sci.impl.analyzer$return_call$reify__5068 eval "analyzer.cljc" 1794]
+  [sci.impl.fns$fun$arity_0__3886 invoke "fns.cljc" 129]
   [clojure.lang.AFn applyToHelper "AFn.java" 152]
   [clojure.lang.AFn applyTo "AFn.java" 144]
   [clojure.lang.AFunction$1 doInvoke "AFunction.java" 31]
   [clojure.lang.RestFn invoke "RestFn.java" 397]
-  [sci.lang.Var invoke "lang.cljc" 232]
-  [sci.impl.analyzer$return_call$reify__5824 eval "analyzer.cljc" 1794]
+  [sci.lang.Var invoke "lang.cljc" 238]
+  [sci.impl.analyzer$return_call$reify__5068 eval "analyzer.cljc" 1794]
   [sci.impl.interpreter$eval_form_STAR_ invokeStatic "interpreter.cljc" 65]
   [sci.impl.interpreter$eval_form_STAR_ invoke "interpreter.cljc" 29]
   [sci.impl.interpreter$eval_form invokeStatic "interpreter.cljc" 88]
@@ -462,8 +475,8 @@ expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(
   [sci.core$eval_string invoke "core.cljc" 278]
   [sci.core$eval_string invokeStatic "core.cljc" 316]
   [sci.core$eval_string invoke "core.cljc" 278]
-  [sci.error_test$fn__12059 invokeStatic "error_test.cljc" 97]
-  [sci.error_test$fn__12059 invoke "error_test.cljc" 92]
+  [sci.error_test$fn__11290 invokeStatic "error_test.cljc" 97]
+  [sci.error_test$fn__11290 invoke "error_test.cljc" 92]
   [clojure.test$test_var$fn__9761 invoke "test.clj" 717]
   [clojure.test$test_var invokeStatic "test.clj" 717]
   [clojure.test$test_var invoke "test.clj" 708]
@@ -477,6 +490,21 @@ expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(
   [clojure.test$test_all_vars invokeStatic "test.clj" 737]
   [clojure.test$test_ns invokeStatic "test.clj" 758]
   [clojure.test$test_ns invoke "test.clj" 743]
+  [user$eval227$fn__288 invoke "form-init5530986858369413376.clj" 1]
+  [clojure.lang.AFn applyToHelper "AFn.java" 156]
+  [clojure.lang.AFn applyTo "AFn.java" 144]
+  [clojure.core$apply invokeStatic "core.clj" 669]
+  [clojure.core$apply invoke "core.clj" 662]
+  [leiningen.core.injected$compose_hooks$fn__154 doInvoke "form-init5530986858369413376.clj" 1]
+  [clojure.lang.RestFn applyTo "RestFn.java" 137]
+  [clojure.core$apply invokeStatic "core.clj" 667]
+  [clojure.core$apply invoke "core.clj" 662]
+  [leiningen.core.injected$run_hooks invokeStatic "form-init5530986858369413376.clj" 1]
+  [leiningen.core.injected$run_hooks invoke "form-init5530986858369413376.clj" 1]
+  [leiningen.core.injected$prepare_for_hooks$fn__159$fn__160 doInvoke "form-init5530986858369413376.clj" 1]
+  [clojure.lang.RestFn applyTo "RestFn.java" 137]
+  [clojure.lang.AFunction$1 doInvoke "AFunction.java" 31]
+  [clojure.lang.RestFn invoke "RestFn.java" 408]
   [clojure.core$map$fn__5884 invoke "core.clj" 2759]
   [clojure.lang.LazySeq sval "LazySeq.java" 42]
   [clojure.lang.LazySeq seq "LazySeq.java" 51]
@@ -494,15 +522,21 @@ expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(
   [clojure.lang.RestFn applyTo "RestFn.java" 137]
   [clojure.core$apply invokeStatic "core.clj" 667]
   [clojure.core$apply invoke "core.clj" 662]
-  [cognitect.test_runner$test invokeStatic "test_runner.clj" 74]
-  [cognitect.test_runner$test invoke "test_runner.clj" 62]
-  [cognitect.test_runner$_main invokeStatic "test_runner.clj" 127]
-  [cognitect.test_runner$_main doInvoke "test_runner.clj" 115]
-  [clojure.lang.RestFn applyTo "RestFn.java" 137]
-  [clojure.lang.Var applyTo "Var.java" 705]
-  [clojure.core$apply invokeStatic "core.clj" 667]
-  [clojure.main$main_opt invokeStatic "main.clj" 514]
-  [clojure.main$main_opt invoke "main.clj" 510]
+  [user$eval227$fn__300$fn__333 invoke "form-init5530986858369413376.clj" 1]
+  [user$eval227$fn__300$fn__301 invoke "form-init5530986858369413376.clj" 1]
+  [user$eval227$fn__300 invoke "form-init5530986858369413376.clj" 1]
+  [user$eval227 invokeStatic "form-init5530986858369413376.clj" 1]
+  [user$eval227 invoke "form-init5530986858369413376.clj" 1]
+  [clojure.lang.Compiler eval "Compiler.java" 7181]
+  [clojure.lang.Compiler eval "Compiler.java" 7171]
+  [clojure.lang.Compiler load "Compiler.java" 7640]
+  [clojure.lang.Compiler loadFile "Compiler.java" 7578]
+  [clojure.main$load_script invokeStatic "main.clj" 475]
+  [clojure.main$init_opt invokeStatic "main.clj" 477]
+  [clojure.main$init_opt invoke "main.clj" 477]
+  [clojure.main$initialize invokeStatic "main.clj" 508]
+  [clojure.main$null_opt invokeStatic "main.clj" 542]
+  [clojure.main$null_opt invoke "main.clj" 539]
   [clojure.main$main invokeStatic "main.clj" 664]
   [clojure.main$main doInvoke "main.clj" 616]
   [clojure.lang.RestFn applyTo "RestFn.java" 137]
@@ -519,7 +553,7 @@ expected: (thrown-with-msg? clojure.lang.ExceptionInfo #"Wrong number of args \(
 === try-finally-test
 
 
-Testing sci.hierarchies-test
+lein test sci.hierarchies-test
 === underive-test
 
 === hierarchy-lookups-work-for-sci-deftype
@@ -537,11 +571,11 @@ Testing sci.hierarchies-test
 === descendants-test
 
 
-Testing sci.impl.analyzer-test
+lein test sci.impl.analyzer-test
 === analyze-constant-test
 
 
-Testing sci.impl.binding-array-refactor-test
+lein test sci.impl.binding-array-refactor-test
 === areduce-test
 
 === order-of-arguments-test
@@ -561,11 +595,11 @@ Testing sci.impl.binding-array-refactor-test
 === self-returning-fn-test
 
 
-Testing sci.impl.vars-test
+lein test sci.impl.vars-test
 === unqualify-symbol-test
 
 
-Testing sci.interop-test
+lein test sci.interop-test
 === static-methods
 
 === exception-data
@@ -607,7 +641,7 @@ Testing sci.interop-test
 === instance-fields
 
 
-Testing sci.interrupt-fn-test
+lein test sci.interrupt-fn-test
 === host-seq-producers-test
 
 === merge-opts-preserves-interrupt-fn-test
@@ -641,7 +675,7 @@ Testing sci.interrupt-fn-test
 === interrupt-uncatchable-test
 
 
-Testing sci.io-test
+lein test sci.io-test
 === with-sci-out-str-test
 
 === print-test
@@ -667,7 +701,7 @@ Testing sci.io-test
 === with-sci-in-str-test
 
 
-Testing sci.multimethods-test
+lein test sci.multimethods-test
 === default-test
 
 === defmethod-test
@@ -679,7 +713,7 @@ Testing sci.multimethods-test
 === remove-method-test
 
 
-Testing sci.namespaces-test
+lein test sci.namespaces-test
 === effective-namespace-bindings-distinguish-load-from-as-alias-test
 
 === ns-refers-test
@@ -763,7 +797,7 @@ Testing sci.namespaces-test
 === find-var-test
 
 
-Testing sci.parse-test
+lein test sci.parse-test
 === parse-test
 
 === parse-string-test
@@ -771,7 +805,7 @@ Testing sci.parse-test
 === parse+string-test
 
 
-Testing sci.pprint-test
+lein test sci.pprint-test
 === print-var
 
 === pprint-simple-dispatch-test
@@ -781,7 +815,7 @@ Testing sci.pprint-test
 === print-namespace-maps-test
 
 
-Testing sci.protocols-test
+lein test sci.protocols-test
 === fallback-on-reified-object-test
 
 === instance-test
@@ -825,7 +859,7 @@ Testing sci.protocols-test
 === issue-975-protocol-meta
 
 
-Testing sci.proxy-test
+lein test sci.proxy-test
 === proxy-super-Object-test
 
 === APersistentMap-proxy-test
@@ -837,7 +871,7 @@ Testing sci.proxy-test
 === proxy-mappings-test
 
 
-Testing sci.read-test
+lein test sci.read-test
 === read-cond-preserve-test
 
 === platform-feature
@@ -859,7 +893,7 @@ Testing sci.read-test
 === read-with-pushback-reader
 
 
-Testing sci.reify-test
+lein test sci.reify-test
 === reify-protocols-with-matching-method-names
 
 === reify-test
@@ -873,7 +907,7 @@ Testing sci.reify-test
 === reify-form-from-macro-test
 
 
-Testing sci.repl-test
+lein test sci.repl-test
 === repl-dir-test
 
 === repl-apropos-test
@@ -885,7 +919,13 @@ Testing sci.repl-test
 === repl-doc-test
 
 
-Testing sci.vars-test
+lein test sci.test-utils
+
+lein test sci.test-utils.macros
+
+lein test sci.test-utils.utils
+
+lein test sci.vars-test
 === with-bindings-api-test
 
 === macro-val-test
@@ -937,16 +977,21 @@ Testing sci.vars-test
 === with-bindings-test
 
 
-Testing sci.write-observer-test
+lein test sci.write-observer-test
 === extensions-and-members-are-marked-at-their-producer
 
 === a-definition-carries-its-source-occurrence
 
 === the-observed-var-is-the-published-var
 
+=== a-watch-rebinding-carries-no-definition-origin
+
 === every-root-write-is-observed-once
 
 
-Ran 397 tests containing 1517 assertions.
+Ran 398 tests containing 1521 assertions.
 5 failures, 0 errors.
+Tests failed.
+Error encountered performing task 'test' with profile(s): 'base,system,user,provided,dev,clojure-1.10.3'
+Tests failed.
 exit 1

@@ -71,7 +71,11 @@
            [:seon.db/pattern-entity {:optional true} :seon.db/pattern-entity]
            [:seon.db/pattern-attribute {:optional true} :seon.db/pattern-attribute]
            [:seon.db/pattern-value {:optional true} :seon.db/pattern-value]],
-          :read-index-patterns [:vector :seon.db/read-index-pattern],
+          ;; A stored plan references its read; it never copies the result. Patterns
+          ;; bound per pulled entity grow with the result (root's opening fault read
+          ;; stored 30,729, 4.5 M characters, 2026-09-27): past 128 the capture
+          ;; keeps none (seon.db/append-read-evidence!) and the writer refuses more.
+          :read-index-patterns [:vector {:max 128} :seon.db/read-index-pattern],
           :read-basis-t :seon.db/basis-t,
           :read-dependency-attributes [:or [:= :all] [:set :qualified-keyword]],
           :read-dependency-source

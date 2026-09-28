@@ -15,10 +15,14 @@
             [seon.sci.reader :as reader]))
 
 (defn parse-options
-  "The live reader's options for `ctx`: Seon's reader policy, no eof."
+  "The live reader's options for `ctx`: Seon's reader policy with end
+  locations (every form carries its complete span, which SCI's producer
+  origin and the expansion observer report), no eof."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :map]}
   [ctx]
-  (dissoc (#'reader/parse-options {::reader/ctx ctx ::reader/features #{:clj} ::reader/tags {}}) :eof))
+  (-> (#'reader/parse-options {::reader/ctx ctx ::reader/features #{:clj} ::reader/tags {}})
+      (dissoc :eof)
+      (assoc :end-location true)))
 
 (defn read-next
   "One read step at the live cursor, through the forgiving input stage."

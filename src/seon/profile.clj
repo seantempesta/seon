@@ -136,37 +136,56 @@
      (.increment ^java.util.concurrent.atomic.LongAdder
                  (.computeIfAbsent ^java.util.concurrent.ConcurrentHashMap sink# ~sym seon.profile/new-adder))))
 
+(def host-entry
+  "The re-entry marker of an armed call made outside any evaluation's world."
+  (Object.))
+
 (defmacro timed
   "Evaluate `body` inside `with-cell`, counting its completion and elapsed time
-  once per outermost entry on this thread.
+  once per outermost entry on this thread, and once per world entered.
 
-  A re-entry of the same cell on the thread already inside it runs `body`
-  uncounted: its time is inside the outer entry's. A throw is counted as a
-  completed call and a throw, then rethrown unchanged."
+  The cell's thread entry holds the call sink of the world it was entered in
+  (`seon.batch/*world*`'s `:seon.batch/sink`, else `host-entry`). A re-entry
+  of the same cell in the same world runs `body` uncounted: its time is inside
+  the outer entry's. A re-entry under another world (a nested test agent)
+  counts one call into that world's sink only; the JVM-wide counters keep
+  their outermost entry. Each entry restores the prior one on exit. A throw
+  is counted as a completed call and a throw, then rethrown unchanged."
   [& body]
-  `(if (.get ~'__profile-entered)
-     (do ~@body)
-     (let [started# (System/nanoTime)]
-       (.set ~'__profile-entered Boolean/TRUE)
-       (try
-         (let [value# (do ~@body)
-               elapsed# (- (System/nanoTime) started#)]
-           ;; the calling evaluation's own count (its world's sink): a test
-           ;; agent's counters see only its own calls
-           (count-into-world! ~'__profile-sym)
-           (.increment ~'__profile-calls)
-           (.add ~'__profile-total elapsed#)
-           (.accumulate ~'__profile-max elapsed#)
-           value#)
-         (catch Throwable failure#
-           (let [elapsed# (- (System/nanoTime) started#)]
+  `(let [prior# (.get ~'__profile-entered)
+         here# (or (:seon.batch/sink seon.batch/*world*) seon.profile/host-entry)]
+     (cond
+       (identical? prior# here#) (do ~@body)
+
+       (some? prior#)
+       (do (.set ~'__profile-entered here#)
+           (try
+             (let [value# (do ~@body)] (count-into-world! ~'__profile-sym) value#)
+             (catch Throwable failure# (count-into-world! ~'__profile-sym) (throw failure#))
+             (finally (.set ~'__profile-entered prior#))))
+
+       :else
+       (let [started# (System/nanoTime)]
+         (.set ~'__profile-entered here#)
+         (try
+           (let [value# (do ~@body)
+                 elapsed# (- (System/nanoTime) started#)]
+             ;; the calling evaluation's own count (its world's sink): a test
+             ;; agent's counters see only its own calls
              (count-into-world! ~'__profile-sym)
              (.increment ~'__profile-calls)
              (.add ~'__profile-total elapsed#)
              (.accumulate ~'__profile-max elapsed#)
-             (.increment ~'__profile-throws))
-           (throw failure#))
-         (finally (.set ~'__profile-entered nil))))))
+             value#)
+           (catch Throwable failure#
+             (let [elapsed# (- (System/nanoTime) started#)]
+               (count-into-world! ~'__profile-sym)
+               (.increment ~'__profile-calls)
+               (.add ~'__profile-total elapsed#)
+               (.accumulate ~'__profile-max elapsed#)
+               (.increment ~'__profile-throws))
+             (throw failure#))
+           (finally (.set ~'__profile-entered prior#)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reads — pure over the cells; nothing here resets a counter

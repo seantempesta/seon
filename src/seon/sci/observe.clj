@@ -17,29 +17,34 @@
 
 (defn observe
   "Run `thunk` (one evaluation) under the producer observer, handing each
-  write to `on-write`."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:=> [:cat :seon.batch/write] :boolean] [:=> [:cat] :seon.batch/value]] :seon.batch/value]}
+  write to `on-write`. The observer bindings are handed to `thunk` as its
+  scope, so the evaluation's world carries them to any thread it moves to."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:=> [:cat :seon.batch/write] :boolean] [:=> [:cat :seon.batch/scope] :seon.batch/value]] :seon.batch/value]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working on-write thunk]
   (let [env (:env ctx)
-        before (:namespaces @env)]
+        before (:namespaces @env)
+        ;; the observation scope as data: the fold puts it in the world, so any
+        ;; thread that re-establishes the world (seon.turn.world/with-world)
+        ;; observes the same evaluation, never an inherited binding
+        scope {#'sci.lang/*expansion-observer*
+               (fn [call expansion]
+                 ;; SCI's end-location metadata names :end-row/:end-col
+                 (let [{:keys [line column end-row end-col]} (meta call)
+                       m (some-> (sci/resolve ctx (first call)) meta)]
+                   (when (and line end-row (:ns m))
+                     (on-write {:seon.batch/op :expansion :seon.batch/macro (symbol (str (:ns m)) (str (:name m)))
+                                :seon.batch/call-span [line column end-row end-col]
+                                :seon.batch/expansion expansion}))))
+               #'sci.lang/*write-observer*
+               (fn [w]
+                 (let [armed (binding [sci.lang/*write-observer* nil]
+                               (if (and (= :bind (:op w)) (:ns (meta (:var w))))
+                                 (arm/arm! request working w)
+                                 w))]
+                   (when (or (not= :bind (:op w)) (:ns (meta (:var w))))
+                     (on-write (arm/write-event armed)))))}]
     (try
-      (binding [sci.lang/*expansion-observer*
-                (fn [call expansion]
-                  (let [{:keys [line column end-line end-column]} (meta call)
-                        m (some-> (sci/resolve ctx (first call)) meta)]
-                    (when (and line end-line (:ns m))
-                      (on-write {:seon.batch/op :expansion :seon.batch/macro (symbol (str (:ns m)) (str (:name m)))
-                                 :seon.batch/call-span [line column end-line end-column]
-                                 :seon.batch/expansion expansion}))))
-                sci.lang/*write-observer*
-                (fn [w]
-                  (let [armed (binding [sci.lang/*write-observer* nil]
-                                (if (and (= :bind (:op w)) (:ns (meta (:var w))))
-                                  (arm/arm! request working w)
-                                  w))]
-                    (when (or (not= :bind (:op w)) (:ns (meta (:var w))))
-                      (on-write (arm/write-event armed)))))]
-        (thunk))
+      (with-bindings scope (thunk scope))
       (finally
         (doseq [n (arm/changed-namespaces before (:namespaces @env))]
           (on-write {:seon.batch/op :namespace :seon.batch/ns n}))))))
