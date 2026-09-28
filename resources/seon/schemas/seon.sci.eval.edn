@@ -77,17 +77,11 @@
                     :seon.schema.admission/reason
                     "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                     :gen/elements [nil true 0 "" :k [] {} #{}]}]]],
-                :missing-function-row-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.eval/missing-function-row :seon.sci.eval/missing-function-row]]],
                 :time-limit-ms [:int {:min 1}],
                 :defs-fork-result
                 [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.sci.eval/unbound-results {:optional true :description "Why a fresh fork's result handles were not bound (a refused read of them, or the binding's own failure), for the entrant to record as a fault delivered to the agent."} :seon.sci.eval/unbound-results]],
                 :unbound-results :seon.error/value,
-                :namespace-binding-cycle-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.eval/pending-namespaces :seon.sci.eval/pending-namespaces]]],
                 :defs-fork-request
                 [:map {:description "A turn fork request. Its connection, when omitted, is supplied from the calling evaluation's world: fork-for-turn never reads it, so absence carries no meaning."}
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
@@ -193,9 +187,6 @@
                    :seon.schema.admission/reason
                    "The evaluator accepts and returns arbitrary Clojure values; admission owns their bounded representation.",
                    :gen/elements [nil true 0 "" :k [] {} #{}]}]],
-                :schema-refused-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.eval/schema-refused :seon.sci.eval/schema-refused]]],
                 :reader-event-count :int,
                 :time-limit :seon.eval/fn-entries,
                 :ctx
@@ -260,9 +251,6 @@
                 :documentation-unavailable :symbol,
                 :bindings
                 [:map-of :qualified-symbol :seon.sci.eval/binding],
-                :install-mismatch-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.eval/installation-member :seon.sci.eval/installation-member]]],
                 :projection-state
                 [:fn
                  {:error/message

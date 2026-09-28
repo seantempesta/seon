@@ -1,39 +1,7 @@
 #:seon.ai{:request-attribute [:qualified-keyword {:description "Request field populated by this config declaration; spelling carries no routing semantics."}],
           :inert-when-thinking [:boolean {:description "This setting is omitted in thinking mode under the shipped provider policy (owner ruling 34)."}],
           :provider-error :seon.ai/http-status,
-          :rate-limited-error
-          [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
-            :error/message
-            "must identify the rate-limit response status"}
-           :seon.error/base
-           [:map
-           [:seon.ai/rate-limited :seon.ai/rate-limited]
-           [:seon.error/message :seon.error/message]]],
           :wire [:vector [:tuple :string :qualified-symbol]],
-          :authorization-failure-error
-          [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
-            :error/message
-            "must identify the provider authorization response status"}
-           :seon.error/base
-           [:map
-           [:seon.ai/authorization-failure
-            :seon.ai/authorization-failure]
-           [:seon.error/message :seon.error/message]]],
-          :authentication-failure-error
-          [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
-            :error/message
-            "must identify the provider authentication response status"}
-           :seon.error/base
-           [:map
-           [:seon.ai/authentication-failure
-            :seon.ai/authentication-failure]
-           [:seon.error/message :seon.error/message]]],
           :transport-outcome-unknown :seon.ai/endpoint,
 
 
@@ -85,16 +53,6 @@
           :rate-limited :seon.ai/http-status,
           :sent [:map-of :string :seon.ai/json-value],
           :inert [:set :qualified-keyword],
-          :request-failure-error
-          [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
-            :error/message
-            "must identify the endpoint that refused the request"}
-           :seon.error/base
-           [:map
-           [:seon.ai/request-failure :seon.ai/request-failure]
-           [:seon.error/message :seon.error/message]]],
           :extra-body-edn :seon.config.ai/extra-body-edn,
           :thinking [:enum :disabled :low :high :max],
           :backup :seon.ai/target,
@@ -331,17 +289,6 @@
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]]],
           :response-format :seon.config.ai/response-format,
           :provider-server-failure :seon.ai/http-status,
-          :provider-server-failure-error
-          [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
-            :error/message
-            "must identify the provider server response status"}
-           :seon.error/base
-           [:map
-           [:seon.ai/provider-server-failure
-            :seon.ai/provider-server-failure]
-           [:seon.error/message :seon.error/message]]],
           :extra-body :boolean,
           :model [:string {:min 1 :description "The provider model identity observed by the request or attempt. It survives descriptor deletion; join a current descriptor through :seon.ai.model/id when needed."}],
           :backup? :boolean,
@@ -467,17 +414,6 @@
            [:seon.ai/provider-error :seon.ai/provider-error]
            [:seon.error/message :seon.error/message]]],
           :max-tokens [:int {:min 1}],
-          :transport-outcome-unknown-error
-          [:and {:seon.db/attributes true,
-            :seon.render/ai seon.error/render-ai,
-            :seon.render/html seon.error/render-html,
-            :error/message
-            "must identify the endpoint with an indeterminate transport outcome"}
-           :seon.error/base
-           [:map
-           [:seon.ai/transport-outcome-unknown
-            :seon.ai/transport-outcome-unknown]
-           [:seon.error/message :seon.error/message]]],
           :system [:string {:min 1}],
           :timeout :seon.ai/timeout-ms
  ; Additive error declaration manifest, 2026-09-18.

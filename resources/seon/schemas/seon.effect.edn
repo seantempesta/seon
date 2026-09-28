@@ -41,12 +41,6 @@
                [:seon.effect/time-limit-ms
                 {:optional true}
                 :seon.effect/time-limit-ms]],
-              :missing-receipt-error
-              [:and
-               :seon.error/base
-               [:map
-                [:seon.effect/missing-effect-id
-                 :seon.effect/missing-effect-id]]],
               :result-validator
               [:fn
                {:gen/schema [:=> [:cat :seon.schema/value] :boolean]
@@ -158,12 +152,6 @@
                 [:seon.effect/missing-bound
                  :seon.effect/missing-bound]]],
               :recorded-effect-id [:string {:min 1}],
-              :already-settled-error
-              [:and
-               :seon.error/base
-               [:map
-                [:seon.effect/settled-effect-id
-                 :seon.effect/settled-effect-id]]],
               :run [:and #:seon.db{:index true} :seon.db/ref],
               :background? :boolean,
               :arguments
@@ -280,10 +268,4 @@
                :seon.effect/handler-failed-error :seon.effect/interrupted-error
                :seon.schema/validation-refusal :seon.schema/value],
               :opened-at :inst,
-              :content-blobs [:vector :seon.blob/digest],
-              :already-recorded-error
-              [:and
-               :seon.error/base
-               [:map
-                [:seon.effect/recorded-effect-id
-                 :seon.effect/recorded-effect-id]]]}
+              :content-blobs [:vector :seon.blob/digest]}

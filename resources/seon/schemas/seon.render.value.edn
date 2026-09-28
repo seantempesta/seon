@@ -61,9 +61,7 @@
                     :tree :seon.print/node,
                     :truncated? :boolean,
                     :window-failed :seon.blob/digest
-                    :window-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/window-failed :seon.render.value/window-failed]]]
                     :window-offset [:int {:min 0}]
-                    :window-realization-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/window-offset :seon.render.value/window-offset]]]
  :seon.render.value/root-description :string
  ; The floor's B cannot show a value's root or a page's first member (one-render-path §3c).
  :seon.render.value/budget [:int {:min 0 :description "The floor's character budget B."}]

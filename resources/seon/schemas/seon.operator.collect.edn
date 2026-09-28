@@ -9,7 +9,6 @@
                           :seon.operator.collect/dry-run?]]
                         :dry-run? :boolean
                         :option-key :keyword
-                        :unrecognized-option-error [:and :seon.error/base [:map [:seon.operator.collect/option-key :seon.operator.collect/option-key]]]
                         :store-id :seon.store/id
                         :managed-root :seon.operator/managed-root
                         :branch

@@ -1,13 +1,4 @@
-#:seon.message{:blank-content-error
-               [:map
-                {
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
-                 "must mark a message whose content is blank"}
-                [:seon.message/blank-content
-                 :seon.message/blank-content]
-                [:seon.error/message :seon.error/message]],
+#:seon.message{,
                :reply-request
                [:map
                 [:my.turn/result :my.turn/result]
@@ -148,16 +139,6 @@
                :chain-limit :seon.message/limit,
                :content [:string {:min 1}],
                :size [:int {:min 0}],
-               :content-too-large-error
-               [:map
-                {
-                 :seon.render/ai seon.error/render-ai,
-                 :seon.render/html seon.error/render-html,
-                 :error/message
-                 "must identify the size of message content that exceeds its limit"}
-                [:seon.message/content-too-large
-                 :seon.message/content-too-large]
-                [:seon.error/message :seon.error/message]],
                :chain-limit-error
                [:and {:seon.db/attributes true} :seon.error/base
                 [:map

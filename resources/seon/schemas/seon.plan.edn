@@ -15,9 +15,6 @@
   [:my.plan.item/title :my.plan.item/title]]
  :seon.plan/non-test-entity
  [:int {:description "The entity id read from an issue test relation that no longer identified a test at the observed basis. This is a value, not a reference that protects the entity."}]
- :seon.plan/non-test-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :my.plan/request-error [:map [:seon.plan/non-test-entity :seon.plan/non-test-entity]]]
  :seon.plan/refusal
  [:or :seon.db/invalid-read-error :seon.db/transaction-refused-error
   :seon.schema/validation-refusal :my.plan/request-error]}

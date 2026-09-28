@@ -39,25 +39,10 @@
                   :seon.config.error/escalate-to]],
                 :fire-count [:int {:min 0}]
  :seon.schedule/incomplete-task-id :string
- :seon.schedule/incomplete-task-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.schedule/incomplete-task-id :seon.schedule/incomplete-task-id]]]
  :seon.schedule/unexpected-fire-id :string
- :seon.schedule/invalid-fire-id-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.schedule/unexpected-fire-id :seon.schedule/unexpected-fire-id]]]
  :seon.schedule/changed-task-id :string
- :seon.schedule/invalid-task-owner-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.schedule/changed-task-id :seon.schedule/changed-task-id]]]
  :seon.schedule/invalid-terminal-member :qualified-keyword
- :seon.schedule/invalid-terminal-arm-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.schedule/invalid-terminal-member :seon.schedule/invalid-terminal-member]]]
  :seon.schedule/missing-receipt-id :string
- :seon.schedule/missing-receipt-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.schedule/missing-receipt-id :seon.schedule/missing-receipt-id]]]
  :seon.schedule/unresolved-handler-symbol :qualified-symbol
  :seon.schedule/unresolved-handler-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
@@ -86,9 +71,6 @@
   :seon.db/component-schema :seon.error.evidence/entity}
  :seon.db/ref]
  :seon.schedule/undated-task-entity :int
- :seon.schedule/task-without-creation-instant-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.schedule/undated-task-entity :seon.schedule/undated-task-entity]]]
  :seon.schedule/handler-exception-data :map
  :seon.schedule/failed-handler-symbol :qualified-symbol
  :seon.schedule/handler-failed-error

@@ -194,9 +194,6 @@
  :unresolved-supplier-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base [:map [:seon.call-preparation/unresolved-symbol :seon.call-preparation/unresolved-symbol]]]
- :supplier-threw-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.call-preparation/thrown-supplier :seon.call-preparation/thrown-supplier] [:seon.error/exception-class :seon.error/exception-class]]]
  :invalid-supplied-value-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base [:map [:seon.call-preparation/target-symbol :seon.call-preparation/target-symbol] [:seon.call-preparation/invalid-key :seon.call-preparation/invalid-key] [:seon.call-preparation/supplier-symbol :seon.call-preparation/supplier-symbol] [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]]]

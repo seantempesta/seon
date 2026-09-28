@@ -29,12 +29,8 @@
              [:seon.blob/size :seon.blob/size]
              [:seon.blob/inline-prefix :seon.blob/inline-prefix]],
             :threshold-attribute :qualified-keyword
-            :invalid-threshold-error [:and :seon.error/base [:map [:seon.blob/threshold-attribute :seon.blob/threshold-attribute]]]
             :store-root-absent :string
-            :store-root-absent-error [:and :seon.error/base [:map [:seon.blob/store-root-absent :seon.blob/store-root-absent]]]
             :stored-content-mismatch :seon.blob/digest
-            :stored-content-mismatch-error [:and :seon.error/base [:map [:seon.blob/stored-content-mismatch :seon.blob/stored-content-mismatch]]]
             :input-stalled :seon.blob/size
             :input-stalled-error [:and :seon.error/base [:map [:seon.blob/input-stalled :seon.blob/input-stalled]]]
-            :content-digest-mismatch :seon.blob/digest
-            :content-digest-mismatch-error [:and :seon.error/base [:map [:seon.blob/content-digest-mismatch :seon.blob/content-digest-mismatch]]]}
+            :content-digest-mismatch :seon.blob/digest}

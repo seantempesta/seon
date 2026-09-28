@@ -26,13 +26,6 @@
             :rows [:vector [:vector :seon.schema/value]]
             :schemas [:map-of :qualified-keyword :seon.schema/value]
             :changes :seon.db.diff/paths
-            :branch-error
-            [:map
-             {:description "One signature's new open errors on the evaluation's branch in its settlement window, as seon.error/occurred-since groups them."}
-             [:seon.error/signature :seon.error/signature]
-             [:seon.error/operation :seon.error/operation]
-             [:seon.error.occurrence/message :seon.error.occurrence/message]
-             [:seon.error.occurrence/count :seon.error.occurrence/count]]
             :errors
             [:string
              {:min 1,

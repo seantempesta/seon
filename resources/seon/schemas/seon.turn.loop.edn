@@ -134,30 +134,10 @@
                    :seon.print/options]],
                  :evaluated-sources
                  [:vector :seon.turn.loop/evaluated-source],
-                 :terminal-refusal-settlement-refused-error
-                 [:map
-                  {
-                   :seon.render/ai seon.error/render-ai,
-                   :seon.render/html seon.error/render-html,
-                   :error/message
-                   "must identify the run rule that refused terminal-refusal settlement"}
-                  [:seon.turn.loop/terminal-refusal-settlement-refused
-                   :seon.turn.loop/terminal-refusal-settlement-refused]
-                  [:seon.error/message :seon.error/message]],
                  :settle-request
                  [:or
                   :seon.turn.loop/settle-evaluation-request
                   :seon.turn.loop/settle-failure-request],
-                 :prompt-failed-error
-                 [:map
-                  {
-                   :seon.render/ai seon.error/render-ai,
-                   :seon.render/html seon.error/render-html,
-                   :error/message
-                   "must identify the agent whose prompt failed to render"}
-                  [:seon.turn.loop/prompt-failed
-                   :seon.turn.loop/prompt-failed]
-                  [:seon.error/message :seon.error/message]],
                  :lint-rejected [:= true],
                  :evaluate-sources-request
                  [:map
@@ -176,16 +156,6 @@
                    :seon.cluster.reply/sources]],
                  :commit-outcome
                  [:map [:db-after :seon.db/database-value]],
-                 :lint-rejected-error
-                 [:map
-                  {
-                   :seon.render/ai seon.error/render-ai,
-                   :seon.render/html seon.error/render-html,
-                   :error/message
-                   "must mark an evaluated form rejected by lint"}
-                  [:seon.turn.loop/lint-rejected
-                   :seon.turn.loop/lint-rejected]
-                  [:seon.error/message :seon.error/message]],
                  :settle-failure-request
                  [:map
                   [:seon.turn.loop/cluster :seon.turn.loop/cluster]

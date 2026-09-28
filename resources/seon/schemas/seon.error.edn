@@ -420,8 +420,6 @@
  :seon.error/operation
  [:qualified-symbol {:seon.db/index true}]
  :seon.error/refused-schema :qualified-keyword
- :seon.error/invalid-declaration-error
- [:and :seon.error/base [:map [:seon.error/refused-schema :seon.error/refused-schema]]]
  :seon.error/normalization-error
  [:and :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]
 

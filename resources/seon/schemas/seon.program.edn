@@ -170,9 +170,6 @@
  :seon.program/no-declaration-at-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.program/position :seon.program/position] [:seon.program/declarations-examined :seon.program/declarations-examined]]]
- :seon.program/declaration-refused-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.program/identity-attributes :seon.program/identity-attributes]]]
  :seon.program/referrers
  [:vector {:min 1}
   [:map
@@ -306,9 +303,6 @@
  :seon.program/mutation-refused-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base [:map [:seon.program/blocked-subject :seon.program/blocked-subject] [:seon.program/affected :seon.program/affected]]]
- :seon.program/native-call-refused-error
- [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
-  :seon.error/base [:map [:seon.program/native-operation :seon.program/native-operation] [:seon.program/advised-operation :seon.program/advised-operation]]]
  :seon.program/affected [:set :seon.program/subject]
  :seon.program/change
  [:map [:seon.program/subject :seon.program/subject]
@@ -360,10 +354,4 @@
 :seon.program/binding-argument [:int {:min 0}]
 :seon.program/signature-member :qualified-keyword
 :seon.program/signature-count [:int {:min 0}]
-:seon.program/binding-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.program/binding-function :seon.program/binding-function] [:seon.program/binding-argument :seon.program/binding-argument]]]
-:seon.program/signature-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.program/signature-member :seon.program/signature-member] [:seon.program/signature-count :seon.program/signature-count]]]
 }

@@ -238,8 +238,6 @@
               :ambiguous-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/candidates :seon.render/candidates]]]
               :invalid-output :keyword
               :invalid-output-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/invalid-output :seon.render/invalid-output] [:seon.error/message :seon.error/message]]]
-
- :seon.render/walk-failed-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/walk-operation :seon.render/walk-operation]]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.render/error

@@ -11,12 +11,6 @@
                 :working-directory :string,
                 :process-exit? :boolean,
                 :missing-bound :qualified-keyword,
-                :custody-selection-error
-                [:and
-                 :seon.error/base
-                 [:map
-                  [:seon.operator/candidate-count
-                   :seon.operator/candidate-count]]],
                 :low-disk-space :string,
                 :readiness :seon.boot/readiness,
                 :request
@@ -61,12 +55,6 @@
                 :flow [:or [:enum :unknown] :map],
                 :advertisements [:vector :seon.boot/advertisement],
                 :exception-class :symbol,
-                :low-disk-space-error
-                [:and
-                 :seon.error/base
-                 [:map
-                  [:seon.operator/low-disk-space
-                   :seon.operator/low-disk-space]]],
                 :branches :seon.cluster.registry/roster,
                 :command
                 [:enum
@@ -132,13 +120,6 @@
                   [:seon.operator/exception-class
                    :seon.operator/exception-class]]],
                 :managed-root :seon.boot/root,
-                :collection-incomplete-error
-                [:and
-                 #:seon.db{:attributes false}
-                 :seon.error/base
-                 [:map
-                  [:seon.operator.collect/result
-                   :seon.operator.collect/result]]],
                 :refork-request
                 [:map
                  [:seon.operator/repository-root
@@ -183,13 +164,6 @@
                 :status
                 [:map
                  [:seon.operator/clusters :seon.operator/clusters]],
-                :cluster-cleanup-incomplete-error
-                [:and
-                 #:seon.db{:attributes false}
-                 :seon.error/base
-                 [:map
-                  [:seon.operator.cluster-cleanup/result
-                   :seon.operator.cluster-cleanup/result]]],
                 :publish-request
                 [:map
                  [:seon.boot/root :seon.boot/root]

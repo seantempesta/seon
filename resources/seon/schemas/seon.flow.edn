@@ -115,32 +115,10 @@
    [:seon.flow/submission-id :seon.flow/submission-id]
 ]]
  :seon.flow/launcher-stopped :seon.flow/proc-id
- :seon.flow/launcher-stopped-error
- [:and :seon.error/base
-  [:map
-   [:seon.flow/launcher-stopped :seon.flow/launcher-stopped]
-   [:seon.flow/submission-id :seon.flow/submission-id]
-]]
  :seon.flow/missing-config-facts [:vector {:min 1} :qualified-keyword]
- :seon.flow/configuration-error
- [:and :seon.error/base
-  [:map
-   [:seon.flow/missing-config-facts :seon.flow/missing-config-facts]
-]]
  :seon.flow/timeout :seon.flow/proc-id
- :seon.flow/timeout-error
- [:and :seon.error/base
-  [:map
-   [:seon.flow/timeout :seon.flow/timeout]
-]]
  :seon.flow/unsupported-implementation :qualified-symbol
  :seon.flow/unsupported-method :qualified-symbol
- :seon.flow/unsupported-command-error
- [:and :seon.error/base
-  [:map
-   [:seon.flow/unsupported-method :seon.flow/unsupported-method]
-   [:seon.flow/unsupported-implementation {:optional true} :seon.flow/unsupported-implementation]
-]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.flow/control-observation

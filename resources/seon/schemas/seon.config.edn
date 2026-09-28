@@ -48,16 +48,10 @@
               :path [:string {:min 1}],
               :key :qualified-keyword,
               :refused :seon.config/rule
-              :refused-error :seon.config/rule-error
               :manifest-unreadable :seon.config/path
-              :manifest-unreadable-error :seon.config/rule-error
               :reconcile-refused :seon.config/rule
-              :reconcile-refused-error :seon.config/rule-error
               :required-absent :seon.config/key
-              :required-absent-error :seon.config/rule-error
               :unknown-key :seon.config/key
-              :unknown-key-error :seon.config/rule-error
- :seon.config/missing-result-cap-error :seon.config/error
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.config/error

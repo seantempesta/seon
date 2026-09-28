@@ -74,12 +74,7 @@
                    [:seon.sci.admit/record
                     {:optional true}
                     :seon.sci.admit/record]]
-                  :seon.sci.admit/missing],
-
-                 :projection-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
- :seon.error/base
- [:map [:seon.sci.admit/failed-class :seon.sci.admit/failed-class]
-  [:seon.sci.admit/projection-failure-message {:optional true} :seon.sci.admit/projection-failure-message]]]
+                  :seon.sci.admit/missing]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.sci.admit/bound-bytes

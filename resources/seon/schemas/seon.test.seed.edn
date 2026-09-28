@@ -23,11 +23,4 @@
  :preparation [:enum {:description "Why one seed entry could not prepare the member's world before its body."} :no-member :invalid-value :write-refused :changes-test]
  :preparation-error
  [:and :seon.error/base [:map {:seon.db/attributes true} [:seon.test.seed/preparation :seon.test.seed/preparation]
-  [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test.seed/ordinal {:optional true} :seon.test.seed/ordinal]]]
- :refused-error
- [:map {:seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html
-        :error/message "must identify the test, the seed entry and the admission rule it broke"}
-  [:seon.test.seed/refused :seon.test.seed/refused]
-  [:seon.test/sym :seon.test/sym]
-  [:seon.test.seed/ordinal :seon.test.seed/ordinal]
-  [:seon.error/message :seon.error/message]]}
+  [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test.seed/ordinal {:optional true} :seon.test.seed/ordinal]]]}

@@ -156,12 +156,9 @@
                     :seon.render.web/pages-mult]],
                   :wanted-port :seon.render.web/port,
                   :missing-port :keyword
-                  :missing-port-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/missing-port :seon.render.web/missing-port]]]
 
                   :value-not-found :seon.blob/digest
-                  :value-not-found-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/value-not-found :seon.render.web/value-not-found]]]
                   :value-unreadable :seon.blob/digest
-                  :value-unreadable-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/value-unreadable :seon.render.web/value-unreadable]]]
                   :function-unavailable :qualified-symbol
                   :function-unavailable-error
                   [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/function-unavailable :seon.render.web/function-unavailable]]]
