@@ -403,8 +403,10 @@
      :seon.test/not-runnable-error]]}
   [test-vars custody]
   (if-let [unrunnable (first (remove #(ifn? (:test (meta %))) test-vars))]
-    (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/execution `run-vars!
-     {:seon.error/message "The supplied Var has no clojure.test function."
+    (seon.error.refusal/error :seon.test/not-runnable-error
+     {:seon.error/layer :seon.test/execution
+      :seon.error/operation `run-vars!
+      :seon.error/message "The supplied Var has no clojure.test function."
       :seon.test/not-runnable (str unrunnable)
       :seon.error/member :seon.test/var
       :seon.error/expected "a Var carrying a clojure.test function"
@@ -1053,8 +1055,10 @@
                                           names)))]
         (into {} (map (fn [s] [s (reach-entry index s)])) test-symbols)))))
       (catch Exception failure
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording `reach-entries
-         {:seon.error/message (str "Reach digest unavailable: " (ex-message failure))
+        (seon.error.refusal/error :seon.test/unknown-error
+         {:seon.error/layer :seon.test/recording
+          :seon.error/operation `reach-entries
+          :seon.error/message (str "Reach digest unavailable: " (ex-message failure))
           :seon.test/unknown "reach digest"
           :seon.error/member :seon.test/reach-digests
           :seon.error/expected "derived reach digests for the requested tests"
@@ -1159,8 +1163,10 @@
   [database]
   (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
     (id/digest 64 [(str commit)])
-    (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/provenance 'seon.test.runner/program-digest
-     {:seon.test.run/unavailable true
+    (seon.error.refusal/error :seon.test.run/unavailable-error
+     {:seon.error/layer :seon.test/provenance
+      :seon.error/operation 'seon.test.runner/program-digest
+      :seon.test.run/unavailable true
      :seon.test.run/provenance-failure "The tested value has no commit."
      :seon.error/data {:seon.test.run/basis-t (db/basis-t database)}
      :seon.error/message "Test provenance unavailable: the tested value has no commit."})))
@@ -1211,12 +1217,21 @@
            (id/id [test-symbol (:seon.test/failure-identity report)
                    (into (sorted-map) (select-keys report report-occurrence-attributes))]))))
 
-(defn- execution-refusal! [operation run-id kind expected observed]
-  (let [failure (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/execution operation
-                        {:seon.error/message "The test execution evidence does not authorize this transition."
+(defn- execution-refusal!
+  "Throw the `:seon.test/execution-error` of `kind` for `operation`; the
+  recording boundary converts it back into that value."
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.schema/value :qualified-keyword
+                       :seon.schema/value :seon.schema/value]
+                  [:or :nil :seon.test/execution-error]]}
+  [operation run-id kind expected observed]
+  (let [failure (seon.error.refusal/error :seon.test/execution-error
+                 {:seon.error/layer :seon.test/execution
+                  :seon.error/operation operation
+                  :seon.error/message "The test execution evidence does not authorize this transition."
                   :seon.error/expected expected
                   :seon.error/offending observed
-                  :seon.error/data {:seon.test.run/id run-id}}) :seon.test/execution-refusal kind)]
+                  :seon.error/data {:seon.test.run/id run-id}
+                  :seon.test/execution-refusal kind})]
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- execution-read [value]
@@ -1670,14 +1685,16 @@
     (when (seon.error.refusal/error? previous)
       (throw (ex-info (:seon.error/message previous) previous)))
     (when (and previous (not= run (dissoc previous :db/id)))
-      (let [failure (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.test.runner/record-tx
-                            {:seon.error/message "A test run's provenance is immutable."
+      (let [failure (seon.error.refusal/error :seon.test.run/immutable-error
+                     {:seon.error/layer :seon.test/recording
+                      :seon.error/operation 'seon.test.runner/record-tx
+                      :seon.error/message "A test run's provenance is immutable."
                       :seon.test.run/id run-id
                       :seon.test.run/immutable run-id
                       :seon.error/expected (dissoc previous :db/id)
                       :seon.error/offending run
                       :seon.error/data {:seon.test.run/id run-id
-                       :seon.db/basis-t (db/basis-t database)}}) :seon.test.run/immutable run-id)]
+                                        :seon.db/basis-t (db/basis-t database)}})]
         (throw (ex-info (:seon.error/message failure) failure))))
     ;; A result needs its test entity: recording must never recreate a retracted
     ;; definition. The writer decides from its own value and refuses the whole
@@ -1685,8 +1702,10 @@
     ;; and changes nothing, instead of reporting an unknown outcome.
     (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
       (when (seq missing)
-        (let [failure (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.test.runner/record-tx
-                        {:seon.error/message (str "Test completion names " (count missing)
+        (let [failure (seon.error.refusal/error :seon.test.run/retracted-definition-error
+                        {:seon.error/layer :seon.test/recording
+                         :seon.error/operation 'seon.test.runner/record-tx
+                         :seon.error/message (str "Test completion names " (count missing)
                                                   " test definition(s) retracted before recording; nothing was recorded.")
                          :seon.test.run/retracted-definitions missing
                          :seon.db/basis-t (db/basis-t database)
@@ -2016,12 +2035,14 @@
   [run-id failure]
   (if (:seon.test/execution-refusal (ex-data failure))
     (ex-data failure)
-    (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.test.runner/run-results
-            {:seon.error/message "Recorded run coverage is unavailable."
-             :seon.error/expected :complete-recorded-membership
-             :seon.error/offending (Throwable->map failure)
-             :seon.error/data {:seon.test.run/id run-id}})
-           :seon.test/execution-refusal :seon.test/population-unknown)))
+    (seon.error.refusal/error :seon.test/execution-error
+     {:seon.error/layer :seon.test/recording
+      :seon.error/operation 'seon.test.runner/run-results
+      :seon.error/message "Recorded run coverage is unavailable."
+      :seon.error/expected :complete-recorded-membership
+      :seon.error/offending (Throwable->map failure)
+      :seon.error/data {:seon.test.run/id run-id}
+      :seon.test/execution-refusal :seon.test/population-unknown})))
 
 (defn run-results
   "Query the total recorded results of an admitted run, including reused members."
