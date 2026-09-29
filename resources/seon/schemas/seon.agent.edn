@@ -35,7 +35,8 @@
                      [:map
                       {:seon.db/attributes true,
                        :seon.render/units
-                       [:seon.message/_to
+                       [:seon.task/of-agent
+                        :seon.message/_to
                         :seon.agent/settings
                         :my.note/_agent
                         :seon.agent/namespace

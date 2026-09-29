@@ -4,7 +4,9 @@
   (:require [clojure.test :refer [deftest is]]
             [my.task :as my.task]
             [seon.cluster :as cluster]
+            [seon.config :as config]
             [seon.db :as db]
+            [seon.render.walk :as walk]
             [seon.task :as task]
             [seon.test-support :as test-support]
             [seon.turn :as turn]))
@@ -64,6 +66,22 @@
      (my.task/plan! (assoc (world connection) :seon.task/steps ["survive" "compaction"]))
      (is (= {:seon.agent/id "root"} (select-keys (turn/compact! (world connection)) [:seon.agent/id])))
      (is (= ["survive" "compaction"] (mapv :seon.step/text (:seon.task/steps (my.task/steps (world connection)))))))))
+
+(deftest the-opening-shows-the-held-task-after-compaction
+  (with-root
+   (fn [connection]
+     (my.task/plan! (assoc (world connection) :seon.task/steps ["survive" "compaction"]))
+     (my.task/done! (world connection))
+     (turn/compact! (world connection))
+     (let [units (walk/neighborhood {:seon.db/db (db/db connection)
+                                     :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
+                                     :seon.render.walk/lookup [:seon.agent/id "root"]
+                                     :seon.render/output :seon.render/ai
+                                     :seon.sci.admit/caps (config/result-caps config/defaults)
+                                     :seon.sci.eval/time-limit-ms 2000})
+           held (:seon.render/output (some #(when (= :seon.task/of-agent (:seon.render.walk/attribute %)) %) units))]
+       (is (= "compaction" (:seon.task/current-step held)) "the opening's task unit names the current step")
+       (is (= "1/2" (:seon.task/progress held)))))))
 
 (deftest a-step-write-never-revises-the-task
   (with-root

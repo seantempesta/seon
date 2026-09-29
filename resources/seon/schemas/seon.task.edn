@@ -40,6 +40,17 @@
               [:seon.task/progress {:optional true} [:string {:min 3}]]
               [:seon.render/operations :seon.render/operations]]
  :steps-request [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]]
+ :held-view [:map {:description "The task an agent holds as its opening shows it: name, intent and its steps view."}
+             [:seon.task/id :seon.task/id] [:seon.task/name {:optional true} :seon.task/name]
+             [:seon.task/intent {:optional true} :seon.task/intent] [:seon.task/steps [:vector :seon.step/view]]
+             [:seon.task/current-step {:optional true} [:string {:min 1}]]
+             [:seon.task/progress {:optional true} [:string {:min 3}]]
+             [:seon.render/operations :seon.render/operations]]
+ :of-agent [:and {:seon.render/derived true
+                  :description "The task an agent holds, derived from its latest assignment at the task home (seon.task/agent-task); no datom stores it. The agent's attachment, so its steps stay in its opening across compaction."
+                  :seon.render/ai seon.render.ns/held-task-ai :seon.render/html seon.render.ns/held-task-html
+                  :seon.render/form seon.render.ns/held-task-form}
+            :seon.db/ref]
  :plan-request [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                 [:seon.task/steps [:vector {:min 1} [:string {:min 1}]]] [:seon.task/intent {:optional true} :seon.task/intent]]
  :step-request [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
