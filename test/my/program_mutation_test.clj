@@ -20,8 +20,6 @@
            refused (program/ns-unmap! context 'seon.turn/open?)]
        (is (= 'seon.turn/open? (:seon.program/blocked-subject refused)))
        (is (seq (get-in refused [:seon.error/data :seon.program/callers])))
-       (is (= (count (get-in refused [:seon.error/data :seon.program/callers]))
-              (count (get-in refused [:seon.program/plan :seon.program/issues]))))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))
        (is (= before @(:env fork)))
        (is (= base-before @(:env ctx)))

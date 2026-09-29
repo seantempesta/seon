@@ -19,7 +19,6 @@
             [seon.flow :as flow]
             [seon.error :as error]
             [seon.id :as id]
-            [seon.issue :as issue]
             [seon.render :as render]
             [seon.repl :as repl]
             [seon.render.hiccup :as hiccup]
@@ -1005,9 +1004,8 @@
          (is (re-find #"≈[\d,]+ tokens" opening) "the unit names its tokens")
          (is (str/includes? opening "seon.render.value/render-ai")
              "the unit names the renderer that produced its shown text")
-         (is (str/includes? opening ":seon.issue/id")
-             "the unit names the entity whose render declared it")
-         (is (str/includes? opening "outline-issue")))
+         (is (str/includes? opening "outline-issue")
+             "the unit names the entity whose render declared it"))
 
        ;; (4) Exactly one composed prompt, behind the one "show everything".
        (is (= 1 (count raw)) "the outline is not a dump")
@@ -1064,33 +1062,6 @@
                                       "outline-probe" profile)]
          (is (str/starts-with? (element-text raw) (prompt/compose selection))
              "the outline shows compose's output, never a re-join"))))))
-
-(deftest outline-origin-survives-the-issues-deletion
-  (support/with-database
-    (fn [connection]
-      (let [request (outline-fixture connection)
-            added (issue/add! {:seon.db/connection connection
-                              :seon.agent/id "outline-probe"
-                              :seon.issue/title "Outline origin"
-                              :seon.issue/problem "Keep the observed origin."
-                              :seon.issue/severity :cleanup})
-            issue-id (:seon.issue/id added)]
-        (is (seq (:seon.issue/id added)))
-        (is (string? issue-id))
-        (support/transacted! connection
-          [[:db/add [:seon.cluster.eval/id "outline-e0"] :seon.eval/origin issue-id]])
-        (doseq [delete? [false true]]
-          (when delete?
-            ;; Its creator deletes it: a deletion, not an authority change.
-            (support/transacted! connection {:tx-data [[:db/retractEntity [:seon.issue/id issue-id]]]
-                                             :tx-meta {:seon.db/user [:seon.agent/id "outline-probe"]}}))
-          (let [rendered (transcript/render-outline (assoc request :seon.db/db @connection))
-                opening (first (outline-nodes rendered #(= "outline-e0" (:data-evaluation-id %))))]
-            (is (some? opening))
-            (is (str/includes? (element-text opening) issue-id))
-            (is (str/includes? (element-text opening) ":seon.issue/id"))
-            (is (= issue-id (:seon.eval/origin (db/pull @connection [:seon.eval/origin] [:seon.cluster.eval/id "outline-e0"]))))))
-        (is (nil? (db/pull @connection [:seon.issue/id] [:seon.issue/id issue-id])))))))
 
 (deftest the-graph-debug-page-shows-both-faces-in-graph-order-at-every-n
   (support/with-database

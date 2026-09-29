@@ -54,9 +54,8 @@
       (testing "green: accept merges exactly the tested entities with lineage H C E; another entity's write never stales it"
         (let [_ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] (* 1 1))")])
               green (prepare)
-              ;; Before, any head write (a turn, an evaluation, this title) refused as a stale basis-t.
-              h (write! h-conn [{:seon.issue/id (str "merge-test-" (id/id)) :seon.issue/title "Merge again" :seon.issue/status :open
-                                 :seon.issue/severity :cleanup :seon.issue/problem "An unrelated head write."}])
+              ;; Before, any head write (a turn, an evaluation, this agent) refused as a stale basis-t.
+              h (write! h-conn (support/agents-tx (db/db h-conn) [(str "merge-test-" (id/id))]))
               tested (digest c-conn "merge-callee")
               _ (write! c-conn [(fn-entity c-conn "merge-callee" "(defn merge-callee {:malli/schema [:=> [:cat] :int]} [] 3)")])
               e (registry/branch-commit-id {:seon.store/store store :seon.store/branch (:seon.source/candidate green)})

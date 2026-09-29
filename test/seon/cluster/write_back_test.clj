@@ -135,9 +135,7 @@
            (let [merged (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))
                 request {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}
                 ;; Before, any write after the accept (root's own recorded run) refused as a moved head.
-                _ (support/transacted! h-conn [{:seon.issue/id (str "write-back-test-" suffix) :seon.issue/title "Merged"
-                                                :seon.issue/status :open :seon.issue/severity :cleanup
-                                                :seon.issue/problem "An unrelated head write."}])
+                _ (support/transacted! h-conn (support/agents-tx (db/db h-conn) [(str "write-back-test-" suffix)]))
                 written (source/write-back! request)]
             (testing "the exact span is written back and nothing else changes"
               (is (= [path] (:seon.source/changed-paths written)))

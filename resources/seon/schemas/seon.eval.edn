@@ -1,4 +1,4 @@
-#:seon.eval{:origin [:and {:description "The issue identity observed when generating this evaluation. A value survives issue deletion and carries forward unchanged through since-diff reads; absent on agent-authored reads." :seon.wake/context-inert true} :seon.issue/id],
+#:seon.eval{:origin [:string {:min 1 :description "The identity of the entity whose declaration generated this evaluation. A value carries forward unchanged through since-diff reads; absent on agent-authored reads." :seon.wake/context-inert true}],
             :renderer [:qualified-symbol {:description "The declared AI renderer that produced the saved shown text. History emits it directly without selecting or invoking a renderer again." :seon.wake/context-inert true}],
             :renderer-fn [:and {:description "The stable program identity of the renderer that produced the saved shown text." :seon.wake/context-inert true} :seon.db/ref],
             :host-interop-count [:int {:min 0 :seon.wake/context-inert true}],

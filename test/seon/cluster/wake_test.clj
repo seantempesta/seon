@@ -269,7 +269,7 @@
   The expected side of the wake sets, read from the schema resources on
   the classpath rather than written down here. A literal would be exactly
   the hand list these derivations exist to abolish, and it went stale the
-  first time a family was declared (`:seon.issue/agent`, 2026-09-16).
+  first time a family was declared (2026-09-16).
   Comparing resources against the installed database is a real oracle:
   it fails when a declaration does not reach its row, when a row is not
   installed, and when a family is added or removed without anyone
@@ -307,10 +307,6 @@
         ;; second copy of the set.
         (is (contains? opening :seon.message/to)
             "a message is an ask, so it opens a turn")
-        (is (contains? opening :seon.issue/agent)
-            "so is an issue assignment: it is a one-time explicit ask, and
-             a worker that never turns about its own issue is the whole
-             reason the assignment became a wake")
         (is (and (contains? listened :seon.schedule.fire/agent)
                  (not (contains? opening :seon.schedule.fire/agent)))
             "a schedule firing surfaces in the next context; it never

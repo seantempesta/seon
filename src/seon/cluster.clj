@@ -844,6 +844,31 @@
        (db/transact! connection {:tx-data tx-data})
        {:seon.boot/population :seon.schema/declarations}))))
 
+(defn- drop-retired-families!
+  "Retract every entity identified by a retired identity attribute, components
+  with it, in one transaction, BEFORE the program rows publish.
+
+  A family cut from the schema leaves stored entities that reference program
+  rows (an issue's cited functions). Removing those rows sweeps the referrers
+  into the same write, whose complete validation then refuses an entity whose
+  attributes the candidate projection no longer declares. The whole entities
+  leave first; `retire-attributes!` later finds no datoms. Work is one AEVT
+  range read per retired identity attribute."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.schema/projection]
+                  [:or :nil :seon.db/transaction-report]]}
+  [connection projection]
+  (let [database (db/db connection)
+        identities (set (db/identity-attributes database))
+        tx-data (into []
+                      (comp (filter identities)
+                            (mapcat #(map (fn [datom] [:db/retractEntity (:e datom)])
+                                          (d/datoms database :aevt %))))
+                      (retired-attributes database projection))]
+    (when (seq tx-data)
+      (require-committed!
+       (db/transact! connection {:tx-data tx-data})
+       {:seon.boot/population :seon.schema/declarations}))))
+
 (defn- dropped-summary
   "The current datoms a declaration change drops, and the files that re-derive them.
 
@@ -1282,6 +1307,8 @@
                               {:seon.db/process
                                [:seon.db.process/id boot-process-identity]}})
                {:seon.boot/population :seon.cluster.instruction/rows}))))
+          (when (and schema? program?)
+            (drop-retired-families! connection (schema/handed-projection)))
           (let [result
                 (when program?
                   (report-source-progress! "program entities started")
@@ -1696,8 +1723,7 @@
             [additional additional-sources]
             (source/capture-paths directory (vec (remove (set inventory) analysis-paths)))
             captured (merge captured additional-sources)]
-    (if (and committed (empty? changed) (empty? rederive)
-             (not-any? (requiring-resolve 'seon.issue/note-path?) requested-paths))
+    (if (and committed (empty? changed) (empty? rederive))
       published
       (let [stored (when partial?
                      (into {} (db/q '[:find ?path ?digest
@@ -2401,13 +2427,12 @@
     (into #{} (keep program/row-identity) (seon.fn/published-index-entities published-database))))
 
 (defn- adopt-entities!
-  "Write the schema, program, issue and task rows among `identities` from
+  "Write the schema, program and task rows among `identities` from
   `published-database` onto `connection` in ONE transaction, and answer the
   program identities.
 
   Schema declarations go first: the writer applies schema datoms before the
-  operations after them (`datahike/db/transaction.cljc:466`). Issues go last:
-  their citations resolve the program rows. The write refuses once another
+  operations after them (`datahike/db/transaction.cljc:466`). The write refuses once another
   publication moves `current-src` (`head-guard-tx`); refused, nothing lands."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/published
                        :seon.reconcile/adopt-identities :seon.db/database-value]
@@ -2415,8 +2440,6 @@
   [connection published identities published-database]
   (let [projection (db/carried-projection published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
-        issue-identities (into #{} (keep (fn [[attribute value]]
-                                         (when (= :seon.issue/id attribute) value))) identities)
         tx-data (into
                  (cond-> [[:db.fn/call registry/head-guard-tx
                            {:seon.source/branch source/current-branch
@@ -2425,11 +2448,7 @@
                    (conj [:db.fn/call (fn [database] (declaration-changes database projection))])
                    (seq program-identities)
                    (into (require-committed! (seon.fn/adoption-tx projection published-database program-identities)
-                                             {:seon.boot/population :seon.fn/population}))
-                   (seq issue-identities)
-                   (into (require-committed! ((requiring-resolve 'seon.issue/adopt-call)
-                                              published-database issue-identities)
-                                             {:seon.boot/population :seon.issue/rows})))
+                                             {:seon.boot/population :seon.fn/population})))
                  ;; Tasks are data the publication admitted, never program entities;
                  ;; the whole set reconciles, empty when the cluster agrees.
                  (require-committed! ((requiring-resolve 'seon.task/adopt-tasks-call)

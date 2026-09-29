@@ -1221,24 +1221,18 @@
                (nil? (:seon.turn/reply-blob latest))
                failure (pos? (turn/turns-left database agent-id))
                (nil? (turn/next-agent-work database {:seon.agent/id agent-id})))
-      (let [pending (remove :seon.issue/resolved-tx
-                            (:seon.issue/_agent
-                             (db/pull database '[{:seon.issue/_agent [:seon.issue/resolved-tx]}]
-                                      [:seon.agent/id agent-id])))
-            at (get-in latest [:seon.turn/closed-tx :db/txInstant])]
-        (when (seq pending)
-          {::turn latest
-           ::detail (str "stalled: " (or (:seon.error/operation failure) "unknown provider refusal")
-                         " at " (if (inst? at)
-                                  (.format (java.text.SimpleDateFormat. "HH:mm") at)
-                                  "unknown time")
-                         ", waiting for an outside wake")})))))
+      (let [at (get-in latest [:seon.turn/closed-tx :db/txInstant])]
+        {::turn latest
+         ::detail (str "stalled: " (or (:seon.error/operation failure) "unknown provider refusal")
+                       " at " (if (inst? at)
+                                (.format (java.text.SimpleDateFormat. "HH:mm") at)
+                                "unknown time")
+                       ", waiting for an outside wake")}))))
 
 (defn- session-header [request entities]
   (let [agent-id (:seon.agent/id request)
         agent-entity (db/pull (:seon.db/db request)
-                           '[{:seon.agent/namespace [:seon.ns/name]}
-                             {:seon.issue/_agent [:seon.issue/problem :seon.issue/resolved-tx]}]
+                           '[{:seon.agent/namespace [:seon.ns/name]}]
                            [:seon.agent/id agent-id])
         active (last (remove :seon.turn/closed-tx entities))
         latest (or active (last entities))
@@ -1258,9 +1252,6 @@
        (when (and latest (not stalled))
          (list " since " (runtime-time (get-in latest [(if active :seon.turn/opened-tx :seon.turn/closed-tx) :db/txInstant]))))
        " · " (:seon.cluster/name request)]]
-     (when-let [objective (some #(when-not (:seon.issue/resolved-tx %) (:seon.issue/problem %))
-                                (:seon.issue/_agent agent-entity))]
-       [:p {:class "seon-session-objective"} objective])
      [:div {:class "seon-session-toolbar"}
       [:nav {:class "seon-session-nav" :aria-label "Agent pages"}
        [:a {:href (route/path ::route/agent {:id agent-id})
@@ -1552,8 +1543,7 @@
         evaluation-id (:seon.cluster.eval/id saved)
         signal (outline-signal evaluation-id)
         origin (session-origin database entity saved)
-        declared (when-let [issue-id (:seon.eval/origin saved)]
-                   [:seon.issue/id issue-id])
+        declared (:seon.eval/origin saved)
         html (render/render-call
               (assoc request :seon.render/value saved
                      :seon.render/output :seon.render/html
@@ -1566,7 +1556,7 @@
       [:span {:class "seon-outline-origin"} origin]
       (when declared
         [:span {:class "seon-outline-declared"}
-         (str "declared by " (pr-str (first declared)) " " (pr-str (second declared)))])
+         (str "declared by " (pr-str declared))])
       [:span {:class "seon-outline-schema"}
        (str (emission-label projection saved) " · " (outline-renderer saved))]
       [:span {:class "seon-outline-tokens"}

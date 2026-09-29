@@ -233,13 +233,6 @@
    [:seon.program/count {:optional true} [:int {:min 0}]]
    [:seon.program/macros {:optional true} [:set :qualified-symbol]]
    [:seon.program/subjects {:optional true} [:set :qualified-symbol]]]]
- :seon.program/plan
- [:map
-  [:seon.program/issues [:vector :seon.issue/issue]]
-  [:seon.program/launch
-   {:optional true}
-   [:sequential {:description "Retiring (no producer since the breaks fix; delete at the next adoption): it named my.program/launch!, which does not exist."}
-    :seon.schema/value]]]
  :seon.program/breakage
  [:map {:description "Pure program-fact read. Empty relation groups are absent; unknown coverage is always explicit."
         :seon.render/ai seon.render.value/render-ai
@@ -263,8 +256,7 @@
   [:seon.program/requiring-namespaces {:optional true} :seon.program/requiring-namespaces]
   [:seon.program/owned-declarations {:optional true} :seon.program/owned-declarations]
   [:seon.program/data-in-use {:optional true} :seon.program/data-in-use]
-  [:seon.program/mentions {:optional true} :seon.program/mentions]
-  [:seon.program/plan {:optional true} :seon.program/plan]]
+  [:seon.program/mentions {:optional true} :seon.program/mentions]]
  :seon.program/definition
  [:map-of {:description "A program entity's exact attribute values at one basis. Families and authored contracts are polymorphic; refs remain datom entity ids."}
   :qualified-keyword :seon.schema/value]

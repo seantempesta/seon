@@ -3691,17 +3691,7 @@
         held (when (vector? pulled) (zipmap identities pulled))
         entity (memoize #(if-let [entry (find held %)] (val entry) (db/pull database '[*] %)))
         desired-identities (set identities)
-        removed (remove desired-identities previous-identities)
-        ;; A note citing a removed file is uncited text. Its citation
-        ;; component's `:seon.issue.citation/file` is a required ref, so the
-        ;; component leaves in the removal's own transaction; one AVET seek per
-        ;; removed identity, never a scan of the notes.
-        uncited (when (get (:schema database) :seon.issue.citation/file)
-                  (for [[attribute value] removed
-                        removed-datom (seek database :avet attribute value)
-                        citation (seek database :avet :seon.issue.citation/file (:e removed-datom))]
-                    (:e citation)))
-        removed (into (vec removed) (sort uncited))
+        removed (vec (remove desired-identities previous-identities))
         desired (vec entity-maps)]
     (if-not held
       pulled

@@ -131,14 +131,6 @@
                     (fn [database]
                       (is (nil? (db/pull database [:db/id]
                                         [:seon.fn.file/relative-path "publication-note.md"]))))
-                    :no-program-facts]
-                   ["docs/seon/issues/publication-fixture.md"
-                    "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue, publication]\n---\n\n# Publication fixture\n\nAn issue note is indexed independently of program identity.\n"
-                    (fn [database]
-                      (is (= "Publication fixture"
-                             (:seon.issue/title
-                              (db/pull database [:seon.issue/title]
-                                       [:seon.issue/id "publication-fixture"])))))
                     :no-program-facts]]]
             (testing path
               (let [file (io/file checkout path)

@@ -125,7 +125,7 @@
   the cluster runs, rather than at the next boot — the belt that used to
   depend on the new agent also being addressed in the same commit
   (issue `a-worker-started-while-the-cluster-runs-is-never-armed`:
-  `seon.issue/start!` created a worker, `seon.turn/next-agent-work`
+  a task assignment created a worker, `seon.turn/next-agent-work`
   answered `:generate`, and nothing ran because no wake-matching datom
   named it).
 

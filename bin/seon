@@ -27,12 +27,5 @@ if [[ -e "$SEON_SOURCE_ROOT/.git" ]]; then
   export SEON_CHECKOUT="$SEON_SOURCE_ROOT"
 fi
 
-if [[ "${1:-}" == "issues-index" ]]; then
-  shift
-  exec bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" \
-    -e '(require (quote seon.dev.issues)) (System/exit (seon.dev.issues/run! (first *command-line-args*) (rest *command-line-args*)))' \
-    "$SEON_OPERATOR_ROOT" "$@"
-fi
-
 exec bb --config /dev/null --classpath "$program/script:$program/src:$program/resources" \
   -m seon.operator --seon-root "$SEON_OPERATOR_ROOT" "$@"

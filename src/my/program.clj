@@ -13,8 +13,7 @@
             [seon.error :as error]
             [seon.fn :as function]
             [seon.render.value :as render.value]
-            [seon.issue :as issue]
-            [seon.cluster.branch :as cluster.branch]
+                    [seon.cluster.branch :as cluster.branch]
             [seon.cluster.message :as message]
             [seon.task :as task]
             [seon.cluster.registry :as registry]
@@ -259,38 +258,10 @@
  (throw (ex-info (:seon.error/message result) result)) result)))))
         [:seon.render/ai :seon.render/html]))
 
-(defn- proposed-plan
-  {:seon/tasks #{"5087cea7800e"}
-   :malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject [:or :nil :seon.program/callers] [:or :nil :seon.program/call-sites]] :seon.program/plan]}
-  [database subject caller-symbols sites]
-  (let [names (sort caller-symbols)
-        stored (vec names)
-        gates (let [result (function/gate-sets database stored)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
-        detector 'seon.program/unresolved-callers]
-    {:seon.program/issues
-     (mapv (fn [caller value]
-             (cond->
-              {:seon.issue/id (issue/subject-id detector [:seon.fn/sym value])
-               :seon.issue/title (str caller " must be repaired before retracting " subject)
-               :seon.issue/problem
-               (str "Repair the caller before retrying the retraction. Preserve its gate set. "
-                    "Done condition: seon.program/unresolved-callers no longer names the caller. "
-                    (render.value/bounded-text (filterv #(= caller (:seon.fn/sym %)) sites)))
-               :seon.issue/status :open :seon.issue/severity :friction
-               :seon.issue/functions #{[:seon.fn/sym value]}
-               :seon.issue/detector [:seon.fn/sym detector]}
-               (seq (get gates value))
-               (assoc :seon.issue/tests (into #{} (map #(vector :seon.test/sym %)) (get gates value)))))
-           names stored)}))
-
 (defn breaks
-  "Read the referrers a retraction would strand, with a prospective plan.
+  "Read the referrers a retraction would strand.
 
   Callers, references and test subjects block; stored test reach is advisory.
-  Plans contain one detected issue per caller and its current gate set.
   Nothing is written. Unknown dispatch, apply, macro and external
   callers are reported explicitly. A supplied contract is advisory: argument
   shapes require the existing candidate test gate.
@@ -336,9 +307,6 @@
                  (when (= :seon.schema/key kind) (key-data database subject entity)))
           unknown-arities (count (remove :seon.fn/call-arity (:seon.program/call-sites report)))]
       (-> report
-          (assoc :seon.program/plan
-                 (proposed-plan database subject (:seon.program/callers report)
-                                (:seon.program/call-sites report)))
           (update :seon.program/unknown into
                   (cond->
                    [{:seon.program/gap :dispatch-not-modelled
@@ -685,7 +653,6 @@
      ;; The referrers that block it: the refactoring data the refusal exists to give.
      :seon.error/offending (into {} (filter (comp seq val)) (select-keys report blocking-relations))})
    {:seon.program/affected affected
-    :seon.program/plan (:seon.program/plan report)
     :seon.program/unknown (:seon.program/unknown report)}))
 
 (defn- blocking? [report]
@@ -713,9 +680,7 @@
         sites (into [] (comp (mapcat :seon.program/call-sites)
                              (remove #(affected (:seon.fn/sym %))) (distinct)) reports)
         report (assoc report :seon.program/render-declared-by render-pairs
-                             :seon.program/call-sites sites
-                             :seon.program/plan (proposed-plan database subject
-                                                               (:seon.program/callers report) sites))]
+                             :seon.program/call-sites sites)]
     [report affected]))
 
 (defn- native! [ctx form]

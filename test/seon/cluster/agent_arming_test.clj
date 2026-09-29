@@ -1,22 +1,17 @@
 (ns seon.cluster.agent-arming-test
   "THE CLASS: a created agent whose absence of execution reads as health.
 
-  `seon.issue/start!` created a worker, its plan and its opening in one
-  transaction, returned a healthy status, and `seon.turn/next-agent-work`
-  answered `:generate` — and nothing ran until the next boot, because the
-  cluster's armer is woken only by a wake-matching datom and the creation
-  wrote none. Calling `arm!` by hand unblocked it instantly, which is what
-  every fixture and every trial session had been doing.
+  A creation committed a worker, returned a healthy status, and
+  `seon.turn/next-agent-work` answered `:generate` — and nothing ran until the
+  next boot, because the cluster's armer is woken only by a wake-matching
+  datom and the creation wrote none.
 
-  Both halves are declarations, not code paths:
-
-  1. `:seon.agent/id` carries `:seon.wake/arms true`, so the commit that
-     creates an agent wakes the ONE armer that arms boot-time agents.
-  2. `:seon.issue/agent` carries `:seon.wake/listen true`, so the
-     assignment datom IS the worker's first wake — no synthetic message."
+  The fix is a declaration, not a code path: `:seon.agent/id` carries
+  `:seon.wake/arms true`, so the commit that creates an agent wakes the ONE
+  armer that arms boot-time agents."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as async.flow]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.wake :as wake]
@@ -25,7 +20,6 @@
             [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.id :as id]
-            [seon.issue :as issue]
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
@@ -139,89 +133,3 @@
           (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]]
                             (db/db connection)))
               "with no core fault recorded")))))))
-
-(deftest starting-an-issue-leaves-one-unanswered-wake-its-first-reply-answers
-  ;; The second half of the same blocker: an armed worker still never took
-  ;; a provider turn, because `start!` left nothing unanswered and the
-  ;; trials had to send it a synthetic message. The assignment IS the wake.
-  (support/with-database
-   (fn [connection]
-     (support/seed-cluster! connection "issue-wake")
-     (let [issue-id "start-arms-and-wakes"
-           agent-id (id/id [issue-id])
-           test-sym (first (sort (db/q '[:find [?s ...]
-                                         :where [_ :seon.test/sym ?s]]
-                                       (db/db connection))))]
-       (is (some? test-sym) "the canonical population carries test entities")
-       (support/transacted! connection
-                            [{:seon.issue/id issue-id
-                              :seon.issue/title "Verify the assignment wakes its worker"
-                              :seon.issue/status :open
-                              :seon.issue/severity :blocker
-                              :seon.issue/problem "The worker must turn on assignment."
-                              :seon.issue/tests #{[:seon.test/sym test-sym]}}])
-       (testing "the assignment attribute is declared a turn-opening wake"
-         (let [database (db/db connection)]
-           (is (contains? (wake/wake-attributes database) :seon.issue/agent))
-           (is (contains? (wake/turn-opening-attributes database)
-                          :seon.issue/agent))
-           (is (not (contains? (wake/inside-attributes database)
-                               :seon.issue/agent))
-               "an assignment arrives from outside, so it refills the bound")
-           (is (not (contains? (wake/unindexed-listened-attributes database)
-                               :seon.issue/agent))
-               "and it is in :avet, or every seek would read as absent")))
-       ;; BUDGET 3, NOT 1. Measured 2026-09-16: the generated opening
-       ;; consumes the episode bound, so a worker started with budget 1 has
-       ;; no ordinary turn left and can never answer its own assignment —
-       ;; filed as `a-workers-generated-opening-spends-its-issue-budget`.
-       ;; This regression is about the wake, so it does not stand on that.
-       (let [started (issue/start! {:seon.db/connection connection
-                                    :seon.issue/id issue-id
-                                    :seon.issue/budget 3
-                                    :seon.ns/name 'my.agents.issue-wake
-                                    :seon.config.ai/no-provider true})]
-         (is (string? (get-in started [:seon.issue/agent :seon.agent/id])))
-         (let [wakes (turn/unanswered-wakes (db/db connection) agent-id {})]
-           (is (= 1 (count wakes)))
-           (is (= :seon.issue/agent (:seon.wake/attribute (first wakes)))
-               "the assignment datom is the worker's one unanswered wake")
-           (is (= (:db/id (db/pull (db/db connection) [:db/id]
-                                   [:seon.issue/id issue-id]))
-                  (:db/id (first wakes)))
-               "carried by the issue entity itself"))
-         ;; NOTHING IS SUBMITTED HERE. The worker is armed by its own
-         ;; creation and the assignment is its only wake, so its loop must
-         ;; reach an accepted reply on the no-provider path by itself —
-         ;; that is the whole claim.
-         (running-cluster
-          connection "issue-wake"
-          (fn [{routing :seon.agent/routing}]
-            (await-armed! routing agent-id)
-            ;; ONE await, on the ONE terminal fact. Awaiting the opening's
-            ;; closure first and the answer second gave the second await its
-            ;; own clock and made the assertion between them race the loop's
-            ;; next turn; measured, the whole sequence settles well inside
-            ;; one backstop.
-            (support/await-event!
-             connection ::issue-assignment-answered
-             (fn [database]
-               (empty? (turn/unanswered-wakes database agent-id {}))))
-            (let [database (db/db connection)
-                  opening (db/pull database
-                                   '[:seon.turn/closed-tx :seon.turn/attempts]
-                                   [:seon.turn/id (id/id [:seon.issue/opening
-                                                          issue-id])])]
-              (is (empty? (turn/unanswered-wakes database agent-id {}))
-                  "the worker's first accepted reply answers the assignment")
-              (is (some? (:seon.turn/closed-tx opening))
-                  "system turn 0 stored the opening and closed")
-              (is (nil? (:seon.turn/attempts opening))
-                  "and attempted no provider, so it answered nothing itself")
-              (is (seq (evaluation/of-agent database agent-id))
-                  "the worker got there by turning, not by being handed a reply")
-              (is (< 1 (count (db/q '[:find [?t ...] :in $ ?a :where
-                                      [?agent :seon.agent/id ?a]
-                                      [?t :seon.turn/agent ?agent]]
-                                    database agent-id)))
-                  "a second, ordinary turn is what answered the assignment")))))))))

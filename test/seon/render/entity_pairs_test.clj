@@ -25,14 +25,7 @@
                                         "(defn function [] true)")
                 (support/program-entity (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
                                      "(clojure.test/deftest test (clojure.test/is true))"
-                                     {:seon.fn/calls #{'entity-pairs.fixture/function}})
-                {:seon.issue/id "entity-pairs-issue"
-                 :seon.issue/title "Render linked entities"
-                 :seon.issue/problem "Verify the entity pairs"
-                 :seon.issue/status :open :seon.issue/severity :cleanup
-                 :seon.issue/agent [:seon.agent/id "entity-pairs-agent"]
-                 :seon.issue/functions [[:seon.fn/sym (quote entity-pairs.fixture/function)]]
-                 :seon.issue/tests [[:seon.test/sym (quote entity-pairs.fixture/test)]]}]))]
+                                     {:seon.fn/calls #{'entity-pairs.fixture/function}})]))]
        (is (:db-after report)))
      (let [database (db/db connection)
            entity (db/pull database '[*] entity-lookup)
@@ -43,10 +36,9 @@
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 5000
                     :seon.render/distance 1
-                    :seon.render.walk/lookup [:seon.issue/id "entity-pairs-issue"]}
+                    :seon.render.walk/lookup entity-lookup}
            acquisition (walk/root-acquisition request)]
-       (is (= 1 (get-in acquisition [:seon.render.walk/members entity-lookup
-                                     :seon.render.walk/found-depth])))
+       (is (some? (get-in acquisition [:seon.render.walk/members entity-lookup])))
        (doseq [[output expected] [[:seon.render/ai expected-ai]
                                   [:seon.render/html expected-html]]]
          (let [request (assoc request :seon.render/output output)
@@ -82,11 +74,11 @@
                  "the form face is the recorded-result read")
              (is (hiccup/hiccup? (render.test/render-html {:seon.render/value value}))))))))))
 
-(deftest function-entity-pair-is-selected-through-the-issue-walk
+(deftest function-entity-pair-is-selected-through-the-walk
   (exercise-pair [:seon.fn/sym (quote entity-pairs.fixture/function)]
                  'seon.render.ns/function-ai 'seon.render.ns/function-html))
 
-(deftest test-entity-pair-is-total-through-the-issue-walk
+(deftest test-entity-pair-is-total-through-the-walk
   (exercise-pair [:seon.test/sym (quote entity-pairs.fixture/test)]
                  'seon.render.test/render-ai 'seon.render.test/render-html))
 

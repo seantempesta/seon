@@ -475,13 +475,10 @@
    :seon.call-preparation/validators])
 
 (defn- unrelated-entity
-  "One ordinary fact no snapshot query reads."
-  [label]
-  {:seon.issue/id (str "call-preparation-unrelated-" label)
-   :seon.issue/title "an unrelated commit"
-   :seon.issue/status :open
-   :seon.issue/severity :cleanup
-   :seon.issue/problem "none; the snapshot must not re-derive for it"})
+  "One ordinary fact no snapshot query reads: a namespace row."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string] :map]}
+  [database label]
+  (test-support/namespace-entity database (symbol (str "call-preparation-unrelated-" label))))
 
 (defn- alternate-entity
   "A second supplied-default row reusing the shipped database row's schema
@@ -508,7 +505,7 @@
        (test-support/transacted! connection database-entities)
        (let [fixed-projection (projection)
              before (cp/snapshot @connection fixed-projection)]
-         (test-support/transacted! connection [(unrelated-entity "held")])
+         (test-support/transacted! connection [(unrelated-entity @connection "held")])
          (let [after-database @connection
                after (cp/snapshot after-database fixed-projection)]
            (is (held? before after) "no member was derived again")
@@ -581,7 +578,7 @@
        (test-support/transacted! connection database-entities)
        (let [fixed-projection (projection)
              committed (cp/snapshot @connection fixed-projection)
-             report (d/with @connection [(unrelated-entity "report")])
+             report (d/with @connection [(unrelated-entity @connection "report")])
              speculative (cp/report-snapshot report fixed-projection)]
          (is (held? committed speculative))
          (is (= (db/basis-t (:db-after report))

@@ -46,7 +46,7 @@
  :proposal [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/proposal-row
                      :description "seon.id/id over [assignment commit], the recurrence key: one proposal per assignment and proposed commit."}]
  :merge [:and {:seon.db/index true :description "The generated merge task a proposal records."} :seon.task/handle]
- :proposes [:and {:description "The assignment, or the legacy issue (:seon.issue/agent), the proposal answers."} :seon.db/ref]
+ :proposes [:and {:description "The assignment the proposal answers."} :seon.db/ref]
  :commit [:uuid {:description "C: the proposing branch's commit its proofs ran on."}]
  :proved [:set {:min 1 :description "Each proof as [test symbol, definition digest] at C: references that outlive C."}
           [:tuple :symbol [:string {:min 64 :max 64}]]]
@@ -88,7 +88,7 @@
  :assigned-work [:map {:description "What an agent's branch is assigned: the key naming its merge task, the owning namespace, the proofs and what the proposal answers."}
                  [:seon.task/key :seon.task/key] [:seon.task/ns :seon.task/ns] [:seon.task/proofs :seon.task/proofs]
                  [:seon.task/proposes :seon.task/proposes] [:seon.task/assigned {:optional true} :seon.task/assigned]]
- :key [:string {:min 1 :description "What names a merge task: the assignment identity, or a legacy issue's id."}]
+ :key [:string {:min 1 :description "What names a merge task: the assignment identity."}]
  :quoted-symbol [:cat [:= quote] :qualified-symbol]
  :annotation [:map {:description "Stage 1: the task and link members of one attribute map."}
               [:seon/tasks {:optional true} :seon.task/tasks]

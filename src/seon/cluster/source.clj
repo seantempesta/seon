@@ -513,18 +513,6 @@
     (catch Exception failure
       (stale-publication-error 'seon.cluster.source/record-results! failure))))
 
-(defn- index-issues!
-  [connection source-digest directory paths]
-  (when (and (or (nil? paths) (seq paths))
-             (get (:schema (db/db connection)) :seon.issue/id))
-    (require-committed!
-     ((requiring-resolve 'seon.issue/index!)
-      (cond-> {:seon.db/connection connection
-               :seon.issue/notes ((requiring-resolve 'seon.issue/notes) directory)}
-        paths (assoc :seon.source/changed-paths paths)))
-     :seon.issue/index-refused "Issue indexing was refused."
-     {:seon.source/digest source-digest})))
-
 (defn- index-tasks!
   "Reconcile every task file of the published `directory` through the task writer,
   then refuse any dangling handle, an annotation naming no admitted task, with its
@@ -598,8 +586,6 @@
   (let [published (current store)
         moved? (and requested-commit published
                     (not= requested-commit (:seon.source/commit-id published)))
-        note-paths (when (and published changed-paths)
-                     (filterv (requiring-resolve 'seon.issue/note-path?) changed-paths))
         committed (when published
                     (d/commit-as-db (:seon.store/connection-object store)
                                     (:seon.source/commit-id published)))
@@ -626,7 +612,7 @@
                          {:branch current-branch
                           :expected-current-commit requested-commit
                           :current-commit (:seon.source/commit-id published)})
-      (and unchanged? (not (seq note-paths)))
+      unchanged?
       (assoc published :seon.source/digest source-digest :seon.source/built? false)
       :else
       (let [projection (schema/declaration-projection)
@@ -668,14 +654,11 @@
                expected-commit
                (assoc :seon.source/previous-database
                       previous-database))))
-                  _ (when (or (nil? note-paths) (seq note-paths))
-                      (progress! "publication issue indexing"))
-                  issues (index-issues! connection source-digest (or directory (fs/source-directory)) note-paths)
                   tasks (index-tasks! connection source-digest (or directory (fs/source-directory)) previous-database)
                   _ (progress! "publication source identity")]
             (require-committed! population-result ::source-population-refused
                                 "The source population was refused." {})
-            (if (and unchanged? (nil? (:seon.db/transaction-report issues)) (not (:seon.task/changed? tasks)))
+            (if (and unchanged? (not (:seon.task/changed? tasks)))
               {:seon.source/built? false}
               (do
             ;; The source seal is the genesis boundary. Population must first
@@ -720,14 +703,9 @@
                      ;; This operation's own head, returned by the guarded
                      ;; update; never a reread of the mutable branch.
                      :seon.source/commit-id installed}
-              (or (contains? population-result :seon.reconcile/adopt-identities)
-                  (:seon.db/transaction-report issues))
+              (contains? population-result :seon.reconcile/adopt-identities)
               (assoc :seon.reconcile/adopt-identities
-                     (into (or (:seon.reconcile/adopt-identities population-result) #{})
-                           (when-let [report (:seon.db/transaction-report issues)]
-                             (require-committed! (fn/report-identities report)
-                                                 ::publish-readback-failed
-                                                 "Issue report identities could not be read." {}))))
+                     (:seon.reconcile/adopt-identities population-result))
               (nil? expected-commit)
               (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection)))))))))))
             (finally

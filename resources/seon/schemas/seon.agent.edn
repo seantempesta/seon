@@ -36,7 +36,6 @@
                       {:seon.db/attributes true,
                        :seon.render/units
                        [:seon.agent/plan
-                        :seon.issue/_agent
                         :seon.message/_to
                         :seon.agent/settings
                         :my.note/_agent

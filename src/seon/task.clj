@@ -407,8 +407,7 @@
 (defn assignment
   "What `agent-id` on `branch` is assigned in the cluster value `database`: its
   task's proofs, owning namespace and key, refused when the task changed since
-  root reviewed it; else the legacy issue it works (`:seon.issue/agent`), whose
-  proofs are its tests. Neither, or several, refuses `:unassigned` by name."
+  root reviewed it. None, or several, refuses `:unassigned` by name."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/branch]
                   [:or :seon.task/assigned-work :seon.task/refused-error :seon.error/value]]}
   [database agent-id branch]
@@ -416,24 +415,16 @@
                          :where [?agent :seon.agent/id ?id] [?a :seon.task/agent ?agent] [?a :seon.task/branch ?branch]
                          [?a :seon.task/assignment ?key] [?a :seon.task/assigned ?handle] [?a :seon.task/revision ?revision]]
                        database agent-id branch)
-        issues (db/q '[:find ?issue (distinct ?test) :in $ ?id
-                       :where [?agent :seon.agent/id ?id] [?i :seon.issue/agent ?agent] [?i :seon.issue/id ?issue]
-                       [?i :seon.issue/tests ?t] [?t :seon.test/sym ?test]]
-                     database agent-id)
         [[key handle revision]] (when-not (map? assigned) (seq assigned))
         current (when handle (task-revision database handle))
         edges (when handle (task-edges database handle))]
-    (cond (some :seon.error/at [assigned issues current edges]) (some #(when (:seon.error/at %) %) [assigned issues current edges])
+    (cond (some :seon.error/at [assigned current edges]) (some #(when (:seon.error/at %) %) [assigned current edges])
           (and (= 1 (count assigned)) (not= revision current))
           (refused 'seon.task/assignment :revised-since-assignment 'seon.task {:seon.task/revision revision :seon.task/current current})
           (= 1 (count assigned))
           {:seon.task/key key :seon.task/assigned handle :seon.task/proposes [:seon.task/assignment key]
            :seon.task/ns (:seon.task/ns (db/pull database [:seon.task/ns] [:seon.task/id handle]))
            :seon.task/proofs (:seon.task/proofs edges)}
-          (and (empty? assigned) (= 1 (count issues)))
-          (let [[[issue tests]] (seq issues)]
-            {:seon.task/key issue :seon.task/proposes [:seon.issue/id issue] :seon.task/proofs (set tests)
-             :seon.task/ns (symbol (namespace (first (sort tests))))})
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
                                                                       :seon.task/assignment (mapv first assigned)}))))
 

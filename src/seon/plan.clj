@@ -17,16 +17,8 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.issue :as issue]
             [seon.schema.edn :as schema.edn]
             [seon.test :as seon.test]))
-
-;;; LOAD-CYCLE BOUNDARY. `seon.turn` requires `seon.plan`, and
-;;; `seon.cluster.agent` requires `seon.turn`, so this namespace cannot
-;;; require it back. One resolution, realized at first use, instead of a
-;;; `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private cluster-agent-acquire-context!
-  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schemas/my.plan.edn
@@ -645,76 +637,6 @@
    "a positive configured query deadline"))
     (+ (System/nanoTime) (* 1000000 limit))))
 
-(defn- stale-issue-tests
-  "The agent's open-issue tests whose reach closure changed or that never ran.
-  A test whose closure is unchanged since its recorded result is not re-run:
-  that result already answers the completion query. A success ref that no
-  longer names a test stays in the set, so the settlement still reports it."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector [:tuple :int [:or :nil :seon.test/sym]]]]}
-  [database agent-id]
-  (let [tests (db/q '[:find [?test ...] :in $ ?agent-id
-                      :where [?a :seon.agent/id ?agent-id]
-                      [?i :seon.issue/agent ?a]
-                      (not [?i :seon.issue/resolved-tx])
-                      [?i :seon.issue/tests ?test]] database agent-id)]
-    (when (db/read-refusal? tests)
-      (throw (ex-info (:seon.error/message tests) tests)))
-    (let [named (mapv (fn [test-eid]
-                        [test-eid (:seon.test/sym
-                                   (db/pull database [:seon.test/sym] test-eid))])
-                      (sort tests))
-          stale (seon.test/stale
-                 database (into [] (keep second) named))]
-      (when (:seon.test/execution-refusal stale)
-        (throw (ex-info (:seon.error/message stale)
-                        (assoc stale :my.plan/refused-member :seon.issue/tests))))
-      (let [changed (set stale)]
-        (filterv (fn [[_ test-symbol]]
-                   (or (nil? test-symbol) (contains? changed test-symbol)))
-                 named)))))
-
-(defn run-issue-tests!
-  "Run an open issue's STALE tests as one request under the shared evaluation deadline.
-  The ordinary turn's close is the one settlement that calls this. A close
-  that changed nothing a test reaches runs nothing and leaves the recorded
-  results standing. Each test runs as an isolated agent on its own branch off
-  the agent's current commit; results, including unavailable or expired
-  tests, use the existing test writer.
-
-  ## Errors
-
-  A refused read, a non-test entity on the issue, a missing query bound or a
-  refused test request is RETURNED as the plan refusal it is, never thrown
-  into the turn's close; the caller delivers it to the agent."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] [:or :nil :seon.plan/refusal]]}
-  [cluster agent-id]
-  (try
-  (let [connection (:seon.db/connection cluster)
-        database (db/db connection)
-        pending (stale-issue-tests database agent-id)]
-    (when (seq pending)
-      (when-let [[test-eid _] (first (filter (comp nil? second) pending))]
-        (refuse-constraint! 'seon.plan/run-issue-tests!
-   "Plan request refused; a test entity named by the issue is required."
-   :seon.issue/tests {:seon.agent/id agent-id :seon.db/ref test-eid}
-   :seon.plan/non-test-entity test-eid
-   "a test entity named by the issue"))
-      (let [deadline (query-deadline database agent-id)
-            handle (@cluster-agent-acquire-context! cluster agent-id)
-            remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
-            result (seon.test/run
-                    {:seon.test/execution handle
-                     :seon.test/recording-connection connection
-                     :seon.test/policy :named
-                     :seon.test/identities (into #{} (map second) pending)
-                     :seon.test/check-time-limit-ms (max 1 remaining-ms)})]
-        (when (:seon.error/at result)
-          (assoc result :my.plan/refused-member :seon.issue/tests)))))
-    ;; Declared cases: the plan refusals `refuse!` and `stale-issue-tests`
-    ;; raise; `flat-refusal` resurfaces anything else whole.
-    (catch clojure.lang.ExceptionInfo refusal
-      (flat-refusal refusal))))
-
 (defn- done-query-result
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/pulled-entity :int] :seon.schema/value]}
   [database step deadline]
@@ -747,8 +669,7 @@
     (conj [:db/retract plan-entity :my.plan/current-step step])))
 
 (defn settle-call
-  "Evaluate every open query-backed step, record first completion in this write,
-  then settle the agent's issue."
+  "Evaluate every open query-backed step and record first completion in this write."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.db/tx-data]}
   [database agent-id]
@@ -758,17 +679,16 @@
                              [?step :my.plan.item/done-query _]
                              (not [?step :my.plan.item/completed-tx _])]
                     database rules agent-id)]
-    (conj (if (empty? plan-steps)
-            []
-            (let [deadline (query-deadline database agent-id)
+    (if (empty? plan-steps)
+      []
+      (let [deadline (query-deadline database agent-id)
                   plan-entity (plan-eid database (agent-eid database agent-id))]
               (into []
                     (mapcat (fn [eid]
                               (let [step (db/pull database step-selector eid)]
                                 (when (query-satisfied? (done-query-result database step deadline))
                                   (completion-tx database plan-entity eid)))))
-                    plan-steps)))
-          [:db.fn/call #'issue/settle-call agent-id])))
+                    plan-steps)))))
 
 (defn- complete-step-call
   [database request]

@@ -8,7 +8,6 @@
             [seon.cluster.source-test :as source-test]
             [seon.id :as id]
             [seon.turn :as turn]
-            [seon.issue :as issue]
             [seon.error :as error]
             [seon.db :as db]
             [seon.config :as config]
@@ -249,17 +248,6 @@
        (is (false? (agent/open? (db/db connection) agent-id)))
        (is (= before (db/pull (db/db connection) selector lookup)))))))
 
-(deftest refused-notes-do-not-mint-incomplete-issue-identities
-  (support/with-database
-   (fn [connection]
-     (let [note {:seon.issue/path "docs/seon/issues/reset-invalid-note.md"
-                 :seon.issue/text "---\ntype: defect\nstatus: open\nseverity: blocker\n---\n# Invalid type\n\n## Problem\nThis note is refused.\n"}
-           entities (issue/index-tx (db/db connection) [note])]
-       (is (seq (:seon.issue/refusals (meta entities))))
-       (is (empty? entities))
-       (is (nil? (db/pull (db/db connection) [:db/id]
-                          [:seon.issue/id "reset-invalid-note"])))))))
-
 (deftest recording-a-fault-does-not-mint-a-program-identity
   (support/with-database
    (fn [connection]
@@ -308,39 +296,6 @@
          (is (not= (:seon.fn/source captured) (:seon.fn/source next-captured)))
          (is (not= expected (id/sha-256 [(.getBytes ^String (:seon.fn/source next-captured)
                                                   java.nio.charset.StandardCharsets/UTF_8)]))))))))
-
-(deftest an-evaluation-retains-its-issue-origin-after-issue-retraction
-  (support/with-database
-   (fn [connection]
-     (let [issue-id "reset-origin"
-           agent-id "reset-origin-agent"
-           turn-id "reset-origin-turn"
-           evaluation-id (id/evaluation turn-id 0)]
-       (support/seed-cluster! connection "reset-origin")
-       (support/transacted!
-        connection (cluster-agent/creation-tx
-                    {:seon.agent/id agent-id :seon.cluster/name "reset-origin"
-                     :seon.ns/name 'reset.origin.agent}))
-       (support/transacted!
-        connection
-        (issue/index-tx (db/db connection)
-                        [{:seon.issue/path "docs/seon/issues/reset-origin.md"
-                          :seon.issue/text "---\ntype: issue\nstatus: resolved\nseverity: friction\n---\n# Historical origin\n\n## Problem\nAn evaluation observed this issue.\n"}]))
-       (support/transacted!
-        connection (turn/open-tx {:seon.turn/id turn-id
-                                 :seon.turn/agent [:seon.agent/id agent-id]
-                                 :seon.turn/opened-tx "datomic.tx"}))
-       (support/transacted!
-        connection
-        (conj (vec (turn/receipt-start-tx
-                    {:seon.turn/id turn-id :seon.cluster.eval/ordinal 0
-                     :seon.cluster.eval/at (java.util.Date.)}))
-              [:db/add [:seon.cluster.eval/id evaluation-id] :seon.eval/origin issue-id]))
-       (support/transacted! connection [[:db/retractEntity [:seon.issue/id issue-id]]])
-       (is (nil? (db/pull (db/db connection) [:db/id] [:seon.issue/id issue-id])))
-       (is (= issue-id (:seon.eval/origin
-                       (db/pull (db/db connection) [:seon.eval/origin]
-                                [:seon.cluster.eval/id evaluation-id]))))))))
 
 (deftest a-test-retraction-is-not-a-function-deletion
   (support/with-database

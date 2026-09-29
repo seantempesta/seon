@@ -291,7 +291,7 @@
 
 (defn render-identity-ai
   "My identity as data: my id, my namespace and its steward, offering
-  `(help)`. The issues I work are their own concern (`seon.issue.opening`)."
+  `(help)`."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/identity-view :seon.db/error-result]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
   (let [agent-data (db/pull database identity-selector [:seon.agent/id agent-id])]
@@ -1641,7 +1641,7 @@
    ;; THE ARMER PRIMES ITSELF, because a missed wake must never decide
    ;; whether an agent has a graph. Agents committed BEFORE this proc was
    ;; reading — boot recovery, a fixture that seeds before it starts a
-   ;; cluster, `seon.issue/start!` racing the listener's registration — left
+   ;; cluster, a task assignment racing the listener's registration — left
    ;; no wake to receive, and the derive-all pass reads facts, so the only
    ;; safe prime is an unconditional one at the transition that makes this
    ;; proc live. `::flow/resume` is that transition: a proc starts paused

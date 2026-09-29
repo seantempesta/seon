@@ -9,7 +9,6 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.fn :as function]
-            [seon.issue :as issue]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -26,7 +25,6 @@
                                  (or [?caller :seon.fn/sym ?name]
                                      [?caller :seon.test/sym ?name])]
                                database 'seon.turn/open?))
-           plans (get-in report [:seon.program/plan :seon.program/issues])
            valid? (schema/projection-validator (schema/handed-projection) :seon.program/breakage)]
        (is (not (:seon.error/at report)))
        (is (= expected (:seon.program/callers report)))
@@ -36,15 +34,7 @@
        (is (seq (:seon.program/gating report)))
        (is (= (function/gate-set database 'seon.turn/open?)
               (:seon.program/gating tests) (:seon.program/gating report)))
-       (is (= (count expected) (count plans) (count (set (map :seon.issue/id plans)))))
-       (is (= plans (get-in (program/breaks request) [:seon.program/plan :seon.program/issues])))
-       (doseq [plan plans
-               :let [caller (second (first (:seon.issue/functions plan)))]]
-         (is (= (issue/subject-id 'seon.program/unresolved-callers [:seon.fn/sym caller])
-                (:seon.issue/id plan)))
-         (is (= (set (function/gate-set database caller))
-                (set (map second (:seon.issue/tests plan)))))
-         (is (= [:seon.fn/sym 'seon.program/unresolved-callers] (:seon.issue/detector plan))))
+       (is (not (contains? report :seon.program/plan)) "a break names its referrers; it proposes no issues")
        (is (seq (:seon.program/unknown report)))
        (is (valid? report))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))

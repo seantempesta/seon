@@ -241,7 +241,7 @@
     (fn [connection]
       (let [forms (schema.edn/packaged-forms)
             changes (ns-resolve 'seon.cluster 'declaration-changes)
-            attribute :seon.issue/agent
+            attribute :seon.task/agent
             installed (get (:schema @connection) attribute)]
         (is (true? (:db/index installed))
             "the canonical population declares the subject attribute indexed")

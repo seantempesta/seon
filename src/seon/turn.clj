@@ -1966,11 +1966,6 @@
                                                 :seon.cluster.eval/ordinal)
                                           (vals latest)))))))))
 
-(defn- issue-origin-read? [database source]
-  (when-let [origin (:seon.eval/origin source)]
-    (some? (:seon.issue/agent
-            (db/pull database [:seon.issue/agent] [:seon.issue/id origin])))))
-
 (defn- generated-read-fault
   "Check read dependencies, independent of the evaluator or stored entity shape.
   Callers hand the captured evidence; reference expansion is not an input to this check."
@@ -2022,11 +2017,7 @@
                                     ;; dependency on any particular attribute.
                                     ;; Answering it with the whole inert set
                                     ;; FABRICATED 68 dependencies the read never
-                                    ;; had: `(my.issue/status …)` reaches
-                                    ;; `seon.test/verified?` → the reach-digest
-                                    ;; cache refresh, and the declared issue
-                                    ;; block of every opening was refused for
-                                    ;; attributes it never touched. A generated
+                                    ;; had. A generated
                                     ;; read only depends on turn-taking when its
                                     ;; evidence NAMES a turn attribute; whether
                                     ;; an unnarrowed read must regenerate is
@@ -2036,7 +2027,7 @@
                                     (when-not (= :all attributes)
                                       (filter inert attributes)))))
                         evidence)]
-    (when (and (seq offending) (not (issue-origin-read? database source)))
+    (when (seq offending)
       (with-meta
        (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
        {:seon.turn/generated-read-attributes offending
@@ -2195,8 +2186,7 @@
                                   selected previews)
                   evaluated
                   (mapv (fn [source item]
-                          (if-let [previous (when-not (issue-origin-read? database source)
-                                              (get latest (source-key source)))]
+                          (if-let [previous (get latest (source-key source))]
                             (let [evaluation (:seon.sci.eval/evaluation item)
                                   changed (db/diff
                                            {:seon.db.diff/before (:seon.repl/shown-value previous)
@@ -2229,9 +2219,6 @@
                                  (phase
                                   #(record-evaluated-tx
                                   {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated})))
-                      ;; A SYSTEM TURN RUNS NO ISSUE TESTS. It appends
-                      ;; generated reads; it is not the agent answering, so
-                      ;; nothing it settles can newly satisfy an issue.
                       ;; a recording its own contract refused is this turn's
                       ;; refusal as a value, never a throw to the caller
                       report (if (:seon.turn.loop/phase-failed prepared)
@@ -2380,18 +2367,15 @@
   "Close a replied or generated run inside the settlement that gave its last
   form a terminal fact, decided at the writer on the value after the batch's
   receipts, so the run is one transaction. A run with a form still to
-  evaluate, and an agent holding an issue, keep the separate close pass: the
-  issue's tests must see the settled rows first."
+  evaluate keeps the separate close pass."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [::id ::id] [:seon.agent/id :seon.agent/id]]]
                   :seon.store/transaction-data]}
-  [database {run-id ::id agent-id :seon.agent/id}]
+  [database {run-id ::id}]
   (let [run (db/pull database [::reply-size ::closed-tx :seon.turn.work/situation] [::id run-id])]
     (if (or (not (or (::reply-size run) (= :generate (:seon.turn.work/situation run))))
             (::closed-tx run)
-            (next-ordinal database run-id)
-            (db/q '[:find ?issue . :in $ ?id :where [?agent :seon.agent/id ?id]
-                    [?issue :seon.issue/agent ?agent]] database agent-id))
+            (next-ordinal database run-id))
       []
       (close-call database {::id run-id}))))
 (defn problem-id
@@ -2675,14 +2659,11 @@
 
 (defn- spent-runs
   "`episode-runs` with the agent's outside-wake anchor when the caller already
-  holds it; nil reads it here, and only when no issue assignment anchors the count."
+  holds it; nil reads it here."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:maybe [:int {:min 0}]]]
                   [:or :seon.turn.work/episode-runs :seon.error/value]]}
   [db agent-id outside-t]
-  (let [issue-t (db/q '[:find ?t . :in $ ?agent-id :where
-                         [?agent :seon.agent/id ?agent-id]
-                         [?issue :seon.issue/agent ?agent ?t]] db agent-id)
-        since (or issue-t outside-t (outside-wake-t db agent-id))
+  (let [since (or outside-t (outside-wake-t db agent-id))
         replies (db/q '[:find [?run ...] :in $ ?agent-id ?since :where
                          [?agent :seon.agent/id ?agent-id]
                          [?run :seon.turn/agent ?agent]
@@ -2700,15 +2681,14 @@
                           [?run :seon.turn.work/situation :call]
                           [?run :seon.turn/closed-tx ?closed]
                           [(> ?closed ?tx)]] db agent-id since)]
-    (or (some #(when (db/read-refusal? %) %) [issue-t replies closed])
+    (or (some #(when (db/read-refusal? %) %) [replies closed])
         (count (into (set replies) closed)))))
 
 (defn episode-runs
-  "Count ordinary turns since issue assignment, or the latest outside wake.
+  "Count ordinary turns since the latest outside wake.
   Provider attempts and replies accepted after opening consume the bound.
   An agent also spends a turn when an ordinary call closes before a provider
-  attempt. Generated openings and same-transaction system turns remain free.
-  Issue budgets are total across resumes; messages do not refill them."
+  attempt. Generated openings and same-transaction system turns remain free."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.agent/id]
                   [:or :seon.turn.work/episode-runs :seon.error/value]]}
@@ -2716,26 +2696,21 @@
   (spent-runs db agent-id nil))
 
 (defn- max-episode-runs
-  "Read the issue budget, otherwise the agent override or its own cluster's
-  dial (`seon.config/agent-cluster-dial`)."
+  "Read the agent override or its own cluster's dial (`seon.config/agent-cluster-dial`)."
   {:malli/schema [:=> [:cat
                        [:or :seon.db/database-value :seon.error/value]
                        :seon.agent/id]
                   [:or :nil :seon.config.run/max-episode-runs
                    :seon.error/value]]}
   [database agent-id]
-  (let [issue-budget
-        (db/q '[:find ?budget . :in $ ?id :where
-                [?agent :seon.agent/id ?id] [?issue :seon.issue/agent ?agent]
-                [?issue :seon.issue/budget ?budget]] database agent-id)]
-    (if (db/read-refusal? issue-budget)
-      issue-budget
-      (or issue-budget
-          (db/q '[:find ?value . :in $ ?id
-                  :where [?agent :seon.agent/id ?id]
-                         [?agent :seon.agent/settings ?settings]
-                         [?settings :seon.config.run/max-episode-runs ?value]]
-                database agent-id)
+  (let [override (db/q '[:find ?value . :in $ ?id
+                         :where [?agent :seon.agent/id ?id]
+                                [?agent :seon.agent/settings ?settings]
+                                [?settings :seon.config.run/max-episode-runs ?value]]
+                       database agent-id)]
+    (if (db/read-refusal? override)
+      override
+      (or override
           (config/agent-cluster-dial database agent-id :seon.config.run/max-episode-runs)))))
 
 (defn turns-left
@@ -2771,8 +2746,8 @@
       :else
       (if-some [declarations-refusal (wake/declarations-refusal db)]
         declarations-refusal
-        ;; ONE ANCHOR READ: the outside-wake anchor bounds the count (absent
-        ;; an issue) and the failed-attempt window alike.
+        ;; ONE ANCHOR READ: the outside-wake anchor bounds the count
+        ;; and the failed-attempt window alike.
         (let [since (outside-wake-t db agent-id)
               spent (spent-runs db agent-id since)]
           (cond
@@ -2888,11 +2863,7 @@
                   [:or :nil :seon.turn.work/next :seon.error/value]]}
   [db {:keys [:seon.agent/id]}]
   (let [agent-id id
-        run (agent-run db agent-id)
-        issue (db/q '[:find (pull ?issue [:seon.issue/id :seon.issue/resolved-tx
-                                         :seon.issue/budget-exhausted-tx]) .
-                      :in $ ?agent-id :where [?agent :seon.agent/id ?agent-id]
-                      [?issue :seon.issue/agent ?agent]] db agent-id)]
+        run (agent-run db agent-id)]
     (cond
       ;; an open turn outranks any trigger: finishing what
       ;; is started is what makes the busy fence mean anything
@@ -2910,18 +2881,6 @@
          :seon.agent/id agent-id}
 
         :else nil)
-
-      issue
-      (let [remaining (turns-left db agent-id)]
-        (if (and (map? remaining)
-                 (contains? remaining :seon.error/at)
-                 (contains? remaining :seon.error/layer)
-                 (contains? remaining :seon.error/operation))
-          remaining
-          (when (and (not (:seon.issue/resolved-tx issue))
-                     (not (:seon.issue/budget-exhausted-tx issue))
-                     (pos? remaining))
-            {:seon.turn.work/situation :open :seon.agent/id agent-id})))
 
       :else
       ;; ONE TURN FOR EVERY UNANSWERED WAKE. The turn's own transaction
@@ -3307,7 +3266,7 @@
   Derived from the settled disposition and the undisposed agent form, the
   same two facts that emit `close-tx`, so the close and everything that
   belongs to it cannot disagree. A generated opening form settles without
-  closing, which is why it costs no issue test run."
+  closing."
   [{undisposed? :seon.turn.loop/undisposed? settled :seon.turn.loop/settled}]
   (boolean (or undisposed?
                (contains? #{:completed :wait} (:my.turn/disposition settled)))))
@@ -3453,12 +3412,6 @@
            settled (assoc :my.turn/value settled)))
         closing? (closing-settlement? {:seon.turn.loop/undisposed? undisposed?
                                        :seon.turn.loop/settled settled})
-        ;; ONLY THE CLOSE ASKS THE QUESTION. A mid-turn form settles without
-        ;; the agent having replied, so rerunning its issue's tests there
-        ;; cannot change the answer. A batch asks once for all its closes
-        ;; (`settle-batch!`). A refusal is delivered beside the value.
-        receipt (with-diagnostic receipt (when (and closing? (not batch?))
-                                           (plan/run-issue-tests! cluster agent-id)))
         side-tx
         (concat
          (when settled
@@ -3575,26 +3528,6 @@
                          (assoc % :seon.turn.loop/batch? true
                                   :seon.db.process/id process))
                        requests)
-        ;; The batch settles every generated opening form as well as the
-        ;; agent's own. Only the settlement that CLOSES the turn asks whether
-        ;; the issue is done, so an opening pass runs no issue tests at all.
-        issue-refusals (into {}
-                             (keep (fn [agent-id]
-                                     (when-let [refusal (plan/run-issue-tests! cluster agent-id)]
-                                       [agent-id refusal])))
-                             (into #{}
-                                   (keep identity)
-                                   (map (fn [request entry]
-                                          (when (closing-settlement? entry)
-                                            (:seon.agent/id request)))
-                                        requests prepared)))
-        ;; each refusal is delivered beside the value of its agent's closing form
-        prepared (mapv (fn [request entry]
-                         (if-let [refusal (and (closing-settlement? entry)
-                                               (get issue-refusals (:seon.agent/id request)))]
-                           (update entry :seon.turn.loop/receipt with-diagnostic refusal)
-                           entry))
-                       requests prepared)
         ;; The definitions these forms executed whose measurement moved,
         ;; once for every attempt: measuring advances their cells' marks.
         measured (measurement/significant-tx
@@ -5313,9 +5246,7 @@
                                :seon.turn.loop/turn-report]]]]]
                   :seon.turn.loop/turn-report]}
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
-  (let [;; a plan refusal is the agent's to act on: the turn still closes
-        issue-refusal (plan/run-issue-tests! cluster (:seon.agent/id work))
-        outcome (db/transact!
+  (let [outcome (db/transact!
                  (:seon.db/connection cluster)
                  (conj (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"})
                        [:db.fn/call #'plan/settle-call (:seon.agent/id work)]))]
@@ -5324,12 +5255,7 @@
                      :seon.agent/id (:seon.agent/id work)
                      :seon.error/value outcome})
           (report :error 0 outcome))
-      (if issue-refusal
-        (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
-                      :seon.agent/id (:seon.agent/id work)
-                      :seon.error/value issue-refusal})
-            (report :closed 0 issue-refusal))
-        (report :closed 0)))))
+      (report :closed 0))))
 
 (defn- generate-turn
   "Run the opening the shared system-turn source generator declares: every
@@ -5584,18 +5510,7 @@
                        ;; spent the last: no budget reads on its reply path.
                        _ (when-not (:seon.turn.loop/submission cluster)
                            (episode-exhausted! cluster agent-id result))]
-                   (if (and (= :closed (:seon.turn.loop/outcome result))
-                              (not= :generate (:seon.turn.work/situation work))
-                              (db/q '[:find ?issue . :in $ ?id :where
-                                      [?agent :seon.agent/id ?id]
-                                      [?issue :seon.issue/agent ?agent]]
-                                    (db/db (:seon.db/connection cluster)) agent-id))
-                     (let [refreshed (system-turn {:seon.turn.loop/cluster cluster
-                                                  :seon.agent/id agent-id :seon.turn/write? true})]
-                       (if (:seon.turn/refused-system-agent refreshed)
-                         (report :error 0 refreshed)
-                         result))
-                     result))))]
+                   result)))]
     (try
       (if-let [projection-state (:seon.sci.eval/projection-state cluster)]
         (schema/call-with-projection-state projection-state pass)
