@@ -142,7 +142,7 @@
               "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"]}
 
   ;; Rebuild the source-preferred class cache for the dependency namespaces
-  ;; reached by `seon.artifact`; first-party source remains uncached.
+  ;; reached by `seon.cluster.boot`; first-party source remains uncached.
   :dev-cache
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
           babashka/process {:local/root "reference-code/babashka-process"}}
@@ -178,9 +178,6 @@
    :extra-deps {com.clojure-goes-fast/clj-memory-meter {:mvn/version "0.3.0"}}
    :jvm-opts ["-Djdk.attach.allowAttachSelf" "--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED" "-XX:+UseG1GC" "-Xmx6g"]}
-
-  :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
-          :ns-default build}
 
   ;; Linting — run via Babashka for speed.
   ;; Usage: bb -M:lint src        (Splint)
