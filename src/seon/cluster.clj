@@ -2826,9 +2826,9 @@
         token (random-uuid)
         published-branch (keyword (str "rehearsal-" token))
         fork (keyword (str "rehearsal-" token "-" cluster-name))
-        ;; Beside, never inside, the archive's `.clj-kondo/.cache`: a launched
-        ;; archive links that path to the root's shared cache.
-        cache-root (str (io/file directory (str ".rehearsal-" token)))
+        ;; The committed archive is immutable input a concurrent start reads:
+        ;; scratch lives in its own temporary directory, never under it.
+        cache-root (str (babashka.fs/create-temp-dir {:prefix (str "seon-rehearsal-" token "-")}))
         thread (Thread/currentThread)
         loader (.getContextClassLoader thread)]
     (try
@@ -2863,7 +2863,7 @@
           (doseq [branch [fork published-branch]
                   :when (contains? (registry/roster held) branch)]
             (registry/retire-branch! {:seon.store/store held :seon.store/branch branch}))
-          (fs/delete-recursively! directory cache-root)
+          (fs/delete-recursively! (str (babashka.fs/parent cache-root)) cache-root)
           (finally (release-root-store! store-dir)))))))
 
 ;;; ---------------------------------------------------------------------------
