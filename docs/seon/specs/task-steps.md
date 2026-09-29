@@ -1,6 +1,6 @@
 ---
 type: spec
-status: proposed
+status: reviewed
 created: 2026-09-28
 tags: [spec, task, plan]
 ---
@@ -124,3 +124,16 @@ Open questions for root:
 4. `create!` needs ns/name/kind/intent and `kind :function|:namespace|:schema|:merge`; a general "work" task has no fitting kind. Add `:work` to `:seon.task/kind`? That adds a value to the handle aspect (`seon.issue/task-handle`).
 5. Probe before build (UNVERIFIED): component-set position ordering and cell-vector alternative; that `render/ns/task-ai` is reached from the agent's opening; cost of the assignment query under 50 ms on the live store; that no stored `:my.plan.item/id` reference exists elsewhere (`:my.note/about` rows).
 6. Order: moving issue code and renaming the shared error/request schemas is a separate landing, first, and independently green.
+
+## Root rulings (2026-09-28)
+
+- R1 Custody: steps live on the task at the task home. Tasks are shared coordination data, not program; a step
+  advance is one small durable write that root and the health view can see. Measure the write in the implementing
+  lane; if it exceeds 50 ms, bring numbers back before changing the model.
+- R2 Agents with no task: yes, create and claim a self task (add `:work` to the task kind if needed).
+- R3 Live plan data: stored data is disposable; no migration. Count it only for the report.
+- R4 Probes first: the implementing lane proves component-set ordering, task-ai reachability from the opening, and
+  the assignment query time at the REPL before writing code.
+- Order: issue cut slice 1 (task machinery into seon.task) → issue cut slice 2 (delete issue, including plan.clj's
+  run-issue-tests! and the issue half of settle-call: they are DELETED with issues, not moved) → this spec: steps on
+  tasks, rename :my.plan/request and the :my.plan/* error schemas to their real owners, delete plan.
