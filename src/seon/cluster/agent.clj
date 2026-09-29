@@ -654,8 +654,10 @@
         chosen (if stage (try (requiring-resolve stage) (catch Exception _ nil)) default)]
     (if (and (var? chosen) (= (:malli/schema (meta chosen)) (:malli/schema (meta default))))
       chosen
-      (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
-       {:seon.agent/refused-source-agent agent-id
+      (seon.error.refusal/error :seon.agent/source-submission-refused-error
+       {:seon.error/layer :seon.agent/source-submission
+        :seon.error/operation `submit-source!
+        :seon.agent/refused-source-agent agent-id
         :seon.error/message "The segmenter must name a function declaring seon.turn/planned-sources' contract."
         :seon.error/member :seon.agent/segmenter
         :seon.error/expected (:malli/schema (meta default))
@@ -728,8 +730,10 @@
       (assoc namespace-name :seon.agent/refused-source-agent agent-id)
 
       (nil? namespace-name)
-      (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
-       {:seon.agent/refused-source-agent agent-id
+      (seon.error.refusal/error :seon.agent/source-submission-refused-error
+       {:seon.error/layer :seon.agent/source-submission
+        :seon.error/operation `submit-source!
+        :seon.agent/refused-source-agent agent-id
         :seon.error/message "Source submission requires an agent with an assigned namespace."
         :seon.error/member :seon.agent/namespace
         :seon.error/expected :seon.ns/name})
@@ -766,8 +770,10 @@
                                  :seon.agent/routing routing}))]
             (if (async/offer! requests request)
               {:seon.turn/id run-id :seon.agent/reply reply}
-              (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
-               {:seon.agent/refused-source-agent agent-id
+              (seon.error.refusal/error :seon.agent/source-submission-refused-error
+               {:seon.error/layer :seon.agent/source-submission
+                :seon.error/operation `submit-source!
+                :seon.agent/refused-source-agent agent-id
                 :seon.error/message "The agent is busy: a submission already waits on its request port."
                 :seon.error/member :seon.agent/requests
                 :seon.error/expected :seon.agent/request
@@ -1585,7 +1591,7 @@
                     :where [?agent :seon.agent/id ?id]
                     [_ :seon.schedule.task/owner ?agent]]
                   database (vec candidates))
-        _ (when (:seon.error/at rows)
+        _ (when (seon.error.refusal/error? rows)
             (throw (ex-info "Agent arming could not read schedule owners." rows)))
         scheduled (set rows)]
     (into scheduled
