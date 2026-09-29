@@ -41,10 +41,15 @@
 (defn- flat-error
   {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map] [:and :seon.error/base [:or :my.fs/path-refused-error :my.fs/not-found-error :my.fs/not-directory-error :my.fs/read-limit-error :my.fs/read-failed-error :my.fs/not-regular-file-error :my.fs/changed-during-read-error :my.fs/invalid-utf8-window-error :my.fs/write-limit-error :my.fs/write-failed-error :my.fs/blob-unavailable-error :my.fs/already-exists-error :my.fs/stale-digest-error :my.fs/atomic-write-unsupported-error :my.fs/glob-failed-error :my.fs/invalid-glob-error]]]}
   [marker subject message data]
+  ;; Each marker's declared alternative is `<marker>-error` (the output union above);
+  ;; the constructor validates it, so a marker without one refuses loudly.
   (error.refusal/error
-   :my.fs/read 'seon.fs.jvm/flat-error
-   (if-let [path (:my.fs/path data)] (str message " Path: " path) message)
-   (cond-> {marker subject :seon.error/data data}
+   (keyword (namespace marker) (str (name marker) "-error"))
+   (cond-> {marker subject
+            :seon.error/data data
+            :seon.error/layer :my.fs/read
+            :seon.error/operation 'seon.fs.jvm/flat-error
+            :seon.error/message (if-let [path (:my.fs/path data)] (str message " Path: " path) message)}
      (fixes marker) (assoc :seon.error/fix (fixes marker)))))
 
 (defn- refuse!

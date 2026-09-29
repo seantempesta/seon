@@ -9,8 +9,13 @@
   {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map]
                   [:or :my.edit/stale-source-error :my.edit/not-utf8-error :my.edit/parse-refused-error]]}
   [marker subject message data]
-  (error.refusal/error :my.edit/edit 'seon.edit.jvm/flat-error message
-                       {marker subject :seon.error/data data}))
+  ;; Each marker's declared alternative is `<marker>-error` (the output union above).
+  (error.refusal/error (keyword (namespace marker) (str (name marker) "-error"))
+                       {marker subject
+                        :seon.error/data data
+                        :seon.error/layer :my.edit/edit
+                        :seon.error/operation 'seon.edit.jvm/flat-error
+                        :seon.error/message message}))
 
 (defn- stale-source
   {:malli/schema [:=> [:cat :seon.edit/request :my.fs/digest]
