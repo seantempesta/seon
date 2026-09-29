@@ -487,8 +487,10 @@
 (defn entity-emission
   "One pulled evaluation entity as an emission this namespace can render.
 
-  Resolve the evaluation's namespace ref against the carried database when
-  the pull did not expand its name."
+  The one converter from an evaluation entity to its emission, for history,
+  the debug session, the ledger and a turn's fresh forms alike. Resolve the
+  evaluation's namespace ref against the carried database when the pull did
+  not expand its name."
   {:malli/schema [:=> [:cat :seon.repl/entity-request] :seon.repl/emission]}
   [unit]
   (let [database (:seon.db/db unit)
@@ -546,7 +548,10 @@
                              ;; out of the response it was recorded for.
                              :seon.print/length
                              :seon.print/level
-                             :seon.print/options])
+                             :seon.print/options
+                             ;; ALREADY TEXT: the history assembly bounded the
+                             ;; branch's new errors once and set them here.
+                             :seon.repl/errors])
     ;; The recorded measures the declared bounds read, so this render's
     ;; findings match the MCP reply's and the next context's.
     :always (merge (select-keys unit (cost-attributes)))

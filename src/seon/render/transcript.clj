@@ -256,10 +256,19 @@
      (get orders (:db/id message)))))
 
 (defn- receipt-entry
+  "One evaluation entity as a transcript entry. The entity itself is what
+  `seon.repl/entity-emission` renders, so it carries its resolved namespace
+  name here (the pull's own, else its agent's, else `user`)."
+  {:malli/schema [:=> [:cat :map] :map]}
   [receipt]
-  (let [ordinal (:seon.cluster.eval/ordinal receipt)]
+  (let [namespace-name (or (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
+                           (get-in receipt [:seon.cluster.eval/run
+                                            :seon.turn/agent
+                                            :seon.agent/namespace
+                                            :seon.ns/name])
+                           'user)]
     {::kind :eval
-     ::entity receipt
+     ::entity (assoc-in receipt [:seon.cluster.eval/ns :seon.ns/name] namespace-name)
      ::id (:seon.cluster.eval/id receipt)
      ;; A FROZEN EVALUATION THAT NEVER STARTED HAS NO START INSTANT, and it
      ;; is still a transcript entry — the run's own opening is when the agent
@@ -267,38 +276,14 @@
      ::at (or (:seon.cluster.eval/at receipt)
               (get-in receipt [:seon.cluster.eval/run
                                :seon.turn/opened-tx :db/txInstant]))
-     ::ordinal ordinal
+     ::ordinal (:seon.cluster.eval/ordinal receipt)
      ::run-id (get-in receipt [:seon.cluster.eval/run
                                :seon.turn/id])
      ::run-opened-at (get-in receipt [:seon.cluster.eval/run
                                       :seon.turn/opened-tx :db/txInstant])
-     ;; ONE ENTITY PER (run, ordinal): the frozen source is this evaluation's
-     ;; own attribute, not a twin form entity joined by ordinal.
      ::source (:seon.cluster.eval/source receipt)
-     ::namespace
-     (or (get-in receipt [:seon.cluster.eval/ns :seon.ns/name])
-         (get-in receipt [:seon.cluster.eval/run
-                          :seon.turn/agent
-                          :seon.agent/namespace
-                          :seon.ns/name])
-         'user)
      ::read-basis (:seon.cluster.eval/read-basis-transaction receipt)
-     ::result (:seon.eval/shown receipt)
-     ::renderer (or (some-> (get-in receipt [:seon.eval/renderer-fn :seon.fn/sym]) symbol)
-                    (:seon.eval/renderer receipt))
-     ::error (:seon.cluster.eval/error receipt)
-     ::diagnostics (:seon.cluster.eval/diagnostics receipt)
-     ::problem-id (:seon.problems/id receipt)
-     ::interrupted-at (:seon.cluster.eval/interrupted-at receipt)
-     ::comment (:seon.cluster.eval/comment receipt)
-     ::duration-ms (:seon.eval/duration-ms receipt)
-     ::cost (select-keys receipt (repl/cost-attributes))
-     ::print-length (:seon.print/length receipt)
-     ::print-level (:seon.print/level receipt)
-     ::ending-ns (:seon.sci.eval/ending-ns receipt)
-     ::output (:seon.cluster.eval/output receipt)}))
-
-
+     ::error (:seon.cluster.eval/error receipt)}))
 
 (defn- entry-order
   [entry]
@@ -452,61 +437,6 @@
          sentence
          (when (seq extra) (str "\n" (floor-text unit extra))))))
 
-(defn- entry-handle
-  "The handle naming one entry's value, or nil.
-
-  A stored evaluation derives it from its own entity id; an in-memory one
-  carries the handle the fork actually bound. Either way the name comes from
-  the identity the value is reachable under, never from an ordinal that
-  restarts in every run — and never for a value that was not stored, which
-  has no node for the predicate to admit and which the turn's fork therefore
-  binds to nothing."
-  [entry]
-  (let [entity (::entity entry)]
-    (or (:seon.repl/handle entity)
-        (when (and (string? (:seon.cluster.eval/id entity)) (string? (::result entry)))
-          (admit/result-handle (:seon.cluster.eval/id entity))))))
-
-(defn- emission
-  "One transcript entry as the REPL emission `seon.repl` renders.
-
-  `seon.repl` owns the GRAMMAR and the value renderer owned the BOUNDING,
-  once, at evaluation time. The already-bounded shown text travels as the
-  node, so the page, the history unit and the prompt read the same bytes
-  because they read the same function. This entry takes no render unit
-  precisely because it re-decides nothing: the second clipping spot that
-  needed the unit's floor and print options is deleted."
-  [entry]
-  (let [handle (entry-handle entry)]
-    (cond-> {:seon.cluster.eval/source (::source entry)
-             :seon.ns/name (or (::namespace entry) 'user)}
-      (::comment entry) (assoc :seon.cluster.eval/comment (::comment entry))
-      (::ordinal entry) (assoc :seon.cluster.eval/ordinal (::ordinal entry))
-      handle (assoc :seon.repl/handle handle)
-      ;; MISSING IS A TERMINAL FACT OF THE EVALUATION, so it travels as one
-      ;; and `seon.repl` writes the one sentence for it. Bounding a value
-      ;; that was never stored is not a thing this call can do.
-      (and (::result entry) (nil? (::missing entry)))
-      (assoc :seon.repl/value
-             (::result entry))
-      (::renderer entry) (assoc :seon.eval/renderer (::renderer entry))
-      (int? (::print-length entry)) (assoc :seon.print/length
-                                           (::print-length entry))
-      (int? (::print-level entry)) (assoc :seon.print/level
-                                          (::print-level entry))
-      (::error entry) (assoc :seon.cluster.eval/error
-                             (::error entry))
-      (::diagnostics entry) (assoc :seon.cluster.eval/diagnostics
-                                   (::diagnostics entry))
-      (::output entry) (assoc :seon.cluster.eval/output
-                              (::output entry))
-      (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
-      (::duration-ms entry) (assoc :seon.eval/duration-ms
-                                   (::duration-ms entry))
-      (seq (::cost entry)) (merge (::cost entry))
-      (::branch-errors-text entry) (assoc :seon.repl/errors
-                                          (::branch-errors-text entry)))))
-
 (defn- projected-entry
   [unit entry detail]
   ;; Every value this entry renders through the floor is rooted at the entry's
@@ -527,7 +457,8 @@
               ;; One frozen form or settled evaluation, through the one REPL
               ;; generator: `repl/text` emits a prompt line and no response
               ;; when nothing has settled, so running needs no second arm.
-              :eval (repl/text (emission entry))
+              :eval (repl/text (repl/entity-emission
+                          (assoc (::entity entry) :seon.db/db (:seon.db/db unit))))
               ;; The run's own `:seon.render/ai`, with no grammar of its own.
               :run (or (turn/render-ai (::entity entry)) ""))}))
 
@@ -689,7 +620,7 @@
                       (let [text (floor-text (assoc unit :seon.render.value/root (::root entry))
                                              found)]
                         (if (string? text)
-                          (assoc entry ::branch-errors-text text)
+                          (assoc-in entry [::entity :seon.repl/errors] text)
                           (throw (ex-info (str (:seon.error/message text)) text))))
                       entry))
                   entries)))))
@@ -799,15 +730,6 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
-        agent-id (:seon.agent/id unit)
-        namespace-name
-        (db/q '[:find ?name .
-                :in $ ?agent-id
-                :where
-                [?agent :seon.agent/id ?agent-id]
-                [?agent :seon.agent/namespace ?namespace]
-                [?namespace :seon.ns/name ?name]]
-              db agent-id)
         candidates (candidate-history unit)
         entries
         (mapv
@@ -816,10 +738,7 @@
            ;; the debug page's AI column and the provider prompt cannot drift
            ;; apart: there is no second place that decides how an evaluation
            ;; reads.
-           (let [entry (cond-> entry
-                         (nil? (::namespace entry))
-                         (assoc ::namespace namespace-name))
-                 emitted (emission entry)]
+           (let [emitted (repl/entity-emission (assoc (::entity entry) :seon.db/db db))]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.cluster.eval/ordinal (::ordinal entry)
