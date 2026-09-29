@@ -697,6 +697,32 @@
                        :seon.error/operation operation}
                       members))))
 
+(defn error?
+  "Whether `value` is an error value: a map carrying the base's three required
+  members. The one check; every hand-written variant is this."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [value]
+  (and (map? value) (every? #(some? (get value %)) [:seon.error/at :seon.error/layer :seon.error/operation]) true))
+
+(defn error
+  "The error value for a refusal at `operation` in `layer`, in one call:
+  `message` and the producer's `members` (offending, expected, cause) beside
+  the common part [[diagnostic]] supplies. Returned, never thrown."
+  {:malli/schema [:=> [:cat :seon.error/layer :seon.error/operation :string :map] :seon.error/base]}
+  [layer operation message members]
+  (diagnostic (java.util.Date.) layer operation (assoc members :seon.error/message message)))
+
+(defmacro let-ok
+  "Like `let`, but a bound value that is an [[error?]] is returned at once and
+  the rest is not evaluated, so callers stop writing `(if (error? x) x ...)`
+  ladders. Expands to plain `let` and `if`: contracts stay on the functions."
+  [bindings & body]
+  (if (empty? bindings)
+    `(do ~@body)
+    (let [[target expr & more] bindings]
+      `(let [value# ~expr]
+         (if (error? value#) value# (let [~target value#] (let-ok ~(vec more) ~@body)))))))
+
 (defn refusal
   "Deepest structural error in `ex-data`, retaining its exception message;
   else deepest non-empty data, or nil.

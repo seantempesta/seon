@@ -412,3 +412,15 @@
             :seon.error/operation 'a/b :x/member 1} (ex-data error)))
     (is (identical? at (:seon.error/at value)))
     (is (identical? cause (ex-cause error)))))
+
+(deftest helpers-build-recognize-and-short-circuit-on-errors
+  (let [failure (error.refusal/error :seon.error.refusal-test/probe 'seon.error.refusal-test/probe
+                                     "Probe refused." {:seon.error/offending 1})
+        evaluated (volatile! false)]
+    (is (error.refusal/error? failure))
+    (is (= "Probe refused." (:seon.error/message failure)))
+    (is (= 1 (:seon.error/offending failure)))
+    (is (not-any? error.refusal/error? [nil {} {:seon.error/at 1} [failure]]))
+    (is (= failure (error.refusal/let-ok [a 1 b failure c (vreset! evaluated true)] [a b c])))
+    (is (false? @evaluated))
+    (is (= [1 2] (error.refusal/let-ok [a 1 b (inc a)] [a b])))))

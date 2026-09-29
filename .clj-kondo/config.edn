@@ -99,7 +99,8 @@
  ;; binding shape applies; def-catch-all keeps unresolved-symbol trustworthy
  ;; everywhere else.
  :lint-as
- {seon.db.remote-contract-test/with-authority clj-kondo.lint-as/def-catch-all}
+ {seon.db.remote-contract-test/with-authority clj-kondo.lint-as/def-catch-all
+  seon.error.refusal/let-ok clojure.core/let}
 
  ;; The one bounded await owner is the only namespace allowed the bare forms.
  ;; The print owners are the only namespaces allowed the bare printers: the
