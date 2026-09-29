@@ -397,6 +397,32 @@
                   (is (= #{} (:refused stable))
                       "a branch behind the adoption is not the branch's own change and refuses nothing"))))))))))))
 
+(deftest ^{:seon.test/long "Two complete SCI acquisitions of the canonical fixture program (the loaded one and a branch value lacking one declaration)."
+           :seon.test/long-ms 12000}
+  a-branch-forked-before-a-platform-change-binds-the-loaded-compiled-var
+  ;; Root, 2026-09-28: an agent forked before a reload could not resolve
+  ;; `my.program/search`, which the reload added: host bindings came from the
+  ;; branch's own rows only, and the branch predates the row.
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [subject 'seon.render.value/bounded-text
+             before (db/db connection)
+             projection (db/carried-projection before)
+             predating (vary-meta (:db-after (d/with before [[:db/retractEntity [:seon.fn/sym subject]]]))
+                                  assoc :seon.schema/projection projection)
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before projection)
+                                   {:seon.sci.eval/loaded-connection connection})]
+         (is (nil? (db/pull predating '[:seon.fn/sym] [:seon.fn/sym subject]))
+             "the branch value has no row for the function the loaded program has")
+         (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db predating
+                         :seon.schema/projection projection})
+         (is (some? (sci/resolve ctx subject)) "the loaded program's function resolves in the branch's context")
+         (is (identical? @(find-var subject) @(sci/resolve ctx subject))
+             "it is the compiled Var's root, running as compiled on every branch")))))))
+
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program with two changed entities whose closures reach four declarations."
            :seon.test/long-ms 8000}
   an-unoverridden-host-bound-declaration-refuses-by-name-only-when-called

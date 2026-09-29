@@ -2350,6 +2350,43 @@
         "the producer's own message survives in the diagnostic")
     (is (= "#'my.x/lint3" (:seon.eval/shown receipt)) "the value stands")))
 
+(deftest a-plain-failing-call-never-carries-the-not-admitted-diagnostic
+  ;; Root, 2026-09-28: `(my.program/no-such-fn 1)` (an unresolved qualified
+  ;; symbol in a program namespace) carried "Not admitted to the program" though
+  ;; the form declares nothing: SCI touched the namespace map, the facts stage
+  ;; refused that namespace-only change, and `not-admitted` spoke for it.
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name "plain-call-proof"})
+     (support/seed-cluster! connection "plain-call-proof")
+     (checked-transact! connection
+                        (agent/creation-tx {:seon.agent/id "caller"
+                                            :seon.ns/name 'my.agents.caller
+                                            :seon.cluster/name "plain-call-proof"}))
+     (let [ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.env/environment (support/environment "plain-call-proof" connection)
+                    :seon.db/connection connection
+                    :seon.cluster/name "plain-call-proof"
+                    :seon.db.process/id cluster/boot-process-identity
+                    :seon.sci.eval/ctx ctx})
+           evaluations (mapv #(get % :seon.sci.eval/evaluation)
+                             (:seon.turn.loop/evaluated-sources
+                              (turn/evaluate-sources
+                               {:seon.turn.loop/cluster handle
+                                :seon.sci.eval/ctx ctx
+                                :seon.agent/id "caller"
+                                :seon.cluster.eval/ordinal 0
+                                :seon.ns/name 'my.agents.caller
+                                :seon.cluster.reply/sources
+                                [{:seon.cluster.eval/source "(my.program/no-such-function 1)"}
+                                 {:seon.cluster.eval/source "(my.plan/no-such-function 1)"}]})))]
+       (is (= 2 (count evaluations)))
+       (is (not-any? #(str/includes? (str (:seon.cluster.eval/diagnostics %)) "Not admitted to the program")
+                     evaluations)
+           "a form that declares nothing has nothing to admit")))))
+
 (deftest a-branch-operation-is-supplied-its-context-from-the-world
   ;; Lanes, 2026-09-28: `(my.agent/retire-branch! {...})` from MCP refused
   ;; its argument count: its context's store and routing were no world's

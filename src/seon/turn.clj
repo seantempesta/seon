@@ -5097,7 +5097,8 @@
                       :seon.turn/max-source (:seon.config.eval.result/max-source (:seon.sci.admit/caps cluster))
                       :seon.sci.eval/time-limit-ms limit})
                     (dissoc :seon.batch/settle))
-        batch (seon.batch/evaluate-batch request)]
+        batch (seon.batch/evaluate-batch request)
+        registered? (boolean (seq (schema/changed-keys (:seon.sci.batch/delta request))))]
     {:seon.turn.loop/evaluated-sources
      (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before reads facts-error change] :as entry}]
              (let [row (get rows (- ordinal first-ordinal))
@@ -5110,7 +5111,11 @@
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (entry-bindings batch ordinal)) (assoc :seon.sci.eval/bindings (entry-bindings batch ordinal))
-                                facts-error (not-admitted facts-error))
+                                ;; only a form that declares has something to admit: a Var bound,
+                                ;; or a schema registered by this run (a plain call whose namespace
+                                ;; map SCI touched proposes nothing to refuse)
+                                (and facts-error (or (seq (entry-bindings batch ordinal)) registered?))
+                                (not-admitted facts-error))
                    ;; A generated read whose reads now depend on the agent's own
                    ;; turn-taking (`generated-read-fault`) keeps its value: the
                    ;; fault rides beside it as a diagnostic, and its stored
