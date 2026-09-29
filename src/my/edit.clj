@@ -51,7 +51,7 @@
                     :my.edit/source \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/form-request]
-    [:or :my.edit/result :my.edit/error]]
+    [:or :my.edit/result :my.edit/tool-error]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
@@ -74,7 +74,7 @@
                      :my.edit/new-string \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/exact-request]
-    [:or :my.edit/result :my.edit/error]]
+    [:or :my.edit/result :my.edit/tool-error]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]
@@ -82,6 +82,11 @@
 
 (defn lines!
   "Replace an inclusive line window after checking its text and digest.
+
+  :my.edit/old-window is the exact text of lines from-line..to-line including
+  each line's trailing newline (a file's last line has none unless it ends with
+  one); :my.edit/new-window replaces it byte for byte, so end it with a newline
+  to keep the line structure.
 
   Returns :my.edit/path, :my.edit/changed?, before/after digests and byte
   counts, plus :my.edit/source-window and its line bounds. A stale digest
@@ -94,11 +99,13 @@
     (my.edit/lines! {:my.edit/path \"example.clj\"
                     :my.edit/expected-digest (:my.fs/after-digest file)
                      :my.edit/from-line 1 :my.edit/to-line 1
+                     ;; the example file has no trailing newline; a file with
+                     ;; one needs \"...\\n\" in both windows
                      :my.edit/old-window \"(def example 1)\"
                      :my.edit/new-window \"(def example 2)\"}))"
   {:malli/schema
    [:=> [:cat :my.edit/lines-request]
-    [:or :my.edit/result :my.edit/error]]
+    [:or :my.edit/result :my.edit/tool-error]]
    :seon.workload :io
    :seon.effect/capability 'seon.edit.jvm/edit}
   [request]

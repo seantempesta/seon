@@ -453,7 +453,9 @@
        (cond-> {:seon.error/at (java.util.Date.)
         :seon.error/layer :my.shell/execution
         :seon.error/operation 'seon.shell.jvm/run
-        :seon.error/message "The foreground process could not be completed; inspect the captured cause."
+        :seon.error/message (str "The foreground process " (first (:my.shell/argv request))
+                                 " could not be completed: " (ex-message error))
+        :seon.error/fix "Check that the executable exists on PATH and the argv is a vector of strings; the cause chain has the exact failure."
         :seon.error/offending request
         :my.shell/failed-argv (:my.shell/argv request)
         :seon.error/throwable error

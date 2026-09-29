@@ -476,7 +476,7 @@
             expected (:my.edit/old-window request)]
         (if (not= expected actual)
           (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/lines
-           {:seon.error/message "The guarded line window does not match current source."
+           {:seon.error/message "The guarded line window does not match current source; :my.edit/old-window is the exact text of the lines including each line's trailing newline (see :my.edit/actual-window)."
         :seon.error/offending request
         :seon.error/data {:my.edit/from-line from-line
                        :my.edit/to-line to-line

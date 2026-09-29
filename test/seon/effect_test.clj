@@ -1,9 +1,12 @@
 (ns seon.effect-test
-  (:require [my.fs]
+  (:require [my.edit]
+            [my.fs]
+            [my.shell]
             [clojure.core.async :as async]
             [clojure.edn :as edn]
             [malli.core :as m]
             [malli.generator :as mg]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.core :as datahike]
             [sci.core :as sci]
@@ -943,6 +946,60 @@
         (testing "the exact admitted text still rides its own attributes"
           (is (string? (:seon.effect/request-edn receipt)))
           (is (string? (:seon.effect/result-edn receipt))))
+        (.delete (java.io.File. path))
+        (.delete (.getParentFile (java.io.File. path)))))))
+
+(deftest tool-runtime-failures-return-the-producer-error-value
+  ;; THE CLASS: a tool's runtime failure was reported as the armed output
+  ;; contract refusing the error itself (`:my.fs/error` demanded members no
+  ;; producer supplies), so the agent never learned the file was missing, the
+  ;; digest stale, the precondition failed or the command absent. Each error is
+  ;; now the producer's own flat value; assert its DATA keys, one per class.
+  (test-support/with-database
+    (fn [connection]
+      (seed-effect-run! connection)
+      (let [path (temporary-path connection)
+            directory (str (.getParentFile (java.io.File. path)))
+            stale-digest (apply str (repeat 64 "a"))
+            valid? (fn [alternative value]
+                     ((schema/projection-validator (schema/handed-projection) alternative) value))]
+        (binding [effect/*request-context* (request-context connection)]
+          (testing "a missing file names its path and the next step"
+            (let [error (my.fs/read {:my.fs/path path})]
+              (is (= path (:my.fs/not-found error)))
+              (is (valid? :my.fs/not-found-error error))
+              (is (valid? :my.fs/tool-error error))
+              (is (str/includes? (:seon.error/message error) path))
+              (is (string? (:seon.error/fix error)))))
+          (my.fs/write! {:my.fs/path path
+                         :my.fs/content {:my.fs/text "line1\n"}
+                         :my.fs/precondition {:my.fs/expected-absence? true}})
+          (testing "a failed precondition names the existing path"
+            (let [error (my.fs/write! {:my.fs/path path
+                                       :my.fs/content {:my.fs/text "x"}
+                                       :my.fs/precondition {:my.fs/expected-absence? true}})]
+              (is (= path (:my.fs/already-exists error)))
+              (is (valid? :my.fs/already-exists-error error))
+              (is (valid? :my.fs/tool-error error))
+              (is (string? (:seon.error/fix error)))))
+          (testing "a stale digest carries the digest the file has now"
+            (let [error (my.edit/exact! {:my.edit/path path
+                                         :my.edit/expected-digest stale-digest
+                                         :my.edit/old-string "line1"
+                                         :my.edit/new-string "L1"})]
+              (is (= path (:my.edit/stale-source error)))
+              (is (valid? :my.edit/stale-source-error error))
+              (is (valid? :my.edit/tool-error error))
+              (is (string? (:my.fs/digest error)))
+              (is (str/includes? (:seon.error/message error) path))))
+          (testing "a command that does not exist is named in the error"
+            (let [error (my.shell/run! {:my.shell/argv ["nosuchcmd-xyz"]
+                                        :my.shell/cwd directory})]
+              (is (= ["nosuchcmd-xyz"] (:my.shell/failed-argv error)))
+              (is (valid? :my.shell/start-failed-error error))
+              (is (valid? :my.shell/tool-error error))
+              (is (str/includes? (:seon.error/message error) "nosuchcmd-xyz"))
+              (is (string? (:seon.error/fix error))))))
         (.delete (java.io.File. path))
         (.delete (.getParentFile (java.io.File. path)))))))
 

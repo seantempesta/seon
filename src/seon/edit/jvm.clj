@@ -2,25 +2,22 @@
   "Protected JVM handler for digest-fenced structural source edits."
   (:require [clojure.java.io :as io]
             [seon.edit :as edit]
+            [seon.error.refusal :as error.refusal]
             [seon.fs.jvm :as fs.jvm]))
 
 (defn- flat-error
   {:malli/schema [:=> [:cat :qualified-keyword :seon.schema/value :string :map]
                   [:or :my.edit/stale-source-error :my.edit/not-utf8-error :my.edit/parse-refused-error]]}
   [marker subject message data]
-  {marker subject
-   :seon.error/at (java.util.Date.)
-   :seon.error/layer :my.edit/edit
-   :seon.error/operation 'seon.edit.jvm/flat-error
-   :seon.error/message message
-   :seon.error/data data})
+  (error.refusal/error :my.edit/edit 'seon.edit.jvm/flat-error message
+                       {marker subject :seon.error/data data}))
 
 (defn- stale-source
   {:malli/schema [:=> [:cat :seon.edit/request :my.fs/digest]
                   :my.edit/stale-source-error]}
   [request actual-digest]
   (flat-error :my.edit/stale-source (:my.edit/path request)
-              "The source file no longer has the expected digest."
+              (str "The source file no longer has the expected digest. Path: " (:my.edit/path request))
               {:my.edit/path (:my.edit/path request)
                :my.edit/expected-digest (:my.edit/expected-digest request)
                :my.fs/digest actual-digest}))

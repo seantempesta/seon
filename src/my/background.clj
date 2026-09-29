@@ -9,6 +9,7 @@
 (schema.edn/load! {})
 
 (defn- invalid-call
+  {:malli/schema [:=> [:cat :seon.schema/value] :my.background/invalid-call-error]}
   [forms]
   (seon.error.refusal/diagnostic (java.util.Date.) :my.background/call 'my.background/background
    {:seon.error/message "background refused its call at [:forms]: expected one direct capability call with one request map, optionally preceded by an options map, but observed another form shape. Fix: inspect (doc my.background/background) and supply the documented direct call."
@@ -42,7 +43,8 @@
               (if execution
                 (list 'merge {:seon.effect/background? true} execution)
                 {:seon.effect/background? true})))
-      (invalid-call forms))))
+      ;; The refusal is a value: quote it so its embedded forms are not evaluated.
+      (list 'quote (invalid-call forms)))))
 
 (defn poll
   "Read a background request's current result without waiting.

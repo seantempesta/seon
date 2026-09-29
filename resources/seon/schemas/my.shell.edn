@@ -82,8 +82,15 @@
  :seon.error/base
  [:map
   {:seon.db/attributes true}
-  [:my.shell/error-command :my.shell/error-command]
-  [:my.shell/execution-observation :my.shell/execution-observation]]]
+  [:my.shell/error-command {:optional true} :my.shell/error-command]
+  [:my.shell/execution-observation {:optional true} :my.shell/execution-observation]]]
+
+ ;; What my.shell/run! returns when it fails: seon.shell.jvm's declared
+ ;; alternatives and the effect boundary's.
+ :my.shell/tool-error
+ [:or :my.shell/cwd-refused-error :my.shell/stdin-limit-error :my.shell/blob-unavailable-error
+  :my.shell/time-limit-error :my.shell/start-failed-error :seon.await/timeout-error
+  :seon.effect/boundary-error]
 
  :my.shell/error-command
  [:and

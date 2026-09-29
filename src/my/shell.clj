@@ -28,14 +28,14 @@
 
   Supply :my.shell/argv and :my.shell/cwd. No shell expansion occurs unless
   the executable is a shell. Returns :my.shell/exit, :my.shell/stdout and
-  :my.shell/stderr with the argv and cwd. Optional :my.shell/stdin supplies
-  text, bytes or a blob.
+  :my.shell/stderr with the argv and cwd. Optional stdin is one of
+  :my.shell/stdin-text, :my.shell/stdin-bytes or :seon.blob/digest (a blob).
 
   Example:
   (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"] :my.shell/cwd \".\"})"
   {:malli/schema
    [:=> [:cat :my.shell/run-request]
-    [:or :my.shell/run-result :my.shell/error]]
+    [:or :my.shell/run-result :my.shell/tool-error]]
    :seon.workload :io
    :seon.effect/capability 'seon.shell.jvm/run}
   [request]

@@ -38,7 +38,12 @@
          (macroexpand-1
           '(my.background/background
             (my.example/call {:my.example/id 1})))))
-  (let [refusal (macroexpand-1 '(my.background/background (+ 1 2 3)))]
+  ;; The refusal is quoted data: evaluating the expansion returns it, and the
+  ;; agent's own forms are never evaluated (an unresolved head once leaked
+  ;; "Unable to resolve var: capability" from the quoted example).
+  (let [expansion (macroexpand-1 '(my.background/background (+ 1 2 3)))
+        refusal (eval expansion)]
+    (is (= 'quote (first expansion)))
     (is (= "((+ 1 2 3))" (:my.background/call-source refusal)))
     (is (= 'my.background/background (:seon.error/operation refusal))))
   ;; The agent's own limit is ordinary execution data on the same call: the
