@@ -26,6 +26,28 @@
   "Classpath directory backed by `resources/seon/schemas/` in a source checkout."
   "seon/schemas")
 
+(def ^:dynamic *resource-loader*
+  "The class loader schema resources are read through while bound: a boot
+  rehearsal binds a candidate archive's loader (`seon.cluster/rehearse-source!`).
+  Unbound, resources come from the loader that loaded this namespace.
+
+  Never the thread's context class loader: that is a per-thread place every
+  pool thread inherits from the thread that created it. A rehearsal that set
+  it leaked its candidate loader into the core.async threads it spawned; once
+  the candidate archive was deleted, every settlement transaction running on
+  one of them refused with `::unreadable-file` (fault 7b2cf983e1a4, 2026-09-29)."
+  nil)
+
+(def ^:private namespace-loader
+  (.getClassLoader (class (fn []))))
+
+(defn- resource-loader
+  "The loader schema resources are read through: [[*resource-loader*]] when
+  bound, else this namespace's loader."
+  {:malli/schema [:=> [:cat] :seon.test/class-loader]}
+  []
+  (or *resource-loader* namespace-loader))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
@@ -144,7 +166,7 @@
 
 (defn- directory-resource?
   [resource]
-  (let [url (or (io/resource resource) (unreadable-file! resource))]
+  (let [url (or (io/resource resource (resource-loader)) (unreadable-file! resource))]
     (or (and (= "file" (.getProtocol url))
              (.isDirectory (io/file url)))
         (and (= "jar" (.getProtocol url))
@@ -200,7 +222,7 @@
 (defn- schema-resource-paths
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
   [resource]
-  (let [url (or (io/resource resource) (unreadable-file! resource))]
+  (let [url (or (io/resource resource (resource-loader)) (unreadable-file! resource))]
     (if (or (= "jar" (.getProtocol url))
             (and (= "file" (.getProtocol url))
                  (.isDirectory (io/file url))))
@@ -210,7 +232,7 @@
 (defn- read-schema-resource
   {:malli/schema [:=> [:cat :string] [:map [:seon.schema.edn/file :string] [:seon.schema.edn/resource :string] [:seon.schema.edn/forms :map]]]}
   [resource]
-  (let [url (or (io/resource resource) (unreadable-file! resource))
+  (let [url (or (io/resource resource (resource-loader)) (unreadable-file! resource))
         file (.toExternalForm url)
         value
         (try
@@ -361,7 +383,7 @@
   {:seon/tasks #{"68490518e186"}
    :malli/schema [:=> [:cat] [:vector [:tuple :string :int :int]]]}
   []
-  (let [url (or (io/resource default-resource)
+  (let [url (or (io/resource default-resource (resource-loader))
                 (unreadable-file! default-resource))]
     (if (and (= "file" (.getProtocol url))
              (.isDirectory (io/file url)))
@@ -384,7 +406,7 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (seon.cache/lookup ::packaged-population
-                     (str (io/resource default-resource))
+                     (str (io/resource default-resource (resource-loader)))
                      #(* population-bytes-per-form (count (::declared-forms %)))
                      #(resource-population default-resource)))
 

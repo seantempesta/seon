@@ -41,34 +41,54 @@
     (is (= declared (entries forms)))
     (is (= #{:example/declared} (entries synthetic)))))
 
+(defn- resource-loader
+  "A class loader answering each resource through `answer` (a function of the
+  resource name returning a URL or nil): what `schema.edn/*resource-loader*`
+  binds, the way a boot rehearsal binds a candidate archive's loader."
+  [answer]
+  (proxy [ClassLoader] [nil]
+    (getResource [^String resource-name] (answer resource-name))))
+
 (defn- with-temporary-resources
   [files f]
   (let [fixture-id (str (random-uuid))
         resource-root (str "schema-edn-test/" fixture-id)
-        directory (io/file "tmp" "schema-edn-test" fixture-id)
-        resolve-resource io/resource]
+        directory (io/file "tmp" "schema-edn-test" fixture-id)]
     (doseq [[relative-path content] files]
       (let [file (io/file directory relative-path)]
         (.mkdirs (.getParentFile file))
         (spit file content)))
-    (with-redefs [io/resource
-                  (fn [resource]
-                    (if (or (= resource resource-root)
-                            (str/starts-with? resource
-                                              (str resource-root "/")))
-                      (let [relative-path
-                            (subs resource (count resource-root))
-                            relative-path
-                            (if (str/starts-with? relative-path "/")
-                              (subs relative-path 1)
-                              relative-path)
-                            file (if (seq relative-path)
-                                   (io/file directory relative-path)
-                                   directory)]
-                        (when (.exists file)
-                          (.toURL (.toURI file))))
-                      (resolve-resource resource)))]
+    (binding [schema.edn/*resource-loader*
+              (resource-loader
+               (fn [resource]
+                 (if (or (= resource resource-root)
+                         (str/starts-with? resource (str resource-root "/")))
+                   (let [relative-path (subs resource (count resource-root))
+                         relative-path (if (str/starts-with? relative-path "/")
+                                         (subs relative-path 1)
+                                         relative-path)
+                         file (if (seq relative-path)
+                                (io/file directory relative-path)
+                                directory)]
+                     (when (.exists file)
+                       (.toURL (.toURI file))))
+                   (io/resource resource))))]
       (f resource-root))))
+
+(deftest schema-resources-ignore-the-thread-context-class-loader
+  ;; Fault 7b2cf983e1a4 (2026-09-29): a boot rehearsal set its thread's context
+  ;; loader, the core.async threads it spawned inherited it, and once the
+  ;; candidate archive was gone every settlement transaction on them refused.
+  (let [expected (schema.edn/packaged-forms)
+        task (java.util.concurrent.FutureTask.
+              ^java.util.concurrent.Callable
+              #(try (schema.edn/packaged-forms)
+                    (catch Exception failure (ex-data failure))))
+        thread (Thread. task)]
+    (.setContextClassLoader thread (resource-loader (constantly nil)))
+    (.start thread)
+    (is (= expected (.get task 5 java.util.concurrent.TimeUnit/SECONDS))
+        "a thread whose context loader sees no resources reads the packaged population")))
 
 (deftest production-schema-edn-is-a-resource-not-source
   (let [paths ((deref #'schema.edn/schema-resource-paths)
@@ -87,13 +107,12 @@
 
 (deftest one-resource-is-one-population
   (let [resource "seon/schema_edn_fixtures/valid.edn"
-        resolve-resource io/resource
         calls (atom [])
         population
-        (with-redefs [io/resource
-                      (fn [name]
-                        (swap! calls conj name)
-                        (resolve-resource name))]
+        (binding [schema.edn/*resource-loader*
+                  (resource-loader (fn [name]
+                                     (swap! calls conj name)
+                                     (io/resource name)))]
           ((deref #'schema.edn/resource-population) resource))
         forms (::schema.edn/forms population)
         loaded {::schema.edn/file (::schema.edn/file population)

@@ -345,10 +345,10 @@
     (spit packaged-file (str (pr-str packaged-decisions) "\n"))
     (try
       (with-redefs [io/resource
-                    (fn [path]
+                    (fn [path & loader]
                       (if (= config/default-manifest-path path)
                         (-> packaged-file .toURI .toURL)
-                        (resource path)))]
+                        (apply resource path loader)))]
         (is (= 19
                (:seon.config.flow.io/queue-depth
                 (config/default-decisions)))
