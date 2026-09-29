@@ -852,9 +852,6 @@
 
 (declare canonical-data-string)
 
-(defn- portable-string-hash [s]
-  (.hashCode ^String s))
-
 (defn- framed [tag payload]
   (str tag (count payload) ":" payload))
 
@@ -923,13 +920,15 @@
   [byte-arrays]
   (id/sha-256 byte-arrays))
 
+(defn- entry-fingerprint
+  "One `section` entry's hash: `String.hashCode` of its canonical encoding."
+  [section identity value]
+  (.hashCode ^String (canonical-data-string [section identity value])))
+
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
    artifact-exports pure-predicate-symbols]
-  (letfn [(entry-fingerprint [section identity value]
-            (portable-string-hash
-             (canonical-data-string [section identity value])))
-          (map-fingerprint [section values]
+  (letfn [(map-fingerprint [section values]
             (reduce-kv
              (fn [fingerprint identity value]
                (bit-xor fingerprint
@@ -945,7 +944,7 @@
              values))]
     (reduce
      bit-xor
-     (portable-string-hash "seon.schema.projection/fingerprint-v3")
+     (.hashCode "seon.schema.projection/fingerprint-v3")
      [(map-fingerprint :forms forms)
       (map-fingerprint :function-contracts function-contracts)
       (map-fingerprint :schema-admissions schema-admissions)
@@ -954,16 +953,6 @@
       (set-fingerprint :pure-predicate-symbols pure-predicate-symbols)])))
 
 (def ^:private projection-fingerprint-version 3)
-
-(defn- replace-fingerprint-entry
-  [fingerprint section identity before after]
-  (let [entry-fingerprint
-        (fn [value]
-          (portable-string-hash
-           (canonical-data-string [section identity value])))]
-    (cond-> fingerprint
-      (not= ::absent before) (bit-xor (entry-fingerprint before))
-      (not= ::absent after) (bit-xor (entry-fingerprint after)))))
 
 (defn direct-references
   "Canonical schema keys directly referenced by `form` in `projection`.
@@ -2522,9 +2511,11 @@
    [:=> [:cat :int :keyword :map :map [:set [:or :keyword :symbol]]] :int]}
   [fingerprint section before after identities]
   (reduce (fn [fingerprint identity]
-            (replace-fingerprint-entry
-             fingerprint section identity
-             (get before identity ::absent) (get after identity ::absent)))
+            (let [before (get before identity ::absent)
+                  after (get after identity ::absent)]
+              (cond-> fingerprint
+                (not= ::absent before) (bit-xor (entry-fingerprint section identity before))
+                (not= ::absent after) (bit-xor (entry-fingerprint section identity after)))))
           fingerprint identities))
 
 (defn- shape-index-attributes
@@ -3799,10 +3790,6 @@
   "Maximum map entries examined for structural diagnostics."
   32)
 
-(def ^:dynamic *candidate-visit!*
-  "Optional test instrumentation called once per diagnostic schema visit."
-  (fn [_schema-key] nil))
-
 (defn projection-validator
   "Acquire the retained schema's Malli-owned validator."
   {:malli/schema [:=> [:catn [::projection ::projection]
@@ -4032,30 +4019,7 @@
 
 (defn- diagnostic-schema-keys [projection attrs]
   (let [index (:seon.schema.projection/shape-index projection)]
-    (loop [remaining-attrs attrs
-           remaining-keys []
-           visited 0
-           selected #{}]
-      (cond
-        (>= visited shape-candidate-limit)
-        selected
-
-        (seq remaining-keys)
-        (let [schema-key (first remaining-keys)]
-          (*candidate-visit!* schema-key)
-          (recur remaining-attrs
-                 (next remaining-keys)
-                 (inc visited)
-                 (conj selected schema-key)))
-
-        (seq remaining-attrs)
-        (recur (next remaining-attrs)
-               (get index (first remaining-attrs) [])
-               visited
-               selected)
-
-        :else
-        selected))))
+    (into #{} (comp (mapcat #(get index % [])) (take shape-candidate-limit)) attrs)))
 
 (defn candidate-shapes-in
   "Bounded diagnostic schema window from explicit `projection`."
