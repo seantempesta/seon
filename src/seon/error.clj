@@ -2096,7 +2096,7 @@
                                    (:seon.error/chain error))]
                    (when (or (< 1 (count links)) (some :seon.error/data links))
                      links)))
-         arity? (or (= :arity (:seon.instrument/check error)) (= :arity (:seon.instrument/arm error)))]
+         arity? (contains? error :seon.instrument/declared-arities)]
      (cond-> {}
        message (assoc :seon.error/message message)
        (and class (not= "clojure.lang.ExceptionInfo" (str class)))
