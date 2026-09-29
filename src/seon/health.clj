@@ -3,7 +3,7 @@
 
   THE REPORT IS ITS OWNERS' VALUES PLUS WHAT MATCHES. Each unit is an owner's
   value, whole, under its own schema (problems, the cluster
-  status, the process cache, every profile observation, maintenance), so each
+  status, the process cache, every profile observation), so each
   keeps its owner's render pair. `:seon.health/findings` is one ranked vector
   of matches: a FINDING IS THE NAMED SCHEMA A VALUE SATISFIES (health plan
   §2b). Any registered schema declaring `:seon.health/severity` is a finding
@@ -44,7 +44,6 @@
             [seon.error.refusal :as refusal]
             [seon.fn :as fn]
             [seon.instrument :as instrument]
-            [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
             [seon.problems :as problems]
             [seon.profile :as profile]
@@ -539,7 +538,7 @@
   [projection report found]
   (let [schemas (finding-schemas projection)
         unread? (some #(or (:seon.health/unit %) (:seon.error/at %))
-                      (map report [:seon.health/problems :seon.health/status :seon.health/maintenance]))]
+                      (map report [:seon.health/problems :seon.health/status]))]
     (cond (some #(<= (:seon.health/faulted-severity ranking)
                      (get-in schemas [(:seon.health/schema %) :seon.health/severity] 0)) found) :faulted
           unread? :unknown
@@ -591,8 +590,6 @@
                                                                              :seon.sci.eval/ctx ctx}))
                            :seon.health/cache (cache/status)
                            :seon.health/profile (collected :seon.health/profile #(profile-unit database (or deadline-ms 900) wake))
-                           :seon.health/maintenance (collected :seon.health/maintenance
-                                                               #(derived database ::maintenance maintenance/report))
                            :seon.health/replaced-roots (collected :seon.health/replaced-roots
                                                                   #(replaced-roots database))
                            :seon.health/regressions (collected :seon.health/regressions
@@ -631,7 +628,6 @@
                                               :seon.cluster.status/open-turns :seon.cluster.status/platform-threads])
       :seon.health/cache (select-keys value [:seon.cache/max-bytes :seon.cache/weighted-bytes])
       :seon.health/profile {:seon.health/observed (count value)}
-      :seon.health/maintenance {:seon.health/entries (count (:seon.maintenance/entries value))}
       :seon.health/replaced-roots {:seon.health/count (count value)}
       :seon.health/regressions {:seon.health/count (count value)}
       value)))
@@ -668,7 +664,7 @@
        :seon.health/units (into (sorted-map)
                                 (keep (fn [k] (when-some [v (get value k)] [k (unit-summary k v)])))
                                 [:seon.health/readiness :seon.health/problems :seon.health/status
-                                 :seon.health/cache :seon.health/profile :seon.health/maintenance
+                                 :seon.health/cache :seon.health/profile
                                  :seon.health/replaced-roots :seon.health/regressions :seon.health/program])
        :seon.render/operations
        [(list 'seon.health/report {:seon.boot/cluster-name cluster})
@@ -723,7 +719,6 @@
                    (fn [found] (into [:dl] (map (fn [[family rows]] [:div [:dt (name family)] [:dd (str (count rows))]]))
                                      (sort-by key found))))
      (unit-section "Cluster" (:seon.health/status value) #(status/render-html {:seon.render/value % :seon.db/db database}))
-     (unit-section "Maintenance" (:seon.health/maintenance value) #(maintenance/render-report-html % database))
      (unit-section "Cache" (:seon.health/cache value)
                    (fn [cache]
                      [:table [:thead [:tr [:th "kind"] [:th "MB"] [:th "bytes %"] [:th "hits %"] [:th "evictions"]]]

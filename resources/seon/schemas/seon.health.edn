@@ -51,7 +51,6 @@
  :tested? [:boolean {:description "Whether any test reaches a function (seon.fn/functions-without-tests)."}]
  :refused [:or [:vector {:description "A refusal for each stored finding schema that constrains only identity attributes; its matches are never derived."} :seon.error/value] :seon.error/value]
  :profile [:or [:vector {:description "The observations of every armed definition with at least one second of inclusive time (the over-bound candidates), each saying whether a test reaches it; a definition that throws often in under a second of total time is not among them."} :seon.profile/observation] :seon.error/value]
- :maintenance [:or :seon.maintenance/report :seon.error/value]
  :replaced-roots [:vector {:description "Loaded first-party Vars whose root is not their namespace's own compile: a redefinition outside a reload, each as seon.instrument/replaced-roots reports it."} :seon.instrument/replaced-root]
  :program :seon.error/value
 
@@ -70,7 +69,6 @@
   [:seon.health/status :seon.health/status]
   [:seon.health/cache :seon.health/cache]
   [:seon.health/profile :seon.health/profile]
-  [:seon.health/maintenance :seon.health/maintenance]
   [:seon.health/replaced-roots :seon.health/replaced-roots]
   [:seon.health/regressions :seon.health/regressions]
   [:seon.health/program {:optional true :description "Present when the loaded program is unknown: its last adoption failed."} :seon.health/program]]

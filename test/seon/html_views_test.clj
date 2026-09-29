@@ -12,7 +12,6 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.id :as id]
-            [seon.maintenance :as maintenance]
             [seon.note :as note]
             [seon.render.ns :as render.ns]
             [seon.render.hiccup :as hiccup]
@@ -142,18 +141,6 @@
              (error/render-ai (assoc fault :seon.error/occurrence-count 3))
              "occurrence-count 3")
             "and it carries the recorded occurrence evidence")))))
-
-(deftest maintenance-pair-preserves-ai
-  (support/with-database
-    (fn [connection]
-      (let [report {:seon.maintenance/entries []}]
-        (readable! (maintenance/render-report-html report @connection) ["No maintenance tasks are recorded."])
-        ;; An entry's function is the qualified symbol the report reads from
-        ;; its task entity (`:seon.fn/sym`, retyped from a string in 0e8f7d323).
-        (readable! (maintenance/render-report-html {:seon.maintenance/entries
-                     [{:seon.schedule.task/id "collect" :seon.fn/sym 'seon.maintenance/collect}]} @connection)
-                   ["collect" "not run"])
-        (is (= (golden :maintenance) (maintenance/render-report-ai report @connection)))))))
 
 (deftest namespace-binding-pairs-show-the-binding-as-data
   (support/with-database

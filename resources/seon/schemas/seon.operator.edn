@@ -97,7 +97,7 @@
                   [:seon.operator/low-space?
                    :seon.operator/low-space?]]],
                 :low-space?
-                [:boolean #:seon.maintenance{:attention-when :truthy}],
+                :boolean,
                 :cleanup-result
                 [:map
                  [:seon.operator.cleanup/root :string]

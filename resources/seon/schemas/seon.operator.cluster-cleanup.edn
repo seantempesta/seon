@@ -24,8 +24,7 @@
                                 :remaining [:vector :string]
                                 :reclaimed-bytes [:int {:min 0}]
                                 :complete?
-                                [:boolean
-                                 {:seon.maintenance/attention-when :false}]
+                                :boolean
                                 :result
                                 [:map
                                  {:seon.maintenance/result-projection
