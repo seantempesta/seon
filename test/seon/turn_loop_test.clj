@@ -460,15 +460,17 @@
                      {:seon.agent/id agent-id
                       :seon.ns/name 'my.agents.live-settings
                       :seon.cluster/name cluster-name}))
-       (test-support/transacted!
-                    connection
-                    [{:seon.agent/id agent-id
-                      :seon.agent/settings {:seon.config.ai/thinking :high}}])
        (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
                                         :seon.agent/id agent-id
                                         :seon.turn/write? true})]
          (is (vector? (:seon.turn/forms opening))))
        (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
+       ;; `prepare-call!` re-runs the agent's creation transaction, which mints
+       ;; a fresh settings component; the override is asserted after it.
+       (test-support/transacted!
+                    connection
+                    [{:seon.agent/id agent-id
+                      :seon.agent/settings {:seon.config.ai/thinking :high}}])
        (with-render-context-proc
         cluster
         (fn [cluster]
@@ -532,6 +534,10 @@
               {:seon.config.ai/model "after-apply"}})
             (prepare-call!
              cluster agent-id "settings-run-2" "settings-message-2")
+            (test-support/transacted!
+             connection
+             [{:seon.agent/id agent-id
+               :seon.agent/settings {:seon.config.ai/thinking :high}}])
             (reset! overlays [])
             (reset! overlay-values [])
             (reset! resolutions [])
