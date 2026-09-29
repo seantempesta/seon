@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+# bin/lane — file claims and proven commits for parallel lanes on one shared tree.
+#
+#   bin/lane claim   LANE PATH...        claim files (or dir/ prefixes) before editing them
+#   bin/lane add     LANE PATH...        claim more
+#   bin/lane commit  LANE -m MSG [--test NS]... PATH...
+#                                        check, lint, then commit exactly PATH... (git commit --only)
+#   bin/lane release LANE                drop the lane's claims
+#   bin/lane status                      every live claim
+#   LANE_ADOPT=1 bin/lane claim ...      root only: record a claim for a lane already editing those files
+#
+# Refusals (exit 2) name the rule they enforce:
+#   - a path claimed by another lane, or already dirty in the tree (someone else's work in progress);
+#   - a commit path the lane never claimed;
+#   - anything staged in the index beyond the commit's paths;
+#   - `bin/seon check PATHS [--test NS...]` or clj-kondo reporting an error.
+set -euo pipefail
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+claims="$root/tmp/orchestrator/lanes"
+mkdir -p "$claims"
+cd "$root"
+
+refuse() { echo "LANE REFUSED: $*" >&2; exit 2; }
+
+valid_lane() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || refuse "lane name '$1' must be lowercase letters, digits and dashes"; }
+
+# A claim entry covers a path when equal, or when the entry ends with / and prefixes it.
+covers() {
+  local entry="$1" path="$2"
+  [[ "$entry" == "$path" ]] && return 0
+  [[ "$entry" == */ && "$path" == "$entry"* ]] && return 0
+  [[ "$path" == */ && "$entry" == "$path"* ]] && return 0
+  return 1
+}
+
+owner_of() {
+  local path="$1" file lane entry
+  for file in "$claims"/*.paths; do
+    [[ -e "$file" ]] || continue
+    lane="$(basename "$file" .paths)"
+    while IFS= read -r entry; do
+      [[ -z "$entry" ]] && continue
+      if covers "$entry" "$path"; then echo "$lane"; return 0; fi
+    done < "$file"
+  done
+  return 1
+}
+
+dirty() { [[ -n "$(git status --porcelain -- "$1")" ]]; }
+
+claim() {
+  local lane="$1"; shift
+  valid_lane "$lane"
+  [[ $# -gt 0 ]] || refuse "claim needs at least one path"
+  local path owner
+  for path in "$@"; do
+    path="${path#./}"
+    if owner="$(owner_of "$path")" && [[ "$owner" != "$lane" ]]; then
+      refuse "$path is claimed by lane $owner (one file, one owner)"
+    fi
+    if [[ "${LANE_ADOPT:-}" != 1 ]] && dirty "$path" && ! owner_of "$path" >/dev/null; then
+      refuse "$path already has uncommitted changes nobody claimed; root decides whose they are before anyone edits it"
+    fi
+  done
+  [[ -e "$claims/$lane.base" ]] || git rev-parse HEAD > "$claims/$lane.base"
+  for path in "$@"; do
+    path="${path#./}"
+    grep -qxF -- "$path" "$claims/$lane.paths" 2>/dev/null || echo "$path" >> "$claims/$lane.paths"
+  done
+  echo "lane $lane claims: $(tr '\n' ' ' < "$claims/$lane.paths")"
+}
+
+commit() {
+  local lane="$1"; shift
+  valid_lane "$lane"
+  [[ -e "$claims/$lane.paths" ]] || refuse "lane $lane has no claims; run bin/lane claim first"
+  local message="" tests=() paths=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -m) message="$2"; shift 2 ;;
+      --test) tests+=("--test" "$2"); shift 2 ;;
+      *) paths+=("${1#./}"); shift ;;
+    esac
+  done
+  [[ -n "$message" ]] || refuse "commit needs -m MESSAGE"
+  [[ ${#paths[@]} -gt 0 ]] || refuse "commit needs the exact paths to commit"
+  local path owner staged
+  for path in "${paths[@]}"; do
+    owner="$(owner_of "$path" || true)"
+    [[ "$owner" == "$lane" ]] || refuse "$path is not claimed by lane $lane${owner:+ (lane $owner holds it)}"
+  done
+  while IFS= read -r staged; do
+    [[ -z "$staged" ]] && continue
+    local ok=0
+    for path in "${paths[@]}"; do [[ "$staged" == "$path" ]] && ok=1; done
+    [[ $ok == 1 ]] || refuse "$staged is staged in the shared index but not part of this commit; a commit must carry only its own paths"
+  done < <(git diff --cached --name-only)
+
+  echo "== bin/seon check ${paths[*]} ${tests[*]:-}"
+  bin/seon check "${paths[@]}" "${tests[@]}" || refuse "bin/seon check failed; nothing committed"
+  echo "== clj-kondo --lint src script test --cache false"
+  local lint
+  lint="$(clj-kondo --lint src script test --cache false 2>&1 | tail -1 || true)"
+  echo "$lint"
+  [[ "$lint" =~ errors:\ 0, ]] || refuse "clj-kondo reports errors; nothing committed"
+
+  git commit --only -m "$message" -- "${paths[@]}"
+  git log --oneline -1
+}
+
+release() {
+  local lane="$1"
+  valid_lane "$lane"
+  rm -f "$claims/$lane.paths" "$claims/$lane.base"
+  echo "lane $lane released"
+}
+
+status() {
+  local file lane
+  shopt -s nullglob
+  local any=0
+  for file in "$claims"/*.paths; do
+    any=1
+    lane="$(basename "$file" .paths)"
+    echo "$lane (since $(cut -c1-9 "$claims/$lane.base" 2>/dev/null || echo '?')): $(tr '\n' ' ' < "$file")"
+  done
+  [[ $any == 1 ]] || echo "no live claims"
+}
+
+command="${1:-status}"; shift || true
+case "$command" in
+  claim|add) claim "$@" ;;
+  commit) commit "$@" ;;
+  release) release "$@" ;;
+  status) status ;;
+  *) sed -n '2,15p' "$0"; exit 1 ;;
+esac
