@@ -2059,7 +2059,7 @@
                         (when (sequential? nested) (seq nested))))
          operation (or (:seon.instrument/fn error) (:seon.error/operation error))
          ;; the producer's own message, never a sentence composed here
-         message (or (:seon.error/message cause) (:seon.error/message error))
+         message (or (when-not problems (:seon.error/message cause)) (:seon.error/message error))
          ;; the projection is read only for problems: expectations and examples
          options (when-let [projection (when problems (some-> database db/carried-projection))]
                    {:registry (:seon.schema.projection/registry projection)})

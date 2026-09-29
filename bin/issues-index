@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-SEON_ISSUE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-exec "$SEON_ISSUE_ROOT/bin/seon" issues-index "$@"
