@@ -23,8 +23,7 @@
 (defn- admit! [connection ctx namespace-name source]
   (let [effective (config/effective (db/db connection) "issue-settlement")
         evaluated (support/evaluate
-                   {:seon.test/rows true
-                    :seon.cluster.eval/source source
+                   {:seon.cluster.eval/source source
                     :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                     :seon.sci.eval/ctx ctx
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms effective)

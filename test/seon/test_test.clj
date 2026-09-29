@@ -46,8 +46,7 @@
            stale (sci.eval/fork-cluster-ctx ctx before connection)
            source "(clojure.test/deftest admitted-fileless-test (clojure.test/is (seon.db/database-value? (seon.db/db))))"
            evaluation (test-support/evaluate
-                       {:seon.test/rows true
-                        :seon.sci.eval/ctx ctx
+                       {:seon.sci.eval/ctx ctx
                         :seon.cluster.eval/source source
                         :seon.cluster.eval/ns [:seon.ns/name 'seon.test-test]
                         :seon.sci.admit/caps (config/result-caps config/defaults)
