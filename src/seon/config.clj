@@ -603,8 +603,7 @@
                  ;; for an identity the database already holds produces a
                  ;; conflicting upsert; refuse with the read as the cause.
                  (let [pulled (db/pull database [:db/id] config-identity)]
-                   (when (and (map? pulled) (:seon.error/at pulled)
-                              (:seon.error/layer pulled) (:seon.error/operation pulled)) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
+                   (when (seon.error.refusal/error? pulled) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
 
                      (refuse!
        (vary-meta {:seon.error/at (java.util.Date.)
@@ -657,7 +656,7 @@
                           :in $ [[?key ?symbol]]
                           :where (not-join [?symbol] [_ :seon.fn/sym ?symbol])]
                         database named)]
-      (when (:seon.error/at missing)
+      (when (seon.error.refusal/error? missing)
         (throw (ex-info (:seon.error/message missing) missing)))
       (when (seq missing)
         (let [missing (vec (sort-by pr-str missing))]
@@ -734,7 +733,7 @@
                     connection
                     ;; The schema population's own accretion shape (`seon.cluster/accrete-schema-population!`).
                     {:tx-data (mapv #(schema.datahike/malli->datahike-attr-in projection %) missing)})]
-        (when (:seon.error/at result)
+        (when (seon.error.refusal/error? result)
           (throw (ex-info (str (:seon.error/message result)) result))))))
   nil)
 
@@ -802,13 +801,12 @@
                   :tx-meta
                   {:seon.db/process
                    [:seon.db.process/id managing-process-identity]}})]
-            (if (and (map? transaction-result) (:seon.error/at transaction-result)
-                              (:seon.error/layer transaction-result) (:seon.error/operation transaction-result)) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
+            (if (seon.error.refusal/error? transaction-result) ; debt: seon.db/pull and transact! declare seon.db/error-result with :seon.error/value.
 
               transaction-result
               {::reconcile/converged? false
                ::reconcile/operations operations})))]
-    (when (:seon.error/at result)
+    (when (seon.error.refusal/error? result)
       (throw (ex-info (:seon.error/message result) result)))
     result))
 
