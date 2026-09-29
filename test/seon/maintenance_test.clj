@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [malli.registry :as mr]
             [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.cluster.store :as store]
             [seon.maintenance :as maintenance]
@@ -407,11 +408,34 @@
         (test-support/delete-recursively! root)))))
 
 
+(defn- declare-cluster-config!
+  "Give the root's store the one cluster configuration fact `collect!` reads,
+  carrying the SHIPPED default snapshot window: `retention-cutoff` refuses a
+  store whose clusters declare none, and an empty root holds no cluster."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [managed-root]
+  (let [window (get-in (config/compile-manifest {:seon.boot/cluster-name "collection-probe"})
+                       [:seon.config/effective :seon.config.db/snapshot-window-ms])]
+    (is (pos-int? window) "the shipped default declares a snapshot window")
+    (#'maintenance/with-root-store!
+     managed-root
+     (fn [held]
+       (d/transact (:seon.store/connection-object held)
+                   {:tx-data [{:db/ident :seon.config/cluster
+                               :db/valueType :db.type/string
+                               :db/cardinality :db.cardinality/one}
+                              {:db/ident :seon.config.db/snapshot-window-ms
+                               :db/valueType :db.type/long
+                               :db/cardinality :db.cardinality/one}
+                              {:seon.config/cluster "collection-probe"
+                               :seon.config.db/snapshot-window-ms window}]})))))
+
 (deftest collection-reports-and-verifies-the-exact-store
   (let [repository-root (owned-root)
         managed-root (.getCanonicalPath
                       (io/file repository-root "managed"))]
     (try
+      (declare-cluster-config! managed-root)
       (let [result
             (maintenance/collect!
              {:seon.operator/repository-root repository-root

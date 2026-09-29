@@ -6,8 +6,4 @@
  ; virtual no-op turns, no provider request or tokens. Remove this entry (or pass
  ; `:seon.config.ai/no-provider :seon.config/absent` with --config) for a
  ; deliberate provider verification.
- :seon.config.ai/no-provider true
- ; Current branch heads survive; ancestry older than one hour is collected by the
- ; daily collection. The hour keeps a database value someone still holds readable
- ; mid-read. Owner 2026-09-28: ≤~1 GB/day, reclaimed by the collection.
- :seon.config.db/snapshot-window-ms 3600000}
+ :seon.config.ai/no-provider true}

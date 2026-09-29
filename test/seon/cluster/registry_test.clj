@@ -423,12 +423,23 @@
       (let [connection (:seon.store/connection-object opened)]
         (is (= :seon.config/required-absent
                (:seon.config/rule (refusal #(registry/retention-cutoff opened)))))
+        ; A row that declares no window blocks the whole store's collection, so
+        ; the refusal must name the cluster and branch that hold it.
+        (test-support/transacted!
+         connection
+         [(:seon.config/desired-row
+           (config/compile-manifest
+            {:seon.boot/cluster-name "legacy"
+             :seon.config/manifest {:seon.config.db/snapshot-window-ms :seon.config/absent}}))])
+        (let [refused (refusal #(registry/retention-cutoff opened))]
+          (is (= [{:seon.store/branch :db :seon.config/cluster "legacy"}]
+                 (:seon.config/undeclared refused))))
         ; The subject is the stored policy read, using the compiler's complete entity.
         (test-support/transacted!
          connection
          [(:seon.config/desired-row
            (config/compile-manifest
-            {:seon.boot/cluster-name "retention-probe"
+            {:seon.boot/cluster-name "legacy"
              :seon.config/manifest {:seon.config.db/snapshot-window-ms 0}}))])
         (let [head (registry/branch-commit-id {:seon.store/store opened
                                               :seon.store/branch :db})

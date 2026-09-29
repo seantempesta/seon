@@ -62,6 +62,7 @@
     fix above. Without it this row was NOT DETECTABLE — the caller was
     told `:ok` and the branch was gone (b2-plan §0.3)."
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [datahike.api :as d]
             [datahike.db.interface :as dbi]
             [seon.cluster.branch :as cluster.branch]
@@ -594,23 +595,33 @@
         heads (branch-heads store (roster store))
         observations
         (mapv
-         (fn [{commit-id :seon.source/commit-id}]
+         (fn [{commit-id :seon.source/commit-id branch :seon.store/branch}]
            (let [record (head-record (konserve-store store) commit-id)
                  database (d/commit-as-db connection commit-id)]
              (try
                [(or (get-in record [:meta :datahike/updated-at])
                     (get-in record [:meta :datahike/created-at]))
-                (mapv #(d/pull database
-                                        [:seon.config/cluster :seon.config.db/snapshot-window-ms] %)
-                                (d/q '[:find [?e ...] :where [?e :seon.config/cluster]] database))]
+                (mapv #(assoc (d/pull database
+                                      [:seon.config/cluster :seon.config.db/snapshot-window-ms] %)
+                              :seon.store/branch branch)
+                      (d/q '[:find [?e ...] :where [?e :seon.config/cluster]] database))]
                (finally (d/release-materialized-db database)))))
          heads)
-        policies (mapcat second observations)]
-    (when (or (empty? policies)
-              (some #(nil? (:seon.config.db/snapshot-window-ms %)) policies))
-      (throw (ex-info "Every cluster configuration must declare snapshot retention before implicit collection."
+        policies (mapcat second observations)
+        undeclared (remove :seon.config.db/snapshot-window-ms policies)]
+    (when (or (empty? policies) (seq undeclared))
+      (throw (ex-info (str "Every cluster configuration must declare snapshot retention before implicit collection."
+                           (if (seq undeclared)
+                             (str " Undeclared: "
+                                  (str/join ", " (map #(str (:seon.store/branch %) " cluster "
+                                                            (pr-str (:seon.config/cluster %)))
+                                                      undeclared))
+                                  ". Fix: apply a configuration declaring :seon.config.db/snapshot-window-ms to that cluster, or unlink its branch.")
+                             " No roster branch holds a cluster configuration."))
                       {:seon.config/error-key :seon.config.db/snapshot-window-ms
-                       :seon.config/rule :seon.config/required-absent})))
+                       :seon.config/rule :seon.config/required-absent
+                       :seon.config/undeclared (mapv #(select-keys % [:seon.store/branch :seon.config/cluster])
+                                                     undeclared)})))
     (java.util.Date.
      (- (apply max (map #(.getTime ^java.util.Date (first %)) observations))
         (apply max (map :seon.config.db/snapshot-window-ms policies))))))
