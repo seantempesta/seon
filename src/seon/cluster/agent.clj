@@ -801,8 +801,10 @@
   (let [bound (:seon.config.agent/turn-completion-backstop-ms
                (config/effective @(:seon.db/connection handle) (:seon.cluster/name handle)))]
     (if-not (pos-int? bound)
-      (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `evaluate-source!
-       {:seon.agent/refused-source-agent agent-id
+      (seon.error.refusal/error :seon.agent/source-submission-refused-error
+       {:seon.error/layer :seon.agent/source-submission
+        :seon.error/operation `evaluate-source!
+        :seon.agent/refused-source-agent agent-id
         :seon.error/message "The cluster declares no turn-completion bound to await the run under."
         :seon.error/member :seon.config.agent/turn-completion-backstop-ms
         :seon.error/offending bound})
