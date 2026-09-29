@@ -51,14 +51,6 @@
     (when-not (pos-int? value) (throw (ex-info "Missing operator boot bound." manifest)))
     value))
 
-(defn operator-export-bound-ms
-  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
-  [manifest]
-  (let [value (get manifest :seon.config.operator/export-bound-ms
-                   (:seon.config.operator/export-bound-ms @shipped-default-decisions))]
-    (when-not (pos-int? value) (throw (ex-info "Missing operator export bound." manifest)))
-    value))
-
 (defn operation-bound-ms
   {:malli/schema [:=> [:cat [:map
                             [:seon.operator/command {:optional true} :keyword]
@@ -67,7 +59,6 @@
   [options]
   (let [manifest (:seon.config/manifest options)]
     (case (:seon.operator/command options)
-      :export (operator-export-bound-ms manifest)
       (:init :reset :check) (operator-boot-bound-ms manifest)
       (operator-silence-backstop-ms manifest))))
 
@@ -1758,9 +1749,6 @@
                   manifest (edn/read-string (slurp path))]
               (when-not (map? manifest) (fail! "Manifest must be an EDN map." request))
               (assoc request :seon.boot/cluster-name (valid-name name) :seon.config/manifest manifest))
-            :export (if (= 1 (count positionals))
-                      (assoc request :seon.operator/destination (.getCanonicalPath (io/file (first positionals))))
-                      (fail! "Use export PATH." request))
             :check (assoc request :seon.operator/paths
                           (mapv #(.getCanonicalPath (io/file %)) positionals))
             (:status :down :nuke)
@@ -1863,7 +1851,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH | check [PATH...] [--test NS | --test NS/NAME]..."}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH...] [--test NS | --test NS/NAME]..."}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.
