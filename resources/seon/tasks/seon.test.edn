@@ -24,7 +24,7 @@
  #:seon.task{:id "c86d834ab695"
              :name "a-test-world-has-no-agent"
              :kind :function
-             :intent "A REPL deftest's member world contains no agent entity and no :seon.agent/id, so (my.plan/current), the documented example, is untestable (only refusal paths are). Seeding the agent costs 88 ms (creation-tx); acquiring with an agent id 626 ms against 31 ms. Owner ruling: seed the executing agent, or branch the world from the agent's own commit (which deletes the checkpoint and overlay machinery, about 200 lines)."
+             :intent "A REPL deftest's member world contains no agent entity and no :seon.agent/id, so an agent-scoped call such as (my.task/steps {}) is untestable (only refusal paths are). Seeding the agent costs 88 ms (creation-tx); acquiring with an agent id 626 ms against 31 ms. Owner ruling: seed the executing agent, or branch the world from the agent's own commit (which deletes the checkpoint and overlay machinery, about 200 lines)."
              :must-read #{seon.cluster.agent/creation-tx seon.test/clean-request-handle}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/research/agent-platform/landing/agent-test-worlds-2026-09-26.md"

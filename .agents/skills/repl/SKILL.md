@@ -165,5 +165,5 @@ Verified at default's REPL on 2026-09-23. Forms and timings are in
 
 A branch evaluation that persists entities needs an armed agent whose custody is
 the branch. The work then goes through `seon.cluster.agent/submit-source!`
-(`src/seon/cluster/agent.clj:663`), the path a model reply uses. A worker is
-created on a candidate by `seon.issue/start!` (`src/seon/issue.clj:1520`).
+(`src/seon/cluster/agent.clj:663`), the path a model reply uses. Root assigns
+the worker its task on that branch with `seon.task/assign!` (`src/seon/task.clj:378`).
