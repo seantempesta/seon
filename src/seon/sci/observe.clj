@@ -12,6 +12,7 @@
   namespace whose SCI map changed (aliases, refers, imports, interns) is one
   more write."
   (:require [sci.core :as sci]
+            [sci.ctx-store]
             [sci.lang]
             [seon.sci.arm :as arm]))
 
@@ -26,23 +27,30 @@
         ;; the observation scope as data: the fold puts it in the world, so any
         ;; thread that re-establishes the world (seon.turn.world/with-world)
         ;; observes the same evaluation, never an inherited binding
+        ;; The observers are bindings, so any host call the evaluation makes
+        ;; (a test body's thread, an acquisition installing a program into
+        ;; another context) runs under them; only the evaluating context's own
+        ;; writes and expansions are this evaluation's (SCI binds the
+        ;; evaluating context in `sci.ctx-store/*ctx*` for each eval).
+        own? (fn [] (identical? env (some-> sci.ctx-store/*ctx* :env)))
         scope {#'sci.lang/*expansion-observer*
                (fn [call expansion]
                  ;; SCI's end-location metadata names :end-row/:end-col
                  (let [{:keys [line column end-row end-col]} (meta call)
                        m (some-> (sci/resolve ctx (first call)) meta)]
-                   (when (and line end-row (:ns m))
+                   (when (and line end-row (:ns m) (own?))
                      (on-write {:seon.batch/op :expansion :seon.batch/macro (symbol (str (:ns m)) (str (:name m)))
                                 :seon.batch/call-span [line column end-row end-col]
                                 :seon.batch/expansion expansion}))))
                #'sci.lang/*write-observer*
                (fn [w]
-                 (let [armed (binding [sci.lang/*write-observer* nil]
+                 (when (own?)
+                  (let [armed (binding [sci.lang/*write-observer* nil]
                                (if (and (= :bind (:op w)) (:ns (meta (:var w))))
                                  (arm/arm! request working w)
                                  w))]
                    (when (or (not= :bind (:op w)) (:ns (meta (:var w))))
-                     (on-write (arm/write-event armed)))))}]
+                     (on-write (arm/write-event armed))))))}]
     (try
       (with-bindings scope (thunk scope))
       (finally

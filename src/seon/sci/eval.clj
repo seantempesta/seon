@@ -2259,6 +2259,30 @@
             failed (assoc ::acquisition-recording-error (second failed))))
         (assoc state ::acquisition-refusals-recorded? false))))))
 
+(defn- function-rows
+  "Every program function of `db` as `[sym source namespace admission private?]`."
+  [db]
+  (mapv (fn [[sym source admission private?]]
+          [sym source (symbol (namespace (symbol sym))) admission private?])
+        (db/q '[:find ?sym ?source ?admission ?private
+                :where
+                [?function :seon.fn/sym ?sym]
+                [(get-else $ ?function :seon.fn/source "") ?source]
+                [?function :seon.schema.admission/source ?admission]
+                [(get-else $ ?function :seon.fn/private? false) ?private]]
+              db)))
+
+(defn- host-function-rows
+  "The rows whose compiled Vars bind: the branch's own, plus the loaded program's
+  rows the branch lacks. A branch forked before a reload holds no row for a
+  function the reload added, yet the compiled Var is running on every branch
+  (AGENTS: a branch never changes the platform)."
+  [branch-rows loaded db]
+  (if (or (nil? loaded) (identical? loaded db))
+    branch-rows
+    (let [known (into #{} (map first) branch-rows)]
+      (into branch-rows (remove (comp known first)) (function-rows loaded)))))
+
 (defn- acquire-program!
   "Acquire definitions against the JVM's loaded program value.
 
@@ -2305,16 +2329,7 @@
         agent-authored?
         (fn [admission]
           (= :agent admission))
-        all-function-rows
-        (mapv (fn [[sym source admission private?]]
-                [sym source (symbol (namespace (symbol sym))) admission private?])
-         (db/q '[:find ?sym ?source ?admission ?private
-                :where
-                [?function :seon.fn/sym ?sym]
-                [(get-else $ ?function :seon.fn/source "") ?source]
-                [?function :seon.schema.admission/source ?admission]
-                [(get-else $ ?function :seon.fn/private? false) ?private]]
-              db))
+        all-function-rows (function-rows db)
         loaded (or (::loaded-database @(::kernel/program-snapshot ctx))
                    (loaded-program db))
         branch-digests (function-digests db)
@@ -2500,7 +2515,7 @@
     ;; that declaration install. Selected definitions overwrite only their Vars.
     (install-first-party-namespaces!
      ctx namespace-assertions all-namespace-rows
-     all-function-rows)
+     (host-function-rows all-function-rows loaded db))
     ;; Interpreted callers analyze against every other name their compiled
     ;; namespace reaches; only this branch's rows become SCI definitions.
     (install-caller-host-bindings!
@@ -3158,11 +3173,6 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
-  ;; Acquisition installs the program rows into THIS context: the SCI observers of
-  ;; an evaluation that called it (root's prepare-merge!, `run`'s request world)
-  ;; are unbound, so a row's definition is never observed as a write of that
-  ;; caller's batch and armed in a context holding no such Var.
-  (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
   (let [snapshot @(::kernel/program-snapshot ctx)]
     (if (acquired-database? ctx database)
       (do
@@ -3212,7 +3222,7 @@
                                  ::loaded-basis (loaded-basis source))
                     (::loaded-connection snapshot)
                     (assoc ::loaded-connection (::loaded-connection snapshot))))
-          recorded))))))
+          recorded)))))
 
 (defn- acquire-function-from-database!
   "Acquire the lazy program before its first named invocation."

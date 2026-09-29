@@ -2,13 +2,26 @@
   (:require [clojure.test :refer [deftest is]]
             [malli.core :as m]
             [malli.registry :as mr]
-            [sci.lang]
+            [sci.core :as sci]
+            [seon.sci.observe :as observe]
             [seon.schema :as schema]
             [seon.db :as db]
             [seon.test :as sut]
             [seon.test-support :as support]))
 
 (def ^:private marker :seon.test.request-acquisition-test/marker)
+
+;; The observer of a running evaluation (`seon.sci.observe/observe`) around
+;; `(body)` called from a form evaluated in a context of its own: the ops that
+;; evaluation's observer receives. A host call the form makes is inside it.
+(defn- observed-ops
+  [body]
+  (let [ctx (sci/init {:namespaces {'probe {'body (fn [] (body))}}})
+        ops (atom [])]
+    (observe/observe {:seon.batch/world {:seon.sci.eval/ctx ctx}} nil
+                     #(do (swap! ops conj (:seon.batch/op %)) true)
+                     (fn [_] (sci/eval-string* ctx "(probe/body) (ns-unmap 'user 'zz)")))
+    @ops))
 
 (defn- marker-test
   "A test that writes its own marker and must see only that marker."
@@ -60,14 +73,15 @@
                                  "(defn plus-one {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
          (support/program-entity (db/db connection) [:seon.test/sym 'seon.test.request-acquisition-test/uses-plus-one]
                                  "(clojure.test/deftest uses-plus-one (clojure.test/is (= 2 (seon.test.request-acquisition-test/plus-one 1))))")])
-       (let [observed (atom [])
-             result (binding [sci.lang/*write-observer* #(swap! observed conj (:op %))]
-                      (sut/run {:seon.test/execution (support/execution-handle connection)
-                                :seon.test/recording-connection connection
-                                :seon.test/policy :named
-                                :seon.test/identities #{'seon.test.request-acquisition-test/uses-plus-one}}))]
-         (is (true? (:seon.test/passed? result)))
-         (is (= [] @observed) "no member write reaches the caller's observer"))))))
+       (let [result (volatile! nil)
+             ops (observed-ops #(vreset! result
+                                         (sut/run {:seon.test/execution (support/execution-handle connection)
+                                                   :seon.test/recording-connection connection
+                                                   :seon.test/policy :named
+                                                   :seon.test/identities #{'seon.test.request-acquisition-test/uses-plus-one}})))]
+         (is (true? (:seon.test/passed? @result)))
+         (is (= [:unmap :namespace] (vec (take 2 ops))) "only the evaluation's own writes are observed")
+         (is (= 1 (count (filter #{:unmap} ops))) "no member write reaches the caller's observer"))))))
 
 (deftest acquiring-a-context-installs-its-program-unobserved-by-the-calling-evaluation
   ;; candidate-gate! acquires the candidate's execution on root's thread, inside
@@ -81,13 +95,14 @@
         connection
         [(support/program-entity (db/db connection) [:seon.fn/sym 'seon.test.request-acquisition-test/plus-two]
                                  "(defn plus-two {:malli/schema [:=> [:cat :int] :int]} [x] (+ 2 x))")])
-       (let [observed (atom [])
-             handle (support/execution-handle connection)
-             child (binding [sci.lang/*write-observer* #(swap! observed conj (:op %))]
-                     ((requiring-resolve 'seon.cluster.agent/acquire-context!)
-                      handle nil {:seon.agent/isolate? true}))]
+       (let [handle (support/execution-handle connection)
+             child (volatile! nil)
+             ops (observed-ops #(vreset! child
+                                         ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                                          handle nil {:seon.agent/isolate? true})))
+             child @child]
          (try (is (some? (:seon.db/connection child)))
-              (is (= [] @observed) "no install reaches the caller's observer")
+              (is (= [:unmap] (filterv #{:unmap} ops)) "no install reaches the caller's observer")
               (finally ((requiring-resolve 'seon.cluster.agent/release-context!) child))))))))
 
 (deftest acquisition-options-name-no-store-so-the-handles-own-store-decides

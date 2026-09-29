@@ -242,13 +242,8 @@
             task (FutureTask.
                   ;; The body thread is the member branch's own work from its
                   ;; first step (resolution, seeds, the body): the custody its
-                  ;; creator's bindings carried is replaced, never inherited, and
-                  ;; so are the SCI observers of the evaluation that called
-                  ;; `run`: a member's interpreted definition is its own, never
-                  ;; a write armed in the caller's context (a merge candidate's
-                  ;; new function refused: no Var there to arm).
+                  ;; creator's bindings carried is replaced, never inherited.
                   (bound-fn []
-                    (binding [sci.lang/*write-observer* nil sci.lang/*expansion-observer* nil]
                     (db/call-with-custody
                      (select-keys custody [:seon.db/connection])
                      (fn [] (sci.eval/call-detecting-program-change
@@ -289,7 +284,7 @@
                                       :seon.sci.eval/time-limit-ms
                                       (or (:seon.test/long-ms
                                            (program/test-markers (meta test-var) (meta (:ns (meta test-var)))))
-                                          5000)))))))))))))))
+                                          5000))))))))))))))
             thread (.unstarted (Thread/ofVirtual) task)
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol
