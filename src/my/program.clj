@@ -9,6 +9,7 @@
   (:require [seon.error.refusal]
             [seon.db :as db]
             [clojure.set :as set]
+            [clojure.string :as str]
             [seon.error :as error]
             [seon.fn :as function]
             [seon.render.value :as render.value]
@@ -898,3 +899,120 @@
                  :seon.error/message (str "Use " operation " so program facts decide before SCI changes.")
                  :seon.error/offending arguments
                  :seon.error/data (or report {})}))))))))
+
+;;; Reading a declaration: source, search and sizes return small data maps.
+
+(defn- declaration
+  "The program entity for sym, from the function family or the test family; empty when neither names it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :map]}
+  [database sym]
+  (or (some (fn [[id-key source-key kind]]
+              (when-let [entity (db/pull database [identity source-key :seon.fn/doc :seon.fn/spec :seon.fn/form-span
+                                                   {:seon.fn/file [:seon.fn.file/relative-path]}]
+                                         [id-key sym])]
+                (assoc entity ::kind kind ::source (get entity source-key))))
+            [[:seon.fn/sym :seon.fn/source :function] [:seon.test/sym :seon.test/source :test]])
+      {}))
+
+(defn- file-line
+  "The 1-based start line of a declaration on disk, as {:line n}; empty when the file no longer holds its indexed source."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{path :seon.fn.file/relative-path} :seon.fn/file [start end] :seon.fn/form-span source ::source}]
+  (let [file (when (and path start) (java.io.File. ^String (System/getProperty "user.dir") ^String path))]
+    (if (and file (.isFile file))
+      (let [content (java.nio.file.Files/readAllBytes (.toPath file))]
+        (if (and (<= end (alength content))
+                 (= source (String. content (int start) (int (- end start)) java.nio.charset.StandardCharsets/UTF_8)))
+          {:line (inc (count (filter #(= 10 %) (take start content))))}
+          {}))
+      {})))
+
+(defn- nearest
+  "Up to five declared symbols sharing sym's name, or in its namespace with an overlapping name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
+  [database sym]
+  (let [ns-part (namespace sym) name-part (name sym)
+        overlaps? #(or (str/includes? (name %) name-part) (str/includes? name-part (name %)))]
+    (->> (concat (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s]])
+                 (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]]))
+         (filter #(or (= name-part (name %)) (and (= ns-part (namespace %)) (overlaps? %))))
+         (sort-by (juxt #(not= ns-part (namespace %)) str))
+         (take 5) vec)))
+
+(defn source
+  "Read one declaration's source, docstring, contract and location, for a function or a test.
+
+  Example:
+  (my.program/source 'seon.plan/refuse-constraint!)
+  Errors: an unknown symbol returns a not-found error naming the nearest symbols."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
+                  [:or :map :seon.program/not-found-error]]}
+  [database sym]
+  (let [entity (declaration database sym)]
+    (if (::kind entity)
+      (cond-> (merge {:sym sym :kind (::kind entity) :source (::source entity)} (file-line entity))
+        (:seon.fn/doc entity) (assoc :doc (:seon.fn/doc entity))
+        (:seon.fn/spec entity) (assoc :contract (read-string (:seon.fn/spec entity)))
+        (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity))))
+      (let [near (nearest database sym)]
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/source
+          {:seon.error/message (str "No program declaration names " sym ". Nearest: " (str/join ", " near))
+           :seon.program/not-found sym
+           :seon.error/expected near})))))
+
+(defn- sources
+  "Every program declaration's [sym source kind], functions before tests."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol :string :keyword]]]}
+  [database]
+  (into (mapv #(conj % :function) (db/q database '[:find ?s ?src :where [?e :seon.fn/sym ?s] [?e :seon.fn/source ?src]]))
+        (map #(conj % :test) (db/q database '[:find ?s ?src :where [?e :seon.test/sym ?s] [?e :seon.test/source ?src]]))))
+
+(defn- match-row
+  "A declaration's first matching source line for needle, as a map; empty when it has none."
+  {:malli/schema [:=> [:cat :string :qualified-symbol :string :keyword] :map]}
+  [needle sym text kind]
+  (let [hits (keep-indexed (fn [i line] (when (str/includes? line needle) [i line]))
+                           (str/split-lines text))]
+    (if-let [[i line] (first hits)]
+      {:sym sym :line (inc i) :hits (count hits) :test? (= :test kind)
+       :snippet (let [t (str/trim line)] (if (< 100 (count t)) (str (subs t 0 97) "...") t))
+       :named? (str/includes? (str sym) needle)}
+      {})))
+
+(defn search
+  "Search program source for a string or keyword; ranked matches, one per declaration.
+
+  Ranked: name matches, then functions before tests, then most hits. The query is the text, or
+  {:text text :limit n}. :line counts from the declaration's first line (my.program/source gives its file line).
+  Example:
+  (my.program/search :seon.render/form)
+  (my.program/search {:text \"java.util.Date.\" :limit 25})
+  Costs: scans every indexed source once; a few hundred ms."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:or :string :keyword [:map [:text [:or :string :keyword]] [:limit {:optional true} :int]]]]
+                  :map]}
+  [database query]
+  (let [{:keys [text limit] :or {limit 8}} (if (map? query) query {:text query})
+        needle (if (keyword? text) (str text) text)
+        rows (->> (sources database)
+                  (keep (fn [[sym src kind]] (not-empty (match-row needle sym src kind))))
+                  (sort-by (juxt #(not (:named? %)) :test? #(- (:hits %)) #(str (:sym %)))))]
+    (cond-> {:count (count rows)
+             :matches (mapv #(select-keys % [:sym :line :snippet]) (take limit rows))}
+      (< limit (count rows)) (assoc :more (list 'my.program/search {:text text :limit (* 3 limit)})))))
+
+(defn sizes
+  "The functions and tests of a namespace with their line counts, largest first (top 20).
+
+  Example:
+  (my.program/sizes 'seon.plan)"
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :map]}
+  [database ns-sym]
+  (let [rows (->> (concat (db/q database '[:find ?s ?src :in $ ?n :where [?e :seon.fn/ns ?ns] [?ns :seon.ns/name ?n]
+                                           [?e :seon.fn/sym ?s] [?e :seon.fn/source ?src]] ns-sym)
+                          (db/q database '[:find ?s ?src :in $ ?n :where [?e :seon.test/ns ?ns] [?ns :seon.ns/name ?n]
+                                           [?e :seon.test/sym ?s] [?e :seon.test/source ?src]] ns-sym))
+                  (map (fn [[sym src]] [sym (count (str/split-lines src))]))
+                  (sort-by (juxt #(- (second %)) #(str (first %)))))]
+    {:ns ns-sym :count (count rows) :lines (reduce + (map second rows))
+     :largest (vec (take 20 rows))}))
