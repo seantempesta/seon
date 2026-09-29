@@ -138,7 +138,12 @@
       (:seon.cluster.eval/read-basis-transaction evaluation)
       (assoc :seon.cluster.eval/read-basis-transaction
              (:seon.cluster.eval/read-basis-transaction evaluation))
-      (seq (:seon.cluster.eval/executed evaluation))
+      ;; The durable executed set has one consumer, `code-current?` in the
+      ;; pre-turn refresh, which judges only evaluations holding read evidence
+      ;; (`read-only-evaluation?`); the in-memory set still feeds profile
+      ;; measurement (`settle-batch!`), so it is stored only beside evidence.
+      (and (seq (:seon.cluster.eval/executed evaluation))
+           (seq (:seon.cluster.eval/read-evidence evaluation)))
       (assoc :seon.cluster.eval/executed (:seon.cluster.eval/executed evaluation))
       (:seon.cluster.eval/code-evidence evaluation)
       (assoc :seon.cluster.eval/code-evidence (:seon.cluster.eval/code-evidence evaluation))

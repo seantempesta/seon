@@ -184,12 +184,14 @@
         "a ready instance is the one named")))
 
 (deftest ^{:seon.test/subject "seon.mcp/sci-run"} a-one-defn-run-settles-in-proportion-to-the-defn
-  ;; One contracted defn settled 3,522 datoms, 94% read evidence: showing
-  ;; the Var read its reaching tests through `seon.fn/declared-callers`,
-  ;; which resolved each of ~510 declaring rows by its own read, and the
-  ;; evaluation stored every read although a form that binds a Var is never
-  ;; refreshed (defn-datoms, 2026-09-28). Measured after the cut: ~220,
-  ;; mostly the executed set and profile measurements riding the settlement.
+  ;; One contracted defn settled 3,522 datoms: 3,307 were read evidence, as
+  ;; showing the Var read its reaching tests through
+  ;; `seon.fn/declared-callers` one declaring row at a time, and ~100 its
+  ;; executed set; neither has a consumer for a form that binds a Var (the
+  ;; pre-turn refresh re-runs only read-only evaluations). The per-attribute
+  ;; census on default (2026-09-28) leaves 62-89 datoms besides profile measurements,
+  ;; which ride the commit by design and scale with the definitions whose
+  ;; timing moved (5-27 on default, every executed one in a fresh store).
   (with-running-agent
    (fn [running agent-id connection]
      (let [namespace-name (symbol (str "settle.probe" (id/id)))
@@ -203,9 +205,10 @@
                                           [?evaluation :seon.cluster.eval/run ?turn]
                                           [?evaluation :seon.cluster.eval/ordinal 1 ?tx]]
                                         database run))
-           evidence (count (:seon.cluster.eval/read-evidence
-                            (db/pull database [{:seon.cluster.eval/read-evidence [:db/id]}] evaluation)))
-           settled (count (filter #(= tx (:tx %)) (db/datoms (db/since database (dec tx)) :eavt)))]
+           stored (db/pull database [{:seon.cluster.eval/read-evidence [:db/id]} :seon.cluster.eval/executed] evaluation)
+           settled (count (remove #(= "seon.profile.measurement" (namespace (:a %)))
+                                  (filter #(= tx (:tx %)) (db/datoms (db/since database (dec tx)) :eavt))))]
        (is (false? (get result "isError")))
-       (is (= 0 evidence) "a form that binds a Var stores no read evidence")
-       (is (< settled 300) "the settlement is proportional to one defn, not the render/schema population")))))
+       (is (empty? (:seon.cluster.eval/read-evidence stored)) "a form that binds a Var stores no read evidence")
+       (is (empty? (:seon.cluster.eval/executed stored)) "nor its executed set")
+       (is (< settled 110) "the settlement is proportional to one ns form and one defn")))))
