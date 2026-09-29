@@ -734,7 +734,10 @@
   path is total)."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
   [unit value path output]
-  (when (and (keyword-lookup? value) (:seon.sci.eval/ctx unit)
+  (when (and (or (keyword-lookup? value)
+                 ;; a defined Var selects the Var render pair (`seon.render/declared-producers`)
+                 (or (instance? clojure.lang.Var value) (instance? sci.lang.Var value)))
+             (:seon.sci.eval/ctx unit)
              (not (get-in unit [:seon.render.value/options :seon.render.value/structural?])))
     (try
       (let [projection (or (:seon.schema/projection unit)

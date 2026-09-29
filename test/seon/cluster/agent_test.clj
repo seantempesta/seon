@@ -466,7 +466,10 @@
             (is (string? run-id))
             (is (= source (:seon.cluster.eval/source evaluation)))
             (is (some? (db/entity database [:seon.fn/sym function-symbol])) "stored without a contract")
-            (is (nil? (:seon.fn/spec (db/pull database [:seon.fn/spec] [:seon.fn/sym function-symbol])))))
+            (is (nil? (:seon.fn/spec (db/pull database [:seon.fn/spec] [:seon.fn/sym function-symbol]))))
+            ;; the reply is the Var's declared render, not the bare Var
+            (is (re-find #"seon\.render\.var/contract" (str (:seon.eval/shown evaluation)))
+                "the reply of an uncontracted defn says its contract is missing"))
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
