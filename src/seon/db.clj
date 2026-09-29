@@ -3843,9 +3843,7 @@
      (let [authored (get (:seon.schema.projection/forms projection) attribute)
            form (when authored
                   (schema.datahike/storage-schema (mr/schema (:seon.schema.projection/registry projection) attribute)))
-           decode (if (and authored (schema.datahike/edn-encoded-attr-in? projection attribute))
-                    #(schema.datahike/decode-attribute-value-in projection attribute %)
-                    identity)]
+           decode (if authored (schema.datahike/attribute-decoder-in projection attribute) identity)]
        {::decode decode
         ::validate (when authored
                      (m/validator

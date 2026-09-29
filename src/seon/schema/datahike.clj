@@ -1143,6 +1143,24 @@
       (refuse-slot! ::noncanonical-edn attr value))
     [decoded]))
 
+(defn attribute-decoder-in
+  "Select an attribute's storage decoder once for a held projection.
+  Writers retain it in their attribute plan; each value still goes through
+  the canonical EDN check and its existing content-keyed cache."
+  {:malli/schema [:=> [:cat :map :keyword] :seon.instrument/callable]}
+  [projection attr]
+  (if-not (edn-encoded-attr-in? projection attr)
+    identity
+    (fn [value]
+      (when-not (string? value)
+        (refuse-slot! ::storage-not-string attr value))
+      (first
+       (seon.cache/lookup
+        ::decoded-edn [decode-canonical-edn storage-string storage-readers attr value]
+        ;; Stored text, decoded nodes and the key; no second value walk to weigh.
+        (constantly (* 10 (count value)))
+        #(decode-canonical-edn attr value))))))
+
 (defn decode-attribute-value-in
   "Decode one attribute value against exactly one projection.
 
@@ -1153,17 +1171,7 @@
    decoded value itself (`seon.db/decode-query-field`)."
   {:malli/schema [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.schema/value]}
   [projection attr value]
-  (if-not (edn-encoded-attr-in? projection attr)
-    value
-    (do
-      (when-not (string? value)
-        (refuse-slot! ::storage-not-string attr value))
-      (first
-       (seon.cache/lookup
-        ::decoded-edn [decode-canonical-edn storage-string storage-readers attr value]
-        ;; Stored text, decoded nodes and the key; no second value walk to weigh.
-        (constantly (* 10 (count value)))
-        #(decode-canonical-edn attr value))))))
+  ((attribute-decoder-in projection attr) value))
 
 (defn decode-attribute-value
   "Decode and validate one value read from an EDN-backed attribute.

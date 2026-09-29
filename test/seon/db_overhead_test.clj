@@ -2,6 +2,8 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.batch :as batch]
             [seon.db :as db]
+            [seon.schema :as schema]
+            [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as support])
   (:import [java.util.concurrent ConcurrentHashMap]
            [java.util.concurrent.atomic AtomicLongArray]))
@@ -29,6 +31,17 @@
      :seon.db-overhead/calls (reduce + 0 (vals counts))
      :seon.db-overhead/by-function counts}))
 
+(defn observe-write-validation
+  "Replay final validation of a held report, without transacting or running tests.
+  The report retains both immutable databases; capture it on one's own branch
+  before changing the program, then pass the same report after adoption."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] :map]}
+  [report]
+  (let [projection (db/carried-projection (:db-after report))]
+    (assoc (observe #(#'seon.db/validate-write-report projection report))
+           :seon.db-overhead/datoms (count (:tx-data report))
+           :seon.db-overhead/entities (count (into #{} (map :e) (:tx-data report))))))
+
 (deftest ^{:seon/tasks #{"d6e3b775f474"}} query-preparation-has-bounded-armed-work
   (support/with-database
    (fn [connection]
@@ -42,3 +55,24 @@
        ;; Armed scratch prototype: 43 before, 35 after on the same value.
        ;; Five calls of margin; the old repeated preparation exceeds it.
        (is (<= calls 40) "a scalar query stays within forty armed calls")))))
+
+(deftest write-plan-selects-storage-once-for-all-values
+  (let [projection (schema/declaration-projection)
+        attribute :datahike.read/revision
+        value {:datahike.read/attributes #{:seon.agent/id}
+               :datahike.read/cache-eligible? false}
+        encoded (schema.datahike/encode-attribute-value-in projection attribute value)
+        decode (:seon.db/decode (#'seon.db/write-attribute-plan projection attribute false))
+        {:seon.db-overhead/keys [by-function] decoded :seon.db-overhead/value}
+        (observe #(mapv decode (repeat 100 encoded)))]
+    (is (= (vec (repeat 100 value)) decoded))
+    (is (= 100 (get by-function 'seon.cache/lookup)) "canonical decoding remains armed")
+    (is (zero? (get by-function 'seon.schema.datahike/compiled-storage 0))
+        "a retained decoder does not traverse the storage schema per value")
+    (is (nil? (decode "nil")) "canonical historical values are read without re-admission")
+    (doseq [[stored rule] [[1 :seon.schema.datahike/storage-not-string]
+                           ["{" :seon.schema.datahike/malformed-edn]
+                           [" nil" :seon.schema.datahike/noncanonical-edn]]]
+      (let [refusal (try (decode stored) (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+        (is (= attribute (:seon.schema.datahike/attr refusal)))
+        (is (= rule (:seon.schema.datahike/rule refusal)))))))
