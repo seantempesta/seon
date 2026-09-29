@@ -2788,6 +2788,23 @@
           (when (.exists file) (io/as-url file)))
         (.getResource parent resource-name)))))
 
+(defn- rehearsal-refusal
+  "The refusal a rehearsal returns for `failure`: the diagnostic boot would stop
+  on, carrying the failing declaration the exception's data names
+  (`:seon.error/member`, `:seon.error/expected`, and the offending schema form
+  of a Malli `::m/invalid-schema`), so the answer names the function."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.error/base]}
+  [failure]
+  (let [data (ex-data failure)
+        form (get-in data [:data :form])]
+    (seon.error.refusal/diagnostic
+     (cond-> (merge (select-keys data [:seon.error/member :seon.error/expected :seon.error/offending])
+                    {:seon.error/at (Date.) :seon.error/layer :seon.source/publication
+                     :seon.error/operation `rehearse-source!
+                     :seon.error/message (or (:seon.error/message data) (ex-message failure))
+                     :seon.error/throwable failure})
+       form (assoc :seon.error/offending form)))))
+
 (defn rehearse-source!
   "Answer whether `directory`'s program (a candidate commit's archive) boots on
   this store: its publication and `cluster-name`'s adoption of it, run as boot
@@ -2850,11 +2867,7 @@
                       ::adopted-identities adopted
                       ::phase-ms {::published-ms published-ms
                                   ::adopted-ms (- (ms) published-ms)}))))))
-      (catch Exception failure
-        (seon.error.refusal/diagnostic
-         {:seon.error/at (Date.) :seon.error/layer :seon.source/publication
-          :seon.error/operation `rehearse-source! :seon.error/message (ex-message failure)
-          :seon.error/throwable failure}))
+      (catch Exception failure (rehearsal-refusal failure))
       (finally
         (.setContextClassLoader thread loader)
         (try
