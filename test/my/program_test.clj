@@ -194,7 +194,8 @@
                                    (support/replacement-tx database [:seon.fn/sym added]
                                                            "(defn diff-fixture-added\n  \"Added.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  1)" {})))
         (support/transacted! connection [[:db/retractEntity [:seon.test/sym removed]]])
-        (let [context {:seon.db/connection connection :seon.store/store store :seon.cluster/name cluster-name}
+        (let [context {:seon.db/connection connection :seon.store/store store :seon.cluster/name cluster-name
+                       :seon.sci.eval/ctx (:seon.sci.eval/ctx held) :my.program/base-ctx (:seon.sci.eval/base-ctx held)}
               by-sym (fn [entries] (into {} (map (juxt :sym identity)) entries))
               value (program/diff context)
               one (program/diff context changed)]

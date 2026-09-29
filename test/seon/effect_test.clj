@@ -818,7 +818,11 @@
         {:seon.turn/id "effect-run"
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (Date.)}))
-      (let [ctx (test-support/fork-cluster-ctx connection)
+      (let [;; a capability call runs on the world's work launcher: the forked context
+            ;; carries the executing member's own world, as `request-context` hands it
+            ctx (assoc (test-support/fork-cluster-ctx connection)
+                       :seon.sci.eval/projection-state
+                       (env/environment-state @(:seon.sci.eval/projection-state (meta connection))))
             effective config/defaults
             evaluation
             (test-support/evaluate

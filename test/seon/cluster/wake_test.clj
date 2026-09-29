@@ -372,13 +372,13 @@
        ;; this attribute would read as absent. `route!` refuses the
        ;; declaration rather than routing into that silence — proven by
        ;; `an-unindexed-listened-attribute-is-refused-at-registration`.
-       :db/index true}
-      {:seon.schema/key ::notice
-       :seon.schema.admission/source :core
-       :seon.schema/form ":seon.db/ref"
-       :seon.wake/listen true
-       :seon.wake/opens-turn? true}]}
+       :db/index true}]}
     (fn [connection]
+      ;; the declaration is a canonical schema entity (digested by its owner)
+      (test-support/transacted!
+       connection
+       (test-support/schema-entities
+        @connection [[::notice [:and {:seon.wake/listen true :seon.wake/opens-turn? true} :seon.db/ref]]]))
       (test-support/transacted! connection (test-support/agent-tx @connection "agent-a"))
       (let [recipient (agent-eid connection)
             mailbox (async/chan (async/sliding-buffer 1))
@@ -408,13 +408,12 @@
     {::test-support/extra-schema
      [{:db/ident ::unindexed-notice
        :db/valueType :db.type/ref
-       :db/cardinality :db.cardinality/one}
-      {:seon.schema/key ::unindexed-notice
-       :seon.schema.admission/source :core
-       :seon.schema/form ":seon.db/ref"
-       :seon.wake/listen true
-       :seon.wake/opens-turn? true}]}
+       :db/cardinality :db.cardinality/one}]}
     (fn [connection]
+      (test-support/transacted!
+       connection
+       (test-support/schema-entities
+        @connection [[::unindexed-notice [:and {:seon.wake/listen true :seon.wake/opens-turn? true} :seon.db/ref]]]))
       (is (contains? (:seon.cluster.wake/attributes (wake/declarations-refusal (db/db connection))) ::unindexed-notice)
           "the derivation names the attribute the index does not hold")
       (is (contains? (wake/unindexed-listened-attributes (db/db connection))
