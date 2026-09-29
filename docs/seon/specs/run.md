@@ -1,6 +1,6 @@
 ---
 type: spec
-status: proposed
+status: reviewed
 created: 2026-09-28
 tags: [spec, run, one-path]
 ---
@@ -233,18 +233,21 @@ Stages stay values (CLAUDE.md "one pipeline"); a request declares `:seon.run/sta
 - Armed calls: 334 for one `defn` (1.5) to a profile-named count; one fewer `show` per program-changing form.
 - Prints per form: exactly 1 (asserted on data: count of `show` calls per entry). Passes over earlier entries: 0.
 
-## 6. Open questions for root
+## 6. Root rulings (2026-09-28)
 
-Q1. **Lazy realization vs the one print (D1).** (a) today: print inside the scope, reprint after a change (two prints,
-stale first); (b) print once after extend; a `defn` made while printing is a late write refused with a diagnostic
-(simplest; changes the lazy-definition edge, no test exists for it); (c) a bounded realization walk inside the scope,
-then one print (adds a realizer). Recommend (c) if realization is a real agent pattern, else (b).
-Q2. **Validate at settlement only (D2)?** (a) unvalidated extend + settle-time `revalidate`, ~10 ms per form, later
-forms may read a change settlement refuses; (b) today, ~450 ms per form; (c) validate only the form's own row
-(Malli on the entity, not the speculative whole value), UNVERIFIED feasible. Recommend (a), and a new `seon.db`
-function is a db-lane file: who owns it?
-Q3. **Fold the product turn's `settle-batch!` (turn.clj:3555, ~300 lines) into the one settle?** Largest deletion,
-touches turn.clj held by other lanes. Recommend one settle after a ledger check; else unify `revalidate` first.
-Q4. Rename `:seon.batch/*` to `:seon.run/*`? A rename is a schema publication; keeping "batch" keeps a retired word.
-Q5. Confirm `mcp/sci-run`, `turn-request`, `read-only?` dead or live before the cut (1.4, UNVERIFIED). Q6. Measurement rows (D3): move them to their own transaction after the settlement (violates "measurements ride a
-commit that happens anyway", item 25), or exempt them from component validation in the writer?
+R1 (Q1, lazy realization): **(b)**. Print once, after `extend`; a write made while printing is a late write refused to
+its writer with a diagnostic (behavior 19). A render is read-only (CLAUDE.md "Presentation"), so printing that defines
+is not a supported pattern; add the regression that pins it.
+R2 (Q2, validation): **fix validation cost at its producer, keep one validated `seon.db/with` per form.** Lane
+astra-write-validation is measuring and cutting writer validation (57% of a run-owned run is `validate-write-report`;
+it is also the ~450 ms per defining form). If `with` reaches <=10 ms per form, the fold keeps validated per-form
+extend and no `revalidate` attribution path. Only if Astra cannot, fall back to (a) with the seon.db function owned by
+the db lane. Never an unvalidated path added "for speed" while the validation cost is unexplained.
+R3 (Q3): **one settle**; `settle-batch!` folds in. Sequenced after lane delete-failover releases turn.clj.
+R4 (Q4): **rename to `:seon.run/*`** in the rewrite commit (one schema publication, proven by `bin/seon check`).
+R5 (Q5): the rewrite lane verifies each at cut time with rg and a live probe; dead ones are deleted in the cut.
+R6 (Q6, measurement rows): **neither move nor exempt.** Whole-owning-value validation scaling with measurement volume
+means measurements are modeled as components of an ever-growing owner; fix the model ("size trees by what each write
+owns") so each write validates only what it owns. Assigned with R2 to the writer-validation work.
+Coverage before the rewrite: the 9 UNCOVERED behaviors (and the D8 row behavior) get one data test each in
+`test/seon/run_test.clj`, green on today's fold, so the rewrite is judged by the same tests.
