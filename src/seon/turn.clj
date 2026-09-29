@@ -3349,6 +3349,20 @@
     error (update :seon.cluster.eval/diagnostics
                   #(str/join "\n" (remove nil? [% (print.value/bounded-text [error])])))))
 
+(defn- not-admitted
+  "`receipt` whose form's program facts were refused: the value stands, the
+  refusal is delivered whole beside it as one flat error whose message says
+  the declaration was NOT admitted to the program (a Var the form bound
+  exists in the agent's SCI context only), and the receipt's error names it."
+  {:malli/schema [:=> [:cat :map [:or :seon.plan/refusal :seon.error/base]] :map]}
+  [receipt refusal]
+  (let [message (str "Not admitted to the program: its program facts were refused, so any Var it "
+                     "bound exists in your SCI context only and my.program/history has no such "
+                     "declaration. " (:seon.error/message refusal))]
+    (-> receipt
+        (update :seon.cluster.eval/error #(or % message))
+        (with-diagnostic (assoc refusal :seon.error/message message)))))
+
 (defn- evaluation-terminal-data
   [{cluster :seon.turn.loop/cluster
     now :seon.turn.loop/now
@@ -3651,14 +3665,13 @@
           [prepared first-outcome]
           (let [[_ program' entries] (turn.batch/revalidate program-request (db/db connection) (vec changes))
                 refused (into {} (keep (fn [e] (when-let [fe (:seon.batch/facts-error e)]
-                                                 [(:seon.batch/ordinal e) (:seon.error/message fe)])))
+                                                 [(:seon.batch/ordinal e) fe])))
                               entries)]
             (if (empty? refused)
               [prepared first-outcome]
               (let [prepared' (mapv (fn [request p]
-                                      (if-let [message (refused (:seon.cluster.eval/ordinal request))]
-                                        (update-in p [:seon.turn.loop/receipt :seon.cluster.eval/error]
-                                                   #(or % (str "Its program facts were not proposed: " message)))
+                                      (if-let [refusal (refused (:seon.cluster.eval/ordinal request))]
+                                        (update p :seon.turn.loop/receipt not-admitted refusal)
                                         p))
                                     requests prepared)]
                 [prepared' (commit program' prepared')]))))]
@@ -5097,11 +5110,7 @@
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (entry-bindings batch ordinal)) (assoc :seon.sci.eval/bindings (entry-bindings batch ordinal))
-                                facts-error (-> (update :seon.cluster.eval/error
-                                                        #(or % (str "Its program facts were not proposed: " (:seon.error/message facts-error))))
-                                                ;; the refusal whole beside the value: its offending
-                                                ;; referrers are what the agent repairs from
-                                                (with-diagnostic facts-error)))
+                                facts-error (not-admitted facts-error))
                    ;; A generated read whose reads now depend on the agent's own
                    ;; turn-taking (`generated-read-fault`) keeps its value: the
                    ;; fault rides beside it as a diagnostic, and its stored

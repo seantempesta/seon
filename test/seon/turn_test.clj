@@ -2332,6 +2332,24 @@
        (is (every? #(some? (:seon.cluster.eval/error %)) receipts)
            "each receipt names the failed settlement beside its value")))))
 
+(deftest a-form-whose-facts-are-refused-says-it-was-not-admitted
+  ;; Lane defn-refusal-reason, 2026-09-28: a defn whose body called another
+  ;; function with the wrong arity replied `{:error "#'ns/f"}` (the Var's
+  ;; name: the shown value beat the error text) with no refusal at all. The
+  ;; refusal rides beside the value as data and says the declaration was not
+  ;; admitted to the program.
+  (let [refusal {:seon.error/message "Recorded source argument counts disagree with the final prepared arities."
+                 :seon.error/at (java.util.Date.)
+                 :seon.error/offending [{:seon.fn/sym 'my.x/lint3}]}
+        receipt (#'turn/not-admitted {:seon.eval/shown "#'my.x/lint3"} refusal)]
+    (is (str/starts-with? (:seon.cluster.eval/error receipt) "Not admitted to the program")
+        "the receipt's error names the refusal, not the Var")
+    (is (str/includes? (:seon.cluster.eval/diagnostics receipt) "Not admitted to the program")
+        "the diagnostic carries the refusal whole beside the value")
+    (is (str/includes? (:seon.cluster.eval/diagnostics receipt) "argument counts disagree")
+        "the producer's own message survives in the diagnostic")
+    (is (= "#'my.x/lint3" (:seon.eval/shown receipt)) "the value stands")))
+
 (deftest a-branch-operation-is-supplied-its-context-from-the-world
   ;; Lanes, 2026-09-28: `(my.agent/retire-branch! {...})` from MCP refused
   ;; its argument count: its context's store and routing were no world's
