@@ -146,7 +146,9 @@
           (let [request (assoc
                           (render-request database ctx nil entity)
                           :seon.render/output
-                          output)
+                          output
+                          ;; A component renders as its attribute's value.
+                          :seon.render.walk/attribute :seon.agent/settings)
                 decision (selection request)
                 argument (#'seon.render/render-invocation-argument
                            (kernel/context-projection ctx)

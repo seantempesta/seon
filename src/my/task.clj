@@ -123,7 +123,8 @@
 
 (defn- steps-of
   "Apply the step `op` to my own task (made when I hold none)."
-  {:malli/schema [:=> [:cat :seon.task/step-request :seon.task/step-op]
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
+                                  [:seon.task/intent {:optional true} :seon.task/intent]] :seon.task/step-op]
                   [:or :seon.task/steps-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{connection :seon.db/connection :as request} op]
   (let [handle (own-task request)]

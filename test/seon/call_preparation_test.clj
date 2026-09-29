@@ -1100,7 +1100,7 @@
                   (:seon.agent/id (first prepared)))))
          (is (not (instance? Throwable omitted)))
          (is (= [] omitted))
-         (is (= (dissoc omitted :seon.error/at) (dissoc explicit :seon.error/at))
+         (is (= omitted explicit)
              "an explicit database wins and reaches the same function body"))))))
 
 (deftest call-preparation-cache-coherence-does-not-widen-evaluation-evidence

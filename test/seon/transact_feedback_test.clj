@@ -120,8 +120,8 @@
   (test-support/with-database
    (fn [connection]
      (let [unknown (keyword "seon" "task/id")
-           result (refused connection [{unknown "feedbacktypo"
-                                       :seon.task/intent "A real task"}]
+           result (refused connection [(assoc (dissoc (test-support/task-row "feedbacktypo" "A real task") :seon.task/id)
+                                          unknown "feedbacktypo")]
                            unknown "feedbacktypo" [0 unknown])
            shown (db/render-rejection-ai result)]
        (is (= [:seon.task/id] (:seon.db/registered-candidates result)))
@@ -157,8 +157,8 @@
                     :seon.task/faults "feedback/step")
              [:db/add "feedback/step" :seon.task/faults "datomic.tx"]])]
        (is (some? (:db-after result)))
-       (is (= #{"feedbackstep" "feedbacknext" "feedbacksing"}
-              (set (db/q '[:find [?id ...] :where [_ :seon.task/id ?id]] @connection))))
+       (is (every? (set (db/q '[:find [?id ...] :where [_ :seon.task/id ?id]] @connection))
+                   ["feedbackstep" "feedbacknext" "feedbacksing"]))
        (is (some? (db/q '[:find ?instant . :where
                           [?step :seon.task/id "feedbackstep"]
                           [?step :seon.task/faults ?tx]

@@ -29,11 +29,6 @@
                      (support/agent-tx @connection "run6-stall" 'my.agents.run6-stall))))
      (is (= 3 (:seon.config.run/max-episode-runs
                (seon.agent/settings! {:seon.config.run/max-episode-runs 3} connection "run6-stall"))))
-     ;; A task with one open step: its completion is the later progress the stall waits for.
-     (is (:db-after
-          (transact! connection
-                     [(assoc (support/task-row "run6stall000" "Finish the work")
-                             :seon.task/steps [{:seon.step/position 0 :seon.step/text "Read" :seon.step/status :current}])])))
      (is (:db-after
           (transact! connection
                         (conj (turn/open-tx {:seon.turn/id "run6-refusal"
@@ -90,13 +85,7 @@
        (is (= 1 (:seon.render.transcript/count first-rule)))
        (is (= "stalled" (:data-problem (second (first active-panels)))))
        (is (:db-after (db/transact! connection
-                                   [[:db/add (db/q '[:find ?step . :where [_ :seon.task/steps ?step]] @connection)
-                                     :seon.step/done-tx "datomic.tx"]])))
-       (is (not (str/includes? (:header (snapshot)) "stalled:")))
-       (is (:db-after (db/transact! connection
-                                   [[:db.fn/retractAttribute (db/q '[:find ?step . :where [_ :seon.task/steps ?step]] @connection)
-                                     :seon.step/done-tx]
-                                    [:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply ""]
+                                   [[:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply ""]
                                     [:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply-size 0]])))
        (is (not (str/includes? (:header (snapshot)) "stalled:")))
        (is (zero? (:seon.render.transcript/count

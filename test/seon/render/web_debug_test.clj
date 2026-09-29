@@ -712,7 +712,7 @@
                                     ;; An identity-less entity exists only as a
                                     ;; component of its one owner (the writer
                                     ;; refuses an unowned one).
-                                    (assoc (support/task-row "referenceunid" "Unidentified step owner")
+                                    (assoc (support/task-row "referenceuni" "Unidentified step owner")
                                            :seon.task/steps [{:db/id "unidentified" :seon.step/position 0
                                                               :seon.step/text "No identity" :seon.step/status :open}])]))
            _ (is (:db-after written))
