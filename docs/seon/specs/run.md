@@ -233,6 +233,14 @@ Stages stay values (CLAUDE.md "one pipeline"); a request declares `:seon.run/sta
 - Armed calls: 334 for one `defn` (1.5) to a profile-named count; one fewer `show` per program-changing form.
 - Prints per form: exactly 1 (asserted on data: count of `show` calls per entry). Passes over earlier entries: 0.
 
+## 5b. Known reds in this area (root's round 2026-09-28 on 587412b85; fixed by the rewrite, not patched)
+
+seon.cluster.turn-test: a-batched-turn-commits-only-queryable-definition-facts, acquisition-orders-agent-authored-refer-targets-and-ignores-alias-cycles (:1452), delimiter-repair-is-span-local-and-precedes-intent (:2369), import-addition-is-ordinary-data-and-reacquires-exactly, refused-terminal-program-transactions-settle-and-do-not-refire, runtime-schema-key-changes-pass-the-one-usage-guarded-decision (:1062), runtime-schema-registration-commits-the-evaluated-form-and-attribute (error), streaming-writes-zero-datoms-test (:2886), two-drivers-of-one-opening-both-answer-and-it-settles-once (error); the namespace takes 117 s.
+seon.turn-loop-test: a-clean-last-form-without-a-disposition-is-loud-terminal-evidence (:778), a-refused-batch-settlement-closes-the-turn-and-the-agent-turns-again (error).
+seon.turn-test: transitions-agree-with-the-model 6.4 s and virtual-turns-use-the-proc-and-compaction-is-agent-scoped 7.3 s over the 5 s bound; 9 fail / 1 error in round-seon.turn-test.log.
+seon.run-test: d8 red (D8) as designed. seon.ai-test captured-run4 (reader, queue item 33).
+The rewrite's done-when: each of these is green, deleted as a test of deleted machinery, or replaced by a run_test behavior test.
+
 ## 6. Root rulings (2026-09-28)
 
 R1 (Q1, lazy realization): **(b)**. Print once, after `extend`; a write made while printing is a late write refused to
