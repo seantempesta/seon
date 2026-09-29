@@ -1010,18 +1010,22 @@
                          :seon.cluster.eval/ns
                          [:seon.ns/name (get-in facts [:seon.cluster.eval/ns :seon.ns/name])]}
                         :seon.sci.eval/evaluation
-                        ;; An in-memory evaluation carries the handle the fork
-                        ;; bound, exactly as `evaluate-sources` assoc's it; a
-                        ;; stored one derives the same handle from its entity
-                        ;; id, so the two projections are the same bytes.
-                        (assoc (select-keys facts [:seon.eval/shown
-                                                   :seon.cluster.eval/comment
-                                                   :seon.cluster.eval/output])
-                               :seon.repl/handle
-                               (admit/result-handle "eval-result"))}])]
-           (is (= (mapv :seon.render.history/bytes entries)
+                        ;; Stored and in-memory both derive the handle from the
+                        ;; evaluation's identity (`repl/entity-emission`); an
+                        ;; in-memory one is named by `receipt-identity`, the
+                        ;; identity the fork bound its value under.
+                        (select-keys facts [:seon.eval/shown
+                                            :seon.cluster.eval/comment
+                                            :seon.cluster.eval/output])}])
+               in-memory-handle (str (admit/result-handle
+                                      (turn/receipt-identity (:seon.turn/id in-memory)
+                                                             (:seon.cluster.eval/ordinal facts))))]
+           (is (= (mapv #(str/replace (:seon.render.history/bytes %)
+                                      (str (admit/result-handle "eval-result")) in-memory-handle)
+                        entries)
                   (mapv :seon.render.history/bytes
-                        (transcript/history-entries in-memory))))
+                        (transcript/history-entries in-memory)))
+               "one evaluation reads the same in history whether stored or in flight, up to its identity's handle")
            (is (= [] (transcript/history-entries
                       (assoc in-memory :seon.turn.loop/evaluated-sources [])))))
          (is (= [] (transcript/history-entries
@@ -1345,8 +1349,9 @@
                                              {:seon.eval/renderer-fn [:seon.fn/sym]}]
                                             [:seon.cluster.eval/id
                                              (turn/receipt-identity "one-grammar-stored" ordinal)])
-                           rendered? (boolean (some receipt [:seon.cluster.eval/error :seon.eval/renderer
-                                                              :seon.eval/renderer-fn]))
+                           ;; a pull whose attributes are all absent answers nil
+                           rendered? (boolean (some (or receipt {}) [:seon.cluster.eval/error :seon.eval/renderer
+                                                                     :seon.eval/renderer-fn]))
                            split (when response (str/last-index-of entry-bytes response))
                            input (if split (subs entry-bytes 0 split) entry-bytes)
                            answer (if split (subs entry-bytes split) "")]

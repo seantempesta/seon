@@ -388,7 +388,9 @@
                          ::notice)
               "the derived set learned the new attribute from its own
                declaration")
-          (test-support/transacted! connection [{::notice recipient}])
+          ;; an owned entity carries the datom: the agent (the writer refuses an
+          ;; identity-less entity nothing owns)
+          (test-support/transacted! connection [{:db/id recipient ::notice recipient}])
           (is (some? (test-support/await-event! mailbox "declared wake"))
               "and a datom on it woke the agent it points at")
           (finally

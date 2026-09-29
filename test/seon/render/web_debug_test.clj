@@ -278,7 +278,7 @@
                               (cond-> (assoc (select-keys directory [:seon.cluster.eval/source :seon.eval/renderer
                                                                      :seon.cluster.eval/read-evidence
                                                                      :seon.cluster.eval/read-basis-transaction])
-                                             :seon.eval/shown (repl/render-directory-ai {:functions [] :schemas {}}))
+                                             :seon.eval/shown (pr-str (repl/render-directory-ai {:functions [] :schemas {}})))
                                 (:seon.cluster.eval/read-evidence directory)
                                 (update :seon.cluster.eval/read-evidence
                                         (partial clojure.walk/postwalk #(if (map? %) (dissoc % :db/id) %))))]
@@ -373,28 +373,26 @@
               connection
               (into [(support/namespace-entity @connection 'my.agents.history-probe)]
                     (support/agent-tx @connection "history-probe" 'my.agents.history-probe)))
-           ;; The runtime and plan are the agent's own components; their
+           ;; The runtime and settings are the agent's own components; their
            ;; identities name the owner.
            written
            (db/transact!
             connection
             [{:seon.runtime/agent [:seon.agent/id "history-probe"]}
-             {:my.plan/agent [:seon.agent/id "history-probe"]
-              :my.plan/objective "An addressable component"}
              {:db/id "history-turn" :seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
              {:seon.cluster.eval/id "history-probe-evaluation"
               :seon.cluster.eval/at (java.util.Date.)
               :seon.cluster.eval/run [:seon.turn/id "history-probe-turn"]
               :seon.cluster.eval/ordinal 0
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.history-probe]
-              :seon.cluster.eval/source "(my.plan/plan {})"
+              :seon.cluster.eval/source "(my.task/steps {})"
               :seon.eval/shown "The component's shown text."}])
            _ (is (:db-after written))
            database @connection
-           agent-entity (db/pull database '[:db/id {:seon.agent/plan [:db/id]}]
+           agent-entity (db/pull database '[:db/id {:seon.agent/settings [:db/id]}]
                           [:seon.agent/id "history-probe"])
            agent-eid (:db/id agent-entity)
-           component-eid (get-in agent-entity [:seon.agent/plan :db/id])
+           component-eid (get-in agent-entity [:seon.agent/settings :db/id])
            request {:seon.db/db database
                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                     :seon.render.walk/lookup agent-eid
@@ -404,7 +402,7 @@
        (is (instance? Long agent-eid))
        (is (instance? Long component-eid))
        (is (= 1 (count history)))
-       (is (= "my.agents.history-probe=> (my.plan/plan {})\n#:seon.repl{:value The component's shown text., :result result/ehistory-probe-evaluation}"
+       (is (= "my.agents.history-probe=> (my.task/steps {})\n#:seon.repl{:value The component's shown text., :result result/ehistory-probe-evaluation}"
               (:seon.render.history/bytes (first history))))
        (is (= history
               (walk/history (assoc request :seon.render.walk/lookup
@@ -424,8 +422,7 @@
               so only seon.cluster.prompt holds the bytes to compare — see
               seon.cluster.prompt-test/a-replay-under-a-selecting-budget-reconstructs-its-own-capture."))
        (let [changed (db/transact! connection
-                                  [[:db/add component-eid :my.plan/objective
-                                    "The current component changed"]])]
+                                  [[:db/add component-eid :seon.config.eval/time-limit-ms 4321]])]
          (is (:db-after changed))
          (is (= history (walk/history (assoc request :seon.db/db @connection)))
              "History reuses the observation without executing or reprinting the component."))))))
@@ -454,7 +451,7 @@
               :seon.cluster.eval/ordinal 0
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.thinking-probe]
               :seon.cluster.eval/comment ";; I should read the plan first."
-              :seon.cluster.eval/source "(my.plan/plan {})"
+              :seon.cluster.eval/source "(my.task/steps {})"
               :seon.eval/shown "The plan's shown text."}]]))
            _ (is (:db-after written))
            database @connection
@@ -479,14 +476,14 @@
        (is (= ";; I should read the plan first."
               (last (first (classed "seon-eval-thinking")))))
        (is (= 1 (count (classed "seon-eval-prompt"))))
-       (is (= "my.agents.thinking-probe=> (my.plan/plan {})"
+       (is (= "my.agents.thinking-probe=> (my.task/steps {})"
               (last (first (classed "seon-eval-prompt"))))
            "the prompt block no longer carries the comment")
        (is (str/includes? (element-text html) "The plan's shown text.")
            "the result renders through the evaluation schema's HTML pair")
        (is (str/starts-with?
             ai
-            "my.agents.thinking-probe=> ;; I should read the plan first.\n(my.plan/plan {})")
+            "my.agents.thinking-probe=> ;; I should read the plan first.\n(my.task/steps {})")
            "the AI pair keeps the REPL grammar unchanged")
        (doseq [namespace-ref [(get-in saved [:seon.cluster.eval/ns :db/id])
                              [:seon.ns/name 'my.agents.thinking-probe]]]
@@ -498,7 +495,7 @@
            (is (= 1 (count (filter #(= "seon-eval-thinking" (:class (second %)))
                                    blocks))))
            (is (str/includes? (element-text rendered)
-                              "my.agents.thinking-probe=> (my.plan/plan {})")
+                              "my.agents.thinking-probe=> (my.task/steps {})")
                "namespace references resolve through the carried database")))))))
 
 (deftest blocks-use-the-values-schema-documentation
@@ -638,7 +635,7 @@
         viewer 'my.agents.juniper]
     (doseq [query [{} {"details" "true" "output" ":seon.render/ai"
                       "limit" "17" "maxWork" "31" "offset" "3"
-                      "path" "[:seon.agent/plan]"}]]
+                      "path" "[:seon.agent/settings]"}]]
       (let [request (#'web/debug-query query subject viewer "juniper")
             url (#'web/debug-page-url request {})
             parameters (#'web/query-params
@@ -678,8 +675,7 @@
                        (keep #(when (and (vector? %) (= :article (first %)))
                                 (:data-seon-unit (second %))))
                        (tree-seq coll? seq html))]
-       (is (= [":seon.agent/agent" ":seon.agent/plan"
-               ":seon.agent/settings" ":seon.agent/runtime"] units))
+       (is (= [":seon.agent/agent" ":seon.agent/settings" ":seon.agent/runtime"] units))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-ai"))
        (is (str/includes? (pr-str html) "seon.cluster.agent/render-identity-html"))))))
 
@@ -716,19 +712,16 @@
                                     ;; An identity-less entity exists only as a
                                     ;; component of its one owner (the writer
                                     ;; refuses an unowned one).
-                                    {:db/id "plan"
-                                     :my.plan/agent [:seon.agent/id "reference-agent"]
-                                     :my.plan/constraint-observation
-                                     {:db/id "unidentified"
-                                      :seon.error.evidence/attribute :my.plan/objective
-                                      :seon.error.evidence/value "No identity"}}]))
+                                    (assoc (support/task-row "referenceunid" "Unidentified step owner")
+                                           :seon.task/steps [{:db/id "unidentified" :seon.step/position 0
+                                                              :seon.step/text "No identity" :seon.step/status :open}])]))
            _ (is (:db-after written))
            database @connection
            projection (schema/projection-from-database database)
            agent-ref (db/pull database '[:db/id] [:seon.agent/id "reference-agent"])
            probe-ref (db/pull database '[:db/id] [::probe-identity "aliased-reference"])
            unidentified {:db/id (get-in written [:tempids "unidentified"])}
-           plan-ref {:db/id (get-in written [:tempids "plan"])}
+           plan-ref (db/pull database '[:db/id] [:seon.config/agent (:db/id agent-ref)])
            effective config/defaults
            request {:seon.db/db database
                     :seon.db/connection connection
@@ -744,10 +737,10 @@
        (is (integer? (:db/id unidentified)))
        (is (= [[[::probe-identity "aliased-reference"] "aliased-reference"]]
               (#'web/referenced-identities database [probe-ref])))
-       (is (= [[[:my.plan/agent (:db/id agent-ref)] "reference-agent"]]
+       (is (= [[[:seon.config/agent (:db/id agent-ref)] "reference-agent"]]
               (#'web/referenced-identities database plan-ref)))
        (is (= plan-ref
-              (db/pull database '[:db/id] [:my.plan/agent (:db/id agent-ref)])))
+              (db/pull database '[:db/id] [:seon.config/agent (:db/id agent-ref)])))
        (doseq [[references expected] [[[agent-ref unidentified agent-ref] ["reference-agent"]]
                                     [[agent-ref plan-ref] ["reference-agent" "reference-agent"]]
                                     [[unidentified] []]]]
@@ -925,7 +918,7 @@
            :seon.cluster.eval/run [:seon.turn/id "outline-turn-0"]
            :seon.cluster.eval/ordinal 0
            :seon.cluster.eval/ns [:seon.ns/name 'my.agents.outline-probe]
-           :seon.cluster.eval/source "(my.plan/plan {})"
+           :seon.cluster.eval/source "(my.task/steps {})"
            :seon.eval/origin "outline-issue"
            :seon.eval/shown "The plan's shown text."}])
         provider

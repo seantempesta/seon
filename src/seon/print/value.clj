@@ -19,7 +19,7 @@
      the limit with `…`.
   4. A value whose printing throws prints `#unprintable[value-class failure-class]`.
   5. A Throwable prints each link of its cause chain once (class, message,
-     ex-data, the frames nearest the throw), each list counting what it left out.
+     ex-data, the frames nearest the throw that are not the host runtime's), each list counting what it left out.
 
   ## Costs
 
@@ -80,15 +80,24 @@
       seen
       (recur (.getCause ^Throwable link) (conj seen link)))))
 
+(defn- host-class?
+  "Whether a frame's class is the JVM's or Clojure's own runtime (`java.*`, `jdk.*`,
+  `clojure.lang.*`...): where a failure passed through, never code an agent
+  wrote. Dependencies and Seon are not host frames: which of those matter is
+  the error render's to say."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String class-name]
+  (boolean (some #(.startsWith class-name ^String %) ["java." "javax." "jdk." "sun." "clojure.lang."])))
+
 (defn- link-lines
-  "One link's lines: class and message, ex-data entries, the frames nearest the
-  throw and suppressed throwables, each list counting what it leaves out; a
+  "One link's lines: class and message, ex-data entries, the nearest non-host
+  frames of the throw and suppressed throwables, each list counting what it leaves out; a
   link whose accessors throw prints its class and the failure's."
   {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :string]]}
   [^Throwable link]
   (let [{:keys [entries frames suppressed]} text-limits]
     (try
-      (let [trace (vec (.getStackTrace link))]
+      (let [trace (into [] (remove #(host-class? (.getClassName ^StackTraceElement %))) (.getStackTrace link))]
         (into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
               (concat
                (for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
