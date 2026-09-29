@@ -214,6 +214,8 @@
 ;;; at first use.
 (defonce ^:private schema-seam
   (delay {:handed (requiring-resolve 'seon.schema/handed-projection)
+          :declared (requiring-resolve 'seon.schema/declaration-projection)
+          :packaged (requiring-resolve 'seon.schema.edn/packaged-forms)
           :projector (requiring-resolve 'seon.schema/identity-only-projector)
           :explain (requiring-resolve 'seon.schema/explain-candidate-value)
           :humanize (requiring-resolve 'malli.error/humanize)}))
@@ -228,6 +230,21 @@
   []
   (when (find-ns 'seon.schema)
     ((:handed @schema-seam))))
+
+(defn- checking-projection
+  "The projection an error is checked against: the one handed to the operation
+  running now, else the declaration projection over the packaged population
+  (`seon.schema/declaration-projection` over `seon.schema.edn/packaged-forms`,
+  built once in the process cache: the registry boot arms every contract
+  against, `instrument.clj:1270-1271`), so an
+  error is buildable at boot, at namespace load and on a thread no operation
+  handed a projection. Nil only where `seon.schema` is not loaded."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  (or (operation-projection)
+      (when (find-ns 'seon.schema)
+        (let [{:keys [declared packaged]} @schema-seam]
+          (when (and declared packaged) (declared (packaged)))))))
 
 (defn- identity-projector
   [projection]
@@ -742,8 +759,9 @@
   explain-candidate-value`, Malli `m/explainer`, compiled once per schema
   object). Valid: the error, its metadata naming `alternative` as
   `:seon.error/declared-schema` (which selects its render). Invalid (a
-  missing operation included), when no schema projection is handed or when
-  `alternative` is not declared: a `:seon.error/base` refusal naming
+  missing operation included), or when `alternative` is not declared in the
+  handed projection, else the packaged declaration projection (so an error is
+  buildable at boot, at load and on any thread): a `:seon.error/base` refusal naming
   `alternative`, the humanized problems and the attempted value in
   `:seon.error/chain`.
 
@@ -758,13 +776,13 @@
   {:malli/schema [:=> [:cat :qualified-keyword :map] :seon.error/base]}
   [alternative members]
   (let [members (merge {:seon.error/at (java.util.Date.) :seon.error/layer alternative} members)
-        projection (operation-projection)]
+        projection (checking-projection)]
     (if-not (qualified-symbol? (:seon.error/operation members))
       (construction-refusal alternative members "`:seon.error/operation` (a qualified symbol) is required" nil)
       (let [built (diagnostic members)
             refused (fn [reason problems] (construction-refusal alternative built reason problems))]
         (if-not projection
-          (refused "no schema projection is handed to this operation, so the alternative cannot be checked" nil)
+          (refused "no schema registry is loaded, so the alternative cannot be checked" nil)
           (try
             (if-let [explanation ((:explain @schema-seam) projection alternative built)]
               (refused "the built error does not satisfy it" ((:humanize @schema-seam) explanation))

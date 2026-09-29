@@ -425,6 +425,25 @@
     (is (false? @evaluated))
     (is (= [1 2] (error.refusal/let-ok [a 1 b (inc a)] [a b])))))
 
+(deftest error-is-buildable-where-no-projection-is-handed
+  ;; A bare Thread does not convey the caller's bindings: the MCP thread, boot
+  ;; and namespace load construct errors exactly here.
+  (let [built (promise)
+        thread (Thread. ^Runnable
+                        (fn []
+                          (deliver built
+                                   [(error.refusal/error :seon.error/base
+                                                         {:seon.error/operation 'seon.error.refusal-test/probe
+                                                          :seon.error/message "No handed projection."})
+                                    (error.refusal/error :no.such/error
+                                                         {:seon.error/operation 'seon.error.refusal-test/probe})])))]
+    (.start thread)
+    (let [[valid undeclared] (deref built 5000 [nil nil])]
+      (is (= :seon.error/base (:seon.error/declared-schema (meta valid))))
+      (is (= :seon.error/base (:seon.error/layer valid)))
+      (is (= :seon.error.refusal/construction (:seon.error/layer undeclared)))
+      (is (= :no.such/error (:seon.error/member undeclared))))))
+
 (deftest error-constructor-builds-the-declared-alternative
   (let [operation 'seon.error.refusal-test/probe
         alternative :my.fs/not-regular-file-error
