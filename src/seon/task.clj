@@ -428,6 +428,119 @@
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
                                                                       :seon.task/assignment (mapv first assigned)}))))
 
+;;; STEPS (spec task-steps): a task's ordered steps are components of its row, written at the task
+;;; home like every task write; they sit outside the declaration, so a step never revises the task.
+
+(def ^:private step-selector
+  [:db/id :seon.step/position :seon.step/text :seon.step/status {:seon.step/done-tx [:db/id]}])
+
+(defn- step-rows
+  "The stored steps of task `handle` with their entity ids, in position order."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or [:vector :map] :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [pulled (db/pull database [{:seon.task/steps step-selector}] [:seon.task/id handle])]
+    (or (read-error pulled)
+        (vec (sort-by :seon.step/position (:seon.task/steps pulled))))))
+
+(defn task-steps
+  "The steps of task `handle` in `database`, in position order: position, text, status and, once
+  done, the completing transaction. Empty when the task has none or is absent.
+
+  ## Costs
+
+  One pull of the task's steps; proportional to their number."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or [:vector :seon.step/view] :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [rows (step-rows database handle)]
+    (if (:seon.error/at rows)
+      rows
+      (mapv (fn [row] (cond-> (select-keys row [:seon.step/position :seon.step/text :seon.step/status])
+                        (:seon.step/done-tx row) (assoc :seon.step/done-tx (get-in row [:seon.step/done-tx :db/id]))))
+            rows))))
+
+(defn step-summary
+  "The current step's text and progress \"done/total\" of `steps`; empty for no steps."
+  {:malli/schema [:=> [:cat [:vector :seon.step/view]] [:map [:seon.task/current-step {:optional true} [:string {:min 1}]]
+                                                        [:seon.task/progress {:optional true} [:string {:min 3}]]]]}
+  [steps]
+  (if (empty? steps)
+    {}
+    (cond-> {:seon.task/progress (str (count (filter #(= :done (:seon.step/status %)) steps)) "/" (count steps))}
+      (some #(= :current (:seon.step/status %)) steps)
+      (assoc :seon.task/current-step (:seon.step/text (first (filter #(= :current (:seon.step/status %)) steps)))))))
+
+(defn steps-call
+  "The writer's transaction data for the step `op` on task `handle`, decided against the steps
+  stored now: `[:plan texts]` replaces them (the first current), `[:append text]` adds one (current
+  when none is), `[:done]` completes the current step and makes the next open one current. With
+  no current step `[:done]` is empty, so a repeat never completes two."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.task/step-op] :seon.db/tx-data]}
+  [database handle op]
+  (let [rows (step-rows database handle)
+        owner [:seon.task/id handle]
+        step (fn [position text status] {:seon.step/position position :seon.step/text text :seon.step/status status})
+        first-with (fn [status] (first (filter #(= status (:seon.step/status %)) rows)))]
+    (case (first op)
+      :plan (cond-> (mapv (fn [row] [:db/retractEntity (:db/id row)]) rows)
+              (seq (second op))
+              (conj {:db/id owner :seon.task/steps (vec (map-indexed #(step %1 %2 (if (zero? %1) :current :open)) (second op)))}))
+      :append [{:db/id owner
+                :seon.task/steps [(step (inc (reduce max -1 (map :seon.step/position rows))) (second op)
+                                        (if (first-with :current) :open :current))]}]
+      :done (if-let [current (first-with :current)]
+              (cond-> [[:db/add (:db/id current) :seon.step/status :done]
+                       [:db/add (:db/id current) :seon.step/done-tx "datomic.tx"]]
+                (first-with :open) (conj [:db/add (:db/id (first-with :open)) :seon.step/status :current]))
+              []))))
+
+(defn agent-task
+  "The handle of the task `agent-id` holds in `database` (the task home's): its latest assignment's
+  task; nil when it holds none. One indexed query.
+
+  ## Costs
+
+  Measured 1.2 ms on default (2026-09-28)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :seon.task/handle :seon.db/invalid-read-error]]}
+  [database agent-id]
+  (let [held (db/q '[:find ?handle ?tx :in $ ?id
+                     :where [?g :seon.agent/id ?id] [?a :seon.task/agent ?g] [?a :seon.task/assigned ?handle ?tx]]
+                   database agent-id)]
+    (or (read-error held) (first (apply max-key second [nil 0] (seq held))))))
+
+(defn steps-view
+  "The steps of `handle` as the agent reads them, with the calls its state offers."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :seon.task/steps-view :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [steps (task-steps database handle)]
+    (or (read-error steps)
+        (merge {:seon.task/id handle :seon.task/steps steps
+                :seon.render/operations (if (some #(= :current (:seon.step/status %)) steps)
+                                          ['(my.task/done!)]
+                                          ['(my.task/step! {:seon.step/text "Next step"})])}
+               (step-summary steps)))))
+
+(defn steps!
+  "Apply the step `op` to task `handle` at the task home, answering the task's steps. An unknown
+  task refuses `:unknown-task`; `[:done]` with no current step refuses `:no-current-step`.
+
+  ## Costs
+
+  One transaction at the home, under the run bound (measured in the landing note)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.task/handle :seon.task/step-op]
+                  [:or :seon.task/steps-view :seon.task/refused-error :seon.error/value]]}
+  [connection handle op]
+  (let [target (home-connection connection)
+        database (db/db target)
+        known (db/pull database [:seon.task/id] [:seon.task/id handle])
+        rows (when (:seon.task/id known) (step-rows database handle))]
+    (cond (:seon.error/at known) known
+          (nil? (:seon.task/id known)) (refused 'seon.task/steps! :unknown-task 'seon.task handle)
+          (:seon.error/at rows) rows
+          (and (= [:done] op) (not-any? #(= :current (:seon.step/status %)) rows))
+          (refused 'seon.task/steps! :no-current-step 'seon.task handle)
+          :else (let [report (written connection [[:db.fn/call #'steps-call handle op]])]
+                  (if (:seon.error/at report) report (steps-view (db/db target) handle))))))
+
 (defn- refuted
   "The `proofs` observed red on `database` (the proposing branch) at a reach
   no green member of the same test shares, as `[test reach-digest]`: each

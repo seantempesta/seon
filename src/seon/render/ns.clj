@@ -8,6 +8,7 @@
             [seon.error.refusal]
             [seon.db :as db]
             [seon.sci.eval :as sci.eval]
+            [seon.task :as task]
             [seon.render.route :as route]))
 
 (defn- first-doc-line
@@ -89,18 +90,28 @@
   [unit]
   (max 0 (long (get unit :seon.render/distance 1))))
 
+(defn- unit-steps
+  "The steps of the task a unit shows, read from the viewer's database; none when it has none."
+  {:malli/schema [:=> [:cat :seon.render/unit :map] [:vector :seon.step/view]]}
+  [unit task]
+  (let [steps (when (and (:seon.db/db unit) (:seon.task/id task)) (task/task-steps (:seon.db/db unit) (:seon.task/id task)))]
+    (if (vector? steps) steps [])))
+
 (defn task-ai
-  "One task as data: its id, name, kind and namespace; beyond distance zero
-  its intent and must-reads. Its subjects and proofs are its related data."
+  "One task as data: its id, name, kind and namespace, with its current step and progress; beyond
+  distance zero its intent, must-reads and steps. Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
-        named (select-keys task [:seon.task/id :seon.task/name :seon.task/kind :seon.task/ns])]
+        steps (unit-steps unit task)
+        named (merge (select-keys task [:seon.task/id :seon.task/name :seon.task/kind :seon.task/ns])
+                     (task/step-summary steps))]
     (if (zero? (node-distance unit))
       named
       ;; A pulled cardinality-many value is a vector (Datahike's pull
       ;; shape); must-read is declared a set, so it is shown as one.
       (cond-> (merge named (select-keys task [:seon.task/intent]))
+        (seq steps) (assoc :seon.task/steps steps)
         (seq (:seon.task/must-read task)) (assoc :seon.task/must-read (set (:seon.task/must-read task)))))))
 
 (defn task-form
@@ -121,6 +132,9 @@
     [:article {:class "seon-family-entry seon-task-entry"}
      [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
      [:p {:class "seon-task-intent"} intent]
+     (when-let [steps (seq (unit-steps unit (or (:seon.render/value unit) unit)))]
+       (into [:ol {:class "seon-task-steps"}]
+             (map (fn [{text :seon.step/text status :seon.step/status}] [:li {:data-status (name status)} text])) steps))
      (when (pos? (node-distance unit))
        [:dl (entity "Must read" must-read) (entity "Evidence" evidence)])]))
 

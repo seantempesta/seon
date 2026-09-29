@@ -77,3 +77,108 @@
                                       :seon.error/offending {:seon.task/assigned handle :seon.agent/id holder}})
       :else (task/assign! {:seon.db/connection connection :seon.task/assigned handle
                                 :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}))))
+
+;;; STEPS: my ordered plan is the steps of the task I hold (spec task-steps). With no task, the first
+;;; plan! or step! makes and claims my own :work task.
+
+(defn- unassigned
+  "The refusal of a step read or write by an agent holding no task."
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.agent/id] :seon.task/refused-error]}
+  [operation agent-id]
+  (refusal/diagnostic (java.util.Date.) :seon.task/ingestion operation
+                      {:seon.error/message (str "Agent " agent-id " holds no task, so it has no steps.")
+                       :seon.task/refused :unassigned :seon.task/holder 'my.task
+                       :seon.error/offending {:seon.agent/id agent-id}
+                       :seon.error/fix "Plan first: (my.task/plan! {:seon.task/steps [\"first step\" \"next step\"]}) makes and claims my own work task."}))
+
+(defn- held
+  "The handle of the task I hold at the task home, or nil."
+  {:malli/schema [:=> [:cat :seon.task/steps-request] [:or :nil :seon.task/handle :seon.db/invalid-read-error]]}
+  [{connection :seon.db/connection agent-id :seon.agent/id}]
+  (task/agent-task (db/db (task/home-connection connection)) agent-id))
+
+(defn- own-task
+  "The handle of the task I hold, else of my own :work task, created and claimed now."
+  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
+                                  [:seon.task/intent {:optional true} :seon.task/intent]]]
+                  [:or :seon.task/handle :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+  [{connection :seon.db/connection agent-id :seon.agent/id intent :seon.task/intent :as request}]
+  (or (held request)
+      (let [database (db/db connection)
+            namespace-name (get-in (db/pull database [{:seon.agent/namespace [:seon.ns/name]}] [:seon.agent/id agent-id])
+                                   [:seon.agent/namespace :seon.ns/name] 'user)
+            created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns namespace-name
+                                   :seon.task/name (str "work of " agent-id) :seon.task/kind :work
+                                   :seon.task/intent (or intent (str "The work agent " agent-id " plans."))})]
+        (if (:seon.error/at created)
+          created
+          (let [assigned (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
+                                        :seon.task/agent [:seon.agent/id agent-id]
+                                        :seon.task/branch (get-in database [:config :branch])})]
+            (if (:seon.error/at assigned) assigned (:seon.task/id created)))))))
+
+(defn- steps-of
+  "Apply the step `op` to my own task (made when I hold none)."
+  {:malli/schema [:=> [:cat :seon.task/step-request :seon.task/step-op]
+                  [:or :seon.task/steps-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+  [{connection :seon.db/connection :as request} op]
+  (let [handle (own-task request)]
+    (if (string? handle) (task/steps! connection handle op) handle)))
+
+(defn plan!
+  "Replace the steps of my task with `:seon.task/steps`, in order: the first is current, the rest
+  open. With no task I first make and claim my own :work task (`:seon.task/intent` names it).
+  Answers my steps.
+
+  Example:
+  (my.task/plan! {:seon.task/steps [\"read the failing test\" \"fix the producer\"]})
+
+  ## Costs
+
+  One transaction at the task home (measured in the landing note)."
+  {:malli/schema [:=> [:cat :seon.task/plan-request]
+                  [:or :seon.task/steps-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+  [request]
+  (steps-of request [:plan (:seon.task/steps request)]))
+
+(defn step!
+  "Append `:seon.step/text` to my steps: current when I have no current step, else open.
+
+  Example:
+  (my.task/step! {:seon.step/text \"run the focused tests\"})"
+  {:malli/schema [:=> [:cat :seon.task/step-request]
+                  [:or :seon.task/steps-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
+  [request]
+  (steps-of request [:append (:seon.step/text request)]))
+
+(defn done!
+  "Complete my current step and make the next open one current. Refuses `:no-current-step` when
+  none is current, `:unassigned` when I hold no task.
+
+  Example:
+  (my.task/done! {})"
+  {:malli/schema [:=> [:cat :seon.task/steps-request]
+                  [:or :seon.task/steps-view :seon.task/refused-error :seon.error/value]]}
+  [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
+  (let [handle (held request)]
+    (cond (nil? handle) (unassigned 'my.task/done! agent-id)
+          (string? handle) (task/steps! connection handle [:done])
+          :else handle)))
+
+(defn steps
+  "My steps in order with the current one's text and progress; the calls my state offers.
+  Refuses `:unassigned` when I hold no task.
+
+  Example:
+  (my.task/steps {})
+
+  ## Costs
+
+  One indexed query for my task and one pull of its steps."
+  {:malli/schema [:=> [:cat :seon.task/steps-request]
+                  [:or :seon.task/steps-view :seon.task/refused-error :seon.error/value]]}
+  [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
+  (let [handle (held request)]
+    (cond (nil? handle) (unassigned 'my.task/steps agent-id)
+          (string? handle) (task/steps-view (db/db (task/home-connection connection)) handle)
+          :else handle)))

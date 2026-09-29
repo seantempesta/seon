@@ -6,7 +6,8 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.print.value :as print.value])
+            [seon.print.value :as print.value]
+            [seon.task :as task])
   (:import [java.lang.management ManagementFactory]))
 
 (defn- unknown
@@ -108,12 +109,14 @@
   [{database :seon.db/db connection :seon.db/connection}]
   (try
     (let [boot (inst-ms (boot-time))
-          entities (db/q '[:find [(pull ?a [:db/id :seon.agent/id
-                                      {:seon.agent/plan [{:my.plan/current-step [:my.plan.item/title]}]}]) ...]
+          home (db/db (task/home-connection connection))
+          entities (db/q '[:find [(pull ?a [:db/id :seon.agent/id]) ...]
                        :where [?a :seon.agent/id]] database)]
       (mapv
        (fn [agent]
-         (let [turns (db/q '[:find [(pull ?t [:db/id :seon.turn/reply-blob
+         (let [step (some->> (task/agent-task home (:seon.agent/id agent)) (task/task-steps home)
+                             (task/step-summary) :seon.task/current-step)
+               turns (db/q '[:find [(pull ?t [:db/id :seon.turn/reply-blob
                                             {:seon.turn/opened-tx [:db/txInstant]}
                                             {:seon.turn/closed-tx [:db/txInstant]}
                                             {:seon.turn/attempts [*]}]) ...]
@@ -146,6 +149,8 @@
                           :seon.cluster.status/provider-cost-usd
                           (sum-known (map #(get % "cost") usages) "An attempt has no reported USD cost.")
                           :seon.cluster.status/storage-bytes storage)
+             ;; the task home holds the step; an agent holding none has no current step
+             step (assoc :seon.task/current-step step)
              last-turn
              (assoc :seon.cluster.status/last-turn-ms
                     (- (inst-ms (get-in last-turn [:seon.turn/closed-tx :db/txInstant]))
