@@ -752,7 +752,7 @@ handle))}}
            declared (web-private 'declared-entity-units)
            entity (db/pull database '[*]
                            [:seon.agent/id "unit-owner"])]
-       (is (= [:seon.agent/id :seon.agent/branch :seon.agent/archived-tx
+       (is (= [:seon.agent/id :seon.agent/branch :seon.agent/cluster :seon.agent/archived-tx
                :seon.agent/admission-closed-tx
                :seon.agent/namespace :seon.agent/plan :seon.agent/settings
                :seon.agent/runtime

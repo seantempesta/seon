@@ -754,7 +754,7 @@
                                     [[unidentified] []]]]
          (let [html (#'web/debug-found-value
                      projection request debug-request ::references references true
-                     {} nil nil)
+                     {})
                header (nth html 2)
                nodes (tree-seq coll? seq header)
                links (filter #(and (vector? %) (= :a (first %))) nodes)
