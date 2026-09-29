@@ -1,27 +1,11 @@
 (ns seon.ai
   "One call, one attempt, one deadline. Failure is a value.
 
-  NOTHING RETRIES A PAID CALL (owner ruling, 2026-07-27 late). Not
-  here, not in the loop, not on crash recovery. A lost call is lost;
-  the agent is told and adapts.
-
-  What that ruling forbids is re-calling a model that MAY HAVE DONE
-  PAID WORK. It does not forbid a second call after a conclusively
-  unpaid refusal, and `disposition` is the one place that distinction
-  is computed — from transport-phase EVIDENCE the leaf recorded, never
-  from a list of error kinds. Everything else in this namespace is data
-  the caller reduces:
-
-  - `targets` derives the primary descriptor row and the OPTIONAL
-    backup from the effective config dials. ONE derivation for both
-    roles, so a role can never drift into its own assembly code;
-  - `disposition` answers `:failover-now` / `:backoff` / `:fail`;
-  - `delays` derives the finite backoff schedule as a vector of waits.
-
-  `complete` STILL MAKES EXACTLY ONE ATTEMPT. Failover and backoff are
-  the CALLER's reduce over these values (`seon.turn`'s `:call`
-  branch), which is why this namespace holds no attempt count and no
-  state: every attempt is one `complete` call and one durable
+  ONE CALL PER MODEL STEP: no retry, no backoff, no failover, no backup
+  provider (owner ruling, 2026-09-28). A failed or lost call is an
+  error value the turn records and the agent reads; `targets` derives
+  the one descriptor row from the effective config dials, and
+  `complete` makes exactly one attempt, each leaving one durable
   `:seon.ai/attempt` fact.
 
   THE ONE LEGITIMATE DEADLINE. A remote HTTP call is genuinely
@@ -407,47 +391,19 @@
 
 (defn- configured-targets
   [projection dials]
-   (let [primary-settings (primary-setting-entries projection dials)
-         primary
-         (if (:seon.config.ai/no-auth dials)
-           (dissoc primary-settings :seon.ai/api-key-variable)
-           (dissoc primary-settings :seon.config.ai/no-auth))]
-     (cond-> {:seon.ai/primary primary}
-       (:seon.config.ai.backup/model dials)
-       (assoc :seon.ai/backup
-              (cond-> (assoc primary :seon.ai/model
-                             (:seon.config.ai.backup/model dials))
-                (:seon.config.ai.backup/endpoint dials)
-                (assoc :seon.ai/endpoint
-                       (:seon.config.ai.backup/endpoint dials))
-                (:seon.config.ai.backup/api-key-variable dials)
-                (->
-                 (dissoc :seon.config.ai/no-auth)
-                 (assoc :seon.ai/api-key-variable
-                        (:seon.config.ai.backup/api-key-variable dials)))
-                (:seon.config.ai.backup/timeout-ms dials)
-                (assoc :seon.ai/timeout-ms
-                       (:seon.config.ai.backup/timeout-ms dials)))))))
+  (let [primary-settings (primary-setting-entries projection dials)]
+    {:seon.ai/primary
+     (if (:seon.config.ai/no-auth dials)
+       (dissoc primary-settings :seon.ai/api-key-variable)
+       (dissoc primary-settings :seon.config.ai/no-auth))}))
 
 (defn targets
-  "The primary descriptor row and the OPTIONAL backup, from the dials.
-  PURE, and the ONE assembly for both roles — a second hand-written
-  provider map somewhere else is how two roles start to disagree about
-  what a target is.
+  "The one provider descriptor row, from the dials. PURE.
 
-  THE BACKUP IS OVERRIDES OVER THE PRIMARY, and that shape is chosen to
-  make a PARTIAL backup unrepresentable rather than merely refused.
-  `:seon.config.ai.backup/model` decides whether a backup exists at
-  all; endpoint, credential variable and deadline are optional and
-  inherit the primary's. Descriptor resolution replaces inherited
-  authentication when the backup model names a different provider;
-  an explicit backup credential variable still wins. So there is no
-  configuration in which three backup dials are set and the fourth
-  silently voids them, and the common case — a different model at the
-  same provider — is one dial rather than four copied lines.
-
-  Absence, never nil: with no backup the key is simply not there, which
-  is exactly what `:seon.ai/backup?` reads downstream."
+  Returned as `{:seon.ai/primary target}`: one call per model step means
+  one target, and the descriptor row (endpoint, model, timeout, one
+  authentication declaration) resolves against the model's provider
+  descriptor when a database is passed."
   {:malli/schema
    [:function
     [:=> [:cat :seon.schema/projection :seon.config/effective] :seon.ai/targets]
@@ -455,96 +411,10 @@
      :seon.ai/targets]]}
   ([projection dials] (configured-targets projection dials))
   ([projection database dials]
-   (let [{:seon.ai/keys [primary backup]} (configured-targets projection dials)
-         primary-model (model-details database (:seon.ai/model primary))
-         backup-model (some->> backup :seon.ai/model
-                               (model-details database))
-         primary-provider-id
-         (get-in primary-model
-                 [:seon.ai.model/provider :seon.ai.model/provider-id])
-         backup-provider-id
-         (get-in backup-model
-                 [:seon.ai.model/provider :seon.ai.model/provider-id])
-         ;; Authentication inherited while assembling a backup is a valid
-         ;; caller choice only when both models use the same provider. Across
-         ;; providers, the backup descriptor supplies its own declaration;
-         ;; an explicit backup variable still wins below.
-         backup
-         (cond-> backup
-           (and backup-provider-id
-                (not= primary-provider-id backup-provider-id)
-                (not (:seon.config.ai.backup/api-key-variable dials)))
-           (dissoc :seon.ai/api-key-variable :seon.config.ai/no-auth))]
-     (cond-> {:seon.ai/primary
-              (resolved-target primary primary-model)}
-       backup
-       (assoc :seon.ai/backup
-              (resolved-target backup backup-model))))))
-
-(defn retry-strategy
-  "The backoff strategy row, from the dials. Pure projection.
-  Its own function for the same reason `targets` is: the strategy is
-  read in two places (the loop's handle and a seeded property) and
-  neither may build it by hand."
-  {:malli/schema [:=> [:cat :seon.config/effective] :seon.ai.retry/strategy]}
-  [dials]
-  {:seon.ai.retry/base-delay-ms (:seon.config.ai.retry/base-delay-ms dials)
-   :seon.ai.retry/multiplier (:seon.config.ai.retry/multiplier dials)
-   :seon.ai.retry/jitter-fraction
-   (:seon.config.ai.retry/jitter-fraction dials)
-   :seon.ai.retry/maximum-delay-ms
-   (:seon.config.ai.retry/maximum-delay-ms dials)
-   :seon.ai.retry/maximum-retries (:seon.config.ai.retry/maximum-retries dials)
-   :seon.ai.retry/maximum-total-delay-ms
-   (:seon.config.ai.retry/maximum-total-delay-ms dials)})
-
-(defn delays
-  "The finite backoff schedule as a vector of waits in milliseconds.
-  PURE — randomness is INJECTED as a zero-arg function returning
-  `[0,1)`, so a seeded property pins the whole schedule and there is no
-  hidden clock or hidden generator anywhere in the retry path.
-
-  The composition is `again`'s, read from
-  `reference-code`-equivalent shape rather than reinvented:
-  multiplicative growth, randomized by a jitter fraction, each delay
-  clamped, the count bounded, and the CUMULATIVE budget bounded — the
-  last one is what actually binds, because a turn holds its run's
-  custody and a backed-off turn that waits forever is worse than a
-  turn that gave up.
-
-  The result is a VALUE, not a control structure: the caller reduces
-  over it, each element is one wait before one more attempt, and an
-  empty vector means `:backoff` degenerates to `:fail` with nothing
-  special-cased."
-  {:malli/schema [:=> [:cat :seon.ai.retry/strategy [:=> [:cat] :double]]
-                  :seon.ai.retry/delays]}
-  [{:seon.ai.retry/keys [base-delay-ms multiplier jitter-fraction
-                         maximum-delay-ms maximum-retries
-                         maximum-total-delay-ms]}
-   random]
-  (loop [remaining maximum-retries
-         raw (double base-delay-ms)
-         spent 0
-         schedule []]
-    (if (zero? remaining)
-      schedule
-      ;; jitter is SYMMETRIC around the raw delay — `again`'s
-      ;; randomize-strategy spreads either side rather than only
-      ;; lengthening, so the mean schedule is the schedule
-      (let [spread (* raw jitter-fraction)
-            jittered (+ (- raw spread) (* 2.0 spread (random)))
-            clamped (long (min (double maximum-delay-ms) (max 0.0 jittered)))
-            ;; the cumulative budget is a HARD stop, not a trim: a
-            ;; final wait shortened to fit would be a wait nobody
-            ;; configured, and the honest answer to "no budget left" is
-            ;; to stop retrying
-            budgeted (+ spent clamped)]
-        (if (> budgeted maximum-total-delay-ms)
-          schedule
-          (recur (dec remaining)
-                 (* raw multiplier)
-                 budgeted
-                 (conj schedule clamped)))))))
+   (let [{:seon.ai/keys [primary]} (configured-targets projection dials)]
+     {:seon.ai/primary
+      (resolved-target primary
+                       (model-details database (:seon.ai/model primary)))})))
 
 (def ^:private omit-wire-value ::omit-wire-value)
 
@@ -1079,63 +949,6 @@
           javax.net.ssl.SSLHandshakeException
           java.net.http.HttpConnectTimeoutException])))
 
-(defn disposition
-  "What to do about one model failure: fail over, back off, or stop.
-  PURE, and computed from the EVIDENCE the leaf recorded rather than
-  from the error's kind — a kind list would be the hand-maintained
-  classification the standing rule bans, and it could not answer the
-  only question that matters anyway.
-
-  That question is: DID THIS CALL COST ANYTHING? The owner's ruling
-  forbids re-calling a model that may have done paid work; it does not
-  forbid a second call after a conclusively unpaid refusal. So:
-
-  - any evidence of OUTPUT is terminal — `:fail`. A 2xx body we could
-    not parse is generated text somebody paid for;
-  - a TRANSMITTED request with no proof of the provider's answer is
-    ambiguously paid, and ambiguously paid is terminal. This is why a
-    plain `::timeout` does NOT fail over, and it is the strictest
-    reading of the ruling rather than the convenient one;
-  - a transient request failure that provably never left this machine — a
-    refused connection, an unresolved host, a failed handshake, a
-    CONNECT timeout — cost nothing, so a backup may be called
-    immediately and, with no backup, the same call may be retried;
-  - a provider REJECTION carrying no output cost nothing either, and
-    splits by what it says: `:rate-limit`/`:server` mean \"not now\"
-    (fail over, else back off), `:authentication`/`:authorization`/
-    `:model`/`:credential` mean \"not here\" (terminal; repeating or
-    switching targets does not repair configuration), and
-    `:request` means \"not this\" (terminal: a backup would reject the
-    same request).
-
-  Returns `:failover-now`, `:backoff`, or `:fail`. The caller decides
-  what to do with each; this decides nothing about execution."
-  {:malli/schema [:=> [:cat :seon.ai/disposition-request] :seon.ai/disposition]}
-  [{value :seon.error/value backup? :seon.ai/backup?}]
-  (let [{::keys [error-class output-observed?]}
-        (:seon.error/data value)]
-    (cond
-      ;; somebody paid for something. Nothing re-calls that.
-      output-observed? :fail
-
-      ;; a rejection is free even though the request was transmitted:
-      ;; the provider told us it did no work
-      (contains? #{:rate-limit :server} error-class)
-      (if backup? :failover-now :backoff)
-
-      (contains? #{:credential :authentication :authorization :model}
-                 error-class)
-      ;; Static configuration refusals are terminal for this turn.
-      :fail
-
-      (= :transport-before-send error-class)
-      (if backup? :failover-now :backoff)
-
-      ;; :request (the provider rejected this request), :response (we
-      ;; could not read a 2xx), :timeout and :transport-unknown (the
-      ;; request may have been transmitted) are all terminal
-      :else :fail)))
-
 (defn- caused-by?
   [failure throwable-class]
   (boolean
@@ -1246,8 +1059,8 @@
 
   A streamed call and a one-shot call return the SAME shape — that is
   the point, and it is why this lives beside `completion-text` rather
-  than replacing it: everything downstream, including the failover
-  disposition and the attempt facts, is untouched by which transport
+  than replacing it: everything downstream, including the attempt
+  facts, is untouched by which transport
   ran.
 
   Reads visible-text replies to natural EOF because reply evaluation is `:batch`

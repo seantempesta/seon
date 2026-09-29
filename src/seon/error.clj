@@ -805,9 +805,8 @@
 (defn notice
   "The agent-facing unit for one fact; :seon.error/notice declares its AI renderer.
 
-  `:seon.error/reason` is optional: only a failover attempt's notice
-  (`seon.turn`) states one. A recorded fault's notification carries the
-  error's value, not a notice (`message-tx`)."
+  `:seon.error/reason` is optional. A recorded fault's notification carries
+  the error's value, not a notice (`message-tx`)."
   {:malli/schema [:=> [:cat :seon.error/notice-request] :seon.error/notice]}
   [{:seon.error/keys [fact] :as request}]
   (into {:seon.error/fact fact
@@ -1026,18 +1025,15 @@
   {:malli/schema [:=> [:cat :seon.error/notice]
                   :string]}
   [notice]
-  (let [{:seon.error/keys [fact reason]} notice
-        {:seon.error/keys [id message signature]} fact]
-    (if (= reason :failover)
-      "The primary model was not called: its connection failed before send, so no output exists. Answer the unchanged request as the backup attempt."
-      (str message " Inspect error " id ". Signature: " signature "."))))
+  (let [{:seon.error/keys [id message signature]} (:seon.error/fact notice)]
+    (str message " Inspect error " id ". Signature: " signature ".")))
 
 (defn ai-prose
   "`:seon.render/ai` — AI-attempt evidence or a legacy error notice.
 
   Class schemas for every `:seon.ai/*` attempt failure declare this producer.
-  The notice arm remains through slice 1 so existing committed facts and the
-  failover context retain their current face until their emission sweep."
+  The notice arm remains through slice 1 so existing committed facts retain
+  their current face until their emission sweep."
   {:malli/schema
    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
   [error-value]
@@ -1063,7 +1059,7 @@
                     (when http-status (str "HTTP status: " http-status))])))
          (cond
            (false? request-transmitted?)
-           "No request was transmitted; a configured failover may be safe."
+           "No request was transmitted."
 
            output-observed?
            "Output may have been observed; do not retry automatically."

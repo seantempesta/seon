@@ -51,13 +51,9 @@
           :inert [:set :qualified-keyword],
           :extra-body-edn :seon.config.ai/extra-body-edn,
           :thinking [:enum :disabled :low :high :max],
-          :backup :seon.ai/target,
-
           :targets
           [:map
-           [:seon.ai/primary :seon.ai/target]
-           [:seon.ai/backup {:optional true} :seon.ai/target]],
-          :disposition [:enum :failover-now :backoff :fail],
+           [:seon.ai/primary :seon.ai/target]],
           :http-status [:int {:min 100, :max 599}],
           :reasoning-without-answer-error
           [:and {:seon.db/attributes true,
@@ -277,7 +273,6 @@
           :provider-server-failure :seon.ai/http-status,
           :extra-body :boolean,
           :model [:string {:min 1 :description "The provider model identity observed by the request or attempt. It survives descriptor deletion; join a current descriptor through :seon.ai.model/id when needed."}],
-          :backup? :boolean,
           :attempt
           [:map
            {:seon.db/attributes true,
@@ -325,13 +320,7 @@
             :seon.ai/output-observed?]
            [:seon.ai.attempt/error
             {:optional true}
-            :seon.ai.attempt/error]
-           [:seon.ai.attempt/failover-from
-            {:optional true}
-            :seon.ai.attempt/failover-from]
-           [:seon.ai.attempt/delay-ms
-            {:optional true}
-            :seon.ai.attempt/delay-ms]],
+            :seon.ai.attempt/error]],
           :stop :seon.config.ai/stop,
           :successful-completion
           [:map
@@ -376,10 +365,6 @@
            [:seon.ai/timeout :seon.ai/timeout]
            [:seon.error/message :seon.error/message]]],
           :text :string,
-          :disposition-request
-          [:map
-           [:seon.error/value :seon.error/value]
-           [:seon.ai/backup? :seon.ai/backup?]],
           :endpoint [:string {:min 1}],
           :usage [:map-of :string :seon.ai/json-value],
           :request-transmitted? :boolean,

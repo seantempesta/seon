@@ -62,17 +62,7 @@
    :seon.config.ai/response-format :json-object
    :seon.config.ai/extra-body-edn "{\"vendor_probe\" true}"
    :seon.config.ai/api-key-variable "SEON_APPLICATION_PROOF_KEY"
-   :seon.config.ai/timeout-ms 222
-   :seon.config.ai.backup/model "application-proof-backup"
-   :seon.config.ai.backup/endpoint "http://127.0.0.1:1/backup"
-   :seon.config.ai.backup/api-key-variable "SEON_APPLICATION_PROOF_BACKUP_KEY"
-   :seon.config.ai.backup/timeout-ms 333
-   :seon.config.ai.retry/base-delay-ms 11
-   :seon.config.ai.retry/multiplier 1.5
-   :seon.config.ai.retry/jitter-fraction 0.1
-   :seon.config.ai.retry/maximum-delay-ms 99
-   :seon.config.ai.retry/maximum-retries 1
-   :seon.config.ai.retry/maximum-total-delay-ms 100})
+   :seon.config.ai/timeout-ms 222})
 
 (defn- fresh-root []
   (let [root (str "tmp/config-application-test/" (random-uuid))]
@@ -209,10 +199,7 @@
                    (select-keys (config/effective @connection name)
                                 (keys (ai/request-attributes (seon.schema/build-projection (schema/declaration-population)))))))
             (is (= name (:seon.cluster/name handle)))
-            (is (empty? (select-keys handle
-                                     [:seon.ai/primary
-                                      :seon.ai/backup
-                                      :seon.ai.retry/strategy]))
+            (is (empty? (select-keys handle [:seon.ai/primary]))
                 "the loop cannot retain a boot-captured AI projection"))
           (testing "the selected web port reaches the armed server"
             (let [url (get-in instance
@@ -254,11 +241,7 @@
          :seon.boot/cluster-name cluster-name
          :seon.config/manifest
          (-> applied
-             (assoc :seon.config.ai/no-auth true)
-             (dissoc :seon.config.ai.backup/model
-                     :seon.config.ai.backup/endpoint
-                     :seon.config.ai.backup/api-key-variable
-                     :seon.config.ai.backup/timeout-ms))})
+             (assoc :seon.config.ai/no-auth true))})
        (let [primary (:seon.ai/primary
                       (ai/targets (schema/handed-projection)
                                   (config/effective (db/db connection) cluster-name)))]

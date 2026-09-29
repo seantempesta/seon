@@ -256,14 +256,10 @@
           (is (= :response (:seon.ai/error-class evidence)))
           (is (true? (:seon.ai/request-transmitted? evidence)))
           (is (true? (:seon.ai/response-started? evidence)))
-          (is (true? (:seon.ai/output-observed? evidence)))
-          (is (= :fail
-                 (ai/disposition {:seon.error/value completion
-                                  :seon.ai/backup? true}))
-              "corrupted paid output never retries or fails over"))))))
+          (is (true? (:seon.ai/output-observed? evidence))))))))
 
 (deftest a-streamed-call-returns-the-same-shape-as-a-one-shot-call
-  ;; Downstream — the disposition, the attempt facts, the loop — must
+  ;; Downstream — the attempt facts, the loop — must
   ;; not be able to tell which transport ran.
   (with-provider {}
     (fn [endpoint]

@@ -93,8 +93,7 @@
                                             [[:db/retract settings :seon.config.ai/no-provider true]
                                              [:db/add settings :seon.config.run/max-episode-runs limit]
                                              [:db/add settings :seon.config.eval/time-limit-ms 10000]
-                                             [:db/add settings :seon.config.ai/timeout-ms 30000]
-                                             [:db/add settings :seon.config.ai.retry/maximum-retries 0]])))))
+                                             [:db/add settings :seon.config.ai/timeout-ms 30000]])))))
                  (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "loop-continue"
                                 :seon.config/manifest {:seon.config.ai/no-provider :seon.config/absent}})
                  (d/listen connection ::continuation (fn [_] (async/offer! @events true)))

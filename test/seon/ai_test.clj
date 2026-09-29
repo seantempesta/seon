@@ -14,7 +14,6 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
-            [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
@@ -81,7 +80,7 @@
   stopped being derivable."
   (delay config/defaults))
 
-(deftest the-shipped-cluster-has-a-primary-and-configured-backup
+(deftest the-shipped-cluster-has-one-primary-target
   (let [targets (ai/targets (seon.schema/handed-projection) @dials)]
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/targets) targets))
     (is (= {:seon.ai/endpoint (:seon.config.ai/endpoint @dials)
@@ -97,9 +96,8 @@
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
         "the primary retains every effective AI dial without reshaping it")
-    (is (= "deepseek/deepseek-v4-flash-20260731"
-           (get-in targets [:seon.ai/backup :seon.ai/model]))
-        "the pinned 0731 GA slug, never the bare 0423 preview slug")
+    (is (= [:seon.ai/primary] (keys targets))
+        "one call per model step means one target: no backup")
     (testing "and a target is a request minus what to say, which is why
     the call site is one assoc"
       (is ((schema/projection-validator (schema/handed-projection) :seon.ai/request) (assoc (:seon.ai/primary targets) :seon.ai/prompt "hello"))))
@@ -107,40 +105,6 @@
         "the interim output budget remains until flash calibration lands")
     (is (= :disabled (:seon.ai/thinking (:seon.ai/primary targets)))
         "the shipped fast-turn posture explicitly disables thinking")))
-
-(deftest the-shipped-openrouter-backup-resolves-through-its-provider-entity
-  (test-support/with-database
-    (fn [connection]
-      (let [backup (:seon.ai/backup (ai/targets (seon.schema/handed-projection) @connection @dials))]
-        (is (= {:seon.ai/model "deepseek/deepseek-v4-flash-20260731"
-                :seon.ai/endpoint
-                "https://openrouter.ai/api/v1/chat/completions"
-                :seon.ai/api-key-variable "OPENROUTER_API_KEY"
-                :seon.ai.model/output-token-wire-key "max_tokens"}
-               (select-keys
-                backup
-                [:seon.ai/model
-                 :seon.ai/endpoint
-                 :seon.ai/api-key-variable
-                 :seon.ai.model/output-token-wire-key])))
-        (is (= (:seon.config.ai/max-tokens @dials)
-               (:seon.ai/max-tokens backup))
-            "the backup inherits the configured output bound")
-        (is (= "EXPLICIT_BACKUP_KEY"
-               (get-in
-                (ai/targets (seon.schema/handed-projection) @connection (assoc @dials
-                        :seon.config.ai.backup/api-key-variable
-                        "EXPLICIT_BACKUP_KEY"))
-                [:seon.ai/backup :seon.ai/api-key-variable]))
-            "an explicit backup credential still outranks its descriptor")
-        (is (= "PRIMARY_OVERRIDE_KEY"
-               (get-in
-                (ai/targets (seon.schema/handed-projection) @connection (assoc @dials
-                        :seon.config.ai/api-key-variable
-                        "PRIMARY_OVERRIDE_KEY"
-                        :seon.config.ai.backup/model "deepseek-v4-pro"))
-                [:seon.ai/backup :seon.ai/api-key-variable]))
-            "same-provider backups inherit an explicit primary credential")))))
 
 (deftest deepseek-flash-thinking-setting-survives-model-resolution
   (test-support/with-database
@@ -218,55 +182,6 @@
     (is (= {"content-type" "application/json"}
            (:seon.ai.http/headers (first @requests)))
         "the F4 recorder seam observes no Authorization header")))
-
-(deftest one-dial-configures-a-backup-and-the-rest-inherit
-  ;; the shape that makes a PARTIAL backup unrepresentable: `model`
-  ;; decides, everything else is an override
-  (let [targets (ai/targets (seon.schema/handed-projection) (assoc @dials :seon.config.ai.backup/model
-                                   "deepseek-v4-pro"))
-        {:seon.ai/keys [primary backup]} targets]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.ai/targets) targets))
-    (is (.equals "deepseek-v4-pro" (:seon.ai/model backup)))
-    (is (= (dissoc primary :seon.ai/model) (dissoc backup :seon.ai/model))
-        "same provider, same credential, same deadline — one dial said
-         everything that differs, so nothing was copied to drift")))
-
-(deftest a-backup-at-another-provider-overrides-what-differs
-  (let [{:seon.ai/keys [primary backup]}
-        (ai/targets (seon.schema/handed-projection) (assoc @dials
-                           :seon.config.ai.backup/model "claude-probe"
-                           :seon.config.ai.backup/endpoint
-                           "https://example.invalid/v1/messages"
-                           :seon.config.ai.backup/api-key-variable
-                           "OTHER_PROVIDER_KEY"
-                           :seon.config.ai.backup/timeout-ms 30000))]
-    (is (= {:seon.ai/endpoint "https://example.invalid/v1/messages"
-            :seon.ai/model "claude-probe"
-            :seon.ai/stop ["#:seon.repl"]
-            :seon.ai/max-tokens (:seon.config.ai/max-tokens @dials)
-            :seon.ai/prompt-token-budget
-            (:seon.config.ai/prompt-token-budget @dials)
-            :seon.ai/chars-per-token-prior
-            (:seon.config.ai/chars-per-token-prior @dials)
-            :seon.ai/api-key-variable "OTHER_PROVIDER_KEY"
-            :seon.ai/thinking :disabled
-            :seon.ai/timeout-ms 30000}
-           backup))
-    (is (not= (:seon.ai/api-key-variable primary)
-              (:seon.ai/api-key-variable backup))
-        "and a second credential is a second VARIABLE NAME — never a key
-         in the database, never in this repository")))
-
-(deftest a-backup-dial-without-a-model-configures-nothing
-  ;; the unrepresentable-partial rule, stated as a falsifier: setting
-  ;; three of four backup dials cannot produce a half-built target
-  (doseq [dial [:seon.config.ai.backup/endpoint
-                :seon.config.ai.backup/api-key-variable]]
-    (is (not (contains? (ai/targets (seon.schema/handed-projection) (-> @dials
-                                        (dissoc :seon.config.ai.backup/model)
-                                        (assoc dial "set-but-alone")))
-                        :seon.ai/backup))
-        "alone is not a backup, and it is not half of one")))
 
 (defn- seed-registry!
   [connection]
@@ -364,8 +279,7 @@
   (test-support/with-database
     (fn [connection]
       (let [settings (test-support/effective-config
-                      {:seon.config.ai/model "unregistered-model"
-                       :seon.config.ai.backup/model config/absent})]
+                      {:seon.config.ai/model "unregistered-model"})]
         (is (= (ai/targets (seon.schema/handed-projection) settings)
                (ai/targets (seon.schema/handed-projection) @connection settings)))))))
 
@@ -443,99 +357,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The backoff schedule: a finite value, never a control structure
 ;;; ---------------------------------------------------------------------------
-
-(def ^:private strategy
-  {:seon.ai.retry/base-delay-ms 100
-   :seon.ai.retry/multiplier 2.0
-   :seon.ai.retry/jitter-fraction 0.0
-   :seon.ai.retry/maximum-delay-ms 1000
-   :seon.ai.retry/maximum-retries 5
-   :seon.ai.retry/maximum-total-delay-ms 100000})
-
-(deftest the-shipped-strategy-is-derived-from-the-shipped-dials
-  (let [shipped-dials @dials
-        derived (ai/retry-strategy shipped-dials)
-        midpoint-schedule (ai/delays derived (constantly 0.5))]
-    (is ((schema/projection-validator (schema/handed-projection) :seon.ai.retry/strategy) derived))
-    (is (= {:seon.ai.retry/base-delay-ms 500
-            :seon.ai.retry/multiplier 2.0
-            :seon.ai.retry/jitter-fraction 0.25
-            :seon.ai.retry/maximum-delay-ms 4000
-            :seon.ai.retry/maximum-retries 2
-            :seon.ai.retry/maximum-total-delay-ms 3000}
-           derived)
-        "every shipped retry dial reaches the one derived strategy")
-    (is (= [500 1000] midpoint-schedule)
-        "midpoint jitter preserves the exact base-plus-doubled schedule")
-    (is (<= (reduce + 0 midpoint-schedule)
-            (:seon.ai.retry/maximum-total-delay-ms derived))
-        "the complete shipped schedule fits its cumulative wait budget")
-    (is (< (:seon.ai.retry/maximum-total-delay-ms derived)
-           (:seon.config.ai/timeout-ms shipped-dials))
-        "the cumulative retry bound stays below the current call deadline")))
-
-(deftest with-no-jitter-the-schedule-is-exactly-the-doubling
-  (is (= [100 200 400 800 1000]
-         (ai/delays strategy (constantly 0.5)))
-      "five retries, doubling, and the fifth CLAMPED at the maximum
-       delay rather than continuing to 1600"))
-
-(deftest each-bound-is-a-real-bound
-  (testing "the retry count"
-    (is (= 2 (count (ai/delays (assoc strategy :seon.ai.retry/maximum-retries 2)
-                               (constantly 0.5))))))
-  (testing "zero retries makes :backoff degenerate to :fail with no
-  special case anywhere — the empty vector IS the behaviour"
-    (is (= [] (ai/delays (assoc strategy :seon.ai.retry/maximum-retries 0)
-                         (constantly 0.5)))))
-  (testing "and the CUMULATIVE budget stops the schedule rather than
-  trimming its last wait to fit: a shortened final wait is a wait
-  nobody configured"
-    (let [schedule (ai/delays
-                    (assoc strategy :seon.ai.retry/maximum-total-delay-ms 250)
-                    (constantly 0.5))]
-      (is (= [100] schedule))
-      (is (<= (reduce + 0 schedule) 250)))))
-
-(defspec every-schedule-is-finite-bounded-and-inside-its-jitter-band 200
-  (prop/for-all
-   [base-delay (gen/choose 1 500)
-    retries (gen/choose 0 8)
-    jitter (gen/elements [0.0 0.1 0.25 0.5 1.0])
-    maximum (gen/choose 1 5000)
-    budget (gen/choose 0 20000)
-    randoms (gen/vector (gen/elements [0.0 0.25 0.5 0.75 0.999]) 1 12)]
-   (let [generated-strategy {:seon.ai.retry/base-delay-ms base-delay
-                   :seon.ai.retry/multiplier 2.0
-                   :seon.ai.retry/jitter-fraction jitter
-                   :seon.ai.retry/maximum-delay-ms maximum
-                   :seon.ai.retry/maximum-retries retries
-                   :seon.ai.retry/maximum-total-delay-ms budget}
-         drawn (atom (cycle randoms))
-         schedule (ai/delays generated-strategy
-                             (fn [] (let [v (first @drawn)]
-                                      (swap! drawn rest)
-                                      v)))]
-     (and ((schema/projection-validator (schema/handed-projection) :seon.ai.retry/delays) schedule)
-          ;; FINITE, and never longer than the configured count
-          (<= (count schedule) retries)
-          ;; every single wait is clamped
-          (every? #(<= 0 % maximum) schedule)
-          ;; the whole schedule fits the cumulative budget
-          (<= (reduce + 0 schedule) budget)
-          ;; and each wait is inside the jitter band around its own
-          ;; undelayed geometric value, clamped — this is what proves
-          ;; the randomness is SPREAD rather than merely added
-          (every? true?
-                  (map-indexed
-                   (fn [index wait-ms]
-                     (let [raw (* (double base-delay) (Math/pow 2.0 index))]
-                       (<= (long (min (double maximum)
-                                      (max 0.0 (* raw (- 1.0 jitter)))))
-                           wait-ms
-                           (long (min (double maximum)
-                                      (* raw (+ 1.0 jitter)))))))
-                   schedule))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure halves
@@ -779,8 +600,7 @@
     (let [completion (#'ai/streamed-completion
                       (java.io.ByteArrayInputStream. (.getBytes ^String body "UTF-8")) nil)]
       (is (= (some? expected) (contains? completion :seon.ai/unreadable-response-member)))
-      (if expected
-        (is (= :fail (ai/disposition {:seon.error/value completion :seon.ai/backup? false})))
+      (when-not expected
         (is (= "" (:seon.ai/text completion)))))))
 
 (def ^:private thinking-usage
@@ -971,10 +791,9 @@
         "reasoning is paid output even when assistant text is absent")))
 
 (deftest a-truncated-stream-never-reports-output-that-never-arrived
-  ;; the flag `disposition` reads was a hardcoded true on every 2xx
+  ;; the output-observed flag was a hardcoded true on every 2xx
   ;; failure, so an attempt entity asserted "output WAS seen" about a stream
-  ;; that delivered nothing. It is derived now, and a truncation that
-  ;; delivered nothing is still terminal — no re-request either way.
+  ;; that delivered nothing. It is derived now.
   (let [empty-truncation (#'seon.ai/streamed-completion (truncating-stream "") nil)
         evidenced (update empty-truncation :seon.error/data merge
                           {:seon.ai/error-class :response
@@ -983,10 +802,7 @@
                                          [:seon.error/data
                                           :seon.ai/text-received]
                                          1))})]
-    (is (false? (get-in evidenced [:seon.error/data :seon.ai/output-observed?])))
-    (is (= :fail (ai/disposition {:seon.error/value evidenced
-                                  :seon.ai/backup? false}))
-        "nothing re-requests a 2xx whose stream died, paid or not")))
+    (is (false? (get-in evidenced [:seon.error/data :seon.ai/output-observed?])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; complete — one attempt, four failure shapes, never a throw
@@ -1233,40 +1049,6 @@
             "every concurrent stream completed"))
       (finally (.stop server 0)))))
 
-(deftest payment-required-primary-is-terminal-with-a-configured-backup
-  (let [server (start-stub!)]
-    (try
-      (let [{:seon.ai/keys [primary backup]}
-            (ai/targets (seon.schema/handed-projection) (assoc @dials
-                    :seon.config.ai.backup/model "backup-probe"
-                    :seon.config.ai.backup/endpoint
-                    "https://backup.example.invalid/v1/chat/completions"))
-            failure
-            (ai/complete (seon.schema/handed-projection)
-                         (with-test-key (assoc primary
-                                               :seon.ai/endpoint
-                                               (str "http://127.0.0.1:"
-                                                    (.getPort (.getAddress server))
-                                                    "/payment-required")
-                                               :seon.ai/prompt "hello")))
-            action
-            (ai/disposition
-             {:seon.error/value failure :seon.ai/backup? true})
-            selected-target (when (= :failover-now action) backup)]
-        (is (= 402 (:seon.ai/provider-error failure)))
-        (is (= :authentication
-               (get-in failure
-                       [:seon.error/data :seon.ai/error-class]))
-            "payment exhaustion is a free 'not here' refusal")
-        (is (= :fail action))
-        (is (nil? selected-target)
-            "static refusal never selects a second provider")
-        (is (= :fail
-               (ai/disposition
-                {:seon.error/value failure :seon.ai/backup? false}))
-            "without a backup, repeating an empty-balance target cannot help"))
-      (finally (.stop server 0)))))
-
 (deftest a-reasoning-finish-settles-before-the-response-body-ends
   (let [{:keys [server reasoning-finished] :as stub}
         (start-custody-stub!)]
@@ -1344,118 +1126,25 @@
       (finally (stop-custody-stub! stub)))))
 
 ;;; ---------------------------------------------------------------------------
-;;; The evidence, and the disposition computed from it
+;;; The transport-phase evidence the leaf records
 ;;; ---------------------------------------------------------------------------
 
-;;; THE QUESTION EVERY ONE OF THESE ASKS is "did this call cost
-;;; anything?", because that — not the error's kind — is what the
-;;; no-retry ruling turns on. A kind list would be the hand-maintained
-;;; classification the standing rule bans, and it could not answer this
-;;; question at all: two `::transport-failure` values with different
-;;; transmission phase have opposite dispositions.
-
-(defn- disposed
-  [value backup?]
-  (ai/disposition {:seon.error/value value :seon.ai/backup? backup?}))
-
-(defn- failure
-  "One error value carrying the evidence the leaf would have recorded."
-  [_observation evidence]
-  {:seon.error/at (java.util.Date.)
-   :seon.error/layer :seon.ai/request
-   :seon.error/operation 'seon.ai-test/failure
-   :seon.error/message "probe"
-   :seon.error/data evidence})
-
-(def ^:private evidence-partitions
-  [{::error-class :credential
-    ::kind :seon.ai/no-credential
-    ::transmitted? false}
-   {::error-class :transport-before-send
-    ::kind :seon.ai/transport-failure
-    ::transmitted? false}
-   {::error-class :transport-unknown
-    ::kind :seon.ai/transport-failure
-    ::transmitted? true}
-   {::error-class :timeout
-    ::kind :seon.ai/timeout
-    ::transmitted? true}
-   {::error-class :rate-limit
-    ::kind :seon.ai/provider-error
-    ::transmitted? true}
-   {::error-class :server
-    ::kind :seon.ai/provider-error
-    ::transmitted? true}
-   {::error-class :authentication
-    ::kind :seon.ai/provider-error
-    ::transmitted? true}
-   {::error-class :authorization
-    ::kind :seon.ai/provider-error
-    ::transmitted? true}
-   {::error-class :model
-    ::kind :seon.ai/provider-error
-    ::transmitted? true}
-   {::error-class :request
-    ::kind :seon.ai/provider-error
-    ::transmitted? true}
-   {::error-class :response
-    ::kind :seon.ai/unparseable-body
-    ::transmitted? true}
-   {::error-class :response
-    ::kind :seon.ai/unparseable-body
-    ::transmitted? true
-    ::output? true}])
-
-(defn- expected-disposition
-  [{::keys [error-class output?]} backup?]
-  (cond
-    output? :fail
-    (contains? #{:rate-limit :server :transport-before-send} error-class)
-    (if backup? :failover-now :backoff)
-    :else :fail))
-
-(defn- partition-value
-  [{::keys [error-class kind transmitted? output?]}]
-  (failure kind
-           (cond-> {:seon.ai/error-class error-class
-                    :seon.ai/request-transmitted? transmitted?
-                    :seon.ai/response-started? (boolean
-                                                (contains?
-                                                 #{:rate-limit :server
-                                                   :authentication
-                                                   :authorization :model
-                                                   :request :response}
-                                                 error-class))
-                    :seon.ai/output-observed? (boolean output?)}
-             (contains? #{:rate-limit :server :authentication
-                          :authorization :model :request :response}
-                        error-class)
-             (assoc :seon.ai/http-status
-                    (if (= :response error-class) 200 503)))))
-
-(deftest every-cost-evidence-partition-has-one-derived-disposition
-  (test-support/assert-check!
-   (tc/quick-check
-    160
-    (prop/for-all [evidence-partition (gen/elements evidence-partitions)
-                   backup? gen/boolean]
-      (let [value (partition-value evidence-partition)
-            request {:seon.error/value value :seon.ai/backup? backup?}]
-        (and ((schema/projection-validator (schema/handed-projection) :seon.error/value) value)
-             ((schema/projection-validator (schema/handed-projection) :seon.ai/disposition-request) request)
-             (= (expected-disposition evidence-partition backup?)
-                (ai/disposition request)))))
-    :seed 202607280401)
-   "Every registered cost-evidence partition must derive one action."))
-
-(deftest possibly-paid-work-never-repeats
-  (let [value (partition-value
-               {::error-class :response
-                ::kind :seon.ai/unparseable-body
-                ::transmitted? true
-                ::output? true})]
-    (is (= [:fail :fail]
-           (mapv #(disposed value %) [false true])))))
+(deftest a-payment-required-provider-returns-its-error-value
+  (let [server (start-stub!)]
+    (try
+      (let [{:seon.ai/keys [primary]} (ai/targets (seon.schema/handed-projection) @dials)
+            failure
+            (ai/complete (seon.schema/handed-projection)
+                         (with-test-key (assoc primary
+                                               :seon.ai/endpoint
+                                               (str "http://127.0.0.1:"
+                                                    (.getPort (.getAddress server))
+                                                    "/payment-required")
+                                               :seon.ai/prompt "hello")))]
+        (is (= 402 (:seon.ai/provider-error failure)))
+        (is (= :authentication
+               (get-in failure [:seon.error/data :seon.ai/error-class]))))
+      (finally (.stop server 0)))))
 
 (defn- refused-loopback-endpoint
   "An endpoint whose ephemeral loopback listener has already closed."
@@ -1483,17 +1172,9 @@
         "the derived subject is one complete typed error value")
     (let [evidence (:seon.error/data value)]
       (is (false? (:seon.ai/request-transmitted? evidence)))
-      (is (= :transport-before-send (:seon.ai/error-class evidence)))
-      (is (= :failover-now (disposed value true))
-          "so a backup is eligible — this is the zero-cost case")
-      (is (= :fail
-             (disposed
-              (assoc-in value [:seon.error/data :seon.ai/error-class]
-                        :transport-unknown)
-              true))
-          "counterexample: without before-send evidence the proof is false"))))
+      (is (= :transport-before-send (:seon.ai/error-class evidence))))))
 
-(deftest a-missing-credential-is-terminal-even-with-a-backup
+(deftest a-missing-credential-is-an-unsent-error-value
   (let [value (ai/complete (seon.schema/handed-projection) {:seon.ai/endpoint "http://127.0.0.1:1/v1"
                             :seon.ai/model "probe"
                             :seon.ai/max-tokens 32
@@ -1503,7 +1184,4 @@
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/no-credential-error) value))
     (is (false? (:seon.ai/request-transmitted? (:seon.error/data value)))
         "no network call happened at all")
-    (is (= :fail (disposed value true)))
-    (is (= :fail (disposed value false))
-        "and with no backup there is nothing to wait for — a missing
-         credential is not a condition that improves with time")))
+    (is (= :credential (:seon.ai/error-class (:seon.error/data value))))))

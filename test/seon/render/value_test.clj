@@ -304,7 +304,7 @@
    (fn [connection]
      (let [groups [{:seon.config.ai/model "deepseek/deepseek-v4-flash-20260731"
                     :seon.config.ai/no-provider true}
-                   {:seon.config.ai.retry/maximum-retries 2}
+                   {:seon.config.run/max-episode-runs 2}
                    {:my.agent/turns-left 20}]
            request (render-request connection groups)]
        (doseq [raw [groups (first groups)]]

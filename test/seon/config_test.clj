@@ -382,7 +382,7 @@
            _ (config/apply! (assoc request :seon.config/manifest
                                    {:seon.config.ai/no-provider true
                                     :seon.config.ai/endpoint stand-in
-                                    :seon.config.ai.backup/model config/absent}))
+                                    :seon.config.web/port config/absent}))
            sparse (config/apply! (assoc request :seon.config/manifest
                                         {:seon.config.run/max-episode-runs 1}))
            effective (config/effective @connection "sparse-apply")
@@ -394,7 +394,7 @@
        (is (true? (:seon.config.ai/no-provider effective))
            "the sparse apply keeps the no-provider decision beneath it")
        (is (= stand-in (:seon.config.ai/endpoint effective)))
-       (is (nil? (find effective :seon.config.ai.backup/model))
+       (is (nil? (find effective :seon.config.web/port))
            "a held absence stays absent")
        (is (true? (:seon.ai/no-provider primary))
            "the resolved provider target is the no-provider one")
@@ -402,7 +402,7 @@
                  (:seon.ai/endpoint primary))
            "the shipped paid endpoint is never resolved")
        (is (= #{:seon.config.ai/no-provider :seon.config.ai/endpoint
-                :seon.config.ai.backup/model :seon.config.run/max-episode-runs}
+                :seon.config.web/port :seon.config.run/max-episode-runs}
               (set (:seon.config/overlay-keys
                     (db/pull @connection [:seon.config/overlay-keys]
                              [:seon.config/cluster "sparse-apply"])))))
@@ -548,9 +548,6 @@
         "ordinary operator roots retain history by shipped decision")
     (is (not (contains? effective :seon.config.web/port))
         "an explicit absence decision resolves without storing nil")
-    (is (= (:seon.config.ai.backup/model (config/default-decisions))
-           (:seon.config.ai.backup/model effective))
-        "the explicitly shipped backup decision resolves without a mirror")
     (is (= :disabled (:seon.config.ai/thinking effective))
         "the shipped Flash posture explicitly disables thinking")
     (is (not (contains? effective :seon.config.ai/temperature))

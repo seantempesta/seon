@@ -42,22 +42,10 @@
   (test-support/with-database
     (fn [connection]
       (let [settings (test-support/effective-config
-                      {:seon.config.ai/timeout-ms 30000
-                       :seon.config.ai.backup/model :seon.config/absent
-                       :seon.config.ai.retry/maximum-retries 2
-                       :seon.config.ai.retry/base-delay-ms 100
-                       :seon.config.ai.retry/multiplier 2.0
-                       :seon.config.ai.retry/jitter-fraction 0.0
-                       :seon.config.ai.retry/maximum-total-delay-ms 300})
-            targets (ai/targets (seon.schema/handed-projection) @connection settings)
-            schedule (ai/delays (ai/retry-strategy settings) (constantly 0.5))]
-        (is (= [100 200] schedule))
-        (is (= 90300 (#'turn/provider-wait-ms
-                     (assoc targets :seon.turn.loop/schedule schedule))))
-        (is (= 70000 (#'turn/provider-wait-ms
-                     (assoc (ai/targets (seon.schema/handed-projection) @connection (assoc settings :seon.config.ai.backup/model "deepseek-flash"
-                                                       :seon.config.ai.backup/timeout-ms 40000))
-                            :seon.turn.loop/schedule [])))))
+                      {:seon.config.ai/timeout-ms 30000})
+            targets (ai/targets (seon.schema/handed-projection) @connection settings)]
+        (is (= 30000 (#'turn/provider-wait-ms targets))
+            "the one provider call's timeout is the whole admitted provider part"))
       (doseq [[expected message] [[:seon.ai/completion "provider response"]
                                   [:seon.sci.eval/evaluation "evaluation completion"]]]
        (with-open [faults (test-support/closeable (async/chan 1) async/close!)]

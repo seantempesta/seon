@@ -4059,10 +4059,8 @@
 ;;; re-keyed one by one: a `cond->` per field is four chances to drop
 ;;; one silently, and `false` is a meaningful value here that a
 ;;; truthiness test would eat. OBSERVATIONS ONLY (owner ruling
-;;; 2026-07-28): the error class and the disposition are pure functions
-;;; of this evidence (`seon.ai/status-class`, `seon.ai/disposition`
-;;; over the error fact's data-edn), derived at read, never stored
-;;; beside the facts they restate.
+;;; 2026-07-28): the error class is a pure function of this evidence,
+;;; derived at read, never stored beside the facts it restates.
 (def ^:private evidence-attributes
   [:seon.ai/http-status :seon.ai/request-transmitted?
    :seon.ai/response-started? :seon.ai/output-observed?])
@@ -4106,9 +4104,18 @@
 
 (defn- attempt-request
   "One record-attempt request assembled from target, evidence, and provenance."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.ai/target :seon.ai/target]
+               [:seon.ai/settings :seon.ai/settings]
+               [:seon.turn/id :seon.turn/id]
+               [:seon.agent/id :seon.agent/id]
+               [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+               [:seon.error/value {:optional true} :seon.error/value]
+               [:seon.turn.loop/attempt-evidence {:optional true} :map]]]
+    :map]}
   [{:keys [:seon.ai/target :seon.ai/settings
-           :seon.ai.attempt/ordinal :seon.error/value
-           :seon.ai.attempt/failover-from :seon.ai.attempt/delay-ms]
+           :seon.ai.attempt/ordinal :seon.error/value]
     run-id :seon.turn/id
     agent-id :seon.agent/id
     evidence :seon.turn.loop/attempt-evidence}]
@@ -4118,25 +4125,27 @@
                   :seon.agent/id agent-id
                   :seon.ai.attempt/ordinal ordinal}
                  evidence)
-    value (assoc :seon.error/value value)
-    failover-from (assoc :seon.ai.attempt/failover-from failover-from)
-    delay-ms (assoc :seon.ai.attempt/delay-ms delay-ms)))
+    value (assoc :seon.error/value value)))
 
 (defn- provider-targets
-  "Resolved provider targets, settings, and finite schedule for one turn."
+  "The resolved provider target and settings for one turn."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.db/db :seon.db/database-value]
+               [:seon.cluster/name :seon.cluster/name]
+               [:seon.agent/id :seon.agent/id]]]
+    [:map
+     [:seon.ai/primary :seon.ai/target]
+     [:seon.ai/settings :seon.ai/settings]]]}
   [{db :seon.db/db
     cluster-name :seon.cluster/name
     agent-id :seon.agent/id}]
   (let [settings (ai/settings (config/effective db cluster-name)
                               (ai/agent-overlay db agent-id))
         targets (ai/targets (db/carried-projection db) db settings)
-        primary (:seon.ai/primary targets)
-        backup (:seon.ai/backup targets)
-        strategy (ai/retry-strategy settings)]
+        primary (:seon.ai/primary targets)]
     {:seon.ai/primary primary
-     :seon.ai/backup backup
-     :seon.ai/settings settings
-     :seon.turn.loop/schedule (if backup [] (ai/delays strategy rand))}))
+     :seon.ai/settings settings}))
 
 (defn- record-attempt!
   "Commit ONE model attempt and its error or truncation facts.
@@ -4145,9 +4154,7 @@
 
   The error fact and the attempt row ride ONE transaction, with the
   attempt's `:seon.ai.attempt/error` pointing at the fact through the
-  shared tempid. That is not tidiness: the caller may only build the
-  backup's context from a fact that is already durable, and one
-  transaction is what makes \"already durable\" true with no window.
+  shared tempid, so the outcome is durable in one transaction.
 
   A refused transaction returns its diagnostic so the caller cannot freeze
   a successful reply or make another paid call without durable evidence."
@@ -4173,9 +4180,7 @@
           [:seon.ai.model/last-latency-ms {:optional true} :seon.ai.model/last-latency-ms]
           [:seon.ai/reasoning-content {:optional true} :seon.ai/reasoning-content]
           [:seon.ai/finish-reason {:optional true} :seon.ai/finish-reason]
-          [:seon.ai/truncation {:optional true} :seon.ai/stream-truncated-error]
-          [:seon.ai.attempt/delay-ms {:optional true} :seon.ai.attempt/delay-ms]
-          [:seon.ai.attempt/failover-from {:optional true} :seon.ai.attempt/id]]
+          [:seon.ai/truncation {:optional true} :seon.ai/stream-truncated-error]]
          :inst]
     [:or :nil :seon.error/fact :seon.db/error-result]]}
   [cluster request now]
@@ -4189,9 +4194,7 @@
          settings :seon.ai/settings
          reasoning-content :seon.ai/reasoning-content
          finish-reason :seon.ai/finish-reason
-         truncation :seon.ai/truncation
-         delay-ms :seon.ai.attempt/delay-ms
-         failover-from :seon.ai.attempt/failover-from} request
+         truncation :seon.ai/truncation} request
         retain-reasoning? (true? (:seon.config.ai/retain-reasoning settings))
         reasoning-content (when retain-reasoning? reasoning-content)
         failure (if retain-reasoning? failure
@@ -4266,12 +4269,7 @@
               (assoc :seon.ai.attempt/reasoning-blob reasoning-blob
                      :seon.ai.attempt/reasoning-size reasoning-size)
               finish-reason
-              (assoc :seon.ai.attempt/finish-reason finish-reason)
-              ;; ROLE BY CONNECTION: only the backup points back, so a
-              ;; reader can tell a failover from a retry without a stamp
-              failover-from (assoc :seon.ai.attempt/failover-from
-                                   [:seon.ai.attempt/id failover-from])
-              delay-ms (assoc :seon.ai.attempt/delay-ms delay-ms))
+              (assoc :seon.ai.attempt/finish-reason finish-reason))
         observation-tx
         (ai/model-observation-tx
          db
@@ -4429,11 +4427,12 @@
         (report :released 0)))))
 
 (defn- provider-wait-ms
-  "The admitted attempt timeouts plus the already chosen finite retry delays."
-  [{:seon.ai/keys [primary backup] schedule :seon.turn.loop/schedule}]
-  (+ (* (inc (count schedule)) (:seon.ai/timeout-ms primary))
-     (reduce + 0 schedule)
-     (if backup (:seon.ai/timeout-ms backup) 0)))
+  "The admitted timeout of the one provider call."
+  {:malli/schema
+   [:=> [:cat [:map [:seon.ai/primary :seon.ai/target]]]
+    :seon.ai/timeout-ms]}
+  [{:seon.ai/keys [primary]}]
+  (:seon.ai/timeout-ms primary))
 
 (defn- await-turn-part!
   "Hand the existing completion observer the work admitted by this owner."
@@ -4459,32 +4458,15 @@
         process (:seon.db.process/id cluster)
         agent-id (:seon.agent/id work)
         run-id (:seon.turn/id work)]
-    ;; THE PAID CALL, and the ONE place a second one is ever made.
-    ;;
-    ;; NOTHING RE-CALLS A REQUEST THAT MAY HAVE BEEN TRANSMITTED. That
-    ;; is not a rule this branch remembers to follow — `ai/disposition`
-    ;; is the choke point, computed from the phase evidence the leaf
-    ;; recorded, and every path out of a failure here goes through it.
-    ;; The branch itself only reduces over its three ordinary values:
-    ;;
-    ;; - `:failover-now` — a conclusively unpaid failure WITH a backup
-    ;;   configured. The primary's error fact commits FIRST, and the
-    ;;   backup's system segment is the notice's `:seon.render/ai`
-    ;;   projection through the one router over that committed fact;
-    ;; - `:backoff` — a conclusively unpaid TRANSIENT failure with no
-    ;;   backup. The schedule is derived once, is EMPTY whenever a
-    ;;   backup exists, and each wait is one more attempt row;
-    ;;   the no-backup path is therefore the backoff path by
-    ;;   construction rather than by a second condition;
-    ;; - `:fail` — the run closes with the error, and the step-2
-    ;;   delivery machinery does the rest.
-    ;;
-    ;; Every attempt, successful or not, leaves one `:seon.ai/attempt`
-    ;; row. That is what makes "exactly two calls" and "exactly one
-    ;; call" queryable facts rather than claims.
+    ;; THE PAID CALL: ONE call per model step, no retry, no failover
+    ;; (owner ruling 2026-09-28). A failure is recorded on its attempt
+    ;; row with its error fact, the run closes with the error, and the
+    ;; delivery machinery does the rest. Every attempt, successful or
+    ;; not, leaves one `:seon.ai/attempt` row, so "one call" is a
+    ;; queryable fact rather than a claim.
     (let [;; ONE TURN, ONE RESOLUTION. Both reads use this immutable
           ;; database value, and resolution stays outside the attempt
-          ;; reduce so failover/backoff cannot change settings halfway
+          ;; reduce so settings cannot change halfway
           ;; through a turn. Applying config or retracting/asserting an
           ;; agent override therefore changes the NEXT turn, without a
           ;; graph rebuild or a cached derived projection.
@@ -4495,8 +4477,6 @@
                       :seon.agent/id agent-id})
           settings (:seon.ai/settings providers)
           primary (:seon.ai/primary providers)
-          backup (:seon.ai/backup providers)
-          schedule (:seon.turn.loop/schedule providers)
           _ (when-not (:seon.config.ai/no-provider settings)
               (await-turn-part!
                cluster :seon.ai/completion
@@ -4632,10 +4612,8 @@
           ;; BEFORE the unobservable remote call. Writer ordering then
           ;; guarantees: no capture → the prompt was never derived;
           ;; capture with no attempt row → the call may never have
-          ;; fired. Failover/backoff attempts inside this same pass
-          ;; REUSE this one capture — the same prompt bytes go out,
-          ;; and the backup's system segment is re-derivable from the
-          ;; committed primary error fact, never re-captured.
+          ;; fired. The provider call reuses this one capture:
+          ;; the same prompt bytes go out.
           captured
           (when-not (:seon.config.ai/no-provider settings)
           (db/transact!
@@ -4676,116 +4654,58 @@
         (fail! refusal)
 
         :else
-        (loop [target primary
-               ordinal (attempts (db/db connection) run-id)
-               ;; ABSENT on the primary and on every backoff retry;
-               ;; present only on the backup, where it is both the role
-               ;; and the proof of which failure supplied its context
-               failover-from nil
-               delay-ms nil
-               waits schedule
-               system nil]
-          (let [completion (ai/complete
-                            (db/carried-projection db)
-                            (cond-> (assoc target :seon.ai/prompt text)
-                              system (assoc :seon.ai/system system)
-                              sink (assoc :seon.ai/stream? true
-                                          :seon.ai/sink sink)))
-                failure (when (or (:seon.ai/unreadable-response-member completion)
-                                  (:seon.ai/unanswered-reasoning-count completion)
-                                  (:seon.ai/exhausted-finish-reason completion)
-                                  (:seon.ai/interrupted-text-count completion)
-                                  (:seon.ai/provider-error completion)
-                                  (:seon.ai/timeout completion)
-                                  (:seon.ai/transport-failure completion)
-                                  (:seon.ai/extra-body-edn completion)
-                                  (:seon.ai/protected-keys completion)
-                                  (:seon.ai/missing-credential-variable completion))
-                          completion)
-                evidence (attempt-evidence {:seon.ai/completion completion})
-                ;; a backup is only ever a target ONCE: the attempt that
-                ;; already failed over cannot fail over again, and that
-                ;; is what bounds a failover at exactly two calls
-                disposition (when failure
-                              (ai/disposition
-                               {:seon.error/value failure
-                                :seon.ai/backup? (and (some? backup)
-                                                      (nil? failover-from))}))
-                fact (record-attempt! cluster
-                                      (attempt-request
-                                       (cond->
-                                        {:seon.ai/target target
-                                         :seon.ai/settings settings
-                                         :seon.turn/id run-id
-                                         :seon.agent/id agent-id
-                                         :seon.ai.attempt/ordinal ordinal
-                                         :seon.turn.loop/attempt-evidence evidence}
-                                         failure
-                                         (assoc :seon.error/value failure)
-                                         failover-from
-                                         (assoc :seon.ai.attempt/failover-from
-                                                failover-from)
-                                         delay-ms
-                                         (assoc :seon.ai.attempt/delay-ms
-                                                delay-ms)))
-                                      now)]
-            (cond
-              (or (:seon.db.write.attempt/request-id fact)
-                  (:seon.db/invalid-read fact)
-                  (:seon.schema/expected-value fact)) (fail! fact)
+        (let [completion (ai/complete
+                          (db/carried-projection db)
+                          (cond-> (assoc primary :seon.ai/prompt text)
+                            sink (assoc :seon.ai/stream? true
+                                        :seon.ai/sink sink)))
+              failure (when (or (:seon.ai/unreadable-response-member completion)
+                                (:seon.ai/unanswered-reasoning-count completion)
+                                (:seon.ai/exhausted-finish-reason completion)
+                                (:seon.ai/interrupted-text-count completion)
+                                (:seon.ai/provider-error completion)
+                                (:seon.ai/timeout completion)
+                                (:seon.ai/transport-failure completion)
+                                (:seon.ai/extra-body-edn completion)
+                                (:seon.ai/protected-keys completion)
+                                (:seon.ai/missing-credential-variable completion))
+                        completion)
+              fact (record-attempt! cluster
+                                    (attempt-request
+                                     (cond->
+                                      {:seon.ai/target primary
+                                       :seon.ai/settings settings
+                                       :seon.turn/id run-id
+                                       :seon.agent/id agent-id
+                                       :seon.ai.attempt/ordinal
+                                       (attempts (db/db connection) run-id)
+                                       :seon.turn.loop/attempt-evidence
+                                       (attempt-evidence
+                                        {:seon.ai/completion completion})}
+                                       failure
+                                       (assoc :seon.error/value failure)))
+                                    now)]
+          (cond
+            (or (:seon.db.write.attempt/request-id fact)
+                (:seon.db/invalid-read fact)
+                (:seon.schema/expected-value fact)) (fail! fact)
 
-              (nil? failure) (freeze! completion)
+            (nil? failure) (freeze! completion)
 
-              ;; THE RECORD REFUSED. Nothing else here is safe: a second
-              ;; paid call whose reason could not be committed is a call
-              ;; nobody could explain afterwards, and the backup's own
-              ;; context would have no fact to project.
-              (nil? fact) (fail! failure)
+            ;; THE RECORD REFUSED: close with the provider's failure.
+            (nil? fact) (fail! failure)
 
-              (= :failover-now disposition)
-              (recur backup
-                     (inc ordinal)
-                     (attempt-id run-id ordinal)
-                     nil
-                     waits
-                     ;; THE PROJECTION, over the fact that is now
-                     ;; durable — never a notice written at this call
-                     ;; site: the notice's declared AI render as the
-                     ;; system text the provider takes (render-ai answers
-                     ;; data for the value printer, and without a block
-                     ;; identity its refusal map became the system text)
-                     (error/ai-prose
-                      (error/notice {:seon.error/fact fact
-                                     :seon.error/reason :failover})))
-
-              (and (= :backoff disposition) (seq waits))
-              (do
-                ;; `:workload :io` is load-bearing here as well as at
-                ;; the model call: this proc may block, and the wait is
-                ;; bounded by a finite schedule rather than a loop
-                ;; condition
-                (Thread/sleep (long (first waits)))
-                (recur target
-                       (inc ordinal)
-                       nil
-                       (first waits)
-                       (rest waits)
-                       system))
-
-              ;; `:fail`, and an exhausted schedule reaches the same
-              ;; place: the run closes with the error, and step 2's
-              ;; delivery machinery does the rest
-              :else
-              (let [closed (db/transact!
-                            connection
-                            (close-tx {:seon.turn/id run-id :seon.turn/closed-tx "datomic.tx"}))]
-                ;; The attempt already owns the fault. Closing must not
-                ;; turn that same occurrence into another fault entity.
-                (if (or (:seon.db.write.attempt/request-id closed)
-                        (:seon.db/invalid-read closed)
-                        (:seon.schema/expected-value closed))
-                  (fail! closed true)
-                  (report :error 0))))))))))
+            ;; The attempt already owns the fault. Closing must not turn
+            ;; that same occurrence into another fault entity.
+            :else
+            (let [closed (db/transact!
+                          connection
+                          (close-tx {:seon.turn/id run-id :seon.turn/closed-tx "datomic.tx"}))]
+              (if (or (:seon.db.write.attempt/request-id closed)
+                      (:seon.db/invalid-read closed)
+                      (:seon.schema/expected-value closed))
+                (fail! closed true)
+                (report :error 0)))))))))
 
 (defn- evaluation-entity-id
   "The entity id of one already-transacted evaluation, or nil.

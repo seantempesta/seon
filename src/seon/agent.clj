@@ -150,17 +150,10 @@
                         (if (:seon.config.agent/show-all-settings resolved)
                           attributes
                           [:seon.config.ai/model :seon.config.ai/no-provider
-                           :seon.config.eval/time-limit-ms :seon.config.run/max-episode-runs
-                           :seon.config.ai.retry/base-delay-ms
-                           :seon.config.ai.retry/jitter-fraction
-                           :seon.config.ai.retry/maximum-delay-ms
-                           :seon.config.ai.retry/maximum-retries
-                           :seon.config.ai.retry/maximum-total-delay-ms
-                           :seon.config.ai.retry/multiplier]))
-            order {"seon.config.ai" 0 "seon.config.ai.retry" 1
-                   "seon.config.eval" 2 "seon.config.run" 3}]
+                           :seon.config.eval/time-limit-ms :seon.config.run/max-episode-runs]))
+            order {"seon.config.ai" 0 "seon.config.eval" 1 "seon.config.run" 2}]
         (mapv (fn [[_ entries]] (into (sorted-map) entries))
-                    (sort-by (fn [[group _]] [(get order group 4) group])
+                    (sort-by (fn [[group _]] [(get order group 3) group])
                              (group-by (comp namespace key) effective)))))))
 
 (defn render-settings-ai

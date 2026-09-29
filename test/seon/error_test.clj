@@ -725,7 +725,7 @@
   (test-support/assert-check!
    (tc/quick-check
     80
-    (prop/for-all [reason (gen/elements [nil :failover])]
+    (prop/for-all [reason (gen/elements [nil :recurring])]
       (let [fact (fact)
             notice (error/notice
                     (cond-> {:seon.error/fact fact}
@@ -1517,7 +1517,7 @@
       (is (str/includes? prose "request transmitted: false"))
       (is (str/includes? prose "response started: false"))
       (is (str/includes? prose "output observed: false"))
-      (is (str/includes? prose "configured failover may be safe"))))
+      (is (str/includes? prose "No request was transmitted."))))
   (testing "time-limit prose explains the diagnostic without treating it as a limit"
     (let [prose (error/time-limit-prose
                  {:seon.error/at #inst "2026-09-22T00:00:00Z"

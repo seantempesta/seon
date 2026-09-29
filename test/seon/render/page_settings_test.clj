@@ -109,8 +109,8 @@
            values (apply merge groups)
            examples (authored-examples @connection 'my.plan)]
        (is (not (:seon.cluster.eval/error result)))
-       (is (= ["seon.config.ai" "seon.config.ai.retry" "seon.config.eval" "seon.config.run"]
-              (mapv (comp namespace ffirst) (take 4 groups))))
+       (is (= ["seon.config.ai" "seon.config.eval" "seon.config.run"]
+              (mapv (comp namespace ffirst) (take 3 groups))))
        (is (= 1234 (:seon.config.eval/time-limit-ms values)))
        (is (= (:seon.config.ai/model (config/effective @connection "page-settings"))
               (:seon.config.ai/model values)))
@@ -149,8 +149,7 @@
          (is (not (str/includes? source "transact!"))))
        (is (not-any? #(find values %) [:seon.config.ai/api-key-variable
                                       :seon.config.ai/endpoint
-                                      :seon.config.ai/chars-per-token-prior
-                                      :seon.config.ai.backup/model]))
+                                      :seon.config.ai/chars-per-token-prior]))
        (is (:db-after (db/transact! connection
                        [{:seon.config/agent [:seon.agent/id "juniper"]
                          :seon.config.agent/show-all-settings true}])))

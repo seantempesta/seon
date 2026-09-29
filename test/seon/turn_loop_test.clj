@@ -434,8 +434,7 @@
            ;; overlay, before its handle reads its config.
            _ (test-support/seed-cluster!
               connection cluster-name
-              {:seon.config.ai/model "before-apply"
-               :seon.config.ai.backup/model "backup-before-apply"})
+              {:seon.config.ai/model "before-apply"})
            cluster (test-support/cluster-handle
                    {:seon.env/environment (test-support/environment cluster-name connection)
                     :seon.db/connection connection
@@ -448,18 +447,7 @@
                     (config/result-caps (test-support/effective-config))
                     :seon.config.error/recurrence-limit 3
                     :seon.config.message/max-chain 8})
-           ;; Declared as `seon.ai/send-request` declares its transport failure.
-           unpaid (with-meta
-                    {:seon.ai/transport-failure "http://127.0.0.1:1/v1" :seon.error/at (java.util.Date.) :seon.error/layer :seon.ai/invocation :seon.error/operation 'seon.ai/complete
-                     :seon.error/message "connection refused"
-                     :seon.error/data
-                     {:seon.ai/error-class :transport-before-send
-                      :seon.ai/request-transmitted? false
-                      :seon.ai/response-started? false
-                      :seon.ai/output-observed? false}}
-                    {:seon.error/declared-schema :seon.ai/transport-failure-error})
-           completions (atom [unpaid
-                              {:seon.ai/text "(identity 1)"
+           completions (atom [{:seon.ai/text "(identity 1)"
                                :seon.ai/usage
                                {"completion_tokens_details"
                                 {"reasoning_tokens" 7}}
@@ -509,34 +497,28 @@
              now)
             (testing "the opening prompt and paid call each resolve once"
               (is (= 3 (count @overlays))
-                  "profile, prompt and call each read the overlay; failover reuses it")
+                  "profile, prompt and call each read the overlay")
               (is (= 2 (count @resolutions))
                   "prompt budget uses opening facts; attempts share call settings")
-              (is (= ["before-apply" "backup-before-apply"]
+              (is (= ["before-apply"]
                      (mapv :seon.ai/model @requests)))
-              (is (= [:high :high]
-                     (mapv :seon.ai/thinking @requests)))
-              (is (apply = @overlay-values)
-                  "the call's one overlay derivation is the exact map both the
-                  primary and the backup attempt settle on; a failover that
-                  re-derived its own overlay would diverge the moment the
-                  agent's settings changed mid-flight, and this equality is
-                  what rules that out"))
+              (is (= [:high]
+                     (mapv :seon.ai/thinking @requests))))
             (let [first-settings (first @resolutions)
                   first-entities (settings-attempts @connection)]
-              (is (= 2 (count first-entities)))
+              (is (= 1 (count first-entities)))
               (is (every? #(= first-settings
                               (edn/read-string
                                (:seon.ai.attempt/settings-edn %)))
                           first-entities))
               (is (= "stop" (:seon.ai.attempt/finish-reason
-                              (second first-entities))))
+                              (first first-entities))))
               (is (= {"completion_tokens_details" {"reasoning_tokens" 7}}
                      (edn/read-string
-                      (:seon.ai.attempt/usage-edn (second first-entities)))))
+                      (:seon.ai.attempt/usage-edn (first first-entities)))))
               (is (not (contains?
                         (edn/read-string
-                         (:seon.ai.attempt/usage-edn (second first-entities)))
+                         (:seon.ai.attempt/usage-edn (first first-entities)))
                         :seon.ai/settings))
                   "settings are beside usage, never inside it"))
 

@@ -162,10 +162,7 @@
             (is (= "armed" (:seon.cluster/name handle)))
             (is (= "root" (:seon.config.error/escalate-to handle))
                 "the shipped config delivers core faults to root (owner ruling 2026-09-25 20:50Z)")
-            (is (empty? (select-keys handle
-                                     [:seon.ai/primary
-                                      :seon.ai/backup
-                                      :seon.ai.retry/strategy])))
+            (is (empty? (select-keys handle [:seon.ai/primary])))
             (let [settings (ai/settings
                             (config/effective @connection "armed")
                             (ai/agent-overlay @connection "root"))
@@ -173,14 +170,7 @@
               (is (str/starts-with?
                    (:seon.ai/endpoint (:seon.ai/primary targets))
                    "https://"))
-              ;; the shipped config carries the OpenRouter backup since
-              ;; the 402-failover work — a boot derives BOTH targets
-              (is (str/starts-with?
-                   (:seon.ai/endpoint (:seon.ai/backup targets))
-                   "https://"))
-              (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-                   :seon.ai.retry/strategy
-                   (ai/retry-strategy settings))))))))))
+              (is (not (contains? targets :seon.ai/backup))))))))))
 
 (deftest ^{:seon.test/fixture-observation "Two real cluster boots must acquire distinct live program contexts over the same published root."} two-clusters-in-one-jvm-own-distinct-live-program-contexts
   (let [root "tmp/armed-test/live-program-boundary"]

@@ -3,7 +3,7 @@
                      {:seon.config/display-label "Show all settings" :seon.config/per-agent true,
                       :seon.config/optional true,
                       :description
-                      "Show every effective agent setting in the settings read. Presence asserts true; absence shows model, no-provider, evaluation deadline, turn budget, and retry. Clear this setting by retracting it.",
+                      "Show every effective agent setting in the settings read. Presence asserts true; absence shows model, no-provider, evaluation deadline, and turn budget. Clear this setting by retracting it.",
                       :seon.config/dial true} true],
                     :write-refusal-bound
                     [:int
@@ -17,5 +17,5 @@
                      {:seon.config/display-label "Turn completion allowance" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,
                       :seon.config/per-agent true,
                       :description
-                      "Milliseconds allowed for turn lifecycle completion, including permit acquisition and orderly disarm. Active work adds its resolved provider attempt timeouts and retry delays, or each admitted form's evaluation limit. Expiry names the missing part and held turn.",
+                      "Milliseconds allowed for turn lifecycle completion, including permit acquisition and orderly disarm. Active work adds its resolved provider attempt timeout, or each admitted form's evaluation limit. Expiry names the missing part and held turn.",
                       :seon.config/dial true}]}

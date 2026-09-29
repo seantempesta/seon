@@ -378,8 +378,7 @@
    (str "http://127.0.0.1:" (.getPort (.getAddress server)) "/chat")
    :seon.config.ai/no-auth true
    :seon.config.ai/model "agent-test-provider"
-   :seon.config.ai/no-provider :seon.config/absent
-   :seon.config.ai.backup/model :seon.config/absent})
+   :seon.config.ai/no-provider :seon.config/absent})
 
 (defn- outside-trigger!
   [connection agent-id message-id content]
@@ -878,9 +877,6 @@
     ;; in; the stand-in refuses before any provider call, so none is paid.
     :seon.config.ai/no-provider :seon.config/absent
     :seon.config.ai/timeout-ms 60000
-    :seon.config.ai.backup/model :seon.config/absent
-    :seon.config.ai.retry/maximum-retries 0
-    :seon.config.ai.retry/maximum-total-delay-ms 0
     :seon.config.run/max-episode-runs 1}))
 
 (defn- open-run-id

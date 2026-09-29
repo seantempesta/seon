@@ -457,59 +457,6 @@
  ; not an internal readiness clock.
  :seon.config.ai/timeout-ms 180000
 
- ; THE BACKUP IS OPENROUTER'S PINNED 0731 GA BUILD. The bare
- ; deepseek/deepseek-v4-flash slug is the older 0423 preview build; model
- ; identity is never inferred from the family name. Endpoint and credential
- ; variable derive from the model's provider row, so this is the one dial
- ; that arms failover while the direct DeepSeek target remains primary.
- ; Provenance: provider-routing-openrouter-2026-08-14.md, Option A.
- :seon.config.ai.backup/model "deepseek/deepseek-v4-flash-20260731"
- :seon.config.ai.backup/endpoint :seon.config/absent
- :seon.config.ai.backup/api-key-variable :seon.config/absent
- :seon.config.ai.backup/timeout-ms :seon.config/absent
-
- ; THE BACKOFF STRATEGY, and it runs on exactly one path: a
- ; conclusively UNPAID transient failure with no backup configured.
- ; Nothing here can re-call a transmitted request — `seon.ai/disposition`
- ; returns :backoff for exactly three error classes, and a request that
- ; may have cost money is not one of them.
- ;
- ; Unit: milliseconds before the first retry.
- ; Provenance: DeepSeek's live plan replies measured 2.7 s, so a first
- ; wait shorter than a second would re-ask a busy provider inside its
- ; own service time; 500 ms is half of that floor and the smallest wait
- ; that is not effectively "immediately".
- :seon.config.ai.retry/base-delay-ms 500
-
- ; Unit: dimensionless growth factor per retry.
- ; Provenance: doubling is the standard exponential backoff shape and is
- ; what `again`'s multiplicative-strategy composes; anything gentler
- ; makes the retry count the bound instead of the wait.
- :seon.config.ai.retry/multiplier 2.0
-
- ; Unit: fraction of each delay applied as random spread.
- ; Provenance: jitter exists so N clusters retrying one outage do not
- ; re-synchronize; a quarter of the delay decorrelates them without
- ; making the schedule unrecognizable to somebody reading the log.
- :seon.config.ai.retry/jitter-fraction 0.25
-
- ; Unit: milliseconds; the cap on any single wait.
- :seon.config.ai.retry/maximum-delay-ms 4000
-
- ; Unit: count of retries after the first attempt.
- ; Provenance: a rate limit or a 503 either clears in seconds or is an
- ; outage; two retries distinguishes those two cases and a third only
- ; delays telling the agent.
- :seon.config.ai.retry/maximum-retries 2
-
- ; Unit: milliseconds of TOTAL waiting across all retries.
- ; Provenance: THE BINDING BOUND, and it is bound by responsiveness,
- ; not by patience. The call deadline is the sibling `timeout-ms` dial;
- ; the retry proof derives this wait budget's relationship to that shipped
- ; fact instead of duplicating it here. Three seconds covers the base plus
- ; one doubled wait without making a backed-off turn feel wedged.
- :seon.config.ai.retry/maximum-total-delay-ms 3000
-
  ; DECLARED INITIALIZATION ROWS. Provider wire facts live only on provider
  ; descriptor rows; model rows point to them and carry only model facts.
  :seon.config/initialization

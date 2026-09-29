@@ -1,7 +1,5 @@
-#:seon.ai.attempt{:failover-from [:and {:seon.wake/context-inert true} :seon.db/ref],
-                  :finish-reason [:and {:seon.wake/context-inert true} :seon.ai/finish-reason],
+#:seon.ai.attempt{:finish-reason [:and {:seon.wake/context-inert true} :seon.ai/finish-reason],
                   :reasoning-size [:int {:min 1 :seon.wake/context-inert true}],
-                  :delay-ms [:int {:min 0 :seon.wake/context-inert true}],
                   :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.ai/attempt :seon.wake/context-inert true}],
                   :ordinal [:int {:min 0 :seon.wake/context-inert true}],
                   :reasoning-blob [:and {:seon.wake/context-inert true} :seon.blob/digest],

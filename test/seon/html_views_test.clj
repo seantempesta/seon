@@ -224,7 +224,7 @@
       (support/transacted! connection (support/agent-tx @connection "alice"))
       (is (= 1500 (:seon.config.eval/time-limit-ms
                    (agent/settings! {:seon.config.eval/time-limit-ms 1500
-                                     :seon.config.ai.retry/maximum-retries 1000}
+                                     :seon.config.run/max-episode-runs 1000}
                                     connection "alice"))))
       (let [html (hiccup/->string
                   (agent/render-settings-html {:seon.db/db @connection :seon.agent/id "alice"}))]

@@ -222,17 +222,9 @@
               {:seon.config.run/max-episode-runs 100
                :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
                :seon.config.ai/model "probe"
-               ;; Failover tests opt in through `configure-backup!`.
-               :seon.config.ai.backup/model config/absent
                :seon.config.ai/max-tokens 32
                :seon.config.ai/api-key-variable "SEON_AI_TEST_KEY"
-               :seon.config.ai/timeout-ms 200
-               :seon.config.ai.retry/base-delay-ms 1
-               :seon.config.ai.retry/multiplier 2.0
-               :seon.config.ai.retry/jitter-fraction 0.0
-               :seon.config.ai.retry/maximum-delay-ms 1
-               :seon.config.ai.retry/maximum-retries 0
-               :seon.config.ai.retry/maximum-total-delay-ms 0}})]
+               :seon.config.ai/timeout-ms 200}})]
         (when (or (:seon.config/error-key result) (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           (throw (ex-info "Turn fixture configuration was refused." result))))
       (let [result (cluster/ensure-cluster-entity!
@@ -1829,29 +1821,6 @@
 ;;; made, and once as durable entities the database can be asked about
 ;;; afterwards without any logs.
 
-(def ^:private backup-target
-  {:seon.ai/endpoint "http://127.0.0.1:2/v1"
-   :seon.ai/model "backup-probe"
-   :seon.ai/api-key-variable "SEON_AI_TEST_BACKUP_KEY"
-   :seon.ai/timeout-ms 200})
-
-(defn- configure-backup!
-  {:malli/schema [:=> [:cat :seon.db/connection] :seon.db/transaction-report]}
-  [connection]
-  (let [report
-        (db/transact!
-         connection
-         (mapv (fn [[attribute value]]
-                 [:db/add [:seon.config/cluster "turn-test"] attribute value])
-               {:seon.config.ai.backup/endpoint (:seon.ai/endpoint backup-target)
-                :seon.config.ai.backup/model (:seon.ai/model backup-target)
-                :seon.config.ai.backup/api-key-variable
-                (:seon.ai/api-key-variable backup-target)
-                :seon.config.ai.backup/timeout-ms (:seon.ai/timeout-ms backup-target)}))]
-    (when (:seon.db.write.attempt/request-id report)
-      (throw (ex-info "The fixture backup configuration was refused." report)))
-    report))
-
 (defn- failure
   "One model failure value carrying the evidence the leaf would record and
   the identity its producer declares (`seon.ai`, `:seon.error/declared-schema`
@@ -1867,8 +1836,7 @@
              assoc :seon.error/declared-schema declared-schema))
 
 (def ^:private unpaid
-  "A connection the JDK PROVED never left this machine — the one case
-  the no-retry ruling leaves open."
+  "A connection the JDK PROVED never left this machine."
   (failure :seon.ai/transport-failure-error
            {:seon.ai/transport-failure "https://provider.invalid"}
            {:seon.ai/error-class :transport-before-send
@@ -1913,22 +1881,6 @@
       (:seon.error/agent fact)
       (assoc :seon.error/agent
              [:seon.agent/id (get-in fact [:seon.error/agent :seon.agent/id])]))))
-
-(defn- derived-disposition
-  "Re-derive what the loop decided, from durable facts alone.
-  The attempt's error fact carries the evidence, and the backup role is
-  the `failover-from` connection — a stored disposition would only
-  restate this derivation (owner ruling 2026-07-28)."
-  [db entity backup-configured?]
-  (let [fact (durable-fact db (:db/id (:seon.ai.attempt/error entity)))
-        ;; stored evidence is value EDN (seon.error/value-edn)
-        value (edn/read-string (:seon.error/data-edn fact))]
-    (ai/disposition
-     {:seon.error/value value
-      :seon.ai/backup? (boolean
-                        (and backup-configured?
-                             (not (contains? entity
-                                             :seon.ai.attempt/failover-from))))})))
 
 (deftest successful-call-persists-the-providers-open-usage-document
   (doseq [retain? [false true]]
@@ -2082,277 +2034,25 @@
           (is (string? (:seon.ai/exhausted-finish-reason error-fact))
               "the attempt points at the named starvation error fact")))))))
 
-(deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
+(deftest a-provider-failure-is-one-call-and-an-error-value
   (with-cluster fake-evaluate
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
-        (configure-backup! connection)
-        (with-redefs [ai/complete
-                      (recording-completer
-                       requests
-                       [unpaid {:seon.ai/text "(seon.run/complete \"backed up\")"}])]
-          (with-redefs [injected-evaluation
-                    {:seon.cluster.eval/result-edn
-                     (pr-str (seon.run/complete "backed up"))
-                     :seon.sci.admit/value (seon.run/complete "backed up")}]
-            (drive! cluster 10)))
-        (let [[primary-request backup-request] @requests
-              entities (attempt-entities @connection)
-              [primary-entity backup-entity] entities]
-          (testing "EXACTLY two request builds — the backup is one call,
-          not a retry loop that happens to stop"
-            (is (= 2 (count @requests))))
-          (testing "the second call went to the BACKUP target"
-            (is (.equals "probe" (:seon.ai/model primary-request)))
-            (is (.equals "backup-probe" (:seon.ai/model backup-request)))
-            (is (.equals "SEON_AI_TEST_BACKUP_KEY"
-                         (:seon.ai/api-key-variable backup-request))))
-          (testing "carrying the ORIGINAL prompt unchanged — the user's
-          request is not where a runtime notice belongs"
-            (is (= (:seon.ai/prompt primary-request)
-                   (:seon.ai/prompt backup-request)))
-            (is (not (contains? primary-request :seon.ai/system))))
-          (testing "and a system segment that IS the projection of the
-          committed fact — asserted against the derivation, never
-          against prose written here"
-            (let [error-id (:seon.error/id
-                            (db/pull @connection '[:seon.error/id]
-                                    (db/q '[:find ?e . :where
-                                           [?e :seon.error/id _]]
-                                         @connection)))
-                  fact (durable-fact @connection [:seon.error/id error-id])]
-              (is (= (error/ai-prose
-                      (error/notice {:seon.error/fact fact
-                                     :seon.error/reason :failover}))
-                     (:seon.ai/system backup-request)))))
-          (testing "two attempt entities tell the whole story"
-            (is (= 2 (count entities)))
-            (is (= [true false]
-                   (mapv #(contains? % :seon.ai.attempt/error) entities))
-                "the error ref's presence IS the outcome")
-            (is (= :failover-now
-                   (derived-disposition @connection primary-entity true))
-                "and WHY the second call was allowed is derivable from
-                 the durable evidence alone — never a stored label")
-            (is (false? (:seon.ai/request-transmitted? primary-entity))
-                "the evidence that made it allowed is on the entity too")
-            (is (some? (:seon.ai.attempt/error primary-entity))
-                "the failed attempt points at its error fact")
-            (is (= (:db/id primary-entity)
-                   (:db/id (:seon.ai.attempt/failover-from backup-entity)))
-                "and the backup points at the attempt it replaced —
-                 role by connection, never a :primary/:backup stamp")
-            (is (not (contains? backup-entity :seon.ai.attempt/delay-ms))
-                "a failover waits for nothing"))
-          (testing "the run proceeded on the backup's answer"
-            (is (some? (db/q '[:find ?d . :where
-                              [_ :seon.turn/reply-size ?d]]
-                            @connection)))))))))
-
-(def ^:private turn-evidence-partitions
-  [{::error-class :credential ::declared-schema :seon.ai/no-credential-error :seon.error/value {:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
-    ::transmitted? false}
-   {::error-class :transport-before-send ::declared-schema :seon.ai/transport-failure-error :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
-    ::transmitted? false}
-   {::error-class :transport-unknown ::declared-schema :seon.ai/transport-failure-error :seon.error/value {:seon.ai/transport-failure "https://provider.invalid"}
-    ::transmitted? true}
-   {::error-class :timeout ::declared-schema :seon.ai/timeout-error :seon.error/value {:seon.ai/timeout 1000} ::transmitted? true}
-   {::error-class :rate-limit ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503}
-    ::transmitted? true}
-   {::error-class :server ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
-   {::error-class :authentication ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503}
-    ::transmitted? true}
-   {::error-class :authorization ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503}
-    ::transmitted? true}
-   {::error-class :model ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
-   {::error-class :request ::declared-schema :seon.ai/provider-error-error :seon.error/value {:seon.ai/provider-error 503} ::transmitted? true}
-   {::error-class :response ::declared-schema :seon.ai/unparseable-body-error :seon.error/value {:seon.ai/unreadable-response-member "body"}
-    ::transmitted? true}
-   {::error-class :response ::declared-schema :seon.ai/unparseable-body-error :seon.error/value {:seon.ai/unreadable-response-member "body"}
-    ::transmitted? true ::output? true}])
-
-(def ^:private turn-outcome-generator
-  (gen/frequency
-   [[1 (gen/return {::outcome :success})]
-    [4 (gen/fmap #(assoc % ::outcome :failure)
-                 (gen/elements turn-evidence-partitions))]]))
-
-(def ^:private turn-scenario-generator
-  (gen/let [outcomes (gen/vector turn-outcome-generator 1 4)
-            backup? gen/boolean
-            maximum-retries (gen/choose 0 2)]
-    {::outcomes outcomes
-     ::backup? backup?
-     ::maximum-retries maximum-retries}))
-
-(defn- turn-failure-value
-  {:malli/schema [:=> [:cat [:map [:seon.error/value :map]
-                            [::declared-schema :qualified-keyword]
-                            [::error-class :keyword]
-                            [::transmitted? :boolean]
-                            [::output? {:optional true} :boolean]]]
-                  :seon.ai/completion]}
-  [{::keys [declared-schema error-class transmitted? output?]
-    members :seon.error/value}]
-  (failure declared-schema members
-           (cond-> {:seon.ai/error-class error-class
-                    :seon.ai/request-transmitted? transmitted?
-                    :seon.ai/response-started?
-                    (boolean
-                     (contains? #{:rate-limit :server :authentication
-                                  :authorization :model :request :response}
-                                error-class))
-                    :seon.ai/output-observed? (boolean output?)}
-             (contains? #{:rate-limit :server :authentication
-                          :authorization :model :request :response}
-                        error-class)
-             (assoc :seon.ai/http-status
-                    (if (= :response error-class) 200 503)))))
-
-(defn- turn-completion
-  [{::keys [outcome] :as generated}]
-  (if (= :success outcome)
-    {:seon.ai/text "(seon.run/complete \"generated\")"}
-    (turn-failure-value generated)))
-
-(defn- oracle-disposition
-  [{::keys [error-class output?]} backup?]
-  (cond
-    output? :fail
-    (contains? #{:rate-limit :server :transport-before-send} error-class)
-    (if backup? :failover-now :backoff)
-    (contains? #{:credential :authentication :authorization :model}
-               error-class)
-    :fail
-    :else :fail))
-
-(defn- expected-attempt-trace
-  [{::keys [outcomes backup? maximum-retries]}]
-  (let [waits (mapv #(bit-shift-left 1 %) (range maximum-retries))
-        answer (fn [ordinal]
-                 (nth outcomes ordinal (last outcomes)))]
-    (loop [ordinal 0
-           target :primary
-           failover? false
-           delay nil
-           remaining-waits (if backup? [] waits)
-           trace []]
-      (let [{::keys [outcome] :as generated} (answer ordinal)
-            failed? (= :failure outcome)
-            entity (cond-> {::model target ::failed? failed?}
-                  failover? (assoc ::failover? true)
-                  delay (assoc ::delay-ms delay))
-            trace (conj trace entity)
-            disposition (when failed?
-                          (oracle-disposition generated
-                                              (and backup?
-                                                   (not failover?))))]
-        (cond
-          (not failed?) {::attempts trace ::succeeded? true}
-          (= :failover-now disposition)
-          (recur (inc ordinal) :backup true nil [] trace)
-          (and (= :backoff disposition) (seq remaining-waits))
-          (recur (inc ordinal) target false (first remaining-waits)
-                 (rest remaining-waits) trace)
-          :else {::attempts trace ::succeeded? false})))))
-
-(defn- actual-attempt-shape
-  [entity]
-  (cond-> {::model (if (= "backup-probe" (:seon.ai/model entity))
-                     :backup
-                     :primary)
-           ::failed? (contains? entity :seon.ai.attempt/error)}
-    (contains? entity :seon.ai.attempt/failover-from)
-    (assoc ::failover? true)
-    (contains? entity :seon.ai.attempt/delay-ms)
-    (assoc ::delay-ms (:seon.ai.attempt/delay-ms entity))))
-
-(defn- generated-turn-agrees-with-durable-facts?
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [scenario]
-  (with-cluster
-    (fn [cluster]
-      (let [{::keys [attempts succeeded?]} (expected-attempt-trace scenario)
-            connection (:seon.db/connection cluster)
-            retry-strategy {:seon.ai.retry/base-delay-ms 1
-                            :seon.ai.retry/multiplier 2.0
-                            :seon.ai.retry/jitter-fraction 0.0
-                            :seon.ai.retry/maximum-delay-ms 4
-                            :seon.ai.retry/maximum-retries
-                            (::maximum-retries scenario)
-                            :seon.ai.retry/maximum-total-delay-ms 1000}
-            completions (mapv turn-completion (::outcomes scenario))
-            requests (atom [])
-            committed-prefixes (atom [])
-            ;; `ai/complete` takes the projection and the request (0f5f849bd).
-            complete! (fn [_projection request]
-                        (swap! committed-prefixes
-                               conj
-                               (mapv actual-attempt-shape
-                                     (attempt-entities @connection)))
-                        (let [ordinal (count @requests)]
-                          (swap! requests conj request)
-                          (nth completions ordinal (last completions))))]
-        (let [report (db/transact!
-         connection
-         [(cond-> {:db/id [:seon.config/cluster "turn-test"]
-                   :seon.config.ai.retry/base-delay-ms
-                   (:seon.ai.retry/base-delay-ms retry-strategy)
-                   :seon.config.ai.retry/multiplier
-                   (:seon.ai.retry/multiplier retry-strategy)
-                   :seon.config.ai.retry/jitter-fraction
-                   (:seon.ai.retry/jitter-fraction retry-strategy)
-                   :seon.config.ai.retry/maximum-delay-ms
-                   (:seon.ai.retry/maximum-delay-ms retry-strategy)
-                   :seon.config.ai.retry/maximum-retries
-                   (:seon.ai.retry/maximum-retries retry-strategy)
-                   :seon.config.ai.retry/maximum-total-delay-ms
-                   (:seon.ai.retry/maximum-total-delay-ms retry-strategy)}
-            (::backup? scenario)
-            (assoc :seon.config.ai.backup/endpoint
-                   (:seon.ai/endpoint backup-target)
-                   :seon.config.ai.backup/model
-                   (:seon.ai/model backup-target)
-                   :seon.config.ai.backup/api-key-variable
-                   (:seon.ai/api-key-variable backup-target)
-                   :seon.config.ai.backup/timeout-ms
-                   (:seon.ai/timeout-ms backup-target)))])]
-          (when (:seon.db.write.attempt/request-id report)
-            (throw (ex-info "The generated scenario seed was refused." report))))
-        (with-redefs [ai/complete complete!]
-          (drive! cluster 12))
+        (with-redefs [ai/complete (recording-completer requests [unpaid])]
+          (drive! cluster 10))
         (let [entities (attempt-entities @connection)
-              actual (mapv actual-attempt-shape entities)
               run-entity (db/q '[:find (pull ?run [*]) .
-                             :where [?run :seon.turn/attempts _]]
-                           @connection)]
-          (and
-           (= attempts actual)
-           (= (mapv #(subvec attempts 0 %)
-                    (range (count attempts)))
-              @committed-prefixes)
-           (= (mapv ::model attempts)
-              (mapv #(if (= "backup-probe" (:seon.ai/model %))
-                       :backup
-                       :primary)
-                    @requests))
-           (= (vec (range (count entities)))
-              (mapv :seon.ai.attempt/ordinal entities))
-           (every? #(not (contains? % :seon.ai/disposition)) entities)
-           (contains? run-entity :seon.turn/closed-tx)
-           (= 1 (turn/episode-runs @connection "agent-a"))
-           (= succeeded?
-              (contains? run-entity :seon.turn/reply-size))))))))
-
-(deftest generated-model-attempt-traces-preserve-presence-and-episode-laws
-  (test-support/assert-check!
-   (tc/quick-check
-    48
-    (prop/for-all [scenario turn-scenario-generator]
-      (generated-turn-agrees-with-durable-facts? scenario))
-    :seed 202607280402)
-   "Generated model attempts diverged from durable turn facts."))
+                                 :where [?run :seon.turn/attempts _]]
+                               @connection)]
+          (is (= 1 (count @requests))
+              "no retry, no failover: one request per model step")
+          (is (= [true] (mapv #(contains? % :seon.ai.attempt/error) entities))
+              "the failed attempt points at its error fact")
+          (is (contains? run-entity :seon.turn/closed-tx)
+              "the run closes with the error")
+          (is (not (contains? run-entity :seon.turn/reply-size))
+              "and no reply was frozen"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The second agent-facing value: a form that sends

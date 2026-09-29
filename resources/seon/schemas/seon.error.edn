@@ -61,8 +61,7 @@
              [:enum
               :your-run
               :no-attributable-agent
-              :recurring
-              :failover],
+              :recurring],
              :op :keyword,
              :data-edn :string,
              :refusal-value
