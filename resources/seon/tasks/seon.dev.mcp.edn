@@ -20,4 +20,8 @@
              :kind :function
              :intent "Every eval_clj session_id opens an io-prepl session (a socket in the one shared bridge, a thread in the JVM) that lives until an error, a timeout or its JVM's replacement. Sessions whose JVM is gone are now released when runtime_status lists them; a finished lane's session on the live JVM is not, because a caller's going away is invisible to the shared bridge. Declare an idle limit as a cluster config dial, enforced by the owner that observes idleness (the JVM's prepl server), and answer a released named session with its declared :session-lost."
              :must-read #{seon.dev.mcp/execute-clj-eval}
-             :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}
+ #:seon.task{:name "branch-mcp-takes-one-form"
+             :kind :function
+             :intent "MCP eval_clj in sci mode with a branch refuses a second form (script/seon/dev/mcp.clj ~377-398), so an outside agent cannot send a multi-form run on its branch (e.g. several register! calls); wrapping them in do then hits register!'s top-level-only refusal (schema.clj ~1310-1320). A branch run should take a run of forms as root's does."
+             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}]
