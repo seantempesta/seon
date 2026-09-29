@@ -4851,11 +4851,14 @@
     (seq repeated) (assoc :seon.cluster.eval/repeated-calls (set repeated))))
 
 (defn- entry-bindings
-  "The Vars a form bound, as the installation reads them: symbol -> its value and metadata."
+  "The Vars a form bound, as the installation reads them: symbol -> its value and metadata.
+  The form's own result handle is not one: publication interns it in the `result`
+  namespace (`sci.eval/bind-result!`), which the write observer also reports."
   {:malli/schema [:=> [:cat :seon.batch/batch :seon.cluster.eval/ordinal] :seon.sci.eval/bindings]}
   [batch ordinal]
   (into {} (keep (fn [{op :seon.batch/op sym :seon.batch/sym the-var :seon.batch/var kind :seon.batch/kind n :seon.batch/ordinal}]
-                   (when (and (= :bind op) (= :root kind) sym (= n ordinal))
+                   (when (and (= :bind op) (= :root kind) sym (= n ordinal)
+                              (not= "result" (namespace sym)))
                      [sym {:seon.sci.eval/value @the-var :seon.sci.eval/metadata (meta the-var)}])))
         (:seon.batch/writes batch)))
 

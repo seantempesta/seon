@@ -698,13 +698,13 @@
                  (let [fresh (filter #(>= (:t %) wake-t)
                                      (evaluation/of-agent @connection "juniper"))]
                    (is (seq fresh))
-                   (is (= 'seon.db/pull (first (read-string (:seon.cluster.eval/source (first fresh)))))
+                   ;; the changed read is the agent's own `:seon.message/_to` concern
+                   ;; as the opening shows it (`turn/declared-sources`' structural read)
+                   (is (= '(get (seon.db/pull '[:seon.message/_to] [:seon.agent/id "juniper"])
+                                :seon.message/_to)
+                          (read-string (:seon.cluster.eval/source (first fresh))))
                        "changed read must precede the no-provider reply")
-                   (is (= #{'(seon.db/pull '[{:seon.message/_to
-                                              [:seon.message/id :seon.message/content
-                                               {:seon.message/from [:seon.agent/id]}]}]
-                                            [:seon.agent/id "juniper"])}
-                          (set (map (comp read-string :seon.cluster.eval/source) fresh)))
+                   (is (= 1 (count (distinct (map :seon.cluster.eval/source fresh))))
                        "no-provider turns do not invent placeholder forms")
                    (is (empty? (turn/unanswered-wakes @connection "juniper" {})))
                    (is (= faults-before
