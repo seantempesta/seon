@@ -97,8 +97,8 @@ commit() {
     [[ $ok == 1 ]] || refuse "$staged is staged in the shared index but not part of this commit; a commit must carry only its own paths"
   done < <(git diff --cached --name-only)
 
-  echo "== bin/seon check ${paths[*]} ${tests[*]:-}"
-  bin/seon check "${paths[@]}" "${tests[@]}" || refuse "bin/seon check failed; nothing committed"
+  echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
+  bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
   echo "== clj-kondo --lint src script test --cache false"
   local lint
   lint="$(clj-kondo --lint src script test --cache false 2>&1 | tail -1 || true)"
