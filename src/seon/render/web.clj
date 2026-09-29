@@ -59,7 +59,6 @@
             [seon.turn :as turn]
 
             [seon.config :as config]
-            [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
             [seon.health :as health]
@@ -155,15 +154,20 @@
 ;;; The shell
 ;;; ---------------------------------------------------------------------------
 
-(defn- query-params
-  [request]
+(defn- form-pairs
+  "One URL-encoded `k=v&k=v` string as string keys and values."
+  [encoded]
   (into {}
         (keep (fn [pair]
                 (when-not (str/blank? pair)
-                  (let [[key setting] (str/split pair #"=" 2)]
-                    [(URLDecoder/decode key "UTF-8")
-                     (URLDecoder/decode (or setting "") "UTF-8")]))))
-        (str/split (or (:query-string request) "") #"&")))
+                  (let [[k v] (str/split pair #"=" 2)]
+                    [(URLDecoder/decode ^String k "UTF-8")
+                     (URLDecoder/decode ^String (or v "") "UTF-8")]))))
+        (str/split encoded #"&")))
+
+(defn- query-params
+  [request]
+  (form-pairs (or (:query-string request) "")))
 
 (defn- read-browser-edn
   "Read one browser-supplied EDN string, or nil when it is not readable EDN.
@@ -192,6 +196,23 @@
       fallback)))
 
 (declare query-entity route-namespace agent-namespace render-source-call)
+
+(defn- carry
+  "`m` with each of `ks` that `source` holds truthy."
+  [m source ks]
+  (into m (filter val) (select-keys source ks)))
+
+(defn- debug-key?
+  "True for a debug page's registration key `[::debug-tab request]`."
+  [registration-key]
+  (and (vector? registration-key) (= ::debug-tab (first registration-key))))
+
+(defn- key-agent-id
+  "The agent a page registration key renders: a debug key's request names it."
+  [registration-key]
+  (if (debug-key? registration-key)
+    (:seon.agent/id (second registration-key))
+    registration-key))
 
 (def ^:private debug-defaults
   {:seon.render.data/limit 40
@@ -468,33 +489,27 @@
         captured-invocations (or captured-invocations (atom {}))
         captured-calls (atom {})
         render-request
-        (cond-> (assoc (walk-request db caps id :seon.render/html
-                                     connection request)
-                       :seon.render/retained-calls retained-calls
-                       :seon.render/captured-calls captured-calls
-                       :seon.render/invocations retained-invocations
-                       :seon.render/captured-invocations captured-invocations)
-          (:seon.render/candidate-call-ids request)
-          (assoc :seon.render/candidate-call-ids
-                 (:seon.render/candidate-call-ids request))
-
-          (:seon.render.walk/root-acquisition request)
-          (assoc :seon.render.walk/root-acquisition
-                 (:seon.render.walk/root-acquisition request)))
+        (-> (assoc (walk-request db caps id :seon.render/html
+                                 connection request)
+                   :seon.render/retained-calls retained-calls
+                   :seon.render/captured-calls captured-calls
+                   :seon.render/invocations retained-invocations
+                   :seon.render/captured-invocations captured-invocations)
+            (carry request [:seon.render/candidate-call-ids
+                            :seon.render.walk/root-acquisition]))
         walked-units (render.walk/neighborhood render-request)
         fleet-call
         (when (= id root-agent-id)
           (oversight/unit
            ;; Routing present asks for live state; absent is a detached render.
-           (cond-> {:seon.db/db db
-                    :seon.agent/id root-agent-id
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
-                    :seon.sci.eval/time-limit-ms
-                    (:seon.config.eval/time-limit-ms request)
-                    :seon.db/connection connection}
-             (:seon.agent/routing request)
-             (assoc :seon.agent/routing (:seon.agent/routing request)))))
+           (carry {:seon.db/db db
+                   :seon.agent/id root-agent-id
+                   :seon.sci.admit/caps caps
+                   :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
+                   :seon.sci.eval/time-limit-ms
+                   (:seon.config.eval/time-limit-ms request)
+                   :seon.db/connection connection}
+                  request [:seon.agent/routing])))
         fleet-output
         (some-> fleet-call
                 (assoc :seon.render/output :seon.render/html
@@ -505,9 +520,7 @@
                          (:seon.render/profile request)))
                 (assoc :seon.render/retained-calls retained-calls
                        :seon.render/captured-calls captured-calls)
-                (cond-> (:seon.render/candidate-call-ids request)
-                  (assoc :seon.render/candidate-call-ids
-                         (:seon.render/candidate-call-ids request)))
+                (carry request [:seon.render/candidate-call-ids])
                 render/render-call)
         fleet-unit
         (when fleet-call
@@ -685,15 +698,13 @@
                        :seon.schema/value :seon.schema/value :seon.render.web/refusal-reason [:maybe :map]]
                   :seon.render.web/request-error]}
   [message operation member expected offending cause evidence]
-  (let [observation
-        (merge evidence (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/debug operation
-                         {:seon.render.web/refused-member member
-         :seon.error/message message
-         :seon.error/fix "Repair the unavailable page input and repeat the observation."
-         :seon.error/expected expected
-         :seon.error/offending offending
-         :seon.render.web/refusal-reason cause}))]
-    observation))
+  (merge evidence (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/debug operation
+                                                 {:seon.render.web/refused-member member
+                                                  :seon.error/message message
+                                                  :seon.error/fix "Repair the unavailable page input and repeat the observation."
+                                                  :seon.error/expected expected
+                                                  :seon.error/offending offending
+                                                  :seon.render.web/refusal-reason cause})))
 
 (defn- turn-function-result
   "Call the ruled turn API, retaining an unavailable function as data."
@@ -710,15 +721,13 @@
                    (requiring-resolve function))]
     (if resolved
       (apply resolved arguments)
-      (let [observation
-            (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/turn-function-result
-             {:seon.error/message (str "Not yet available: " function)
-             :seon.error/fix "Supply the expected member and repeat the requested operation."
-             :seon.render.web/function-unavailable function
-             :seon.error/member :seon.fn/sym
-             :seon.error/expected "a resolvable turn function"
-             :seon.error/data {:seon.render.web/arguments arguments}})]
-        observation))))
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/turn-function-result
+                                     {:seon.error/message (str "Not yet available: " function)
+                                      :seon.error/fix "Supply the expected member and repeat the requested operation."
+                                      :seon.render.web/function-unavailable function
+                                      :seon.error/member :seon.fn/sym
+                                      :seon.error/expected "a resolvable turn function"
+                                      :seon.error/data {:seon.render.web/arguments arguments}}))))
 
 (defn- debug-turn-request
   [database connection agent-id caps render-context]
@@ -1239,7 +1248,7 @@
 (defn- debug-found-value
   "One declared unit: its key, description, references, and paired outputs."
   [projection render-request debug-request attribute value present?
-   related _context-selection _context-source-call]
+   related]
   (let [attribute-schema (projection-form projection
                                           (forward-attribute attribute))
         root (:seon.render.debug/subject debug-request)
@@ -1319,9 +1328,9 @@
 
 (defn- debug-found-values-html
   "Every declared attribute, then other stored attributes and reverse concerns."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map [:sequential :qualified-keyword] :map :map :map :seon.schema/value :seon.schema/value] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map [:sequential :qualified-keyword] :map :map :map] :seon.render/hiccup]}
   [projection render-request debug-request acquisition declared-units
-   observation reverse-values related context-selection context-source-call]
+   observation reverse-values related]
   (let [declared (set declared-units)
         additional (->> (concat (keys acquisition) (keys reverse-values))
                         (filter qualified-keyword?)
@@ -1353,15 +1362,13 @@
              agent?
              (conj (debug-found-value
                     projection render-request debug-request
-                    :seon.agent/agent identity-value true related
-                    context-selection context-source-call)))
+                    :seon.agent/agent identity-value true related)))
            (map (fn [attribute]
                   (let [entry (find (if (reverse-attribute? attribute)
                                      reverse-values acquisition) attribute)]
                      (debug-found-value
                       projection render-request debug-request attribute
-                      (when entry (val entry)) (some? entry) related
-                      context-selection context-source-call))))
+                      (when entry (val entry)) (some? entry) related))))
            units))
    (when-not (get-in observation [:seon.render.data/incoming
                                   :seon.render.data/complete?])
@@ -1598,7 +1605,7 @@
           (:seon.render.call/output previous)
           (binding [db/*read-evidence-sink* captured]
             (let [observation-request
-                  (cond->
+                  (carry
                    {:seon.db/db database
                     :seon.render.data/subject
                     (:seon.render.debug/subject debug-request)
@@ -1608,12 +1615,9 @@
                     (:seon.render.data/max-ref-attributes debug-request)
                     :seon.render.data/max-result-weight
                     (:seon.render.data/max-result-weight debug-request)}
-                    (:seon.render.data/outgoing-cursor debug-request)
-                    (assoc :seon.render.data/outgoing-cursor
-                           (:seon.render.data/outgoing-cursor debug-request))
-                    (:seon.render.data/incoming-cursor debug-request)
-                    (assoc :seon.render.data/incoming-cursor
-                           (:seon.render.data/incoming-cursor debug-request)))
+                   debug-request
+                   [:seon.render.data/outgoing-cursor
+                    :seon.render.data/incoming-cursor])
                   first-observation (data/entity-observation
                                      observation-request)
                   restarted? (= :seon.render.data/continuation
@@ -1700,9 +1704,6 @@
               {::debug-request effective-request
                ::declared-units declared-units
                ::reverse-values reverse-values
-               ::context-selection
-               (when-let [agent-id (:seon.agent/id debug-request)]
-                 (context/selection database agent-id))
                ::observation observation
                ::related-entities
                (if (or (:seon.db/invalid-read related-values) (:seon.schema/expected-value related-values))
@@ -1744,10 +1745,9 @@
         declared-units (::declared-units debug-data-output)
         reverse-values (::reverse-values debug-data-output)
         captured-calls (atom {data-call-id debug-data-entry})
-        render-agent-id (:seon.agent/id debug-request)
         render-request
         (when (map? acquisition)
-          (cond->
+          (carry
            {:seon.db/db db
             :seon.render/namespace
             (:seon.render.debug/viewer-namespace debug-request)
@@ -1767,33 +1767,27 @@
             :seon.render/captured-calls captured-calls
             :seon.render/invocations retained-invocations
             :seon.render/captured-invocations captured-invocations}
-            render-agent-id
-            (assoc :seon.agent/id render-agent-id)))
-        context-source-call nil
+           debug-request [:seon.agent/id]))
         units-html
         (if render-request
           (debug-found-values-html
            projection render-request debug-request acquisition declared-units
            observation reverse-values
            (let [related (::related-entities debug-data-output)]
-             (if (map? related) related {}))
-           (::context-selection debug-data-output)
-           context-source-call)
+             (if (map? related) related {})))
           [:section {:id "debug-units" :class "seon-debug-found-values"}
            [:h1 {:class "seon-debug-caption"}
             "Attributes of the selected entity"]
            (error/render-html
             (or acquisition
-                (let [observation
-                      {:seon.error/at (java.util.Date.)
-                       :seon.error/layer :seon.render.web/render
-                       :seon.error/operation 'seon.render.web/debug-page-result
-                       :seon.error/message "The selected entity does not exist."
-                       :seon.error/fix "Supply the expected member and repeat the requested operation."
-                       :seon.render.web/refused-member :seon.render/value
-                       :seon.error/expected "an existing selected entity"
-                       :seon.error/offending debug-request}]
-                  observation)))])
+                {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.render.web/render
+                 :seon.error/operation 'seon.render.web/debug-page-result
+                 :seon.error/message "The selected entity does not exist."
+                 :seon.error/fix "Supply the expected member and repeat the requested operation."
+                 :seon.render.web/refused-member :seon.render/value
+                 :seon.error/expected "an existing selected entity"
+                 :seon.error/offending debug-request}))])
         program-identity
         (debug-program-identity db (:seon.sci.eval/ctx handle))
         page
@@ -2062,6 +2056,12 @@
   "The health page's one morph target."
   "seon-health")
 
+(def ^:private no-retained-calls
+  "A page result that retains no fragments, calls or invocations."
+  {:seon.render.web/fragments {}
+   :seon.render/captured-calls {}
+   :seon.render/captured-invocations {}})
+
 (defn- health-page-result
   "The health page at `database`: the cluster's `seon.health/report` through
   its HTML face, as one block. The report waits at most the paint deadline
@@ -2073,12 +2073,10 @@
                                :seon.db/db database
                                :seon.health/deadline-ms 50
                                :seon.health/wake #(async/offer! (:seon.render.web/render-channel handle) {})})]
-    {:seon.render.web/page
-     {health-surface (hiccup/->string [:div {:id health-surface}
-                                       (health/render-html {:seon.render/value report :seon.db/db database})])}
-     :seon.render.web/fragments {}
-     :seon.render/captured-calls {}
-     :seon.render/captured-invocations {}}))
+    (assoc no-retained-calls
+           :seon.render.web/page
+           {health-surface (hiccup/->string [:div {:id health-surface}
+                                             (health/render-html {:seon.render/value report :seon.db/db database})])})))
 
 (defn- derive-page
   "One page at `database`: derive the blocks whose retained calls are
@@ -2089,12 +2087,9 @@
   [handle database streams profile registration-key retained-values derive-all? invalidate-calls? confirmed?]
   (let [connection (:seon.db/connection handle)
         caps (:seon.sci.admit/caps handle)
-        debug? (and (vector? registration-key)
-                    (= ::debug-tab (first registration-key)))
+        debug? (debug-key? registration-key)
         debug-request (when debug? (second registration-key))
-        agent-id (if debug?
-                   (:seon.agent/id debug-request)
-                   registration-key)
+        agent-id (key-agent-id registration-key)
         retained-invocations (::invocations retained-values {})
         captured-invocations (atom {})]
     (cond
@@ -2111,8 +2106,7 @@
         ;; only advances its observed database basis below.
         (if (or invalidate-calls? (nil? (get-in retained-values [::page-results registration-key])) (seq candidates))
           (debug-page-result database connection debug-request caps profile
-                             (assoc handle :seon.agent/routing
-                                    (:seon.agent/routing handle))
+                             handle
                              retained retained-invocations
                              captured-invocations)
           {::retained-only? true
@@ -2126,7 +2120,7 @@
             candidates (candidate-call-ids retained database confirmed?)
             call-id (root-call-id :seon.render/html registration-key)
             request
-            (cond-> {:seon.db/db database
+            (carry {:seon.db/db database
                      :seon.agent/id agent-id
                      :seon.render.web/root-agent-id
                      (:seon.render.web/root-agent-id handle)
@@ -2145,12 +2139,9 @@
                      :seon.render.walk/lookup
                      [:seon.agent/id agent-id]
                      :seon.render/distance 2}
-              (get-in streams [agent-id :seon.ai/partial])
-              (assoc :seon.ai/partial
-                     (get-in streams [agent-id :seon.ai/partial]))
-
-              (:seon.agent/routing handle)
-              (assoc :seon.agent/routing (:seon.agent/routing handle)))
+                    (assoc handle :seon.ai/partial
+                           (get-in streams [agent-id :seon.ai/partial]))
+                    [:seon.ai/partial :seon.agent/routing])
             root (refresh-root request retained call-id candidates)
             derive? (or derive-all?
                         (not= [(get-in streams [agent-id :seon.ai/partial])]
@@ -2315,8 +2306,7 @@
   pass, carried in the proc's own state map; an unchanged signature offers
   nothing. The returned `::fault-signature` is what the pass folds back."
   ([state registration-key failure last-signature]
-   (let [debug? (and (vector? registration-key)
-                     (= ::debug-tab (first registration-key)))
+   (let [debug? (debug-key? registration-key)
          message (str "Deriving this page threw " (.getName (class failure))
                       ": " (.getMessage ^Throwable failure))
          signature [registration-key message]
@@ -2332,16 +2322,14 @@
                      {:seon.error/layer :seon.render.web/page
                       :seon.error/operation 'seon.render.web/render-pass
                       :seon.db.process/id (process/id (process/current-identity))}))
-     {:seon.render.web/page
-      {(if debug? "debug-units" (str "seon-page-" registration-key))
-       (hiccup/->string
-        [:section {:class "seon-debug-body"}
-         [:h2 {:class "seon-debug-caption"} "This page could not be derived"]
-         (error/render-html diagnostic)])}
-      :seon.render.web/fragments {}
-      :seon.render/captured-calls {}
-      :seon.render/captured-invocations {}
-      ::fault-signature signature})))
+     (assoc no-retained-calls
+            :seon.render.web/page
+            {(if debug? "debug-units" (str "seon-page-" registration-key))
+             (hiccup/->string
+              [:section {:class "seon-debug-body"}
+               [:h2 {:class "seon-debug-caption"} "This page could not be derived"]
+               (error/render-html diagnostic)])}
+            ::fault-signature signature))))
 
 (defn- unreportable-page-result
   "The floor when building a failed page's own diagnostic also threw.
@@ -2357,15 +2345,13 @@
                  " and reporting it threw "
                  (.getName (class ^Throwable diagnostic-failure))
                  " — page " (pr-str registration-key)))
-  {:seon.render.web/page
-   {(str "seon-page-" registration-key)
-    (str "<section class=\"seon-debug-body\">"
-         "<h2 class=\"seon-debug-caption\">"
-         "This page could not be derived, and the failure could not be"
-         " reported</h2></section>")}
-   :seon.render.web/fragments {}
-   :seon.render/captured-calls {}
-   :seon.render/captured-invocations {}})
+  (assoc no-retained-calls
+         :seon.render.web/page
+         {(str "seon-page-" registration-key)
+          (str "<section class=\"seon-debug-body\">"
+               "<h2 class=\"seon-debug-caption\">"
+               "This page could not be derived, and the failure could not be"
+               " reported</h2></section>")}))
 
 (defn- render-pass
   "Derive every registered page and retain its serialized package.
@@ -2406,9 +2392,9 @@
         ;; throw too; when it does, the string-only floor keeps the proc alive
         ;; instead of ending it with the failure it was reporting.
         previous-signatures (::fault-signatures state)
-        [results _pass-invocations pass-signatures]
+        [results pass-signatures]
         (reduce
-         (fn [[results invocations signatures] registration-key]
+         (fn [[results signatures] registration-key]
            (let [result (try
                           (derive-page! (merge state handle) database streams profile registration-key
                                         derive-all? invalidate-calls?)
@@ -2420,39 +2406,28 @@
                               (catch Throwable diagnostic-failure
                                 (unreportable-page-result
                                  registration-key failure
-                                 diagnostic-failure)))))
-                 invocations (if (::retained-only? result)
-                               invocations
-                               (merge invocations
-                                      (:seon.render/captured-invocations
-                                       result)))]
+                                 diagnostic-failure)))))]
              [(assoc results registration-key result)
-              invocations
               (if-let [signature (::fault-signature result)]
                 (assoc signatures registration-key signature)
                 signatures)]))
-         [{} (::invocations state) {}]
+         [{} {}]
          watched)
-        paint-results results
         advanced
         (reduce-kv
          (fn [{latest :packages changed? :changed?}
               registration-key result]
-           (let [debug? (and (vector? registration-key)
-                             (= ::debug-tab (first registration-key)))
-                 agent-id (if debug?
-                            (:seon.agent/id (second registration-key))
-                            registration-key)
+           (let [debug? (debug-key? registration-key)
                  [package package-changed?]
                  (next-package
                   (get latest registration-key)
                   (:seon.render.web/page result)
                   (db/basis-t database)
-                  (boolean (and (not debug?) (get streams agent-id))))]
+                  (boolean (and (not debug?) (get streams (key-agent-id registration-key)))))]
              {:packages (assoc latest registration-key package)
               :changed? (or changed? package-changed?)}))
          {:packages (::packages state) :changed? false}
-         paint-results)
+         results)
         packages
         (reduce-kv
          (fn [packages registration-key result]
@@ -2656,31 +2631,24 @@
                                            (when-not channel port))
                                          ports)))]
        (throw (ex-info "the render proc is missing an in/out port"
-                       (let [observation
-                             {:seon.error/at (java.util.Date.)
-                              :seon.error/layer :seon.render.web/render
-                              :seon.error/operation 'seon.render.web/render-step
-                              :seon.error/message "The requested render observation is unavailable."
-                              :seon.error/fix "Supply the expected member and repeat the requested operation."
-                              :seon.render.web/missing-port (first missing)
-                              ::missing (vec missing)
-                              :seon.error/member :seon.render.web/render-channel
-                              :seon.error/expected "all declared render ports"
-                              :seon.error/data {:seon.render.web/missing (vec missing)}}]
-                         observation)))))
-   (assoc args
-          ::flow/in-ports
-          {::interest (:seon.render.web/render-channel args)
-           ::runtime-eval (:seon.render.web/runtime-eval-channel args)
-           ::stream (:seon.turn.loop/stream-channel
-                     (:seon.turn.loop/cluster args))}
-          ::flow/out-ports
-          {::pages (:seon.render.web/pages-channel args)}
-          ::streams {}
-          ::passes 0
-          ::watched 0
-          ::coalesce-ms 0
-          ::last-pass-nanos 0))
+                       {:seon.error/at (java.util.Date.)
+                        :seon.error/layer :seon.render.web/render
+                        :seon.error/operation 'seon.render.web/render-step
+                        :seon.error/message "The requested render observation is unavailable."
+                        :seon.error/fix "Supply the expected member and repeat the requested operation."
+                        :seon.render.web/missing-port (first missing)
+                        ::missing (vec missing)
+                        :seon.error/member :seon.render.web/render-channel
+                        :seon.error/expected "all declared render ports"
+                        :seon.error/data {:seon.render.web/missing (vec missing)}})))
+     (assoc args
+            ::flow/in-ports (select-keys ports [::interest ::runtime-eval ::stream])
+            ::flow/out-ports (select-keys ports [::pages])
+            ::streams {}
+            ::passes 0
+            ::watched 0
+            ::coalesce-ms 0
+            ::last-pass-nanos 0)))
   ([state transition]
    (when (= ::flow/stop transition)
      ;; its OWN completion, not the cluster handle's: disarm must join
@@ -3021,13 +2989,23 @@
                   (nil? body) ""
                   (string? body) body
                   :else (slurp body))]
-    (into {}
-          (keep (fn [pair]
-                  (when-not (str/blank? pair)
-                    (let [[key value] (str/split pair #"=" 2)]
-                      [(URLDecoder/decode key "UTF-8")
-                       (URLDecoder/decode (or value "") "UTF-8")]))))
-          (str/split encoded #"&"))))
+    (form-pairs encoded)))
+
+(defn- text-response
+  "A plain-text Ring response."
+  [status body]
+  {:status status :headers {"content-type" "text/plain; charset=utf-8"} :body body})
+
+(defn- html-response
+  "A 200 HTML Ring response; a Datastar fragment reply adds its `datastar-mode`."
+  [body & [headers]]
+  {:status 200 :headers (into {"content-type" "text/html; charset=utf-8"} headers) :body body})
+
+(defn- no-content [] {:status 204 :headers {} :body nil})
+
+(defn- not-found
+  [_request]
+  (text-response 404 "not found"))
 
 (defn- agent-exists?
   [db agent-id]
@@ -3074,20 +3052,14 @@
         ;; declared refusal; nothing else is success.
         (cond
           (:db-after result)
-          {:status 204 :headers {} :body nil}
+          (no-content)
 
           (get-in result [:seon.db.write/attempt :seon.db.write.attempt/completion-unavailable])
-          {:status 500
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body (:seon.error/message result)}
+          (text-response 500 (:seon.error/message result))
 
           :else
-          {:status 422
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body (:seon.error/message result)}))
-      {:status 422
-       :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (:seon.error/message decision)})))
+          (text-response 422 (:seon.error/message result))))
+      (text-response 422 (:seon.error/message decision)))))
 
 (defn- query-entity
   {:malli/schema [:=> [:cat [:maybe :string]] :seon.schema/value]}
@@ -3099,12 +3071,6 @@
                    (= 2 (count value))
                    (qualified-keyword? (first value))))
       value)))
-
-(defn- not-found
-  [_request]
-  {:status 404
-   :headers {"content-type" "text/plain; charset=utf-8"}
-   :body "not found"})
 
 (defn- route-namespace
   "Read one route segment as a round-tripping simple Clojure symbol."
@@ -3181,15 +3147,13 @@
         (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           result
           (or (first (cluster.agent/assigned-to (db/db connection) namespace-name))
-              (let [observation
-                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/ensure-namespace-owner!
-                     {:seon.error/message (str "The namespace owner for " namespace-name
-                                                     " was not created.")
-                     :seon.error/fix "Supply the expected member and repeat the requested operation."
-                     :seon.render.web/refused-member :seon.ns/name
-                     :seon.error/expected "a namespace with an assigned agent"
-                     :seon.error/offending namespace-name})]
-                observation))))))
+              (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/ensure-namespace-owner!
+                                             {:seon.error/message (str "The namespace owner for " namespace-name
+                                                                       " was not created.")
+                                              :seon.error/fix "Supply the expected member and repeat the requested operation."
+                                              :seon.render.web/refused-member :seon.ns/name
+                                              :seon.error/expected "a namespace with an assigned agent"
+                                              :seon.error/offending namespace-name}))))))
 
 (defn- create-owner-form
   "`:seon.render/html` — the explicit control that creates a namespace's agent.
@@ -3237,31 +3201,28 @@
   (let [database (db/db (:seon.store/connection-object service))]
     (if (:seon.error/at database)
       ;; a refused read answers as that refusal, never as a page's database
-      {:status 503
-       :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (value/bounded-text (:seon.error/message database))}
+      (text-response 503 (value/bounded-text (:seon.error/message database)))
       (let [page (current-page service database agent-id)
             stream-html (get page stream-strip-id)
             unit-html (vals (dissoc page stream-strip-id))]
-        {:status 200
-     :headers {"content-type" "text/html; charset=utf-8"}
-     :body (shell {:seon.agent/id agent-id
-                   :seon.db/db database
-                   ::agent-header? true
-                   :seon.render/page
-                   [(transcript/render-agent-header
-                     (session-controls
-                      (debug-turn-request database
-                                          (:seon.store/connection-object service) agent-id
-                                          (:seon.sci.admit/caps service)
-                                          (assoc service ::transcript/debug? false))))
-                    [:section {:class "seon-namespace-page"}
-                     (into [:section {:class "seon-rank-layout"}]
-                           (map hiccup/raw)
-                           unit-html)
-                     (hiccup/raw stream-html)]]
-                   :seon.render.web/feed-url
-                   (route/path ::route/feed {:id agent-id})})}))))
+        (html-response
+         (shell {:seon.agent/id agent-id
+                 :seon.db/db database
+                 ::agent-header? true
+                 :seon.render/page
+                 [(transcript/render-agent-header
+                   (session-controls
+                    (debug-turn-request database
+                                        (:seon.store/connection-object service) agent-id
+                                        (:seon.sci.admit/caps service)
+                                        (assoc service ::transcript/debug? false))))
+                  [:section {:class "seon-namespace-page"}
+                   (into [:section {:class "seon-rank-layout"}]
+                         (map hiccup/raw)
+                         unit-html)
+                   (hiccup/raw stream-html)]]
+                 :seon.render.web/feed-url
+                 (route/path ::route/feed {:id agent-id})}))))))
 
 (defn- debug-turn-response
   ([service agent-id turn-id] (debug-turn-response service agent-id turn-id false))
@@ -3276,18 +3237,17 @@
                               [?turn :seon.turn/id ?turn-id]] database turn-id)]
     (if (not= agent-id owner)
       (not-found nil)
-      {:status 200
-       :headers {"content-type" "text/html; charset=utf-8"
-                 "datastar-mode" "replace"}
-       :body (hiccup/->string
-              ((case view :card transcript/render-ledger-turn
-                          :context transcript/render-ledger-context
-                          :ledger transcript/render-ledger
-                          transcript/render-session)
-               (session-controls (debug-turn-request database connection agent-id
-                                   (:seon.sci.admit/caps service)
-                                   (assoc service :seon.turn/id turn-id
-                                          ::transcript/raw? raw?)))))}))))
+      (html-response
+       (hiccup/->string
+        ((case view :card transcript/render-ledger-turn
+                    :context transcript/render-ledger-context
+                    :ledger transcript/render-ledger
+                    transcript/render-session)
+         (session-controls (debug-turn-request database connection agent-id
+                                               (:seon.sci.admit/caps service)
+                                               (assoc service :seon.turn/id turn-id
+                                                      ::transcript/raw? raw?)))))
+       {"datastar-mode" "replace"})))))
 
 (defn- debug-outline-response
   "The agent's history OUTLINE, deferred from the session page's first paint.
@@ -3296,15 +3256,14 @@
   no turn id and `render-outline` acquires the whole history once."
   [{connection :seon.store/connection-object :as service} agent-id]
   (let [database (db/db connection)]
-    {:status 200
-     :headers {"content-type" "text/html; charset=utf-8"
-               "datastar-mode" "replace"}
-     :body (hiccup/->string
-            (transcript/render-outline
-             (session-controls
-              (debug-turn-request database connection agent-id
-                                  (:seon.sci.admit/caps service)
-                                  (dissoc service :seon.turn/id)))))}))
+    (html-response
+     (hiccup/->string
+      (transcript/render-outline
+       (session-controls
+        (debug-turn-request database connection agent-id
+                            (:seon.sci.admit/caps service)
+                            (dissoc service :seon.turn/id)))))
+     {"datastar-mode" "replace"})))
 
 (defn- graph-node-name
   "What names a node: its identity value, else the component attribute reaching it."
@@ -3627,129 +3586,128 @@
   [{connection :seon.store/connection-object
     :as service}
    viewer-namespace agent-id request]
-  (cond
-    (and agent-id (= "true" (get (query-params request) "record"))
-         (= "true" (get-in request [:headers "datastar-request"])))
-    (let [page (current-page service (db/db connection) agent-id)]
-      {:status 200
-       :headers {"content-type" "text/html; charset=utf-8" "datastar-mode" "replace"}
-       :body (hiccup/->string
-              (into [:div {:id (block/surface-id (keyword "session-record" agent-id))
-                           :data-signals__ifmissing "{showEverything:true}"}]
-                    (map hiccup/raw)
-                    (vals (dissoc page stream-strip-id))))})
+  (let [query (query-params request)
+        datastar? (= "true" (get-in request [:headers "datastar-request"]))]
+    (cond
+      (and agent-id (= "true" (get query "record"))
+           datastar?)
+      (let [page (current-page service (db/db connection) agent-id)]
+        (html-response
+         (hiccup/->string
+          (into [:div {:id (block/surface-id (keyword "session-record" agent-id))
+                       :data-signals__ifmissing "{showEverything:true}"}]
+                (map hiccup/raw)
+                (vals (dissoc page stream-strip-id))))
+         {"datastar-mode" "replace"}))
 
-    (and agent-id (= "true" (get (query-params request) "outline"))
-         (= "true" (get-in request [:headers "datastar-request"])))
-    (debug-outline-response service agent-id)
+      (and agent-id (= "true" (get query "outline"))
+           datastar?)
+      (debug-outline-response service agent-id)
 
-    (and (get (query-params request) "turn")
-         (= "true" (get-in request [:headers "datastar-request"])))
-    (debug-turn-response service agent-id (get (query-params request) "turn")
-                         (= "true" (get (query-params request) "prompt"))
-                         (cond
-                           (get (query-params request) "card") :card
-                           (get (query-params request) "context") :context
-                           (get (query-params request) "ledger") :ledger
-                           :else :full))
+      (and (get query "turn")
+           datastar?)
+      (debug-turn-response service agent-id (get query "turn")
+                           (= "true" (get query "prompt"))
+                           (cond
+                             (get query "card") :card
+                             (get query "context") :context
+                             (get query "ledger") :ledger
+                             :else :full))
 
-    (and agent-id (= "true" (get (query-params request) "sent")) (= "true" (get-in request [:headers "datastar-request"])))
-    {:status 200 :headers {"content-type" "text/html; charset=utf-8" "datastar-mode" "replace"}
-     :body (hiccup/->string (sent-context-html service agent-id))}
+      (and agent-id (= "true" (get query "sent")) datastar?)
+      (html-response (hiccup/->string (sent-context-html service agent-id))
+                     {"datastar-mode" "replace"})
 
-    (and agent-id (get (query-params request) "n"))
-    {:status 200 :headers {"content-type" "text/html; charset=utf-8"} :body (shell {:seon.agent/id agent-id ::session? true ::graph? true
-     :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
-     :seon.render/page [(graph-debug-html service agent-id (query-params request))]})}
+      (and agent-id (get query "n"))
+      (html-response
+       (shell {:seon.agent/id agent-id ::session? true ::graph? true
+               :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
+               :seon.render/page [(graph-debug-html service agent-id query)]}))
 
-    (and agent-id (not (get (query-params request) "subject")))
-    {:status 200
-     :headers {"content-type" "text/html; charset=utf-8"}
-     :body (shell
-            {:seon.agent/id agent-id
-             ::session? true
-             :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
-             :seon.render.debug/viewer-namespace viewer-namespace
-             :seon.render/page
-             [[:section {:class "seon-session-page"}
-               ((if (= "true" (get (query-params request) "prompt"))
-                  transcript/render-session-loading transcript/render-ledger)
-                (session-controls (debug-turn-request (db/db connection) connection agent-id
-                                    (:seon.sci.admit/caps service)
-                                    (cond-> service
-                                      (get (query-params request) "turn")
-                                      (assoc :seon.turn/id (get (query-params request) "turn"))
-                                      ;; THE SESSION PANEL IS AN OUTLINE, NOT A
-                                      ;; DUMP (owner, 2026-09-16). `?prompt=true`
-                                      ;; defers to the outline, which carries the
-                                      ;; composed prompt behind its own control.
-                                      (= "true" (get (query-params request) "prompt"))
-                                      (assoc ::transcript/raw? true
-                                             ::transcript/outline? true)))))
-               [:details {:class "seon-session-record"
-                          (keyword "data-on:toggle")
-                          (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
-                [:summary "Record"]
-                [:div {:id (block/surface-id (keyword "session-record" agent-id))}
-                 "Loading the agent’s current record…"]]] ]})}
+      (and agent-id (not (get query "subject")))
+      (html-response
+       (shell
+              {:seon.agent/id agent-id
+               ::session? true
+               :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
+               :seon.render.debug/viewer-namespace viewer-namespace
+               :seon.render/page
+               [[:section {:class "seon-session-page"}
+                 ((if (= "true" (get query "prompt"))
+                    transcript/render-session-loading transcript/render-ledger)
+                  (session-controls (debug-turn-request (db/db connection) connection agent-id
+                                      (:seon.sci.admit/caps service)
+                                      (cond-> service
+                                        (get query "turn")
+                                        (assoc :seon.turn/id (get query "turn"))
+                                        ;; THE SESSION PANEL IS AN OUTLINE, NOT A
+                                        ;; DUMP (owner, 2026-09-16). `?prompt=true`
+                                        ;; defers to the outline, which carries the
+                                        ;; composed prompt behind its own control.
+                                        (= "true" (get query "prompt"))
+                                        (assoc ::transcript/raw? true
+                                               ::transcript/outline? true)))))
+                 [:details {:class "seon-session-record"
+                            (keyword "data-on:toggle")
+                            (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
+                  [:summary "Record"]
+                  [:div {:id (block/surface-id (keyword "session-record" agent-id))}
+                   "Loading the agent’s current record…"]]] ]}))
 
-    :else
-  (let [db (db/db connection)
-        query (query-params request)
-        default-subject (if agent-id
-                          [:seon.agent/id agent-id]
-                          [:seon.ns/name viewer-namespace])
-        debug-request (debug-query query default-subject viewer-namespace
-                                   agent-id)
-        projection (sci.kernel/context-projection
-                    (:seon.sci.eval/ctx service))
-        effective (schema/call-with-projection
-                   projection
-                   #(cluster-effective! service db))
-        render-context
-        (assoc service :seon.render/profile
-               (render/agent-render-profile effective))
-        rendered-page (current-page render-context db [::debug-tab debug-request])
-        feed-id (or agent-id (str viewer-namespace))
-        prompt-section
-        (when agent-id
-          (transcript/render-session-loading
-           (session-controls
-            (debug-turn-request db connection agent-id
-                                (:seon.sci.admit/caps service)
-                                (assoc render-context ::transcript/raw?
-                                       (::prompt-preview? debug-request))))))
-        page
-        [[:section {:class "seon-debug"
-                    :data-signals__ifmissing
-                    "{showEverything:true,selectedUnit:''}"}
-          (when-let [unowned (::unowned-namespace service)]
-            (create-owner-form unowned))
-          [:header {:id "debug-inspection-header" :class "seon-debug-header"}
-           [:div [:span "viewer"] [:code (pr-str viewer-namespace)]]
-           [:div [:span "subject"]
-            [:code (pr-str (:seon.render.debug/subject debug-request))]]
-           [:div [:span "snapshot"]
-            [:code (pr-str (db/database-value-identity db))]]
-           [:div [:span "output"]
-            [:code (pr-str (:seon.render/output debug-request))]]]
-          [:div {:class "seon-debug-grid"}
-           prompt-section
-           (debug-experiment-html rendered-page)]]]]
-    {:status 200
-     :headers {"content-type" "text/html; charset=utf-8"}
-     :body
-     (shell
-      (cond->
-       {:seon.render.debug/viewer-namespace viewer-namespace
-         ::agent-header? (boolean agent-id)
-         :seon.render/page page
-         :seon.render.web/feed-url
-         (route/path ::route/feed
-                     {:id feed-id}
-                     (debug-query-strings debug-request))}
-        agent-id
-        (assoc :seon.agent/id agent-id)))})))
+      :else
+    (let [db (db/db connection)
+          default-subject (if agent-id
+                            [:seon.agent/id agent-id]
+                            [:seon.ns/name viewer-namespace])
+          debug-request (debug-query query default-subject viewer-namespace
+                                     agent-id)
+          projection (sci.kernel/context-projection
+                      (:seon.sci.eval/ctx service))
+          effective (schema/call-with-projection
+                     projection
+                     #(cluster-effective! service db))
+          render-context
+          (assoc service :seon.render/profile
+                 (render/agent-render-profile effective))
+          rendered-page (current-page render-context db [::debug-tab debug-request])
+          feed-id (or agent-id (str viewer-namespace))
+          prompt-section
+          (when agent-id
+            (transcript/render-session-loading
+             (session-controls
+              (debug-turn-request db connection agent-id
+                                  (:seon.sci.admit/caps service)
+                                  (assoc render-context ::transcript/raw?
+                                         (::prompt-preview? debug-request))))))
+          page
+          [[:section {:class "seon-debug"
+                      :data-signals__ifmissing
+                      "{showEverything:true,selectedUnit:''}"}
+            (when-let [unowned (::unowned-namespace service)]
+              (create-owner-form unowned))
+            [:header {:id "debug-inspection-header" :class "seon-debug-header"}
+             [:div [:span "viewer"] [:code (pr-str viewer-namespace)]]
+             [:div [:span "subject"]
+              [:code (pr-str (:seon.render.debug/subject debug-request))]]
+             [:div [:span "snapshot"]
+              [:code (pr-str (db/database-value-identity db))]]
+             [:div [:span "output"]
+              [:code (pr-str (:seon.render/output debug-request))]]]
+            [:div {:class "seon-debug-grid"}
+             prompt-section
+             (debug-experiment-html rendered-page)]]]]
+      (html-response
+       (shell
+        (cond->
+         {:seon.render.debug/viewer-namespace viewer-namespace
+           ::agent-header? (boolean agent-id)
+           :seon.render/page page
+           :seon.render.web/feed-url
+           (route/path ::route/feed
+                       {:id feed-id}
+                       (debug-query-strings debug-request))}
+          agent-id
+          (assoc :seon.agent/id agent-id))))))))
 
 (defn- canonical-namespace-response
   [{connection :seon.store/connection-object :as service} debug? request]
@@ -3789,15 +3747,13 @@
   [{connection :seon.store/connection-object root :seon.agent/id :as service} _request]
   (let [database (db/db connection)]
     (if (:seon.error/at database)
-      {:status 503 :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (value/bounded-text (:seon.error/message database))}
+      (text-response 503 (value/bounded-text (:seon.error/message database)))
       (let [page (current-page service database [::health-tab {}])]
-        {:status 200
-         :headers {"content-type" "text/html; charset=utf-8"}
-         :body (shell {:seon.agent/id root
-                       ::agent-header? true
-                       :seon.render/page [(hiccup/raw (get page health-surface))]
-                       :seon.render.web/feed-url (route/path ::route/feed {:id root} {:health "true"})})}))))
+        (html-response
+         (shell {:seon.agent/id root
+                 ::agent-header? true
+                 :seon.render/page [(hiccup/raw (get page health-surface))]
+                 :seon.render.web/feed-url (route/path ::route/feed {:id root} {:health "true"})}))))))
 
 (defn- root-alias-response
   [service request]
@@ -3829,19 +3785,13 @@
           {:status 303
            :headers {"location" (route/path ::route/namespace {:namespace (str namespace-name)})}
            :body nil}
-          {:status 422
-           :headers {"content-type" "text/plain; charset=utf-8"}
-           :body (pr-str owner)})))))
+          (text-response 422 (pr-str owner)))))))
 
 (defn- context-action-response
   "One ordinary turn operation requested from the page's context controls."
   {:malli/schema [:=> [:cat :seon.render.web/service :map [:map-of :string :string]] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
   [service request params]
-  (let [action (case (get params "action")
-                 "system-turn" :system-turn
-                 "virtual-turn" :virtual-turn
-                 "compact" :compact
-                 nil)
+  (let [action (#{:system-turn :virtual-turn :compact} (some-> (get params "action") keyword))
         result (if action
                  (render/acquire-context!
                   (merge service (:seon.turn.loop/cluster service)
@@ -3850,18 +3800,15 @@
                    :seon.agent/id (get-in request [:path-params :id])
                    :seon.sci.eval/time-limit-ms
                    (:seon.config.eval/time-limit-ms service)}))
-                 (let [observation
-                       (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/context-response
-                        {:seon.error/message "Choose Run system turn, Virtual turn, or Compact."
-                        :seon.error/fix "Supply the expected member and repeat the requested operation."
-                        :seon.render.web/refused-member :seon.render/context-action
-                        :seon.error/expected "system-turn, virtual-turn, or compact"
-                        :seon.error/offending params})]
-                   observation))]
+                 (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/context-response
+                                                {:seon.error/message "Choose Run system turn, Virtual turn, or Compact."
+                                                 :seon.error/fix "Supply the expected member and repeat the requested operation."
+                                                 :seon.render.web/refused-member :seon.render/context-action
+                                                 :seon.error/expected "system-turn, virtual-turn, or compact"
+                                                 :seon.error/offending params}))]
     (if (:seon.render.web/refused-member result)
-      {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (value/bounded-text result)}
-      {:status 204 :headers {} :body nil})))
+      (text-response 422 (value/bounded-text result))
+      (no-content))))
 
 (defn- received-response
   "Acknowledge one message for the page's agent: the inbox's offered
@@ -3878,9 +3825,8 @@
                    :seon.error/member :seon.message/id :seon.error/expected :seon.message/id
                    :seon.error/offending params}))]
     (if (:seon.message/id result)
-      {:status 204 :headers {} :body nil}
-      {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
-       :body (value/bounded-text result)})))
+      (no-content)
+      (text-response 422 (value/bounded-text result)))))
 
 (defn- context-response
   "The agent context route: the explicit create-owner action, a message
@@ -3977,19 +3923,18 @@
                (render.walk/continue (assoc unit :seon.render.walk/continuation-node [:seon.blob/digest value-digest]
                                             :seon.db/connection connection))
                (value/prepare (assoc unit :seon.render/value opened-value) :seon.render/html))]
-    {:status 200
-     :headers {"content-type" "text/html; charset=utf-8"}
-     :body (shell {:seon.agent/id id
-                   :seon.db/db db
-                   ;; A refused page (gone, malformed, over budget) is shown
-                   ;; as the refusal value it is, at the root.
-                   :seon.render/page
-                   [(if (:seon.error/at page)
-                      (value/render-html (assoc unit :seon.render/value page
-                                                :seon.render.data/cursor (data/parse-cursor nil nil)))
-                      (value/render-html-data page))]
-                   :seon.render.web/feed-url
-                   (route/path ::route/feed {:id id})})}))
+    (html-response
+     (shell {:seon.agent/id id
+             :seon.db/db db
+             ;; A refused page (gone, malformed, over budget) is shown
+             ;; as the refusal value it is, at the root.
+             :seon.render/page
+             [(if (:seon.error/at page)
+                (value/render-html (assoc unit :seon.render/value page
+                                          :seon.render.data/cursor (data/parse-cursor nil nil)))
+                (value/render-html-data page))]
+             :seon.render.web/feed-url
+             (route/path ::route/feed {:id id})}))))
 
 (defn- static-response
   [directory request]
@@ -4014,9 +3959,7 @@
   (fn [request]
     (if (same-origin? request)
       (next-handler request)
-      {:status 403
-       :headers {"content-type" "text/plain; charset=utf-8"}
-       :body "cross-origin POST refused"})))
+      (text-response 403 "cross-origin POST refused"))))
 
 (defn- failure-response
   "The response to a request whose handling threw: the failure as one error
@@ -4029,13 +3972,13 @@
                {:seon.error/at (java.util.Date.) :seon.error/layer :seon.render.web/request
                 :seon.error/operation 'seon.render.web/handler :seon.error/throwable failure})]
     (try
-      {:status 500 :headers {"content-type" "text/html; charset=utf-8"}
-       :body (hiccup/->string (error/render-html {:seon.render/value value
-                                                  :seon.db/db (db/db (:seon.store/connection-object service))}))}
+      (assoc (html-response
+              (hiccup/->string (error/render-html {:seon.render/value value
+                                                   :seon.db/db (db/db (:seon.store/connection-object service))})))
+             :status 500)
       ;; Declared case: the face itself failed; the value still answers.
       (catch Throwable _
-        {:status 500 :headers {"content-type" "text/plain; charset=utf-8"}
-         :body (value/bounded-text value)}))))
+        (text-response 500 (value/bounded-text value))))))
 
 (defn handler
   "Build the one Reitit Ring handler from the route table and service."

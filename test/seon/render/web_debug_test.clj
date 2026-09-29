@@ -547,7 +547,7 @@
            html (#'web/debug-found-values-html
                  projection {:seon.db/db database} {} {} declared
                  {:seon.render.data/incoming {:seon.render.data/complete? true}}
-                 {} {} nil nil)
+                 {} {})
            nodes (tree-seq coll? seq html)
            units (keep #(when (and (vector? %) (= :article (first %)))
                           (:data-seon-unit (second %))) nodes)
@@ -674,7 +674,7 @@
                  {:seon.render.debug/subject [:seon.agent/id "identity-blocks"]}
                  entity declared
                  {:seon.render.data/incoming {:seon.render.data/complete? true}}
-                 {} {} nil nil)
+                 {} {})
            units (into []
                        (keep #(when (and (vector? %) (= :article (first %)))
                                 (:data-seon-unit (second %))))
