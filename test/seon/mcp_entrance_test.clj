@@ -182,3 +182,30 @@
         "a stopping instance is refused as not ready")
     (is (= "c" (:seon.mcp/cluster (#'mcp/instance {"c" {:seon.boot/ready-ms 10}} "c")))
         "a ready instance is the one named")))
+
+(deftest ^{:seon.test/subject "seon.mcp/sci-run"} a-one-defn-run-settles-in-proportion-to-the-defn
+  ;; One contracted defn settled 3,522 datoms, 94% read evidence: showing
+  ;; the Var read its reaching tests through `seon.fn/declared-callers`,
+  ;; which resolved each of ~510 declaring rows by its own read, and the
+  ;; evaluation stored every read although a form that binds a Var is never
+  ;; refreshed (defn-datoms, 2026-09-28). Measured after the cut: ~220,
+  ;; mostly the executed set and profile measurements riding the settlement.
+  (with-running-agent
+   (fn [running agent-id connection]
+     (let [namespace-name (symbol (str "settle.probe" (id/id)))
+           result (answer "eval_clj" {"code" (str "(ns " namespace-name ")"
+                                                  " (defn one {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+                                      "agent" agent-id "cluster" running})
+           database (db/db connection)
+           run (latest-run-in database agent-id)
+           [evaluation tx] (first (db/q '[:find ?evaluation ?tx :in $ ?run
+                                          :where [?turn :seon.turn/id ?run]
+                                          [?evaluation :seon.cluster.eval/run ?turn]
+                                          [?evaluation :seon.cluster.eval/ordinal 1 ?tx]]
+                                        database run))
+           evidence (count (:seon.cluster.eval/read-evidence
+                            (db/pull database [{:seon.cluster.eval/read-evidence [:db/id]}] evaluation)))
+           settled (count (filter #(= tx (:tx %)) (db/datoms (db/since database (dec tx)) :eavt)))]
+       (is (false? (get result "isError")))
+       (is (= 0 evidence) "a form that binds a Var stores no read evidence")
+       (is (< settled 300) "the settlement is proportional to one defn, not the render/schema population")))))

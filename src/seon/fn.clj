@@ -1863,13 +1863,19 @@
                    (distinct (concat [:seon.effect/capability] referring (map :v invokers))))
         capabilities (held :seon.effect/capability)
         referred (into [] (mapcat held) (distinct referring))
-        ;; Each entity and each named symbol is resolved once.
-        symbol-of (into {} (keep (fn [e] (when-let [s (:v (first (datoms :eavt e :seon.fn/sym)))] [e s])))
-                        (distinct (concat (map :e capabilities) (map :e referred)
-                                          (filter int? (map :v referred))
-                                          (filter int? (mapcat #(map :v %) (vals held))))))
-        named (into #{} (filter #(seq (datoms :avet :seon.fn/sym %)))
-                    (distinct (concat (map :v capabilities) (filter symbol? (mapcat #(map :v %) (vals held))))))
+        ;; Every entity and every named symbol is resolved in ONE bound read
+        ;; each: a read per entity recorded ~510 read-evidence rows (mostly
+        ;; schema rows holding render refs, which have no `:seon.fn/sym`) into
+        ;; every run that rendered a Var (defn-datoms, 2026-09-28).
+        symbol-of (into {} (read! (db/q '[:find ?e ?s :in $ [?e ...] :where [?e :seon.fn/sym ?s]]
+                                        database
+                                        (vec (distinct (concat (map :e capabilities) (map :e referred)
+                                                               (filter int? (map :v referred))
+                                                               (filter int? (mapcat #(map :v %) (vals held)))))))))
+        named (set (read! (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]]
+                                database
+                                (vec (distinct (concat (map :v capabilities)
+                                                       (filter symbol? (mapcat #(map :v %) (vals held)))))))))
         target (fn [v] (if (int? v) (symbol-of v) (when (named v) v)))
         edges (concat
                (for [{caller :e v :v} capabilities

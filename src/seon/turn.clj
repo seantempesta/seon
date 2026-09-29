@@ -4960,8 +4960,13 @@
                                              (code-evidence entry)
                                              (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)
-                                              :seon.cluster.eval/read-evidence (db/read-evidence reads)
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})
+                                ;; Read evidence has one consumer, the pre-turn refresh
+                                ;; (`system-plan`), which re-runs only read-only evaluations
+                                ;; (`read-only-evaluation?`): a form that bound a Var declared,
+                                ;; so its reads are never consumed and are not stored.
+                                (empty? (entry-bindings batch ordinal))
+                                (assoc :seon.cluster.eval/read-evidence (db/read-evidence reads))
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (entry-bindings batch ordinal)) (assoc :seon.sci.eval/bindings (entry-bindings batch ordinal))
                                 ;; only a form that declares has something to admit: a Var bound,
