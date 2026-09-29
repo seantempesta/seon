@@ -11,7 +11,7 @@
             [seon.db :as db]
             [seon.fn :as fn]
             [seon.id :as id]
-            [seon.issue :as issue]
+            [seon.task :as task]
             [seon.schema.datahike]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
@@ -374,7 +374,7 @@
         sym #(symbol "scratch.merge-tasks" %)
         entity #(test-support/program-entity (db/db %1) [%2 (sym %3)] %4)
         write! #(test-support/transacted! %1 (vec %2))
-        handle (issue/task-handle 'scratch.merge-tasks "merge-task" :function)
+        handle (task/task-handle 'scratch.merge-tasks "merge-task" :function)
         proofs #{(sym "merge-tasked-check")}
         c (keyword (str "merge-task-test-c-" (id/id)))
         _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
@@ -400,12 +400,12 @@
         (is (= {handle #{(sym "merge-tasked")}} (:seon.error/offending refused)))
         (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
-          (is (:seon.task/changed? (issue/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
+          (is (:seon.task/changed? (task/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
                                                          :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
                                                                            "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
           ;; The task write touches no merged entity, so the same proposal now merges.
           (is (:seon.source/commit-id (source/accept-merge! target held-store proposal)))
-          (is (= #{handle} (issue/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
+          (is (= #{handle} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
           (is (= "Merge." (intent)))))
       (finally
         (cluster.agent/release-context! candidate)

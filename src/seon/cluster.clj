@@ -2432,7 +2432,7 @@
                                              {:seon.boot/population :seon.issue/rows})))
                  ;; Tasks are data the publication admitted, never program entities;
                  ;; the whole set reconciles, empty when the cluster agrees.
-                 (require-committed! ((requiring-resolve 'seon.issue/adopt-tasks-call)
+                 (require-committed! ((requiring-resolve 'seon.task/adopt-tasks-call)
                                       published-database (db/db connection))
                                      {:seon.boot/population :seon.task/rows}))]
     (when (next tx-data)

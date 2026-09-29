@@ -7,7 +7,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn]
-            [seon.issue :as issue]
+            [seon.task :as task]
             [seon.render :as render]
             [seon.render.test :as render.test]
             [seon.render.walk :as walk]
@@ -35,7 +35,7 @@
     (try (io/make-parents (io/file root "rd/a.clj"))
          (spit (io/file root "rd/a.clj") source)
          (support/transacted! connection (seon.fn/reconcile-tx @connection (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
-         (let [indexed (issue/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/rd.a.edn" task}})]
+         (let [indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/rd.a.edn" task}})]
            (when-not (:seon.task/changed? indexed) (throw (ex-info "The fixture task did not index." {:seon.task/report indexed}))))
          (finally (support/delete-recursively! root)))))
 
@@ -56,7 +56,7 @@
   (into #{} (map #(or (:seon.fn/sym %) (:seon.test/sym %) (:seon.ns/name %) (:seon.task/id %))) (:seon.related/items group)))
 
 (deftest the-fixture-handle-is-the-derived-task-handle
-  (is (= (issue/task-handle 'rd.a "related" :function) handle)))
+  (is (= (task/task-handle 'rd.a "related" :function) handle)))
 
 (deftest value-references-derive-from-the-schemas
   (support/with-database

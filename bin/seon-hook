@@ -981,7 +981,7 @@
                 :else nil))))))))
 
 (defn- task-file-path?
-  "True for one task file, `resources/seon/tasks/<ns>.edn` (`seon.issue/task-path?`)."
+  "True for one task file, `resources/seon/tasks/<ns>.edn` (`seon.task/task-path?`)."
   [file-path]
   (when-let [absolute (absolute-file-path file-path)]
     (let [file (io/file absolute)]
@@ -991,7 +991,7 @@
 
 (defn- validate-task-edit
   "Block a task-file edit whose prospective text is not exactly one vector:
-  publication's task indexing refuses it (`seon.issue/file-declarations`
+  publication's task indexing refuses it (`seon.task/file-declarations`
   :not-one-vector / :unreadable-file) and with it the next boot (91f8cbe40
   appended entries after the vector). Parsed with the owner's reader,
   edamame's all-forms parse; nothing is evaluated."

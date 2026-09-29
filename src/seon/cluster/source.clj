@@ -538,17 +538,17 @@
                   [:maybe :seon.task/report]]}
   [connection source-digest directory previous]
   (when (get (:schema (db/db connection)) :seon.task/id)
-    (let [task-files (requiring-resolve 'seon.issue/task-files)
+    (let [task-files (requiring-resolve 'seon.task/task-files)
           stored (require-committed! (db/q '[:find [?ns ...] :where [_ :seon.task/ns ?ns]] (db/db connection))
                                      :seon.task/findings-refused "Stored task namespaces could not be read." {})
           files (merge (task-files directory (mapv #(str "resources/seon/tasks/" % ".edn") stored)) (task-files directory nil))
-          basis (require-committed! ((requiring-resolve 'seon.issue/task-basis) (or previous (db/db connection)) files)
+          basis (require-committed! ((requiring-resolve 'seon.task/task-basis) (or previous (db/db connection)) files)
                                     :seon.task/findings-refused "The task basis could not be read." {})
           report (require-committed!
-                  ((requiring-resolve 'seon.issue/index-tasks!)
+                  ((requiring-resolve 'seon.task/index-tasks!)
                    {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
                   :seon.task/index-refused "Task indexing was refused." {:seon.source/digest source-digest})
-          findings (require-committed! ((requiring-resolve 'seon.issue/task-findings) (db/db connection))
+          findings (require-committed! ((requiring-resolve 'seon.task/task-findings) (db/db connection))
                                        :seon.task/findings-refused "Task findings could not be read." {})]
       (when-let [[handle holders] (first (:seon.task/dangling findings))]
         (fn/task-refused! 'seon.cluster.source/publish! :dangling-id (first (sort holders)) handle
@@ -1023,7 +1023,7 @@
                                 :when (:db/id (db/pull tested [:db/id] [a f]))
                                 :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
                 tx (when (seq delta) (replacement tested head delta))
-                dangling ((requiring-resolve 'seon.issue/candidate-dangling) tested head delta)]
+                dangling ((requiring-resolve 'seon.task/candidate-dangling) tested head delta)]
             (cond
               (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
               (refuse "The named run was not recorded on the tested branch." run)

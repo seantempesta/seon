@@ -1,4 +1,4 @@
-(ns seon.issue.task-ingestion-test
+(ns seon.task-ingestion-test
   "Task ingestion (spec 7.9-7.16): handle-valued edges, task EDN by handle with a
   revision basis, lookups both ways, and the publication seam's dangling refusal."
   (:require [clojure.edn :as edn]
@@ -8,7 +8,7 @@
             [seon.cluster.source]
             [seon.db :as db]
             [seon.fn]
-            [seon.issue :as issue]
+            [seon.task :as task]
             [seon.program :as program]
             [seon.test-support :as test-support]))
 
@@ -61,7 +61,7 @@
 (defn- ingest!
   {:malli/schema [:=> [:cat :seon.db/connection :string [:* :seon.task/basis]] :seon.schema/value]}
   [connection text & [basis]]
-  (issue/index-tasks! (cond-> {:seon.db/connection connection :seon.task/files {task-path text}}
+  (task/index-tasks! (cond-> {:seon.db/connection connection :seon.task/files {task-path text}}
                         basis (assoc :seon.task/basis basis))))
 
 (deftest ingested-tasks-answer-both-ways-and-unchanged-input-writes-nothing
@@ -71,10 +71,10 @@
        (admit! connection entities)
        (is (:seon.task/changed? (ingest! connection text)))
        (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f handle}}
-              (issue/task-edges @connection handle)))
+              (task/task-edges @connection handle)))
        (is (= '#{clojure.string/join} (set (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f])))))
-       (is (= #{handle} (issue/open-tasks @connection '[:seon.fn/sym tq.a/g])))
-       (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection))))
+       (is (= #{handle} (task/open-tasks @connection '[:seon.fn/sym tq.a/g])))
+       (is (not-any? #(contains? % handle) (vals (task/task-findings @connection))))
        (testing "unchanged input, with an empty optional set, writes nothing"
          (is (= {:seon.task/changed? false} (ingest! connection text)))
          (is (empty? (seon.fn/reconcile-tx @connection entities []))))
@@ -84,17 +84,17 @@
                 (db/pull @connection [:seon.task/intent :seon.task/must-read] [:seon.task/id handle]))))
        (testing "removing one annotation drops only that edge"
          (admit! connection (entities-of (str/replace subject-source "(defn g {:seon/tasks #{\"043df611d179\"}}" "(defn g")))
-         (is (= '#{tq.a tq.a/f} (:seon.task/subjects (issue/task-edges @connection handle)))))
+         (is (= '#{tq.a tq.a/f} (:seon.task/subjects (task/task-edges @connection handle)))))
        (testing "program attributes carry the handle edges, never task entities"
          (let [attributes (program/program-attributes (db/carried-projection @connection))]
            (is (contains? attributes :seon.task/tasks))
            (is (not-any? attributes [:seon.task/id :seon.task/intent]))))
-       (is (:seon.error/at (issue/open-tasks @connection '[:seon.no-such/attribute x])) "a refused read returns whole")))))
+       (is (:seon.error/at (task/open-tasks @connection '[:seon.no-such/attribute x])) "a refused read returns whole")))))
 
 (deftest two-edits-from-one-basis-the-second-refuses-and-the-winner-stays
   (test-support/with-database
    (fn [connection]
-     (let [basis (issue/task-basis @connection {task-path "[]"})]
+     (let [basis (task/task-basis @connection {task-path "[]"})]
        (is (:seon.task/changed? (ingest! connection (task-text "First." "") basis)))
        (is (= :revision-conflict (refusal #(ingest! connection (task-text "Second." "") basis))))
        (is (= "First." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))))))
@@ -117,7 +117,7 @@
              (is (= (edn/read-string text) (:seon.error/offending refused)) "the diagnostic keeps the authored entry"))))
        (is (= :unreadable-file (refusal #(ingest! connection "#=(+ 1 2)"))))
        (is (= :not-one-vector (refusal #(ingest! connection "{}"))))
-       (is (= :misplaced-file (refusal #(issue/index-tasks! {:seon.db/connection connection :seon.task/files {"tmp/tq.a.edn" "[]"}}))))
+       (is (= :misplaced-file (refusal #(task/index-tasks! {:seon.db/connection connection :seon.task/files {"tmp/tq.a.edn" "[]"}}))))
        (is (= before (db/basis-t @connection)) "no refusal writes")))))
 
 (deftest annotation-placement-is-positional-and-body-usage-stays-legal
@@ -132,7 +132,7 @@
   ;; The destination is a branch of the live program, so the checkout's own task
   ;; files ride along: only this fixture's handle may dangle.
   (let [publish-tasks! #'seon.cluster.source/index-tasks!
-        checkout (issue/task-files "." nil)
+        checkout (task/task-files "." nil)
         dangling #(try (% ) nil (catch clojure.lang.ExceptionInfo e (keys (:seon.task/dangling (ex-data e)))))]
     (test-support/with-database
      (fn [connection]
@@ -155,10 +155,10 @@
   (test-support/with-database
    (fn [connection]
      (admit! connection (entities-of subject-source))
-     (with-root (assoc (issue/task-files "." nil) task-path (task-text "Prove ingestion." ""))
+     (with-root (assoc (task/task-files "." nil) task-path (task-text "Prove ingestion." ""))
        (fn [root]
          (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection digest (.getPath root) nil)))
-         (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection)))))))))
+         (is (not-any? #(contains? % handle) (vals (task/task-findings @connection)))))))))
 
 (deftest adoption-carries-published-tasks-keeps-the-destinations-own-and-refuses-a-competing-edit
   ;; P1-2 (review 5fb38b91f): the adoption compares against the destination value
@@ -170,19 +170,19 @@
         ;; The inner fixture holds destination's custody; the source's writes run under its own.
         (let [publish! #(is (:seon.task/changed? (db/call-with-custody {:seon.db/connection source} (fn [] (ingest! source %))))
                             "the source admits the edit")
-              adopt! #(test-support/transacted! destination (issue/adopt-tasks-call @source @destination))
+              adopt! #(test-support/transacted! destination (task/adopt-tasks-call @source @destination))
               intent #(:seon.task/intent (db/pull @destination [:seon.task/intent] [:seon.task/id %]))
-              own (issue/task-handle 'tq.b "own" :function)]
-          (is (= [] (issue/adopt-tasks-call @source @source)) "an agreeing cluster adopts nothing")
-          (issue/index-tasks! {:seon.db/connection destination :seon.task/basis {}
+              own (task/task-handle 'tq.b "own" :function)]
+          (is (= [] (task/adopt-tasks-call @source @source)) "an agreeing cluster adopts nothing")
+          (task/index-tasks! {:seon.db/connection destination :seon.task/basis {}
                                :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :kind :function :intent \"Mine.\"}]"}})
           (publish! (task-text "Prove ingestion." ""))
           (adopt!)
           (is (= ["Prove ingestion." "Mine."] (map intent [handle own])) "published arrives; a task the source never held stays")
-          (is (= [] (issue/adopt-tasks-call @source @destination)) "repeat adopts nothing")
+          (is (= [] (task/adopt-tasks-call @source @destination)) "repeat adopts nothing")
           (testing "a competing edit between the adoption's read and its transaction refuses; the competitor stays"
             (publish! (task-text "Revised." ""))
-            (let [call (issue/adopt-tasks-call @source @destination)]
+            (let [call (task/adopt-tasks-call @source @destination)]
               (is (seq call) "the proposal carries the source's revision")
               (is (:seon.task/changed? (ingest! destination (task-text "Competing." ""))))
               (is (= :revision-conflict (refusal #(test-support/transacted! destination call))))
@@ -200,12 +200,12 @@
      (let [head @connection
            merged #{[:seon.fn/sym 'tq.a/f] [:seon.test/sym 'tq.a/proves]}]
        (admit! connection (entities-of subject-source))
-       (is (= {handle '#{tq.a/f tq.a/proves}} (issue/candidate-dangling @connection head merged)))
-       (is (not (contains? (issue/candidate-dangling @connection head #{}) handle)) "unmerged holders are the destination's")
-       (is (= {handle '#{tq.a tq.a/g}} (select-keys (issue/candidate-dangling head @connection merged) [handle]))
+       (is (= {handle '#{tq.a/f tq.a/proves}} (task/candidate-dangling @connection head merged)))
+       (is (not (contains? (task/candidate-dangling @connection head #{}) handle)) "unmerged holders are the destination's")
+       (is (= {handle '#{tq.a tq.a/g}} (select-keys (task/candidate-dangling head @connection merged) [handle]))
            "a merged entity without the annotation drops its edge; the unmerged holders keep theirs")
        (ingest! connection (task-text "Prove ingestion." ""))
-       (is (= {} (select-keys (issue/candidate-dangling @connection @connection merged) [handle])))))))
+       (is (= {} (select-keys (task/candidate-dangling @connection @connection merged) [handle])))))))
 
 (deftest the-checkouts-migrated-records-ingest-by-aspect-and-repeat-as-a-no-op
   ;; Slice 2 (spec 7.12, 7.15): the checkout's own task files are the migrated
@@ -213,16 +213,16 @@
   ;; file names a different aspect, so its written handle refuses there.
   (test-support/with-database
    (fn [connection]
-     (let [files (issue/task-files "." nil)
-           basis (issue/task-basis @connection files)]
-       (issue/index-tasks! {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
+     (let [files (task/task-files "." nil)
+           basis (task/task-basis @connection files)]
+       (task/index-tasks! {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
        (doseq [[id aspect] {"d215b1ebde7c" '[seon.sci.eval "acquisition-rebuilds-the-whole-program" :function]
                                 "cea47b015b23" '[seon.schema "agents-can-validate" :namespace]}]
          (is (= aspect ((juxt :seon.task/ns :seon.task/name :seon.task/kind)
                         (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind] [:seon.task/id id]))))
-         (is (= id (apply issue/task-handle aspect))))
-       (is (= {:seon.task/changed? false} (issue/index-tasks! {:seon.db/connection connection :seon.task/files files})))
+         (is (= id (apply task/task-handle aspect))))
+       (is (= {:seon.task/changed? false} (task/index-tasks! {:seon.db/connection connection :seon.task/files files})))
        (is (= :handle-mismatch
-              (refusal #(issue/index-tasks! {:seon.db/connection connection
+              (refusal #(task/index-tasks! {:seon.db/connection connection
                                              :seon.task/files {"resources/seon/tasks/seon.sci.eval.edn"
                                                                (get files "resources/seon/tasks/seon.schema.edn")}}))))))))

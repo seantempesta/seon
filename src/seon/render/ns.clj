@@ -107,7 +107,7 @@
   "The read of a task's edges. Shown, never executed."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
-  (list 'seon.issue/task-edges '(seon.db/db) (:seon.task/id (or (:seon.render/value unit) unit))))
+  (list 'seon.task/task-edges '(seon.db/db) (:seon.task/id (or (:seon.render/value unit) unit))))
 
 (defn task-html
   "Render one task as a card: intent, must-reads, evidence. Its subjects and

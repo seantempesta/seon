@@ -2,7 +2,7 @@
              :name "no-repl-entrance-creates-a-task"
              :kind :namespace
              :intent "No REPL entrance creates a task. Detectors, errors, users and agents can add a task only by hand-editing resources/seon/tasks EDN, the bootstrap exception of spec 7.14. seon.task/create! (spec 7.8) must submit a declaration, with the basis it read, to the one task writer: the handle is seon.id over [ns name kind], a duplicate or a supplied handle that differs from its aspect refuses, and a competing revision returns base, current and proposed (7.16). Today every task in this directory was written by hand."
-             :must-read #{seon.issue/index-tasks! seon.issue/task-basis seon.issue/task-handle seon.issue/tasks-tx}
+             :must-read #{seon.task/index-tasks! seon.task/task-basis seon.task/task-handle seon.task/tasks-tx}
              :evidence #{"docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"
                          "docs/research/agent-platform/landing/task-log-2026-09-26.md"
                          "docs/research/agent-platform/language-requirements-2026-09-24.md"}}]

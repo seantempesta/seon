@@ -379,7 +379,7 @@
       (let [hosted (host-on! handle (branch!) "mcp/creator")
             create #(str "(seon.task/create! {:seon.task/ns '" host-ns " :seon.task/name \"trim titles\""
                          " :seon.task/kind :function :seon.task/intent " (pr-str %) "})")
-            task-id (seon.issue/task-handle host-ns "trim titles" :function)]
+            task-id (task/task-handle host-ns "trim titles" :function)]
         (is (= ["true"] (hosted-run! hosted (str "(:seon.task/changed? " (create "Trim titles.") ")"))))
         (is (= ["false"] (hosted-run! hosted (str "(:seon.task/changed? " (create "Trim titles.") ")")))
             "the same declaration again finds the task and changes nothing")

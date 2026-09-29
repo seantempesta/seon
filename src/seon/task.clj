@@ -1,14 +1,297 @@
 (ns seon.task
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
   record a merge proposal. Tasks live on the cluster, so every write goes to
-  the task home through the one task writer (`seon.issue/adopt-tasks-tx`)."
+  the task home through the one task writer (`seon.task/adopt-tasks-tx`)."
   {:seon/tasks #{"2fe9c6b7fe31"}}
-  (:require [seon.db :as db]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [edamame.core :as edamame]
+            [malli.core :as m]
+            [malli.error :as me]
+            [malli.registry :as mr]
+            [seon.db :as db]
             [seon.error :as error]
             [seon.error.refusal :as refusal]
+            [seon.fn :as functions]
             [seon.id :as id]
-            [seon.issue :as issue]
             [seon.schema :as schema]))
+
+;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
+;;; and proofs are the `:seon.task/tasks` handles program entities carry.
+
+(defn- replacement-tx
+  "The delta from one stored task to its desired facts, over the `owned` attributes
+  only: a declared attribute whose value already holds contributes nothing, a changed
+  one is retracted and asserted, an absent desired one is retracted."
+  {:malli/schema [:=> [:cat :map :map [:set :qualified-keyword]] [:vector :seon.schema/value]]}
+  [current desired owned]
+  (let [eid (:db/id current)
+        normalized (fn [value]
+                     (cond
+                       (and (map? value) (= #{:db/id} (set (keys value)))) (:db/id value)
+                       (coll? value) (set (map #(if (map? %) (get % :db/id %) %) value))
+                       :else value))
+        changed (into (sorted-set)
+                      (for [attribute (into (set (keys current)) (keys desired))
+                            :when (and (not (contains? #{:db/id :seon.task/id} attribute))
+                                       (contains? owned attribute)
+                                       (not= (normalized (get current attribute))
+                                             (normalized (get desired attribute))))]
+                        attribute))
+        asserted (select-keys desired changed)]
+    (cond-> (mapv (fn [attribute] [:db/retract eid attribute])
+                  (filter #(contains? current %) changed))
+      (seq asserted) (conj (assoc asserted :db/id eid)))))
+
+(defn task-handle
+  "The task handle of an identifying aspect: seon.id/id over [ns name kind] (3b.6)."
+  {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name :seon.task/kind] :seon.task/handle]}
+  [ns name kind]
+  (id/id [ns name kind]))
+
+(defn task-path?
+  "Whether a repository-relative path names a task file."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [path]
+  (let [file (io/file path)]
+    (and (= "resources/seon/tasks" (.getParent file)) (str/ends-with? (.getName file) ".edn"))))
+
+(defn- file-namespace
+  "The owning namespace a task file's name states."
+  {:malli/schema [:=> [:cat :string] :seon.task/ns]}
+  [path]
+  (symbol (str/replace-first (.getName (io/file path)) ".edn" "")))
+
+(defn task-files
+  "Task file texts under `directory`: every file, or the changed `paths`; a deleted file is \"[]\"."
+  {:malli/schema [:=> [:cat :string [:maybe [:sequential :string]]] :seon.task/files]}
+  [directory paths]
+  (into (sorted-map)
+        (map (fn [path] (let [file (io/file directory path)] [path (if (.isFile file) (slurp file) "[]")])))
+        (filter task-path? (or paths (map #(str "resources/seon/tasks/" (.getName %))
+                                          (.listFiles (io/file directory "resources/seon/tasks")))))))
+
+(defn- read-error
+  "The owner's declared read or write refusal, when `result` is one."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :seon.error/base]]}
+  [result]
+  (when (refusal/error? result) result))
+
+(defn- declared
+  "A stored or proposed task's `:seon.task/declaration`: its declared members, sets as sets."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :map]] [:maybe :seon.task/declaration]]}
+  [projection task]
+  (when task
+    (update-vals (select-keys task (map first (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection)
+                                                                              :seon.task/declaration)))))
+                 #(if (sequential? %) (set %) %))))
+
+(defn- file-declarations
+  "Read one task file with edamame's all-forms reader (nothing evaluated), require one
+  vector of valid entries with empty sets absent, and verify each supplied handle."
+  {:malli/schema [:=> [:cat :seon.schema/projection :string :string] [:vector :seon.task/task]]}
+  [projection path text]
+  (let [ns (file-namespace path)
+        refuse-task! #(functions/task-refused! 'seon.task/file-declarations %1 ns %2 %3)
+        forms (try (edamame/parse-string-all text)
+                   (catch clojure.lang.ExceptionInfo failure (refuse-task! :unreadable-file text {:seon.error/throwable failure})))
+        _ (when-not (task-path? path) (refuse-task! :misplaced-file path {}))
+        _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse-task! :not-one-vector forms {}))
+        ;; Only an empty set at an optional set member is absence (#{} clears);
+        ;; every other member, empty or not, meets the closed entry schema.
+        registry (:seon.schema.projection/registry projection)
+        absent-when-empty (into #{} (keep (fn [[k props s]] (when (and (:optional props) (= :set (m/type (m/deref-all s)))) k)))
+                                (m/children (m/deref (mr/schema registry :seon.task/entry))))
+        entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
+    (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
+      (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
+    (mapv (fn [{:seon.task/keys [id name kind] :as entry}]
+            (let [handle (task-handle ns name kind)]
+              (when (and id (not= id handle)) (refuse-task! :handle-mismatch entry {:seon.error/expected handle}))
+              (assoc entry :seon.task/id handle :seon.task/ns ns)))
+          entries)))
+
+(defn- stored-tasks
+  "The stored tasks whose `attribute` (`:seon.task/ns` or `:seon.task/id`) is one of `values`, indexed once by handle."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :seon.task/ns :seon.task/id] [:set [:or :seon.task/ns :seon.task/handle]]]
+                  [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
+  [database attribute values]
+  (let [entities (if (contains? (:schema database) attribute)
+               (db/q database '[:find [(pull ?e [*]) ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
+               [])]
+    (or (read-error entities) (into {} (map (juxt :seon.task/id identity)) entities))))
+
+(defn task-basis
+  "The declarations stored now for the files' namespaces: the basis a caller reads with its proposal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files] [:or :seon.task/basis :seon.db/invalid-read-error]]}
+  [database files]
+  (let [stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
+    (or (read-error stored) (update-vals stored #(declared (db/carried-projection database) %)))))
+
+(defn- task-delta
+  "The writer's delta from `stored` to `by-id` tasks, by handle; a handle whose stored
+  declaration differs from the caller's `basis` refuses with base, current and proposed."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :seon.task/handle :map] [:map-of :seon.task/handle :map]
+                       :seon.task/basis] [:vector :seon.schema/value]]}
+  [projection stored by-id basis]
+  (let [owned (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))]
+    (into []
+          (mapcat (fn [id]
+                    (let [current (declared projection (stored id)) wanted (declared projection (by-id id))]
+                      (cond
+                        (= current wanted) []
+                        (not= (get basis id) current)
+                        (functions/task-refused! 'seon.task/tasks-tx :revision-conflict (:seon.task/ns (or (by-id id) (stored id))) id
+                                                 (cond-> {} (get basis id) (assoc :seon.task/base (get basis id))
+                                                   current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
+                        (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
+                        current (replacement-tx (stored id) (by-id id) owned)
+                        :else [(by-id id)]))))
+          (sort (into (set (keys stored)) (keys by-id))))))
+
+(defn tasks-tx
+  "The writer's delta from stored tasks to the declared `files`, by handle. A touched
+  task whose current declaration differs from the caller's `basis` refuses with base,
+  current and proposed (7.16); unchanged input is empty; a removed entry retracts.
+  A runtime task (`:seon.task/created-by`) is outside every file's declaration."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
+  [database files basis]
+  (let [projection (db/carried-projection database)
+        proposed (into [] (mapcat (fn [[path text]] (file-declarations projection path text))) files)
+        by-id (into {} (map (juxt :seon.task/id identity)) proposed)
+        stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
+    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (when-let [id (some (fn [[id n]] (when (< 1 n) id)) (frequencies (map :seon.task/id proposed)))]
+      (functions/task-refused! 'seon.task/tasks-tx :duplicate-id (:seon.task/ns (by-id id)) id {}))
+    ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
+    (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))
+
+(defn task-revision
+  "The reviewed revision of the task `handle` in `database`: seon.id/digest over its declaration; nil when absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/revision :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [stored (stored-tasks database :seon.task/id #{handle})]
+    (or (read-error stored)
+        (some->> (stored handle) (declared (db/carried-projection database)) vector (id/digest 64)))))
+
+(defn adopt-tasks-tx
+  "Reconcile the selected `handles` into a development database from the `rows` the
+  exact published source holds for them, against the `basis` the adoption read at
+  the destination: a competing edit since refuses (7.16); a handle absent from
+  `rows` retracts."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle] :seon.task/basis]
+                  [:vector :seon.schema/value]]}
+  [database entities handles basis]
+  (let [stored (stored-tasks database :seon.task/id handles)]
+    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis)))
+
+(defn- task-handles
+  "Every stored task handle, or with `retracted?` every handle `database`'s history
+  retracted; none when the database declares no tasks."
+  {:malli/schema [:=> [:cat :seon.db/database-value :boolean] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
+  [database retracted?]
+  (if (contains? (:schema database) :seon.task/id)
+    (let [handles (if retracted?
+                    (let [history (db/history database)]
+                      (or (read-error history) (db/q '[:find [?h ...] :where [_ :seon.task/id ?h _ false]] history)))
+                    (db/q database '[:find [?h ...] :where [_ :seon.task/id ?h]]))]
+      (or (read-error handles) (set handles)))
+    #{}))
+
+(defn adopt-tasks-call
+  "Transaction data reconciling `destination`'s tasks to every task `source`, the
+  published database, holds: the whole set, since an adopted commit never proved its
+  tasks admitted. A held task the source's history retracted was published and is
+  deleted; one the source never held is the destination's own and stays. The basis
+  is `destination`, the value this call read. Empty when they agree."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                  [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
+  [source destination]
+  (let [published (task-handles source false) retracted (task-handles source true) held (task-handles destination false)
+        failure (some read-error [published retracted held])
+        handles (when-not failure (into published (filter retracted) held))
+        entities (when handles (stored-tasks source :seon.task/id handles))
+        basis (when handles (stored-tasks destination :seon.task/id handles))]
+    (or failure (read-error entities) (read-error basis)
+        (let [entities (vec (vals entities))
+              basis (update-vals basis #(declared (db/carried-projection destination) %))]
+          (if (empty? (adopt-tasks-tx destination entities handles basis)) [] [[:db.fn/call #'adopt-tasks-tx entities handles basis]])))))
+
+(defn index-tasks!
+  "Reconcile task files through the writer against the declarations the caller read
+  (`:seon.task/basis`); an unchanged set writes nothing. Refusals return. Without a
+  basis it reads one now, which guards only writes after this call, not a stale file."
+  {:malli/schema [:=> [:cat :seon.task/request]
+                  [:or :seon.task/report :seon.task/refused-error :seon.task/conflict-error
+                   :seon.db/invalid-read-error :seon.db/transaction-refused-error]]}
+  [{connection :seon.db/connection files :seon.task/files basis :seon.task/basis}]
+  (let [database (db/db connection)
+        basis (or basis (task-basis database files))]
+    (or (read-error basis)
+        (try (if (empty? (tasks-tx database files basis))
+               {:seon.task/changed? false}
+               (let [report (db/transact! connection [[:db.fn/call #'tasks-tx files basis]])]
+                 (or (read-error report) {:seon.task/changed? true :seon.db/transaction-report report})))
+             (catch clojure.lang.ExceptionInfo failure
+               (if (:seon.task/refused (ex-data failure)) (ex-data failure) (throw failure)))))))
+
+(defn task-edges
+  "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
+  namespaces and tasks whose must-read names one of its subjects, over one held value."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :seon.task/edges :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [holders (db/q database '[:find ?s ?proof :in $ ?t :where [?e :seon.task/tasks ?t]
+                                 (or (and [?e :seon.test/sym ?s] [(ground true) ?proof])
+                                     (and (or [?e :seon.fn/sym ?s] [?e :seon.ns/name ?s]) [(ground false) ?proof]))] handle)
+        subjects (when-not (read-error holders) (set (keep (fn [[s proof]] (when-not proof s)) holders)))
+        referrers (when subjects
+                    (db/q database '[:find [?h ...] :in $ [?target ...]
+                                     :where (or (and [?e :seon.fn/must-read ?target]
+                                                     (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h]))
+                                                (and [?e :seon.task/must-read ?target] [?e :seon.task/id ?h]))] (vec subjects)))]
+    (or (read-error holders) (read-error referrers)
+        {:seon.task/subjects subjects :seon.task/proofs (set (keep (fn [[s proof]] (when proof s)) holders))
+         :seon.task/referrers (set referrers)})))
+
+(defn open-tasks
+  "The task handles a definition still lists; listing is openness (spec 7.2, 7.6)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:tuple :qualified-keyword :symbol]]
+                  [:or [:set :seon.task/handle] :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database program-identity]
+  (let [pulled (db/pull database [:seon.task/tasks] program-identity)]
+    (or (read-error pulled) (set (:seon.task/tasks pulled)))))
+
+(defn task-findings
+  "`:seon.task/dangling` handles listed in code with no task entity, by holder (the
+  program gate refuses them), and `:seon.task/triage` tasks with no subject or proof."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.task/findings :seon.db/invalid-read-error]]}
+  [database]
+  (let [dangling (db/q database '[:find ?t ?h :where [?e :seon.task/tasks ?t] (not [_ :seon.task/id ?t])
+                                  (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h])])
+        triage (db/q database '[:find [?t ...] :where [_ :seon.task/id ?t] (not [_ :seon.task/tasks ?t])])]
+    (or (read-error dangling) (read-error triage)
+        {:seon.task/dangling (update-vals (group-by first dangling) #(set (map second %)))
+         :seon.task/triage (set triage)})))
+
+(defn candidate-dangling
+  "The `:seon.task/dangling` handles, by holder, of the program `destination` would
+  hold after taking `candidate`'s rows for `identities`: those holders' task edges
+  from `candidate`, every other holder's from `destination`, against the tasks
+  admitted on `destination`. Task rows never ride the merge (7.13)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
+                  [:or :seon.task/dangling :seon.db/invalid-read-error]]}
+  [candidate destination identities]
+  (let [edges #(if (contains? (:schema %) :seon.task/tasks)
+                 (db/q '[:find ?t ?a ?h :in $ [?a ...] :where [?e :seon.task/tasks ?t] [?e ?a ?h]]
+                       % [:seon.fn/sym :seon.test/sym :seon.ns/name])
+                 #{})
+        mine (edges candidate) theirs (edges destination) admitted (task-handles destination false)
+        touched? (fn [[_ attribute holder]] (contains? identities [attribute holder]))]
+    (or (some read-error [mine theirs admitted])
+        (update-vals (group-by first (remove (comp admitted first) (concat (filter touched? mine) (remove touched? theirs))))
+                     #(set (map (fn [[_ _ holder]] holder) %))))))
 
 (defn home
   "The connection tasks live on, seen from `database`: root's home branch (root's
@@ -47,7 +330,7 @@
   "`declaration` as the runtime task entity `agent-id` writes, under its handle."
   {:malli/schema [:=> [:cat :seon.task/declaration :seon.agent/id] :seon.task/task]}
   [{:seon.task/keys [ns name kind] :as declaration} agent-id]
-  (assoc declaration :seon.task/id (issue/task-handle ns name kind) :seon.task/created-by [:seon.agent/id agent-id]))
+  (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/created-by [:seon.agent/id agent-id]))
 
 (defn- task-call
   "The task writer's call for `row` against `basis` on the task home of
@@ -56,9 +339,9 @@
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/task :seon.task/basis] :seon.db/tx-data]}
   [connection entity basis]
   (let [handles #{(:seon.task/id entity)}]
-    (if (empty? (issue/adopt-tasks-tx (db/db (home-connection connection)) [entity] handles basis))
+    (if (empty? (adopt-tasks-tx (db/db (home-connection connection)) [entity] handles basis))
       []
-      [[:db.fn/call #'issue/adopt-tasks-tx [entity] handles basis]])))
+      [[:db.fn/call #'adopt-tasks-tx [entity] handles basis]])))
 
 (defn- refusal-data
   "Call `f`; the task writer's thrown refusal answers as its data."
@@ -106,7 +389,7 @@
                   [:or :seon.task/assignment-view :seon.task/refused-error :seon.error/value]]}
   [{connection :seon.db/connection handle :seon.task/assigned agent :seon.task/agent branch :seon.task/branch}]
   (let [database (db/db (home-connection connection))
-        revision (issue/task-revision database handle)
+        revision (task-revision database handle)
         agent-id (:seon.agent/id (db/pull database [:seon.agent/id] agent))]
     (cond (:seon.error/at revision) revision
           (nil? revision) (refused 'seon.task/assign! :unknown-task 'seon.task handle)
@@ -138,8 +421,8 @@
                        [?i :seon.issue/tests ?t] [?t :seon.test/sym ?test]]
                      database agent-id)
         [[key handle revision]] (when-not (map? assigned) (seq assigned))
-        current (when handle (issue/task-revision database handle))
-        edges (when handle (issue/task-edges database handle))]
+        current (when handle (task-revision database handle))
+        edges (when handle (task-edges database handle))]
     (cond (some :seon.error/at [assigned issues current edges]) (some #(when (:seon.error/at %) %) [assigned issues current edges])
           (and (= 1 (count assigned)) (not= revision current))
           (refused 'seon.task/assignment :revised-since-assignment 'seon.task {:seon.task/revision revision :seon.task/current current})
@@ -255,7 +538,7 @@
   - A merge task is closed by root's outcome.
 
   An authored task answering none of these is open while a definition names
-  it (`seon.issue/open-tasks`); it has no resolution here.
+  it (`seon.task/open-tasks`); it has no resolution here.
 
   ## Examples
 

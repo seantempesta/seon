@@ -7,7 +7,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.fn]
-            [seon.issue :as issue]
+            [seon.task :as task]
             [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -40,7 +40,7 @@
     (try (io/make-parents (io/file root "tg/a.clj"))
          (spit (io/file root "tg/a.clj") source)
          (support/transacted! connection (seon.fn/reconcile-tx @connection (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
-         (let [indexed (issue/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tg.a.edn" task}})]
+         (let [indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tg.a.edn" task}})]
            (when-not (:seon.task/changed? indexed) (throw (ex-info "The fixture task did not index." {:seon.task/report indexed}))))
          (finally (support/delete-recursively! root)))))
 
@@ -57,7 +57,7 @@
     (or (:seon.fn/sym value) (:seon.test/sym value) (:seon.ns/name value) (:seon.task/id value))))
 
 (deftest the-fixture-handle-is-the-derived-task-handle
-  (is (= (issue/task-handle 'tg.a "walk-graph" :function) handle)))
+  (is (= (task/task-handle 'tg.a "walk-graph" :function) handle)))
 
 (deftest the-task-graph-walks-levels-in-definition-order
   (support/with-database

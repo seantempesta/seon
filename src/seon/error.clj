@@ -1261,7 +1261,7 @@
 (defn- producer-task
   "The runtime task a producer's faults answer: one per producing definition,
   its handle the aspect `[ns \"faults of <name>\" :function]` minted as
-  `seon.issue/task-handle` mints it, so a second signature of the same producer
+  `seon.task/task-handle` mints it, so a second signature of the same producer
   lands on the same task. It refs each signature it answers
   (`:seon.task/faults`); it is closed when every one is resolved
   (`seon.task/resolution`), never by a stored flag."

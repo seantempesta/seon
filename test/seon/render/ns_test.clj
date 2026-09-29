@@ -7,7 +7,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
             [seon.render.schema :as render.schema]
-            [seon.issue :as issue]
+            [seon.task :as task]
             [seon.test-support :as support])
   )
 
@@ -146,10 +146,10 @@
   ;; Distance 0 names the node; distance 1 shows its content with neighbours as names.
   (support/with-database
    (fn [connection]
-     (let [handle (issue/task-handle 'tn.a "render-node" :function)
+     (let [handle (task/task-handle 'tn.a "render-node" :function)
            entry (str "[#:seon.task{:id \"" handle "\" :name \"render-node\" :kind :function"
                       " :intent \"Render one node.\\nThen stop.\" :must-read #{tn.a/f}}]")
-           indexed (issue/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
+           indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
            database @connection
            unit (fn [lookup distance]
                   (let [value (db/pull database '[*] lookup)]
@@ -162,7 +162,7 @@
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
            (is (= "Render one node.\nThen stop." (:seon.task/intent shown)))
            (is (= #{'tn.a/f} (:seon.task/must-read shown)))
-           (is (= (list 'seon.issue/task-edges (list 'seon.db/db) handle) (sut/task-form (unit [:seon.task/id handle] 1)))
+           (is (= (list 'seon.task/task-edges (list 'seon.db/db) handle) (sut/task-form (unit [:seon.task/id handle] 1)))
                "the form face is the edges read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
        (testing "a schema's AI face is data: the form it replaces and what names the key"
