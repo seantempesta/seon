@@ -249,7 +249,8 @@
                      "(clojure.test/deftest largest-customer-test (clojure.test/is (= {:seon.test/pass-count 9} (largest-customer [{:seon.test/pass-count 2} {:seon.test/pass-count 9}]))))"]]
         (doseq [source sources]
           (let [evaluation (support/evaluate
-                             {:seon.cluster.eval/source source
+                             {:seon.test/rows true
+                              :seon.cluster.eval/source source
                               :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                               :seon.sci.eval/ctx ctx
                               :seon.sci.eval/time-limit-ms 10000

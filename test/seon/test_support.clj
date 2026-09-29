@@ -379,12 +379,16 @@
   acquires it first (`seon.sci.eval/acquire!`), as an agent's next run forks
   onto its head. Without a context, a base context is built from
   `:seon.schema/projection`; without a database, the executing member's is
-  read, since an agent's evaluation always has one."
+  read, since an agent's evaluation always has one.
+
+  With `:seon.test/rows` true the derive stage also runs (still nothing
+  settles) and the result carries `:seon.program/row`, the declaration the
+  last form defined, for a test that transacts or installs it."
   {:malli/schema [:=> [:cat [:map [:seon.cluster.eval/source :string]
                              [:seon.sci.admit/caps :map]]]
                   :map]}
   [{ctx :seon.sci.eval/ctx source :seon.cluster.eval/source namespace-ref :seon.cluster.eval/ns
-    limit :seon.sci.eval/time-limit-ms :as request}]
+    limit :seon.sci.eval/time-limit-ms rows? :seon.test/rows :as request}]
   (let [ctx (or ctx (sci.eval/build-base-ctx (or (:seon.schema/projection request) (schema/handed-projection))))
         database (or (:seon.db/db request)
                      (some-> (get-in ctx [::sci.eval/custody :seon.db/connection]) db/db)
@@ -423,13 +427,20 @@
                      :seon.turn/frame-request (fn [_ordinal namespace-name]
                                                 (assoc request :seon.cluster.eval/ns [:seon.ns/name namespace-name]))
                      :seon.sci.eval/time-limit-ms limit})
-                   (dissoc :seon.batch/settle :seon.batch/derive :seon.batch/facts :seon.batch/apply
-                           :seon.batch/fold :seon.batch/observe)))
+                   (as-> r (if rows?
+                             (dissoc r :seon.batch/settle :seon.batch/observe)
+                             (dissoc r :seon.batch/settle :seon.batch/derive :seon.batch/facts :seon.batch/apply
+                                     :seon.batch/fold :seon.batch/observe)))))
         entries (:seon.batch/entries batch)
         output (apply str (keep #(get-in % [:seon.batch/evaluation :seon.cluster.eval/output]) entries))]
     (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries)))
       (seq output) (assoc :seon.cluster.eval/output output)
-      (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch)))))
+      (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch))
+      ;; the declaration the last form defined, as the batch's derive stage
+      ;; proposes it (what a settlement would commit)
+      rows? (as-> e (if-let [row (first (:seon.batch/entities (:seon.batch/change (peek entries))))]
+                      (assoc e :seon.program/row row)
+                      e)))))
 
 (defn agent-value
   "Evaluate `source` at the boundary an AGENT actually calls, and return the
