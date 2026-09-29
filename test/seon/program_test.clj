@@ -1422,3 +1422,14 @@
                       [:seon.fn/sym (quote sample.s1/right)]
                       [:seon.test/sym (quote sample.s1/paired)]]]
       (is (seq (:seon.fn/calls (get evaluated identity)))))))
+
+(deftest replacement-dropping-all-set-members-writes-no-empty-set
+  ;; Absence is no key: redefining a function without `:seon/tasks` retracts the
+  ;; old members and adds nothing, never `:seon.task/tasks #{}`.
+  (let [shapes (program/shapes)
+        current {:db/id 7 :seon.fn/sym 'my.x/f :seon.task/tasks #{"7bfe767bec09"}}
+        desired {:seon.fn/sym 'my.x/f}
+        tx (program/exact-replacement-tx-in shapes current desired)
+        row (last tx)]
+    (is (not (contains? row :seon.task/tasks)))
+    (is (some #{[:db/retract 7 :seon.task/tasks "7bfe767bec09"]} tx))))

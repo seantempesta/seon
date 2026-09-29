@@ -1395,9 +1395,9 @@
                   (first value) value)]]))))
               (sort changed)))
      (reduce (fn [row attribute]
-               (let [old (set (get current attribute)) new (set (get desired attribute))]
-                 (if (= old new) (dissoc row attribute)
-                     (assoc row attribute (set/difference new old)))))
+               (let [added (set/difference (set (get desired attribute)) (set (get current attribute)))]
+                 ;; Absence is no key: retractions are already emitted above.
+                 (if (empty? added) (dissoc row attribute) (assoc row attribute added))))
              (assoc desired :db/id entity-id) many))))
 
 (defn exact-replacement-tx-in
