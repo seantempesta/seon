@@ -5,7 +5,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [seon.plan :as plan]
+            [my.note :as note]
             [sci.core :as sci]
             [seon.batch]
             [seon.call-preparation :as cp]
@@ -1058,17 +1058,16 @@
                  (str "(seon.call-preparation-test/probe-received-database?"
                       " \"a\")"))))))))))
 
-(deftest an-acquired-context-supplies-a-leading-database-to-plan
+(deftest an-acquired-context-supplies-a-leading-database-to-a-first-party-read
   (testing "a real first-party call uses its contracted shorter shape"
     (test-support/with-database
      (fn [connection]
        (test-support/transacted! connection database-entities)
        ;; This ordinary call is also the program-graph edge that makes the
        ;; source-string callee part of a reduced focused-test projection.
-       (is (= "missing"
-              (:my.plan/missing-agent-id
-               (plan/plan {:seon.db/db @connection
-                           :seon.agent/id "missing"}))))
+       (is (= []
+              (note/notes {:seon.db/db @connection
+                           :seon.agent/id "missing"})))
        (let [ctx (sci.eval/cluster-ctx @connection connection)
              ;; cluster-ctx acquires lazily at `kernel/invoke`; a raw
              ;; `sci/eval-string*` needs the program acquired first.
@@ -1082,14 +1081,14 @@
                                 :seon.schema/projection acquired-projection}))
              live (env/carry-state ctx (env/environment-state environment))
              current (cp/snapshot @connection acquired-projection)
-             invocation-plan (cp/plan-for @connection current 'my.plan/plan)
+             invocation-plan (cp/plan-for @connection current 'my.note/notes)
              omitted (try
-                       (armed-eval live "(my.plan/plan)")
+                       (armed-eval live "(my.note/notes)")
                        (catch Throwable cause cause))
              explicit
              (armed-eval
               live
-              (str "(my.plan/plan {:seon.db/db "
+              (str "(my.note/notes {:seon.db/db "
                    "(seon.call-preparation-test/probe-current-database), "
                    ":seon.agent/id \"missing\"})"))]
          (is (contains? (:seon.call-preparation/supplied-defaults current)
@@ -1100,7 +1099,7 @@
            (is (= "missing"
                   (:seon.agent/id (first prepared)))))
          (is (not (instance? Throwable omitted)))
-         (is (= "missing" (:my.plan/missing-agent-id omitted)))
+         (is (= [] omitted))
          (is (= (dissoc omitted :seon.error/at) (dissoc explicit :seon.error/at))
              "an explicit database wins and reaches the same function body"))))))
 

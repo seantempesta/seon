@@ -9,7 +9,7 @@
             [seon.test-support :as support]))
 
 
-(deftest a-plan-item-result-shows-data-instead-of-its-block-render-source
+(deftest a-task-steps-result-shows-data-instead-of-its-block-render-source
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection
@@ -19,25 +19,12 @@
                         (agent/creation-tx {:seon.agent/id "juniper"
                                             :seon.ns/name 'my.agents.juniper
                                             :seon.cluster/name "shown-text"}))
-     (support/transacted!
-      connection
-      [{:my.plan/agent [:seon.agent/id "juniper"]
-         :my.plan/objective "Keep generated source out of values"
-         :my.plan/current-step "current-item"
-         :my.plan/steps
-         #{{:db/id "current-item"
-            :my.plan.item/id "juniper/render-plan"
-            :my.plan.item/title "Render this plan clearly"
-            :my.plan.item/done-when "The item is shown as data."}
-           {:my.plan.item/id "juniper/verify"
-            :my.plan.item/title "Verify dependencies"
-            :my.plan.item/needs #{"current-item"}}}}])
      (let [base (support/fork-cluster-ctx connection "shown-text")
            ctx (:seon.sci.eval/ctx
                 (evaluation/fork-for-turn
                  {:seon.sci.eval/ctx base :seon.db/db @connection
                   :seon.db/connection connection :seon.agent/id "juniper"}))
-           request {:seon.cluster.eval/source "[(my.plan/current) (my.plan/blocked) (my.message/inbox) (my.agent/settings)]"
+           request {:seon.cluster.eval/source "[(my.task/plan! {:seon.task/steps [\"Render this plan clearly\" \"Verify dependencies\"]}) (my.message/inbox) (my.agent/settings)]"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.agents.juniper]
                     :seon.agent/id "juniper"
                     :seon.sci.eval/ctx ctx
@@ -49,13 +36,10 @@
                    request #(evaluation/evaluate request))
            shown (repl/value-text result)]
        (is (nil? (:seon.cluster.eval/error result)))
-       (is (= "juniper/render-plan"
-              (get-in result [:seon.sci.admit/value 0 :my.plan.item/id])))
-       (is (= ["juniper/render-plan"]
-              (get-in result [:seon.sci.admit/value 1 0 :my.plan/needs])))
-       (is (= [] (get-in result [:seon.sci.admit/value 2])))
+       (is (= "Render this plan clearly"
+              (get-in result [:seon.sci.admit/value 0 :seon.task/current-step])))
+       (is (= [] (get-in result [:seon.sci.admit/value 1])))
        (is (not (str/includes? shown "ExceptionInfo")))
        (is (string? shown))
-       (is (str/includes? shown "juniper/render-plan"))
        (is (str/includes? shown "Render this plan clearly"))
        (is (not (str/includes? shown "format-item-ai")))))))

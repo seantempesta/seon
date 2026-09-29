@@ -60,7 +60,7 @@
   [notes]
   (let [pulled (when (map? notes)
                  (db/pull (:seon.db/db notes)
-                          '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:my.plan.item/id]}]}]
+                          '[{:my.note/_agent [:my.note/id :my.note/content {:my.note/about [:seon.task/id]}]}]
                           [:seon.agent/id (:seon.agent/id notes)]))]
     (if (db/read-refusal? pulled)
       pulled
@@ -71,10 +71,10 @@
   [note database]
   (let [reference (:my.note/about note)
         about (if (and database reference)
-                (db/pull database [:my.plan.item/id :my.plan.item/title :db/txInstant]
+                (db/pull database [:seon.task/id :seon.task/name :db/txInstant]
                          (if (map? reference)
                            (or (:db/id reference)
-                               (when-let [id (:my.plan.item/id reference)] [:my.plan.item/id id]))
+                               (when-let [id (:seon.task/id reference)] [:seon.task/id id]))
                            reference))
                 reference)
         at (when database
@@ -93,10 +93,10 @@
      [:p {:class "my-note-content"} (:my.note/content note)]
      (when reference
        [:p {:class "my-note-about"} "About "
-        (if-let [id (:my.plan.item/id about)]
+        (if-let [id (:seon.task/id about)]
           [:a {:href (route/path :seon.render.route/data {}
-                                {:entity (pr-str [:my.plan.item/id id])})}
-           (get about :my.plan.item/title id)]
+                                {:entity (pr-str [:seon.task/id id])})}
+           (get about :seon.task/name id)]
           (if (:db/txInstant about) "the recorded transaction" "a related record"))])]))
 
 (defn render-note-html

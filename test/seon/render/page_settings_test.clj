@@ -4,9 +4,7 @@
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.plan :as plan]
             [seon.render :as render]
-            [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
 
@@ -34,50 +32,7 @@
                                            :seon.render.walk/attribute :seon.agent/settings})]
            (is (= expected (:seon.render.selection/selected decision)))))))))
 
-(defn- example-forms
-  "Each top-level form of one authored Example, as agent-facing source.
-
-  An Example may author more than one form — `my.plan/item` teaches an add
-  followed by the read, because a read keeps its own evaluation's immutable
-  database snapshot. One evaluation carries exactly one form, so the agent
-  sees those as two successive evaluations and so does this test."
-  [example]
-  (let [reader (java.io.PushbackReader. (java.io.StringReader. example))]
-    (binding [*read-eval* false]
-      (loop [forms []]
-        (let [form (read {:eof ::eof} reader)]
-          (if (= ::eof form)
-            forms
-            (recur (conj forms (repl/source-text form)))))))))
-
-(defn- authored-examples
-  "Every public function's authored Example in one namespace, in doc order.
-
-  DERIVED from program rows through the one owner of the docstring grammar
-  (`seon.sci.eval/docstring-parts`, `src/seon/sci/eval.clj:1157`) — not
-  scraped out of a docstring by string index. The scrape this replaces
-  searched for `(seon.db/transact!` forms that the plan-derivation rewrite
-  retired, so it silently returned nothing and handed `nil` to
-  `seon.repl/source-text`."
-  [database namespace-name]
-  (->> (db/q '[:find [(pull ?function [:seon.fn/sym :seon.fn/doc
-                                       :seon.fn/doc-order]) ...]
-               :in $ ?namespace-name
-               :where [?namespace :seon.ns/name ?namespace-name]
-                      [?function :seon.fn/ns ?namespace]
-                      [?function :seon.fn/private? false]
-                      [?function :seon.fn/doc _]]
-             database namespace-name)
-       (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
-                      :seon.fn/sym))
-       (keep (fn [entity]
-               (let [example (:example (evaluation/docstring-parts
-                                        (:seon.fn/doc entity)))]
-                 (when-not (str/blank? example)
-                   [(:seon.fn/sym entity) example]))))
-       vec))
-
-(deftest effective-settings-and-authored-plan-examples-work-through-sci
+(deftest effective-settings-work-through-sci
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "page-settings"})
@@ -86,11 +41,7 @@
              [(agent/creation-tx {:seon.agent/id "juniper" :seon.ns/name 'my.agents.juniper
                                   :seon.cluster/name "page-settings"})
               [{:seon.config/agent [:seon.agent/id "juniper"]
-                :seon.config.eval/time-limit-ms 1234 :seon.config.ai/no-provider true}
-               {:my.plan/agent [:seon.agent/id "juniper"]
-                :my.plan/objective "Verify the examples"
-                :my.plan/steps [{:my.plan.item/id "existing" :my.plan.item/title "Existing step"
-                                 :my.plan.item/position 0}]}]]]
+                :seon.config.eval/time-limit-ms 1234 :seon.config.ai/no-provider true}]]]
        (let [result (db/transact! connection transaction)]
          (assert (:db-after result) (pr-str result))))
      (let [base (support/fork-cluster-ctx connection "page-settings")
@@ -106,8 +57,7 @@
                                                  :seon.cluster.eval/source source)))
            result (evaluate "(seon.agent/effective-settings)")
            groups (:seon.sci.admit/value result)
-           values (apply merge groups)
-           examples (authored-examples @connection 'my.plan)]
+           values (apply merge groups)]
        (is (not (:seon.cluster.eval/error result)))
        (is (= ["seon.config.ai" "seon.config.eval" "seon.config.run"]
               (mapv (comp namespace ffirst) (take 3 groups))))
@@ -120,33 +70,6 @@
        (is (not (find values :my.agent/turns-left)))
        (is (nat-int? (:seon.sci.admit/value (evaluate "(seon.turn/turns-left)"))))
        (is (not (str/includes? (:seon.eval/shown result) "seon.render/ambiguous")))
-       ;; THE CLASS: every Example my.plan authors into an agent's context
-       ;; must evaluate in that agent's own SCI context. Each authored example
-       ;; is self-contained, so order is irrelevant and one failing example
-       ;; names its own function.
-       (is (seq examples))
-       (doseq [[_function-symbol example] examples
-               source (example-forms example)]
-         (let [evaluated (evaluate source)]
-           (is (not (:seon.cluster.eval/error evaluated)))))
-       (let [steps (db/q '[:find [(pull ?step [:my.plan.item/id
-                                               :my.plan.item/completed-tx]) ...]
-                           :where [_ :my.plan/steps ?step]]
-                         @connection)
-             current (db/q '[:find ?id .
-                             :where [_ :my.plan/current-step ?step]
-                                    [?step :my.plan.item/id ?id]]
-                           @connection)]
-         (is (< 1 (count steps)))
-         (is (some :my.plan.item/completed-tx steps))
-         (is (string? current)))
-       (let [documentation (evaluate "(doc my.plan)")
-             text (:example (:seon.sci.admit/value documentation))
-             source (plan/render-plan-ai {:seon.agent/id "juniper"})]
-         (is (string? text))
-         (is (str/includes? text "my.plan/add!"))
-         (is (= 1 (count (filter #(str/starts-with? % ";;") (str/split-lines source)))))
-         (is (not (str/includes? source "transact!"))))
        (is (not-any? #(find values %) [:seon.config.ai/api-key-variable
                                       :seon.config.ai/endpoint
                                       :seon.config.ai/chars-per-token-prior]))

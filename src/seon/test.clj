@@ -1535,7 +1535,7 @@
 
 (defn owned-symbols
   "Read the test symbols declared in the calling agent's assigned namespace."
-  {:malli/schema [:=> [:cat :my.plan/request] [:vector :seon.test/sym]]}
+  {:malli/schema [:=> [:cat :seon.agent/db-request] [:vector :seon.test/sym]]}
   [{database :seon.db/db agent-id :seon.agent/id}]
   (vec (sort (db/q '[:find [?symbol ...] :in $ ?agent-id
                      :where [?agent :seon.agent/id ?agent-id]
@@ -1590,7 +1590,7 @@
 ;;; ---------------------------------------------------------------------------
 
 ;;; LOAD-CYCLE BOUNDARY. `seon.cluster.agent` requires `seon.turn`, which
-;;; requires `seon.plan`, which requires this namespace. One resolution per
+;;; requires this namespace. One resolution per
 ;;; entrance Var, realized at first use (`acquire-context!` sits above `apply-seeds!`).
 (def ^:private release-context!
   (delay (requiring-resolve 'seon.cluster.agent/release-context!)))

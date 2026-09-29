@@ -36,12 +36,12 @@
   (let [body-ran (atom false)
         failure (try
                   (test-support/with-database
-                   {:seon.test-support/extra-schema [{:my.plan.item/title 42}]}
+                   {:seon.test-support/extra-schema [{:seon.task/intent 42}]}
                    (fn [_] (reset! body-ran true)))
                   (catch clojure.lang.ExceptionInfo error (ex-data error)))]
     (is (false? @body-ran))
     (is (string? (:seon.db.write.attempt/request-id failure)))
-    (is (= [0 :my.plan.item/title] (:seon.db/path failure)))
+    (is (= [0 :seon.task/intent] (:seon.db/path failure)))
     (is (= 42 (:seon.db/offending failure))))
   (test-support/with-database
    (fn [connection]

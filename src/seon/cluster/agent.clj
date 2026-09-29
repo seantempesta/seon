@@ -237,7 +237,6 @@
                   ;; the agent's config is its cluster's (seon.config/agent-cluster)
                   :seon.agent/cluster cluster-name
                   :seon.agent/namespace namespace-ref
-                  :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
                   :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
                   :seon.agent/runtime {:seon.runtime/agent (str "agent:" agent-id)}}
            branch (assoc :seon.agent/branch branch))]
@@ -386,7 +385,7 @@
           (when (and (:seon.db/db unit) (:seon.agent/id unit))
             (bootstrap/situation (:seon.db/db unit)
                                  (:seon.agent/id unit))))]
-    (when (and situation (not (:my.plan/missing-agent-id situation)))
+    (when (and situation (not (:seon.bootstrap/missing-agent-id situation)))
       (str "You are agent " (:seon.agent/id situation)
            " in namespace "
            (second (:seon.agent/namespace-ref situation)) ". "

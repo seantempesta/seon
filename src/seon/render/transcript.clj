@@ -1672,17 +1672,12 @@
 
 (defn- ledger-effects
   "Acquire effect facts for all closed turns in one batch per fact family."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] [:or [:map [:seon.render.transcript/steps :map] [:seon.render.transcript/messages :map] [:seon.render.transcript/definitions :map]] :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] [:or [:map [:seon.render.transcript/messages :map] [:seon.render.transcript/definitions :map]] :seon.db/error-result]]}
   [database agent-id entities]
   (let [intervals (db/q '[:find ?id ?opened ?closed :in $ [?id ...]
                           :where [?turn :seon.turn/id ?id ?opened]
                                  [?turn :seon.turn/closed-tx ?closed]]
                         database (mapv :seon.turn/id entities))
-        steps (db/q '[:find ?id ?step :in $ ?agent [[?id ?from ?to]]
-                       :where [?a :seon.agent/id ?agent] [?tx :seon.db/user ?a]
-                              [?s :my.plan.item/completed-tx ?tx]
-                              [(<= ?from ?tx)] [(<= ?tx ?to)] [?s :my.plan.item/id ?step]]
-                     database agent-id intervals)
         messages (db/q '[:find ?id ?target :in $ ?agent [[?id ?from ?to]]
                           :where [?a :seon.agent/id ?agent] [?m :seon.message/from ?a ?tx]
                                  [(<= ?from ?tx)] [(<= ?tx ?to)] [?m :seon.message/to ?recipient]
@@ -1690,9 +1685,9 @@
         definitions (db/q '[:find ?symbol ?tx
                              :where (or [?f :seon.fn/sym ?symbol ?tx]
                                         [?f :seon.test/sym ?symbol ?tx])] database)]
-    (if-let [failure (some #(when (db/read-refusal? %) %) [intervals steps messages definitions])]
+    (if-let [failure (some #(when (db/read-refusal? %) %) [intervals messages definitions])]
       failure
-      {::steps (group-by first steps) ::messages (group-by first messages)
+      {::messages (group-by first messages)
        ;; Acquire each definition once, then relate it to the saved intervals.
        ;; Supplying every interval to the query repeats the program scan.
        ::definitions (group-by first
@@ -1704,18 +1699,15 @@
 (defn- turn-effects {:malli/schema [:=> [:cat :map :map] :map]}
   [effects entity]
   (let [turn-id (:seon.turn/id entity)
-        steps (get (::steps effects) turn-id)
         messages (get (::messages effects) turn-id)
         definitions (get (::definitions effects) turn-id)
-        details (concat (map #(str "plan step " (second %) " completed") steps)
-                        (map #(str "message sent to " (second %)) messages)
+        details (concat (map #(str "message sent to " (second %)) messages)
                         (map #(str "definition installed during this turn: " (second %)) definitions))]
     (cond
       (db/read-refusal? effects) {::details (:seon.error/message effects)}
       (not (:seon.turn/closed-tx entity)) {::details "Turn is still open."}
       :else {::details (if (seq details) (str/join " · " details) "—")
              ::summary (str/join " · " (cond-> []
-                                       (seq steps) (conj "step completed")
                                        (seq messages) (conj "message sent")
                                        (seq definitions) (conj "definition installed")))})))
 
@@ -2054,22 +2046,10 @@
         costs (mapv (fn [{a ::attempt u ::usage}]
                       (let [[input cached output :as rates] (rates-of a)]
                         (when (every? number? (into rates [(::miss u) (::hit u) (::out u)]))
-                          (/ (+ (* input (::miss u)) (* cached (::hit u)) (* output (::out u))) 1000000.0)))) attempts)
-        plan ((requiring-resolve 'seon.plan/plan) {:seon.db/db database :seon.agent/id agent-id})
-        steps (:my.plan/steps plan)
-        per-step (frequencies
-                  (for [entity entities :when (seq (:seon.turn/attempts entity))]
-                    (let [basis (turn/opening-db database (:seon.turn/id entity))]
-                      (when-not (or (db/read-refusal? basis) (:seon.turn/missing-opening-datom basis))
-                        (get-in (db/pull basis
-                                         '[{:seon.agent/plan [{:my.plan/current-step [:my.plan.item/id]}]}]
-                                         [:seon.agent/id agent-id])
-                                [:seon.agent/plan :my.plan/current-step :my.plan.item/id])))))]
+                          (/ (+ (* input (::miss u)) (* cached (::hit u)) (* output (::out u))) 1000000.0)))) attempts)]
     {::used (turn/episode-runs database agent-id)
      ::bound (#'turn/max-episode-runs database agent-id)
-     ::completed (count (filter :my.plan.item/completed-tx steps))
-     ::steps (count steps) ::plan-unavailable (boolean (or (db/read-refusal? plan) (:my.plan/missing-agent-id plan)))
-     ::per-step per-step ::totals totals ::attempts (count attempts)
+     ::totals totals ::attempts (count attempts)
      ::missing-usage (count (remove #(every? number? (map (::usage %) [::prompt ::hit ::miss ::out])) attempts))
      ::cost (when (every? number? costs) (reduce + 0 costs))
      ::missing-rates (count (remove #(every? number? (rates-of (::attempt %))) attempts))}))
@@ -2119,28 +2099,20 @@
 
 (defn- budget-html [budget]
   [:div {:class "seon-session-budget"}
-   [:p (str "Budget · " (::used budget) "/" (or (::bound budget) "unavailable") " turns used · "
-            (if (::plan-unavailable budget) "plan unavailable"
-              (str (::completed budget) "/" (::steps budget) " steps complete")))]
+   [:p (str "Budget · " (::used budget) "/" (or (::bound budget) "unavailable") " turns used")]
    [:p (str "Billing tokens · " (str/join " · "
               (for [[k label] [[::prompt "in"] [::hit "hit"] [::miss "miss"] [::out "out"]]]
                 (str (format "%,d" (get (::totals budget) k 0)) " " label)))
             " · " (cond (number? (::cost budget)) (format "$%.5f at rates on file" (double (::cost budget)))
                          (pos? (::missing-rates budget)) "no rate on file"
                          :else "cost unavailable: incomplete usage")
-            (when (pos? (::missing-usage budget)) (str " · usage unavailable on " (::missing-usage budget) " attempts")))]
-   [:details [:summary "Provider turns per plan step"]
-    (if (seq (::per-step budget))
-      (for [[step n] (sort-by (comp str key) (::per-step budget))]
-        [:p (str (or step "No step selected at opening") " · " n)])
-      [:p "No provider turns recorded."])]] )
+            (when (pos? (::missing-usage budget)) (str " · usage unavailable on " (::missing-usage budget) " attempts")))]])
 
 (defn- problem-summary [request problems]
   (let [by-code (into {} (map (juxt ::code identity)) (::rules problems))
         budget (::budget problems)]
     [:div {:class "seon-problem-summary"}
-     [:p (str (::used budget) "/" (or (::bound budget) "unavailable") " turns used · "
-              (::completed budget) "/" (::steps budget) " steps complete")]
+     [:p (str (::used budget) "/" (or (::bound budget) "unavailable") " turns used")]
      [:p [:span {:class (when (pos? (get-in by-code [:errors ::count])) "seon-emission-error")}
           (str (get-in by-code [:errors ::count]) " evaluation errors")]
       " · " [:span {:class (when (pos? (get-in by-code [:faults ::count])) "seon-emission-error")}

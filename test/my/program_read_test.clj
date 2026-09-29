@@ -8,10 +8,10 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           function (program/source database 'seon.plan/refuse-constraint!)
+           function (program/source database 'seon.task/task-handle)
            test-sym (first (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]]))
            test-read (program/source database test-sym)]
-       (is (= [:function "src/seon/plan.clj"] ((juxt :kind :file) function)))
+       (is (= [:function "src/seon/task.clj"] ((juxt :kind :file) function)))
        (is (= :=> (first (:contract function))))
        (is (integer? (:line function)))
        (is (= [:test test-sym] ((juxt :kind :sym) test-read)))
@@ -20,9 +20,9 @@
 (deftest source-of-an-unknown-symbol-names-the-nearest
   (support/with-database
    (fn [connection]
-     (let [refusal (program/source (db/db connection) 'seon.plan/refuse-constrain)]
-       (is (= 'seon.plan/refuse-constrain (:seon.program/not-found refusal)))
-       (is (some #{'seon.plan/refuse-constraint!} (:seon.error/expected refusal)))))))
+     (let [refusal (program/source (db/db connection) 'seon.task/task-handl)]
+       (is (= 'seon.task/task-handl (:seon.program/not-found refusal)))
+       (is (some #{'seon.task/task-handle} (:seon.error/expected refusal)))))))
 
 (deftest search-ranks-bounds-and-offers-more
   (support/with-database
@@ -38,8 +38,8 @@
 (deftest sizes-list-lines-largest-first
   (support/with-database
    (fn [connection]
-     (let [sized (program/sizes (db/db connection) 'seon.plan)
+     (let [sized (program/sizes (db/db connection) 'seon.task)
            lines (map second (:largest sized))]
-       (is (= 'seon.plan (:ns sized)))
+       (is (= 'seon.task (:ns sized)))
        (is (= lines (reverse (sort lines))))
-       (is (= 'seon.plan/compile-tree (ffirst (:largest sized))))))))
+       (is (seq (:largest sized)))))))

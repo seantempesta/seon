@@ -17,7 +17,7 @@
 
   Example:
   (my.note/notes)"
-  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.note/notes :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.note/notes :seon.error/value]]}
   [request]
   (note/notes (:seon.db/db request) (:seon.agent/id request)))
 

@@ -30,7 +30,7 @@
        (is (some #(= 'seon.agent/render-settings-ai (:seon.render/ai %)) matches))
        (is (not-any? #(= 'seon.agent/render-settings-ai (:seon.render/ai %))
                      (schema/matching-shapes-in (schema/projection-from-database database)
-                                               {:my.plan.item/title "Unrelated"})))
+                                               {:seon.task/intent "Unrelated"})))
        (is (integer? component))))))
 
 (deftest settings-updates-preserve-one-component-and-agent-isolation

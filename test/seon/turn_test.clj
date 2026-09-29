@@ -2375,7 +2375,7 @@
                                 :seon.ns/name 'my.agents.caller
                                 :seon.cluster.reply/sources
                                 [{:seon.cluster.eval/source "(my.program/no-such-function 1)"}
-                                 {:seon.cluster.eval/source "(my.plan/no-such-function 1)"}]})))]
+                                 {:seon.cluster.eval/source "(my.task/no-such-function 1)"}]})))]
        (is (= 2 (count evaluations)))
        (is (not-any? #(str/includes? (str (:seon.cluster.eval/diagnostics %)) "Not admitted to the program")
                      evaluations)

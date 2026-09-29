@@ -167,9 +167,6 @@
                      inert (wake/inert-attributes database)
                      entries (evaluation/of-agent database "juniper")]
                  (is (seq entries) "The seeded system turn must store its opening.")
-                 ;; the plan's form face names its agent and database (f278f8dc3)
-                 (is (some #(= 'seon.plan/plan (first (read-string (:seon.cluster.eval/source %)))) entries)
-                     "the opening stores the agent's plan read")
                  (doseq [entry entries
                          read (:seon.cluster.eval/read-evidence entry)
                          source (get-in read [:datahike.read/dependency-plan
@@ -458,22 +455,6 @@
                                         (:seon.turn/forms refresh))))
                        "closing the creation turn changes no opening read"))))
              (fixture/install! handle routing)
-             (let [plan (:seon.agent/plan
-                         (db/pull @connection
-                                  '[{:seon.agent/plan
-                                     [:my.plan/objective
-                                      {:my.plan/current-step [:my.plan.item/id]}
-                                      {:my.plan/steps [:my.plan.item/id :my.plan.item/position
-                                                       {:my.plan.item/needs [:my.plan.item/id]}]}]}]
-                                  [:seon.agent/id "juniper"]))
-                   steps (sort-by :my.plan.item/position (:my.plan/steps plan))
-                   ids (mapv :my.plan.item/id steps)]
-               (is (= ["juniper/read" "juniper/define" "juniper/test" "juniper/save"
-                       "juniper/add" "juniper/again" "juniper/report"] ids))
-               (is (= fixture/instruction (:my.plan/objective plan)))
-               (is (= "juniper/read" (get-in plan [:my.plan/current-step :my.plan.item/id])))
-               (is (= (into [#{}] (map hash-set (butlast ids)))
-                      (mapv #(set (map :my.plan.item/id (:my.plan.item/needs %))) steps))))
              (testing "fresh opening and stable stored prompt"
                (let [first-id (turn/next-id @connection "loop-proof" "juniper")
                      opening (turn/system-turn request)
@@ -622,7 +603,7 @@
                      "both opening reads must exist")
                  (dotimes [ordinal 3]
                    (submit (if (zero? ordinal)
-                             "(seon.db/q '[:find (pull ?e [*]) :where [?e :my.plan.item/id]])"
+                             "(seon.db/q '[:find (pull ?e [*]) :where [?e :example/order]])"
                              "(+ 10 20)"))
                    (let [refresh (turn/system-turn request)]
                      (is (vector? (:seon.turn/forms refresh)))
@@ -656,21 +637,6 @@
                  (is (= raw (sci/eval-form ctx (list 'get-in handle []))))))
              (agent/disarm! {:seon.agent/routing routing
                              :seon.agent/id "juniper"})
-             (testing "one plan write appends exactly the plan read"
-               (let [plan-eid (get-in (db/pull @connection '[{:seon.agent/plan [:db/id]}]
-                                              [:seon.agent/id "juniper"])
-                                     [:seon.agent/plan :db/id])
-                     _ (is (some? plan-eid))
-                     written (db/transact! connection
-                                           [[:db/add plan-eid :my.plan/objective
-                                             "Verify one changed plan read."]])
-                     _ (is (some? (:db-after written)))
-                     system (turn/system-turn request)
-                     changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms system))]
-                 (is (string? (:seon.turn/id system)))
-                 (is (= ['(seon.plan/plan {})]
-                        (mapv (comp read-string :seon.cluster.eval/source) changed)))
-                 (assert-changed-response! @connection handle system)))
              (testing "changed reads answer only observed wakes"
                (let [prefix (stored-text @connection)
                      message (db/transact!
@@ -832,36 +798,17 @@
                (submit "(seon.db/transact! [{:example/order \"a3\" :example/customer \"Ada\" :example/amount 40}])")
                (submit "(seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]])")
                (is (= "155" (:seon.eval/shown (last (evaluation/of-agent @connection "juniper")))))
-               (testing "completion is derived from the report message, never asserted"
-                 (is (= 7 (db/q '[:find (count ?step) . :where
-                                  [?step :my.plan.item/done-query _]] @connection)))
-                 (submit "(my.plan/complete! {:my.plan.item/id \"juniper/report\"})")
-                 (let [last-evaluation (last (evaluation/of-agent @connection "juniper"))]
-                   (is (str/includes? (:seon.cluster.eval/error last-evaluation) "done-query"))
-                   (is (str/includes? (:seon.cluster.eval/error last-evaluation) "found #{}")))
-                 (is (nil? (:my.plan.item/completed-tx
-                            (db/pull @connection [:my.plan.item/completed-tx]
-                                     [:my.plan.item/id "juniper/report"]))))
+               (testing "the report message reaches root about its request"
                  (let [about (db/q '[:find ?id . :where
-                                     [?step :my.plan.item/id "juniper/report"]
-                                     [?step :my.plan.item/subject ?request]
+                                     [?request :seon.message/from ?root] [?root :seon.agent/id "root"]
+                                     [?request :seon.message/to ?agent] [?agent :seon.agent/id "juniper"]
                                      [?request :seon.message/id ?id]] @connection)
                        source (str "(let [sent (my.message/send "
                                    (pr-str {:my.message/to "root" :my.message/about about
                                             :my.message/content "Ada had the largest total, 115. I added an order of 40 and verified the new total is 155."})
-                                   ")] :sent)")
-                       run-id (submit source)
-                       completed (db/pull @connection '[{:my.plan.item/completed-tx [:db/id :db/txInstant]}]
-                                          [:my.plan.item/id "juniper/report"])
-                       settled (db/q '[:find ?tx . :in $ ?run-id
-                                       :where [?turn :seon.turn/id ?run-id]
-                                              [?evaluation :seon.cluster.eval/run ?turn]
-                                              [?evaluation :seon.eval/shown _ ?tx]]
-                                     @connection run-id)]
+                                   ")] :sent)")]
                    (is (string? about))
-                   (is (inst? (get-in completed [:my.plan.item/completed-tx :db/txInstant])))
-                   (is (= settled
-                          (get-in completed [:my.plan.item/completed-tx :db/id])))))
+                   (submit source)))
                (is (= 1 (db/q '[:find (count ?message) . :where
                                 [?agent :seon.agent/id "juniper"]
                                 [?message :seon.message/from ?agent]

@@ -137,7 +137,7 @@
                       (str "(do " read-source " (/ 1 0))")
                       "(seon.db/pull 1 2)"
                       "(+ 1 #unknown/tag 2)"]
-            documentation "(doc my.plan/current!)"]
+            documentation "(doc my.task/done!)"]
         (doseq [source (conj failures documentation)]
           (fixture/submit! handle routing source))
         (agent/disarm! {:seon.agent/routing routing :seon.agent/id "juniper"})
@@ -173,7 +173,7 @@
             (is (= :unchanged (:seon.turn/status (get by-source documentation))))
             (is (nil? (:seon.turn/id (turn/system-turn request))))
             (is (= 1 (count (entries connection documentation)))))
-          (support/transacted! connection [[:db/add [:seon.fn/sym 'my.plan/current!]
+          (support/transacted! connection [[:db/add [:seon.fn/sym 'my.task/done!]
                                            :seon.fn/doc "Select the current plan item. Reread proof."]])
           (let [plan (#'turn/system-plan @connection []
                                         (#'turn/latest-evaluations @connection "juniper"))]

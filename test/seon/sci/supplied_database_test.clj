@@ -19,8 +19,7 @@
            functions '[seon.bootstrap/help-value
                        seon.agent/identity seon.agent/archived? seon.agent/open?
                        seon.agent/settings seon.agent/effective-settings
-                       seon.plan/current seon.plan/blocked seon.plan/steps
-                       seon.plan/ready seon.plan/ready-subjects seon.turn/turns-left]
+                       seon.turn/turns-left]
            source (pr-str
                    (mapv (fn [sym]
                            [(list sym)

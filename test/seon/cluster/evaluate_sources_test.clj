@@ -193,18 +193,17 @@
                     (mapv :seon.cluster.eval/at receipts)))
              (let [conflict (-> prepared :seon.db/tx-data first
                                 (update 2 assoc :seon.turn/reply "different source"))
-                   ;; THE ROLLBACK PROBE MUST REACH THE WRITER: a plan item
-                   ;; without its required `:my.plan.item/title` is refused by
+                   ;; THE ROLLBACK PROBE MUST REACH THE WRITER: a task
+                   ;; without its required `:seon.task/intent` is refused by
                    ;; write admission first, so the transaction never gets far
                    ;; enough to prove the content conflict rolls it back.
                    refused (db/transact! connection
-                                         [{:my.plan.item/id "must-rollback"
-                                           :my.plan.item/title "must rollback"}
+                                         [(support/task-row "mustrollback" "must rollback")
                                           conflict])]
                (is (= :seon.turn/recorded-content-conflict
                       (:seon.turn/refused refused)))
-               (is (nil? (db/pull @connection [:my.plan.item/id]
-                                  [:my.plan.item/id "must-rollback"]))))))
+               (is (nil? (db/pull @connection [:seon.task/id]
+                                  [:seon.task/id "mustrollback"]))))))
          (finally (async/close! channel)))))))
 
 (deftest one-turn-derives-the-render-profile-exactly-once

@@ -36,14 +36,14 @@
                       [?attempt :seon.problems/id ?id]] @connection))))
      (let [accepted (db/transact! connection
                                  [{:db/id [:seon.problems/id "x"]
-                                   :my.plan.item/title "attribute-only"}])]
+                                   :seon.task/intent "attribute-only"}])]
        (is (some? (:db-after accepted)))
        (is (= "attribute-only"
-              (:my.plan.item/title (db/pull @connection [:my.plan.item/title]
+              (:seon.task/intent (db/pull @connection [:seon.task/intent]
                                            [:seon.problems/id "x"])))))
      (let [before (:t @connection)
            refused (db/transact! connection [{:seon.cluster.eval/id "incomplete"}])
-           wrong (db/transact! connection [{:my.plan.item/title 42}])
+           wrong (db/transact! connection [{:seon.task/intent 42}])
            nested (db/transact! connection
                                 [{:seon.problems/id "nested"
                                   :seon.turn/_attempts [{:seon.turn/id 42}]}])]
@@ -52,7 +52,7 @@
        (is (int? (first (:seon.db/path refused))))
        (is (str/includes? (:seon.error/message refused) ":seon.cluster.eval/run"))
        (is (string? (:seon.db.write.attempt/request-id wrong)))
-       (is (= [0 :my.plan.item/title] (:seon.db/path wrong)))
+       (is (= [0 :seon.task/intent] (:seon.db/path wrong)))
        (is (= [0 :seon.turn/_attempts 0 :seon.turn/id] (:seon.db/path nested)))
        (is (= before (:t @connection)))))))
 
@@ -77,70 +77,68 @@
   (test-support/with-database
    (fn [connection]
      (doseq [[transaction path]
-             [[[{ :my.plan.item/id "feedback/type" :my.plan.item/title 42}]
-               [0 :my.plan.item/title]]
-              [[[:db/add "feedback/type" :my.plan.item/title 42]] [0 3]]]]
-       (let [result (refused connection transaction :my.plan.item/title 42 path)]
+             [[[(assoc (test-support/task-row "feedbacktype" "x") :seon.task/intent 42)]
+               [0 :seon.task/intent]]
+              [[[:db/add "feedback/type" :seon.task/intent 42]] [0 3]]]]
+       (let [result (refused connection transaction :seon.task/intent 42 path)]
          (is (= (get (:seon.schema.projection/forms (schema/handed-projection))
-                     :my.plan.item/title)
+                     :seon.task/intent)
                 (:seon.schema/form result)))
          (is (str/starts-with? (db/render-rejection-ai result) "seon.db/transact! refused transaction data at"))
          (is (str/includes? (db/render-rejection-ai result) "got an integer 42. Fix:"))))
      (testing "the supplied projection owns constraints on the same attribute"
        (let [forms (:seon.schema.projection/forms (schema/handed-projection))
              projection (schema/declaration-projection
-                         (assoc forms :my.plan.item/title [:string {:min 8}]))]
+                         (assoc forms :seon.task/intent [:string {:min 8}]))]
          (db/carry-connection-projection-state!
           connection (evaluation/projection-state @connection projection))
          (schema/call-with-projection
           projection
-          #(refused connection [[:db/add "feedback/projected" :my.plan.item/title "short"]]
-                    :my.plan.item/title "short" [0 3])))))))
+          #(refused connection [[:db/add "feedback/projected" :seon.task/intent "short"]]
+                    :seon.task/intent "short" [0 3])))))))
 
 (deftest unknown-attribute-with-candidates
   (test-support/with-database
    (fn [connection]
      (doseq [[transaction path]
-             [[[{ :my.plan.item/typo "x"}] [0 :my.plan.item/typo]]
-              [[[:db/add "feedback/unknown" :my.plan.item/typo "x"]] [0 3]]]]
-       (let [result (refused connection transaction :my.plan.item/typo "x" path)]
-         (is (some #{:my.plan.item/title} (:seon.db/registered-candidates result))))))))
+             [[[{ :seon.task/typo "x"}] [0 :seon.task/typo]]
+              [[[:db/add "feedback/unknown" :seon.task/typo "x"]] [0 3]]]]
+       (let [result (refused connection transaction :seon.task/typo "x" path)]
+         (is (some #{:seon.task/intent} (:seon.db/registered-candidates result))))))))
 
 (deftest missing-required-identity-member
   (test-support/with-database
    (fn [connection]
-     (let [result (refused connection [{:my.plan.item/id "feedback/missing"}]
-                           :my.plan.item/title {:my.plan.item/id "feedback/missing"}
-                           [0 :my.plan.item/title])]
+     (let [result (refused connection [{:seon.task/id "feedbackmiss"}]
+                           :seon.task/ns {:seon.task/id "feedbackmiss"}
+                           [0 :seon.task/ns])]
        (is (= :map (first (:seon.db/entity-form result))))
-       (is (some #(= [:my.plan.item/title :my.plan.item/title] %)
+       (is (some #(= [:seon.task/ns :seon.task/ns] %)
                  (:seon.db/entity-form result)))))))
 
 (deftest unknown-key-suggestion-comes-from-present-attributes
   (test-support/with-database
    (fn [connection]
-     (let [unknown (keyword "my.plan" "item/id")
-           result (refused connection [{unknown "feedback/typo"
-                                       :my.plan.item/title "A real step"}]
-                           unknown "feedback/typo" [0 unknown])
+     (let [unknown (keyword "seon" "task/id")
+           result (refused connection [{unknown "feedbacktypo"
+                                       :seon.task/intent "A real task"}]
+                           unknown "feedbacktypo" [0 unknown])
            shown (db/render-rejection-ai result)]
-       (is (= [:my.plan.item/id] (:seon.db/registered-candidates result)))
-       (is (str/includes? shown "Fix: Use :my.plan.item/id;"))))))
+       (is (= [:seon.task/id] (:seon.db/registered-candidates result)))
+       (is (str/includes? shown "Fix: Use :seon.task/id;"))))))
 
 (deftest nested-component-and-lookup-violations
   (test-support/with-database
    (fn [connection]
      (testing "a nested component reports its own attribute and complete path"
        (refused connection
-                [{:seon.agent/id "feedback/nested"
-                  :seon.agent/plan {:my.plan/steps
-                                    [{:my.plan.item/id "feedback/child"
-                                      :my.plan.item/title false}]}}]
-                :my.plan.item/title false
-                [0 :seon.agent/plan :my.plan/steps 0 :my.plan.item/title]))
+                [(assoc (test-support/task-row "feedbacknest" "Nested")
+                        :seon.task/steps [{:seon.step/position 0 :seon.step/text false :seon.step/status :open}])]
+                :seon.step/text false
+                [0 :seon.task/steps 0 :seon.step/text]))
      (testing "a lookup ref validates the identity value, including its nesting"
        (refused connection
-                [[:db/add "feedback/ref" :my.plan.item/agent [:seon.agent/id 42]]]
+                [[:db/add "feedback/ref" :seon.task/created-by [:seon.agent/id 42]]]
                 :seon.agent/id 42 [0 3 1])))))
 
 (deftest tempids-and-current-transaction-are-admitted
@@ -149,23 +147,21 @@
      (let [result
            (db/transact!
             connection
-            [{:db/id -1 :seon.agent/id "feedback/tempid"
-              :my.plan.item/position 4}
-             {:db/id "feedback/step" :my.plan.item/id "feedback/step"
-              :my.plan.item/title "Valid" :my.plan.item/agent -1
-              :my.plan.item/needs #{"feedback/next"}}
-             {:db/id "feedback/next" :my.plan.item/id "feedback/next"
-              :my.plan.item/title "Next"
-              :my.plan.item/needs [:my.plan.item/id "feedback/step"]}
-             {:my.plan.item/id "feedback/single" :my.plan.item/title "Single"
-              :my.plan.item/needs "feedback/step"}
-             [:db/add "feedback/step" :my.plan.item/needs "datomic.tx"]])]
+            [{:db/id -1 :seon.agent/id "feedback/tempid"}
+             (assoc (test-support/task-row "feedbackstep" "Valid")
+                    :db/id "feedback/step" :seon.task/created-by -1
+                    :seon.task/faults #{"feedback/next"})
+             (assoc (test-support/task-row "feedbacknext" "Next")
+                    :db/id "feedback/next" :seon.task/faults [[:seon.task/id "feedbackstep"]])
+             (assoc (test-support/task-row "feedbacksing" "Single")
+                    :seon.task/faults "feedback/step")
+             [:db/add "feedback/step" :seon.task/faults "datomic.tx"]])]
        (is (some? (:db-after result)))
-       (is (= #{"feedback/step" "feedback/next" "feedback/single"}
-              (set (db/q '[:find [?id ...] :where [_ :my.plan.item/id ?id]] @connection))))
+       (is (= #{"feedbackstep" "feedbacknext" "feedbacksing"}
+              (set (db/q '[:find [?id ...] :where [_ :seon.task/id ?id]] @connection))))
        (is (some? (db/q '[:find ?instant . :where
-                          [?step :my.plan.item/id "feedback/step"]
-                          [?step :my.plan.item/needs ?tx]
+                          [?step :seon.task/id "feedbackstep"]
+                          [?step :seon.task/faults ?tx]
                           [?tx :db/txInstant ?instant]] @connection)))))))
 
 (deftest non-temporal-stores-admit-writes-while-a-retention-rule-is-in-force

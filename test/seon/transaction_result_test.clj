@@ -14,26 +14,26 @@
      (let [ctx (support/fork-cluster-ctx connection "transaction-result")
            created (support/agent-value
                     ctx
-                    "(seon.db/transact! [{:db/id \"item\" :my.plan.item/id \"report/item\" :my.plan.item/title \"Verify\"} [:db/add \"item\" :my.plan.item/needs \"datomic.tx\"]])")
+                    "(seon.db/transact! [{:db/id \"item\" :seon.task/id \"reportitem00\" :seon.task/ns (quote fixture.tasks) :seon.task/name \"report\" :seon.task/kind :function :seon.task/intent \"Verify\"} [:db/add \"item\" :my.note/about \"datomic.tx\"]])")
            changes (:seon.db/datoms created)
            transaction (:seon.db/tx created)]
        (is (= #{:seon.db/tx :seon.db/datoms} (set (keys created))))
        (is (integer? transaction))
-       (is (some #{[[:my.plan.item/id "report/item"] :my.plan.item/title "Verify" true]} changes))
-       (is (some #{[[:my.plan.item/id "report/item"] :my.plan.item/needs transaction true]} changes)
+       (is (some #{[[:seon.task/id "reportitem00"] :seon.task/intent "Verify" true]} changes))
+       (is (some #{[[:seon.task/id "reportitem00"] :my.note/about transaction true]} changes)
            "the current transaction and the entity tempid are resolved")
-       (is (= "Verify" (:my.plan.item/title
-                        (db/pull @connection [:my.plan.item/title]
-                                 [:my.plan.item/id "report/item"]))))
+       (is (= "Verify" (:seon.task/intent
+                        (db/pull @connection [:seon.task/intent]
+                                 [:seon.task/id "reportitem00"]))))
        (let [removed (support/agent-value
-                      ctx "(seon.db/transact! [[:db.fn/retractEntity [:my.plan.item/id \"report/item\"]]])")]
-         (is (some #{[[:my.plan.item/id "report/item"] :my.plan.item/id "report/item" false]}
+                      ctx "(seon.db/transact! [[:db.fn/retractEntity [:seon.task/id \"reportitem00\"]]])")]
+         (is (some #{[[:seon.task/id "reportitem00"] :seon.task/id "reportitem00" false]}
                    (:seon.db/datoms removed))
              "a retracted identity is resolved from the report's before value")
-         (is (nil? (db/pull @connection [:my.plan.item/id]
-                           [:my.plan.item/id "report/item"]))))
+         (is (nil? (db/pull @connection [:seon.task/id]
+                           [:seon.task/id "reportitem00"]))))
        (let [before (db/basis-t @connection)
              refused (support/agent-value
-                      ctx "(seon.db/transact! [[:db/add \"bad\" :my.plan.item/title 42]])")]
+                      ctx "(seon.db/transact! [[:db/add \"bad\" :seon.task/intent 42]])")]
          (is (string? (:seon.db.write.attempt/request-id refused)))
          (is (= before (db/basis-t @connection))))))))

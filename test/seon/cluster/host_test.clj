@@ -464,9 +464,9 @@
   (with-host-world {}
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/member-custody")
-            shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['my.plan-test/a-changed-title-is-an-ordinary-fact-update]})] "
+            shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['seon.task-steps-test/step-appends-and-is-current-when-none-is]})] "
                                                   "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
-        (is (= "[true [[my.plan-test/a-changed-title-is-an-ordinary-fact-update 0 nil]]]" shown))))))
+        (is (= "[true [[seon.task-steps-test/step-appends-and-is-current-when-none-is 0 nil]]]" shown))))))
 
 (deftest a-refused-deletion-is-its-forms-refusal-and-the-run-closes
   ;; Before, one refused declaration replaced every form's shown text with the

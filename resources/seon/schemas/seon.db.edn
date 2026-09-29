@@ -7,7 +7,7 @@
           [:or
            :seon.error/value :seon.error/base
            :my.background/error :my.edit/error :my.fs/error :my.message/error
-           :my.plan/error :my.shell/error :my.turn/error
+           :my.shell/error :my.turn/error
            :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
            :seon.artifact/error :seon.boot/error :seon.bootstrap/error
            :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error

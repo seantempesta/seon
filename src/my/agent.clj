@@ -16,7 +16,7 @@
 
   Example:
   (my.agent/identity)"
-  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.agent/identity :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.agent/identity :seon.error/value]]}
   [request]
   (agent/identity (:seon.db/db request) (:seon.agent/id request)))
 
@@ -30,7 +30,7 @@
 
   Example:
   (my.agent/done {})"
-  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.turn/wait :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.turn/wait :seon.error/value]]}
   [_request]
   (run/wait "Session complete."))
 
@@ -42,7 +42,7 @@
 
   Example:
   (my.agent/settings)"
-  {:malli/schema [:=> [:cat :my.plan/request] [:or :my.agent/settings :seon.error/value]]}
+  {:malli/schema [:=> [:cat :seon.agent/db-request] [:or :my.agent/settings :seon.error/value]]}
   [request]
   (agent/settings (:seon.db/db request) (:seon.agent/id request)))
 

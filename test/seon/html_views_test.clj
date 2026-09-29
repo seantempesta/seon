@@ -5,7 +5,6 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [seon.plan :as plan]
             [seon.agent :as agent]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as cluster.agent]
@@ -32,33 +31,6 @@
     (doseq [text texts] (is (str/includes? printed text)))
     (doseq [literal ["#inst" ":db/id" "[:seon.agent/id"]]
       (is (not (str/includes? printed literal))))))
-
-(deftest plan-pairs-are-readable-and-ai-is-data
-  (support/with-database
-    (fn [connection]
-      (support/transacted! connection (support/agent-tx @connection "alice"))
-      (plan/plan! {:my.plan/objective "Ship a clear plan"
-                   :my.plan/steps [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}
-                                   {:my.plan.item/id "second" :my.plan.item/title "Ship"
-                                    :my.plan.item/done-when "The page reads clearly"
-                                    ;; needs are prerequisite ids, not refs (71c6d1fb6)
-                                    :my.plan.item/needs #{"first"}}]}
-                  @connection connection "alice")
-      (let [unit {:seon.agent/id "alice" :seon.db/db @connection}
-            step (plan/item {:my.plan.item/id "first" :seon.db/db @connection})]
-        (readable! (plan/render-plan-html unit) ["Ship a clear plan" "Blocked on: " "Prepare" "pending"])
-        (readable! (plan/render-item-html step) ["Prepare" "pending"])
-        (readable! (plan/render-ready-items-html [step]) ["Ready work (1)" "Prepare"])
-        (is (= {:seon.agent/id "alice" :my.plan/objective "Ship a clear plan"
-                :seon.plan/step-lines {"first" "1. ready — Prepare" "second" "2. blocked — Ship"}
-                :seon.render/operations ['(my.plan/current! {:my.plan.item/id "first"})]}
-               (plan/render-plan-ai unit)))
-        (is (= (golden :item) (plan/render-item-ai step)))
-        (is (= [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}] (plan/render-ready-items-ai [step])))
-      (plan/complete! "first" connection "alice")
-      (plan/start! "second" connection "alice")
-      (readable! (plan/render-plan-html {:seon.agent/id "alice" :seon.db/db @connection})
-                 ["done" "current" "datetime=" "The page reads clearly"])))))
 
 (deftest settings-pair-omits-absences-and-ai-is-data
   (support/with-database
@@ -106,10 +78,10 @@
   (support/with-database
     (fn [connection]
       (support/transacted! connection (into (support/agent-tx @connection "alice")
-                                        [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}]))
+                                        [(assoc (support/task-row "prepare00000" "Prepare") :seon.task/name "Prepare")]))
       (support/transacted! connection [{:my.note/id "observation" :my.note/content "Verified"
                                         :my.note/agent [:seon.agent/id "alice"]
-                                        :my.note/about [:my.plan.item/id "first"]}])
+                                        :my.note/about [:seon.task/id "prepare00000"]}])
       (let [entity (assoc (db/pull @connection '[*] [:my.note/id "observation"]) :seon.db/db @connection)
             unit {:seon.agent/id "alice" :seon.db/db @connection}]
         (readable! (note/render-note-html entity) ["observation" "Verified" "Prepare" "datetime="])
@@ -118,15 +90,15 @@
                (note/render-note-ai {:my.note/id (:my.note/id entity)
                                      :my.note/content (:my.note/content entity)
                                      :my.note/agent [:seon.agent/id "alice"]})))
-        (is (= [{:my.note/id "observation" :my.note/content "Verified" :my.note/about {:my.plan.item/id "first"}}]
+        (is (= [{:my.note/id "observation" :my.note/content "Verified" :my.note/about {:seon.task/id "prepare00000"}}]
                (note/render-notes-ai unit)))))))
 
 (deftest help-preserves-lines-and-ai
   (support/with-database
     (fn [_]
-      (let [unit {:seon.help/lines ["Inspect (dir my.plan) before acting." "Then (doc seon.db/q)."]}
+      (let [unit {:seon.help/lines ["Inspect (dir my.task) before acting." "Then (doc seon.db/q)."]}
             html (bootstrap/render-help-html unit)]
-        (readable! html ["<code>(dir my.plan)</code>" "<code>(doc seon.db/q)</code>"])
+        (readable! html ["<code>(dir my.task)</code>" "<code>(doc seon.db/q)</code>"])
         (is (= (golden :help) (bootstrap/render-help-ai unit)))))))
 
 (deftest identity-pairs-preserve-ai
@@ -199,20 +171,20 @@
 (deftest transactions-render-values-without-entity-id-dumps
   (support/with-database
     (fn [connection]
-      (let [report (db/transact! connection [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
-            ;; The writer's own refusal: a step without its required title.
-            refusal (db/transact! connection [{:my.plan.item/id "refused"}])
+      (let [report (db/transact! connection [(support/task-row "prepare00000" "Prepare")])
+            ;; The writer's own refusal: a task without its required intent.
+            refusal (db/transact! connection [(dissoc (support/task-row "refusedtask0" "x") :seon.task/intent)])
             ;; A real report whose only datom is its transaction's own: the
             ;; declared report shape holds database values, never identity maps.
             shown-report (db/transact! connection [])]
         (readable! (db/render-transaction-html report) ["Committed transaction" "Prepare" "Changes"])
         (readable! (db/render-rejection-html refusal)
-                   ["seon.db/transact!" "Supply :my.plan.item/title with a string of length at least 1."])
+                   ["seon.db/transact!" "Supply :seon.task/intent with a string of length at least 1."])
         (is (= {:seon.db.report/facts 0 :seon.db.report/entities []}
                (select-keys (db/render-transaction-ai shown-report) [:seon.db.report/facts :seon.db.report/entities]))
             "a report is data: its facts counted and its changed entities by identity")
         (is (str/includes? (db/render-rejection-ai refusal)
-                           "Supply :my.plan.item/title with a string of length at least 1."))))))
+                           "Supply :seon.task/intent with a string of length at least 1."))))))
 
 (deftest settings-display-follows-declarations-without-name-based-units
   ;; WANTED (ed3f44225): each dial declares its own label, divisor and unit,

@@ -1,7 +1,11 @@
 (ns ^{:seon.ns/context-relevant? true} my.task
   "The one work queue (health plan §5): the tasks a fault or a warning signal
-  opened that nobody holds, and the claim that puts one on my branch. Call
-  preparation supplies my database, connection and identity."
+  opened that nobody holds, and the claim that puts one on my branch; and my
+  plan, the ordered steps of the task I hold. Call preparation supplies my
+  database, connection and identity.
+
+  Example:
+  (my.task/steps {})"
   (:require [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.task :as task]))

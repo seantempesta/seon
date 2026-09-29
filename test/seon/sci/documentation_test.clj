@@ -74,7 +74,7 @@
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
        (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
        (is (= :map (first (second (:in entity)))))
-       (doseq [target ["my.message/send" "my.agent/done" "my.plan" "my.note"]
+       (doseq [target ["my.message/send" "my.agent/done" "my.task" "my.note"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
          (is (= (cond-> #{:summary :body :example :in :out}
                   (namespace (symbol target)) (conj :arglists :supplied))

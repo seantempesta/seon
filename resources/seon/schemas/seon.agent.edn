@@ -35,8 +35,7 @@
                      [:map
                       {:seon.db/attributes true,
                        :seon.render/units
-                       [:seon.agent/plan
-                        :seon.message/_to
+                       [:seon.message/_to
                         :seon.agent/settings
                         :my.note/_agent
                         :seon.agent/namespace
@@ -56,9 +55,12 @@
                       [:seon.agent/namespace
                        {:optional true}
                        :seon.agent/namespace]
-                      [:seon.agent/plan {:optional true} :seon.agent/plan]
                       [:seon.agent/settings {:optional true} :seon.agent/settings]
                       [:seon.agent/runtime {:optional true} :seon.agent/runtime]],
+                     :db-request
+                     [:map {:description "A call from an agent's world: the database value and the agent, both supplied by call preparation."}
+                      [:seon.db/db :seon.db/database-value]
+                      [:seon.agent/id :seon.agent/id]],
                      :arm-request
                      [:map
                       [:seon.turn.loop/cluster
@@ -204,10 +206,6 @@
                      :creation-incomplete :seon.agent/id
                      :armer-quiescence-undeliverable [:= true]
                      :supervision-not-committed [:= true]
-:plan [:and {:seon.db/component true :seon.db/component-schema :my.plan/entity
-             :seon.render/ai seon.plan/render-plan-ai
-             :seon.render/html seon.plan/render-plan-html
-             :seon.render/form seon.plan/render-plan-form} :seon.db/ref]
              :settings [:and {:seon.db/component true :seon.db/component-schema :seon.config/agent-overlay
                               :seon.render/ai seon.agent/render-settings-ai
                               :seon.render/html seon.agent/render-settings-html

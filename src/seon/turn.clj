@@ -21,7 +21,6 @@
             [seon.fault :as fault]
             [seon.flow :as seon.flow]
             [seon.id :as id]
-            [seon.plan :as plan]
             [seon.profile.measurement :as measurement]
             [seon.program :as program]
             [seon.print.value :as print.value]
@@ -2242,8 +2241,7 @@
                                     ;; against the history from which it was derived.
                                     (if (and (nil? (open-for-agent current [:seon.agent/id agent-id]))
                                              (= latest (latest-evaluations current agent-id)))
-                                      (conj (into refresh-tx (:seon.db/tx-data prepared))
-                                            [:db.fn/call #'plan/settle-call agent-id])
+                                      (into refresh-tx (:seon.db/tx-data prepared))
                                       []))]])))]
                   (if (or (:seon.turn.loop/phase-failed report) (:seon.db/transaction-refused report))
                     (assoc report :seon.turn/refused-system-agent agent-id)
@@ -3309,7 +3307,7 @@
   "`receipt` with `error` delivered beside its value: appended to its
   :seon.cluster.eval/diagnostics as bounded data (a later stage's failure
   never replaces the value)."
-  {:malli/schema [:=> [:cat :map [:maybe [:or :seon.plan/refusal :seon.error/base]]] :map]}
+  {:malli/schema [:=> [:cat :map [:maybe :seon.error/base]] :map]}
   [receipt error]
   (cond-> receipt
     error (update :seon.cluster.eval/diagnostics
@@ -3320,7 +3318,7 @@
   refusal is delivered whole beside it as one flat error whose message says
   the declaration was NOT admitted to the program (a Var the form bound
   exists in the agent's SCI context only), and the receipt's error names it."
-  {:malli/schema [:=> [:cat :map [:or :seon.plan/refusal :seon.error/base]] :map]}
+  {:malli/schema [:=> [:cat :map :seon.error/base] :map]}
   [receipt refusal]
   (let [message (str "Not admitted to the program: its program facts were refused, so any Var it "
                      "bound exists in your SCI context only and my.program/history has no such "
@@ -3436,8 +3434,7 @@
          (:seon.error/values-tx delivery))
         tx-data (if batch?
                   (vec side-tx)
-                  (conj (into (receipt-settle-tx receipt) side-tx)
-                        [:db.fn/call #'plan/settle-call agent-id]))]
+                  (into (receipt-settle-tx receipt) side-tx))]
     {:seon.turn.loop/settled settled
      :seon.turn.loop/undisposed? undisposed?
      :seon.turn.loop/evaluation evaluation
@@ -3558,14 +3555,11 @@
                     (with-fault-windows (db/db connection) requests (mapv :seon.turn.loop/receipt prepared))))
              (into (mapcat :seon.db/tx-data) prepared)
              (into measured)
-             ;; The close precedes plan/settle-call, as in close-turn; a
-             ;; settlement that already closes the turn needs no fold.
+             ;; A settlement that already closes the turn needs no fold.
              (cond-> (not (some closing-settlement? prepared))
                (into (map (fn [[agent-id run-id]]
                             [:db.fn/call #'close-folded-call {::id run-id :seon.agent/id agent-id}]))
-                     (distinct (map (juxt :seon.agent/id :seon.turn/id) requests))))
-             (into (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
-                   (distinct (map :seon.agent/id requests))))))
+                     (distinct (map (juxt :seon.agent/id :seon.turn/id) requests)))))))
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
         ;; commit directly — so the caller has no branch to get wrong. The
         ;; branch this replaced handed `(seq …)`, a `ChunkedSeq`, where the
@@ -5260,8 +5254,7 @@
   [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report}]
   (let [outcome (db/transact!
                  (:seon.db/connection cluster)
-                 (conj (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"})
-                       [:db.fn/call #'plan/settle-call (:seon.agent/id work)]))]
+                 (close-tx {:seon.turn/id (:seon.turn/id work) :seon.turn/closed-tx "datomic.tx"}))]
     (if-not (:db-after outcome)
       (do (settle! {:seon.turn.loop/cluster cluster :seon.turn.loop/now now
                      :seon.agent/id (:seon.agent/id work)

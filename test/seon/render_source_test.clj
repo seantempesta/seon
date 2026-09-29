@@ -27,7 +27,7 @@
   "A fixture preview whose result depends on one real database attribute."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [_unit]
-  "(seon.db/pull [:my.plan.item/title] [:my.plan.item/id \"preview-item\"])")
+  "(seon.db/pull [:seon.task/intent] [:seon.task/id \"previewitem0\"])")
 
 (defn- subject-of
   "The declared subject producer whose pair names a source fixture renderer."
@@ -69,7 +69,7 @@
                                  {:seon.agent/id "memory-preview-agent"
                                   :seon.ns/name 'my.agents.memory-preview
                                   :seon.cluster/name "memory-preview"})
-                                [{:my.plan.item/id "preview-item" :my.plan.item/title "Before"}]))
+                                [(support/task-row "previewitem0" "Before")]))
      (support/transacted! connection
                           (turn/open-tx
                            {:seon.turn/id "agent-is-busy" :seon.turn/agent [:seon.agent/id "memory-preview-agent"] :seon.turn/opened-tx "datomic.tx"}))
@@ -137,7 +137,7 @@
          (is (= (db/basis-t database) (db/basis-t @connection))
              "previewing, including the busy agent, changes no facts")
          (is (nil? (db/pull @connection [:seon.turn/id] [:seon.turn/id cached-id])))
-         (support/transacted! connection [{:my.plan.item/id "preview-item" :my.plan.item/title "After"}])
+         (support/transacted! connection [{:seon.task/id "previewitem0" :seon.task/intent "After"}])
          (let [next-calls (atom {})
                next-output (source-call
                             (assoc request :seon.db/db @connection
@@ -154,12 +154,11 @@
    (fn [connection]
      (support/transacted!
              connection
-             [{:my.plan.item/id "source-provenance"
-               :my.plan.item/title "Exact title"}])
+             [(support/task-row "srcprov00000" "Exact title")])
      (let [database @connection
-           lookup [:my.plan.item/id "source-provenance"]
+           lookup [:seon.task/id "srcprov00000"]
            entity (db/pull database '[*] lookup)
-           cursor {:seon.render.data/path [:my.plan.item/title]
+           cursor {:seon.render.data/path [:seon.task/intent]
                    :seon.render.data/offset 0}
            entity-source
            (render/render-default-ai-source
@@ -180,20 +179,20 @@
                          :seon.sci.eval/time-limit-ms 2000})))]
        (testing "entity source uses the public omitted-database pull"
          (is (= '(seon.db/pull (quote [*])
-                               [:my.plan.item/id "source-provenance"])
+                               [:seon.task/id "srcprov00000"])
                 (read-string entity-source)))
          (is (= entity (evaluate entity-source))))
        (testing "a cursor constrains the source to the reached scalar"
          (is (= "Exact title" (evaluate scalar-source)))
          (is (= '(seon.render.data/pull-at
                    (quote [*])
-                   [:my.plan.item/id "source-provenance"]
-                   {:seon.render.data/path [:my.plan.item/title]
+                   [:seon.task/id "srcprov00000"]
+                   {:seon.render.data/path [:seon.task/intent]
                     :seon.render.data/offset 0})
                 (read-string scalar-source))))
        (testing "query and path failures remain flat diagnostics"
          (is (:seon.render.data/root-description
-              (data/pull-at '[*] [:my.plan.item/id "absent"] cursor)))
+              (data/pull-at '[*] [:seon.task/id "absent"] cursor)))
          (is (:seon.render.data/root-description
               (data/pull-at '[*] lookup
                             {:seon.render.data/path [:no.such/path]

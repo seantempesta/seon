@@ -552,10 +552,10 @@
                 result)))))
 
 (deftest reader-errors-retain-token-and-enclosing-parser-evidence
-  (let [parsed (events "(my.plan/current! {:my.plan/item/id \"x\"})")
+  (let [parsed (events "(my.task/done! {:my.task/item/id \"x\"})")
         data (:seon.error/data (first-read-error parsed))]
-    (is (= ":my.plan/item/id" (:seon.sci.reader/token data)))
-    (is (= 'my.plan/current! (:seon.sci.reader/call data)))
+    (is (= ":my.task/item/id" (:seon.sci.reader/token data)))
+    (is (= 'my.task/done! (:seon.sci.reader/call data)))
     (is (= 0 (:seon.sci.reader/argument-index data)))
     (is (= ["{" "("] (mapv :edamame/opened-delimiter (:seon.sci.reader/containers data)))))
   (let [source "Gate: failed\narguments: []\nexpected: number\nactual: wrong )\n(+ 1 2)"

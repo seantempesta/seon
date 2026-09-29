@@ -67,7 +67,7 @@
 
   INJECTIVE, and that is a requirement rather than an observation: two
   blocks sharing an id would silently morph over each other. A qualified
-  name keeps its namespace (`:my.plan/tree` → `\"surface-my.plan_2f_tree\"`,
+  name keeps its namespace (`:my.note/tree` → `\"surface-my.note_2f_tree\"`,
   the `/` escaped as hex) so `:a/x` and `:b/x` cannot collide, and every
   character outside `[A-Za-z0-9._-]` is escaped rather than dropped —
   dropping is what makes two different names one id."

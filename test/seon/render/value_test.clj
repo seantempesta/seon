@@ -15,7 +15,6 @@
             [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.print :as print]
-            [seon.plan :as plan]
             [seon.repl :as repl]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
@@ -58,27 +57,10 @@
   (support/with-database
    (fn [connection]
      (let [report (db/transact! connection
-                                [{:my.plan.item/id "prepare"
-                                  :my.plan.item/title "Prepare input"
-                                  :my.plan.item/done-when "Input is available"}
-                                 {:my.plan.item/id "check"
-                                  :my.plan.item/title "Check output"}])
+                                [(support/task-row "prepare00000" "Prepare input")
+                                 (support/task-row "check0000000" "Check output")])
            database (db/db connection)
            directory (evaluation/directory-value database 'seon.repl true)
-           step (plan/item {:seon.db/db database :my.plan.item/id "prepare"})
-           _ (support/transacted! connection (support/agent-tx @connection "plan-reader"))
-           installed (plan/plan!
-                      {:my.plan/objective "Verify the render"
-                       :my.plan/current-step {:my.plan.item/id "focus"}
-                       :my.plan/steps [{:my.plan.item/id "focus" :my.plan.item/title "Current task"
-                                        :my.plan.item/done-when "Current criterion"}
-                                       {:my.plan.item/id "later" :my.plan.item/title "Later task"
-                                        :my.plan.item/done-when "Later criterion"}
-                                       {:my.plan.item/id "finished" :my.plan.item/title "Finished task"
-                                        :my.plan.item/done-when "Finished criterion"}]}
-                      (db/db connection) connection "plan-reader")
-           completed (plan/complete! "finished" connection "plan-reader")
-           whole-plan (plan/plan {:seon.db/db (db/db connection) :seon.agent/id "plan-reader"})
            request (assoc (render-request connection nil)
                           :seon.render/profile
                           {:seon.render.profile/id :seon.render.profile/test
@@ -87,15 +69,11 @@
                            :seon.render.profile/max-children 256
                            :seon.render.profile/composition :single-line})]
        (is (seq (:tx-data report)))
-       (is (map? installed))
-       (is (map? completed))
        (is (seq (:functions directory)))
        ;; Each value names its producer (design §1 rule 2): its declared
        ;; return names the pair.
        (doseq [[raw render-pair producer] [[report db/render-transaction-ai 'seon.db/transact!]
-                                          [directory repl/render-directory-ai 'seon.sci.eval/directory-value]
-                                          [step plan/render-item-ai 'seon.plan/item]
-                                          [whole-plan plan/format-plan-ai 'seon.plan/plan]]]
+                                          [directory repl/render-directory-ai 'seon.sci.eval/directory-value]]]
          (is (= (render-pair raw)
                 (render/render-ai (assoc request :seon.render/value raw
                                          :seon.render.call/function producer)))))))))

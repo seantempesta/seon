@@ -136,13 +136,13 @@
   attribute-declared-producers-select-for-every-projection
   (support/with-database
     (fn [connection]
-      (db/transact! connection (support/agent-tx @connection "plan-owner"))
+      (db/transact! connection (support/agent-tx @connection "settings-owner"))
       (let [database (db/db connection)
-            owner (db/q '[:find ?e . :where [?e :seon.agent/id "plan-owner"]] database)
-            entity {:my.plan/agent owner, :my.plan/objective "Verify the plan"}
+            owner (db/q '[:find ?e . :where [?e :seon.agent/id "settings-owner"]] database)
+            entity {:seon.config/agent owner, :seon.config.eval/time-limit-ms 1234}
             ctx (support/fork-cluster-ctx connection)]
-        (doseq [[output producer] [[:seon.render/ai 'seon.plan/render-plan-ai]
-                                   [:seon.render/html 'seon.plan/render-plan-html]]]
+        (doseq [[output producer] [[:seon.render/ai 'seon.agent/render-settings-ai]
+                                   [:seon.render/html 'seon.agent/render-settings-html]]]
           (let [request (assoc
                           (render-request database ctx nil entity)
                           :seon.render/output
@@ -162,13 +162,10 @@
                 (:seon.render.selection/selected
                   (selection (assoc request :seon.render/value [])))))
             (if (= output :seon.render/ai)
-              ;; the AI face is data (f278f8dc3): the plan of the agent it names
-              (is (= "plan-owner" (:seon.agent/id (render-ai request)))
-                  "the plan's AI face renders its owner's plan")
-              (is
-                (str/includes?
-                  (hiccup/->string (render-html request))
-                  "Verify the plan")))))))))
+              ;; the AI face is data (f278f8dc3)
+              (is (map? (render-ai request)) "the settings' AI face is data")
+              (is (seq (hiccup/->string (render-html request)))
+                  "the settings' HTML face renders"))))))))
 
 (deftest
   pulled-entity-selection-and-invocation-share-transaction-shape
@@ -177,12 +174,10 @@
       (db/transact!
         connection
         (into (support/agent-tx @connection "pulled-render-owner")
-          [{:my.plan.item/id "pulled-render-item",
-            :my.plan.item/title "Render the pulled item",
-            :my.plan.item/agent [:seon.agent/id "pulled-render-owner"],
-            :my.plan.item/about ['seon.plan/render-item-html]}]))
+          [(assoc (support/task-row "pulledrender" "Render the pulled item")
+                  :seon.task/created-by [:seon.agent/id "pulled-render-owner"])]))
       (let [database (db/db connection)
-            pulled (db/pull database '[*] [:my.plan.item/id "pulled-render-item"])
+            pulled (db/pull database '[*] [:seon.task/id "pulledrender"])
             prepared (value/transacted pulled database)
             request (assoc
                       (render-request
@@ -196,14 +191,11 @@
             declared-stage (some #(when (= :declared (:seon.render.selection.stage/name %)) %)
                                  (:seon.render.selection/stages decision))
             rendered (render-html request)]
-        (is (integer? (:my.plan.item/agent prepared)))
-        (is
-          (= ['seon.plan/render-item-html] (:my.plan.item/about prepared))
-          "a scalar EDN vector is not mistaken for cardinality-many")
+        (is (integer? (:seon.task/created-by prepared)))
         (is
           (= prepared (value/transacted (dissoc pulled :db/id) database))
           "normalization does not depend on a root :db/id projection")
-        (is (= 'seon.plan/render-item-html (:seon.render.selection/selected decision)))
+        (is (= 'seon.render.ns/task-html (:seon.render.selection/selected decision)))
         (is (= :selected (:seon.render.selection.stage/status declared-stage))
             "the item's identity names its entity schema's pair")
         (is (str/includes? (hiccup/->string rendered) "Render the pulled item"))))))

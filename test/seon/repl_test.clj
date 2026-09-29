@@ -27,7 +27,7 @@
   (doseq [source ["\n```clojure\n;; café <tag>\n(+ 1 2)\n```"
                   "[\"unfinished\\\"" "\\; \\newline ; comment\n{:x -3.2}" ""]
           response [{:seon.eval/shown "[1 :two result/e3]"}
-                    {:seon.eval/shown "Plain help.\nUse (dir my.plan)."
+                    {:seon.eval/shown "Plain help.\nUse (dir my.task)."
                      :seon.eval/renderer 'seon.bootstrap/render-help-ai}
                     {:seon.cluster.eval/error "Reader error"}]]
     (let [emission (merge (cond-> {:seon.ns/name 'my.agents.juniper}
@@ -368,12 +368,12 @@
         (is (= [1 2] (:seon.repl/value reply)))
         (is (= 1 (:seon.repl/ms reply)))))
     (testing "a declared renderer's text is the :value, not text before the map"
-      (let [reply (one-map (repl/response {:seon.cluster.eval/source "(my.plan/current)"
-                                           :seon.eval/renderer 'my.plan/render-ai
+      (let [reply (one-map (repl/response {:seon.cluster.eval/source "(my.task/steps {})"
+                                           :seon.eval/renderer 'my.task/steps
                                            :seon.repl/handle handle
                                            :seon.eval/duration-ms 12
-                                           :seon.eval/shown ";; The plan has two steps.\n(my.plan/step 1)"}))]
-        (is (= ";; The plan has two steps.\n(my.plan/step 1)" (:seon.repl/value reply)) "prose renders are one string")
+                                           :seon.eval/shown ";; The plan has two steps.\n(my.task/steps {})"}))]
+        (is (= ";; The plan has two steps.\n(my.task/steps {})" (:seon.repl/value reply)) "prose renders are one string")
         (is (= handle (:seon.repl/result reply)))
         (is (= 12 (:seon.repl/ms reply))))
       (let [reply (one-map (repl/response {:seon.cluster.eval/source "(dir x)"

@@ -598,7 +598,7 @@
 (defparity "D11" :passing
   ;; A private function is data too: arglists and contract, with the summary
   ;; absent when the function is undocumented.
-  (let [value (:value (first (repl-session ["(doc seon.plan/refuse-constraint!)"])))]
+  (let [value (:value (first (repl-session ["(doc seon.task/create!)"])))]
     (checked "documentation data, not a refusal"
              value
              (and (nil? (:seon.error/message value)) (seq (:arglists value)) (contains? value :in)))))

@@ -892,7 +892,7 @@
   "Read one declaration's source, docstring, contract and location, for a function or a test.
 
   Example:
-  (my.program/source 'seon.plan/refuse-constraint!)
+  (my.program/source 'seon.task/create!)
   Errors: an unknown symbol returns a not-found error naming the nearest symbols."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:or :map :seon.program/not-found-error]]}
@@ -954,7 +954,7 @@
   "The functions and tests of a namespace with their line counts, largest first (top 20).
 
   Example:
-  (my.program/sizes 'seon.plan)"
+  (my.program/sizes 'seon.task)"
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :map]}
   [database ns-sym]
   (let [rows (->> (concat (db/q database '[:find ?s ?src :in $ ?n :where [?e :seon.fn/ns ?ns] [?ns :seon.ns/name ?n]

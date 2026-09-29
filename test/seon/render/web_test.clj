@@ -43,7 +43,6 @@
             [seon.context :as seon.context]
             [seon.db :as db]
             [seon.eval :as evaluation]
-            [seon.plan :as plan]
             [seon.flow :as flow]
             [seon.problems :as problems]
             [seon.render :as render]
@@ -741,9 +740,6 @@ handle))}}
    (fn [connection]
      (support/transacted! connection
                           (support/agent-tx @connection "unit-owner"))
-     (is (map? (:my.plan/diff
-                (plan/plan! {:my.plan/objective "Inspect the page"}
-                            @connection connection "unit-owner"))))
      (is (= 1234 (:seon.config.eval/time-limit-ms
                   (agent/settings! {:seon.config.eval/time-limit-ms 1234}
                                    connection "unit-owner"))))
@@ -754,7 +750,7 @@ handle))}}
                            [:seon.agent/id "unit-owner"])]
        (is (= [:seon.agent/id :seon.agent/branch :seon.agent/cluster :seon.agent/archived-tx
                :seon.agent/admission-closed-tx
-               :seon.agent/namespace :seon.agent/plan :seon.agent/settings
+               :seon.agent/namespace :seon.agent/settings
                :seon.agent/runtime
                :seon.message/inbound-content]
               (declared projection database entity))
@@ -997,7 +993,7 @@ handle))}}
   (support/with-database
     (fn [connection]
       (let [ctx (support/fork-cluster-ctx connection)
-            entity (sci.kernel/program-function ctx 'seon.plan/render-item-html)
+            entity (sci.kernel/program-function ctx 'seon.render.ns/task-html)
             definition ((web-private 'debug-renderer-definition)
                         {:seon.render.call/static-evidence
                          {:seon.render.call/declaration-row entity}})]
@@ -1209,9 +1205,9 @@ handle))}}
               {:datahike.query.dependency/sources
                [{:datahike.query.source/symbol '$
                  :datahike.query.source/argument-position 0
-                 :datahike.query.source/attributes #{:my.plan.item/title}}]}
+                 :datahike.query.source/attributes #{:seon.task/intent}}]}
               :datahike.read/revision
-              {:datahike.read/attributes #{:my.plan.item/title}
+              {:datahike.read/attributes #{:seon.task/intent}
                :datahike.read/cache-eligible? false}}
         rendered ((web-private 'debug-read-dependencies-html)
                   {:seon.render.call/basis-transaction 42
@@ -1323,7 +1319,7 @@ handle))}}
     (fn [connection]
       (let [state (throwing-render-state connection)
             cache (render/shared-cache (get-in state [:seon.turn.loop/cluster :seon.sci.eval/ctx]))
-            closed [::web/debug-tab {:seon.render.debug/viewer-namespace 'my.plan}]]
+            closed [::web/debug-tab {:seon.render.debug/viewer-namespace 'my.task}]]
         (swap! cache assoc
                ::web/packages {"agent-a" {:seon.render.package/revision 1}
                                closed {:seon.render.package/revision 1}}

@@ -54,7 +54,7 @@
      "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
      (str "When unsure, use (dir ns) first, for example (dir my.note). Copy the exact function name, including ! on mutations. (doc my.note/add!) gives its request keys, return shape and example. (dir " namespace-name
           ") lists your own public functions and schema declarations.")
-     "Your plan is your instructions. Read its current step and completion criterion before acting; a done-query completes it automatically when the facts match, and you mark a step without one complete only after seeing the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
+     "Your task is your instructions. (my.task/steps {}) reads its current step; (my.task/plan! {:seon.task/steps [\"first\" \"next\"]}) sets your ordered steps (it makes and claims your own work task when you hold none) and (my.task/done! {}) completes the current step, only after you have seen the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
      "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
      "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
      "Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> <declared-refusal-declared-schema>]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours."
@@ -100,7 +100,7 @@
   "Derive one agent's live opening seeds from current database facts."
   {:malli/schema
    [:=> [:cat :seon.db/db :seon.agent/id]
-    [:or :seon.agent/situation :my.plan/agent-not-found-error :seon.config/error]]}
+    [:or :seon.agent/situation :seon.bootstrap/agent-not-found-error :seon.config/error]]}
   [database agent-id]
   (let [agent-entity
         (db/pull database
@@ -113,8 +113,8 @@
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.bootstrap/opening 'seon.bootstrap/situation
        {:seon.error/message "Create the requested agent before deriving its opening."
         :seon.error/offending agent-id
-        :my.plan/refused-member :seon.agent/id
-        :my.plan/missing-agent-id agent-id
+        :seon.error/member :seon.agent/id
+        :seon.bootstrap/missing-agent-id agent-id
         :seon.error/expected :seon.agent/entity})
       (let [namespace-entity (:seon.agent/namespace agent-entity)
             run (when-let [id (turn/open-for-agent database [:seon.agent/id agent-id])]
