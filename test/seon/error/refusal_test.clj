@@ -414,13 +414,45 @@
     (is (identical? cause (ex-cause error)))))
 
 (deftest helpers-build-recognize-and-short-circuit-on-errors
-  (let [failure (error.refusal/error :seon.error.refusal-test/probe 'seon.error.refusal-test/probe
-                                     "Probe refused." {:seon.error/offending 1})
+  (let [failure (error.refusal/error :seon.error/base
+                                     {:seon.error/operation 'seon.error.refusal-test/probe
+                                      :seon.error/message "Probe refused."})
         evaluated (volatile! false)]
     (is (error.refusal/error? failure))
     (is (= "Probe refused." (:seon.error/message failure)))
-    (is (= 1 (:seon.error/offending failure)))
     (is (not-any? error.refusal/error? [nil {} {:seon.error/at 1} [failure]]))
     (is (= failure (error.refusal/let-ok [a 1 b failure c (vreset! evaluated true)] [a b c])))
     (is (false? @evaluated))
     (is (= [1 2] (error.refusal/let-ok [a 1 b (inc a)] [a b])))))
+
+(deftest error-constructor-builds-the-declared-alternative
+  (let [operation 'seon.error.refusal-test/probe
+        alternative :my.fs/not-regular-file-error
+        valid (error.refusal/error alternative {:seon.error/operation operation
+                                                :seon.error/message "Not a file."
+                                                :my.fs/not-regular-file "/tmp/x"})
+        missing (error.refusal/error alternative {:seon.error/operation operation
+                                                  :seon.error/message "Not a file."})
+        operationless (error.refusal/error :seon.error/base {:seon.error/message "x"})
+        undeclared (error.refusal/error :no.such/error {:seon.error/operation operation})
+        projection (schema/handed-projection)]
+    (testing "a valid construction returns the error, layered and attributed"
+      (is (= alternative (:seon.error/layer valid)))
+      (is (= operation (:seon.error/operation valid)))
+      (is (inst? (:seon.error/at valid)))
+      (is (= alternative (:seon.error/declared-schema (meta valid)))))
+    (testing "the result validates against the named alternative"
+      (is ((schema/projection-validator projection alternative) valid)))
+    (testing "a missing required member is a base refusal carrying the attempted error"
+      (is ((schema/projection-validator projection :seon.error/base) missing))
+      (is (= alternative (:seon.error/member missing)))
+      (is (= :seon.error.refusal/construction (:seon.error/layer missing)))
+      (let [data (:seon.error/data (first (:seon.error/chain missing)))]
+        (is (= "Not a file." (get-in data [:seon.error/attempted :seon.error/message])))
+        (is (contains? (:seon.error/problems data) :my.fs/not-regular-file))))
+    (testing "an absent operation and an undeclared alternative refuse the same way"
+      (is (= :seon.error.refusal/construction (:seon.error/layer operationless)))
+      (is (= "x" (get-in (first (:seon.error/chain operationless))
+                         [:seon.error/data :seon.error/attempted :seon.error/message])))
+      (is (= :seon.error.refusal/construction (:seon.error/layer undeclared)))
+      (is (= :no.such/error (:seon.error/member undeclared))))))

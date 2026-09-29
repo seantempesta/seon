@@ -214,7 +214,9 @@
 ;;; at first use.
 (defonce ^:private schema-seam
   (delay {:handed (requiring-resolve 'seon.schema/handed-projection)
-          :projector (requiring-resolve 'seon.schema/identity-only-projector)}))
+          :projector (requiring-resolve 'seon.schema/identity-only-projector)
+          :explain (requiring-resolve 'seon.schema/explain-candidate-value)
+          :humanize (requiring-resolve 'malli.error/humanize)}))
 
 (defn- operation-projection
   "The projection handed to the operation running now, or nil.
@@ -704,13 +706,71 @@
   [value]
   (and (map? value) (every? #(some? (get value %)) [:seon.error/at :seon.error/layer :seon.error/operation]) true))
 
+(defn- construction-refusal
+  "The `:seon.error/base` refusal for a malformed `error` construction: it
+  names the `alternative`, carries the Malli `problems` (humanized, or nil
+  where none could be computed) and holds the `attempted` value in its
+  `:seon.error/chain` (a link's data, worlds referenced and bounded), so the
+  malformed producer is loud and local. The blame rule's first authored frame
+  is the caller of `error`."
+  {:malli/schema [:=> [:cat :qualified-keyword :map :string :any] :seon.error/base]}
+  [alternative attempted reason problems]
+  (diagnostic
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.error.refusal/construction
+    :seon.error/operation 'seon.error.refusal/error
+    :seon.error/member alternative
+    :seon.error/message (str "Error construction refused for " alternative ": " reason)
+    :seon.error/fix (str "Supply every member " alternative " requires, of the shapes it declares.")
+    :seon.error/throwable (ex-info reason (cond-> {:seon.error/attempted attempted}
+                                            problems (assoc :seon.error/problems problems)))}))
+
 (defn error
-  "The error value for a refusal at `operation` in `layer`, in one call:
-  `message` and the producer's `members` (offending, expected, cause) beside
-  the common part [[diagnostic]] supplies. Returned, never thrown."
-  {:malli/schema [:=> [:cat :seon.error/layer :seon.error/operation :string :map] :seon.error/base]}
-  [layer operation message members]
-  (diagnostic (java.util.Date.) layer operation (assoc members :seon.error/message message)))
+  "The error value of the declared error alternative `alternative` (a
+  registered schema, e.g. `:my.fs/error` or an extension of
+  `:seon.error/base`): THE one constructor, returned, never thrown.
+
+  `members` is the producer's flat map under full keys, with
+  `:seon.error/operation` required and optional `:seon.error/message`,
+  `:seon.error/fix`, `:seon.error/member`, `:seon.error/expected-key`,
+  `:seon.error/offending-projection` and its own. A `:seon.error/throwable`
+  supplies the cause chain, frame and (absent a message) message
+  ([[diagnostic]]). Absent, `:seon.error/at` is now and `:seon.error/layer`
+  is `alternative`; the calling world and producer are attributed.
+
+  The built value is checked against `alternative` (`seon.schema/
+  explain-candidate-value`, Malli `m/explainer`, compiled once per schema
+  object). Valid: the error, its metadata naming `alternative` as
+  `:seon.error/declared-schema` (which selects its render). Invalid (a
+  missing operation included), when no schema projection is handed or when
+  `alternative` is not declared: a `:seon.error/base` refusal naming
+  `alternative`, the humanized problems and the attempted value in
+  `:seon.error/chain`.
+
+  ## Examples
+
+  (error :my.fs/error {:seon.error/operation 'my.fs/read :seon.error/message \"No such file.\"})
+
+  ## Costs
+
+  One [[diagnostic]] plus one cached-explainer call; the refusal path adds a
+  humanize and a chain walk, on the error path only."
+  {:malli/schema [:=> [:cat :qualified-keyword :map] :seon.error/base]}
+  [alternative members]
+  (let [members (merge {:seon.error/at (java.util.Date.) :seon.error/layer alternative} members)
+        projection (operation-projection)]
+    (if-not (qualified-symbol? (:seon.error/operation members))
+      (construction-refusal alternative members "`:seon.error/operation` (a qualified symbol) is required" nil)
+      (let [built (diagnostic members)
+            refused (fn [reason problems] (construction-refusal alternative built reason problems))]
+        (if-not projection
+          (refused "no schema projection is handed to this operation, so the alternative cannot be checked" nil)
+          (try
+            (if-let [explanation ((:explain @schema-seam) projection alternative built)]
+              (refused "the built error does not satisfy it" ((:humanize @schema-seam) explanation))
+              (vary-meta built assoc :seon.error/declared-schema alternative))
+            (catch clojure.lang.ExceptionInfo e
+              (refused (str "it cannot be checked: " (ex-message e)) nil))))))))
 
 (defmacro let-ok
   "Like `let`, but a bound value that is an [[error?]] is returned at once and
