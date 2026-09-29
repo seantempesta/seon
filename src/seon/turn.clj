@@ -5401,11 +5401,12 @@
   (when-not (= :released (:seon.turn.loop/outcome result))
     (let [database (db/db (:seon.db/connection cluster))
           left (turns-left database agent-id)
-          deferred (when (and (int? left) (zero? left))
+          ;; an absent dial bounds nothing, so no run was spent against it
+          limit (max-episode-runs database agent-id)
+          deferred (when (and (int? left) (zero? left) (int? limit))
                      (deferred-triggers database agent-id))]
       (when (seq deferred)
-        (let [limit (max-episode-runs database agent-id)
-              diagnostic
+        (let [diagnostic
               (seon.error.refusal/diagnostic
                (Date.) :seon.turn/episode 'seon.turn/turn
                {:seon.error/message

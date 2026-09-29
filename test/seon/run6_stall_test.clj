@@ -79,7 +79,7 @@
                                  (tree-seq coll? seq (:html before)))]
        (is (= 2 (turn/turns-left @connection "run6-stall")))
        (is (nil? (turn/next-agent-work @connection {:seon.agent/id "run6-stall"})))
-       (is (str/includes? (:header before) "stalled: :seon.ai/unparseable-body at "))
+       (is (str/includes? (:header before) "stalled: seon.ai/complete at "))
        (is (str/includes? (:header before) ", waiting for an outside wake"))
        (is (= "Session stalled" (:seon.render.transcript/label first-rule)))
        (is (= 1 (:seon.render.transcript/count first-rule)))

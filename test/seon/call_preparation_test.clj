@@ -475,10 +475,12 @@
    :seon.call-preparation/validators])
 
 (defn- unrelated-entity
-  "One ordinary fact no snapshot query reads: a namespace row."
+  "One ordinary fact no snapshot query reads: a namespace row without its
+  admission source (`:seon.schema.admission/source` is a read attribute)."
   {:malli/schema [:=> [:cat :seon.db/database-value :string] :map]}
   [database label]
-  (test-support/namespace-entity database (symbol (str "call-preparation-unrelated-" label))))
+  (dissoc (test-support/namespace-entity database (symbol (str "call-preparation-unrelated-" label)))
+          :seon.schema.admission/source))
 
 (defn- alternate-entity
   "A second supplied-default row reusing the shipped database row's schema

@@ -24,7 +24,12 @@
      (let [accepted (db/transact! connection
                                  [{:seon.problems/id "x"}
                                   [:db/add "reverse-turn" :seon.turn/id "reverse-turn"]
-                                  {:seon.problems/id "reverse-attempt"
+                                  {:seon.ai.attempt/id "reverse-attempt"
+                                   :seon.ai.attempt/ordinal 0
+                                   :seon.ai.attempt/at #inst "2026-01-01"
+                                   :seon.ai/endpoint "reverse-endpoint"
+                                   :seon.ai/model "reverse-model"
+                                   :seon.ai.attempt/settings-edn "{}"
                                    :seon.turn/_attempts [:seon.turn/id "reverse-turn"]}])]
        (is (some? (:db-after accepted)))
        (is (= "x" (:seon.problems/id
@@ -33,7 +38,7 @@
               (db/q '[:find ?id . :where
                       [?turn :seon.turn/id "reverse-turn"]
                       [?turn :seon.turn/attempts ?attempt]
-                      [?attempt :seon.problems/id ?id]] @connection))))
+                      [?attempt :seon.ai.attempt/id ?id]] @connection))))
      (let [accepted (db/transact! connection
                                  [{:db/id [:seon.problems/id "x"]
                                    :seon.task/intent "attribute-only"}])]
@@ -70,7 +75,7 @@
           (is (= (rest path) (rest (:seon.db/path result)))))
       (is (= path (:seon.db/path result))))
     (is (= before (:t @connection)) "a refusal commits nothing")
-    (is (= :database-write (get-in result [:seon.error/data :seon.error/layer])))
+    (is (= :seon.db/database-write (:seon.error/layer result)))
     result))
 
 (deftest bad-value-type
@@ -84,8 +89,8 @@
          (is (= (get (:seon.schema.projection/forms (schema/handed-projection))
                      :seon.task/intent)
                 (:seon.schema/form result)))
-         (is (str/starts-with? (db/render-rejection-ai result) "seon.db/transact! refused transaction data at"))
-         (is (str/includes? (db/render-rejection-ai result) "got an integer 42. Fix:"))))
+         (is (= (:seon.error/message result) (:seon.error/message (db/render-rejection-ai result))))
+         (is (= [42] (mapv :seon.error/offending (:seon.error/problems (db/render-rejection-ai result)))))))
      (testing "the supplied projection owns constraints on the same attribute"
        (let [forms (:seon.schema.projection/forms (schema/handed-projection))
              projection (schema/declaration-projection
@@ -125,7 +130,7 @@
                            unknown "feedbacktypo" [0 unknown])
            shown (db/render-rejection-ai result)]
        (is (= [:seon.task/id] (:seon.db/registered-candidates result)))
-       (is (str/includes? shown "Fix: Use :seon.task/id;"))))))
+       (is (= [unknown] (mapv :seon.error/offending (:seon.error/problems shown))))))))
 
 (deftest nested-component-and-lookup-violations
   (test-support/with-database

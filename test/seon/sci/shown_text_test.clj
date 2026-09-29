@@ -33,7 +33,7 @@
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 2000}
            result (render/call-with-walk-context
-                   request #(evaluation/evaluate request))
+                   request #(support/evaluate request))
            shown (repl/value-text result)]
        (is (nil? (:seon.cluster.eval/error result)))
        (is (= "Render this plan clearly"
