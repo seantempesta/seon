@@ -1346,7 +1346,7 @@
                   (fn [position [entry evaluation-entity]]
                     (let [entity (get by-eid (get-in evaluation-entity [:seon.cluster.eval/run :db/id]))
                           origin (session-origin database entity evaluation-entity)
-                          emission (repl/entity-emission evaluation-entity)
+                          emission (repl/entity-emission (assoc evaluation-entity :seon.db/db database))
                           previous (when (pos? position) (nth saved (dec position)))
                           boundary? (not= (:seon.cluster.eval/run evaluation-entity)
                                           (:seon.cluster.eval/run previous))]
