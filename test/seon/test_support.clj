@@ -886,7 +886,7 @@
    no closed-tx), so pulling the attribute answers `{:db/id …}` and never an
    instant — the shape forty-five assertions were comparing to `inst?` since
    the transaction refs landed (`ae0e54841`). The time lives on the
-   transaction, exactly as `seon.plan` reads `:my.plan.item/completed-tx`.
+   transaction, exactly as `seon.task` reads `:seon.step/done-tx`.
    Absent while the turn is still open."
   [database turn-id]
   (get-in (db/pull database
@@ -1075,6 +1075,14 @@
                          #(config/apply! {:seon.db/connection connection
                                           :seon.boot/cluster-name cluster-name
                                           :seon.config/manifest manifest}))))
+
+(defn task-row
+  "A complete task entity for fixtures that need one plain identified entity with a required
+  string: the twelve-character `handle` and its `intent`."
+  {:malli/schema [:=> [:cat :seon.task/handle :seon.task/intent] :seon.task/task]}
+  [handle intent]
+  {:seon.task/id handle :seon.task/ns 'fixture.tasks :seon.task/name handle
+   :seon.task/kind :function :seon.task/intent intent})
 
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents.
