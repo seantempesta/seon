@@ -82,8 +82,8 @@
  :seon.error/base
  [:map
   {:seon.db/attributes true}
-  [:my.shell/error-command {:optional true} :my.shell/error-command]
-  [:my.shell/execution-observation {:optional true} :my.shell/execution-observation]]]
+  [:my.shell/error-command :my.shell/error-command]
+  [:my.shell/execution-observation :my.shell/execution-observation]]]
 
  ;; What my.shell/run! returns when it fails: seon.shell.jvm's declared
  ;; alternatives and the effect boundary's.

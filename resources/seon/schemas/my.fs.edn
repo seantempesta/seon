@@ -157,8 +157,8 @@
  :seon.error/base
  [:map
   {:seon.db/attributes true}
-  [:my.fs/error-path {:optional true} :my.fs/error-path]
-  [:my.fs/io-observation {:optional true} :my.fs/io-observation]]]
+  [:my.fs/error-path :my.fs/error-path]
+  [:my.fs/io-observation :my.fs/io-observation]]]
 
  ;; What my.fs functions return when they fail: exactly the producers' declared
  ;; alternatives (seon.fs.jvm) plus the effect boundary's. :my.fs/error above

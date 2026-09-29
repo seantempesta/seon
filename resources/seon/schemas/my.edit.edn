@@ -86,8 +86,8 @@
  :seon.error/base
  [:map
   {:seon.db/attributes true}
-  [:my.edit/error-path {:optional true} :my.edit/error-path]
-  [:my.edit/edit-observation {:optional true} :my.edit/edit-observation]]]
+  [:my.edit/error-path :my.edit/error-path]
+  [:my.edit/edit-observation :my.edit/edit-observation]]]
 
  ;; What my.edit functions return when they fail: the edit alternatives, the
  ;; filesystem errors seon.edit.jvm passes through, and the effect boundary's.
