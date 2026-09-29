@@ -560,7 +560,15 @@
            ;; `:seon.error/problems`, so this loses no evidence.
            offending (if arity? (:arity data) value)
            paths (into [] (comp (map :seon.error/path) (remove empty?)) problems)
-           caller (caller-frame)]
+           caller (caller-frame)
+           ;; A refused output that is itself an error keeps that error as the
+           ;; cause: the contract mismatch is the defect to fix, the original
+           ;; message is what went wrong (refusal path only).
+           cause (when (and (= :output arm) (map? value) (string? (:seon.error/message value)))
+                   (cond-> {:seon.error/throwable-class "seon.error/base"
+                            :seon.error/message (:seon.error/message value)}
+                     (string? (:seon.error/fix value))
+                     (update :seon.error/message str " Fix: " (:seon.error/fix value))))]
        (seon.error.refusal/references projection
        (merge {:seon.error/at (java.util.Date.)
          :seon.error/layer :seon.instrument/invocation
@@ -570,6 +578,8 @@
                (error/scalar-text (:seon.error/offending first-problem)))
               (when (qualified-keyword? expected)
                 (str " Contract: " expected "."))
+              (when cause (str " Its result is itself an error, kept as the cause: "
+                               (:seon.error/message cause)))
               (when caller (str " Called from " caller ".")))
          :seon.error/expected expected
          :seon.error/offending offending
@@ -579,6 +589,7 @@
                   ::problem-count (count problems)
                   :seon.error/problems problems}
            arity? (assoc ::arity (:arity data))
+           cause (assoc :seon.error/chain [cause])
            arglists (assoc ::arglists arglists)
            (pos? other-alternatives) (assoc ::other-alternatives other-alternatives)
            (seq paths) (assoc ::problem-paths paths)

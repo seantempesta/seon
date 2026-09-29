@@ -231,7 +231,13 @@
              (is (= domain (candidate domain 1)) "Only the declaring arity permits this declared-schema."))
            (let [refusal (test-support/refusal-data #(candidate base))]
              (is (= :output (:seon.instrument/check refusal)))
-             (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))))
+             (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal)))
+           (let [refusal (test-support/refusal-data
+                          #(candidate (assoc base :seon.error/message "original failure" :seon.error/fix "do the fix")))]
+             (is (= :output (:seon.instrument/check refusal)) "The refusal stands.")
+             (is (= "original failure Fix: do the fix" (:seon.error/message (first (:seon.error/chain refusal))))
+                 "An error refused as a result is kept as the cause.")
+             (is (.contains ^String (:seon.error/message refusal) "original failure"))))
          (is (empty? (db/q '[:find ?e :in $ ?function
                              :where [?e :seon.instrument/fn ?function]]
                            (db/db connection) (symbol "seon.instrument-test" (str candidate-name))))
