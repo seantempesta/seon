@@ -204,7 +204,7 @@
 ;;; An unstored panic prints bounded text: the class regression for the
 ;;; 3.18 GB stderr lines of pid 68592 (issue
 ;;; unstored-panic-prints-whole-throwable-map-to-stderr). Each cause prints
-;;; through `render.value/floor` (at most 8192 chars + ellipsis); the whole
+;;; through `print.value/throwable-text` (at most 8192 chars + ellipsis); the whole
 ;;; value stays on the failure's ex-data.
 (deftest an-unstored-panic-prints-bounded-text-and-keeps-the-whole-cause
   (test-support/with-database

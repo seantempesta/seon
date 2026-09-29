@@ -25,7 +25,7 @@
             [seon.health :as health]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :refer [running-instances]]
-            [seon.render.value :as render.value]
+            [seon.print.value :as print.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]))
@@ -296,7 +296,7 @@
    ;; This reply crosses the prepl, a wire: every carried value is bounded text
    ;; from the value renderer's projection-free core, never a live handle
    ;; printed whole, and never a render that can fail with what it reports.
-   (let [shown render.value/bounded-text]
+   (let [shown print.value/bounded-text]
      (-> (refusal/diagnostic
           (assoc (diagnostic message (shown offending) cause) :seon.error/throwable throwable))
          (update :seon.error/chain
@@ -404,7 +404,7 @@
                            (into [] (mapcat #(open-runs (:seon.db/connection %))) worlds))]
         (let [refusal (kernel/memory-pressure-error pressure)
               failure (ex-info (:seon.error/message refusal) refusal)]
-          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (render.value/bounded-text (:seon.error/message refusal))) (flush))
+          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (print.value/bounded-text (:seon.error/message refusal))) (flush))
           (doseq [world worlds]
             (flow/hand-off-fault! world failure (handed-off-context world `memory-pressure-crossed!))))))
     (catch Throwable failure
@@ -789,7 +789,7 @@
       ;; failure is a core fault, shown first as the floor of its Throwable and
       ;; recorded in the requested cluster.
       (let [refused? (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
-            response (diagnostic (if refused? (ex-message cause) (render.value/floor cause))
+            response (diagnostic (if refused? (ex-message cause) (print.value/throwable-text cause))
                                  (dissoc (or (ex-data cause) request) :seon.boot/prepl-server)
                                  (if refused? :refused :operation-failed) cause)]
         (if refused?
@@ -815,5 +815,5 @@
   [ready]
   (str "seon " (:seon.boot/cluster-name ready)
        (if (seq (:seon.boot/missing-layers ready)) " partial boot " " ready ")
-       (or (:seon.render.web/url ready) (render.value/bounded-text (:seon.boot/missing-layers ready)))
+       (or (:seon.render.web/url ready) (print.value/bounded-text (:seon.boot/missing-layers ready)))
        " (pid " (:seon.boot/pid ready) ", prepl " (:seon.boot/prepl-port ready) ")"))

@@ -55,22 +55,22 @@
    clojure.core/future {:message "A future is a thread nobody joins: submit to the Flow work launcher, or await it through seon.await/await!."}
    clojure.core/locking {:message "A monitor cannot be timed or interrupted: serialize through a Flow proc or an atom."}
    ;; Printing has one owner per role (AGENTS.md, "Apply presentation
-   ;; limits once"): display is the value printer (seon.render.value/bounded-text,
-   ;; seon.render.value/floor for a Throwable); canonical EDN text and
+   ;; limits once"): display is the value printer (seon.print.value/bounded-text,
+   ;; seon.print.value/throwable-text for a Throwable); canonical EDN text and
    ;; hashing are seon.id/printed and seon.id/id, which stream into their
    ;; sink. A bare print of a value outside them is unbounded: a pr-str of a
    ;; failing value holding SCI contexts built a 2 GB string and killed
    ;; default (2026-09-28 00:07Z). `format` is not listed: 37 of its 50 uses
    ;; format numbers, and a var-level rule cannot tell `%,d` from `%s`.
-   clojure.core/pr-str {:message "Unbounded print: display through seon.render.value/bounded-text; canonical EDN through seon.id/printed; identity through seon.id/id."}
-   clojure.core/prn-str {:message "Unbounded print: display through seon.render.value/bounded-text; canonical EDN through seon.id/printed."}
-   clojure.core/print-str {:message "Unbounded print: display through seon.render.value/bounded-text."}
-   clojure.core/println-str {:message "Unbounded print: display through seon.render.value/bounded-text."}
-   clojure.core/pr {:message "Unbounded print: display through seon.render.value/bounded-text."}
-   clojure.core/prn {:message "Unbounded print: print (seon.render.value/bounded-text value), or seon.render.value/floor for a Throwable."}
-   clojure.core/print {:message "Unbounded print: print only text the value printer bounded (seon.render.value/bounded-text)."}
-   clojure.core/println {:message "Unbounded print: print only text the value printer bounded (seon.render.value/bounded-text); a Throwable through seon.render.value/floor."}
-   clojure.core/printf {:message "Unbounded print: format numbers, and display values through seon.render.value/bounded-text."}
+   clojure.core/pr-str {:message "Unbounded print: display through seon.print.value/bounded-text; canonical EDN through seon.id/printed; identity through seon.id/id."}
+   clojure.core/prn-str {:message "Unbounded print: display through seon.print.value/bounded-text; canonical EDN through seon.id/printed."}
+   clojure.core/print-str {:message "Unbounded print: display through seon.print.value/bounded-text."}
+   clojure.core/println-str {:message "Unbounded print: display through seon.print.value/bounded-text."}
+   clojure.core/pr {:message "Unbounded print: display through seon.print.value/bounded-text."}
+   clojure.core/prn {:message "Unbounded print: print (seon.print.value/bounded-text value), or seon.print.value/throwable-text for a Throwable."}
+   clojure.core/print {:message "Unbounded print: print only text the value printer bounded (seon.print.value/bounded-text)."}
+   clojure.core/println {:message "Unbounded print: print only text the value printer bounded (seon.print.value/bounded-text); a Throwable through seon.print.value/throwable-text."}
+   clojure.core/printf {:message "Unbounded print: format numbers, and display values through seon.print.value/bounded-text."}
    clojure.pprint/pprint {:message "Unbounded print: display through seon.render.value, the value printer."}
    clojure.pprint/write {:message "Unbounded print: display through seon.render.value, the value printer."}}
 

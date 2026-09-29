@@ -24,7 +24,7 @@
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
-            [seon.render.value :as value]
+            [seon.print.value :as print.value]
             [seon.test.runner :as runner])
   (:import [java.util.concurrent FutureTask]))
 
@@ -323,7 +323,7 @@
                          "; thread " (.threadId thread) ".")
                     false))
           (catch java.util.concurrent.ExecutionException failure
-            (failed (str "Test execution failed:\n" (value/floor (or (ex-cause failure) failure)))
+            (failed (str "Test execution failed:\n" (print.value/throwable-text (or (ex-cause failure) failure)))
                     true))))
       (catch Throwable failure
         (when-not @started? (release! false))
@@ -1725,7 +1725,7 @@
   (ex-info (str "The test world's " what " was refused: " (:seon.error/message refusal))
            {:seon.error/message (:seon.error/message refusal)
             :seon.error/operation (:seon.error/operation refusal)
-            :seon.error/offending (value/bounded-text (:seon.error/offending refusal) 400)}))
+            :seon.error/offending (print.value/bounded-text (:seon.error/offending refusal) 400)}))
 
 (defn- open-world!
   "Open `branch`, `cluster`'s test world, with the schema projection its value derives, from `candidate`'s."
@@ -2004,7 +2004,7 @@
                         #(str (when % (str % "\n"))
                               "Member cleanup failed; its branch "
                               (:seon.agent/branch child) " may remain:\n"
-                              (value/floor failure))))
+                              (print.value/throwable-text failure))))
             result))
         ;; Owned by this function until `bounded-result` takes it.
         release! (fn [_watched?]
@@ -2073,7 +2073,7 @@
                                        "Live cluster schema registry changed and was restored: "
                                        ;; bounded once by the floor: the drift can
                                        ;; be whole registry entries
-                                       (value/bounded-text drifted)))))]
+                                       (print.value/bounded-text drifted)))))]
         (when-not @handed? (vreset! handed? true) (release! false))
         {:seon.test/result (cond-> (with-cleanup-failure result)
                              (not (:seon.test.run/terminated? result))

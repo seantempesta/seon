@@ -6,7 +6,7 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.render.value :as render.value])
+            [seon.print.value :as print.value])
   (:import [java.lang.management ManagementFactory]))
 
 (defn- unknown
@@ -182,4 +182,4 @@
   (let [shown (if (and (map? value) (:seon.cluster.status/heap-used value)) value (render-ai unit))]
     [:section {:class "seon-cluster-status"}
      [:h3 "Cluster"]
-     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (render.value/bounded-text v)]]) shown))]))
+     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (print.value/bounded-text v)]]) shown))]))

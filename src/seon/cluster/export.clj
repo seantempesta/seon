@@ -69,7 +69,7 @@
             [seon.cluster.store :as store]
             [seon.fs :as fs]
             [seon.config :as config]
-            [seon.render.value :as render.value]
+            [seon.print.value :as print.value]
             [seon.cluster.process :as operator.process]
             [seon.schema.edn :as schema.edn])
   (:import [java.nio.file CopyOption Files StandardCopyOption]))
@@ -103,7 +103,7 @@
   quietly takes minutes instead of milliseconds must announce itself."
   [message data]
   (binding [*out* *err*]
-    (println "WARNING" message (render.value/bounded-text data))
+    (println "WARNING" message (print.value/bounded-text data))
     (flush)))
 
 ;;; ---------------------------------------------------------------------------

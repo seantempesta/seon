@@ -3,7 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.render.value :as value]))
+            [seon.print.value :as print.value]))
 
 (deftype Hostile []
   Object
@@ -46,7 +46,7 @@
                                middle)
                       [["seon.probe$outer" "probe.clj" 3] ["my.work$run" "work.clj" 9]])
         start (System/nanoTime)
-        text (value/floor outer)
+        text (print.value/throwable-text outer)
         ms (/ (- (System/nanoTime) start) 1e6)]
     (testing "every link's class and message, every ex-data key, and a first-party frame per link"
       (doseq [part ["clojure.lang.ExceptionInfo: \"outer\"" "caused by clojure.lang.ExceptionInfo: \"middle\""
@@ -70,19 +70,19 @@
 (deftest deep-cyclic-and-accessor-hostile-chains-stay-bounded
   (let [a (Exception. "a") b (Exception. "b" a)]
     (.initCause a b)
-    (is (= 2 (count (re-seq #"java.lang.Exception" (value/floor a))))
+    (is (= 2 (count (re-seq #"java.lang.Exception" (print.value/throwable-text a))))
         "a cause cycle prints each link once"))
   (let [deep (reduce (fn [cause n] (ex-info (str "link " n) {} cause)) (Exception. "bottom") (range 10000))
-        text (value/floor deep)]
+        text (print.value/throwable-text deep)]
     (is (str/includes? text "… further causes"))
     (is (< (count text) 8300)))
   (let [hostile (proxy [RuntimeException] [] (getMessage [] (throw (IllegalStateException. "no"))))]
-    (is (str/includes? (value/floor hostile) "#unprintable[java.lang.IllegalStateException]")
+    (is (str/includes? (print.value/throwable-text hostile) "#unprintable[java.lang.IllegalStateException]")
         "a throwing accessor names its link and the failure"))
-  (is (str/starts-with? (value/floor (OutOfMemoryError.)) "java.lang.OutOfMemoryError: nil")
+  (is (str/starts-with? (print.value/throwable-text (OutOfMemoryError.)) "java.lang.OutOfMemoryError: nil")
       "a nil message and an Error print"))
 
 (deftest bounded-text-stops-at-its-limit
-  (is (= "\"xxx…" (value/bounded-text (apply str (repeat 1000000 \x)) 4)))
-  (is (= "#'clojure.core/map" (value/bounded-text #'clojure.core/map 100)))
-  (is (= "(0 1 2 3 4 5 6 7 ...)" (value/bounded-text (range) 100))))
+  (is (= "\"xxx…" (print.value/bounded-text (apply str (repeat 1000000 \x)) 4)))
+  (is (= "#'clojure.core/map" (print.value/bounded-text #'clojure.core/map 100)))
+  (is (= "(0 1 2 3 4 5 6 7 ...)" (print.value/bounded-text (range) 100))))

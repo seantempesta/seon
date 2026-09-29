@@ -30,7 +30,7 @@
             [seon.health :as health]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
-            [seon.render.value :as render.value]
+            [seon.print.value :as print.value]
             [seon.sci.eval :as eval]
             [seon.turn]
             [seon.turn.batch :as turn.batch]
@@ -122,7 +122,7 @@
       (:seon.eval/shown (if (and (map? value) (:seon.error/at value))
                           (eval/shown-failure value request nil)
                           (eval/shown-result value request nil))))
-    (catch Throwable failure (render.value/floor failure))))
+    (catch Throwable failure (print.value/throwable-text failure))))
 
 (defn- result
   "The MCP CallToolResult as a JSON string: one text item per shown text."
@@ -293,7 +293,7 @@
   [schema value]
   (let [value (or value {})]
     (if-let [explanation (m/explain schema value)]
-      (refused (str "Invalid arguments: " (render.value/bounded-text (me/humanize explanation)))
+      (refused (str "Invalid arguments: " (print.value/bounded-text (me/humanize explanation)))
                :seon.mcp/arguments (m/form schema) value)
       value)))
 
@@ -377,7 +377,7 @@
              (cond
                (:seon.error/at value) [[(printed value request nil nil)] true]
                (nil? schema)
-               [[(printed (refused (str "Unknown tool " (render.value/bounded-text tool) ".") :seon.mcp/name
+               [[(printed (refused (str "Unknown tool " (print.value/bounded-text tool) ".") :seon.mcp/name
                                    (mapv :seon.mcp/name tool-table) tool)
                           request nil nil)] true]
                (:seon.error/at valid) [[(printed valid request nil nil)] true]

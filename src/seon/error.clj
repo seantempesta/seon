@@ -27,6 +27,7 @@
             [seon.error.refusal :as error.refusal]
             [seon.repl :as repl]
             [seon.render.route :as render.route]
+            [seon.print.value :as print.value]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -1252,7 +1253,7 @@
    :seon.message/id (notification-id (:seon.error/signature fact) recipient opening)
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
-   :seon.message/content (render.value/bounded-text (value fact))
+   :seon.message/content (print.value/bounded-text (value fact))
    :seon.message/about (:seon.error/signature fact)})
 
 
@@ -2241,7 +2242,7 @@
   shown through the value printer's bounded text."
   {:malli/schema [:=> [:cat :seon.error/reply] :seon.render/hiccup]}
   [reply]
-  (let [shown (fn [value] [:code (render.value/bounded-text value)])
+  (let [shown (fn [value] [:code (print.value/bounded-text value)])
         {:seon.error/keys [message problems offending fix in-namespace sources]} reply]
     (into
      [:div {:class "seon-error-reply"}
@@ -2270,7 +2271,7 @@
          (if (db/read-refusal? source) (shown source) [:pre (str/join "\n" source)])])
       (when-let [frames (seq (:seon.sci.eval/stacktrace reply))]
         [(into [:ol {:class "seon-error-frames"}]
-               (map (fn [frame] [:li [:code (render.value/bounded-text frame)]]))
+               (map (fn [frame] [:li [:code (print.value/bounded-text frame)]]))
                frames)])))))
 
 ;;; SCHEMA PAIRS AS REPL ENTRIES (owner 2026-09-26, "Three points"). An

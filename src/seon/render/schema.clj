@@ -13,7 +13,7 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.render.route :as render.route]
-            [seon.render.value :as render.value]))
+            [seon.print.value :as print.value]))
 
 (def ^:private names-shown
   "Referencing schemas and contracts named before the count says the rest."
@@ -153,7 +153,7 @@
      [:p (str failing " of " checked (when more? " (the first checked)") " stored entities fail the form")]
      (when failing-example
        [:p "First failing: entity " (str (first failing-example)) " "
-        [:code (render.value/bounded-text (second failing-example))]])]))
+        [:code (print.value/bounded-text (second failing-example))]])]))
 
 (defn render-html
   "Render a registration or schema entity from the same selection
@@ -165,7 +165,7 @@
     (let [report (selection unit chosen)
           {:seon.schema.usage/keys [previous new? check referenced-by referenced-by-count
                                     contracts contract-count]} report
-          form-text (fn [form] [:pre [:code (render.value/bounded-text form)]])]
+          form-text (fn [form] [:pre [:code (print.value/bounded-text form)]])]
       (into
        [:article {:class "seon-family-entry seon-schema-entry"}
         [:header [:p {:class "seon-kicker"} (if new? "New schema" "Schema")]

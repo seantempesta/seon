@@ -42,6 +42,7 @@
             [seon.error :as error]
             [seon.render :as render]
             [seon.render.data :as data]
+            [seon.print.value :as print.value]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -1284,7 +1285,7 @@
                     [:summary [:code (str attribute)]
                      (when-let [total (:seon.related/count group)] (str " " (count (:seon.related/items group)) " of " total))]
                     (into [:ul] (map #(vector :li %)) (:seon.related/items group))
-                    (when-let [[operation] (:seon.render/operations group)] [:code (render.value/bounded-text operation)])])))
+                    (when-let [[operation] (:seon.render/operations group)] [:code (print.value/bounded-text operation)])])))
           data)))
 
 (defn with-related

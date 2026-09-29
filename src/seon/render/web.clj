@@ -71,6 +71,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.route :as route]
             [seon.render.transcript :as transcript]
+            [seon.print.value :as print.value]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
             [seon.ai.tokens :as tokens]
@@ -3201,7 +3202,7 @@
   (let [database (db/db (:seon.store/connection-object service))]
     (if (:seon.error/at database)
       ;; a refused read answers as that refusal, never as a page's database
-      (text-response 503 (value/bounded-text (:seon.error/message database)))
+      (text-response 503 (print.value/bounded-text (:seon.error/message database)))
       (let [page (current-page service database agent-id)
             stream-html (get page stream-strip-id)
             unit-html (vals (dissoc page stream-strip-id))]
@@ -3315,9 +3316,9 @@
         ;; A symbol value is an observed name; it links when a symbol identity currently names an entity.
         named (into [] (keep (fn [[a {t :db/valueType u :db/unique}]] (when (and u (= :db.type/symbol t)) a))) (:schema (db/schema-database database)))
         link (fn [v] (when-let [a (and (symbol? v) (seq named) (db/q '[:find ?a . :in $ [?a ...] ?v :where [_ ?a ?v]] database named v))]
-                       [:a {:href (root-href (pr-str [a v]))} [:code (value/bounded-text v)]]))
+                       [:a {:href (root-href (pr-str [a v]))} [:code (print.value/bounded-text v)]]))
         group #(cond ((::render.walk/component-owners structure) %) "component" (refs %) "ref" :else "value")
-        shown #(if (refs %1) (value/bounded-text (if (map? %2) (:db/id %2) (mapv :db/id %2))) (value/bounded-text %2))
+        shown #(if (refs %1) (print.value/bounded-text (if (map? %2) (:db/id %2) (mapv :db/id %2))) (print.value/bounded-text %2))
         properties (some->> schema-key (mr/schema (:seon.schema.projection/registry projection)) internal/entity-properties)]
     [:div {:class "seon-graph-attributes"}
      [:p "owning schema " [:code (str schema-key)] " · render pair "
@@ -3326,7 +3327,7 @@
            (for [[kind entries] (sort-by key (group-by (comp group key) (dissoc value :db/id)))
                  [a v] (sort-by (comp str key) entries)]
              [:tr [:td kind] [:td [:code (str a)]] [:td (or (link v) [:code (shown a v)])]
-              [:td [:code (value/bounded-text (projection-form projection a))]]]))]))
+              [:td [:code (print.value/bounded-text (projection-form projection a))]]]))]))
 
 (defn- context-graph-model
   "The walk as `seon-graph.js`'s tree: each node labeled by its schema and
@@ -3362,7 +3363,7 @@
                                                    named (graph-node-name identities node)
                                                    [_ identity-value] (some #(find (:seon.render/value node) %) (sort identities))]]
                          {:data {:id (str "e" id) :level level :href (str "#node-" id) :groups (vec path)
-                                 :label (str/join "  ·  " (cons (str (if schema (name schema) "unowned") " " (if (and (some? identity-value) (not (map? identity-value))) (value/bounded-text identity-value 28) named)) (chips node)))
+                                 :label (str/join "  ·  " (cons (str (if schema (name schema) "unowned") " " (if (and (some? identity-value) (not (map? identity-value))) (print.value/bounded-text identity-value 28) named)) (chips node)))
                                  :full (str (some-> schema str (subs 1)) " " named " · e" id)}}))
                  (into (for [[e families] groups :when (paths e) [[_ a] members] families
                              :let [g (gid e a) total (count (distinct (map peek members))) offset (get window [e a] 0)]
@@ -3441,7 +3442,7 @@
        (list [:p {:class "seon-graph-counts"} (format "%,d chars · ≈%,d tokens · %d segments" (count text) (tokens/estimate text)
                                                       (count (:seon.context/contributions composed)))]
              [:pre {:class "seon-graph-prompt"} text])
-       [:pre {:class "seon-graph-prompt"} (value/bounded-text (dissoc composed :seon.db/db))])]))
+       [:pre {:class "seon-graph-prompt"} (print.value/bounded-text (dissoc composed :seon.db/db))])]))
 
 (defn- graph-debug-html
   "The owner's context-tuning page for one agent: the context as sent (lazy),
@@ -3513,7 +3514,7 @@
                    {[(parse-long e) (keyword (subs a 1))] (parse-long o)} {}))
         chips (fn [{v :seon.render/value}]
                 (into [] (comp (remove (comp identities key)) (filter (comp #(or (symbol? %) (keyword? %)) val)) (take 2)
-                               (map (fn [[a x]] (str (name a) ": " (value/bounded-text x 28)))))
+                               (map (fn [[a x]] (str (name a) ": " (print.value/bounded-text x 28)))))
                       (sort-by (comp str key) v)))
         toggle #(vector :button {:type "button" :class "seon-graph-toggle"
                                  (keyword "data-on:click") (str "document.querySelectorAll('.seon-graph-node').forEach(d => d.open = " %1 ")")} %2)]
@@ -3747,7 +3748,7 @@
   [{connection :seon.store/connection-object root :seon.agent/id :as service} _request]
   (let [database (db/db connection)]
     (if (:seon.error/at database)
-      (text-response 503 (value/bounded-text (:seon.error/message database)))
+      (text-response 503 (print.value/bounded-text (:seon.error/message database)))
       (let [page (current-page service database [::health-tab {}])]
         (html-response
          (shell {:seon.agent/id root
@@ -3807,7 +3808,7 @@
                                                  :seon.error/expected "system-turn, virtual-turn, or compact"
                                                  :seon.error/offending params}))]
     (if (:seon.render.web/refused-member result)
-      (text-response 422 (value/bounded-text result))
+      (text-response 422 (print.value/bounded-text result))
       (no-content))))
 
 (defn- received-response
@@ -3826,7 +3827,7 @@
                    :seon.error/offending params}))]
     (if (:seon.message/id result)
       (no-content)
-      (text-response 422 (value/bounded-text result)))))
+      (text-response 422 (print.value/bounded-text result)))))
 
 (defn- context-response
   "The agent context route: the explicit create-owner action, a message
@@ -3978,7 +3979,7 @@
              :status 500)
       ;; Declared case: the face itself failed; the value still answers.
       (catch Throwable _
-        (text-response 500 (value/bounded-text value))))))
+        (text-response 500 (print.value/bounded-text value))))))
 
 (defn handler
   "Build the one Reitit Ring handler from the route table and service."
@@ -4021,7 +4022,7 @@
                                 :seon.render.web/request 'seon.render.web/handler)
                (catch Throwable unrecorded
                  (log/warn (str "seon.render.web: a request fault could not be recorded\n"
-                                (value/floor unrecorded)))))
+                                (print.value/throwable-text unrecorded)))))
           (failure-response service failure))))))
 
 ;;; ---------------------------------------------------------------------------
