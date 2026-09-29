@@ -800,8 +800,7 @@
   A core fault already recorded by this propagation (its receipt anywhere in
   the cause chain, `seon.fault/carried-receipt`) is rethrown, never turned
   into an ordinary evaluation value: its panic reaches the caller."
-  {:seon/tasks #{"e13e5a9c557f"}
-   :malli/schema
+  {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
     [:or :seon.sci.kernel/execution-error :seon.sci.kernel/error]]}
   [{subject :seon.fn/sym}

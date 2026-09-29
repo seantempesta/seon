@@ -1,12 +1,4 @@
-[#:seon.task{:id "e13e5a9c557f"
-             :name "failure-value-contract-finding-on-every-exception"
-             :kind :function
-             :intent "Every ordinary agent exception ends with 'Contract finding: seon.sci.kernel/failure-value returned this error, and none of its declared error alternatives matches it.' Reproduced after the nuke at 013e12924 on (/ 1 0) and on an unresolved symbol. The value failure-value builds does not match its own declared output alternatives, and render's declared-producers selection reports it on every failure (D12)."
-             :must-read #{seon.render/declared-producers seon.sci.kernel/failure-value}
-             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"
-                         "docs/research/agent-platform/landing/repl-parity-2026-09-26.md"
-                         "docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
- #:seon.task{:name "the-memory-gate-names-in-flight-work-it-cannot-see"
+[#:seon.task{:name "the-memory-gate-names-in-flight-work-it-cannot-see"
              :kind :function
              :intent "At default pid 63809's OOM the memory-pressure refusal said 'In flight when it began: no open run' while a hosted branch agent's run was open: seon.cluster.boot/open-runs queries only each running instance's own connection, and running-instances holds only the cluster, so hosted-branch runs are never listed. The gate refuses new SCI arms only, which is its honest contract, but seon.sci.eval's namespace docstring claims the heap watermark covers what the interrupt cannot; unarmed work (post-admission turn phases, JVM prepl evaluations, web requests) runs on to OOM. List open runs across hosted branches, state the gate as 'refuses new arms; neither stops nor names unarmed work', and delete the false docstring sentence."
              :must-read #{seon.cluster.boot/memory-pressure-crossed! seon.sci.kernel/memory-pressure-error seon.sci.kernel/enter-memory-pressure!}

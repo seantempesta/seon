@@ -1594,8 +1594,7 @@
     re-derivation (task 50a6a9afcb64).
   - An encoding-only storage change leaves reused entities in their old
     encoding; storage migration owns it (task 52875b443ef0)."
-  {:seon/tasks #{"aca1b25fa16a" "50a6a9afcb64" "52875b443ef0"}
-   :malli/schema [:=> [:cat :seon.source/analyzer-digest :seon.schema/projection
+  {:malli/schema [:=> [:cat :seon.source/analyzer-digest :seon.schema/projection
                        :seon.source/relative-file-digests [:map-of :string [:set :keyword]] [:set :string]]
                   [:map-of :string :seon.source/digest]]}
   [code projection inputs schema-keys paths]
@@ -1881,8 +1880,7 @@
   A throw keeps the unknown mark, with its cause. A member or evaluation that
   read another identity at its start refuses its own result
   (`seon.sci.eval/call-detecting-program-change`)."
-  {:seon/tasks #{"431c6e828256"}
-   :malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.source/commit-id
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.source/commit-id
                        [:=> [:cat] :seon.source/adoption-result]]
                   :seon.source/adoption-result]}
   [identity-atom commit-id change]

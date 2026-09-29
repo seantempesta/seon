@@ -1,7 +1,0 @@
-[#:seon.task{:id "3c8d05fc3de9"
-             :name "join-membership-has-no-caller"
-             :kind :function
-             :intent "seon.render.walk/join-membership (23 lines) has zero callers in source and in default's program graph (agent-centric F01 residue). Delete it."
-             :must-read #{seon.render.walk/join-membership}
-             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
-                         "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}]

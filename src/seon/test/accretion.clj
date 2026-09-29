@@ -39,8 +39,7 @@
   Compiles every form the row reaches again per call; `schema-row-in` answers
   from a projection. Its last caller converts and this function is deleted
   (task 0dfdcc8e447e)."
-  {:seon/tasks #{"0dfdcc8e447e"}
-   :malli/schema [:=> [:cat :map :map] :map]}
+  {:malli/schema [:=> [:cat :map :map] :map]}
   [forms row]
   (let [registry (mr/composite-registry (m/default-schemas)
                                         (mr/fast-registry forms))]

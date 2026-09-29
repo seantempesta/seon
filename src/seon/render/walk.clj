@@ -341,30 +341,6 @@
         {:seon.render.walk/members {}
          :seon.render.walk/order []}))))
 
-(defn join-membership
-  "Join additional walk acquisitions into one stable membership.
-
-  The original root and member order stay byte-identical. Each new member is
-  appended at its first occurrence; repeated subjects collapse to the member
-  already acquired from the same immutable database value."
-  {:seon/tasks #{"3c8d05fc3de9"}
-   :malli/schema [:=> [:cat :map [:vector :map]] :map]}
-  [acquisition additions]
-  (reduce
-   (fn [joined addition]
-     (reduce
-      (fn [result lookup]
-        (if (contains? (:seon.render.walk/members result) lookup)
-          result
-          (-> result
-              (assoc-in [:seon.render.walk/members lookup]
-                        (get-in addition [:seon.render.walk/members lookup]))
-              (update :seon.render.walk/order conj lookup))))
-      joined
-      (:seon.render.walk/order addition)))
-   acquisition
-   additions))
-
 (defn root-pull-plan
   "Acquire a compiled pull plan by its schema and selector; retain caller bounds."
   {:malli/schema [:=> [:cat :seon.render.walk/acquisition-request] :map]}
