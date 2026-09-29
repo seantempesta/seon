@@ -840,6 +840,36 @@
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
 (declare proven-files)
 
+(defn release!
+  "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
+  {:malli/schema [:=> [:cat [:sequential [:maybe [:or :seon.db/database-value :seon.program/digest-map-refusal :seon.error/value]]]] :nil]}
+  [values]
+  (run! #(when (and % (not (:seon.error/at %))) (d/release-materialized-db %)) values)
+  nil)
+
+(defn compare-branch
+  "Compare `candidate`'s committed program with `head` (a database value) on
+  their merge base: the candidate's changed identities, the base, candidate and
+  head digest maps and their `seon.program/three-way` classification. The one
+  comparison merge and `my.program/diff` share. The base and branch values are
+  materialized: the caller releases them. Refusals sit in `:c-id`, `:changed`
+  or `:maps`."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value] :map]}
+  [held-store candidate head]
+  (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})]
+    (if (:seon.error/at c-id)
+      {:c-id c-id}
+      (let [bound {:seon.program/max-datoms 10000}
+            branch (commit-database held-store c-id)
+            base (merge-base held-store branch head 10000)
+            ;; Only what the candidate changed can merge or conflict; H's
+            ;; transaction numbers are another lineage's.
+            changed (if (:seon.error/at base) base (program/changed-identities base branch bound))
+            maps (when (set? changed)
+                   (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))]
+        {:c-id c-id :base base :branch branch :head head :changed changed :maps maps
+         :three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))}))))
+
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
@@ -874,19 +904,11 @@
   ([source held-store candidate proofs] (prepare-merge! source held-store candidate proofs nil nil))
   ([source held-store candidate proofs selection] (prepare-merge! source held-store candidate proofs selection nil))
   ([source held-store candidate proofs selection root]
-  (let [c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})]
+  (let [{:keys [c-id base branch head changed maps three]}
+        (compare-branch held-store candidate (db/db (:seon.db/connection source)))]
     (if (:seon.error/at c-id)
       c-id
-      (let [bound {:seon.program/max-datoms 10000}
-            head (db/db (:seon.db/connection source))
-            branch (commit-database held-store c-id)
-            base (merge-base held-store branch head 10000)
-            ;; Only what the candidate changed can merge or conflict; H's
-            ;; transaction numbers are another lineage's.
-            changed (if (:seon.error/at base) base (program/changed-identities base branch bound))
-            maps (when (set? changed)
-                   (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))
-            three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
+      (let [
             whole (when three (into (:seon.program/changed-on-branch three)
                                     (concat (:seon.program/added three) (:seon.program/retracted three))))
             unchanged (when (and whole selection) (vec (remove whole selection)))
@@ -940,7 +962,7 @@
                                      :seon.task/proofs proofs
                                      :seon.source/expected-digests (held-digests head delta) :parents #{c-id})
                         (seq red) (assoc :seon.source/red red)))))
-          (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch]))))))))
+          (finally (release! [base branch]))))))))
 
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into

@@ -662,22 +662,6 @@
       (source/write-back! {:seon.db/connection (:seon.db/connection context)
                            :seon.source/accepted accepted :seon.fn/root root})))
 
-(defn overrides
-  "Read current agent-admitted identities under an indexed src root.
-
-  The declaration owner follows historical file provenance over this same
-  database value. This does not assert JVM write-back or SCI loadability.
-  Example: (my.program/overrides)"
-  {:seon/tasks #{"70bf0e12569e"}
-   :malli/schema [:=> [:cat :my.program/read-request]
-                  [:or [:vector :seon.fn/sym] :seon.program/read-refused-error]]}
-  [{database :seon.db/db :as request}]
-  (read-result request 'my.program/overrides
-               #(let [result ((requiring-resolve 'seon.program/overrides) database)]
-                  (if (:seon.db/invalid-read result)
-                    (throw (ex-info (:seon.error/message result) result))
-                    result))))
-
 (def ^:private blocking-relations
   "The breakage relations that block a retraction."
   [:seon.program/callers :seon.program/references
@@ -1016,3 +1000,78 @@
                   (sort-by (juxt #(- (second %)) #(str (first %)))))]
     {:ns ns-sym :count (count rows) :lines (reduce + (map second rows))
      :largest (vec (take 20 rows))}))
+
+;;; Reading the branch's difference from its cluster.
+
+(def ^:private identity-kinds
+  "The declaration families a program diff compares, by identity attribute."
+  {:seon.fn/sym :function :seon.test/sym :test :seon.ns/name :namespace})
+
+(defn- diff-entries
+  "One entry per identity: symbol, kind, the head's digest before and the branch's after, and the dig form for a changed one."
+  {:malli/schema [:=> [:cat :seon.program/identity-set :map :map :boolean] [:vector :map]]}
+  [identities before after dig?]
+  (->> identities
+       (mapv (fn [identity]
+               (cond-> {:sym (second identity) :kind (identity-kinds (first identity))}
+                 (before identity) (assoc :digest-before (before identity))
+                 (after identity) (assoc :digest-after (after identity))
+                 (and dig? (not= :namespace (identity-kinds (first identity))))
+                 (assoc :dig (list 'my.program/diff (second identity))))))
+       (sort-by (comp str :sym))
+       vec))
+
+(defn- diff-value
+  "The branch's difference from the cluster head as {:added :changed :removed}, each entry data."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{[_ branch head] :maps {:seon.program/keys [added changed-on-branch retracted conflict]} :three}]
+  (cond-> {:added (diff-entries added {} branch false)
+           :changed (diff-entries changed-on-branch head branch true)
+           :removed (diff-entries retracted head {} false)}
+    (seq conflict) (assoc :conflicts (diff-entries conflict head branch true))))
+
+(defn- declaration-pair
+  "A declaration's source on the cluster head and on the branch, as {:sym :kind :before :after}."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :qualified-symbol] :map]}
+  [head branch sym]
+  (let [read (fn [database] (declaration database sym))
+        [before after] (map read [head branch])]
+    (if (or (::kind before) (::kind after))
+      (cond-> {:sym sym :kind (or (::kind after) (::kind before))}
+        (::source before) (assoc :before (::source before))
+        (::source after) (assoc :after (::source after)))
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/diff
+        {:seon.error/message (str "Neither the cluster head nor your branch declares " sym ".")
+         :seon.program/not-found sym}))))
+
+(defn diff
+  "Your branch's program difference from your cluster's head, as small data:
+  {:added [...] :changed [...] :removed [...]}. An entry is {:sym :kind
+  :digest-before :digest-after}, a changed one with the form that reads it. With
+  a symbol, that declaration's source on the head (:before) and on your branch
+  (:after). The same comparison merge takes (`seon.cluster.source/compare-branch`).
+
+  Example:
+  (my.program/diff)
+  (my.program/diff 'my.program/source)
+  Edge cases: holding the cluster's own branch answers empty.
+  Costs: one merge-base walk and digests of the changed declarations only."
+  {:malli/schema [:function
+                  [:=> [:cat :my.program/context] [:or :map :seon.error/value]]
+                  [:=> [:cat :my.program/context :qualified-symbol] [:or :map :seon.error/value]]]}
+  ([context] (diff context nil))
+  ([{connection :seon.db/connection store :seon.store/store cluster :seon.cluster/name :as context} sym]
+   (let [held (get-in (db/db connection) [:config :branch])
+         home (cluster.branch/cluster-branch cluster)
+         head-id (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})
+         head (when-not (:seon.error/at head-id) (source/commit-database store head-id))
+         compared (if head (source/compare-branch store held head) {:c-id head-id})
+         refusal (some #(when (:seon.error/at %) %) [(:c-id compared) (:changed compared) (first (:maps compared))])]
+     (try
+       (cond
+         refusal refusal
+         (= held home) {:added [] :changed [] :removed []}
+         (nil? (:three compared)) (some #(when (:seon.error/at %) %) (:maps compared))
+         sym (declaration-pair head (:branch compared) sym)
+         :else (diff-value compared))
+       (finally (source/release! [head (:base compared) (:branch compared)]))))))

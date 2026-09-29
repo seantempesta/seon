@@ -2,7 +2,10 @@
   (:require [clojure.test :refer [deftest is]]
             [my.program :as program]
             [seon.config :as config]
+            [seon.cluster.agent :as agent]
+            [seon.cluster.registry :as registry]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.env :as env]
             [seon.error :as error]
             [seon.fn :as function]
@@ -142,7 +145,7 @@
            read-evaluation (run "(my.program/breaks {:seon.program/subject 'seon.turn/open?})")]
        (is (every? (set (map :sym (:functions directory)))
                    '#{my.program/breaks my.program/callers my.program/tests-reaching
-                      my.program/reads-key my.program/history my.program/overrides
+                      my.program/reads-key my.program/history my.program/diff
                       my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}))
        (is (every? #(and (:in %) (:out %) (:doc %)) (:functions directory)))
        (is (:example documentation))
@@ -179,3 +182,39 @@
                                 {:seon.error/at (java.util.Date.)
                                  :seon.error/layer :seon.program/read
                                  :seon.error/operation 'my.program/callers})))))))
+
+(deftest diff-names-what-the-branch-added-changed-and-removed-against-its-cluster
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        cluster-name (:seon.cluster/name target)
+        branch (keyword (str "program-diff-" (id/id)))
+        changed 'my.program/sizes
+        added 'my.program/diff-fixture-added
+        removed 'my.program-test/program-refusals-carry-complete-distinguishable-declared-schemas]
+    (registry/branch! {:seon.store/store store :seon.store/branch branch
+                       :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+    (let [held (agent/acquire-context! target nil {:seon.agent/branch branch})
+          connection (:seon.db/connection held)
+          database (db/db connection)]
+      (try
+        (support/transacted! connection
+                             (into (support/replacement-tx database [:seon.fn/sym changed]
+                                                           "(defn sizes\n  \"Changed.\"\n  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :map]}\n  [_ _]\n  {})" {})
+                                   (support/replacement-tx database [:seon.fn/sym added]
+                                                           "(defn diff-fixture-added\n  \"Added.\"\n  {:malli/schema [:=> [:cat] :int]}\n  []\n  1)" {})))
+        (support/transacted! connection [[:db/retractEntity [:seon.test/sym removed]]])
+        (let [context {:seon.db/connection connection :seon.store/store store :seon.cluster/name cluster-name}
+              by-sym (fn [entries] (into {} (map (juxt :sym identity)) entries))
+              value (program/diff context)
+              one (program/diff context changed)]
+          (is (contains? (by-sym (:added value)) added))
+          (is (:digest-after (get (by-sym (:added value)) added)))
+          (is (not= (:digest-before (get (by-sym (:changed value)) changed))
+                    (:digest-after (get (by-sym (:changed value)) changed))))
+          (is (= (list 'my.program/diff changed) (:dig (get (by-sym (:changed value)) changed))))
+          (is (contains? (by-sym (:removed value)) removed))
+          (is (not= (:before one) (:after one)) "the dig form answers the head's and the branch's source"))
+        (finally
+          (agent/release-context! held)
+          (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))
