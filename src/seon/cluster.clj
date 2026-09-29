@@ -2875,32 +2875,34 @@
         ;; The committed archive is immutable input a concurrent start reads:
         ;; scratch lives in its own temporary directory, never under it.
         cache-root (str (babashka.fs/create-temp-dir {:prefix (str "seon-rehearsal-" token "-")}))
-        thread (Thread/currentThread)
-        loader (.getContextClassLoader thread)]
+        loader (.getClassLoader (class candidate-resources))]
     (try
       (babashka.fs/copy-tree analyzer/cache-directory cache-root)
-      (.setContextClassLoader thread (candidate-resources directory loader))
-      (schema/call-with-projection
-       (schema/declaration-projection (schema.edn/packaged-forms))
-       (fn []
-         (let [published (full-source-refresh!
-                          root held (assoc (publication-roots)
-                                           :seon.fn/root directory
-                                           :seon.source/changed-paths []
-                                           ::loaded-files (loaded-files held)
-                                           :seon.source/branch published-branch
-                                           :seon.fn.analyzer/cache-root cache-root))]
-           (if (:seon.error/at published)
-             published
-             (let [published-ms (ms)
-                   adopted (rehearsal-adoption! held published cluster-name fork)]
-               (assoc (select-keys published [:seon.source/commit-id :seon.source/built?])
-                      ::adopted-identities adopted
-                      ::phase-ms {::published-ms published-ms
-                                  ::adopted-ms (- (ms) published-ms)}))))))
+      ;; A binding, never the thread's context loader: the core.async threads
+      ;; a rehearsal spawns inherit a context loader for their lifetime, and
+      ;; once this candidate's archive was gone every settlement on them
+      ;; refused (fault 7b2cf983e1a4, 2026-09-29).
+      (binding [schema.edn/*resource-loader* (candidate-resources directory loader)]
+        (schema/call-with-projection
+         (schema/declaration-projection (schema.edn/packaged-forms))
+         (fn []
+           (let [published (full-source-refresh!
+                            root held (assoc (publication-roots)
+                                             :seon.fn/root directory
+                                             :seon.source/changed-paths []
+                                             ::loaded-files (loaded-files held)
+                                             :seon.source/branch published-branch
+                                             :seon.fn.analyzer/cache-root cache-root))]
+             (if (:seon.error/at published)
+               published
+               (let [published-ms (ms)
+                     adopted (rehearsal-adoption! held published cluster-name fork)]
+                 (assoc (select-keys published [:seon.source/commit-id :seon.source/built?])
+                        ::adopted-identities adopted
+                        ::phase-ms {::published-ms published-ms
+                                    ::adopted-ms (- (ms) published-ms)})))))))
       (catch Exception failure (rehearsal-refusal failure))
       (finally
-        (.setContextClassLoader thread loader)
         (try
           (doseq [branch [fork published-branch]
                   :when (contains? (registry/roster held) branch)]
