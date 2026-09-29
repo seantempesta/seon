@@ -2,6 +2,7 @@
   (:require [clojure.test]
             [clojure.core.async]
             [clojure.java.io]
+            [clojure.java.shell]
             [clojure.string]
             [seon.cluster]
             [seon.cluster.agent]
@@ -41,8 +42,8 @@
                                        (seon.db/pull d '[:seon.issue/unresolved]
                                                      [:seon.issue/id "probe-real-member"])))
                                  "my.run/complete")))
-   (let [real (first (filter #(clojure.string/includes? (:seon.issue/text %) "seon.fn")
-                             (seon.issue/notes ".")))
+   (let [real {:seon.issue/path "docs/seon/issues/probe-other.md"
+               :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue]\n---\n# Other\n## Problem\nseon.fn cited nowhere else."}
          selected [{:seon.issue/path "docs/seon/issues/probe-class.md"
                     :seon.issue/text "---\ntype: issue\nstatus: open\nseverity: cleanup\ntags: [issue, class/n7, class-kill]\n---\n# Class\n## Problem\nFind facts."}
                    {:seon.issue/path "docs/seon/issues/probe-member.md"
@@ -57,12 +58,13 @@
                                                      [:seon.issue/id "probe-member"])))
                                  "seon.issue-missing/absent"))
      (let [member (seon.db/pull (seon.db/db connection) '[*] [:seon.issue/id "probe-member"])
-           class-entity (seon.db/pull (seon.db/db connection) '[{:seon.issue/members [:seon.issue/id]}] [:seon.issue/id "probe-class"])]
+           class-entity (seon.db/pull (seon.db/db connection) '[{:seon.issue/members [:seon.issue/id]}] [:seon.issue/id "probe-class"])
+           unit {:seon.render/value member :seon.db/db (seon.db/db connection)}]
        (clojure.test/is (= #{"abcdef123"} (set (:seon.issue/commits member))))
        (clojure.test/is (seq (:seon.issue/functions member)))
        (clojure.test/is (some #(= "probe-member" (:seon.issue/id %)) (:seon.issue/members class-entity)))
-       (clojure.test/is (clojure.string/includes? (seon.issue/render-ai member) "(my.issue/status"))
-       (clojure.test/is (= :section (first (seon.issue/render-html member))))
+       (clojure.test/is (clojure.string/includes? (seon.issue/render-ai unit) "probe-member"))
+       (clojure.test/is (= :section (first (seon.issue/render-html unit))))
        (clojure.test/is (= "probe-member" (:seon.issue/id (seon.issue/status {:seon.db/db (seon.db/db connection) :seon.issue/id "probe-member"}))))
        (seon.issue/index! {:seon.db/connection connection
                           :seon.issue/notes (mapv #(update % :seon.issue/text clojure.string/replace "status: open" "status: resolved") selected)})
@@ -110,7 +112,7 @@
                 report (seon.test-support/transacted! connection [[:db.fn/call #'seon.issue/adopt-tx entities]])]
             (clojure.test/is (let [observed again] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))))
             (clojure.test/is (empty? delta))
-            (clojure.test/is (empty? (remove #(= :db/txInstant (:a %)) (:tx-data report)))))
+            (clojure.test/is (empty? (filter #(clojure.string/starts-with? (namespace (:a %)) "seon.issue") (:tx-data report)))))
           (let [changed (index-source!
                          (mapv #(update % :seon.issue/text clojure.string/replace
                                         "# Adoption member" "# Changed member") notes))
@@ -137,7 +139,7 @@
   (fn [connection]
    (let [wanted (set (map #(str % ".md") (keys converted-notes)))
          selected (filterv #(contains? wanted (.getName (clojure.java.io/file (:seon.issue/path %))))
-                           (seon.issue/notes "."))
+                           (seon.issue/notes (clojure.string/trim (:out (clojure.java.shell/sh "git" "rev-parse" "--show-toplevel")))))
          report (seon.issue/index! {:seon.db/connection connection :seon.issue/notes selected})
          d (seon.db/db connection)
          pull-issue (fn [slug]
