@@ -1,6 +1,0 @@
-#:seon.export{:parent-dir [:string {:min 1}],
-              :path [:string {:min 1}],
-              :request
-              [:map
-               [:seon.store/store :seon.store/store]
-               [:seon.export/parent-dir :seon.export/parent-dir]]}

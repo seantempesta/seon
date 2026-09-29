@@ -36,7 +36,6 @@
                  [:seon.source/changed-paths
                   {:optional true}
                   [:vector :string]]
-                 [:seon.operator/destination {:optional true} :string]
                  [:seon.source/directory
                   {:optional true :description "A candidate program's archive directory, rehearsed by :check."}
                   :string]
@@ -70,7 +69,6 @@
                  :reset
                  :logs
                  :config-apply
-                 :export
                  :check],
                 :observation
                 [:map
@@ -224,5 +222,4 @@
                   [:seon.operator/process-exit? :seon.operator/process-exit?]]
                  [:map
                   [:seon.boot/cluster-name :seon.boot/cluster-name]
-                  [:seon.reconcile/result :seon.reconcile/result]]
-                 [:map [:seon.operator/destination :string]]]}
+                  [:seon.reconcile/result :seon.reconcile/result]]]}

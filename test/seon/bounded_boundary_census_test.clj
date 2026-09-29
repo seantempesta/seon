@@ -11,7 +11,6 @@
   ["resources/seon/operator"
    "src/seon/cluster/boot.clj"
    "src/seon/cluster/process.clj"
-   "src/seon/cluster/export.clj"
    "src/seon/cluster/registry.clj"
    "src/seon/shell/jvm.clj"
    "script/seon/dev"

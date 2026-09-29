@@ -8,7 +8,6 @@
             [datahike.gc-guard :as gc-guard]
             [seon.cluster :as cluster]
             [seon.cluster.process :as process]
-            [seon.cluster.export :as export]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -741,9 +740,6 @@
         :check (merge identity
                       (cluster/rehearse-source! cluster-root (:seon.source/directory request)
                                                 (or name "default")))
-        :export {:seon.operator/destination
-                 (export/export! {:seon.store/store (:seon.store/store (selected-instance name))
-                                  :seon.export/parent-dir (:seon.operator/destination request)})}
         :init
         (if name
           (let [dir (str (io/file root "data/store"))

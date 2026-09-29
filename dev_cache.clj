@@ -174,7 +174,7 @@
   [basis staging-dir]
   (let [staging (.getCanonicalPath (canonical-file staging-dir))
         result (.getCanonicalPath (canonical-file result-file))
-        discovery (discovery-form (dependency-containers basis) result 'seon.artifact)]
+        discovery (discovery-form (dependency-containers basis) result 'seon.cluster.boot)]
     (run-child! basis discovery
                 "Development dependency-cache discovery failed."
                 staging)
