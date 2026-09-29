@@ -182,19 +182,19 @@ source, test, schema or task files, run the same publication and adoption in the
 running JVM on disposable branches (`seon.cluster/rehearse-source!`, `src/seon/cluster.clj`;
 `current-src`, default's branch and the shared analyzer cache are untouched):
 
-- `bin/seon check PATH...` rehearses HEAD plus those working-tree files (the paths
-  you pass to `git commit --only`); no paths rehearses HEAD. It answers the rehearsal
-  commit id, adopted identity count and phase times, or the refusal boot would stop
-  on. It exists once root applies `tmp/boot-reliability/patches/01-boot-check-request.patch`
-  and default runs that commit.
-- Until then: `tmp/boot-reliability/candidate.sh PATH...` prints the candidate
-  archive directory, then over MCP (jvm mode)
-  `(seon.cluster/rehearse-source! "<root>/data/clusters" "<archive>" "default")`.
+- `bin/seon check PATH...` rehearses HEAD plus those working-tree files; no paths rehearses
+  HEAD. It answers the rehearsal commit id, adopted identity count and phase times, or the
+  refusal boot would stop on.
+- `bin/seon check PATH... --test NS [--test NS/test]...` then boots a throwaway JVM from the
+  candidate archive on a disposable store and runs the named tests through the one runner:
+  the only proof that covers host code (a changed boot, publication, evaluation or render
+  function), which the running JVM cannot reload. Any red, boot failure or refusal exits
+  non-zero.
+- Lanes commit through `bin/lane commit LANE -m MSG --test NS... PATHS`, which runs both plus
+  `clj-kondo --lint src script test --cache false` and commits exactly PATHS.
 
-Measured 2026-09-28: HEAD 1.6-6 s, one changed file 4-5 s, a `seon.cluster` change
-30 s (its dependents re-derive, as boot's publication would). Not covered: host code
-does not reload, so a changed boot or publication function is not exercised (64cb9e80f's
-boot write of an attribute adopted only after boot passes the check).
+Measured 2026-09-28: HEAD 1.6-6 s, one changed file 4-5 s; a change to any function the
+analyzer reaches re-derives every program file (~30 s) until that is fixed.
 
 Record actual program identity, arming precondition, execution/reuse counts,
 assertions, failures, errors and refusal/timeout categories. Zero executions with

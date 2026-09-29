@@ -96,16 +96,17 @@ root.
    ledger: a change need not delete what it adds, feature for feature. Write the simplest correct form of what is
    needed; when the code grows, name what it lets go elsewhere and plan that deletion. Large additions still start
    with the smaller alternative considered, and net deletion never excuses needless machinery.
-4. **Opus builds at the REPL; Astra profiles and fixes.**
-   - **Opus designs and implements by dogfooding.** In its own Seon branch it tries alternatives at the REPL (defn,
-     the tests reaching the change, timings), keeps what worked, and proposes it through the ordinary merge;
-     write-back then updates only the files that changed.
-   - **Astra, an outside model trained on a different distribution, follows each landed slice.** It profiles the
-     slice at the REPL and FIXES what it finds directly, with no review round to wait on: super-linear
-     transformations (everything O(n) or O(n log n) in what changed), repeated work (the same derivation executed
-     thousands of times, whole-program work per change, re-reading what the caller holds), and correctness or law
-     violations.
-   - **Both refuse bad changes on sight,** so feedback is immediate and designs iterate fast.
+4. **Pick the model by risk; every lane proves its slice.**
+   - **Sonnet** measures, diagnoses, writes specs, deletes and sweeps, and implements clearly specified slices. When
+     it cannot find the cause or a clearly correct fix in about fifteen minutes, it bows out with what it measured.
+   - **Opus** changes the semantics of the one REPL path (turn, batch, evaluation, render, evidence) and other
+     boot-critical platform code, designing by dogfooding: alternatives tried at the REPL on its own branch, the
+     tests reaching the change, timings.
+   - **Astra, an outside model trained on a different distribution, takes the hard performance work** a Sonnet lane
+     bowed out of, and FIXES what it finds: super-linear transformations, repeated work (the same derivation
+     executed thousands of times, whole-program work per change, re-reading what the caller holds).
+   - **Every lane refuses bad changes on sight** and proves its own slice before committing (see "Use focused
+     verification"); a review round never substitutes for that proof.
    - **Root** assigns file ownership so the two never edit the same file at once, rules on disputes, and resolves
      already-ruled questions by citing their authority. For a new decision with hours of cross-owner work, root
      offers three priced options: the simplest viable first, the recommendation marked, each with its guarantee,
@@ -359,9 +360,12 @@ root.
   and input evidence; past observed reach is diagnostic. Unknown or red cannot reuse green. Record completion even
   with no armed calls; a recording failure is not success. Keep one regression per behavior class, and destructive
   isolation until proven confined.
-- **Use focused verification, run centrally.** Test worlds contend for one JVM, so root runs one focused list of
-  installed requests per batched restart and returns each red to its owner; at completion root runs platform/affected
-  integration and the bulk tier once, not per edit. Classify each red from stored runs by the commit that changed its
+- **Prove each slice before it lands; run the broad tiers centrally.** A lane commits through `bin/lane commit LANE
+  -m MSG --test NS... PATHS`, which runs `bin/seon check PATHS --test NS...`: the candidate archive (HEAD plus the
+  slice) is published and adopted on disposable branches, then a throwaway JVM boots from it on a disposable store
+  and runs the named tests through the one runner; any red, boot failure or lint error refuses the commit. Name the
+  tests reaching the change. Root restarts default after each landing and runs platform/affected integration and the
+  bulk tier once, not per edit. Classify each red from stored runs by the commit that changed its
   behavior, then delete tests of deleted machinery, update retired assumptions or fix the surviving owner; replacement
   behavior tests land with the cut; never wholesale-triage reds. Gate inputs are `seon.test.cache/input-roots`:
   documentation never publishes or widens gates; fix a tool that does so before proceeding. HEAD must load and the
@@ -406,20 +410,21 @@ root.
   Root preserves evidence, batches recovery, reconnects and verifies; disposable data and private state may not be
   reconstructible. Root coordinates shared exhaust and integration. Publish schema resources and consumers together;
   pause hooks during source cuts and record pause and resumption.
-- **One file, one owner.** A file has one owner at a time, no shared hunks. Root checks
-  `tmp/orchestrator/file-ownership.md` before every launch or follow-up; a change to a held file goes to its owner
-  as a patch or waits; agents request new ownership without editing the ledger. At each check-in root launches all ready
+- **One file, one owner.** A file has one owner at a time, no shared hunks. A lane claims every file it will edit,
+  tests included, with `bin/lane claim LANE PATHS` before editing; the claim refuses a file another lane holds or one
+  with uncommitted changes nobody claimed, and `bin/lane status` is the ledger. A change to a held file goes to its
+  owner as a patch or waits; a lane needing another file claims it with `bin/lane add` or asks root. At each check-in root launches all ready
   file-disjoint work or names its dependency or collision, with no artificial JVM-slot or prober cap; editing lanes are limited to what root can prove
   in one central test round, and
   addresses oversized functions and files with shrink assignments.
 - **Stay inside the assignment.** Work within its stop boundary; never resume, message or edit another agent's
   session or files. Do not nest delegation in bounded assignments, sandbox assigned work or overlap your own probe
-  or test JVMs. Foreign breakage does not stop independent work. Assigned agents start no test requests or
-  `bin/test` gates: they name the focused tests their slice needs, and root runs them centrally and owns cold and
-  platform proof. If the shared tree cannot load, prove HEAD plus your diff in a `git archive` snapshot with shared
+  or test JVMs. Foreign breakage does not stop independent work. A lane proves its slice with `bin/lane commit
+  … --test NS` and names what it could not prove; root owns the broad tiers and cold proof. If the shared tree cannot load, prove HEAD plus your diff in a `git archive` snapshot with shared
   caches linked and name the foreign boundary.
 - **Use Git without touching others' work.** No `git add -A`, `reset --hard`, `stash` or shared-file restore. Commit
-  coherent slices with `git commit --only -- <owned paths>` and report released paths so root updates the ledger.
+  coherent slices only through `bin/lane commit` (it refuses unclaimed paths and anything else staged in the shared
+  index, then commits exactly the named paths with `git commit --only`), and `bin/lane release` when done.
   Never push, merge or open a pull request beyond explicit owner authorization. No git worktrees without the owner's
   personal authorization for that specific use.
 - **Launch lanes deliberately.** Astra runs through `bin/codex-agent`; read the

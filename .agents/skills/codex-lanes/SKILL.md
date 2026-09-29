@@ -70,8 +70,10 @@ Only the GPT-6 versions are used (owner 2026-09-23). Dials: `LANE_MODEL`
   no pre-write shell event); a patch write is refused before.
 - **Default is the owner's window:** a lane never stops, resets, reforks or
   adopts `default`; RESET NEEDED goes in the landing note.
-- **Commits are the heartbeat:** path-limited (`git commit --only -- …`),
-  one coherent slice each; the orchestrator gates cold and pushes.
+- **Commits are the heartbeat:** claim files first (`bin/lane claim LANE PATHS`), commit
+  each coherent slice through `bin/lane commit LANE -m MSG --test NS... PATHS` (proven on a
+  throwaway JVM from the candidate), `bin/lane release LANE` at the end; the orchestrator
+  runs the broad tiers and pushes.
 
 ## Pausing, resuming, reading
 
