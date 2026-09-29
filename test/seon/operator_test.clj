@@ -106,3 +106,20 @@
       (finally
         (.destroy holder)
         (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+
+(deftest check-names-the-tests-its-throwaway-jvm-runs
+  ;; `check PATH --test NS --test NS/NAME` carries both test names in order;
+  ;; the runner receives a namespace as --ns and a test as --test.
+  (let [root (System/getProperty "java.io.tmpdir")
+        request (operator/parse-argv ["--seon-root" root "check" "src/seon/operator.clj"
+                                      "--test" "seon.error.refusal-test"
+                                      "--test" "seon.operator-test/check-names-the-tests-its-throwaway-jvm-runs"])
+        refused (try (operator/parse-argv ["--seon-root" root "status" "--test" "seon.operator-test"])
+                     (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]
+    (is (= ["seon.error.refusal-test" "seon.operator-test/check-names-the-tests-its-throwaway-jvm-runs"]
+           (:seon.operator/tests request)))
+    (is (= 1 (count (:seon.operator/paths request))))
+    (is (= ["--ns" "seon.error.refusal-test"
+            "--test" "seon.operator-test/check-names-the-tests-its-throwaway-jvm-runs"]
+           (#'operator/test-check-arguments (:seon.operator/tests request))))
+    (is (= :refused (:seon.operator/disposition refused)))))

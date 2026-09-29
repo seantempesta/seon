@@ -1471,7 +1471,7 @@
                            :client-failed)
                :seon.operator/process-exit? (not (:seon.operator/ready? resumed)))))))
 
-(declare failure-cause)
+(declare failure-cause first-line)
 
 ;;; Will this tree boot? (owner 2026-09-28: HEAD refused to boot twice in one
 ;;; hour; only a boot saw it.) The candidate is a commit object whose tree is
@@ -1501,11 +1501,147 @@
                                   repository 30000))))
           (finally (fs/delete-if-exists index)))))))
 
+;;; Will the candidate's tests pass? (owner 2026-09-28: a lane proves its change
+;;; before committing.) The rehearsal above adopts the candidate in the running
+;;; JVM, which cannot run its compiled code; `--test` then boots a THROWAWAY JVM
+;;; from the candidate's archive under a disposable root `data/check/<sha>-<pid>`
+;;; (its own empty store, lock and ports: a fresh install is adoption onto an
+;;; empty store, `launch!`'s path), runs the named tests there through the
+;;; candidate's own `bin/test-check` (the one runner path `bin/test` uses), then
+;;; terminates that JVM by exact identity and deletes the root. The root links
+;;; this root's archived pins and the checkout's `target` (class caches); its
+;;; analysis cache is a private copy, since the candidate's bytes are not the
+;;; published program this root's cache follows.
+
+(def ^:private check-slots
+  "Throwaway JVMs one root runs at once; further checks wait for a slot."
+  2)
+
+(defn- check-slot!
+  "A held slot lock under `root`'s `data/check` (`{:seon.operator/slot n}` plus
+  its channel, whose close releases it), awaited within `bound` ms. The lock is
+  the OS's, so a check that dies releases its slot."
+  {:malli/schema [:=> [:cat :string [:int {:min 1}]] :map]}
+  [root bound]
+  (let [directory (doto (io/file root "data/check") .mkdirs)
+        began (System/nanoTime)]
+    (loop [announced? false]
+      (or (some (fn [slot]
+                  (let [channel (.getChannel (java.io.RandomAccessFile.
+                                              (io/file directory (str "slot-" slot ".lock")) "rw"))
+                        ;; One check per operator process: no lock of this JVM overlaps.
+                        lock (.tryLock channel)]
+                    (if lock
+                      {:seon.operator/slot slot :seon.operator/channel channel}
+                      (do (.close channel) nil))))
+                (range check-slots))
+          (do (when (< bound (elapsed-ms began))
+                (fail! "No throwaway JVM slot freed within its bound."
+                       {:seon.operator/slots check-slots :seon.operator/timeout-ms bound}))
+              (when-not announced?
+                (binding [*out* *err*]
+                  (println (str "check: " check-slots " throwaway JVMs already run; waiting for a slot"))
+                  (flush)))
+              (Thread/sleep 1000)
+              (recur true))))))
+
+(defn- test-check-arguments
+  "`bin/test-check` arguments for the check's `--test` values: `NS/NAME` names
+  one test, `NS` a namespace."
+  {:malli/schema [:=> [:cat [:vector :string]] [:vector :string]]}
+  [tests]
+  (into [] (mapcat #(if (str/includes? % "/") ["--test" %] ["--ns" %])) tests))
+
+(defn- log-tail
+  "The last `n` lines of the file at `path`, or nothing."
+  {:malli/schema [:=> [:cat :string [:int {:min 1}]] [:maybe [:vector :string]]]}
+  [path n]
+  (when (.isFile (io/file path))
+    (vec (take-last n (str/split-lines (slurp path))))))
+
+(defn- run-candidate-tests!
+  "Run `tests` on the ready throwaway JVM of `disposable` through the
+  candidate's `bin/test-check`: its summary line and whether it passed."
+  {:malli/schema [:=> [:cat :string :string [:vector :string]] :map]}
+  [source-root disposable tests]
+  (let [classpath (str/join ":" (map #(str source-root "/" %) ["script" "src" "resources"]))
+        argv (into ["bb" "--config" "/dev/null" "--classpath" classpath
+                    (str source-root "/bin/test-check") "--root" disposable "default"]
+                   (test-check-arguments tests))
+        bound (+ (operator-boot-bound-ms {}) (operator-silence-backstop-ms {}))]
+    (try
+      {:seon.operator/test-summary (str/trim (command! argv source-root bound))
+       :seon.operator/tests-passed? true}
+      (catch clojure.lang.ExceptionInfo refusal
+        (let [evidence (:seon.error/offending (ex-data refusal))]
+          (if-let [output (:seon.operator/output evidence)]
+            {:seon.operator/test-summary (str/trim output) :seon.operator/tests-passed? false}
+            (throw refusal)))))))
+
+(defn- candidate-tests!
+  "Boot a throwaway JVM of `root` from commit `sha`, run `tests` there and
+  answer the summary with the phases; a boot that does not reach readiness
+  answers its failure with the log's tail. The JVM is terminated by exact
+  identity and its disposable root deleted on every exit path."
+  {:malli/schema [:=> [:cat :string :string [:vector :string]] :map]}
+  [root sha tests]
+  (let [began (System/nanoTime)
+        slot (check-slot! root (operator-boot-bound-ms {}))
+        waited-ms (elapsed-ms began)
+        disposable (.getCanonicalPath
+                    (doto (io/file root "data/check"
+                                   (str (subs sha 0 12) "-" (.pid (java.lang.ProcessHandle/current))))
+                      .mkdirs))]
+    (try
+      (fs/create-dirs (io/file root pinned-directory))
+      (fs/create-dirs (io/file disposable "data/source"))
+      (fs/create-sym-link (io/file disposable pinned-directory)
+                          (fs/real-path (io/file root pinned-directory)))
+      (let [previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
+            source (filled-classes! disposable (prepared-source! disposable sha previous))
+            source-root (:seon.operator/source-root source)
+            prepared-ms (elapsed-ms began)
+            outcome (try (launch-child! {:seon.operator/managed-root disposable
+                                         :seon.operator/command :start
+                                         :seon.boot/cluster-name "default"}
+                                        source-root true)
+                         (catch Exception cause
+                           {:seon.operator/value
+                            (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
+            value (:seon.operator/value outcome)
+            missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
+            ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
+            booted-ms (elapsed-ms began)
+            run (when ready? (run-candidate-tests! source-root disposable tests))
+            phases (merge (:seon.operator/phases source)
+                          {:seon.operator/slot-wait-ms waited-ms
+                           :seon.operator/prepare-ms prepared-ms
+                           :seon.operator/boot-ms (- booted-ms prepared-ms)
+                           :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
+                           :seon.operator/tests-ms (- (elapsed-ms began) booted-ms)})]
+        (if ready?
+          (assoc run :seon.operator/test-phases phases)
+          (diagnostic (str "The throwaway JVM from " sha " did not reach readiness; its tests did not run.")
+                      {:seon.operator/value value :seon.operator/test-phases phases
+                       :seon.operator/log-tail (log-tail (str (io/file disposable "data/clusters/default/logs/seon.log")) 40)}
+                      :client-failed)))
+      (finally
+        (try
+          (doseq [process (selected-processes disposable)]
+            (terminate! process (operator-silence-backstop-ms {})))
+          ;; delete-tree never follows a link: the pins, `target` and gitlink
+          ;; links are removed, their shared targets kept.
+          (fs/delete-tree disposable)
+          (finally (.close ^java.nio.channels.FileChannel (:seon.operator/channel slot))))))))
+
 (defn check!
   "Answer whether HEAD plus `:seon.operator/paths` boots on this root's store,
   in its running JVM: the candidate's archive is published and adopted there
-  on disposable branches. A candidate that is not HEAD has its archive deleted
-  after; HEAD's is kept for the `start --head` that follows."
+  on disposable branches. With `:seon.operator/tests`, a rehearsal that
+  adopted then boots the candidate in a throwaway JVM and runs those tests
+  there (`candidate-tests!`); a red run refuses. A candidate that is not HEAD
+  has its archive deleted after; HEAD's is kept for the `start --head` that
+  follows."
   {:malli/schema [:=> [:cat :map] :map]}
   [request]
   (let [began (System/nanoTime)
@@ -1516,11 +1652,24 @@
         {source-root :seon.operator/source-root :as source} (committed-source! root sha)
         archive-ms (elapsed-ms began)]
     (try
-      (assoc (connected! (assoc request :seon.source/directory source-root
-                                :seon.boot/cluster-name (get request :seon.boot/cluster-name "default")))
-             :seon.source/git-sha sha
-             :seon.operator/phases {:seon.operator/archive-ms archive-ms
-                                    :seon.operator/total-ms (elapsed-ms began)})
+      (let [rehearsal (connected! (assoc request :seon.source/directory source-root
+                                         :seon.boot/cluster-name (get request :seon.boot/cluster-name "default")))
+            rehearsal-ms (elapsed-ms began)
+            tests (get request :seon.operator/tests [])
+            run (when (and (seq tests) (not (:seon.error/message rehearsal)))
+                  (candidate-tests! root sha tests))
+            phases {:seon.operator/archive-ms archive-ms
+                    :seon.operator/rehearsal-ms (- rehearsal-ms archive-ms)
+                    :seon.operator/total-ms (elapsed-ms began)}]
+        (cond
+          (or (nil? run) (:seon.error/message run))
+          (assoc (or run rehearsal) :seon.source/git-sha sha :seon.operator/phases phases)
+          (:seon.operator/tests-passed? run)
+          (merge rehearsal run {:seon.source/git-sha sha :seon.operator/phases phases})
+          :else
+          (diagnostic (str "The candidate " sha " is red: " (first-line (:seon.operator/test-summary run)))
+                      (merge run {:seon.source/git-sha sha :seon.operator/phases phases})
+                      :client-failed)))
       (finally
         (when (and (:seon.operator/source-built? source) (not= sha head)
                    (not (contains? (held-sources) source-root)))
@@ -1579,6 +1728,10 @@
           "--head" (if (= :start command)
                      (recur (next args) (assoc request :seon.operator/head? true) positionals)
                      (fail! "--head is supported only by start." request))
+          "--test" (if (and (= :check command) (seq (next args)))
+                     (recur (nnext args) (update request :seon.operator/tests (fnil conj []) (second args))
+                            positionals)
+                     (fail! "--test NS or --test NS/NAME is supported only by check." request))
           "--dev" (recur (nnext args) (assoc request :seon.operator/development-cluster (valid-name (second args))) positionals)
           "--config" (let [_ (when-not (= :start command)
                                         (fail! "--config is supported only by start." request))
@@ -1710,7 +1863,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH | check [PATH...]"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH | check [PATH...] [--test NS | --test NS/NAME]..."}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.
@@ -1720,6 +1873,10 @@
         (binding [*out* *err*]
           (println (headline request result (when failed? (write-diagnostic! request result)) code))
           (flush)))
+      ;; A check's test run prints bin/test's own summary and red lines.
+      (when-let [summary (or (:seon.operator/test-summary result)
+                             (get-in result [:seon.error/offending :seon.operator/test-summary]))]
+        (println summary))
       (cond
         (:seon.operator/help result) (println (:seon.operator/help result))
         failed? nil
