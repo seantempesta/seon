@@ -8,7 +8,6 @@
             [seon.env :as env]
             [seon.fault :as fault]
             [seon.operator.runtime :refer [running-instances]]
-            [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.render.value :as render.value]
             [seon.schema :as schema]

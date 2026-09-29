@@ -1,8 +1,0 @@
-[#:seon.task{:id "ed8c6db31a85"
-             :name "status-is-blind-to-hosted-graphs"
-             :kind :function
-             :intent "flow-status passes only the root roster to fleet-value, so a hosted agent whose graph stopped still reads armed (its report and error channels closed, mailbox open), no fault is recorded, and status reports :agents 1 while six hosted rosters exist."
-             :must-read #{seon.oversight/flow-status}
-             :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
-                         "docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
-                         "docs/seon/issues/status-reads-only-the-root-roster-and-a-stopped-hosted-graph-stays-armed.md"}}]

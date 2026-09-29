@@ -615,7 +615,7 @@
   `:seon.agent/contexts` the execution handles acquired on this execution's branch,
   by `[branch agent-id]`; `:seon.agent/children` the roster of each other branch
   acquired through it, by branch; `:seon.flow/graph` the cluster graph, joined
-  before it resumes, read by oversight on every render path that holds this entry."
+  before it resumes."
   {:malli/schema [:=> [:cat] :seon.agent/routing]}
   []
   (atom {:seon.agent/armed {} :seon.agent/channels {} :seon.agent/contexts {}}))

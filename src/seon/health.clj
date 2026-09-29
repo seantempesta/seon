@@ -2,7 +2,7 @@
   "Everything wrong with one cluster now, ranked, in one value.
 
   THE REPORT IS ITS OWNERS' VALUES PLUS WHAT MATCHES. Each unit is an owner's
-  value, whole, under its own schema (problems, the Flow fleet, the cluster
+  value, whole, under its own schema (problems, the cluster
   status, the process cache, every profile observation, maintenance), so each
   keeps its owner's render pair. `:seon.health/findings` is one ranked vector
   of matches: a FINDING IS THE NAMED SCHEMA A VALUE SATISFIES (health plan
@@ -46,7 +46,6 @@
             [seon.instrument :as instrument]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :as operator.runtime]
-            [seon.oversight :as oversight]
             [seon.problems :as problems]
             [seon.profile :as profile]
             [seon.print.value :as print.value]
@@ -540,7 +539,7 @@
   [projection report found]
   (let [schemas (finding-schemas projection)
         unread? (some #(or (:seon.health/unit %) (:seon.error/at %))
-                      (map report [:seon.health/problems :seon.health/fleet :seon.health/status :seon.health/maintenance]))]
+                      (map report [:seon.health/problems :seon.health/status :seon.health/maintenance]))]
     (cond (some #(<= (:seon.health/faulted-severity ranking)
                      (get-in schemas [(:seon.health/schema %) :seon.health/severity] 0)) found) :faulted
           unread? :unknown
@@ -598,11 +597,6 @@
                                                                   #(replaced-roots database))
                            :seon.health/regressions (collected :seon.health/regressions
                                                                #(derived database ::regressions regressions))}
-                    (:seon.agent/routing instance)
-                    (assoc :seon.health/fleet (collected :seon.health/fleet
-                                                         #(:seon.render/value
-                                                           (oversight/unit {:seon.db/db database :seon.sci.eval/ctx ctx
-                                                                            :seon.agent/routing (:seon.agent/routing instance)}))))
                     (:seon.error/at loaded) (assoc :seon.health/program loaded))
             found (collected :seon.health/findings #(findings database units))
             found (if (vector? found) found [])]
@@ -633,9 +627,6 @@
     (case k
       :seon.health/readiness (select-keys value [:seon.boot/missing-layers :seon.boot/ready-ms :seon.render.web/url])
       :seon.health/problems (into (sorted-map) (map (fn [[family rows]] [family (count rows)])) value)
-      :seon.health/fleet {:seon.health/agents (count (:seon.oversight/agents value))
-                          :seon.health/procs (+ (count (:seon.oversight/plumbing value))
-                                                (count (mapcat :seon.oversight/procs (:seon.oversight/agents value))))}
       :seon.health/status (select-keys value [:seon.cluster.status/heap-used :seon.cluster.status/heap-live :seon.cluster.status/heap-max
                                               :seon.cluster.status/open-turns :seon.cluster.status/platform-threads])
       :seon.health/cache (select-keys value [:seon.cache/max-bytes :seon.cache/weighted-bytes])
@@ -676,7 +667,7 @@
        :seon.health/counts (into (sorted-map) (frequencies (map :seon.health/schema found)))
        :seon.health/units (into (sorted-map)
                                 (keep (fn [k] (when-some [v (get value k)] [k (unit-summary k v)])))
-                                [:seon.health/readiness :seon.health/problems :seon.health/fleet :seon.health/status
+                                [:seon.health/readiness :seon.health/problems :seon.health/status
                                  :seon.health/cache :seon.health/profile :seon.health/maintenance
                                  :seon.health/replaced-roots :seon.health/regressions :seon.health/program])
        :seon.render/operations
@@ -731,8 +722,6 @@
      (unit-section "Problems" (:seon.health/problems value)
                    (fn [found] (into [:dl] (map (fn [[family rows]] [:div [:dt (name family)] [:dd (str (count rows))]]))
                                      (sort-by key found))))
-     (when-some [fleet (:seon.health/fleet value)]
-       (unit-section "Flow" fleet #(oversight/html-table {:seon.render/value % :seon.db/db database})))
      (unit-section "Cluster" (:seon.health/status value) #(status/render-html {:seon.render/value % :seon.db/db database}))
      (unit-section "Maintenance" (:seon.health/maintenance value) #(maintenance/render-report-html % database))
      (unit-section "Cache" (:seon.health/cache value)

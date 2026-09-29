@@ -135,9 +135,8 @@
                    ;; revision proof, and retained evidence carries no read
                    ;; result to replay (owner ruling 2026-09-26: re-render,
                    ;; never replay), so any commit makes its block a
-                   ;; candidate, and a candidate block re-derives the page,
-                   ;; whose fleet table takes the live fleet as its argument.
-                   all-read (into #{"seon.oversight/html-table"}
+                   ;; candidate, and a candidate block re-derives the page.
+                   all-read (into #{}
                                   (keep (fn [call]
                                           (when (some #(= :all (get-in % [:datahike.read/revision
                                                                           :datahike.read/attributes]))

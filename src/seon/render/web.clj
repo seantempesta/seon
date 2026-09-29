@@ -64,7 +64,6 @@
             [seon.health :as health]
             [seon.error :as error]
             [seon.fault :as fault]
-            [seon.oversight :as oversight]
             [seon.render :as render]
             [seon.render.block :as block]
             [seon.render.data :as data]
@@ -471,14 +470,12 @@
   "One namespace page and the durable owner messages its failures require.
 
   Derives the agent's flat HTML units at `db` and serializes each through
-  `surface-html`. Root fleet oversight enters the same unit sequence before
-  ranking; it has no private fragment path. GET, first SSE paint, and the
+  `surface-html`. GET, first SSE paint, and the
   render proc share this derivation. The proc retains fragments for deltas.
 
   Process provenance rides the service request."
   {:malli/schema [:=> [:cat :map] :map]}
   [{:keys [:seon.db/db :seon.agent/id
-           :seon.render.web/root-agent-id
            :seon.db/connection] caps :seon.sci.admit/caps
     stream-partial :seon.ai/partial
     retained :seon.render.web/retained-fragments
@@ -499,47 +496,8 @@
             (carry request [:seon.render/candidate-call-ids
                             :seon.render.walk/root-acquisition]))
         walked-units (render.walk/neighborhood render-request)
-        fleet-call
-        (when (= id root-agent-id)
-          (oversight/unit
-           ;; Routing present asks for live state; absent is a detached render.
-           (carry {:seon.db/db db
-                   :seon.agent/id root-agent-id
-                   :seon.sci.admit/caps caps
-                   :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
-                   :seon.sci.eval/time-limit-ms
-                   (:seon.config.eval/time-limit-ms request)
-                   :seon.db/connection connection}
-                  request [:seon.agent/routing])))
-        fleet-output
-        (some-> fleet-call
-                (assoc :seon.render/output :seon.render/html
-                       :seon.render.call/id
-                       [:seon.render/html [::fleet-oversight]])
-                (cond-> (contains? request :seon.render/profile)
-                  (assoc :seon.render/profile
-                         (:seon.render/profile request)))
-                (assoc :seon.render/retained-calls retained-calls
-                       :seon.render/captured-calls captured-calls)
-                (carry request [:seon.render/candidate-call-ids])
-                render/render-call)
-        fleet-unit
-        (when fleet-call
-          (cond-> {:seon.render.walk/lookup
-                   [:seon.agent/id root-agent-id]
-                   :seon.render.walk/path [::fleet-oversight]
-                   :seon.render.walk/found-depth 0
-                   :seon.render/distance 0}
-            (:seon.render/refused-member fleet-output)
-            (assoc :seon.error/value fleet-output
-                   :seon.render/output
-                   [:div {:class "seon-render-unavailable"}
-                    "renderer unavailable"])
-
-            (not (:seon.render/refused-member fleet-output))
-            (assoc :seon.render/output fleet-output)))
         units (mapv #(with-database % {:seon.db/db db})
-                    (cond-> walked-units fleet-unit (conj fleet-unit)))
+                    walked-units)
         ranks (into {}
                     (map-indexed (fn [rank unit]
                                    [(:seon.render.walk/path unit) rank]))

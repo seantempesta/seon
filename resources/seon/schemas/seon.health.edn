@@ -46,7 +46,6 @@
 
  :readiness :seon.boot/readiness
  :problems [:or :seon.problems/problems :seon.health/pending :seon.error/value]
- :fleet [:or :seon.oversight/fleet :seon.oversight/unavailable :seon.error/value]
  :status [:or :seon.cluster.status/value :seon.error/value]
  :cache :seon.cache/status
  :tested? [:boolean {:description "Whether any test reaches a function (seon.fn/functions-without-tests)."}]
@@ -68,7 +67,6 @@
   [:seon.health/refused {:optional true} :seon.health/refused]
   [:seon.health/readiness {:optional true} :seon.health/readiness]
   [:seon.health/problems :seon.health/problems]
-  [:seon.health/fleet {:optional true} :seon.health/fleet]
   [:seon.health/status :seon.health/status]
   [:seon.health/cache :seon.health/cache]
   [:seon.health/profile :seon.health/profile]
