@@ -236,3 +236,18 @@ UNVERIFIED (named in the assignment, not read or reproduced):
 6. Ownership: this touches web.clj, transcript.clj, render.clj, repl.clj, turn.clj:2215, cluster/agent.clj:857, error.clj
    and schemas seon.turn/seon.runtime edn. Root must assign one owner per file; the order that keeps HEAD loading is
    D6 (floor), D2 (emission), D1 (context owner), D3 (view), then D4/D5/D8 (web only).
+
+## 7. Root rulings (2026-09-28)
+
+- R1 Budget: **(a)**, keep every feature and delete the duplication now (~3.9k). The rest of the area budget comes
+  from the area rewrite (value printer and walk) later, from its own reviewed spec. No feature cut without the owner.
+- R2 Cache: **`seon.cache`** kinds keyed by content (CLAUDE.md "One central cache"); `render/shared-cache` must name
+  its reason or go.
+- R3 Yes: delete `transcript/history-entries`; convert bootstrap.clj:247 and the seon.mcp task's :must-read in the
+  same commit.
+- R4 hiccup.clj: only if a library already on the classpath does the job (check deps.edn); no new dependency in a
+  dedup slice.
+- R5 Verify live use with a probe on the running pages; delete `render-runtime-*` / `render-history-html` if no page
+  shows them.
+- R6 Order as given: D6, D2, D1, D3, then D4/D5/D8. One lane per slice, one owner per file, each slice after the
+  issue cut releases the render call sites.
