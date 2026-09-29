@@ -1,6 +1,9 @@
 (ns seon.test.request-acquisition-test
   (:require [clojure.test :refer [deftest is]]
+            [malli.core :as m]
+            [malli.registry :as mr]
             [sci.lang]
+            [seon.schema :as schema]
             [seon.db :as db]
             [seon.test :as sut]
             [seon.test-support :as support]))
@@ -82,7 +85,19 @@
              handle (support/execution-handle connection)
              child (binding [sci.lang/*write-observer* #(swap! observed conj (:op %))]
                      ((requiring-resolve 'seon.cluster.agent/acquire-context!)
-                      handle nil {:seon.agent/isolate? true :seon.store/store (:seon.store/store handle)}))]
+                      handle nil {:seon.agent/isolate? true}))]
          (try (is (some? (:seon.db/connection child)))
               (is (= [] @observed) "no install reaches the caller's observer")
               (finally ((requiring-resolve 'seon.cluster.agent/release-context!) child))))))))
+
+(deftest acquisition-options-name-no-store-so-the-handles-own-store-decides
+  ;; An option named :seon.store/store is a world member, so an agent's evaluation
+  ;; supplied its file store over a test request's overlay: every fixture branch
+  ;; refused "no branch or commit <overlay head> to branch from".
+  (support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (db/db connection))
+           compiled (mr/schema (:seon.schema.projection/registry projection) :seon.agent/acquisition-options)
+           declared (into #{} (map first) (m/children compiled))]
+       (is (contains? declared :seon.agent/isolate?) "the probe reads the real options schema")
+       (is (not (contains? declared :seon.store/store)))))))

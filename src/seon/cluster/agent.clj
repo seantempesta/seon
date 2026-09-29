@@ -1084,8 +1084,10 @@
                       (:seon.agent/branch
                        (db/pull database '[:seon.agent/branch]
                                 [:seon.agent/id agent-id]))))
-         held-store (or (:seon.store/store options) (:seon.store/store handle)
-                        (:seon.store/store (env/of source-ctx)))]
+         ;; The handle's own store: a test request's overlay holds commits the
+         ;; file store never sees. Options name no store, so the calling
+         ;; evaluation's world cannot supply one over it.
+         held-store (or (:seon.store/store handle) (:seon.store/store (env/of source-ctx)))]
      (when-not (and parent-roster branch)
        (throw (ex-info "Acquisition requires the handle's roster and an explicit agent branch."
                        {:seon.agent/id agent-id :seon.agent/branch branch})))
