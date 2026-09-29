@@ -496,15 +496,16 @@
             (throw
              (ex-info
               "A namespace test hook requires its complete admitted selection."
-              {:seon.error/at (java.util.Date.)
-                :seon.error/layer :seon.test/execution
+              (seon.error.refusal/error
+               :seon.test/execution-error
+               {:seon.error/layer :seon.test/execution
                 :seon.error/operation `run-selected-tests
                 :seon.error/message "A namespace test hook requires its complete admitted selection."
+                :seon.test/execution-refusal :seon.test/incomplete-test-ns-hook
                 :seon.ns/name namespace-name
-                :seon.test.runner/long-test-ns-hook namespace-name
                 :seon.error/expected "the namespace's complete admitted test selection"
                 :seon.error/offending namespace-vars
-                :seon.error/data {:seon.ns/name namespace-name}})))
+                :seon.error/data {:seon.ns/name namespace-name}}))))
           (test/test-vars namespace-vars))
         (when host? (test/do-report {:type :end-test-ns :ns namespace-object})))
       @test/*report-counters*))))
@@ -588,8 +589,7 @@
             exit-projection (:seon.schema/projection @state)
             database (when connection (db/db connection))]
         (if (or (nil? connection)
-                (and (map? database)
-                     (contains? database :seon.error/at)))
+                (seon.error.refusal/error? database))
           {:seon.cluster/name cluster-name
            ::schema-authority-unavailable
            (if connection
@@ -1073,23 +1073,25 @@
                            entries))]
     (cond
       (:seon.test/unknown entries)
-      (assoc (select-keys entries [:seon.error/message :seon.test/unknown])
-             :seon.error/at (java.util.Date.)
-             :seon.error/layer :seon.test/reach
-             :seon.error/operation 'seon.test.runner/reach-digests)
+      (seon.error.refusal/error
+       :seon.test/unknown-error
+       (assoc (select-keys entries [:seon.error/message :seon.test/unknown])
+              :seon.error/layer :seon.test/reach
+              :seon.error/operation 'seon.test.runner/reach-digests))
       ;; Unknown evidence never keys reuse: equal unknown leaves would match.
       (seq undigested)
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.test/reach
-       :seon.error/operation 'seon.test.runner/reach-digests
-       :seon.error/message (let [declarations (vec (distinct (mapcat val undigested)))]
-                             (str "Reach digest unknown: " (count declarations) " declarations have no stored "
-                                  ":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
-                                  "; reached by " (count undigested) " tests, first "
-                                  (pr-str (vec (take 10 (keys undigested)))) "."))
-       :seon.test/unknown "reach digest"
-       :seon.error/member :seon.program/definition-digest
-       :seon.error/offending (vec (keys undigested))}
+      (seon.error.refusal/error
+       :seon.test/unknown-error
+       {:seon.error/layer :seon.test/reach
+        :seon.error/operation 'seon.test.runner/reach-digests
+        :seon.error/message (let [declarations (vec (distinct (mapcat val undigested)))]
+                              (str "Reach digest unknown: " (count declarations) " declarations have no stored "
+                                   ":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
+                                   "; reached by " (count undigested) " tests, first "
+                                   (pr-str (vec (take 10 (keys undigested)))) "."))
+        :seon.test/unknown "reach digest"
+        :seon.error/member :seon.program/definition-digest
+        :seon.error/offending (vec (keys undigested))})
       :else (into {} (map (fn [[s entry]] [s (::reach-digest entry)])) entries))))
 
 (defn reach-memberships
@@ -1125,7 +1127,7 @@
                       (db/since (db/history database) basis-t)
                       (vec (program-digest-read-attributes
                             (or (db/carried-projection database) (schema/handed-projection)))))]
-    (if (and (map? written) (:seon.error/at written)) written (some? written))))
+    (if (seon.error.refusal/error? written) written (some? written))))
 
 (defn program-revisions
   "Datahike's revisions of every attribute a program row carries, with the
@@ -1171,7 +1173,7 @@
                   [:or :seon.test.run/provenance :seon.test.run/unavailable-error]]}
   [database]
   (let [digest (program-digest database)]
-    (if (and (map? digest) (contains? digest :seon.error/at) (contains? digest :seon.error/layer) (contains? digest :seon.error/operation)) digest
+    (if (seon.error.refusal/error? digest) digest
         {:seon.test.run/id (id/id)
    :seon.test.run/at (java.util.Date.)
    :seon.test.run/program-digest digest
@@ -1218,7 +1220,7 @@
     (throw (ex-info (:seon.error/message failure) failure))))
 
 (defn- execution-read [value]
-  (when (and (map? value) (contains? value :seon.error/at) (contains? value :seon.error/layer) (contains? value :seon.error/operation))
+  (when (seon.error.refusal/error? value)
     (throw (ex-info (:seon.error/message value) value)))
   value)
 
@@ -1326,7 +1328,7 @@
                      (db/as-of database (:seon.test.run/basis-t run)))
                    database)
         threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
-        _ (when (and (map? threshold) (contains? threshold :seon.error/at) (contains? threshold :seon.error/layer) (contains? threshold :seon.error/operation))
+        _ (when (seon.error.refusal/error? threshold)
             (throw (ex-info "Cannot read the assertion blob threshold." threshold)))
         staged (volatile! [])
         stage-field
@@ -1625,7 +1627,7 @@
                           (reach-memberships tested
                             (into [] (comp (map :seon.test/sym)
                                            (remove #(contains? carried-reaches %))) results)))
-        reaches (if (and (map? derived-reaches) (contains? derived-reaches :seon.error/at) (contains? derived-reaches :seon.error/layer) (contains? derived-reaches :seon.error/operation))
+        reaches (if (seon.error.refusal/error? derived-reaches)
                   (or carried-reaches derived-reaches)
                   (merge derived-reaches carried-reaches))
         run-id (:seon.test.run/id run)
@@ -1665,7 +1667,7 @@
         previous (cond-> previous
                    (:seon.test.run/callers-at-head previous)
                    (update :seon.test.run/callers-at-head set))]
-    (when (and (map? previous) (contains? previous :seon.error/at) (contains? previous :seon.error/layer) (contains? previous :seon.error/operation))
+    (when (seon.error.refusal/error? previous)
       (throw (ex-info (:seon.error/message previous) previous)))
     (when (and previous (not= run (dissoc previous :db/id)))
       (let [failure (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.test.runner/record-tx
@@ -1843,15 +1845,17 @@
                                  (every? integer? (map member [:seon.test.member/pass-count
                                                                :seon.test.member/fail-count
                                                                :seon.test.member/error-count])))
-                      {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
-                       :seon.error/operation 'seon.test.runner/recorded-member-results
-                       :seon.error/message
-                       (if-let [cause (:seon.test.run/stopped run)]
-                         (str "Never started: request " (:seon.test.run/id run) " stopped (" cause ") before this test.")
-                         "This test's latest admitted execution recorded no completed outcome.")
-                       :seon.error/expected :completed-member :seon.error/offending test-symbol
-                       :seon.test/execution-refusal :seon.test/population-unknown
-                       :seon.test/error-test-symbol test-symbol :seon.test/run run-ref}
+                      (seon.error.refusal/error
+                       :seon.test/result-unknown
+                       {:seon.error/layer :seon.test/execution
+                        :seon.error/operation 'seon.test.runner/recorded-member-results
+                        :seon.error/message
+                        (if-let [cause (:seon.test.run/stopped run)]
+                          (str "Never started: request " (:seon.test.run/id run) " stopped (" cause ") before this test.")
+                          "This test's latest admitted execution recorded no completed outcome.")
+                        :seon.error/expected :completed-member :seon.error/offending test-symbol
+                        :seon.test/execution-refusal :seon.test/population-unknown
+                        :seon.test/error-test-symbol test-symbol :seon.test/run run-ref})
                     (cond-> (merge base
                                    {:seon.test/sym (:seon.test.member/symbol member)
                                     :seon.test/pass-count (:seon.test.member/pass-count member)
@@ -1885,12 +1889,12 @@
                             (reach-memberships tested (mapv :seon.test/sym results)))
                      completion)
         transaction-report
-        (if (and (map? database) (contains? database :seon.error/at) (contains? database :seon.error/layer) (contains? database :seon.error/operation))
+        (if (seon.error.refusal/error? database)
           database
           (blob/with-publication! connection (:seon.blob/staged-writes completion)
             #(db/transact! connection
                            [[:db.fn/call #'record-tx (dissoc completion :seon.blob/staged-writes)]]))) ]
-    (if (and (map? transaction-report) (contains? transaction-report :seon.error/at) (contains? transaction-report :seon.error/layer) (contains? transaction-report :seon.error/operation))
+    (if (seon.error.refusal/error? transaction-report)
       transaction-report
       (let [after (:db-after transaction-report)
             admitted? (:seon.test.run/selection-tx
@@ -1905,7 +1909,7 @@
                                (get by-symbol (symbol test-symbol))
                                (dissoc (db/pull after result-selector [:seon.test/sym test-symbol]) :db/id)))
                            results)]
-        (or (first (filter :seon.error/at recorded)) recorded)))))
+        (or (first (filter seon.error.refusal/error? recorded)) recorded)))))
 
 (defn exit-tx
   "Record at the writer that `test-symbol`'s body in `run-id` has exited.
