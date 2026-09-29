@@ -43,14 +43,11 @@
                (str
                 "(seon.db/transact! "
                 (pr-str
-                 {:tx-data
-                  [{:my.note/id "receipt-carrier"
-                    :my.note/agent
-                    [:seon.agent/id agent-id]
-                    :my.note/content "written in evaluation"}]
-                  :tx-meta
-                  {:seon.db/user
-                   [:seon.agent/id agent-id]}})
+                 (list 'quote
+                       {:tx-data [(support/task-row "receiptcarry" "written in evaluation")]
+                        :tx-meta
+                        {:seon.db/user
+                         [:seon.agent/id agent-id]}}))
                 ")")
                :seon.sci.eval/ctx (evaluation-context connection)
                :seon.sci.admit/caps caps
@@ -64,15 +61,15 @@
            (is (= [receipt-id agent-id]
                   (db/q
                    '[:find [?receipt-id ?agent-id]
-                     :in $ ?note-id
+                     :in $ ?task-id
                      :where
-                     [?note :my.note/id ?note-id]
-                     [?note :my.note/content _ ?tx]
+                     [?task :seon.task/id ?task-id]
+                     [?task :seon.task/intent _ ?tx]
                      [?tx :seon.db/receipt ?receipt]
                      [?receipt :seon.cluster.eval/id ?receipt-id]
                      [?tx :seon.db/user ?agent]
                      [?agent :seon.agent/id ?agent-id]]
-                   @connection "receipt-carrier")))))
+                   @connection "receiptcarry")))))
        (support/transacted! connection
                             (support/agent-tx @connection system-agent-id))
        (testing "a system write outside receipt custody asserts no receipt"

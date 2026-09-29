@@ -128,16 +128,16 @@
               (doseq [{function-symbol :sym} entities]
                 (is (true? (:seon.sci.admit/value
                             (run (str "(boolean (resolve '" function-symbol "))"))))))
-              (let [failed (run "(my.note/add! {:my.note/id \"bad-note\" :my.note/content 42})")
+              (let [failed (run "(my.message/send {:my.message/to \"root\" :my.message/content 42})")
                     value (:seon.sci.admit/value failed)
-                    documented (:seon.sci.admit/value (run "(doc my.note/add!)"))]
+                    documented (:seon.sci.admit/value (run "(doc my.message/send)"))]
                 (is (= :input (:seon.instrument/check value)))
                 (is (map? documented))
                 (is (not (find value :seon.error/doc)) "printing never enriches the refusal")
-                (is (str/includes? (:seon.error/message value "") "my.note/add!"))
-                (is (str/includes? (:seon.error/message value "") ":my.note/content"))
+                (is (str/includes? (:seon.error/message value "") "my.message/send"))
+                (is (str/includes? (:seon.error/message value "") ":my.message/content"))
                 (is (some? (get-in value [:seon.error/expected])))
-                (is (empty? (db/q '[:find ?note :where [?note :my.note/id "bad-note"]] @connection))))
+                (is (empty? (db/q '[:find ?message :where [?message :seon.message/content 42]] @connection))))
               (let [failed (run "(my.test/run {:seon.agent/id 17})")]
                 (is (= :input
                        (get-in failed [:seon.sci.admit/value :seon.instrument/check]))

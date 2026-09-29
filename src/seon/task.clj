@@ -357,8 +357,8 @@
   names the revision I read (7.16).
 
   Example:
-  (seon.task/create! {:seon.task/ns 'my.note :seon.task/name \"titles trim\"
-                      :seon.task/kind :function :seon.task/intent \"Trim note titles.\"})"
+  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles trim\"
+                      :seon.task/kind :function :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
                              [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]

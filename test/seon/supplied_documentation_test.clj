@@ -38,7 +38,7 @@
        (support/transacted! connection [{:seon.agent/id "supplied-docs" :seon.agent/branch branch}
                                         {:seon.agent/id "root" :seon.agent/branch branch}]))
      (let [ctx (support/fork-cluster-ctx connection "supplied-docs")]
-       (doseq [sym ['my.message/send 'my.note/add!]]
+       (doseq [sym ['my.message/send]]
          (let [documented (evaluate ctx connection (str "(doc " sym ")"))
                doc (:seon.sci.admit/value documented)
                directory (evaluate ctx connection (str "(dir " (namespace sym) ")"))

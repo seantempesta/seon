@@ -4,7 +4,6 @@
    and a function-contract refusal names the function symbol it refused."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
-            [seon.note]
             [seon.schema :as schema]))
 
 (def ^:private agent-admission {:seon.schema.admission/source :agent})
@@ -47,10 +46,6 @@
 (deftest agent-contracts-admit-nil-and-refuse-nilable-unions-alike
   (let [projection (packaged-projection)
         subject 'scratch.agent-nil-contract/probe]
-    (testing "an agent re-entering seon.note/add-note!'s own contract is admitted"
-      (let [contract (:malli/schema (meta #'seon.note/add-note!))]
-        (is (some #{:nil} (tree-seq coll? seq contract)))
-        (is (= :admitted (admission projection subject contract)))))
     (testing "`:nil` in an argument union and as a bare return is exact"
       (is (= :admitted (admission projection subject [:=> [:cat [:or :nil :int]] :int])))
       (is (= :admitted (admission projection subject [:=> [:cat :int] :nil]))))

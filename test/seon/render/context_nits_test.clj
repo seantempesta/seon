@@ -1,7 +1,6 @@
 (ns seon.render.context-nits-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [seon.note :as note]
             [seon.render.transcript :as transcript]
             [seon.test-support :as support]))
 
@@ -20,14 +19,7 @@
                  :seon.runtime/trigger [:seon.message/id "trigger"]}}]))))
      (let [runtime-unit {:seon.db/db @connection
                          :seon.render/value
-                         (db/pull @connection '[*] [:seon.runtime/agent [:seon.agent/id "juniper"]])}
-           notes-unit (fn [] {:seon.db/db @connection :seon.agent/id "juniper"})]
+                         (db/pull @connection '[*] [:seon.runtime/agent [:seon.agent/id "juniper"]])}]
        (is (= {:seon.message/id "trigger" :seon.message/content "Read the orders."
                :seon.message/from {:seon.agent/id "root"}}
-              (:seon.runtime/trigger (transcript/render-runtime-ai runtime-unit))))
-       (is (= [] (note/render-notes-ai (notes-unit))) "no note is an empty vector, never absent")
-       (is (:db-after (db/transact! connection
-                       [{:my.note/id "first" :my.note/content "Keep this."
-                         :my.note/agent [:seon.agent/id "juniper"]}])))
-       (is (= [{:my.note/id "first" :my.note/content "Keep this."}]
-              (note/render-notes-ai (notes-unit))))))))
+              (:seon.runtime/trigger (transcript/render-runtime-ai runtime-unit))))))))

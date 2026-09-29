@@ -16,8 +16,8 @@
   transaction-report-identities-select-only-changed-program-entities
   (support/with-database
    (fn [connection]
-     (let [changed-symbol (symbol "my.note" (str "report-changed-" (id/id)))
-           other-symbol (symbol "my.note" (str "report-other-" (id/id)))
+     (let [changed-symbol (symbol "my.turn" (str "report-changed-" (id/id)))
+           other-symbol (symbol "my.turn" (str "report-other-" (id/id)))
            before (db/db connection)
            changed (support/program-fn-entity before changed-symbol (pr-str (list 'defn (symbol (name changed-symbol)) [] 1)))
            other (support/program-fn-entity before other-symbol (pr-str (list 'defn (symbol (name other-symbol)) [] 2)))
@@ -109,15 +109,15 @@
    (fn [connection]
      (support/preserving-instrumentation-state
       (fn []
-        (require 'my.note)
+        (require 'my.turn)
         ;; Adoption re-arms only the reloaded namespace's changed identities
         ;; (never the whole JVM, which strips every production wrapper's
         ;; supplied-default plan); every other wrapper stays the same object.
         (let [projection (db/carried-projection (db/db connection))
               expected (into #{} (keep (fn [[name candidate]]
                                          (when (:malli/schema (meta candidate))
-                                           (symbol "my.note" (str name)))))
-                             (ns-interns 'my.note))
+                                           (symbol "my.turn" (str name)))))
+                             (ns-interns 'my.turn))
               request {:seon.schema/projection projection
                        :seon.db/db (db/db connection)
                        :seon.instrument/changed-identities
@@ -130,7 +130,7 @@
                                     :when (and (bound? candidate)
                                                (:seon.instrument/var (meta @candidate)))]
                                 [candidate @candidate]))]
-          (require 'my.note :reload)
+          (require 'my.turn :reload)
           (arm)
           (let [rearmed (into #{}
                               (keep (fn [[candidate prior]]
@@ -145,7 +145,7 @@
 (deftest schema-referrers-are-selected-for-arming-without-a-namespace-reload
   (support/with-database
    (fn [connection]
-     (let [sym (symbol "my.note" (str "arming-probe-" (id/id)))
+     (let [sym (symbol "my.turn" (str "arming-probe-" (id/id)))
            entity (support/program-fn-entity
                 (db/db connection) sym
                 (pr-str (list 'defn (symbol (name sym))

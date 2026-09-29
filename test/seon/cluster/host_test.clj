@@ -137,15 +137,14 @@
         (is (= ["#'my.agents.host-probe/host-probe"]
                (hosted-run! hosted "(defn host-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")))
         (is (= ["2"] (hosted-run! hosted "(host-probe 1)")) "the agent's next run calls its def")
-        (let [note-id (str "host-note-" (id/id))]
+        (let [task-id (id/id)]
           (hosted-run! hosted (pr-str (list 'seon.db/transact!
-                                            {:tx-data [{:my.note/id note-id :my.note/agent [:seon.agent/id "mcp/solo"]
-                                                        :my.note/content "written by a hosted form"}]})))
+                                            (list 'quote {:tx-data [(support/task-row task-id "written by a hosted form")]}))))
           (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
-            (is (some? (db/q '[:find ?r . :in $ ?note-id :where [?n :my.note/id ?note-id] [?n :my.note/content _ ?tx]
-                               [?tx :seon.db/receipt ?r]] database note-id))
+            (is (some? (db/q '[:find ?r . :in $ ?task-id :where [?n :seon.task/id ?task-id] [?n :seon.task/intent _ ?tx]
+                               [?tx :seon.db/receipt ?r]] database task-id))
                 "a form's own elided write lands on the branch, naming its evaluation")
-            (is (nil? (db/q '[:find ?n . :in $ ?note-id :where [?n :my.note/id ?note-id]] (db/db connection) note-id))
+            (is (nil? (db/q '[:find ?n . :in $ ?task-id :where [?n :seon.task/id ?task-id]] (db/db connection) task-id))
                 "and never on the parent")))
         (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
           (is (= branch (get-in database [:config :branch])))

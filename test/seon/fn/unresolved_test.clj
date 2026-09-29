@@ -9,11 +9,11 @@
   unresolved-calls-require-an-indexed-callee-namespace
   (support/with-database
    (fn [connection]
-     (let [caller 'my.note/unresolved-report-probe
-           missing 'my.note/unresolved-report-target
+     (let [caller 'my.turn/unresolved-report-probe
+           missing 'my.turn/unresolved-report-target
            entity (support/program-fn-entity
                 (db/db connection) caller
-                "(defn unresolved-report-probe [] (clojure.core/str (my.note/unresolved-report-target)))")]
+                "(defn unresolved-report-probe [] (clojure.core/str (my.turn/unresolved-report-target)))")]
        (support/transacted! connection [entity])
        (let [report (functions/unresolved-callers (db/db connection))
              calls (:seon.program/unresolved-callers report)]

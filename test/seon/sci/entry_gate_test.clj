@@ -22,13 +22,13 @@
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
            entity (db/pull (db/db connection) '[{:seon.ns/aliases [*]}]
-                        [:seon.ns/name 'seon.note])
+                        [:seon.ns/name 'seon.maintenance])
            stored (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns))
                         (:seon.ns/aliases entity))]
-       (is (= 'seon.db (get stored 'db)) "the fixture's seon.note entity declares db")
+       (is (= 'seon.db (get stored 'db)) "the fixture's seon.maintenance entity declares db")
        (is (= stored
               (:seon.sci.admit/value
-               (evaluate-in ctx "(into {} (map (fn [[k v]] [k (ns-name v)])) (ns-aliases 'seon.note))")))
+               (evaluate-in ctx "(into {} (map (fn [[k v]] [k (ns-name v)])) (ns-aliases 'seon.maintenance))")))
            "an uninterpreted file namespace has its entity's aliases in SCI")))))
 
 (deftest printed-output-rides-with-the-value-under-the-storage-bound

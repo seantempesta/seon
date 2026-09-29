@@ -175,23 +175,17 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       ;; A test world inherits no agent (fe5dcc072): the note's agent is
-       ;; created before acquisition, so its namespace entity is in the program.
-       (let [_ (support/transacted! connection
-                 (support/agent-tx (db/db connection) "program-revision-note-holder"))
-             live (support/fork-cluster-ctx connection)
+       (let [live (support/fork-cluster-ctx connection)
              before (db/db connection)
              acquisition (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db before})
              environment @(:env live)
-             ;; A declared data-partition entity: a note the test's agent holds.
+             ;; A declared data-partition entity: a task.
              _ (support/transacted! connection
-                 [{:my.note/id "program-revision-probe"
-                   :my.note/agent [:seon.agent/id "program-revision-note-holder"]
-                   :my.note/content "A commit that writes no program entity."}])
+                 [(support/task-row "programrevis" "A commit that writes no program entity.")])
              data (db/db connection)
              reused (measured #(eval/acquire! {:seon.sci.eval/ctx live :seon.db/db data}))]
          (is (not= (db/commit-id before) (db/commit-id data))
-             "the note is a real commit")
+             "the task is a real commit")
          (is (identical? acquisition (:value reused))
              "a commit writing no program entity returns the acquired program")
          (is (identical? environment @(:env live))

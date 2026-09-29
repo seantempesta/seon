@@ -10,7 +10,7 @@
   manifest-functions-must-exist-before-reconciliation
   (support/with-database
    (fn [connection]
-     (let [function 'my.note/config-supplier
+     (let [function 'my.turn/config-supplier
            compiled (config/compile-manifest
                      {:seon.boot/cluster-name "config-functions"
                       :seon.config/manifest

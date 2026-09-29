@@ -13,18 +13,17 @@
 (deftest ^{:seon/tasks #{"361088de3d56"}} a-batched-report-does-not-advance-the-acquired-program
   (support/with-database
    (fn [connection]
-     ;; Notes carry no program identity; the agent entity (with its seeded
+     ;; Tasks carry no program identity; the agent entity (with its seeded
      ;; namespace, a program entity) is setup.
      (support/transacted! connection (support/agent-tx @connection "report-writer"))
      (let [covers? #'sci.eval/installation-covers-program-change?
-           note #(vector {:my.note/id (str "report-note-" %) :my.note/agent [:seon.agent/id "report-writer"]
-                          :my.note/content "x"})
+           note #(vector (support/task-row % "x"))
            ctx (support/fork-cluster-ctx connection)
            acquired (db/db connection)
-           _ (support/transacted! connection (note "between"))
+           _ (support/transacted! connection (note "betweenreprt"))
            written-on (db/db connection)
-           own (support/transacted! connection (note "own"))
-           later (support/transacted! connection (note "later"))
+           own (support/transacted! connection (note "ownreportrow"))
+           later (support/transacted! connection (note "laterreportr"))
            projection (db/carried-projection (:db-after own))]
        (is (true? (covers? ctx written-on own [] projection))
            (str "a report written on a value holding the acquired program, ending at its own "
@@ -35,6 +34,6 @@
            "nor is a report that did not start from the value the caller names")
        (support/transacted! connection (support/agent-tx @connection "report-program"))
        (let [on (db/db connection)
-             after-program (support/transacted! connection (note "after-program"))]
+             after-program (support/transacted! connection (note "afterprogram"))]
          (is (not (covers? ctx on after-program [] projection))
              "nor one written on a value whose program the context did not acquire"))))))

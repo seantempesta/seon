@@ -74,7 +74,7 @@
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
        (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
        (is (= :map (first (second (:in entity)))))
-       (doseq [target ["my.message/send" "my.agent/done" "my.task" "my.note"]
+       (doseq [target ["my.message/send" "my.agent/done" "my.task"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
          (is (= (cond-> #{:summary :body :example :in :out}
                   (namespace (symbol target)) (conj :arglists :supplied))
@@ -252,14 +252,14 @@
    (fn [connection]
      (support/transacted!
       connection
-      [(assoc (support/program-fn-entity (db/db connection) 'my.note/undeclared "(defn undeclared [] true)")
+      [(assoc (support/program-fn-entity (db/db connection) 'my.turn/undeclared "(defn undeclared [] true)")
               :seon.fn/private? false)])
      (let [database (db/db connection)
            doc (evaluation/documentation-value database
-                                               'my.note/undeclared
-                                               'my.note/undeclared)
-           entity (some #(when (= 'my.note/undeclared (:sym %)) %)
-                     (:functions (evaluation/directory-value database 'my.note false)))]
+                                               'my.turn/undeclared
+                                               'my.turn/undeclared)
+           entity (some #(when (= 'my.turn/undeclared (:sym %)) %)
+                     (:functions (evaluation/directory-value database 'my.turn false)))]
        (is (contains? doc :in))
        (is (some? entity) "the undeclared entity is still listed by dir")
        (doseq [[_label value attribute]

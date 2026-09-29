@@ -107,9 +107,9 @@
                              {:seon.fn/root (fs/source-directory)
                               :seon.fn/roots functions/source-roots
                               :seon.source/roots cluster/source-roots
-                              :seon.source/changed-paths ["src/my/note.clj"]}))]
+                              :seon.source/changed-paths ["src/my/turn.clj"]}))]
                (is (false? (:seon.source/built? result)))
-               (is (= ["src/my/note.clj"] (vec (mapcat identity @calls))))
+               (is (= ["src/my/turn.clj"] (vec (mapcat identity @calls))))
                (is (= before (source/current opened))))
              (finally (store/release-store! opened))))
          (finally (support/delete-recursively! root)))))))
@@ -119,9 +119,9 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           path "src/my/note.clj"
+           path "src/my/turn.clj"
            declarations (functions/file-entities database [path] :seon.fn/file)]
-       (is (= #{'my.note/add! 'my.note/forget! 'my.note/notes}
+       (is (= #{'my.turn/complete 'my.turn/wait 'my.turn/usage-form}
               (into #{} (keep :seon.fn/sym) declarations)))
        (is (every? #(= [:seon.fn.file/relative-path path] (:seon.fn/file %))
                    declarations))
@@ -135,8 +135,8 @@
   (let [pin (apply str (repeat 64 "a"))
         manifest (apply str (repeat 64 "b"))
         loaded {"deps.edn" manifest "reference-code/sci" pin}]
-    (is (= :selected (source/classify-paths #{"src/my/note.clj"} #{"reference-code/sci"}
-                                            {"src/my/note.clj" pin} loaded)))
+    (is (= :selected (source/classify-paths #{"src/my/turn.clj"} #{"reference-code/sci"}
+                                            {"src/my/turn.clj" pin} loaded)))
     (is (= :all (source/classify-paths #{".clj-kondo/config.edn"} #{} {} loaded)))
     (is (= :selected (source/classify-paths #{"deps.edn" "reference-code/sci"} #{"reference-code/sci"}
                                             loaded loaded))

@@ -10,11 +10,11 @@
    (fn [connection]
      (let [database (db/db connection)
            manifest (functions/database-manifest database (fs/source-directory)
-                                                 ["src" "test"] ["src/my/note.clj"])
+                                                 ["src" "test"] ["src/my/turn.clj"])
            artifacts (:seon.fn.manifest/artifacts manifest)
            declarations (filter :seon.fn/sym (:seon.fn.file/rows (first artifacts)))]
-       (is (= ["src/my/note.clj"] (mapv :seon.fn.file/relative-path artifacts)))
-       (is (= #{'my.note/add! 'my.note/forget! 'my.note/notes}
+       (is (= ["src/my/turn.clj"] (mapv :seon.fn.file/relative-path artifacts)))
+       (is (= #{'my.turn/complete 'my.turn/wait 'my.turn/usage-form}
               (set (map :seon.fn/sym declarations))))
        (is (every? #(not (contains? % :seon.fn/arities)) declarations)
            "authored declaration comparison does not acquire compiled arities")

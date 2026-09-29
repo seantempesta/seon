@@ -12,7 +12,6 @@
             [seon.config :as config]
             [seon.error :as error]
             [seon.id :as id]
-            [seon.note :as note]
             [seon.render.ns :as render.ns]
             [seon.render.hiccup :as hiccup]
             [seon.test-support :as support]))
@@ -72,25 +71,6 @@
         (message/received! "hello" connection "alice")
         (readable! (message/render-html (assoc (db/pull @connection '[*] [:seon.message/id "hello"])
                                               :seon.db/db @connection)) ["received"])))))
-
-(deftest note-pairs-link-titles-and-ai-is-data
-  (support/with-database
-    (fn [connection]
-      (support/transacted! connection (into (support/agent-tx @connection "alice")
-                                        [(assoc (support/task-row "prepare00000" "Prepare") :seon.task/name "Prepare")]))
-      (support/transacted! connection [{:my.note/id "observation" :my.note/content "Verified"
-                                        :my.note/agent [:seon.agent/id "alice"]
-                                        :my.note/about [:seon.task/id "prepare00000"]}])
-      (let [entity (assoc (db/pull @connection '[*] [:my.note/id "observation"]) :seon.db/db @connection)
-            unit {:seon.agent/id "alice" :seon.db/db @connection}]
-        (readable! (note/render-note-html entity) ["observation" "Verified" "Prepare" "datetime="])
-        (readable! (note/render-notes-html unit) ["Current notes (1)" "Prepare"])
-        (is (= {:my.note/id "observation" :my.note/content "Verified"}
-               (note/render-note-ai {:my.note/id (:my.note/id entity)
-                                     :my.note/content (:my.note/content entity)
-                                     :my.note/agent [:seon.agent/id "alice"]})))
-        (is (= [{:my.note/id "observation" :my.note/content "Verified" :my.note/about {:seon.task/id "prepare00000"}}]
-               (note/render-notes-ai unit)))))))
 
 (deftest help-preserves-lines-and-ai
   (support/with-database

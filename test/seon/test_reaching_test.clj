@@ -144,10 +144,10 @@
     (fn [connection]
       (let [database (db/db connection)
             actual (sut/reaching {:seon.db/db database
-                                  :seon.test/changed ['my.note/add!]})]
-        (is (:db/id (db/pull database [:db/id] [:seon.fn/sym 'my.note/add!])))
+                                  :seon.test/changed ['my.turn/complete]})]
+        (is (:db/id (db/pull database [:db/id] [:seon.fn/sym 'my.turn/complete])))
         (is (vector? actual))
-        (is (= (set (functions/tests-reaching database 'my.note/add!)) (set actual)))
+        (is (= (set (functions/tests-reaching database 'my.turn/complete)) (set actual)))
         (is (= :seon.test/identity-unresolved
                (:seon.test/selection-refusal
                 ;; Built at run time: a quoted symbol here would itself be an

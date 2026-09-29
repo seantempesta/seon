@@ -178,18 +178,16 @@
             ;; Under one commit per form the run's entities were written only at
             ;; settlement, and every write a form made refused "Nothing found
             ;; for entity id [:seon.cluster.eval/id ...]" (task c9e0cde3edb3).
-            (let [note-id (str "one-commit-note-" (id/id))
+            (let [task-id (id/id)
                   result (code (pr-str (list 'seon.db/transact!
-                                             {:tx-data [{:my.note/id note-id
-                                                         :my.note/agent [:seon.agent/id agent-id]
-                                                         :my.note/content "written by a form"}]})))
+                                             (list 'quote {:tx-data [(support/task-row task-id "written by a form")]}))))
                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
               (is (not-any? :seon.cluster.eval/error receipts))
               (is (= (receipt-id-of result)
-                     (db/q '[:find ?receipt-id . :in $ ?note-id
-                             :where [?note :my.note/id ?note-id] [?note :my.note/content _ ?tx]
+                     (db/q '[:find ?receipt-id . :in $ ?task-id
+                             :where [?task :seon.task/id ?task-id] [?task :seon.task/intent _ ?tx]
                              [?tx :seon.db/receipt ?receipt] [?receipt :seon.cluster.eval/id ?receipt-id]]
-                           (:seon.db/db result) note-id))
+                           (:seon.db/db result) task-id))
                   "the write's transaction names the form's evaluation")))
           (testing "a fault recorded during a form names its run without refusing: the value is answered"
             ;; A renderer that throws is a later stage's failure: recorded as a

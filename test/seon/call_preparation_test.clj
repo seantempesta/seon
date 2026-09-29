@@ -5,7 +5,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
-            [my.note :as note]
+            [my.agent :as my-agent]
             [sci.core :as sci]
             [seon.batch]
             [seon.call-preparation :as cp]
@@ -1067,9 +1067,9 @@
        (test-support/transacted! connection database-entities)
        ;; This ordinary call is also the program-graph edge that makes the
        ;; source-string callee part of a reduced focused-test projection.
-       (is (= []
-              (note/notes {:seon.db/db @connection
-                           :seon.agent/id "missing"})))
+       (is (= {}
+              (my-agent/settings {:seon.db/db @connection
+                                  :seon.agent/id "missing"})))
        (let [ctx (sci.eval/cluster-ctx @connection connection)
              ;; cluster-ctx acquires lazily at `kernel/invoke`; a raw
              ;; `sci/eval-string*` needs the program acquired first.
@@ -1083,14 +1083,14 @@
                                 :seon.schema/projection acquired-projection}))
              live (env/carry-state ctx (env/environment-state environment))
              current (cp/snapshot @connection acquired-projection)
-             invocation-plan (cp/plan-for @connection current 'my.note/notes)
+             invocation-plan (cp/plan-for @connection current 'my.agent/settings)
              omitted (try
-                       (armed-eval live "(my.note/notes)")
+                       (armed-eval live "(my.agent/settings)")
                        (catch Throwable cause cause))
              explicit
              (armed-eval
               live
-              (str "(my.note/notes {:seon.db/db "
+              (str "(my.agent/settings {:seon.db/db "
                    "(seon.call-preparation-test/probe-current-database), "
                    ":seon.agent/id \"missing\"})"))]
          (is (contains? (:seon.call-preparation/supplied-defaults current)
@@ -1101,7 +1101,7 @@
            (is (= "missing"
                   (:seon.agent/id (first prepared)))))
          (is (not (instance? Throwable omitted)))
-         (is (= [] omitted))
+         (is (= {} omitted))
          (is (= omitted explicit)
              "an explicit database wins and reaches the same function body"))))))
 

@@ -22,7 +22,7 @@
           config {:lint {:enabled false} :markdown-lint {:enabled false}
                   :docstring-lint {:enabled false} :review {:enabled false}
                   :schema-admission {:enabled false}
-                  :shell-writes {:enabled true :roots ["src/my/note.clj"]}
+                  :shell-writes {:enabled true :roots ["src/my/turn.clj"]}
                   :current-source {:enabled true :root root :cluster "default"
                                    :timeout-seconds 120 :check-tests false}
                   :feedback {:max-tokens 10000}}
@@ -85,7 +85,7 @@
                        (assert (= (:seon.source/commit-id terminal)
                                   (get-in state [:seon.probe/adoption :seon.source/commit-id]))))
                      entity))
-          leaf (io/file "src/my/note.clj") core (io/file "src/seon/id.clj")
+          leaf (io/file "src/my/turn.clj") core (io/file "src/seon/id.clj")
           leaf-before (slurp leaf) core-before (slurp core)]
       (try
         (let [before (read-state)
@@ -93,12 +93,12 @@
           (assert (= (:seon.probe/adoption before) (:seon.probe/adoption nochange)))
           (assert (= [] (get-in nochange [:seon.probe/terminal :seon.source/reloaded-namespaces])))
           (assert (= #{} (get-in nochange [:seon.probe/terminal :seon.source/arming-identities]))))
-        (spit leaf (str/replace-first leaf-before "Read my current notes" "Read my current saved notes"))
+        (spit leaf (str/replace-first leaf-before "Return my completion reply" "Return my saved completion reply"))
         (let [leaf-result (invoke :adopt-noncore (event (str leaf)) "accepted")]
-          (assert (some #{'my.note} (get-in leaf-result [:seon.probe/terminal :seon.source/reloaded-namespaces]))))
+          (assert (some #{'my.turn} (get-in leaf-result [:seon.probe/terminal :seon.source/reloaded-namespaces]))))
         (spit core (str/replace-first core-before "Lowercase SHA-256" "Stable lowercase SHA-256"))
         (invoke :adopt-core (event (str core)) "accepted")
-        (spit leaf (str/replace-first (slurp leaf) "Read my current saved notes" "Read my saved current notes"))
+        (spit leaf (str/replace-first (slurp leaf) "Return my saved completion reply" "Return my completion saved reply"))
         (invoke :shell-write (event nil) "accepted")
         (let [before (read-state)]
           (spit leaf (str leaf-before "\n(defn hook-refused [] (missing-hook-function))\n"))

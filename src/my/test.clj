@@ -16,7 +16,7 @@
   names the test and its claim.
 
   Example:
-  (my.test/check {:seon.test/changed ['my.note/add!]})"
+  (my.test/check {:seon.test/changed ['my.turn/complete]})"
   {:malli/schema [:=> [:cat :my.test/check-request]
                   [:or :seon.test/run-result :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection :as request}]

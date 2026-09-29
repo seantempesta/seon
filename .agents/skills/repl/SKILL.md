@@ -111,7 +111,7 @@ and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3196`
    projection
    (fn []
      (let [configuration (seon.config/effective database "default")]
-       (require 'seon.oversight :reload)
+       (require 'seon.health :reload)
        (seon.instrument/apply!
         {:seon.config/on-core-error (:seon.config/on-core-error configuration)
          :seon.schema/projection projection})))))
