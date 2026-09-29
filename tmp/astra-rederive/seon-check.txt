@@ -1,0 +1,2 @@
+SEON check OK total-ms 5049
+{:seon.boot/pid 19993, :seon.boot/start-instant #inst "2026-09-29T01:30:46.465-00:00", :seon.source/commit-id #uuid "6abb1509-ce42-52ce-a653-6900a526dc42", :seon.source/built? true, :seon.cluster/adopted-identities 43, :seon.cluster/phase-ms #:seon.cluster{:published-ms 3070, :adopted-ms 644}, :seon.source/git-sha "f27f9eac34e8415e69f7c734ec786ebfe5ebc7dd", :seon.operator/phases #:seon.operator{:archive-ms 1190, :total-ms 5049}}

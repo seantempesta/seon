@@ -2220,8 +2220,11 @@
 
   The JVM that analyzed them loaded the files `loaded` (`loaded-files`). A
   reached declaration whose file `inputs` publishes as those bytes contributes
-  its definition digest; one whose file it loaded as other bytes contributes
-  the loaded bytes' digest. So a publication of the files the JVM loaded names
+  its definition digest. When the stored file matches the loaded bytes instead,
+  its stored declarations supply both the calls and definition digests: publishing
+  other bytes does not change the code doing the analysis. Only when neither
+  source describes the loaded file does its byte digest stand in. A publication
+  of the files the JVM loaded therefore names
   exactly the identity the stored entities name, and an unchanged tree
   publishes nothing after it; one
   analyzed by other code names an analyzer no stored program has, and every
@@ -2234,22 +2237,31 @@
   (let [path-of #(let [file (:seon.fn/file %)]
                    (if (map? file) (:seon.fn.file/relative-path file) (second file)))
         analyzed (filterv #(and (:seon.fn/sym %) (path-of %)) entities)
-        replaced (into paths (map path-of) analyzed)
         stored (if database
                  (db/q '[:find [(pull ?function [:seon.fn/sym :seon.program/definition-digest :seon.fn/calls
-                                                 {:seon.fn/file [:seon.fn.file/relative-path]}]) ...]
+                                                 {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/digest]}]) ...]
                          :where [?function :seon.fn/sym]] database)
                  [])]
     (when (map? stored) (refused! "Published function entities could not be read." stored))
-    (let [functions (into {} (map (juxt :seon.fn/sym identity))
+    (let [stored-loaded (into #{}
+                              (keep (fn [function]
+                                      (let [path (path-of function)
+                                            digest (get loaded path)]
+                                        (when (and digest (not= digest (get inputs path))
+                                                   (= digest (get-in function [:seon.fn/file :seon.fn.file/digest])))
+                                          path))))
+                              stored)
+          replaced (set/difference (into paths (map path-of) analyzed) stored-loaded)
+          functions (into {} (map (juxt :seon.fn/sym identity))
                           (concat (sequence (comp (filter path-of)
                                                   (remove #(contains? replaced (path-of %)))
                                                   (map #(update % :seon.fn/calls set)))
                                             stored)
-                                  analyzed))
+                                  (remove #(contains? stored-loaded (path-of %)) analyzed)))
           contribution (fn [function]
                          (let [path (path-of function)]
-                           (if (= (get inputs path) (get loaded path))
+                           (if (or (contains? stored-loaded path)
+                                   (= (get inputs path) (get loaded path)))
                              (:seon.program/definition-digest function)
                              (get loaded path ::not-loaded))))]
       (id/digest 64 [(into (sorted-map)

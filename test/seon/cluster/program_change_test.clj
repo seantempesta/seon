@@ -251,6 +251,19 @@
     (is (contains? files "src/seon/fn.clj"))
     (is (= head (selected database #{"src/seon/fn.clj"} entities files files))
         "the same definitions from the loaded bytes name the head's analyzer")
+    (let [candidate (assoc files "src/seon/fn.clj" zero)
+          changed (mapv #(cond-> % (= `seon.fn/analyze-entities (:seon.fn/sym %))
+                           (assoc :seon.program/definition-digest zero
+                                  :seon.fn/calls #{}))
+                        entities)]
+      (is (= head (selected database #{"src/seon/fn.clj"} entities candidate files))
+          "other file bytes do not change the stored declarations this JVM loaded")
+      (is (= head (selected database #{"src/seon/fn.clj"} changed candidate files))
+          "unloaded definitions and their call graph do not derive the publication")
+      (is (= head (selected database #{"src/seon/fn.clj"} [] (dissoc files "src/seon/fn.clj") files))
+          "removing a source file does not unload the analyzer running this publication")
+      (is (not= head (selected database #{"src/seon/fn.clj"} changed candidate candidate))
+          "loading the changed producer invalidates the derivations"))
     (is (not= head (selected database #{"src/seon/fn.clj"}
                              (mapv #(cond-> % (= `seon.fn/analyze-entities (:seon.fn/sym %))
                                       (assoc :seon.program/definition-digest zero))
