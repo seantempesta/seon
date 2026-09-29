@@ -16,6 +16,8 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.arm :as sci.arm]
+            [sci.core :as sci]
             [seon.test]
             [seon.test-support :as support]))
 
@@ -350,3 +352,17 @@
                "its entity keeps every other attribute"))))
       (finally
         (doseq [file (reverse (file-seq root))] (io/delete-file file true))))))
+
+(deftest result-handles-and-lazy-namespace-objects-do-not-change-the-program
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           before (sci/namespace-state ctx)]
+       (sci/find-ns ctx 'user)
+       (sci.eval/bind-result! ctx 'result/e123456789abc 2)
+       (is (= #{} (sci.arm/changed-namespaces before (sci/namespace-state ctx)))
+           "reading a value and retaining its handle are not program writes")
+       (sci/add-namespace! ctx 'resolver.probe {:aliases {'s 'clojure.string}})
+       (is (= #{'resolver.probe}
+              (sci.arm/changed-namespaces before (sci/namespace-state ctx)))
+           "an actual resolver change is still observed")))))

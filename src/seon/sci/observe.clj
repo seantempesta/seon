@@ -9,8 +9,8 @@
   the source occurrence the definition ran as. A definition is armed at its
   write, on the exact Var written, with the observer unbound so arming's own
   root replacement is not a write of the program. After the evaluation, each
-  namespace whose SCI map changed (aliases, refers, imports, interns) is one
-  more write."
+  namespace whose resolver state changed is one more write; cached
+  namespace objects and private interns do not change the program."
   (:require [sci.core :as sci]
             [sci.ctx-store]
             [sci.lang]

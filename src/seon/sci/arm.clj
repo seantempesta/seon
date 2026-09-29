@@ -84,8 +84,18 @@
     :namespace {:seon.batch/op :namespace :seon.batch/ns namespace-symbol}))
 
 (defn changed-namespaces
-  "Namespaces whose SCI namespace map is not the one it was before: every
-  alias, refer, import or intern made by the form, and each namespace made."
-  {:malli/schema [:=> [:cat :map :map] [:set :symbol]]}
+  "Namespaces whose resolver state changed: aliases, refers, imports,
+  requires or types. SCI's cached namespace object and private interns are
+  not declarations. Admitted definitions contribute their namespace through
+  `seon.turn.batch/derive-form`, independently of this resolver observation."
+  {:malli/schema [:=> [:cat [:map-of :symbol :map] [:map-of :symbol :map]] [:set :symbol]]}
   [before after]
-  (into #{} (keep (fn [[n m]] (when-not (identical? m (get before n)) n))) after))
+  (let [resolver-keys [:aliases :imports :refers :refer :required-namespaces :types]]
+    (into #{}
+          (keep (fn [[n m]]
+                  (let [previous (get before n)]
+                    (when (and (not (identical? m previous))
+                               (not= (select-keys m resolver-keys)
+                                     (select-keys previous resolver-keys)))
+                      n))))
+          after)))
