@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "#:seon.repl{:value [{:seon.test/sym my.astrarunowned/small-test,\n  :seon.test/error-count 0,\n  :seon.test/fail-count 0,\n  :seon.test/pass-count 1,\n  :seon.test/run [:seon.test.run/id \"32aea78cd041\"],\n  :seon.test/run-at #inst \"2026-09-29T00:03:19.242Z\",\n  :seon.test/run-basis-t 536871307,\n  :seon.test.member/began? true,\n  :seon.test.member/completed-tx [:db/id 536871309],\n  :seon.test.member/ended? true,\n  :seon.test.run/basis-t 536871307,\n  :seon.test.run/terminated? true,\n  :seon.test.member/reach-digest\n    \"22a0e958fca5a2c2d80da193ee28f69b9733c935990f83948f87f3f63423185f\",\n  :seon.test.run/input-digest\n    \"8950c6a643cdbf8a9071bb5b1ba0bf8e46e257186f0125a20676df41a75b2c1b\",\n  :seon.test.run/program-digest\n    \"315f4e25e733b85639257113fc239f1e25bd30938ea1804b8e26f119ebde50d3\"}], :findings [{:seon.repl/finding :slow, :seon.eval/duration-ms 4096, :seon.repl/fix \"Over one second in the evaluation you asked for: find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time.\"}], :result result/e80da5b5ec52d, :ms 4096, :calls 270624, :repeated [[seon.db/decode-query-field 35436 9] [seon.schema/projection-cache-value 21104 289] [seon.schema.internal/reference-id 18530 2] [seon.call-preparation/argument-facts 17922 9] [seon.db/database-value? 14755 2] [seon.db/decode-query-tuple 11812 23] [seon.call-preparation/arity-facts 8844 24] [seon.schema.internal/entity-maps 8681 8] ...]}"
+    }
+  ],
+  "isError": false
+}

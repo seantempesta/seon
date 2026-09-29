@@ -503,7 +503,12 @@
          (is (= #{literal-text producer}
                 (into #{}
                       (map :v)
-                      (db/datoms @connection :avet ::ai-declaration)))))))))
+                      (db/datoms @connection :avet ::ai-declaration)))))
+       (testing "a function-bound map still decodes its nested attribute values"
+         (is (= {::ai-declaration producer}
+                (db/q '[:find ?result . :in $ ?input
+                        :where [(identity ?input) ?result]]
+                      @connection {::ai-declaration literal-text}))))))))
 
 (deftest committed-edn-reads-as-written-unless-its-storage-is-malformed
   ;; A committed value outside the current write schema (a legacy dependency
@@ -558,7 +563,11 @@
      (let [database @connection]
        (doseq [query ['[:find ?entity ?key :where [?entity :seon.schema/key ?key]]
                       '[:find [?key ...] :where [_ :seon.schema/key ?key]]
-                      '[:find ?entity ?key :where (or [?entity :seon.schema/key ?key])]]]
+                      '[:find ?entity ?key :where (or [?entity :seon.schema/key ?key])]
+                      '[:find ?entity ?key ?private :where
+                        [?entity :seon.schema/key ?key]
+                        [(get-else $ ?entity :seon.fn/private? false) ?private]]
+                      '[:find [(count ?entity)] :where [?entity :seon.schema/key]]]]
          (is (seq (d/q query database)))
          (is (identical? (d/q query database) (db/q query database))))))))
 

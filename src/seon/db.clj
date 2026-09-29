@@ -2405,7 +2405,14 @@
       ;; attribute: each value is a stored datom component the walk would
       ;; return unchanged, so the result is already native. Walking it cost
       ;; 5 ms / 21 MB for 19,232 tuples against Datahike's cached 0.002 ms.
-      (native-query-result? parsed-query attributes) result
+      (or (native-query-result? parsed-query attributes)
+          ;; A function-bound column (for example get-else's numeric default)
+          ;; is not proven native by data patterns. With no encoded columns
+          ;; and no maps anywhere in the answer, the recursive map decoder
+          ;; can change nothing. Check that once, without an armed call per
+          ;; tuple and field of the query result.
+          (and (every? nil? attributes)
+               (not-any? map? (tree-seq coll? seq result)))) result
       (and (map? result) (contains? result :ret)) (update result :ret decode-result)
       :else (decode-result result))))
 
