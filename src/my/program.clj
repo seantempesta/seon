@@ -856,7 +856,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] :map]}
   [database sym]
   (or (some (fn [[id-key source-key kind]]
-              (when-let [entity (db/pull database [identity source-key :seon.fn/doc :seon.fn/spec :seon.fn/form-span
+              (when-let [entity (db/pull database [id-key source-key :seon.fn/doc :seon.fn/spec :seon.fn/form-span
                                                    {:seon.fn/file [:seon.fn.file/relative-path]}]
                                          [id-key sym])]
                 (assoc entity ::kind kind ::source (get entity source-key))))
@@ -982,7 +982,7 @@
                  (before identity) (assoc :digest-before (before identity))
                  (after identity) (assoc :digest-after (after identity))
                  (and dig? (not= :namespace (identity-kinds (first identity))))
-                 (assoc :dig (list 'my.program/diff (second identity))))))
+                 (assoc :dig (list 'my.program/declaration-diff (second identity))))))
        (sort-by (comp str :sym))
        vec))
 
@@ -1009,34 +1009,57 @@
         {:seon.error/message (str "Neither the cluster head nor your branch declares " sym ".")
          :seon.program/not-found sym}))))
 
+(defn- head-comparison
+  "The branch compared with the cluster head as {:head :compared}, plus :answer when the comparison already decides the reply (a refusal, or the empty difference on the cluster's own branch). The caller releases it with `release-comparison!`."
+  {:malli/schema [:=> [:cat :my.program/context] :map]}
+  [{connection :seon.db/connection store :seon.store/store cluster :seon.cluster/name}]
+  (let [held (get-in (db/db connection) [:config :branch])
+        home (cluster.branch/cluster-branch cluster)
+        head-id (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})
+        head (when-not (:seon.error/at head-id) (source/commit-database store head-id))
+        compared (if head (source/compare-branch store held head) {:c-id head-id})
+        refusal (some #(when (:seon.error/at %) %) [(:c-id compared) (:changed compared) (first (:maps compared))])]
+    (cond-> {:head head :compared compared}
+      refusal (assoc :answer refusal)
+      (and (not refusal) (= held home)) (assoc :answer {:added [] :changed [] :removed []})
+      (and (not refusal) (not= held home) (nil? (:three compared)))
+      (assoc :answer (some #(when (:seon.error/at %) %) (:maps compared))))))
+
+(defn- release-comparison!
+  "Release the databases a head comparison acquired."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [{:keys [head compared]}]
+  (source/release! [head (:base compared) (:branch compared)])
+  nil)
+
 (defn diff
   "Your branch's program difference from your cluster's head, as small data:
   {:added [...] :changed [...] :removed [...]}. An entry is {:sym :kind
-  :digest-before :digest-after}, a changed one with the form that reads it. With
-  a symbol, that declaration's source on the head (:before) and on your branch
-  (:after). The same comparison merge takes (`seon.cluster.source/compare-branch`).
+  :digest-before :digest-after}, a changed one with the form that reads it
+  (`my.program/declaration-diff`). The same comparison merge takes
+  (`seon.cluster.source/compare-branch`).
 
   Example:
   (my.program/diff)
-  (my.program/diff 'my.program/source)
   Edge cases: holding the cluster's own branch answers empty.
   Costs: one merge-base walk and digests of the changed declarations only."
-  {:malli/schema [:function
-                  [:=> [:cat :my.program/context] [:or :map :seon.error/value]]
-                  [:=> [:cat :my.program/context :qualified-symbol] [:or :map :seon.error/value]]]}
-  ([context] (diff context nil))
-  ([{connection :seon.db/connection store :seon.store/store cluster :seon.cluster/name :as context} sym]
-   (let [held (get-in (db/db connection) [:config :branch])
-         home (cluster.branch/cluster-branch cluster)
-         head-id (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})
-         head (when-not (:seon.error/at head-id) (source/commit-database store head-id))
-         compared (if head (source/compare-branch store held head) {:c-id head-id})
-         refusal (some #(when (:seon.error/at %) %) [(:c-id compared) (:changed compared) (first (:maps compared))])]
-     (try
-       (cond
-         refusal refusal
-         (= held home) {:added [] :changed [] :removed []}
-         (nil? (:three compared)) (some #(when (:seon.error/at %) %) (:maps compared))
-         sym (declaration-pair head (:branch compared) sym)
-         :else (diff-value compared))
-       (finally (source/release! [head (:base compared) (:branch compared)]))))))
+  {:malli/schema [:=> [:cat :my.program/context] [:or :map :seon.error/value]]}
+  [context]
+  (let [comparison (head-comparison context)]
+    (try (or (:answer comparison) (diff-value (:compared comparison)))
+         (finally (release-comparison! comparison)))))
+
+(defn declaration-diff
+  "One declaration's source on the cluster head (:before) and on your branch (:after).
+
+  Example:
+  (my.program/declaration-diff 'my.program/source)
+  Errors: a symbol neither the head nor your branch declares returns a not-found error.
+  Edge cases: holding the cluster's own branch answers the empty difference.
+  Costs: as `my.program/diff`."
+  {:malli/schema [:=> [:cat :my.program/context :qualified-symbol] [:or :map :seon.error/value]]}
+  [context sym]
+  (let [comparison (head-comparison context)]
+    (try (or (:answer comparison)
+             (declaration-pair (:head comparison) (:branch (:compared comparison)) sym))
+         (finally (release-comparison! comparison)))))

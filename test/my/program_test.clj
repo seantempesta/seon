@@ -32,8 +32,10 @@
        (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites report)))))
        (is (every? :seon.fn/form-span (:seon.program/call-sites report)))
        (is (seq (:seon.program/gating report)))
-       (is (= (function/gate-set database 'seon.turn/open?)
-              (:seon.program/gating tests) (:seon.program/gating report)))
+       (is (= (function/gate-set database 'seon.turn/open?) (:seon.program/gating tests))
+           "test selection is the call-reach gate set")
+       (is (every? (set (:seon.program/gating report)) (function/gate-set database 'seon.turn/open?))
+           "a retraction's gating tests are the destructive reverse closure, which contains the call-reach set")
        (is (not (contains? report :seon.program/plan)) "a break names its referrers; it proposes no issues")
        (is (seq (:seon.program/unknown report)))
        (is (valid? report))
@@ -135,7 +137,7 @@
            read-evaluation (run "(my.program/breaks {:seon.program/subject 'seon.turn/open?})")]
        (is (every? (set (map :sym (:functions directory)))
                    '#{my.program/breaks my.program/callers my.program/tests-reaching
-                      my.program/reads-key my.program/history my.program/diff
+                      my.program/reads-key my.program/history my.program/diff my.program/declaration-diff
                       my.program/ns-unmap! my.program/remove-ns! my.program/ns-unalias!}))
        (is (every? #(and (:in %) (:out %) (:doc %)) (:functions directory)))
        (is (:example documentation))
@@ -198,12 +200,12 @@
                        :seon.sci.eval/ctx (:seon.sci.eval/ctx held) :my.program/base-ctx (:seon.sci.eval/base-ctx held)}
               by-sym (fn [entries] (into {} (map (juxt :sym identity)) entries))
               value (program/diff context)
-              one (program/diff context changed)]
+              one (program/declaration-diff context changed)]
           (is (contains? (by-sym (:added value)) added))
           (is (:digest-after (get (by-sym (:added value)) added)))
           (is (not= (:digest-before (get (by-sym (:changed value)) changed))
                     (:digest-after (get (by-sym (:changed value)) changed))))
-          (is (= (list 'my.program/diff changed) (:dig (get (by-sym (:changed value)) changed))))
+          (is (= (list 'my.program/declaration-diff changed) (:dig (get (by-sym (:changed value)) changed))))
           (is (contains? (by-sym (:removed value)) removed))
           (is (not= (:before one) (:after one)) "the dig form answers the head's and the branch's source"))
         (finally
