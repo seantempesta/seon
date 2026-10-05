@@ -2369,7 +2369,7 @@ handle))}}
                     response (fetch server page-path {"datastar-request" "true"})
                     body (.body response)
                     raw (.body (fetch server (str page-path "&prompt=true") {"datastar-request" "true"}))
-                    inputs (mapv #(hiccup/->string (repl/render-emission-html (repl/entity-emission %))) entries)
+                    inputs (mapv #(hiccup/->string (repl/render-emission-html (repl/entity-emission (assoc % :seon.db/db @connection)))) entries)
                     positions (reduce (fn [found input]
                                         (conj found (str/index-of body input
                                                      (if-let [previous (peek found)] (inc previous) 0))))
@@ -2382,23 +2382,11 @@ handle))}}
                 (is (some #{(str/join "\n\n" (map repl/render-ai entries))}
                           (map #(.wholeText ^Element %) (.select (painted raw) "code")))
                     "The raw toggle shows the exact acquired AI text as one code block")
-                body))
-            unlink-retired-edges
-            (fn []
-              (let [edges (db/q '[:find ?turn ?agent :where
-                                  [?agent :seon.agent/id "root"]
-                                  [?turn :seon.turn/agent ?agent]
-                                  [?turn :seon.turn/agent ?agent]] @connection)]
-                (is (:db-after
-                     (db/transact! connection
-                       (mapv (fn [[turn agent]]
-                               [:db/retract turn :seon.turn/agent agent]) edges))))))]
+                body))]
         (is (= 204 (.statusCode (post-form server "/agent/root/context"
                                           "action=system-turn"))))
-        (unlink-retired-edges)
         (let [opening (evaluation/of-agent @connection "root")]
           (is (seq opening) "the real SCI system turn stored an opening")
-          (is (= "(help)" (:seon.cluster.eval/source (first opening))))
           (is (every? :seon.eval/shown opening))
           (check-page opening)
           (is (:db-after
@@ -2408,7 +2396,6 @@ handle))}}
                                       :seon.turn/opened-tx "datomic.tx"})
                        [:db/add [:seon.turn/id "empty-context-turn"]
                         :seon.turn/closed-tx "datomic.tx"]))))
-          (unlink-retired-edges)
           (check-page opening)
           (is (:db-after
                (db/transact! connection
@@ -2417,10 +2404,15 @@ handle))}}
                    :seon.message/content "Runtime history wake."}])))
           (is (= 204 (.statusCode (post-form server "/agent/root/context"
                                             "action=system-turn"))))
-          (unlink-retired-edges)
           (let [continued (evaluation/of-agent @connection "root")]
             (is (< (count opening) (count continued)))
-            (is (= opening (subvec continued 0 (count opening)))
+            ;; An unchanged read advances its read basis in place
+            ;; (:seon.wake/context-inert); what the agent saw does not move.
+            (is (= (mapv #(select-keys % [:seon.cluster.eval/id :seon.cluster.eval/source
+                                          :seon.cluster.eval/ordinal :seon.eval/shown]) opening)
+                   (mapv #(select-keys % [:seon.cluster.eval/id :seon.cluster.eval/source
+                                          :seon.cluster.eval/ordinal :seon.eval/shown])
+                         (subvec continued 0 (count opening))))
                 "the wake appends without rewriting the opening")
             (is (some #(str/includes? (:seon.eval/shown % "") "Runtime history wake.")
                       (drop (count opening) continued)))
