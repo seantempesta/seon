@@ -63,7 +63,9 @@
   holder.
 
   Example:
-  (my.task/claim! {:seon.task/assigned \"6cc772cb3f60\"})"
+  (let [created (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles trim\"
+                                    :seon.task/kind :function :seon.task/intent \"Trim reply titles.\"})]
+    (my.task/claim! {:seon.task/assigned (:seon.task/id created)}))"
   {:malli/schema [:=> [:cat :seon.task/claim-request]
                   [:or :seon.task/assignment-view :seon.task/refused-error :seon.error/value]]}
   [{connection :seon.db/connection agent-id :seon.agent/id handle :seon.task/assigned}]
@@ -161,6 +163,7 @@
   none is current, `:unassigned` when I hold no task.
 
   Example:
+  (my.task/plan! {:seon.task/steps [\"read the failing test\" \"fix the producer\"]})
   (my.task/done! {})"
   {:malli/schema [:=> [:cat :seon.task/steps-request]
                   [:or :seon.task/steps-view :seon.task/refused-error :seon.error/value]]}

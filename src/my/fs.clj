@@ -9,7 +9,7 @@
   (gen/fmap #(apply str %)
             (gen/vector (gen/elements (seq "0123456789abcdef")) 64)))
 
-(def content-generator
+(def ^{:seon.fn/internal? true} content-generator
   (gen/one-of
    [(gen/fmap (fn [text] {:my.fs/text text}) gen/string)
     (gen/fmap (fn [octets] {:my.fs/bytes octets})
@@ -17,7 +17,7 @@
     (gen/fmap (fn [digest] {:seon.blob/digest digest})
               digest-generator)]))
 
-(def write-precondition-generator
+(def ^{:seon.fn/internal? true} write-precondition-generator
   (gen/one-of
    [(gen/return {:my.fs/expected-absence? true})
     (gen/fmap (fn [digest] {:my.fs/expected-digest digest})

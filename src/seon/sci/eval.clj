@@ -1872,10 +1872,28 @@
     ::missing-declaration attribute
     :seon.error/expected :seon.sci.eval/present-declaration}))
 
+(def ^:private section-headings
+  "The fixed docstring headings that open a section and so end an Example."
+  ["Edge cases:" "Costs:" "Recommendations:" "Errors:" "Known issues:" "## "])
+
+(defn- example-start
+  "The first-form text after an Example heading line (`Example:`, `Examples:`,
+  `## Example`, `## Examples`), or nil when the line opens no Example."
+  {:malli/schema [:=> [:cat :string] [:or :nil :string]]}
+  [line]
+  (or (some #(when (str/starts-with? line %) (str/trim (subs line (count %))))
+            ["Examples:" "Example:"])
+      (when (#{"## Example" "## Examples"} line) "")))
+
 (defn docstring-parts
   "Split a declared docstring into its summary (the first sentence of its first
-  paragraph, whole), the body that follows, and the final Example section."
-  {:malli/schema [:=> [:cat :string] :map]}
+  paragraph, whole), the body that follows, and the final Example section.
+
+  The Example section runs from its heading to the next fixed heading (Edge
+  cases, Costs, Recommendations, Errors, Known issues, any `## ` heading) or the
+  end; the sections around it stay in the body. `Example: (form)` on one line
+  yields that form."
+  {:malli/schema [:=> [:cat :string] [:map [:summary :string] [:body :string] [:example :string]]]}
   [docstring]
   (let [lines (mapv str/trim (str/split-lines (or docstring "")))
         lines (vec (drop-while str/blank? lines))
@@ -1885,11 +1903,17 @@
         summary (if stop (subs flat 0 (inc stop)) flat)
         leftover (when stop (str/trim (subs flat (+ stop 2))))
         lines (vec (concat (when (seq leftover) [leftover]) after))
-        example-index (last (keep-indexed #(when (= "Example:" %2) %1) lines))]
+        start (last (keep-indexed #(when (example-start %2) %1) lines))
+        heading? (fn [line] (some #(str/starts-with? line %) section-headings))
+        end (when start
+              (or (first (filter #(heading? (lines %)) (range (inc start) (count lines))))
+                  (count lines)))
+        join #(str/trim (str/join "\n" %))]
     {:summary summary
-     :body (str/trim (str/join "\n" (if example-index (subvec lines 0 example-index) lines)))
-     :example (if example-index
-                (str/trim (str/join "\n" (subvec lines (inc example-index)))) "")}))
+     :body (join (if start (concat (subvec lines 0 start) (subvec lines end)) lines))
+     :example (if start
+                (join (cons (example-start (lines start)) (subvec lines (inc start) end)))
+                "")}))
 
 (defn- arglists-reader
   "The function that reads one arglists text as the namespace's own source

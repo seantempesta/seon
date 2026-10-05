@@ -388,7 +388,8 @@
 
   Call preparation carries the executing context explicitly; no process or
   thread lookup is used. A host call without that context refuses."
-  {:malli/schema [:=> [:cat :seon.env/environment]
+  {:seon.fn/internal? true
+   :malli/schema [:=> [:cat :seon.env/environment]
                   [:or :my.program/context :seon.program/context-unavailable-error]]}
   [environment]
   (let [ctx (:my.program/executing-ctx environment)
@@ -809,9 +810,9 @@
   "Return a reduced diagnostic for native program mutation, or nil.
 
   The SCI hook calls this before supplied-default preparation. Intern and
-  alter-var-root remain available for private bindings with no program row.
-  Example: called by the installed SCI call-preparation hook."
-  {:seon/tasks #{"2497b961dccc" "20e88abfc982"}
+  alter-var-root remain available for private bindings with no program row."
+  {:seon.fn/internal? true
+   :seon/tasks #{"2497b961dccc" "20e88abfc982"}
    :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value :seon.schema/arguments]
                   :seon.schema/value]}
   [ctx callee arguments]

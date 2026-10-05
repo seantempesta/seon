@@ -10,7 +10,7 @@
 (def ^:private digest-generator
   (gen/return (apply str (repeat 64 "0"))))
 
-(def form-request-generator
+(def ^{:seon.fn/internal? true} form-request-generator
   (gen/let [path (gen/such-that seq gen/string-alphanumeric)
             digest digest-generator
             operation (gen/elements

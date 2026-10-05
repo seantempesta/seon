@@ -323,3 +323,16 @@
        (is (= (str stored "\n") (:seon.cluster.eval/output aliased)))
        (is (= "Source not found\n" (:seon.cluster.eval/output missing)))
        (is (= stored (evaluation/stored-source (db/db connection) 'my.agent/settings!)))))))
+
+(deftest an-example-ends-at-the-next-fixed-heading
+  ;; The example ran to the docstring's end, so a heading after it (Costs,
+  ;; Errors, `## Known issues`) was read as example forms (tasks eba5d142ef12,
+  ;; eaf75398383c); a one-line `Example: (form)` yielded no example.
+  (is (= {:summary "Read one." :example "(a 1)\n(b 2)"
+          :body "Edge cases: none.\nCosts: one query.\n\n## Known issues\n\nx"}
+         (evaluation/docstring-parts
+          "Read one.\n\n  Example:\n  (a 1)\n  (b 2)\n  Edge cases: none.\n  Costs: one query.\n\n  ## Known issues\n\n  x")))
+  (is (= "(trim \"a \")" (:example (evaluation/docstring-parts "Trim a title.\n\n  Example: (trim \"a \")"))))
+  (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/open)"}
+         (evaluation/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
+  (is (= "" (:example (evaluation/docstring-parts "No example here.")))))

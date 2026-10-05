@@ -5,7 +5,7 @@
             [clojure.test.check.generators :as gen]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
-(def stdin-generator
+(def ^{:seon.fn/internal? true} stdin-generator
   (gen/one-of
    [(gen/fmap (fn [text] {:my.shell/stdin-text text}) gen/string)
     (gen/fmap (fn [octets] {:my.shell/stdin-bytes octets})
