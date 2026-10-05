@@ -283,7 +283,7 @@
              :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable as flat links: the primary chain outermost to root, then suppressed throwables and their causes, each naming its relation by index. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
              :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
              :resolved-tx :seon.db/ref,
-             :resolved-by [:enum {:description "The fact that resolves a fault: its producer's changed definition digest proven by its task's red-then-green tests (:seon.task/proof), the changed digest alone when no task answers it, or the resolve! transaction."} :seon.task/proof :seon.program/definition-digest :seon.error/resolved-tx],
+             :resolved-by [:enum {:description "The fact that resolves a fault: its producer's changed definition digest proven by a green stored run of its task's test (:seon.task/proof), the changed digest alone when no task answers it or the producer is deleted, or the resolve! transaction."} :seon.task/proof :seon.program/definition-digest :seon.error/resolved-tx],
              :digest-then :seon.program/definition-digest,
              :digest-now :seon.program/definition-digest,
              :resolution

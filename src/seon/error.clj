@@ -1125,35 +1125,39 @@
           database function)))
 
 (defn- proof
-  "Whether task `handle`'s proof holds in `database` (health plan §5): every
-  test naming it (`:seon.task/tasks`) was proved green by one accepted
-  proposal of it (`:seon.task/proved`) and observed red first on the
-  proposing branch (`:seon.task/refuted`). A task no test names has no proof.
-  The answer is derived, never stored."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :boolean :seon.db/error-result]]}
-  [database handle]
-  (let [tests (db/q '[:find [?test ...] :in $ ?handle
+  "Whether task `handle`'s proof holds in `database`: at least one test names it
+  (`:seon.task/tasks`) and each such test's latest stored run is green (passes,
+  no failure or error, terminated) and completed after the transaction that
+  wrote `producer`'s current definition digest. A task no test names has no
+  proof. The answer is derived, never stored."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle :seon.fn/sym]
+                  [:or :boolean :seon.db/error-result]]}
+  [database handle producer]
+  (let [fixed (db/q '[:find (max ?tx) . :in $ ?producer
+                      :where [?f :seon.fn/sym ?producer] [?f :seon.program/definition-digest _ ?tx]]
+                    database producer)
+        runs (db/q '[:find ?test ?done ?pass ?fail ?error :in $ ?handle
+                     :where [?t :seon.task/tasks ?handle] [?t :seon.test/sym ?test]
+                            [?m :seon.test.member/symbol ?test]
+                            [?m :seon.test.member/completed-tx ?done]
+                            [?m :seon.test.member/terminated-tx]
+                            [?m :seon.test.member/pass-count ?pass]
+                            [?m :seon.test.member/fail-count ?fail]
+                            [?m :seon.test.member/error-count ?error]]
+                   database handle)
+        named (db/q '[:find [?test ...] :in $ ?handle
                       :where [?t :seon.task/tasks ?handle] [?t :seon.test/sym ?test]]
                     database handle)
-        proposals (db/q '[:find [?proposal ...] :in $ ?handle
-                          :where [?assignment :seon.task/assigned ?handle]
-                                 [?proposal :seon.task/proposes ?assignment]
-                                 [?proposal :seon.task/merge ?merge]
-                                 [?merge-task :seon.task/id ?merge]
-                                 [?merge-task :seon.task/outcome :accepted]]
-                        database handle)]
+        latest (when (set? runs) (into {} (map (juxt first identity)) (sort-by second runs)))]
     (cond
-      (map? tests) tests
-      (map? proposals) proposals
-      (empty? tests) false
-      :else (boolean
-             (some (fn [proposal]
-                     (let [{proved :seon.task/proved refuted :seon.task/refuted}
-                           (db/pull database [:seon.task/proved :seon.task/refuted] proposal)]
-                       (every? (fn [proof-test] (and (some #(= proof-test (first %)) proved)
-                                                     (some #(= proof-test (first %)) refuted)))
-                               tests)))
-                   proposals)))))
+      (map? fixed) fixed
+      (map? runs) runs
+      (map? named) named
+      (or (empty? named) (nil? fixed)) false
+      :else (every? (fn [test]
+                      (let [[_ done pass fail error] (get latest test)]
+                        (and done (> done fixed) (pos? pass) (zero? fail) (zero? error))))
+                    named))))
 
 (defn resolution
   "Why the fault `signature` names is resolved, or nil while it is open.
@@ -1162,15 +1166,16 @@
   producer's current definition digest differs from the one its latest
   occurrence ran (`:seon.error/producer-digest`), and, when a task answers
   the fault (`:seon.task/faults`), that task's proof holds: a test naming it
-  was observed red before the change and proved green after
-  (`:seon.task/proof`). Otherwise by a `:seon.error/resolved-tx`
+  has a green stored run completed after the change (`:seon.task/proof`). A
+  producer with no program entity any more (deleted) resolves it, task or
+  not. Otherwise by a `:seon.error/resolved-tx`
   (`seon.problems/resolve!`) at or after its latest occurrence. A fault with
   no producer resolves only so. A recurrence reopens it.
 
   ## Costs
 
-  - Three indexed queries and two pulls, plus one query and one pull per
-    accepted proposal of an answering task; no history view."
+  - Three indexed queries and two pulls, plus three queries per answering
+    task over its tests' members and the producer's digest datoms."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature]
                   [:or :nil :seon.error/resolution :seon.db/error-result]]}
   [database signature]
@@ -1187,10 +1192,10 @@
         then (:seon.error/producer-digest (last (sort-by #(inst-ms (:seon.error.occurrence/last-at %))
                                                          (:seon.error/occurrences fault))))
         now (when producer
-              (db/pull database [:seon.program/definition-digest] [:seon.fn/sym producer]))
+              (db/pull database [:db/id :seon.program/definition-digest] [:seon.fn/sym producer]))
         tasks (keep :seon.task/id (:seon.task/_faults fault))
         proven (when (and then (not= then (:seon.program/definition-digest now)))
-                 (reduce (fn [_ handle] (let [held (proof database handle)]
+                 (reduce (fn [_ handle] (let [held (proof database handle producer)]
                                           (cond (map? held) (reduced held) held (reduced handle))))
                          nil tasks))
         resolved (when (int? latest)
@@ -1198,12 +1203,15 @@
                            :where [?error :seon.error/signature ?signature]
                                   [?error :seon.error/resolved-tx ?resolution]]
                          database signature))
-        changed (cond-> {:seon.error/producer producer :seon.error/digest-then then}
+        changed (cond-> {:seon.error/producer producer}
+                  then (assoc :seon.error/digest-then then)
                   (:seon.program/definition-digest now)
                   (assoc :seon.error/digest-now (:seon.program/definition-digest now)))]
     (cond
       (some #(and (map? %) (:seon.error/at %)) [latest fault now proven resolved])
       (some #(when (and (map? %) (:seon.error/at %)) %) [latest fault now proven resolved])
+      (and producer (nil? (:db/id now)))
+      (assoc changed :seon.error/resolved-by :seon.program/definition-digest)
       (string? proven) (assoc changed :seon.error/resolved-by :seon.task/proof :seon.task/id proven)
       (and then (not= then (:seon.program/definition-digest now)) (empty? tasks))
       (assoc changed :seon.error/resolved-by :seon.program/definition-digest)

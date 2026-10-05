@@ -39,6 +39,9 @@
         origin (test-support/with-database
                    (fn [a]
                      (let [a0 (db/basis-t (db/db a))]
+                       (test-support/transacted! a [(test-support/namespace-entity (db/db a) 'seon.error.branch-test)
+                                                    (test-support/program-fn-entity (db/db a) 'seon.error.branch-test/probe
+                                                                                    "(defn probe [] 1)")])
                        (record! a at {})
                        (let [seen (error/occurred-since (db/db a) a0)]
                          (testing "the next evaluation on A carries it, tagged with A"

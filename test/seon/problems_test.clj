@@ -335,6 +335,10 @@
     (fn [connection]
       (let [open (fn [] (->> (problems/open-faults @connection)
                              (filterv #(= 'seon.problems-test/rejected (:seon.error/operation %)))))
+            _ (test-support/transacted! connection
+                                        [(test-support/namespace-entity @connection 'seon.problems-test)
+                                         (test-support/program-fn-entity @connection 'seon.problems-test/rejected
+                                                                         "(defn rejected [] 1)")])
             _ (is (:db-after (commit-error! connection)))
             [entry] (open)
             signature (:seon.error/signature entry)]

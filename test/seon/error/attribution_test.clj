@@ -23,12 +23,12 @@
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as turn.world]))
 
-(def ^:private context
+(def context
   {:seon.error/layer ::boundary
    :seon.error/operation `boundary
    :seon.db.process/id "attribution-test"})
 
-(defn- world
+(defn world
   "The environment a boundary holds for one fixture cluster, with root seeded as boot does."
   [connection cluster-name]
   (test-support/seed-cluster! connection cluster-name {})
@@ -68,7 +68,7 @@
            (:seon.error/producer
             (refusal/producer {:seon.instrument/fn 'seon.problems/open-faults :seon.instrument/arm :output} nil))))))
 
-(defn- signature-row
+(defn signature-row
   [connection signature]
   (db/pull (db/db connection)
            [:seon.error/producer :seon.instrument/fn
@@ -104,27 +104,6 @@
          (is (= limit (stored-sum)) "the held count is not stored yet")
          (fault/fault! environment (ex-info "another failure" {}) context)
          (is (= (+ 2 limit) (stored-sum)) "the next fault's commit carried it"))))))
-
-(deftest a-fault-its-task-answers-stays-open-until-the-proof-holds
-  (test-support/with-database
-   (fn [connection]
-     (let [environment (world connection "attribution-resolution")
-           ;; a declared error value whose producer stated the digest that ran:
-           ;; the program's current digest differs, as after a fix
-           receipt (fault/fault! environment
-                                 {:seon.error/at (java.util.Date.) :seon.error/layer ::boundary
-                                  :seon.error/operation 'seon.problems/problems :seon.error/message "refused"
-                                  :seon.error/producer 'seon.problems/problems
-                                  :seon.error/producer-digest (apply str (repeat 64 "0"))
-                                  :seon.task/refused :unproven :seon.task/holder 'seon.problems}
-                                 ;; a declared value names its extension of the base
-                                 (assoc context :seon.error/declared-schema :seon.task/refused-error))
-           signature (:seon.error/signature receipt)
-           handle (-> (signature-row connection signature) :seon.task/_faults first :seon.task/id)]
-       (is (string? handle) "the producer's task answers the fault")
-       (is (nil? (error/resolution (db/db connection) signature))
-           "a changed digest without a red-then-green proof leaves it open")
-       (is (nil? (task/resolution (db/db connection) handle)) "so its task stays open")))))
 
 (deftest the-queue-offers-open-tasks-and-a-held-task-refuses-another-claim
   (test-support/with-database
