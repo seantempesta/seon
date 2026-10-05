@@ -1,4 +1,4 @@
-(ns my.examples.nested-fixture
+(ns ^{:seon.ns/context-relevant? true} my.examples.nested-fixture
   "A nested namespace admitted by the canonical program population.")
 
 (defn echo

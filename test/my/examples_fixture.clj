@@ -1,9 +1,6 @@
-(ns ^{:seon.test/fixture
-      "Executable-example material: this namespace's one test exists so the
-       usage-example machinery has a statically indexed row to assert over,
-       not to gate anything."}
-  my.examples-fixture
-  "One statically indexed test for the agent API's executable examples."
+(ns my.examples-fixture
+  "The examples agent's own namespace: its one test is what the agent's
+  `(my.test/run)` example runs, as any agent runs its own namespace's tests."
   (:require [clojure.test :refer [deftest is]]))
 
 (deftest ^{:seon.test/usage true} arithmetic

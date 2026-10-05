@@ -403,12 +403,15 @@
                        :seon.batch/sink (seon.batch/sink)}
                 ;; the world an agent's evaluation has: its custody's connection
                 ;; and its identity, from which omitted inputs are supplied
-                connection (assoc :seon.db/connection connection
-                                  ;; the context's own environment (its routing, store),
-                                  ;; else one naming the cluster and connection
-                                  :seon.env/environment (or (env/of ctx)
-                                                            (env/environment {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
-                                                                              :seon.db/connection connection})))
+                connection (as-> world
+                             (let [environment (or (env/of ctx)
+                                                   (env/environment {:seon.boot/cluster-name (:seon.boot/cluster-name request "default")
+                                                                     :seon.db/connection connection}))]
+                               ;; the context's own environment (its routing, store), else one
+                               ;; naming the cluster and connection; its store and routing are
+                               ;; world members, as `seon.turn.world/agent-world` merges them
+                               (merge world {:seon.db/connection connection :seon.env/environment environment}
+                                      (seon.batch/environment-members environment))))
                 (:seon.agent/id request) (assoc :seon.agent/id (:seon.agent/id request)))
         batch (seon.batch/evaluate-batch
                (-> (turn.batch/code-request

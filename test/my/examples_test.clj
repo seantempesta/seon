@@ -10,11 +10,13 @@
             [seon.bootstrap :as bootstrap]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.sci.eval :as evaluation]
             [seon.turn :as turn]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [my.examples.nested-fixture])
   (:import [com.sun.net.httpserver HttpServer HttpHandler]
            [java.io PushbackReader StringReader]
            [java.net InetSocketAddress]
@@ -39,7 +41,9 @@
     server))
 
 (deftest ^{:seon.test/fixture-observation
-           "Runs public examples through real HTTP, filesystem, and background-effect fixtures; an ordinary database branch cannot prove these effects."}
+           "Runs public examples through real HTTP, filesystem, and background-effect fixtures; an ordinary database branch cannot prove these effects."
+           :seon.test/long "Runs every public docstring example (about 130 forms) through the one REPL path with real HTTP, filesystem and background-effect work: 17.8-25.5 s measured 2026-10-06 on the check JVM, proportional to the number of public examples."
+           :seon.test/long-ms 45000}
   public-docstring-examples-run-in-the-canonical-agent-context
   (support/with-database
     (fn [connection]
@@ -92,6 +96,14 @@
                                                   :seon.db/db @connection
                                                   :seon.db/connection connection
                                                   :seon.agent/id "examples"}))
+                  ;; the cluster environment the ctx carries holds its work launcher, as boot
+                  ;; publishes it: a capability call dispatches on it
+                  _ (env/replace-environment!
+                     (:seon.sci.eval/projection-state ctx)
+                     (env/refuse-incomplete-environment!
+                      (env/environment (cond-> (assoc (env/of ctx) :seon.flow/work-launcher @launcher-resource)
+                                         (:seon.store/store (support/execution-handle connection))
+                                         (assoc :seon.store/store (:seon.store/store (support/execution-handle connection)))))))
                   _ (sci/intern ctx (sci/find-ns ctx 'my.examples-fixture) 'example-url example-url)
                   ordinal (atom -1)
                   run (fn [source]
@@ -137,7 +149,9 @@
                 (is (str/includes? (:seon.error/message value "") "my.message/send"))
                 (is (str/includes? (:seon.error/message value "") ":my.message/content"))
                 (is (some? (get-in value [:seon.error/expected])))
-                (is (empty? (db/q '[:find ?message :where [?message :seon.message/content 42]] @connection))))
+                (is (empty? (db/q '[:find ?message :where [?message :seon.message/to ?agent] [?agent :seon.agent/id "root"]]
+                                  @connection))
+                    "the refused message was never written"))
               (let [failed (run "(my.test/run {:seon.agent/id 17})")]
                 (is (= :input
                        (get-in failed [:seon.sci.admit/value :seon.instrument/check]))
@@ -166,7 +180,7 @@
                                                                 :seon.test/fail-count
                                                                 :seon.test/error-count])
                                                (:seon.sci.admit/value result)))))
-                                (is (nil? (get-in result [:seon.sci.admit/value :seon.error/at]))))
+                                (is (nil? (get-in result [:seon.sci.admit/value :seon.error/message]))))
                               (recur)))))))))
               (let [effect-ids (db/q '[:find [?id ...] :where
                                        [?e :seon.effect/id ?id]

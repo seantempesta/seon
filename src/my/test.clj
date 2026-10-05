@@ -31,7 +31,10 @@
 (defn run-owned
   "Run one namespace's declared tests as one named request.
   The namespace is :seon.ns/name, else my assigned namespace.
-  Returns each test's result; [] means none are declared."
+  Returns each test's result; [] means none are declared.
+
+  Example:
+  (my.test/run-owned {})"
   {:malli/schema [:=> [:cat :my.test/run-request]
                   [:or :seon.test/results :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection
