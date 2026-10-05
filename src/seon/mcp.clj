@@ -150,6 +150,11 @@
       (nil? found)
       (refused (str "No cluster " chosen " is running in this JVM.") :seon.mcp/cluster
                (vec (sort (keys running))) chosen)
+      (:seon.boot/failure found)
+      (refused (str "Cluster " chosen " failed to boot: "
+                    (:seon.error/message (:seon.boot/failure found))
+                    " Fix the cause, then run bin/seon start --head.")
+               :seon.boot/ready-ms :seon.boot/ready-ms chosen)
       ;; the roster holds a start's partial instance from its first layer and
       ;; a stopping one until its exit: neither can evaluate yet or still
       (or (:seon.boot/stopping found) (not (contains? found :seon.boot/ready-ms)))

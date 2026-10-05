@@ -1538,10 +1538,11 @@
 
 (defn- test-check-arguments
   "`bin/test-check` arguments for the check's `--test` values: `NS/NAME` names
-  one test, `NS` a namespace."
-  {:malli/schema [:=> [:cat [:vector :string]] [:vector :string]]}
-  [tests]
-  (into [] (mapcat #(if (str/includes? % "/") ["--test" %] ["--ns" %])) tests))
+  one test, `NS` a namespace; `include-long?` runs declared-long tests too."
+  {:malli/schema [:=> [:cat [:vector :string] :boolean] [:vector :string]]}
+  [tests include-long?]
+  (cond-> (into [] (mapcat #(if (str/includes? % "/") ["--test" %] ["--ns" %])) tests)
+    include-long? (conj "--include-long")))
 
 (defn- log-tail
   "The last `n` lines of the file at `path`, or nothing."
@@ -1553,12 +1554,12 @@
 (defn- run-candidate-tests!
   "Run `tests` on the ready throwaway JVM of `disposable` through the
   candidate's `bin/test-check`: its summary line and whether it passed."
-  {:malli/schema [:=> [:cat :string :string [:vector :string]] :map]}
-  [source-root disposable tests]
+  {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean] :map]}
+  [source-root disposable tests include-long?]
   (let [classpath (str/join ":" (map #(str source-root "/" %) ["script" "src" "resources"]))
         argv (into ["bb" "--config" "/dev/null" "--classpath" classpath
                     (str source-root "/bin/test-check") "--root" disposable "default"]
-                   (test-check-arguments tests))
+                   (test-check-arguments tests include-long?))
         bound (+ (operator-boot-bound-ms {}) (operator-silence-backstop-ms {}))]
     (try
       {:seon.operator/test-summary (str/trim (command! argv source-root bound))
@@ -1574,8 +1575,8 @@
   answer the summary with the phases; a boot that does not reach readiness
   answers its failure with the log's tail. The JVM is terminated by exact
   identity and its disposable root deleted on every exit path."
-  {:malli/schema [:=> [:cat :string :string [:vector :string]] :map]}
-  [root sha tests]
+  {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean] :map]}
+  [root sha tests include-long?]
   (let [began (System/nanoTime)
         slot (check-slot! root (operator-boot-bound-ms {}))
         waited-ms (elapsed-ms began)
@@ -1603,7 +1604,7 @@
             missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
             ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
             booted-ms (elapsed-ms began)
-            run (when ready? (run-candidate-tests! source-root disposable tests))
+            run (when ready? (run-candidate-tests! source-root disposable tests include-long?))
             phases (merge (:seon.operator/phases source)
                           {:seon.operator/slot-wait-ms waited-ms
                            :seon.operator/prepare-ms prepared-ms
@@ -1648,7 +1649,7 @@
             rehearsal-ms (elapsed-ms began)
             tests (get request :seon.operator/tests [])
             run (when (and (seq tests) (not (:seon.error/message rehearsal)))
-                  (candidate-tests! root sha tests))
+                  (candidate-tests! root sha tests (true? (:seon.operator/include-long? request))))
             phases {:seon.operator/archive-ms archive-ms
                     :seon.operator/rehearsal-ms (- rehearsal-ms archive-ms)
                     :seon.operator/total-ms (elapsed-ms began)}]
@@ -1673,9 +1674,12 @@
                (:seon.operator/head? request) (move-to-head! request)
                (seq (selected-processes (:seon.operator/managed-root request))) (connected! request)
                :else (launch! request))
-      :status (let [result (connected! request)]
+      :status (let [result (connected! request)
+                    failure (:seon.boot/failure result)]
                 (cond-> result
-                  (:seon.boot/pid result) (merge (program-source result))))
+                  (:seon.boot/pid result) (merge (program-source result))
+                  failure (assoc :seon.error/message
+                                 (str "The running JVM's boot failed: " (:seon.error/message failure)))))
       :stop (if (:seon.operator/force? request) (force-stop! request) (connected! request))
       :down (down! request (selected-processes (:seon.operator/managed-root request)))
       ;; reset = the running JVM unlinks the branch and forks a fresh one,
@@ -1719,6 +1723,9 @@
           "--head" (if (= :start command)
                      (recur (next args) (assoc request :seon.operator/head? true) positionals)
                      (fail! "--head is supported only by start." request))
+          "--include-long" (if (= :check command)
+                             (recur (next args) (assoc request :seon.operator/include-long? true) positionals)
+                             (fail! "--include-long is supported only by check." request))
           "--test" (if (and (= :check command) (seq (next args)))
                      (recur (nnext args) (update request :seon.operator/tests (fnil conj []) (second args))
                             positionals)
@@ -1851,7 +1858,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH...] [--test NS | --test NS/NAME]..."}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH...] [--test NS | --test NS/NAME]... [--include-long]"}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.

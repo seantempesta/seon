@@ -29,6 +29,9 @@
              [:seon.boot/prepl-port :seon.boot/prepl-port]
              [:seon.boot/log-dir :seon.boot/log-dir]
              [:seon.boot/store-dir :seon.boot/store-dir]],
+            :failure
+            [:and {:description "Why this start's boot refused: its operator diagnostic (references only). Retained on the partial instance so status and the MCP entrance say the boot failed instead of reporting it as still starting."}
+             :seon.cluster.boot/operation-error]
             :instance-ctx
             [:and {:description "A boot instance's cluster context: absent during a partial boot (the REPL opens before the store), so it is never supplied from the calling evaluation's world."}
              :seon.sci.eval/ctx]
@@ -70,6 +73,7 @@
               {:optional true}
               :seon.agent/routing]
              [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+             [:seon.boot/failure {:optional true} :seon.boot/failure]
              [:seon.boot/layers {:optional true} :seon.boot/layers]
              [:seon.boot/stopping {:optional true} [:= true]]],
             :layers [:vector {:description "Each boot layer with the cumulative milliseconds since the start began when it was first published, in acquisition order."}
@@ -110,6 +114,7 @@
               {:optional true}
               :seon.boot/recovered-runs]
              [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+             [:seon.boot/failure {:optional true} :seon.boot/failure]
              [:seon.boot/layers {:optional true} :seon.boot/layers]
              [:seon.instrument/instrumented
               {:optional true}

@@ -152,6 +152,8 @@
           (let [partial (evaluate! root
                          "(with-redefs [seon.cluster/serve! (fn [& _] (throw (ex-info \"injected web failure\" {})))] (try (seon.cluster.boot/start! {:seon.boot/root (get-in (get @seon.operator.runtime/running-instances \"default\") [:seon.boot/config :seon.boot/root]) :seon.boot/cluster-name \"partial\"}) (catch Throwable e (seon.cluster.boot/readiness (get @seon.operator.runtime/running-instances (:seon.boot/cluster-name (ex-data e)))))))" 120000)]
             (is (some #{:seon.render.web/served} (:seon.boot/missing-layers partial)))
+            (is (= "injected web failure" (get-in partial [:seon.boot/failure :seon.error/message]))
+                "A failed partial boot says it failed, not that it is still starting.")
             (is (= 2 (client/prepl-value! partial "(+ 1 1)" event-ms)))))))))
 
 (defn- cold-launch!

@@ -517,10 +517,18 @@
         (let [own (let [entry (get @running-instances name)]
                     (when (identical? (:seon.boot/prepl-server entry) (:seon.boot/prepl-server instance))
                       entry))]
-          (when (and own (#{:seon.cluster.store/held-elsewhere :seon.cluster.store/held-by-this-process}
+          (if (and own (#{:seon.cluster.store/held-elsewhere :seon.cluster.store/held-by-this-process}
                           (:seon.cluster.store/rule (ex-data cause))))
-            (server/stop-server (server-name name))
-            (swap! running-instances #(cond-> % (identical? own (get % name)) (dissoc name))))
+            (do (server/stop-server (server-name name))
+                (swap! running-instances #(cond-> % (identical? own (get % name)) (dissoc name))))
+            ;; The partial boot stays for diagnosis; it says it failed, so
+            ;; status and the MCP entrance never report it as still starting.
+            (when own
+              (swap! running-instances
+                     #(cond-> % (identical? own (get % name))
+                        (assoc name (assoc own :seon.boot/failure
+                                           (diagnostic (ex-message cause) (or (ex-data cause) {})
+                                                       :boot-failed cause)))))))
           (throw (failed cause own)))))))
 
 (defn readiness
@@ -541,7 +549,8 @@
                                      ;; Datalog's count over no bindings answers nil, not 0.
                                      (db/q '[:find (count ?a) . :where [?a :seon.agent/id _]] database))
                                    0)}
-           (select-keys instance [:seon.boot/ready-ms :seon.boot/layers :seon.boot/recovered-runs])
+           (select-keys instance [:seon.boot/ready-ms :seon.boot/layers :seon.boot/recovered-runs
+                                  :seon.boot/failure])
            (select-keys (:seon.render.web/served instance) [:seon.render.web/url :seon.render.web/wanted-port]))))
 
 (defn stop!
