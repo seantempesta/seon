@@ -2769,7 +2769,8 @@
 ;;; committed files boot cannot install (a tag naming a task no file declares,
 ;;; a task file that is not one vector, an entity its schema refuses). The
 ;;; rehearsal runs those same steps in the running JVM on two disposable
-;;; branches of the live store.
+;;; branches of an overlay of the live store (`store/open-overlay!`): every
+;;; write stays in memory and the store is never written.
 
 (defn- rehearsal-adoption!
   "Adopt `published`'s changes onto `fork`, a new branch of `cluster-name`'s
@@ -2839,10 +2840,14 @@
 (defn rehearse-source!
   "Answer whether `directory`'s program (a candidate commit's archive) boots on
   this store: its publication and `cluster-name`'s adoption of it, run as boot
-  runs them, onto disposable branches unlinked before the answer.
+  runs them, onto disposable branches of an overlay of the store
+  (`store/open-overlay!`) dropped before the answer. The store itself is never
+  written: every branch, commit and node the rehearsal makes stays in the
+  overlay's memory (a one-file check wrote 126 files, 0.8 MB, and left four dead
+  branch heads in `data/store` before, 2026-09-28).
 
   The files that differ from the published program publish through
-  `full-source-refresh!` onto a new branch (`source/publish!`'s
+  `full-source-refresh!` onto a new overlay branch (`source/publish!`'s
   `:seon.source/branch`), reading the candidate's schema resources
   ([[candidate-resources]]) and analyzing with a copy of this JVM's analyzer
   cache, so neither the shared cache nor `current-src` changes. The cluster's
@@ -2854,7 +2859,8 @@
   cluster adopts only after boot passes here and refuses at boot).
 
   Costs: proportional to the files that differ from the published program,
-  plus one copy of the analyzer cache (about 6 MB, 0.2 s). Measured
+  plus one copy of the analyzer cache (about 6 MB, 0.2 s); the overlay holds the
+  rehearsal's writes in heap until it is dropped. Measured
   2026-09-28 on default, unarmed rehearsal code: HEAD 1.6 s, one changed test
   file 5.1 s, three changed files with a schema resource 6.5 s."
   {:malli/schema [:=> [:cat :seon.boot/root :string :seon.boot/cluster-name]
@@ -2868,7 +2874,9 @@
   (let [began (System/nanoTime)
         ms #(quot (- (System/nanoTime) began) 1000000)
         store-dir (:seon.boot/store-dir (resolve-bootstrap {:seon.boot/root root}))
-        held (acquire-root-store! store-dir)
+        held (let [root-store (acquire-root-store! store-dir)]
+               (try (store/open-overlay! root-store)
+                    (catch Throwable failure (release-root-store! store-dir) (throw failure))))
         token (random-uuid)
         published-branch (keyword (str "rehearsal-" token))
         fork (keyword (str "rehearsal-" token "-" cluster-name))
@@ -2904,9 +2912,8 @@
       (catch Exception failure (rehearsal-refusal failure))
       (finally
         (try
-          (doseq [branch [fork published-branch]
-                  :when (contains? (registry/roster held) branch)]
-            (registry/retire-branch! {:seon.store/store held :seon.store/branch branch}))
+          ;; Drops the overlay's branches and writes; never the store's flock.
+          (store/release-store! held)
           (fs/delete-recursively! (str (babashka.fs/parent cache-root)) cache-root)
           (finally (release-root-store! store-dir)))))))
 

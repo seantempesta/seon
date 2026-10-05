@@ -106,7 +106,14 @@ commit() {
   echo "$lint"
   [[ "$lint" =~ errors:\ 0, ]] || refuse "clj-kondo reports errors; nothing committed"
 
-  git commit --only -m "$message" -- "${paths[@]}"
+  # A new file the lane names is not yet known to git; --only refuses such a
+  # pathspec, so it is added (alone) first. Nothing else enters the index.
+  for path in "${paths[@]}"; do
+    if [[ -e "$path" ]] && ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+      git add -- "$path"
+    fi
+  done
+  git commit --only -m "$message" -- "${paths[@]}" || refuse "git commit failed; nothing committed"
   git log --oneline -1
 }
 
