@@ -12,6 +12,7 @@
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.instrument :as instrument]
+            [seon.maintenance :as maintenance]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -366,3 +367,32 @@
        (is (= #{'resolver.probe}
               (sci.arm/changed-namespaces before (sci/namespace-state ctx)))
            "an actual resolver change is still observed")))))
+
+(deftest a-collection-receipts-branch-heads-never-name-the-loaded-program
+  ;; The first scheduled collection stored its branch heads, each a
+  ;; {:seon.store/branch :seon.source/commit-id} component of its receipt, and
+  ;; the next boot refused: the loaded program was read from every entity
+  ;; carrying :seon.source/commit-id (2026-10-05).
+  (support/with-database
+   (fn [connection]
+     (let [loaded (@#'sci.eval/loaded-commit-id @connection)
+           foreign (java.util.UUID/randomUUID)]
+       (support/transacted!
+        connection
+        [(assoc (maintenance/result-entity
+                 (schema/handed-projection)
+                 {:seon.operator.collect/store-id (java.util.UUID/randomUUID)
+                  :seon.operator.collect/managed-root "/repo"
+                  :seon.operator.collect/branches [{:seon.store/branch :cluster-default
+                                                    :seon.source/commit-id foreign}]
+                  :seon.operator.collect/objects-before 2
+                  :seon.operator.collect/objects-after 1
+                  :seon.operator.collect/swept-objects 1
+                  :seon.operator.collect/bytes-before 2048
+                  :seon.operator.collect/bytes-after 1024
+                  :seon.operator.collect/reclaimed-bytes 1024
+                  :seon.operator.collect/verification-pass-swept 0
+                  :seon.operator.collect/roots-verified? true
+                  :seon.operator.collect/complete? true})
+                :seon.maintenance.result/id "maintenance-result/collect")])
+       (is (= loaded (@#'sci.eval/loaded-commit-id @connection)))))))

@@ -1110,12 +1110,16 @@
   (if-let [connection (::loaded-connection holder)] (db/db connection) database))
 
 (defn- loaded-commit-id
-  "The source commit the JVM loaded, as the adoption record in `database` names it.
+  "The source commit the JVM loaded, as the cluster's adoption record in
+  `database` names it: the commit on the entity carrying `:seon.cluster/name`.
+  Other entities may carry `:seon.source/commit-id` with another meaning (a
+  collection receipt's branch heads), so the attribute alone never decides.
   A `current-src` value without a record is that commit itself."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/commit-id]}
   [database]
   (let [commits (db/q '[:find [?commit ...]
-                        :where [_ :seon.source/commit-id ?commit]] database)]
+                        :where [?cluster :seon.cluster/name]
+                               [?cluster :seon.source/commit-id ?commit]] database)]
     (cond
       (= 1 (count commits)) (first commits)
       (= :current-src (get-in database [:config :branch])) (db/commit-id database)
