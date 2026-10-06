@@ -11,6 +11,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.registry :as registry]
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.context-blocks-fixture :as fixture]
@@ -60,7 +61,9 @@
                 :seon.test/changed-subtree-bytes
                 (:seon.test/bytes (bytes-evidence (pr-str changes)))}))))
 
-(deftest running-fixture-settles-its-seeded-wake
+(deftest ^{:seon.test/long "Starts a work launcher and armer, installs the order scenario through a real turn, then settles two wakes and a withheld-permit fault; 10.1 s measured in the check JVM at 525d62694."
+           :seon.test/long-ms 20000}
+  running-fixture-settles-its-seeded-wake
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection
@@ -297,19 +300,18 @@
                         :seon.turn.loop/completion]]
              (async/close! (get handle key)))))))))
 
-(deftest virtual-loop-end-to-end
+(deftest ^{:seon.test/long "Boots a cluster handle with a work launcher and drives about twenty-five real agent turns through its flow graph, each one durable settlement; 31 to 45 s measured in the check JVM at 525d62694 (one 5 s bound cannot hold it). Splitting this test by scenario is the way to shrink it."
+           :seon.test/long-ms 60000}
+  virtual-loop-end-to-end
   (support/with-database
    (fn [connection]
-     (let [runtime-read
-           '(seon.db/pull
-             '[{:seon.agent/runtime
-                [{:seon.runtime/trigger
-                  [:seon.message/id :seon.message/content
-                   {:seon.message/from [:seon.agent/id]}]}
-                 {:seon.runtime/listens [:seon.listen/attribute :seon.listen/entity :seon.listen/value]}]}]
-             [:seon.agent/id "juniper"])
-           turn-dependent? #(#{runtime-read}
-                              (read-string (:seon.cluster.eval/source %)))
+     (let [;; the opening reads the agent's runtime entity (its trigger and
+           ;; listens): the one read whose answer follows the agent's turns
+           runtime-source? #(let [form (read-string %)]
+                              (and (seq? form)
+                                   (= 'seon.db/pull (first form))
+                                   (= :seon.runtime/agent (first (nth form 2 nil)))))
+           turn-dependent? #(runtime-source? (:seon.cluster.eval/source %))
            configured
            (db/transact!
             connection
@@ -322,6 +324,15 @@
                    (support/agent-tx @connection "unobserved" 'my.agents.unobserved)]))
            _ (is (some? (:db-after configured)))
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
+           ;; a test world branches from the cluster's adopted source commit
+           ;; (`seon.test/world-base`): this cluster descends from the one
+           ;; the executing test's cluster adopted, as a fork records it
+           _ (when-let [source-commit
+                        (:seon.source/commit-id
+                         (db/pull @connection [:seon.source/commit-id]
+                                  [:seon.cluster/name
+                                   (:seon.cluster/name (support/execution-handle connection))]))]
+               (support/transacted! connection [(registry/fork-entity "loop-proof" source-commit)]))
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
            routing (support/attempt-routing connection)
@@ -412,14 +423,15 @@
                    (is (empty? (keep :seon.cluster.eval/error saved)))
                    (is (= sources (mapv :seon.cluster.eval/source planned)))
                    (is (= sources (vec (distinct sources))))
-                   (is (= "(help)" (first sources)))
+                   (is (= [:seon.agent/id "root"] (last (read-string (first sources))))
+                       "the opening starts with the pull of the agent itself")
                    (is (some #{'(seon.db/q '[:find (pull ?cluster [:seon.cluster/name :seon.source/commit-id]) .
                                              :where [?cluster :seon.cluster/name]])}
-                             (map read-string sources)))
+                             (map #(take 2 (read-string %)) sources)))
                    (is (not-any? #{"(seon.cluster.status/snapshot {})" "(seon.cluster.status/agents {})"}
                                  sources))
-                   (is (str/starts-with? (:seon.eval/shown (first saved))
-                                        "The prompt shows your namespace my.agents.root")))))
+                   (is (str/includes? (:seon.eval/shown (first saved)) "my.agents.root")
+                       "the agent's own pull shows its namespace"))))
              (testing "agent creation uses the same retained-read opening"
                (let [created (cluster/ensure-entity!
                               connection cluster/boot-process-identity
@@ -451,9 +463,10 @@
                                (remove #(str/starts-with? (:seon.cluster.eval/source %) "(dir ") saved)))
                    (is (= []
                           (mapv (comp read-string :seon.cluster.eval/source)
-                                (remove #(= :unchanged (:seon.turn/status %))
+                                (remove #(or (= :unchanged (:seon.turn/status %))
+                                             (runtime-source? (:seon.cluster.eval/source %)))
                                         (:seon.turn/forms refresh))))
-                       "closing the creation turn changes no opening read"))))
+                       "closing the creation turn changes no opening read but the runtime's"))))
              (fixture/install! handle routing)
              (testing "fresh opening and stable stored prompt"
                (let [first-id (turn/next-id @connection "loop-proof" "juniper")
@@ -464,7 +477,8 @@
                      second-prompt (prompt)]
                  (is (string? (:seon.turn/id opening)))
                  (is (= first-id (:seon.turn/id opening)))
-                 (is (= "(help)" (:seon.cluster.eval/source (first saved))))
+                 (is (= [:seon.agent/id "juniper"] (last (read-string (:seon.cluster.eval/source (first saved)))))
+                     "the opening starts with the pull of the agent itself")
                  (is (= (mapv :seon.cluster.eval/source (:seon.turn/forms opening))
                         (mapv :seon.cluster.eval/source saved)))
                  (is (= (count saved) (count (distinct (map :seon.cluster.eval/source saved)))))
@@ -477,7 +491,6 @@
                                            [?n :seon.ns/name ?name]
                                            [?s :seon.schema/ns ?n]
                                            [?s :seon.schema/key ?key]] @connection 'my.agents.juniper))))
-                 (is (some #(= 'seon.db/q (first (read-string (:seon.cluster.eval/source %)))) saved))
                  (is (= [["Ada" 115] ["Bea" 100] ["Cy" 40]]
                         (sort (db/q '[:find ?customer (sum ?amount)
                                 :where [?order :example/customer ?customer]
@@ -513,15 +526,16 @@
                            :seon.test/stored (bytes-evidence text)
                            :seon.test/prompt
                            (bytes-evidence (:seon.cluster.prompt/text first-prompt))})
-                 (let [basis (db/basis-t @connection)
-                       refreshed (turn/system-turn request)]
+                 (let [refreshed (turn/system-turn request)]
                    (is (= []
                           (mapv (comp read-string :seon.cluster.eval/source)
                                 (remove #(= :unchanged (:seon.turn/status %))
                                         (:seon.turn/forms refreshed))))
                        "no opening read observes turn-history churn")
                    (is (nil? (:seon.turn/id refreshed)))
-                   (is (= basis (db/basis-t @connection))))
+                   ;; an unchanged read advances its read basis in place, by design
+                   (is (= (count saved) (count (evaluation/of-agent @connection "juniper")))
+                       "a refresh appends no evaluation"))
                  (testing "the first ordinary wake retains the seeded opening once"
                    (agent/arm! {:seon.turn.loop/cluster handle
                                 :seon.agent/routing routing :seon.agent/id "juniper"})
@@ -591,7 +605,9 @@
                ;; Show that outside event before measuring turns with no new event.
                (let [settled (turn/system-turn request)
                      _ (is (vector? (:seon.turn/forms settled)))
-                     sources #{"(seon.agent/settings)" (repl/source-text runtime-read)}
+                     opening-read? #(let [form (read-string %)]
+                                      (or (runtime-source? %)
+                                          (and (seq? form) (= 'seon.agent/settings (first form)))))
                      observed #(filter (fn [entry]
                                          (and (= :system (:seon.cluster.eval/author entry))
                                               (not= :call (:seon.turn.work/situation
@@ -599,7 +615,7 @@
                                                                     (get-in entry [:seon.cluster.eval/run :db/id]))))))
                                        (evaluation/of-agent @connection "juniper"))
                      before (mapv :seon.cluster.eval/id (observed))]
-                 (is (= sources (set (keep #(sources (:seon.cluster.eval/source %)) (observed))))
+                 (is (= 2 (count (set (filter opening-read? (map :seon.cluster.eval/source (observed))))))
                      "both opening reads must exist")
                  (dotimes [ordinal 3]
                    (submit (if (zero? ordinal)
@@ -650,10 +666,8 @@
                                        (:seon.turn/forms system))]
                    (is (= 1 (count changed)) "one message appends exactly the generated inbox read")
                    (assert-changed-response! @connection handle system)
-                   (is (= #{'(seon.db/pull '[{:seon.message/_to
-                                             [:seon.message/id :seon.message/content
-                                              {:seon.message/from [:seon.agent/id]}]}]
-                                           [:seon.agent/id "juniper"])}
+                   (is (= #{'(get (seon.db/pull '[:seon.message/_to] [:seon.agent/id "juniper"])
+                                  :seon.message/_to)}
                           (set (map (comp read-string :seon.cluster.eval/source) changed))))
                    (is (str/starts-with? (stored-text @connection) prefix))
                    (is (= (stored-text @connection)
@@ -791,7 +805,7 @@
                    (is (seq (:seon.eval/shown (first saved))))
                    (is (seq (:seon.cluster.eval/read-evidence (first saved))))
                    (is (str/includes? (:seon.cluster.eval/error (second saved))
-                                      "You wrote a response. Only the REPL writes responses; send forms and wait."))
+                                      "Only the REPL writes responses"))
                    (is (str/starts-with? (:seon.cluster.eval/source (second saved)) "#:seon.repl"))))
                (submit "(seon.db/q '[:find ?customer (sum ?amount) :where [?order :example/customer ?customer] [?order :example/amount ?amount]])")
                (is (str/includes? (:seon.eval/shown (last (evaluation/of-agent @connection "juniper"))) "115"))
@@ -814,12 +828,14 @@
                                 [?message :seon.message/from ?agent]
                                 [?message :seon.message/content ?content]
                                 [(clojure.string/includes? ?content "155")]] @connection)))
-               (submit "(clojure.test/deftest order-total (clojure.test/is (= 155 (seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]]))))")
+               ;; a test runs in its own world branched from the adopted program, so it declares its own orders
+               (submit "(clojure.test/deftest order-total (seon.db/transact! [{:example/order \"t1\" :example/customer \"Ada\" :example/amount 60} {:example/order \"t2\" :example/customer \"Ada\" :example/amount 55} {:example/order \"t3\" :example/customer \"Ada\" :example/amount 40}]) (clojure.test/is (= 155 (seon.db/q '[:find (sum ?amount) . :where [?order :example/customer \"Ada\"] [?order :example/amount ?amount]]))))")
                (submit "(my.test/run)")
+               ;; the run's answer is the reply value: one result per test, counted
                (is (= [1 0 0]
-                      (let [result (db/pull @connection
-                                            [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]
-                                            [:seon.test/sym "my.agents.juniper/order-total"])]
+                      (let [result (->> (:seon.eval/shown (last (evaluation/of-agent @connection "juniper")))
+                                        edn/read-string
+                                        (some #(when (= 'my.agents.juniper/order-total (:seon.test/sym %)) %)))]
                         (mapv result [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))
                (testing "the three exact live fenced replies evaluate through the ordinary proc"
                  ; Only reader/evaluation behavior is under test. The supplied

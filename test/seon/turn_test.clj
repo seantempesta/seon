@@ -243,6 +243,40 @@
                     (evidence reading)))
            "a form's one query is its one read")))))
 
+(deftest a-refused-response-map-settles-as-an-unrun-evaluation
+  ;; THE CLASS: a form the batch refused (a fabricated response map) carries no
+  ;; error value, so its unrun evaluation was built from nil and the publish
+  ;; stage failed; the entry kept no evaluation and the whole run's settlement
+  ;; was refused for want of its namespace.
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name "refused-response-proof"})
+     (support/seed-cluster! connection "refused-response-proof")
+     (checked-transact! connection
+                        (agent/creation-tx {:seon.agent/id "reader"
+                                            :seon.ns/name 'my.agents.reader
+                                            :seon.cluster/name "refused-response-proof"}))
+     (let [ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.env/environment (support/environment "refused-response-proof" connection)
+                    :seon.db/connection connection
+                    :seon.cluster/name "refused-response-proof"
+                    :seon.db.process/id cluster/boot-process-identity
+                    :seon.sci.eval/ctx ctx})
+           [refused]
+           (:seon.turn.loop/evaluated-sources
+            (turn/evaluate-sources
+             {:seon.turn.loop/cluster handle
+              :seon.sci.eval/ctx ctx
+              :seon.agent/id "reader"
+              :seon.cluster.eval/ordinal 0
+              :seon.ns/name 'my.agents.reader
+              :seon.cluster.reply/sources [{:seon.cluster.eval/source "{:seon.repl/value 1}"}]}))
+           evaluation (:seon.sci.eval/evaluation refused)]
+       (is (= [:seon.ns/name 'my.agents.reader] (:seon.cluster.eval/ns evaluation)))
+       (is (str/includes? (:seon.cluster.eval/error evaluation) "Only the REPL writes responses"))))))
+
 (deftest a-turn-dependent-generated-form-keeps-its-value-beside-the-fault
   (testing "a generated form whose reads depend on turn-taking settles its value with the fault as a diagnostic, and the turn closes"
    (support/with-database

@@ -3260,7 +3260,7 @@
               :seon.error/layer :seon.turn/phase
               :seon.error/operation 'seon.turn/phase
               :seon.error/message
-              (or (ex-message failure) (.getName (class failure))) :seon.turn.loop/phase-failed true}
+              (or (ex-message failure) (some-> failure class .getName) "The form was not evaluated.") :seon.turn.loop/phase-failed true}
              (error/refusal failure)
              {:seon.turn.loop/failed-step
               (or (:seon.error/operation (error/refusal failure)) 'seon.turn/phase)})
@@ -4781,10 +4781,20 @@
   (let [projection (db/carried-projection working)
         ;; a form that never ran (its read failed) settles through the one
         ;; constructor of an unrun evaluation
+        ;; The failure is the read refusal's own value; a refused response map
+        ;; or a stage that threw carries none, so it is built from the throwable
+        ;; (never nil: `unrun-evaluation` requires the value, and without one the
+        ;; whole run's settlement is refused for want of this form's evaluation).
         evaluation (or (:seon.batch/evaluation entry)
-                       (sci.eval/unrun-evaluation
-                        {:seon.sci.admit/value (:seon.batch/error-value (ex-data (:seon.batch/error entry)))
-                         :seon.cluster.eval/ns [:seon.ns/name (or ns-before 'user)]}))
+                       (let [failure (:seon.batch/error entry)]
+                         (sci.eval/unrun-evaluation
+                          {:seon.sci.admit/value
+                           (or (:seon.batch/error-value (ex-data failure))
+                               (seon.error.refusal/diagnostic
+                                (Date.) :seon.turn/evaluation 'seon.turn/evaluate-sources
+                                {:seon.error/message (or (ex-message failure) (.getName (class failure)))
+                                 :seon.error/throwable failure}))
+                           :seon.cluster.eval/ns [:seon.ns/name (or ns-before 'user)]})))
         entry (assoc entry :seon.batch/evaluation evaluation)
         last? (empty? (get-in batch [:seon.batch/read-state :seon.batch/rows]))
         refused? (and (contains? entry :seon.batch/value)
