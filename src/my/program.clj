@@ -510,20 +510,6 @@
             :seon.render/operations ['(my.program/proposals)]})
           :else (update (second (last (sort-by first found))) :seon.task/proved set))))
 
-(defn- cluster-custody
-  "Nil when `context` holds its cluster's own branch, the custody that merges
-  into the cluster and writes its files; otherwise the refusal naming both."
-  {:malli/schema [:=> [:cat :qualified-symbol :my.program/context] [:maybe :my.program/custody-refused-error]]}
-  [operation {connection :seon.db/connection cluster :seon.cluster/name}]
-  (let [held (get-in (db/db connection) [:config :branch])
-        home (some-> cluster cluster.branch/cluster-branch)]
-    (when-not (and home (= held home))
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write operation
-       {:seon.error/message (str operation " needs the cluster's own custody, branch " home
-                                 "; this context holds branch " held ".")
-        :seon.error/member :my.program/context
-        :my.program/held-branch held}))))
-
 (defn prepare-merge!
   "Test the open proposal of merge task `:seon.task/merge` (one of
   `proposals`) through the merge gate on a fresh branch of the head I hold and
@@ -536,7 +522,7 @@
   `ns`). Name the checkout `:seon.fn/root` to prove the file write-back would
   produce before any test runs; the accepted merge then offers its
   `write-back!` there. The merge is prepared onto the head of the branch my
-  context holds; only root's accepts it.
+  context holds.
 
   Example:
   (my.program/prepare-merge! {:seon.task/merge \"0123456789ab\" :seon.fn/root \"/path/to/checkout\"})"
@@ -567,69 +553,65 @@
   naming it with both digests. The merge closes the proposing branch: the
   tested branch and the proposal's own branch (its hosted agent first,
   `my.agent/retire-branch!`) retire afterwards as detached io work, off this
-  call. Only the cluster's own custody (root) accepts.
+  call. The merge lands on the branch my context holds: root's is its cluster.
 
   Example:
   (def accepted (my.program/accept-merge! proposal))"
   {:malli/schema [:=> [:cat :my.program/accept-request]
-                  [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value
-                   :my.program/custody-refused-error]]}
+                  [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
   [{context :my.program/context tested :seon.source/candidate merge-task :seon.task/merge
     proposing :seon.task/branch :as proposal}]
-  (or (cluster-custody 'my.program/accept-merge! context)
-      (let [store (:seon.store/store context)
-            accepted (source/accept-merge! context store (dissoc proposal :my.program/context :seon.render/operations))
-            ;; The merge task closes with the merge: `proposals` no longer lists it.
-            closed (when (:seon.source/commit-id accepted)
-                     (task/decide! (:seon.db/connection context) merge-task :accepted))
-            environment (:seon.env/environment context)
-            retire! #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch tested})
-                         ;; The agent's branch retires when its merge closes (AGENTS.md, merge).
-                         (when proposing
-                           (let [retired ((requiring-resolve 'my.agent/retire-branch!)
-                                          {:seon.store/branch proposing}
-                                          (select-keys context [:seon.store/store :seon.db/connection :seon.agent/routing]))]
-                             (when (:seon.error/at retired) (throw (ex-info (:seon.error/message retired) retired))))))]
-        ;; Unlinking takes the store's roster permit, which a running
-        ;; collection holds for seconds: the launcher's io work, off this call.
-        (when (and (:seon.source/commit-id accepted)
-                   (not (some-> (:seon.flow/work-launcher environment)
-                                (work/submit!
-                                 {:seon.env/environment environment :seon.flow/workload :io
-                                  :seon.flow/submission-id (str "retire-" (name tested))
-                                  :seon.flow/work-fn (fn [_] (retire!))
-                                  :seon.flow/complete!
-                                  (fn [{failure :seon.flow/throwable}]
-                                    (when failure
-                                      (fault/fault! environment failure
-                                                    {:seon.error/layer :seon.program/write
-                                                     :seon.error/operation 'my.program/accept-merge!
-                                                     :seon.db.process/id (cluster.process/id (cluster.process/current-identity))}))
-                                    nil)}))))
-          ;; No launcher accepting work (a closing cluster): unlink here.
-          (retire!))
-        (cond (:seon.error/at closed) closed
-              (and (:seon.source/commit-id accepted) (:seon.fn/root proposal))
-              (assoc accepted :seon.render/operations
-                     [(list 'my.program/write-back! {:seon.source/accepted accepted :seon.fn/root (:seon.fn/root proposal)})])
-              :else accepted))))
+  (let [store (:seon.store/store context)
+        accepted (source/accept-merge! context store (dissoc proposal :my.program/context :seon.render/operations))
+        ;; The merge task closes with the merge: `proposals` no longer lists it.
+        closed (when (:seon.source/commit-id accepted)
+                 (task/decide! (:seon.db/connection context) merge-task :accepted))
+        environment (:seon.env/environment context)
+        retire! #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch tested})
+                     ;; The agent's branch retires when its merge closes (AGENTS.md, merge).
+                     (when proposing
+                       (let [retired ((requiring-resolve 'my.agent/retire-branch!)
+                                      {:seon.store/branch proposing}
+                                      (select-keys context [:seon.store/store :seon.db/connection :seon.agent/routing]))]
+                         (when (:seon.error/at retired) (throw (ex-info (:seon.error/message retired) retired))))))]
+    ;; Unlinking takes the store's roster permit, which a running
+    ;; collection holds for seconds: the launcher's io work, off this call.
+    (when (and (:seon.source/commit-id accepted)
+               (not (some-> (:seon.flow/work-launcher environment)
+                            (work/submit!
+                             {:seon.env/environment environment :seon.flow/workload :io
+                              :seon.flow/submission-id (str "retire-" (name tested))
+                              :seon.flow/work-fn (fn [_] (retire!))
+                              :seon.flow/complete!
+                              (fn [{failure :seon.flow/throwable}]
+                                (when failure
+                                  (fault/fault! environment failure
+                                                {:seon.error/layer :seon.program/write
+                                                 :seon.error/operation 'my.program/accept-merge!
+                                                 :seon.db.process/id (cluster.process/id (cluster.process/current-identity))}))
+                                nil)}))))
+      ;; No launcher accepting work (a closing cluster): unlink here.
+      (retire!))
+    (cond (:seon.error/at closed) closed
+          (and (:seon.source/commit-id accepted) (:seon.fn/root proposal))
+          (assoc accepted :seon.render/operations
+                 [(list 'my.program/write-back! {:seon.source/accepted accepted :seon.fn/root (:seon.fn/root proposal)})])
+          :else accepted)))
 
 (defn write-back!
   "Write an accepted merge's declarations into their source file under `root`
   (`seon.cluster.source/write-back!`): proven equivalent before an atomic
-  install. Answers the written path and digests. Only the cluster's own
-  custody (root) writes files.
+  install, checked against the branch my context holds. Answers the written
+  path and digests.
 
   Example:
   (my.program/write-back! {:seon.source/accepted accepted :seon.fn/root \"/path/to/checkout\"})"
   {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context]
                              [:seon.source/accepted :seon.source/accepted] [:seon.fn/root :seon.fn/root]]]
-                  [:or :seon.source/written :seon.source/write-back-error :seon.error/value
-                   :my.program/custody-refused-error]]}
+                  [:or :seon.source/written :seon.source/write-back-error :seon.error/value]]}
   [{context :my.program/context accepted :seon.source/accepted root :seon.fn/root}]
-  (or (cluster-custody 'my.program/write-back! context)
-      (source/write-back! {:seon.db/connection (:seon.db/connection context)
-                           :seon.source/accepted accepted :seon.fn/root root})))
+  (source/write-back! {:seon.db/connection (:seon.db/connection context)
+                       :seon.source/accepted accepted :seon.fn/root root}))
 
 (def ^:private blocking-relations
   "The breakage relations that block a retraction."

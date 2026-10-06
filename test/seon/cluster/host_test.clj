@@ -642,10 +642,12 @@
                (hosted-run! hosted "(:seon.error/offending (my.program/ns-unmap! 'my.agents.host-probe/breaks-helper))"))
             "the refusal names the surviving caller")))))
 
-(deftest a-message-is-no-proposal-and-only-roots-custody-accepts
+(deftest a-message-is-no-proposal-and-a-branch-agent-accepts-in-its-own-context
   ;; Before, root inferred a pending proposal from any message about an issue
-  ;; from an agent on another branch. A branch agent's custody neither accepts
-  ;; a merge nor writes files: it refuses by name.
+  ;; from an agent on another branch. Owner ruling 2026-10-06: no merge
+  ;; function refuses a caller for not being root; a branch agent's
+  ;; accept-merge! acts on its own branch, and the merge's own checks answer
+  ;; (here: the tested branch it names does not exist).
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
       (support/transacted! connection (support/agent-tx @connection "root"))
@@ -653,10 +655,10 @@
             hosted (host-on! handle branch "mcp/proposer")]
         (hosted-run! hosted "(my.message/send {:my.message/to \"root\" :my.message/about \"a-fix\" :my.message/content \"Please merge.\"})")
         (is (= [] (my.program/proposals {:seon.db/db (db/db connection)})) "only a proven proposal is one")
-        (is (= [(str [:my.program/context branch])]
-               (hosted-run! hosted (str "((juxt :seon.error/member :my.program/held-branch) (my.program/accept-merge! "
+        (is (= ["[:tested true]"]
+               (hosted-run! hosted (str "((juxt :seon.store/branch :seon.cluster.registry/branch-missing) (my.program/accept-merge! "
                                         "{:seon.source/candidate :tested :seon.test.run/id \"run\" "
                                         ;; a complete request (0db8bf035 made proofs and the merge task required),
-                                        ;; so the custody check is what answers
+                                        ;; so the merge's own candidate check is what answers
                                         ":seon.task/proofs #{} :seon.task/merge \"000000000000\" "
                                         ":seon.source/expected-digests {} :parents #{}}))"))))))))

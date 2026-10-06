@@ -42,7 +42,4 @@
   [:seon.task/merge :seon.task/merge] [:seon.task/branch {:optional true} :seon.task/branch]
   [:seon.fn/root {:optional true} :seon.fn/root] [:seon.render/operations {:optional true} :seon.render/operations]
   [:seon.source/expected-digests :seon.source/expected-digests] [:parents [:set :seon.source/commit-id]]]
- :my.program/held-branch
- [:keyword {:description "The branch a context refused the cluster's own custody holds."}]
- :my.program/custody-refused-error
- [:and :seon.error/base [:map [:my.program/held-branch :my.program/held-branch]]]}
+}
