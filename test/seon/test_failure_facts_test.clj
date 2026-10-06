@@ -307,6 +307,21 @@
             (is (str/includes? (sut/failure-message (dissoc result :seon.test/failure-message)) "second claim"))
             (is (str/includes? (pr-str (problems/html-report found)) "data-file"))))))))
 
+(deftest a-red-counts-only-while-the-program-it-ran-on-is-current
+  ;; Unknown or red cannot reuse green: a red recorded for a reach the test no
+  ;; longer has is outdated evidence, not a current failure.
+  (support/with-database
+    (fn [connection]
+      (with-probe connection
+        (fn [s v _]
+          (let [entry #(first (filter (comp #{s} :seon.test/sym)
+                                      (:seon.problems/failed-tests (problems/problems (db/db connection) {}))))]
+            (run-probe connection v)
+            (is (some? (entry)) "a red on the current reach is a failure")
+            (is (inst? (:seon.test/run-at (entry))) "it carries the execution's age")
+            (is (:db-after (redeclare-probe! connection s "(deftest probe (is (= 3 4)))")))
+            (is (nil? (entry)) "after the reach changed the old red is no longer a failure")))))))
+
 (defn- completion [database test-symbol failures]
   (let [run (runner/provenance database)]
     {:seon.db/db database

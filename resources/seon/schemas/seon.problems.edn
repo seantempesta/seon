@@ -4,21 +4,23 @@
                  [:seon.error/operation {:optional true} :seon.error/operation]
                  [:seon.error/resolved-tx :seon.error/resolved-tx]]
                 :failed-test
-                [:map {:seon.health/severity 4 :seon.health/impact :seon.test/fail-count :seon.health/subject :seon.test/sym
+                [:map {:seon.health/severity 4 :seon.health/impact :seon.test/fail-count :seon.health/at :seon.test/run-at :seon.health/subject :seon.test/sym
                        :seon.health/in [:seon.health/problems :seon.problems/failed-tests]
                        :seon.health/clues [[:seon.test/fail-count] [:seon.test/error-count]]
-                       :description "A test whose latest admitted execution failed or errored."}
+                       :description "A test whose latest admitted execution failed or errored on the program it still reaches (its recorded reach digest is the current one); it ages from that execution."}
                  [:seon.test/sym :seon.test/sym]
                  [:seon.test/fail-count :seon.test/fail-count]
                  [:seon.test/error-count :seon.test/error-count]
+                 [:seon.test/run-at :seon.test/run-at]
                  [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]]
                 :failed-tests [:vector :seon.problems/failed-test]
                 :unknown-test
-                [:and {:seon.health/severity 3 :seon.health/subject :seon.test/error-test-symbol
+                [:and {:seon.health/severity 3 :seon.health/at :seon.test/run-at :seon.health/subject :seon.test/error-test-symbol
                        :seon.health/in [:seon.health/problems :seon.problems/failed-tests-unknown]
                        :seon.health/clues [[:seon.error/message]]
                        :description "A test whose latest execution recorded no outcome: unknown, never green."}
-                 :seon.test/execution-error]
+                 :seon.test/execution-error
+                 [:map [:seon.test/run-at {:optional true} :seon.test/run-at]]]
                 :open-fault
                 [:and {:seon.health/severity 8 :seon.health/impact :seon.problems/occurrences :seon.health/at :seon.error/at
                        :seon.health/subject :seon.error/producer

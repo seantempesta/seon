@@ -1874,7 +1874,8 @@
                           "This test's latest admitted execution recorded no completed outcome.")
                         :seon.error/expected :completed-member :seon.error/offending test-symbol
                         :seon.test/execution-refusal :seon.test/population-unknown
-                        :seon.test/error-test-symbol test-symbol :seon.test/run run-ref})
+                        :seon.test/error-test-symbol test-symbol :seon.test/run run-ref
+                        :seon.test/run-at (:seon.test.run/at run)})
                     (cond-> (merge base
                                    {:seon.test/sym (:seon.test.member/symbol member)
                                     :seon.test/pass-count (:seon.test.member/pass-count member)

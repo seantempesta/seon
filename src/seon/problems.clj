@@ -394,7 +394,14 @@
   "Current failed executions from admitted member facts, with each test whose
   latest execution recorded no outcome kept as its own typed unknown. Only
   symbols that are test rows at `database` count: a deleted test's member
-  evidence is history, not a current failure."
+  evidence is history, not a current failure. A red counts only while its
+  recorded reach digest equals the program's current one (an outdated red is
+  unknown evidence, never a current failure, and never reuses as green).
+
+  ## Costs
+
+  `reach-digests` for the reds only, through the runner's reach cache: 40 ms
+  warm and 750 ms cold for the 102 reds on default 2026-10-06."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.test/latest-results :seon.test/execution-error :seon.db/invalid-read-error]]}
   [database]
@@ -404,9 +411,14 @@
         results (if (:seon.error/at symbols) symbols
                     (test.runner/latest-results database symbols))]
     (if (:seon.error/at results) results
-        (filterv #(or (:seon.error/at %)
-                      (pos? (:seon.test/fail-count %))
-                      (pos? (:seon.test/error-count %))) results))))
+        (let [red? #(and (not (:seon.error/at %))
+                         (or (pos? (:seon.test/fail-count %)) (pos? (:seon.test/error-count %))))
+              reds (filterv red? results)
+              current (when (seq reds) (test.runner/reach-digests database (mapv :seon.test/sym reds)))]
+          (into (filterv :seon.error/at results)
+                (filter #(or (:seon.error/at current)
+                             (= (:seon.test.member/reach-digest %) (get current (:seon.test/sym %)))))
+                reds)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one derivation

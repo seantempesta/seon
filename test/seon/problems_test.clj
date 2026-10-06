@@ -522,6 +522,7 @@
         failed (mapv (fn [i]
                        {:seon.test/sym (symbol "seon.fake-test" (str "t-" i))
                         :seon.test/pass-count 0 :seon.test/fail-count 1 :seon.test/error-count 0
+                        :seon.test/run-at #inst "2026-10-06T00:00:00Z"
                         :seon.test/failure-message (str "expected: (= " i " 0)\n" (str/join (repeat 400 "x")))})
                      (range 600))
         text (problems/ai-prose {:seon.problems/failed-tests failed :seon.render/profile profile})
