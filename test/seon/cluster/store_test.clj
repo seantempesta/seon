@@ -416,6 +416,28 @@
         (test-support/delete-recursively! (str (io/file dir-a) "/.."))
         (test-support/delete-recursively! (str (io/file dir-b) "/.."))))))
 
+(deftest an-overlay-roster-write-keeps-the-stores-branches
+  ;; An overlay writes only its memory frontend. Its first :branches update ran
+  ;; before the frontend held the roster (a cold read warms it asynchronously),
+  ;; so it wrote only the new branch, and the late warm then replaced it with the
+  ;; store's: a test world's request branch went missing ("branch :agent-… is
+  ;; absent from the store roster", task 8cc510a426f9). Fixed in konserve's
+  ;; tiered store (8700ca7).
+  (let [dir (fresh-dir)]
+    (try
+      (let [held (store/open-store! {:seon.store/dir dir})]
+        (try
+          (let [overlay (store/open-overlay! held)
+                connection (:seon.store/connection-object overlay)]
+            (try
+              (k/update (:store @connection) :branches #(conj (set %) :agent-race) {:sync? true})
+              (is (= #{:db :agent-race} (set (d/branches connection)))
+                  "an update of the uncached roster starts from the store's")
+              (finally (store/release-store! overlay))))
+          (finally (store/release-store! held))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The first-create kill window — :db present, :branches missing
 ;;; ---------------------------------------------------------------------------
