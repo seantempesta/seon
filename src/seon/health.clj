@@ -463,7 +463,7 @@
   move adds over the newest digest's calls (the tail is not compared: rare
   heavy calls dominate it). A digest's value is its newest measurement;
   digests order by it."
-  {:malli/schema [:=> [:cat [:sequential :seon.profile.measurement/measurement]]
+  {:malli/schema [:=> [:cat [:sequential :seon.health/measured]]
                   [:vector :seon.health/definition-comparison]]}
   [measurements]
   (into []

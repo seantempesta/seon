@@ -187,6 +187,11 @@
     (is (not-any? regression? (health/definition-comparisons [(measured older 19 #inst "2026-09-28T20:00Z")
                                                               (measured newer 19 #inst "2026-09-28T21:00Z")]))
         "an unmoved median is no regression")
+    (is (= 1 (count (health/definition-comparisons
+                     (mapv #(select-keys % [:seon.profile.measurement/sym :seon.profile.measurement/digest :seon.profile.measurement/p50
+                                           :seon.profile.measurement/calls :seon.profile.measurement/at])
+                           [(measured older 19 #inst "2026-09-28T20:00Z") (measured newer 21 #inst "2026-09-28T21:00Z")]))))
+        "stored measurements pulled without their tail compare")
     (is (= [] (health/definition-comparisons [(measured older 19 #inst "2026-09-28T20:00Z")]))
         "one digest has nothing to compare")))
 

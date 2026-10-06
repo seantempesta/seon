@@ -155,6 +155,13 @@
  :before-us [:int {:min 0 :description "The before bucket's upper edge, 2^b ns, in microseconds."}]
  :after-us [:int {:min 0 :description "The after bucket's upper edge, 2^b ns, in microseconds."}]
  :added-ms [:int {:description "The median's move times the newest digest's calls, in milliseconds: (after-us - before-us) x calls / 1000, the time the change adds to the cluster for the work it measured."}]
+ :measured
+ [:map {:description "The members of a stored measurement the median comparison reads; the tail (p99) and errors are not read."}
+  [:seon.profile.measurement/sym :seon.profile.measurement/sym]
+  [:seon.profile.measurement/digest :seon.profile.measurement/digest]
+  [:seon.profile.measurement/p50 :seon.profile.measurement/p50]
+  [:seon.profile.measurement/calls :seon.profile.measurement/calls]
+  [:seon.profile.measurement/at :seon.profile.measurement/at]]
  :definition-comparison
  [:map {:description "A definition's newest measured digest's median beside its previous digest's."}
   [:seon.profile.measurement/sym :seon.profile.measurement/sym]
