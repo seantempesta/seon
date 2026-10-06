@@ -31,7 +31,7 @@
                  :seon.problems/error-signature
                  [:not [:map [:seon.error/resolution :seon.error/resolution]]]]
                 :errored-receipt
-                [:map {:seon.health/severity 1 :seon.health/subject :seon.cluster.eval/id
+                [:map {:seon.health/severity 1 :seon.health/at :seon.cluster.eval/at :seon.health/subject :seon.cluster.eval/id
                        :seon.health/in [:seon.health/problems :seon.problems/errored-receipts]
                        :seon.health/clues [[:seon.cluster.eval/error] [:seon.turn/id]]}
                  [:seon.cluster.eval/id :seon.cluster.eval/id]
@@ -39,7 +39,8 @@
                  [:seon.cluster.eval/ordinal
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source :seon.cluster.eval/source]
-                 [:seon.cluster.eval/error :seon.cluster.eval/error]],
+                 [:seon.cluster.eval/error :seon.cluster.eval/error]
+                 [:seon.cluster.eval/at :seon.cluster.eval/at]],
                 :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.cluster.eval/receipt}],
                 :form-problem
                 [:map

@@ -189,7 +189,7 @@
 
 (defn- errored-receipts
   [db]
-  (->> (db/q '[:find ?id ?run-id ?ordinal ?source ?error
+  (->> (db/q '[:find ?id ?run-id ?ordinal ?source ?error ?at
               :where
               ;; PRESENCE IS THE STATE: an errored receipt is one that
               ;; carries an error — there is no status label to filter
@@ -197,6 +197,7 @@
               [?receipt :seon.cluster.eval/id ?id]
               [?receipt :seon.cluster.eval/ordinal ?ordinal]
               [?receipt :seon.cluster.eval/error ?error]
+              [?receipt :seon.cluster.eval/at ?at]
               [?receipt :seon.cluster.eval/run ?run]
               [?run :seon.turn/id ?run-id]
               [?form :seon.cluster.eval/run ?run]
@@ -204,12 +205,13 @@
               [?form :seon.cluster.eval/source ?source]]
             db)
        (sort)
-       (mapv (fn [[id run-id ordinal source error]]
+       (mapv (fn [[id run-id ordinal source error at]]
                {:seon.cluster.eval/id id
                 :seon.turn/id run-id
                 :seon.cluster.eval/ordinal ordinal
                 :seon.cluster.eval/source source
-                :seon.cluster.eval/error error}))))
+                :seon.cluster.eval/error error
+                :seon.cluster.eval/at at}))))
 
 (defn form-problem
   "A routable red evaluation attributed to its namespace owner, or nil.

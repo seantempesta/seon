@@ -452,6 +452,7 @@
         (is (= 0 (:seon.cluster.eval/ordinal entry)))
         (is (= "Unable to resolve symbol: widgets" (:seon.cluster.eval/error entry)))
         (is (= "(widgets)" (:seon.cluster.eval/source entry)))
+        (is (= now (:seon.cluster.eval/at entry)) "the receipt's time is what the finding ages from")
         (is (str/includes?
              (problems/ai-prose value)
              "Form 0 failed during evaluation"))
