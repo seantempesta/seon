@@ -146,7 +146,6 @@
   [:seon.health/before-process :seon.health/before-process]
   [:seon.health/after-process :seon.health/after-process]
   [:seon.health/changed-at :seon.health/changed-at]]
- :quantile [:enum {:description "The measured quantile compared."} :seon.profile.measurement/p50 :seon.profile.measurement/p99]
  :before-bucket [:int {:min 0 :max 39}]
  :after-bucket [:int {:min 0 :max 39}]
  :buckets-up [:int {:description "After bucket minus before bucket: each one is a doubling (at least 1.41x past the measurement's hysteresis)."}]
@@ -155,15 +154,16 @@
  :after-digest :seon.program/definition-digest
  :before-us [:int {:min 0 :description "The before bucket's upper edge, 2^b ns, in microseconds."}]
  :after-us [:int {:min 0 :description "The after bucket's upper edge, 2^b ns, in microseconds."}]
+ :added-ms [:int {:description "The median's move times the newest digest's calls, in milliseconds: (after-us - before-us) x calls / 1000, the time the change adds to the cluster for the work it measured."}]
  :definition-comparison
- [:map {:description "One quantile of a definition's newest measured digest beside its previous digest's."}
+ [:map {:description "A definition's newest measured digest's median beside its previous digest's."}
   [:seon.profile.measurement/sym :seon.profile.measurement/sym]
-  [:seon.health/quantile :seon.health/quantile]
   [:seon.health/before-bucket :seon.health/before-bucket]
   [:seon.health/after-bucket :seon.health/after-bucket]
   [:seon.health/buckets-up :seon.health/buckets-up]
   [:seon.health/before-us :seon.health/before-us]
   [:seon.health/after-us :seon.health/after-us]
+  [:seon.health/added-ms :seon.health/added-ms]
   [:seon.health/before-calls :seon.health/before-calls]
   [:seon.health/before-digest :seon.health/before-digest]
   [:seon.health/after-digest :seon.health/after-digest]
@@ -180,12 +180,11 @@
   [:seon.health/increase-percent [:int {:min 21}]]]
  :definition-regression
  [:map {:seon.health/severity 4 :seon.health/in [:seon.health/regressions] :seon.health/subject :seon.profile.measurement/sym
-        :seon.health/impact :seon.profile.measurement/calls :seon.health/at :seon.health/changed-at
-        :seon.health/clues [[:seon.health/quantile] [:seon.health/before-us] [:seon.health/after-us]
+        :seon.health/impact :seon.health/added-ms :seon.health/at :seon.health/changed-at
+        :seon.health/clues [[:seon.health/before-us] [:seon.health/after-us]
                             [:seon.health/before-digest] [:seon.health/after-digest]]
-        :description "A definition whose median measures at least one bucket (a doubling) slower under its newest digest than under its previous one, each measured over at least 200 calls: the after digest is the change. A p99 move alone never counts (rare heavy calls dominate the tail; transact! p99 0.54 s -> 1.07 s was 68 vs 795 calls with a flat p50)."}
+        :description "A definition whose median measures at least one bucket (a doubling) slower under its newest digest than under its previous one, each measured over at least 200 calls: the after digest is the change. It ranks by the milliseconds it adds (added-ms), not by its calls. The tail is never compared (rare heavy calls dominate it; transact! p99 0.54 s -> 1.07 s was 68 vs 795 calls with a flat p50)."}
   [:seon.profile.measurement/sym :seon.profile.measurement/sym]
-  [:seon.health/quantile [:= :seon.profile.measurement/p50]]
   [:seon.health/before-calls [:int {:min 200}]]
   [:seon.profile.measurement/calls [:int {:min 200}]]
   [:seon.health/buckets-up [:int {:min 1}]]]

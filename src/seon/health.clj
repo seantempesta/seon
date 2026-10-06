@@ -459,8 +459,10 @@
 
 (defn definition-comparisons
   "For each symbol measured under more than one digest in `measurements`, its
-  newest digest's p50 and p99 buckets beside its previous digest's. A
-  digest's value is its newest measurement; digests order by it."
+  newest digest's median bucket beside its previous digest's, and the time the
+  move adds over the newest digest's calls (the tail is not compared: rare
+  heavy calls dominate it). A digest's value is its newest measurement;
+  digests order by it."
   {:malli/schema [:=> [:cat [:sequential :seon.profile.measurement/measurement]]
                   [:vector :seon.health/definition-comparison]]}
   [measurements]
@@ -473,19 +475,21 @@
                                        (sort-by (comp inst-ms :seon.profile.measurement/at)))
                         [before after] (take-last 2 by-digest)]
                     (when after
-                      (for [q [:seon.profile.measurement/p50 :seon.profile.measurement/p99]]
-                        {:seon.profile.measurement/sym sym
-                         :seon.health/quantile q
-                         :seon.health/before-bucket (q before)
-                         :seon.health/after-bucket (q after)
-                         :seon.health/buckets-up (- (q after) (q before))
-                         :seon.health/before-us (quot (bit-shift-left 1 (q before)) 1000)
-                         :seon.health/after-us (quot (bit-shift-left 1 (q after)) 1000)
-                         :seon.health/before-calls (:seon.profile.measurement/calls before)
-                         :seon.health/before-digest (:seon.profile.measurement/digest before)
-                         :seon.health/after-digest (:seon.profile.measurement/digest after)
-                         :seon.profile.measurement/calls (:seon.profile.measurement/calls after)
-                         :seon.health/changed-at (:seon.profile.measurement/at after)})))))
+                      [(let [before-us (quot (bit-shift-left 1 (:seon.profile.measurement/p50 before)) 1000)
+                             after-us (quot (bit-shift-left 1 (:seon.profile.measurement/p50 after)) 1000)
+                             calls (:seon.profile.measurement/calls after)]
+                         {:seon.profile.measurement/sym sym
+                          :seon.health/before-bucket (:seon.profile.measurement/p50 before)
+                          :seon.health/after-bucket (:seon.profile.measurement/p50 after)
+                          :seon.health/buckets-up (- (:seon.profile.measurement/p50 after) (:seon.profile.measurement/p50 before))
+                          :seon.health/before-us before-us
+                          :seon.health/after-us after-us
+                          :seon.health/added-ms (quot (* (- after-us before-us) calls) 1000)
+                          :seon.health/before-calls (:seon.profile.measurement/calls before)
+                          :seon.health/before-digest (:seon.profile.measurement/digest before)
+                          :seon.health/after-digest (:seon.profile.measurement/digest after)
+                          :seon.profile.measurement/calls calls
+                          :seon.health/changed-at (:seon.profile.measurement/at after)})]))))
         (sort-by key (group-by :seon.profile.measurement/sym measurements))))
 
 (defn- stored
@@ -523,7 +527,7 @@
                         [:seon.db.process/layers :seon.db.process/start-instant :seon.source/commit-id])
         measurements (stored database :seon.profile.measurement/id
                              [:seon.profile.measurement/sym :seon.profile.measurement/digest
-                              :seon.profile.measurement/p50 :seon.profile.measurement/p99
+                              :seon.profile.measurement/p50
                               :seon.profile.measurement/errors :seon.profile.measurement/calls
                               :seon.profile.measurement/at])]
     (cond (db/read-refusal? records) records

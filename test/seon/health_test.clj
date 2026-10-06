@@ -169,40 +169,59 @@
 (deftest a-definition-slower-under-its-new-digest-is-a-regression
   (let [projection (schema/handed-projection)
         regression? (schema/projection-validator projection :seon.health/definition-regression)
-        measured (fn [digest p99 at]
+        measured (fn [digest p50 at]
                    {:seon.profile.measurement/id (subs digest 0 16) :seon.profile.measurement/sym 'seon.db/q
-                    :seon.profile.measurement/digest digest :seon.profile.measurement/p50 19
-                    :seon.profile.measurement/p99 p99 :seon.profile.measurement/errors :none
+                    :seon.profile.measurement/digest digest :seon.profile.measurement/p50 p50
+                    :seon.profile.measurement/p99 30 :seon.profile.measurement/errors :none
                     :seon.profile.measurement/calls 300 :seon.profile.measurement/at at})
         older (apply str (repeat 64 "a"))
         newer (apply str (repeat 64 "b"))
-        compared (health/definition-comparisons [(measured older 23 #inst "2026-09-28T20:00Z")
-                                                 (measured newer 25 #inst "2026-09-28T21:00Z")])
-        p99 (some #(when (= :seon.profile.measurement/p99 (:seon.health/quantile %)) %) compared)]
+        compared (health/definition-comparisons [(measured older 19 #inst "2026-09-28T20:00Z")
+                                                 (measured newer 21 #inst "2026-09-28T21:00Z")])
+        row (first compared)]
     (is ((schema/projection-validator projection :seon.health/regressions) compared))
-    (is (= [2 older newer] ((juxt :seon.health/buckets-up :seon.health/before-digest :seon.health/after-digest) p99)))
-    (is (not (regression? p99)) "a p99 move alone never flags")
-    (is (not-any? regression? (filter #(= :seon.profile.measurement/p50 (:seon.health/quantile %)) compared))
-        "an unmoved quantile is no regression")
-    (is (= [] (health/definition-comparisons [(measured older 23 #inst "2026-09-28T20:00Z")]))
+    (is (= 1 (count compared)))
+    (is (= [2 older newer] ((juxt :seon.health/buckets-up :seon.health/before-digest :seon.health/after-digest) row)))
+    (is (regression? row))
+    (is (= 471 (:seon.health/added-ms row)) "(2097 - 524) us x 300 calls: the time the change adds")
+    (is (not-any? regression? (health/definition-comparisons [(measured older 19 #inst "2026-09-28T20:00Z")
+                                                              (measured newer 19 #inst "2026-09-28T21:00Z")]))
+        "an unmoved median is no regression")
+    (is (= [] (health/definition-comparisons [(measured older 19 #inst "2026-09-28T20:00Z")]))
         "one digest has nothing to compare")))
 
 (deftest a-definition-regression-is-a-median-move-over-enough-calls
   ;; Default 2026-09-28: transact! p99 0.54 s -> 1.07 s flagged from 68 vs 795
   ;; calls (fixture-write tails) with p50 flat at ~33 ms.
   (let [regression? (schema/projection-validator (schema/handed-projection) :seon.health/definition-regression)
-        flagged (fn [p50-after p99-after calls-before calls-after]
-                  (let [row (fn [digest p50 p99 calls at]
+        flagged (fn [p50-after calls-before calls-after]
+                  (let [row (fn [digest p50 calls at]
                               {:seon.profile.measurement/id (apply str (repeat 16 digest)) :seon.profile.measurement/sym 'seon.db/transact!
                                :seon.profile.measurement/digest (apply str (repeat 64 digest))
-                               :seon.profile.measurement/p50 p50 :seon.profile.measurement/p99 p99
+                               :seon.profile.measurement/p50 p50 :seon.profile.measurement/p99 30
                                :seon.profile.measurement/errors :none :seon.profile.measurement/calls calls
                                :seon.profile.measurement/at at})]
                     (filterv regression?
-                             (health/definition-comparisons [(row "a" 25 29 calls-before #inst "2026-09-28T20:00Z")
-                                                             (row "b" p50-after p99-after calls-after #inst "2026-09-28T21:00Z")]))))]
-    (is (empty? (flagged 25 30 68 795)) "flat p50, p99 +1 bucket, small N: no flag")
-    (is (empty? (flagged 25 30 300 795)) "flat p50, p99 +1 bucket, large N: no flag")
-    (is (empty? (flagged 26 30 68 795)) "a p50 move over too few before-calls: no flag")
-    (is (= [:seon.profile.measurement/p50] (map :seon.health/quantile (flagged 26 30 300 795)))
-        "a doubled p50 at N >= 200 flags")))
+                             (health/definition-comparisons [(row "a" 25 calls-before #inst "2026-09-28T20:00Z")
+                                                             (row "b" p50-after calls-after #inst "2026-09-28T21:00Z")]))))]
+    (is (empty? (flagged 25 300 795)) "a flat median never flags, whatever the tail did")
+    (is (empty? (flagged 26 68 795)) "a p50 move over too few before-calls: no flag")
+    (is (= 1 (count (flagged 26 300 795))) "a doubled p50 at N >= 200 flags")))
+
+(deftest a-regression-ranks-by-the-time-it-adds-not-by-its-calls
+  ;; Default 2026-10-06: seon.db/query-value-type-error 16 -> 32 us over 377 calls (6 ms) was the
+  ;; first of all findings because its impact was the call count.
+  (let [properties (get (#'health/finding-schemas (schema/handed-projection)) :seon.health/definition-regression)
+        now #inst "2026-10-06T00:00Z"
+        row (fn [p50-before p50-after calls]
+              (let [measure (fn [digest p50 at] {:seon.profile.measurement/id (apply str (repeat 16 digest))
+                                                 :seon.profile.measurement/sym 'seon.db/q
+                                                 :seon.profile.measurement/digest (apply str (repeat 64 digest))
+                                                 :seon.profile.measurement/p50 p50 :seon.profile.measurement/p99 p50
+                                                 :seon.profile.measurement/errors :none :seon.profile.measurement/calls calls
+                                                 :seon.profile.measurement/at at})]
+                (first (health/definition-comparisons [(measure "a" p50-before #inst "2026-10-05T00:00Z")
+                                                       (measure "b" p50-after now)]))))
+        score #(#'health/score health/ranking now properties %)]
+    (is (< (score (row 14 15 5000)) (score (row 24 25 300)))
+        "a hot cheap function adds less time than a rarely called expensive one")))
