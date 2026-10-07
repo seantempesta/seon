@@ -202,6 +202,24 @@
         (is (not-any? #(registry/active-branch-connection {:seon.store/store store :seon.store/branch %}) branches)
             "no connection remains for a stopped host's branch")))))
 
+(defn- storage-reads
+  "The index nodes `hosted`'s branch connection has restored from storage, not its shared node cache."
+  [hosted]
+  (:reads @(:stats (:storage (:store @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection]))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.host/hosting-an-agent-costs-seconds-and-a-hundred-megabytes}}
+  a-second-hosted-branch-restores-no-index-node-from-storage
+  ;; A new branch's tree starts empty: the store's shared node cache must hold
+  ;; what a host and its first form read, or every host re-reads it from disk.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [first-host (host-on! handle (branch!) "mcp/warm")]
+        (is (= ["1"] (hosted-run! first-host "1")))
+        (let [second-host (host-on! handle (branch!) "mcp/shared")]
+          (is (= ["1"] (hosted-run! second-host "1")))
+          (is (zero? (storage-reads second-host))
+              "the second branch reads every node from the shared cache"))))))
+
 (deftest one-identity-is-homed-on-one-branch-decided-by-the-writer
   ;; Astra H2: two hosts of one new agent on sibling branches both pre-read an
   ;; absent cluster entity; the cluster writer now decides, so exactly one homes it.

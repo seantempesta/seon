@@ -1,0 +1,118 @@
+---
+type: notes
+status: active
+created: 2026-10-07
+tags: [notes, host, reset, datahike, acquisition]
+---
+
+# host-cost notes (lane host-cost, 2026-10-07)
+
+Tasks: `seon.cluster.host/hosting-an-agent-costs-seconds-and-a-hundred-megabytes` (persisted in
+`resources/seon/tasks/seon.cluster.host.edn`) and `seon.cluster.boot/reset-takes-over-six-seconds` (runtime, default).
+Evidence before this lane: `../reset-leak/reset-leak-notes.md`.
+
+All numbers come from a disposable operator root (`bin/seon --root scratchpad/host-cost/root start probe`, HEAD
+4c9ccb3f7, pid 95384), driven through its prepl. Allocation is
+`ThreadMXBean/getTotalThreadAllocatedBytes` over all threads; heap is used heap after three `System/gc`; armed calls
+come from `seon.profile/begin` and `seon.profile/explain`. Probe forms: `scratchpad/host-cost/*.clj`.
+
+## 1. What hosting an agent was made of
+
+Path: `seon.mcp/execution` → `my.agent/create-branch!` → `seon.cluster.host/host!` (`acquire-context!` on the named
+branch: `store/open-branch!`, `sci.eval/fork-cluster-ctx`, which calls `sci.eval/acquire!`, then `fork-for-turn`;
+then `start!`: two `home-call` transactions and the armer graph) → the first `sci-run` (`arm!` builds the agent
+graph, first turn) → later runs.
+
+Steady state at HEAD, per agent (after the first few derivations of the boot's program):
+
+| stage | ms | allocated |
+|---|---|---|
+| create-branch | 20 | 2 MB |
+| host! | 560-940 | 1.23-1.35 GB |
+| first run | 105-185 | 200 MB |
+| plain run | 80-120 | 90-97 MB |
+
+Profile of `host!`: `seon.sci.eval/acquire!` 491 ms, inside it 19 `seon.db/q` calls, 471 ms. Stack sampling of the
+threads that touch konserve during `host!`: 225 of 246 samples sat in
+`seon.sci.eval/load-core-namespaces!`'s or-join query, under `datahike.index.persistent_set.CachedStorage.restore`
+→ `konserve.core/get` → LZ4 decompress → Fressian decode. JFR allocation samples: 3.8 of 4.3 GB on the reading
+thread, 1.4 GB of it in `LZ4FrameInputStream.readHeader`.
+
+Why the reads: a new branch connection builds its own persistent-sorted-set tree over the shared addresses. Its
+first whole-program query walks about 3,400 index nodes, which the tree restores through the store's one shared
+node cache (`datahike.index.interface/node-cache-key`, an LRU shared by every connection to the physical store).
+Seon never set `:store-cache-size`, so the cache held Datahike's default 1,000 nodes, was always full, and each new
+branch restored every node from disk again (storage stat `:reads` 106 after `host!`, 3,317-3,384 after its first
+run). Each restored node is a fresh object the branch's tree then keeps (soft references), which is the retained
+heap: `jmap -histo:live` across 4 hosts grew 217 MB, 1.15 M `Datom`s in 15,135 `Leaf`s (~54 MB per host).
+
+`load-core-namespaces!` itself was redundant on almost every acquisition: it requires the program's namespaces
+before `base-ctx`, whose memoized base is keyed by a program identity covering every attribute that query reads
+(checked: `:seon.fn.file/relative-root :seon.fn/file :seon.ns/name :seon.schema.admission/source :seon.ns/source
+:seon.fn/ns :seon.fn/source` are all acquisition attributes), and the JVM keeps what it loaded. On a cached base
+nothing is loaded; on a fresh branch the query was still answered from scratch.
+
+Not the cost: SCI forks (`sci/fork` shares the environment map), `open-branch!` (2 ms), the base-context cache
+(3 entries before and after every steady-state host), the agent graph (`arm-graph!` 7-9 ms), projection reuse.
+
+The early outliers after boot (first run 1,460 ms / 3.2 GB; a host 2,119 ms / 3.1 GB) are base-context derivations
+for new program identities right after boot; see section 4.
+
+## 2. Fixes
+
+1. `seon.cluster.store/datahike-configuration` sets `:store-cache-size 8192` (Datahike excludes it from the
+   stored-config check and the connection acquisition key, so reopening an existing store accepts it). The working
+   set of a host plus first run on this store was 3,486-3,805 nodes. EQUIVALENT in results; changes only where a
+   node comes from.
+2. `seon.sci.eval/derive-base-ctx` calls `load-core-namespaces!` first, and `acquire!` no longer calls it before
+   `base-ctx`. The namespaces load exactly when a base is derived (cache miss or a value with no identity).
+   EQUIVALENT for `acquire!` under the precondition above (the base key covers the query's attributes; loaded JVM
+   namespaces stay loaded). `base-ctx`'s direct callers (tests only) now also load namespaces on a miss, which the
+   test JVM has already done.
+
+Measured on the probe root by installing each change in its JVM (cache resized through the shared atom, the two
+functions re-evaluated), same probe (`hostonly.clj`: three new agents, host then first run):
+
+| | host! | first run |
+|---|---|---|
+| HEAD | 590-940 ms, 1.23-1.35 GB | 105-185 ms, 196-244 MB |
+| acquisition change only | 98-290 ms, 71-142 MB | 550-820 ms, 1.16-1.18 GB (the same reads move to the first form's `seon.fn/runtime-analysis-batch`) |
+| node cache only | 124-242 ms, 139-326 MB | 135-150 ms, 154-166 MB |
+| both | 66-80 ms, 61-73 MB | 125-165 ms, 153-157 MB |
+
+Storage reads of a new branch connection (`reads.clj`): node cache 1,000: 106 after host, 3,317-3,384 after the
+first run; 8,192 (warm): 0 and 0. Retained heap per idle host (4 hosts, `heap.clj` + histogram diff): HEAD ~54 MB;
+both fixes 1-1.5 MB (`:per-host-mb 1`, histogram delta 6.1 MB for 4). Marginal heap of the full node cache itself:
+0 MB measured (emptying it freed nothing: every node it holds is also held by a live tree).
+
+So a new agent's first call (host + first run) is now ~200-240 ms, 215-230 MB allocated, against a plain run of
+~100 ms and 95 MB: about 120 ms over a plain call (target 300 ms). The plain run's own ~95 MB per `(+ 1 2)` is out of
+this slice (section 5).
+
+Regression: `seon.cluster.host-test/a-second-hosted-branch-restores-no-index-node-from-storage` (names the task):
+two hosts each run one form; the second branch connection's storage `:reads` is zero.
+
+Which step of the one loop it serves: eval (the agent's world acquisition and its first form). Nothing new is added:
+the dependency's own shared cache is sized for the work, and a query leaves the per-acquisition path. Deletes the
+per-acquisition namespace query.
+
+## 3. Reset
+
+See below (in progress at this writing).
+
+## 4. Findings
+
+- Plain hosted run of `(+ 1 2)` allocates 90-97 MB and takes 80-120 ms (45 queries, `seon.fn/runtime-analysis-batch`
+  20-30 ms, settlement transaction ~30 ms). Over the 10 MB budget.
+- Boot-adjacent base-context derivations: the first host/run after boot allocated 3.1-3.2 GB (one derivation per new
+  program identity). Existing task `seon.sci.eval` acquisition (health top: `seon.sci.eval/acquire-program!`, task
+  4a738d4f7138).
+
+## Design check
+
+The design held, and was smaller than the task's hypothesis: no SCI context copy and no per-branch derivation existed;
+the 100 MB was the dependency's node cache sized for a 1,000-node store being asked for 3,500 nodes per branch, plus
+one redundant whole-program query per acquisition. Awkward: the cache size is a constant beside the other store
+settings rather than a configured dial, because the node cache is fixed by whichever entrant first opens the store
+(boot, maintenance and operator paths open it before or without the cluster configuration). A dial would need every
+opener to read the configuration first; the constant names its reason in place.

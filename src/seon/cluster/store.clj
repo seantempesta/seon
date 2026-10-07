@@ -157,7 +157,8 @@
   `:file` backend at the CANONICAL path of `store-dir` (the store id
   derives from the path, so every spelling of one physical directory
   must be the ONE store) with LZ4-compressed values, fused persistent-set roots with a 32-entry
-  diff buffer and a measured 128-way branching factor, retained history by
+  diff buffer and a measured 128-way branching factor, a node cache that
+  holds a branch's whole-program read, retained history by
   the settled default policy, and
   write-time schema flexibility. Fusion and index settings are
   creation-only; reopen configurations omit them so Datahike adopts the
@@ -194,6 +195,12 @@
               :config {:defer-immutable-sync? true
                        :compressor {:type :lz4}}}
       :writer {:backend :self}
+      ; Every connection to this store shares one LRU of materialized index
+      ; nodes, keyed by immutable address. It holds a new branch's first
+      ; whole-program read (an agent's acquisition and first form); below
+      ; that working set each branch re-reads those nodes from disk into a
+      ; private copy its tree keeps. Not a creation setting: reopens may change it.
+      :store-cache-size 8192
       :keep-history? keep-history?
       :fuse-index-roots? true
       :index-config {; A commit rewrites every leaf it touches whole, in each of

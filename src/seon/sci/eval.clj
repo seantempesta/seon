@@ -1699,11 +1699,9 @@
                 :seon.error/expected :seon.sci.eval/loaded-namespace})))))))
 
 (defn- load-core-namespaces!
-  "The effectful cluster caller loads the running program's JVM namespaces
-  before pure construction. A namespace indexed from the test source root is
-  not run by the cluster: `seon.test/resolve-test` requires it on the test
-  request that needs it. Measured 2026-09-23 on a 417-namespace program:
-  107 armed, 310 deferred, 7,772 ms -> 1,193 ms on a warm resume."
+  "Load the JVM namespaces `database`'s core program names; nil. A namespace
+  indexed from the test source root is not run by the cluster:
+  `seon.test/resolve-test` requires it on the test request that needs it."
   [database]
   (let [names (db/q '[:find [?name ...]
                       :where [?file :seon.fn.file/relative-root ?root]
@@ -2952,9 +2950,13 @@
   ::program-identity)
 
 (defn- derive-base-ctx
-  "Derive one base context: build the interpreter and acquire the program."
+  "Derive one base context: load the program's JVM namespaces, build the
+  interpreter and acquire the program."
   {:malli/schema [:=> [:cat :seon.db/database-value :map] :seon.sci.eval/ctx]}
   [database arm-request]
+  ;; Once per derivation: the memoized base's key covers every attribute that
+  ;; query reads and a JVM keeps what it loaded, so a cached base proves them loaded.
+  (load-core-namespaces! database)
   (let [projection (if-let [carried (db/carried-projection database)]
                      (schema/projection-from-database database carried)
                      (schema/projection-from-database database))]
@@ -3187,7 +3189,6 @@
           (advance-context-projection! ctx database (context-projection ctx)))
         (::acquisition snapshot))
       (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
-            _ (load-core-namespaces! database)
             source (loaded-source snapshot database)
             generated (base-ctx database
                                 (cond-> {::loaded-database (loaded-program source)}
