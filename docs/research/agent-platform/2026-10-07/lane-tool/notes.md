@@ -62,4 +62,6 @@ tests) → `clj-kondo --lint src script test` over the working tree → `git add
 ## Timings
 
 - Docs-only commit, before: 56 s check (42.6 s publication) + 17 s lint.
-- This landing (bin/lane + task file + these notes; check runs): see the commit message.
+- Task-file + script commit 1758624f4 (check runs): 64.6 s wall = check 62.5 s (published 48.8 s, adopted 9.0 s:
+  default's drift again) with the 13.0 s lint concurrent, not after it (before: + 17 s serial).
+- Docs-only commit of this paragraph: see the lane's report (lint only, no check).
