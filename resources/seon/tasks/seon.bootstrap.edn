@@ -13,9 +13,9 @@
              :kind :function
              :intent "(help) ends with 'Tools: . Inspect one with dir.' for a fresh branch agent (ctx-ex-1 on default, 2026-10-07): help-value lists the namespaces the agent's own namespace requires, which is none. The toolkit is seon.cluster.instruction/toolkit-namespaces; calling it from help-value made seon.help-test/help-evidence-tracks-its-code-version stale on any new namespace (its query reads every :seon.ns/name). Derive the tools line from the context-relevant namespaces with an attribute-bound read, or drop the line now that seon.agent.loop/system-message lists the tools."
              :must-read #{seon.bootstrap/help-value seon.cluster.instruction/toolkit-namespaces}
-             :evidence #{"tmp/context-examples/README.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
 #:seon.task{:name "help-evidence-test-red-on-head"
              :kind :function
              :intent "seon.help-test/help-evidence-tracks-its-code-version is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption."
              :must-read #{seon.bootstrap/help-value}
-             :evidence #{"tmp/context-examples/README.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}]

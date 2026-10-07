@@ -2,4 +2,4 @@
              :kind :function
              :intent "toolkit-namespaces (the system message's tool list) includes the test fixture namespace my.examples.nested-fixture, and the namespaces' public generator functions (my.edit/form-request-generator, my.fs/content-generator, my.fs/write-precondition-generator, my.shell/stdin-generator) and my.program/native-call-refusal and supplied-context, which have no example and are not agent tools. They cost tokens in every call. Only agent-facing functions belong in the toolkit."
              :must-read #{seon.cluster.instruction/toolkit-namespaces}
-             :evidence #{"tmp/context-examples/README.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}]
