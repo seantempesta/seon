@@ -151,15 +151,15 @@
        (mapv #(href (.attr ^Element % "href")))))
 
 (defn labelled
-  "The debug header's fields as data: each `<span>label</span><code>value</code>`
-  pair, label to shown value."
+  "The debug header's fields as data: each `<span>label</span>` followed by
+  its shown value (`<code>` text or a value-printer panel), label to text."
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [html]
   (into {}
         (keep (fn [^Element span]
-                (when-let [code (.nextElementSibling span)]
-                  (when (= "code" (.tagName code))
-                    [(.text span) (.text code)]))))
+                (when-let [shown (.nextElementSibling span)]
+                  (when (or (= "code" (.tagName shown)) (.hasClass shown "seon-data-panel"))
+                    [(.text span) (.text shown)]))))
         (.select (dom html) "span")))
 
 ;;; ---------------------------------------------------------------------------
@@ -815,7 +815,7 @@ handle))}}
               [:seon.render/ai :seon.render/html])
         renderers
         ((web-private 'applicable-renderers-html)
-         {:seon.render.debug/viewer-namespace 'my.viewer} experiments)
+         (db/db connection) {:seon.render.debug/viewer-namespace 'my.viewer} experiments)
         links (fn [css-class]
                 (->> (support/hiccup-elements renderers)
                      (filter #(= css-class (:class (second %))))
@@ -905,7 +905,7 @@ handle))}}
         preview ((web-private 'experiment-preview-html)
                  :seon.render/ai experiment (db/db connection))
         details ((web-private 'debug-selected-renderer-details)
-                 request :seon.render/ai experiment)
+                 (db/db connection) request :seon.render/ai experiment)
         classes support/hiccup-classes]
     (is (= [:pre "exact agent-visible text"] (last preview))
         "the AI preview is the renderer output alone: no renderer metadata inside it")
@@ -1189,18 +1189,21 @@ handle))}}
 
 (defn- disclosure
   "A read-dependency disclosure as data: its summary line, its basis line and
-  the evidence values it shows (each `[:pre (pr-str value)]` read back)."
+  the value-printer panels it shows for its evidence."
   {:malli/schema [:=> [:cat :seon.schema/value] [:map [:summary :string] [:basis :seon.schema/value] [:evidence [:vector :seon.schema/value]] [:notes [:vector :string]]]]}
   [rendered]
   (let [shown (fn [tag] (->> (support/hiccup-elements rendered) (filter #(= tag (first %)))))]
     {:summary (apply str (support/hiccup-leaves (first (shown :summary))))
      :basis (some #(when (= "seon-debug-read-basis" (:class (second %))) (apply str (support/hiccup-leaves %)))
                   (support/hiccup-elements rendered))
-     :evidence (mapv #(edn/read-string (last %)) (shown :pre))
+     :evidence (filterv #(= "seon-data-panel" (:class (second %))) (shown :div))
      :notes (mapv #(apply str (support/hiccup-leaves %)) (remove #(map? (second %)) (shown :p)))}))
 
 (deftest debug-compatible-candidate-discloses-retained-read-dependencies
-  (let [evidence {:seon.db/source-argument-position 0
+  (support/with-database
+   (fn [connection]
+  (let [database @connection
+        evidence {:seon.db/source-argument-position 0
               :datahike.read/dependency-plan
               {:datahike.query.dependency/sources
                [{:datahike.query.source/symbol '$
@@ -1210,19 +1213,33 @@ handle))}}
               {:datahike.read/attributes #{:seon.task/intent}
                :datahike.read/cache-eligible? false}}
         rendered ((web-private 'debug-read-dependencies-html)
+                  database
                   {:seon.render.call/basis-transaction 42
                    :seon.render.call/read-evidence [evidence]})]
     (is (= {:summary "database read dependencies · 1 evidence entry"
             :basis "render basis transaction 42"
-            :evidence [evidence]}
+            :evidence [(value/render-html {:seon.render/value evidence :seon.db/db database
+                                           :seon.render.value/root [::web/read-evidence 0]})]}
            (select-keys (disclosure rendered) [:summary :basis :evidence]))
-        "the disclosure shows the render basis and each retained evidence entry as its value")))
+        "the disclosure shows the render basis and each retained evidence entry through the value printer")))))
+
+(deftest a-debug-value-shows-through-the-value-printer-within-its-budget
+  ;; Class regression (print-site audit 2026-10-07): the debug page printed
+  ;; a value whole with pr-str, so a 10 MB value became a 10 MB page.
+  (support/with-database
+   (fn [connection]
+     (let [value (vec (repeat 100000 (apply str (repeat 100 "x"))))
+           shown ((web-private 'value-html) @connection [::web/raw-data] value)
+           page (hiccup/->string shown)]
+       (is (= "seon-data-panel" (:class (second shown))) "the value printer's panel is the shown value")
+       (is (< (count page) 100000) "the page holds the printer's budget, never the 10 MB value")))))
 
 (deftest debug-read-dependencies-distinguishes-empty-from-absent
   (let [none ((web-private 'debug-read-dependencies-html)
+               nil
                {:seon.render.call/basis-transaction 7
                 :seon.render.call/read-evidence []})
-        absent ((web-private 'debug-read-dependencies-html) {})]
+        absent ((web-private 'debug-read-dependencies-html) nil {})]
     (is (= [{:summary "database read dependencies · 0 evidence entries"
              :notes ["No database read evidence was retained."]}
             {:summary "database read dependencies unavailable"
@@ -2417,3 +2434,4 @@ handle))}}
             (is (some #(str/includes? (:seon.eval/shown % "") "Runtime history wake.")
                       (drop (count opening) continued)))
             (check-page continued)))))))
+

@@ -80,7 +80,7 @@
              contract-shapes)))))
 
 (defn measure
-  "Print and return the harness cost numbers for one database value."
+  "The harness cost numbers for one database value."
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (let [projection (db/carried-projection database)
@@ -93,5 +93,4 @@
          (mean-us #(schema/projection-explainer projection :seon.agent/id) 1000)
          ::projection-build-ms (elapsed-ms #(schema/build-projection forms))
          ::wrappers (wrapper-overhead projection)}]
-    (prn result)
     result))

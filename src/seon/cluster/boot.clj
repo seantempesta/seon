@@ -403,7 +403,7 @@
                            (into [] (mapcat #(open-runs (:seon.db/connection %))) worlds))]
         (let [refusal (kernel/memory-pressure-error pressure)
               failure (ex-info (:seon.error/message refusal) refusal)]
-          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (print.value/bounded-text (:seon.error/message refusal))) (flush))
+          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (:seon.error/message refusal)) (flush))
           (doseq [world worlds]
             (flow/hand-off-fault! world failure (handed-off-context world `memory-pressure-crossed!))))))
     (catch Throwable failure

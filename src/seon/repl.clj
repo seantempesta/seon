@@ -607,7 +607,7 @@
         live (when answer (live-response unit emission))
         producer (:seon.render.call/selected-producer live)
         content (cond
-                  (:seon.render.value/root-description live) [:pre (pr-str live)]
+                  (:seon.render.value/root-description live) [:p (:seon.error/message live)]
                   producer (value/render-html-data live)
                   live [:pre [:code {:class "seon-eval-response"}
                               (response (assoc emission :seon.eval/shown

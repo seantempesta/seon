@@ -121,12 +121,7 @@
   It rejects symbols whose namespace begins with `:`, including symbols made
   from clj-kondo's `:clj-kondo/unknown-namespace` sentinel: they print as
   keywords, so an EDN boundary changes their type. It checks the symbol's
-  text against the EDN reader's symbol grammar without printing or reading.
-
-  ## Costs
-
-  Unarmed, about 0.3 µs for an ordinary qualified symbol, against 1.7 µs for
-  the print-and-read round trip it replaced (JVM probe, 2026-10-07)."
+  text against the EDN reader's symbol grammar without printing or reading."
   {:malli/schema
    [:=>
     [:cat

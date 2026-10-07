@@ -6,7 +6,7 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.task :as task])
   (:import [java.lang.management ManagementFactory]))
 
@@ -178,6 +178,14 @@
   [_unit]
   (list 'seon.db/q (list 'quote cluster-query) '(seon.db/db)))
 
+(defn- shown-html
+  "`value` through the value printer's HTML face, addressed by its key; a
+  printer refusal shows its message."
+  {:malli/schema [:=> [:cat :seon.db/database-value :keyword :seon.schema/value] :seon.render/hiccup]}
+  [database k value]
+  (let [shown (render.value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root [::status k]})]
+    (if (map? shown) [:span (:seon.error/message shown)] shown)))
+
 (defn render-html
   "Show a cluster observation as labeled data: the value it is given when that
   is a `snapshot`, else my cluster and adopted source, as the AI face reads
@@ -187,4 +195,4 @@
   (let [shown (if (and (map? value) (:seon.cluster.status/heap-used value)) value (render-ai unit))]
     [:section {:class "seon-cluster-status"}
      [:h3 "Cluster"]
-     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (print.value/bounded-text v)]]) shown))]))
+     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (shown-html (:seon.db/db unit) k v)]]) shown))]))

@@ -13,7 +13,7 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.render.route :as render.route]
-            [seon.print.value :as print.value]))
+            [seon.render.value :as render.value]))
 
 (def ^:private names-shown
   "Referencing schemas and contracts named before the count says the rest."
@@ -143,17 +143,25 @@
    (into [:span] (interpose " " links))
    (when (> total (count links)) (str " and " (- total (count links)) " more"))])
 
+(defn- shown-html
+  "`value` through the value printer's HTML face under `root`; a printer
+  refusal shows its message."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.render/hiccup]}
+  [database root value]
+  (let [shown (render.value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
+    (if (map? shown) [:span (:seon.error/message shown)] shown)))
+
 (defn- check-html
   "The registration's recorded stored-data verdict, or its refusal."
-  {:malli/schema [:=> [:cat :seon.schema.usage/check] :seon.render/hiccup]}
-  [{:seon.schema.usage/keys [checked failing failing-example more?] :as check}]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema.usage/check] :seon.render/hiccup]}
+  [database {:seon.schema.usage/keys [checked failing failing-example more?] :as check}]
   (if (:seon.error/message check)
     [:p {:class "seon-schema-usage-stored"} (str "Stored values not checked: " (:seon.error/message check))]
     [:div {:class "seon-schema-usage-stored"}
      [:p (str failing " of " checked (when more? " (the first checked)") " stored entities fail the form")]
      (when failing-example
        [:p "First failing: entity " (str (first failing-example)) " "
-        [:code (print.value/bounded-text (second failing-example))]])]))
+        (shown-html database [::failing-example (first failing-example)] (second failing-example))])]))
 
 (defn render-html
   "Render a registration or schema entity from the same selection
@@ -165,7 +173,7 @@
     (let [report (selection unit chosen)
           {:seon.schema.usage/keys [previous new? check referenced-by referenced-by-count
                                     contracts contract-count]} report
-          form-text (fn [form] [:pre [:code (print.value/bounded-text form)]])]
+          form-text (fn [form] (shown-html (:seon.db/db unit) [::form schema-key (identical? form previous)] form))]
       (into
        [:article {:class "seon-family-entry seon-schema-entry"}
         [:header [:p {:class "seon-kicker"} (if new? "New schema" "Schema")]
@@ -179,7 +187,7 @@
           [[:div {:class "seon-schema-diff"}
             [:div [:p "Before"] (form-text previous)] [:div [:p "Now"] (form-text definition)]]]
           :else [(form-text definition)])
-        (when (some? check) [(check-html check)])
+        (when (some? check) [(check-html (:seon.db/db unit) check)])
         (when (seq referenced-by)
           [(named-list "Schemas naming it" (mapv #(link :seon.schema/key %) referenced-by) referenced-by-count)])
         (when (seq contracts)

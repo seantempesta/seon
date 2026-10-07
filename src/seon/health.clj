@@ -48,6 +48,7 @@
             [seon.problems :as problems]
             [seon.profile :as profile]
             [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]))
 
@@ -675,19 +676,35 @@
         '(seon.problems/open-faults (seon.db/db))
         '(seon.cache/status)]})))
 
+(defn- shown-html
+  "`value` through the value printer's HTML face under `root`; a printer
+  refusal shows its message."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.render/hiccup]}
+  [database root value]
+  (let [shown (render.value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
+    (if (map? shown) [:span (:seon.error/message shown)] shown)))
+
+(defn- shown-text
+  "`value` through the value printer's text face under `root`; a printer
+  refusal answers its message."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :string]}
+  [database root value]
+  (let [shown (render.value/render-ai {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
+    (if (string? shown) shown (:seon.error/message shown))))
+
 (defn- finding-item
   "One finding as a list item: score, subject and schema, then its clues and
   tasks on a second line, so it reads at any width."
-  {:malli/schema [:=> [:cat :map :seon.health/finding] :seon.render/hiccup]}
-  [schemas {k :seon.health/schema :as finding}]
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.health/finding] :seon.render/hiccup]}
+  [database schemas {k :seon.health/schema :as finding}]
   (let [shown-clues (clues (get schemas k) (:seon.health/value finding))]
     [:li {:class "seon-health-finding" :data-schema (str k)}
      [:div [:strong (str (:seon.health/score finding))] " "
-      [:code (print.value/bounded-text (:seon.health/subject finding))] " "
+      (shown-html database [::subject k (:seon.health/subject finding)] (:seon.health/subject finding)) " "
       [:span {:class "seon-health-schema"} (str k)]]
      (when (or (seq shown-clues) (:seon.health/tasks finding) (:seon.health/callers finding))
        [:div {:class "seon-health-clues"}
-        (str/join " · " (concat (map (fn [[ck v]] (str (name ck) " " (print.value/bounded-text v))) shown-clues)
+        (str/join " · " (concat (map (fn [[ck v]] (str (name ck) " " (shown-text database [::clue k ck] v))) shown-clues)
                                 (when-let [callers (:seon.health/callers finding)]
                                   [(str "callers " (str/join ", " callers))])
                                 (when-let [tasks (:seon.health/tasks finding)]
@@ -695,12 +712,12 @@
 
 (defn- unit-section
   "One unit through its owner's HTML face; a pending or failed unit says so."
-  {:malli/schema [:=> [:cat :string :seon.schema/value [:fn clojure.core/ifn?]] :seon.render/hiccup]}
-  [title value face]
+  {:malli/schema [:=> [:cat :seon.db/database-value :string :seon.schema/value [:fn clojure.core/ifn?]] :seon.render/hiccup]}
+  [database title value face]
   [:section {:class "seon-health-unit"}
    [:h2 title]
-   (cond (:seon.health/unit value) [:p {:class "seon-health-pending"} "deriving… " [:code (print.value/bounded-text (:seon.health/requery value))]]
-         (:seon.error/at value) [:p {:class "seon-health-error"} (print.value/bounded-text (:seon.error/message value))]
+   (cond (:seon.health/unit value) [:p {:class "seon-health-pending"} "deriving… " (shown-html database [::requery title] (:seon.health/requery value))]
+         (:seon.error/at value) [:p {:class "seon-health-error"} (:seon.error/message value)]
          :else (face value))])
 
 (defn render-html
@@ -712,18 +729,18 @@
   (let [schemas (if database (finding-schemas (db/carried-projection database)) {})]
     [:article {:class "seon-health" :data-state (name (:seon.health/state value :unknown))}
      [:header [:h1 "Health " [:span {:class "seon-health-state"} (name (:seon.health/state value :unknown))]]
-      [:code (print.value/bounded-text (:seon.health/basis value))]]
+      (shown-html database [::basis] (:seon.health/basis value))]
      [:section {:class "seon-health-findings"}
       [:h2 (str (count (:seon.health/findings value)) " findings, worst first")]
-      (into [:ol {:class "seon-health-list"}] (map (partial finding-item schemas)) (:seon.health/findings value))]
+      (into [:ol {:class "seon-health-list"}] (map (partial finding-item database schemas)) (:seon.health/findings value))]
      ;; Counts, not problems' own report: every family's entries are already
      ;; findings above, and that report renders each failed test through the
      ;; test render at 28 ms apiece (241 on default: 6.8 s, 2026-09-28).
-     (unit-section "Problems" (:seon.health/problems value)
+     (unit-section database "Problems" (:seon.health/problems value)
                    (fn [found] (into [:dl] (map (fn [[family rows]] [:div [:dt (name family)] [:dd (str (count rows))]]))
                                      (sort-by key found))))
-     (unit-section "Cluster" (:seon.health/status value) #(status/render-html {:seon.render/value % :seon.db/db database}))
-     (unit-section "Cache" (:seon.health/cache value)
+     (unit-section database "Cluster" (:seon.health/status value) #(status/render-html {:seon.render/value % :seon.db/db database}))
+     (unit-section database "Cache" (:seon.health/cache value)
                    (fn [cache]
                      [:table [:thead [:tr [:th "kind"] [:th "MB"] [:th "bytes %"] [:th "hits %"] [:th "evictions"]]]
                       (into [:tbody]

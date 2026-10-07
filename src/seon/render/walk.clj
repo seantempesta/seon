@@ -42,7 +42,6 @@
             [seon.error :as error]
             [seon.render :as render]
             [seon.render.data :as data]
-            [seon.print.value :as print.value]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -1272,8 +1271,8 @@
 (defn- related-html
   "The related data as Hiccup: one group per attribute, its items as their
   HTML renders gave them, its count and next call when it shows fewer."
-  {:malli/schema [:=> [:cat [:or :seon.related/data :seon.error/base]] :seon.render/hiccup]}
-  [data]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :seon.related/data :seon.error/base]] :seon.render/hiccup]}
+  [database data]
   (if (:seon.error/message data)
     [:section {:class "seon-related"} [:p (:seon.error/message data)]]
     (into [:section {:class "seon-related"}]
@@ -1285,7 +1284,10 @@
                     [:summary [:code (str attribute)]
                      (when-let [total (:seon.related/count group)] (str " " (count (:seon.related/items group)) " of " total))]
                     (into [:ul] (map #(vector :li %)) (:seon.related/items group))
-                    (when-let [[operation] (:seon.render/operations group)] [:code (print.value/bounded-text operation)])])))
+                    (when-let [[operation] (:seon.render/operations group)] (let [shown (render.value/render-html {:seon.render/value operation
+                                                                                                 :seon.db/db database
+                                                                                                 :seon.render.value/root [::operation attribute]})]
+                                                                          (if (map? shown) (:seon.error/message shown) shown)))])))
           data)))
 
 (defn with-related
@@ -1312,6 +1314,6 @@
           answer
           (assoc-in answer [:seon.print/node :seon.print/value]
                     (if html?
-                      [:div {:class "seon-related-entity"} shown (related-html data)]
+                      [:div {:class "seon-related-entity"} shown (related-html (:seon.db/db unit) data)]
                       (assoc shown :seon.related/data data))))))))
 
