@@ -16,6 +16,8 @@ visibility, settlement/error ownership, and the cut's intermediate states. All p
 
 Read lane-rules first, all five r-* notes, the full v2 plan, agent-loop spec, repl-lookup design and dh-fix note;
 loaded the data-oriented-clojure, REPL, testing, Datahike and Flow skills. Reviewed source at HEAD `100f7a13c`.
+Before final delivery, also read plan update `77dbdd38b`: the owner accepts ~150 KB/pass and resets whenever needed,
+and root records the 08:54Z reset. Those decisions are accepted and are not open questions below.
 Default's archive is `722f110df0d2e140dcbb177eb228de16c60443db`; `git diff 722f110df HEAD -- src script test
 resources/seon/schemas` is empty. Dependency pins: Datahike `d9121bbbad`, SCI `ce0aa53b9b`, core.async
 `dc35f3e0d7`, Malli `43c6dca8d2`. The dirty Datahike checkout is another lane's work, not the installed pin.
@@ -27,12 +29,14 @@ tasks include `seon.sci.eval/acquisition-rebuilds-the-whole-program` and the bat
 **The running database changed during this review.** Before the first eval, its basis fell to 536871064; at
 08:55:21Z status was `:degraded`, basis 536871070, same PID/archive, one errored receipt, no open-fault count,
 ready-ms 7280, live heap 5,199,452,864 bytes. The stale `user.sgprobe/fix` entity was absent in both the lane and
-root JVM reads. This is evidence of a replacement database boundary, not proof of who performed it or how.
+root JVM reads. The later plan update identifies this boundary as root's 08:54Z reset.
 I never stopped, reset, restarted, adopted or loaded source into default. Historical root populations and timings
 cannot be compared to this new population. P0's deletion is now conditional on a fresh read.
 
-Other lanes own the dirty task EDNs (`persist-tasks`) and Datahike (`dh-audit`); http-kit and unrelated untracked
-files also exist. None was included in the candidate or edited. No test runs, model calls, agents delegated,
+At acquisition, other lanes owned dirty task EDNs (`persist-tasks`) and Datahike (`dh-audit`); http-kit and unrelated
+untracked files also existed. Task persistence subsequently landed as `c07e86373`; the lint/contract inputs
+(`src script test resources/seon/schemas .clj-kondo deps.edn`) remain unchanged from the checked archive.
+No foreign edit entered this note's commit. No test runs, model calls, agents delegated,
 pollers, extra JVMs, or worktrees were started.
 
 ## Ranked findings and concrete plan changes
@@ -169,7 +173,7 @@ the bound as ruled; a timeout/retry must not reset that anchor.
 
 | Slice | Feasibility correction |
 |---|---|
-| P0 | Dead-code deletion and reviewed dependency bump can precede the loop cut. Use r-delete's **410–444**, keeping `turn-request`; 444 is not an unconditional deletion total. Read the stale namespace first: it is now absent. `remove-ns!` is a namespace operation, not a targeted single-row repair; inspect every member/reference and verify writer acceptance if the defect recurs. |
+| P0 | Dead-code deletion and reviewed dependency bump can precede the loop cut. Use r-delete's **410–444**, keeping `turn-request`; 444 is not an unconditional deletion total. The updated plan records the reset; the stale entity is independently confirmed absent. Successful agent test runs are root's evidence, not this lane's. |
 | S0 | Installed HTTP fixture seam is supported by r-turn and `ai/resolved-target`; no need for a new sender path. Give every entrant the same behavior cases, including definitions, refusals, effects and blob publication. A plain arithmetic pass does not bound S4. Its numbers follow P0, so retain the historical pre-P0 baseline separately. |
 | S1 | Lookup changes are independent. Rewrite help only to capabilities available in that commit; future completion/wait semantics cannot be taught as installed. Convert `render.ns/directory`, both refer installers and test-only `agent.loop` callers. |
 | S2 | Pair seed deletion with its replacement opening/delivery, or keep the seed until S3. Existing persisted `:generate` rows need a terminal disposition before deleting their handler. Dead debug views can be an earlier file-disjoint deletion. |
@@ -208,12 +212,13 @@ The same-shape `or`+join query still allocated **180,851,688 bytes / 60.713 ms f
 Task `seon.db/an-or-clause-joined-to-a-pattern-costs-a-scan-per-binding` survives S2. Batching is already present
 and does not cure it. Keep it as an independently measured producer fix, not an incidental promise inside S4.
 
-### 8. Medium — §6 options omit guarantees and the reset's loss boundary
+### 8. Medium — §6's remaining choices need guarantees; resolved choices stay resolved
 
-1. **P0/reset:** conditional stale-row removal then one cut reset was reasonable on the old basis. Rebase the
-   decision on the current cluster. Reset replaces the branch with the selected source commit; it is not selective
+1. **Reset, resolved:** the owner permits resets when needed; root performed one at 08:54Z. Reset replaces the
+   branch with the selected source commit; it is not selective
    runtime-schema cleanup (`src/seon/cluster/registry.clj:319`). Runtime-only program changes, tasks, assignments,
-   messages, settings, schedules, results and error evidence need an explicit preserve/discard inventory. Saved
+   messages, settings, schedules, results and error evidence need an explicit preserve/discard inventory. This is
+   an operational loss record, not a request for another reset approval or migration. Saved
    task EDNs alone do not preserve all of those. Verify task identity/references round-trip from the committed
    archive, preserve needed evidence outside the discarded head, and retire only owned/unclaimed branches through
    their owner. Do not treat a disappearing error count as proof its producer was fixed.
@@ -224,12 +229,13 @@ and does not cure it. Keep it as an independently measured producer fix, not an 
    explicit rebuilding. Loading children at split trades synchronous I/O for no format migration; a recount
    alone is temporary until the split bug is fixed. Do not promise that adding the fields immediately ends all
    whole-range counting. It is separate PSS work, not a prerequisite for the reviewed correctness gitlink bump.
-3. **Store budget:** the existing snapshot's two 26.7 KB root records already exceed 50 KB together. But
+3. **Store budget, resolved:** ~150 KB/pass is accepted in `77dbdd38b`; the old <50 KB target no longer blocks this
+   plan. Keep the factual attribution accurate: the snapshot's two 26.7 KB root records exceeded 50 KB together. But
    “write the root once” saves only 26.7 KB from ~152 KB, leaving ~125 KB. Node bytes were ~99 KB, the majority.
-   Price three choices: accept the measured per-pass cost temporarily (recommended), remove duplicate root
-   payload only (smaller change, still misses budget), or reduce root plus per-attribute node rewrites (larger
-   dependency work with durability/GC proof, needed to substantiate <50 KB). Carry the accepted exception next
-   to the §3 budget; it must not silently turn a red number green. Root/head duplicate payload is source-verified
+   Removing duplicate payload alone is a separate smaller optimization; reducing both root and node writes is
+   larger dependency work with durability/GC proof. Neither is required merely to satisfy the accepted budget.
+   Measure definition/blob passes too: the 150 KB observation is the small arithmetic case, not their upper bound.
+   Root/head duplicate payload is source-verified
    at pinned Datahike `writing.cljc:539–540`; bytes depend on branch shape and touched attributes.
 4. **Replacement spec:** approve only after carrying forward the non-context invariants that v2 has dropped:
    immutable handle identities, agent-wide ordinal allocation, task-home custody, unknown commit ownership,
@@ -331,7 +337,8 @@ not measured for this review probe. No claimed before/after optimization.
 
 4. Static candidate checks: archive of HEAD's `src script test resources .clj-kondo deps.edn`, with ignored lint
 configuration linked exactly as bin/lane does; no shared dirty files. The sole diff is this Markdown note, so the
-program inputs are identical to HEAD. **Archive lint: 5,810 ms, 0 errors, 1,481 warnings**. An initial incidental
+lint/contract inputs are identical to the landing HEAD despite the concurrent task-resource commit.
+**Archive lint: 5,810 ms, 0 errors, 1,481 warnings**. An initial incidental
 working-tree lint also completed (10,964 ms, 0 errors, 1,481 warnings); it is not the candidate proof. Exit 2 is
 clj-kondo's warning status; no error was hidden. No warnings were claimed fixed.
 
@@ -378,7 +385,7 @@ changes; every entrant's fault/blob/refusal preserves values and the declared tr
 
 Questions for plan revision: What is the once-recorded input exchange for new messages and proof failures? How
 does one end-of-reply analysis preserve same-pass admission without re-expanding macros? Which fault/completion
-facts are authoritative on which branch? What exact preservation manifest is approved for R? What finite S0
+facts are authoritative on which branch? What is the explicit preservation/discard inventory for R? What finite S0
 workload bounds the <5 MB/<200 ms targets while history remains whole? These are missing design decisions, not
 requests to revisit §1.
 
