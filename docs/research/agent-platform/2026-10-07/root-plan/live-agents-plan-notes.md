@@ -82,10 +82,10 @@ store bytes and tokens shown.
 | allocation, beyond the agent's own forms | < 5 MB | 3.65 GB |
 | machinery commits | 1 | 6 |
 | context read at N = 200 exchanges | < 10 ms, < 5 MB | 8 ms, 17 MB (narrow read) |
-| store bytes per pass | < 50 KB | 0.94 MB |
+| store bytes per pass | ~150 KB (owner: fine) | 0.94 MB |
 
-The store-bytes budget cannot be met by Seon alone: the ~130 KB per-commit floor is Datahike's index-root record.
-Section 6, decision 3 covers it.
+The owner accepts ~150 KB per pass ("small amounts of data that are reasonable"). The ~130 KB floor is Datahike's
+index-root record; cutting commits from 6 to 1 is the win.
 
 Any non-agent, non-provider operation over 1 s or 10 MB is stop-and-fix at its producer.
 
@@ -159,13 +159,13 @@ approval, code, a dual review of the diff, then root's restart. Every slice repo
 
 | # | Slice | Deletes | Adds | Gate |
 |---|---|---|---|---|
-| P0 | **Stability.** Land `forgive-fix` (cubic read). Bump the Datahike gitlink to the reviewed fork (wrong-answer and stale-plan fixes). Remove the stale `user.sgprobe/fix` row with `my.program/remove-ns!` so tests run, rather than resetting now. Retire leftover probe branches. | dead code (444 lines, r-delete) | — | diff reviews |
+| P0 | **Stability.** Land `forgive-fix` (cubic read). Bump the Datahike gitlink to the reviewed fork (wrong-answer and stale-plan fixes). Reset done (08:54Z): the stale row is gone and agent test runs work. Retire leftover probe branches. | dead code (444 lines, r-delete) | — | diff reviews |
 | S0 | **Baseline probe.** One turn per entrant (model through a local HTTP fixture endpoint set in agent settings, which needs no code change, r-turn; MCP SCI; MCP JVM; test), recording every budget metric. | — | a test plus a probe form | root |
 | S1 | **Lookups** (repl-lookup design) and **help** rewrite | D6 (`directory-value`, …, ~133 lines) | thin layer on SCI | design → owner |
 | S2 | **The system turn.** Delete it and the generated opening seeded at agent creation; debug views read `of-agent` with an explicit selector. This is the biggest budget win (~80% of a turn). Re-measure `acquire-program!` after it. | D1 parts a-b (~1,970 lines) | — | design → owner |
 | S3 | **Context:** the opening as origin `:opening`, the narrow history read, REPL and DATA functions at the existing prompt seam. Delete the old prompt, walk and capture. | D1 part d (~850 lines) | context functions | design → owner |
 | S4 | **One pass:** one read, one kondo analysis, one batched digest query, one machinery transaction, the origin enum, re-derived answeredness, three bounds, all entrants. Delete the run machinery, permits, backstop, parking, episodes, the second and third settlement writers, split-then-reread, and the refresh-only attributes (read evidence, `executed`, `code-evidence`, …). | D2-D5 + D1 part c (~3,000 lines) | the one pass (target < 600 lines) | design → owner |
-| R | **The one reset**, after S4 retires the schema attributes. Runtime tasks persisted first (`persist-tasks`, uncommitted, re-checked). | — | — | owner approved |
+| R | **Resets** whenever a slice retires schema or state needs cleaning (~7 s). Runtime tasks are dumped first. | — | — | no approval needed |
 | S5 | **Completion:** proof tests run after a pass that changed reached code; `complete!` bails; `assign!` refuses. SCI test running fixed (`run-test-var` throws; r-read finding 7). | `my.agent/done`, turns-left | ~100 lines | design → owner |
 | S6 | **Live experiments on DeepSeek** (unlimited) through the real loop. REPL vs DATA; prompt-marker handling; system role vs first form; stop on vs off. Measured: protocol followed, invented results, calls to finish, correctness. A separate feedback turn after each run. | the losing variants | — | the owner reads the results |
 
@@ -181,11 +181,11 @@ Stop-and-fix items folded into the slices above, each with its owner:
 
 ## 6. Decisions for the owner (after review)
 
-1. **P0:** remove the stale row now and run the one reset after S4, which retires the schema, instead of resetting
-   now and again later.
-2. **Subtree counts** (dh-fix): store child counts in branch nodes (persistent-sorted-set format change; it also
+Resolved by the owner, 2026-10-07:
+- Reset whenever needed (~7 s, no migrations); default was reset at 08:54Z.
+- ~150 KB written to the store per pass is fine.
+
+Open:
+1. **Subtree counts** (dh-fix): store child counts in branch nodes (persistent-sorted-set format change; it also
    ends whole-range counting). Alternatives: count at each split (up to 64 reads per split), or a recount job.
-3. **The store-bytes budget:** Datahike writes the index-root record twice per commit (~53 KB). Options: (a) accept
-   ~150 KB per pass for now, the commit-count cut (6 → 1) being the big win; (b) a Datahike change to write the
-   root once and make it smaller. Recommendation: (a) now, with (b) tasked.
-4. Approve this plan as the replacement for `docs/seon/specs/agent-loop.md`.
+2. Approve this plan as the replacement for `docs/seon/specs/agent-loop.md`.
