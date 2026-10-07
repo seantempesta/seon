@@ -1,281 +1,441 @@
 ---
 title: Printer long text on both faces, design
 type: research
-status: proposed (gate 1, design only)
+status: proposed v2 (gate 1, design only; revised for the Opus and Astra reviews and root's rulings 1-8)
 date: 2026-10-07
 lane: printer-text
 ---
 
 # Printer: long text on both faces (lane printer-text, design only)
 
-One line: the value printer (`seon.render.value` selects, `seon.print` emits one fipp op stream as text and
-hiccup) already selects long strings correctly (line-end fill, `subs` dig forms, HTML expander links when the unit
-carries a route base). What is broken is three emission/splicing steps around it: the HTML face emits a string as its
-escaped literal, a view of an unstored value supplies no route base, and the reply grammar re-prints rendered text
-with `pr-str`. The fix is in those three places; the selection does not change.
+One line: the value printer (`seon.render.value` selects, `seon.print` emits one fipp op stream as text and hiccup)
+already selects ordinary long strings well: it fills to a line end, gives `subs` dig forms, and links in HTML when the
+unit carries a route base. Five things around it are broken:
 
-Probed on default `ec5f13d2f` (restarted 11:57; default was `:faulted` with three open faults and five over-bound
-warnings, all already tasked) as SCI agent `printer-text`, scratch namespace `scratch.printer-text`. No platform code
-was loaded into SCI; prototypes are pure functions over `prepare`'s real output. JVM mode was used once for a
-read-only census. At 21:18 `bin/seon status` reported "an exact-root JVM is alive but its endpoint is unavailable"
-(default being restarted); default answered again at 12:19 UTC on `e80131ef1` and the two tasks in §7 were created then.
+- the HTML face emits a string as its escaped literal;
+- a view of an unstored value supplies no route base or basis;
+- the reply composer prints rendered text again with `pr-str`;
+- a declared render's text is cut inside a leaf, mid-line, with no dig form and no count;
+- the diagnostic beside a failed render is a second printer.
 
-Scope (root, mid-lane): part 2 (source printing) dropped, because S1 v2 returns `{sym, source, :seon.render/ai
-text}` and a value's own render text already prints raw at the root (§4 checks the nested case). Added: delete
-`seon.render.value/diagnostic-line` (§3) and find why `(help)` arrives quoted (§5).
+Each fix is at its owner. The selection changes in one place only: the render-text cut joins the ordinary string cut
+(§4).
+
+Evidence: default `ec5f13d2f`, then `e80131ef1` after root's restart at 12:18 UTC. Both were `:faulted` with open
+faults that are all tasked. Probes ran as SCI agent `printer-text` in scratch namespace `scratch.printer-text`. No
+platform code was loaded, and prototypes are pure functions over `prepare`'s real output. JVM mode was used for one
+read-only census and for task creation. Reviews: [Opus](review-printer-opus-notes.md) and
+[Astra](review-printer-codex-notes.md). Every finding of theirs is taken below, by section.
+
+Path step served: PRINT, the edge of the one path, plus the human view of the agent's context. No owner is added. The
+slice reuses the op stream's hiccup override, the existing cursor and route machinery, `text-response`, and the
+value printer's core. It deletes `seon.repl/data-text`, `one-form?`, `seon.render.value/diagnostic-line`, the leaf
+`kept` cut in `make-node`, and `ends-in-comment?`'s use of the lexer.
 
 ## 1. What exists and what is broken
 
 | Step | Where | What it does |
 |---|---|---|
-| select | `seon.render.value/select-nodes`, `make-node`, `string-shown`, `fill-strings`/`fill-end` | a long string shows a head grown to the last line end inside the budget (agent profile 1,500 tokens = `tokens/estimate-chars` 4,800 chars) |
-| cut | `cut-node` | elision node with prefix, omitted, next offset, continuation form (only when the root is a `result/…` handle), `::print/href` (only when the unit has `:seon.render.value/route-base`) |
-| emit | `seon.print/leaf-ops` | `::string` → `string-literal` (quotes, `\"`, `\\` escaped; newlines kept since 7619b8dfd); `::elided` `:characters` → `elided-text` = literal prefix + `…+N` + form; hiccup = the same text in a span, a link when `::href` |
-| page | `seon.render.web` `/data` handler (web.clj:3850-3870) | the only caller that passes `route-base` and `:seon.render.data/cursor`; stored blobs and entities only |
-| reply | `seon.repl/response-entries` → `data-text` (repl.clj:178) | for a value with a declared renderer, `pr-str`s the shown text unless it reads as one form without comments |
+| select | `seon.render.value/select-nodes`, `make-node`, `string-shown`, `fill-strings`/`fill-end` | a long string shows a head grown into the budget (agent profile 1,500 tokens = 4,800 chars); `fill-end` backs off to the last line end in the growth, else the character end (forward progress) |
+| declared text | `make-node` (value.clj:1034-1049) | a render's AI text over the ceiling is shortened inside a `:leaf` (`kept`): mid-line, no continuation; `more?` is false for leaves, so `:truncated?`, `:elisions` and `omitted-characters` report no cut |
+| cut | `cut-node` | elision with prefix, omitted, next offset, continuation (only with a `result/…` root), `::print/href` (only with `:seon.render.value/route-base`) |
+| emit | `seon.print/leaf-ops` | `::string` → `string-literal` (escapes `"` and `\`, keeps newlines); a character cut → literal prefix + `…+N` + form; hiccup = the same text in a span |
+| page | web.clj `/data` (HEAD :3850, s2a working tree :3473-3501) | the only route-base and cursor supplier; stored blobs and entities only |
+| reply | `seon.repl/response-entries` → `data-text` (repl.clj:178) | `pr-str`s a rendered value's shown text, a failure's text and diagnostics unless the text reads as one form without a comment; `reply-map` lexes every entry (`ends-in-comment?`) |
 
-Measured on root's real assembled context (`seon.cluster.prompt/prompt`, 155,809 chars now; 544 ms / 136k calls cold
-in SCI):
+Measured on root's assembled context (`seon.cluster.prompt/prompt`, 155,809 chars):
 
 | Face | ms | Output | Defect |
 |---|---|---|---|
-| AI, root `'result/x1` | 3.8 | 4,750 chars, 1,484 tokens, ends `"…+151151 (subs result/x1 4658)` | none beyond `\"` escapes (dig form present) |
-| HTML, root `[:seon.agent/id "root"]` | 0.8 | 5,264 chars of HTML ending `&quot;…+151083</span>` | 66 backslashes (`\&quot;`); the whole literal is one `seon-print-elision` span; no link, no form, no reason |
-| HTML of the composed map (s2a's view value) | 6.8 | 25,117 chars, 26 cuts, **0 links** | every cut dead |
-| HTML, same value with `route-base` + cursor `{path [:seon.cluster.prompt/text] offset 4726}` | 2.9 | 5,247 chars, starts at char 4,726, three links (two breadcrumbs, next page `offset=9356`) | works today |
+| AI, root `'result/x1` | 3.8 | 4,750 chars, 1,484 tokens, ends `"…+151151 (subs result/x1 4658)` | `\"` escapes only |
+| HTML, root `[:seon.agent/id "root"]` | 0.8 | 5,264 chars of HTML ending `&quot;…+151083</span>` | 66 backslashes; the whole literal is one `seon-print-elision` span; no link, form or reason |
+| HTML of the composed map (s2a's view value) | 6.8 | 25,117 chars, 26 cuts, 0 links | every cut dead |
+| HTML with route base + cursor `{path [:seon.cluster.prompt/text] offset 4726}` | 2.9 | 5,247 chars from char 4,726, a next link `offset=9356` | works today |
 
-So task `e3d5afaaa903` (`seon.render.value/an-html-cut-of-an-unstored-value-offers-no-continuation`) is two defects:
-(a) the HTML face shows a string's literal instead of its text; (b) the context view passes no route base, so the
-existing expander never appears. The paging machinery (`select-nodes` offset branch, `data/at`, `path-url`,
-breadcrumbs) is complete and needs no change.
+Astra's compiled measurement (platform thread, exact): `prepare` of 14 K, 140 K and 1.4 M-character strings costs
+1.6-2.1 ms, 671 KB and 293 armed calls each, constant in input size. These are snapshot and prototype numbers; the
+installed after-numbers are re-run with the same probe (Astra's §6 form) after the slice lands.
 
-## 2. The smallest composition
+## 2. HTML: strings show their text, and every cut continues
 
-### 2.1 HTML strings show their text (BEHAVIOR CHANGE, `seon.print`)
+### 2.1 String hiccup (BEHAVIOR CHANGE, `seon.print/leaf-ops`)
 
-`leaf-ops` gives each string-bearing op a hiccup override, the mechanism `::projected` and `::elided` already use
-(`text-op` third arity), so text and hiccup stay one op stream and cannot disagree about a token:
+Each string-bearing op gets a hiccup override via the `text-op` third arity, which `::projected` and `::elided`
+already use. Text and hiccup stay one op stream with the same token boundaries:
 
-- `::string`: text unchanged (`string-literal`); hiccup `[:span {:class "seon-print-string"} value]`.
+- `::string`: the text is unchanged (`(or (::text node) (string-literal value))`). The hiccup is
+  `[:span {:class "seon-print-string"} s]`, where `s` is the node's own value: `::text` when present, so both faces
+  come from one source.
 - `::truncated-string`: hiccup `[:span {:class "seon-print-string"} (str value "…")]`.
-- `::elided` with `:characters`: hiccup `[:span [:span {:class "seon-print-string"} prefix] marker]` where marker is
-  the `…+N` link when `::href`, else `[:span {:class "seon-print-elision" :title refusal-or-form} "…+N"]` naming the
-  continuation form or `::requery-refusal` (a dead cut says why; today it says nothing).
+- `::elided` with `:characters`: hiccup `[:span [:span {:class "seon-print-string"} prefix] marker]`. The marker is
+  the `…+N` link when `::href`. Otherwise it is `[:span {:class "seon-print-elision" :title t} "…+N"]`, where `t` is
+  the continuation form or the `::requery-refusal`, so a dead cut says why.
 
-CSS (`resources/public/css/input.css` + built `output.css`): `.seon-print-string { white-space: pre-wrap }` and
-`::before/::after { content: '"' }`, so a reader still sees a string boundary without escapes. The hiccup serializer
-escapes `<>&"` for HTML; the browser shows the characters.
+CSS lives in `resources/public/css/input.css` and the built `output.css`, both claimed by s2a-code. `.seon-print-string`
+gets `white-space: pre-wrap` and `::before/::after { content: '"' }`. Hiccup already escapes the HTML-special
+characters (hiccup.clj:227-257).
 
-Prototype on the real context (hand-built hiccup equal to what the change emits): 5,249 chars of HTML (was 5,264),
-backslashes 66 → 4 (the 4 are the text's own), shown text 1,476 tokens ending at a line end.
+The comment at print.cljc:396-399 ("cannot disagree about a token") is revised in the same commit. The faces share
+tokens, not spelling.
 
-Not changed: the text face. A nested string stays a readable literal with its lines; the root text case is S1's
-`:seon.render/ai` (§4).
+Prototype on the real context: 5,249 chars of HTML. Backslashes drop from 66 to 4, and the 4 are the text's own. It
+shows 1,476 tokens and ends at a line end.
 
-### 2.2 Every cut of an unstored value continues (BEHAVIOR CHANGE, the view)
+### 2.2 The whole string as text/plain (ruling 2)
 
-The view that shows an unstored value supplies what `/data` supplies: `:seon.render.value/route-base` (its own route)
-and `:seon.render.data/cursor` from the request's `path`/`offset`, and navigates with `seon.render.data/at` before
-`value/html`. For s2a's `sent-context-html` (web.clj, lane s2a-views) that is about four lines:
+`seon.print/full` cannot mark a string: the review measured `(identical? "abc" (seon.print/full "abc"))` → true.
+Printing a whole 143 K string through the printer costs 48 ms and 8.9 MB in HTML and 128 ms and 8.3 MB as text. So
+paging stays, and a character cut also offers a second link: "whole text". It points to the same route with `&text=1`
+and answers `text-response 200` with the string at the cursor's path, as `text/plain; charset=utf-8`. No printing
+step runs: the string is its own text.
 
-```clojure
-(let [cursor (data/parse-cursor (get query "path") (get query "offset"))
-      shown (dissoc composed :seon.db/db)
-      found (data/at shown cursor)]
-  (value/html {:seon.render/value (get found :seon.render.data/value found) :seon.db/db database
-               :seon.render.value/root [::context agent-id]
-               :seon.render.value/route-base (route/path ::route/agent-debug {:id agent-id} {:sent "true"})
-               :seon.render.data/cursor cursor}))
+Cost on the 155,809-char context, from SCI:
+
+| Step | ms | MB |
+|---|---|---|
+| re-derive the context, warm | 4.6 | 10.5 |
+| re-derive the context, cold (after any write) | 577-590 | 788-897 (process-wide, upper bound) |
+| encode the string as UTF-8 (156,035 bytes) | 0.52 | 0.67 |
+
+The serving step is 0.5 ms and 0.67 MB, proportional to the bytes sent. The cold derivation is over the owner's
+1 s / 10 MB line on allocation. That cost belongs to `seon.cluster.prompt/prompt` (s2a measured the same; S4 replaces
+the assembly). It is paid by any click on this view, and is not added by the link.
+
+Only a cut whose path reaches a string gets the link. A non-string value at that path answers the existing 422
+refusal. `seon.render.data/at` must resolve the cursor first: the Opus review filed `8f8ea88a5bea`, because an
+unresolved cursor prints the root as `{}`.
+
+### 2.3 Pages carry their basis (ruling 3)
+
+A view of a re-derived value adds `basis=<t>` to every page link (`path-url` adds it when the unit carries
+`:seon.render.value/basis`). The handler derives at `(seon.db/as-of (seon.db/db conn) t)` whenever the link has a
+basis, the first page included, so every page of one sequence comes from the same view.
+
+Measured: two as-of derivations at the same t gave identical text. A head value at t and an as-of view at t
+did **not**. The 155,809- and 155,808-char texts first differed at char 25,186, where two `[sym calls ms]` rows with
+equal counts (`seon.profile/accumulator? 2712` and `seon.profile/histogram? 2712`) swapped. The tie comes from
+`seon.repl/response-entries`' `:seon.repl/repeated` ordering, `(sort-by (comp - second) repeated)`, which breaks ties
+by the stored collection's iteration order.
+
+Fix at the producer (repl.clj, this slice): `(sort-by (juxt (comp - second) first) repeated)`. With that change a
+head-derived first page and as-of later pages agree. Deriving every page as-of is kept as well, because it does not
+depend on every renderer being deterministic.
+
+Cost: as-of derivation is cold every click: 680-784 ms and 1.06-1.17 GB process-wide. That is the same producer cost
+as §2.2, and it is why the whole-text link is the recommended way to read all of it.
+
+### 2.4 The view change (ruling 6: a patch to s2a-code, or after it)
+
+`sent-context-html` (web.clj, owned by s2a-code) passes four things to `value/html`:
+
+- `:seon.render.data/cursor` from the request's `path`/`offset`, carried from the existing handler's query (its
+  current signature does not take it);
+- `:seon.render.value/route-base` from `(route/path ::route/agent-debug {:id agent-id} {:sent "true"})`, a route that
+  exists at route.clj:15-16;
+- `:seon.render.value/basis`, the request's `basis` or the head's `basis-t`;
+- the value resolved with `seon.render.data/at`, using the as-of database when `basis` is given.
+
+It also handles `text=1` with `text-response`. That is about eight lines. They go to s2a-code as a patch after the
+printer slice lands. The printer side, `path-url` carrying `basis` and `text`, is in this slice.
+
+## 3. `diagnostic-line` deleted, terminal fallback acyclic (ruling 5)
+
+`diagnostic-line` (value.clj:996) prints `";; renderer failed at " (pr-str path) …(bounded-text failure)`, which makes
+it a second printer. After the change:
+
+**The failure keeps its path as data.** `prepare` returns `:seon.render.value/diagnostics` as entries
+`{:seon.render.data/path p :seon.render.value/failure f}`. The failure is the Throwable or error map as today. This
+is a new registered shape, `:seon.render.value/diagnostic`, in `seon.render.value.edn`.
+
+The first consumer is `seon.sci.eval/shown` (eval.clj:3566 `into failures`), owned by s5a-reply. It must read
+`:seon.render.value/failure`, a one-word change handed over as a patch. Alternatively, `:diagnostics` keeps its
+vector of failures and a sibling `:seon.render.value/failure-paths` is added; root picks.
+
+**Callers and what each becomes.**
+
+| Caller | After |
+|---|---|
+| `prepare`, a failed render beside a value (:1582) | text = value text + `\n` + `d`, where `d = (core-text {:seon.render.value/diagnostics entries})`, computed once; HTML `[:div {:class "seon-render-unavailable"} [:pre {:class "seon-data-panel seon-core-value"} d]]`, which keeps the class `seon.render.lint` counts (render.clj:1115-1119) |
+| `prepare`'s catch, a successful structural retry (:1626-1641) | the same `d` appended to text, and the same wrapped `d` appended to the projection's HTML (today it updates only text and diagnostics) |
+| `plain-projection` (:1486), the terminal | `(bounded-text value 8192)` + `\n` + `(bounded-text entries)`, both projection-free; HTML the same text in the wrapped div |
+| `unavailable-line` (:271), beside `text`/`html` | `d` of `{:seon.render.value/diagnostics [{:seon.render.value/failure refused}]}` through `core-text`; HTML in the same wrapped div |
+
+**The one terminal is `seon.render.value/bounded-text`.** It calls only `datum` (clojure.core data, no projection)
+and `pr-str` under fixed bindings, and never reaches `prepare`. The call graph after the change:
+
+```
+text/html → render-ai → prepare(non-structural) → core-text → render-ai → prepare(structural)
+prepare(structural) → catch → plain-projection → bounded-text      (terminal; calls nothing in seon.render)
+core-text → catch → bounded-text / throwable-text / opaque          (terminal)
 ```
 
-Route name UNVERIFIED (s2a's design keeps `?sent=`); the s2a lane owns web.clj, so this goes to it as a patch or into
-its slice. A click re-derives the value (prompt warm 3.7 ms, cold ~500 ms per s2a) and prints ~4.8 KB of text from
-the offset. Paging all 156 KB is 33 pages at the one budget; see open question 1.
+It is acyclic for three reasons:
 
-### 2.3 What disappears
+1. `plain-projection` no longer reaches `core-text`, so Astra's P1 cycle disappears.
+2. `prepare` with `structural?` runs no declared render, so it never produces a render failure and never calls
+   `core-text` for one.
+3. `core-text` always calls `prepare` structurally (value.clj:261).
 
-- `seon.render.ns/function-ai`'s false docstring claim (`:source-lines` "the printer shows unescaped") and the
-  split-lines workaround behind it. Three producers split text into vectors of line strings
-  (`seon.render.ns/function-ai`, `seon.cluster.message` render `:seon.message/lines`, `seon.error` `:seon.render.ns/source-lines`
-  at error.clj:2206). Since 7619b8dfd a multi-line literal already prints as its lines, so a vector of line literals
-  costs two quotes and a separator per line and says less. Each should carry the string itself; owners named, not in
-  this slice's files.
-- `seon.repl/data-text` and `one-form?` (§5).
-- `seon.render.value/diagnostic-line` and `plain-projection`'s second text (§3).
+So `core-text` nests at most once below a non-structural `prepare`.
 
-### 2.4 Which step of the one path it serves
+Proof test: `seon.render.value-test/a-terminal-structural-failure-does-not-reenter-selection`. It feeds a value
+whose realization always throws (a lazy seq) through `text`, and asserts that the result is a string with one
+diagnostic entry, which shows the call depth is bounded. No counter and no dynamic Var are added.
 
-Print (the edge) and the human view of it. No new owner: the op stream's hiccup override, the existing cursor/route
-machinery and the value printer's core. Nothing is added beside the printer; one reply function is deleted.
+Tests:
 
-## 3. `diagnostic-line` deleted (root's added item)
+- `a-failing-renderer-never-replaces-the-value` (value_test.clj:947-970) becomes a data assertion: one diagnostic
+  entry whose `:seon.render.data/path` is `[]`, plus the value's entries in the text.
+- `seon.sci.admit-test` (admit_test.clj:162) calls `plain-projection`; its assertion on the text's head stays.
+- `floor_test` is unchanged.
 
-`diagnostic-line` (value.clj:996) builds `";; renderer failed at " (pr-str path) ", value printed as data: "
-(bounded-text …)`: `pr-str` and the core's projection-free last resort used as a printer. Callers and what each
-becomes:
+As Astra notes, a Throwable nested in the diagnostic map prints through `classify`/`throwable-value` as
+`#error {:via …}`, not as `core-text`'s root chain. That matches today's line, which carries no frames either.
 
-| Caller | Today | After |
-|---|---|---|
-| `prepare`, failed render beside a value (value.clj:1582) | text = value text + `\n` + line; HTML `[:div.seon-render-unavailable line]` | text = value text + `\n` + `(core-text {:seon.render.value/diagnostics failures})`; HTML `(core-html …)` of the same map. The REPL path already shows `:seon.render.value/value-text` (eval.clj:3561) and delivers the failures as `:seon.cluster.eval/diagnostics`, so agents see no change |
-| `prepare`'s catch, structural retry (value.clj:1626) | appends `line` to the structural projection's text | appends the same `core-text` of the failures |
-| `plain-projection` (value.clj:1493) | `(bounded-text value 8192)` + `\n` + line | `(core-text value)` + `\n` + `(core-text {:seon.render.value/diagnostics [failure]})`; `core-text` is already total (its last resort is `bounded-text`, the one place the projection-free text stays, per root's core ruling) |
+## 4. Declared-render text is an ordinary string cut (ruling 4)
 
-`:seon.render.value/diagnostics` is an existing key (the vector `prepare` returns), so no key is added. A Throwable in
-it prints through `core-text`'s own chain handling. `:seon.render.value/value-text` then equals `:text` minus the
-diagnostic; its consumer is `seon.sci.eval/shown` (eval.clj, lane s5a-reply), so the key stays.
+`make-node` stops shortening declared AI text inside a leaf. Text a declared render returns, and a value's own
+`:seon.render/ai` string, become a `:kind :string` node with `:raw? true`. That one node state drives the charge,
+`more?`, the fill, `cut-node`, `omitted-characters`, `:truncated?`, `:elisions` and both faces:
 
-Tests: `seon.render.value-test/a-failing-renderer-never-replaces-the-value` (value_test.clj:947-970) asserts the
-`";; renderer failed at []"` prefix; it becomes an assertion on data: one entry in
-`:seon.render.value/diagnostics` and the value's own entries in the text. `test/seon/sci/admit_test.clj:162` calls
-`plain-projection` directly. `floor_test` keeps `bounded-text` (still the core's last resort).
+- **Width:** a raw node's `:shown-width` counts characters, not escaped widths: `escaped-width` takes the flag. Its
+  `flat-width` adds no quotes.
+- **Growth:** the same chunks, then `fill-strings` to the last line end. `fill-string` already shrinks room by what the
+  regrown cut costs, so the whole continuation is reserved before the line end is chosen. A first line longer than
+  the budget falls back to the character end, which keeps forward progress.
+- **Emission:** a whole raw node is `::print/projected` as today, raw at the root. A cut raw node is an `::elided`
+  carrying `::print/raw? true`. `elided-text` prints its prefix raw, then a newline, then `…+N`, then the form. HTML
+  uses §2.1's hiccup.
+- **Dig form:** `(seon.print/full result/e…)` for an IObj root; `prepare` already lifts the ceiling for it
+  (value.clj:1557-1563). When the root is not an IObj (a Var's render) or has no handle, there is no dig form and the
+  cut carries the requery refusal.
+- **Removed:** `kept`, `:ceiling` and their comment.
 
-Also seen, same family, not in this slice: `render-database-identity-ai` `pr-str`s the db name; `breadcrumbs`
-`pr-str`s a path step as link label (value.clj:1483); `path-url` `pr-str`s the path into the URL (data
-serialization read back by `parse-cursor`, arguably transport, root to rule). Covered by
-`seon.print.value/printed-copies-stored-or-sent-instead-of-values`.
+Rows to test, as one table in `a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form`:
 
-## 4. Root-only render text when nested (root's check)
+- a value's own `:seon.render/ai` string over the budget;
+- a declared renderer's text over the budget;
+- a first line longer than the budget;
+- CRLF line ends;
+- `"` and `\` inside the text;
+- HTML-special characters;
+- `:seon.render/ai` holding a symbol (renders through its producer, no `subs`) versus holding a string.
 
-Probe (`src` = a 4-line defn with a docstring holding `\"q\"`, a `;;` comment, `#()`, `@`, `'`):
+Each row asserts the data: `:truncated?`, `:elisions`, the `omitted-characters` contribution, the continuation form,
+and `prepare`'s value tokens greater than its shown tokens.
 
-| Form | Reply |
-|---|---|
-| `{:sym 'my/f :source src :seon.render/ai src}` | `:value (defn f …)` raw, comment and quotes as written. Holds. |
-| `[{:sym 'my/f :source src :seon.render/ai src}]` | the map prints as data: `:source` and `:seon.render/ai` both as escaped literals (`\"Doc \\\"q\\\".\"`): **the source shows twice, escaped**. Breaks. |
-| the same at root with 800 lines of render text | cut mid-line `(+ 1 2…+1666` with no dig form, and the reply reports `:seon.eval/value-tokens 1500` = shown tokens. Breaks. |
+Root-only render text, checked nested (root's earlier question), from the first version:
 
-So root-only holds for `(source x)` at the root and breaks in two ways S1 should know:
+- `{:sym 'my/f :source src :seon.render/ai src}` prints raw at the root, with comments and quotes as written.
+- Nested in a vector, the map prints as data, and the source appears twice as escaped literals.
 
-1. Nested (`(map source xs)`, a `doc` map carrying a source): the value prints twice. S1 can carry the text once:
-   `{:seon.fn/sym x :seon.render/ai text}` with no separate source key; nested it prints once, as a literal with lines.
-2. A monster source (seon.render.value/prepare, 140 lines, 2,820 tokens) is cut by `make-node`'s `kept` at a
-   character with no continuation, and `omitted-characters` does not count it. This is a general printer defect (any
-   render text over budget), task `5d42a25f9a53`: cut at the last line end inside the ceiling (`fill-end`'s rule),
-   continue with `(subs (:seon.render/ai result/e…) n)` when the text is the value's own `:seon.render/ai` string (the
-   path is known), else name the requery refusal, and count the omitted characters. In `value.clj`, ~10 lines in
-   `make-node` and `omitted-characters`. I recommend it in this slice because S1 depends on it.
+S1 v3 already returns `{sym, :seon.render/ai text}` with no separate `:source` key, so nested it prints once, as a
+literal with its lines.
 
-## 5. Why `(help)` arrives quoted and the namespace pull as one escaped string (root's check; task `61e6f8134119`)
+## 5. The reply composer (ruling 1, ruling 7, the `(help)` cause)
 
-Cause: `seon.repl/data-text` (src/seon/repl.clj:178), not a re-read. `response-entries` passes the value's shown text
-through `data-text` only when `:seon.eval/renderer` is set; `data-text` then `pr-str`s it unless it reads as exactly
-one form with no comment token.
-
-Evidence (agent printer-text's branch):
+**Cause of `(help)` and the namespace pull arriving quoted** (task `61e6f8134119`): `seon.repl/data-text`, not a
+re-read.
 
 | Evaluation | `:seon.eval/renderer` | stored `:seon.eval/shown` | reply |
 |---|---|---|---|
-| `(help)` | `seon.bootstrap/render-help-ai` | raw multi-line prose | one quoted line with `\n` escapes (prose never reads as one form) |
-| `(:seon.agent/namespace (pull …))` | `seon.render.ns/render-ai` | raw multi-line map, 4,594 chars | one quoted line; `read-string` of the shown text fails: "The map literal starting with …1 contains 1 form(s)" (the printer's own cut `{…1}`) |
-| `{… :seon.render/ai src}` | nil (an inline key selects no declared producer) | raw | raw |
+| `(help)` | `seon.bootstrap/render-help-ai` | raw prose | one quoted line with `\n` escapes |
+| `(:seon.agent/namespace (pull …))` | `seon.render.ns/render-ai` | raw map, 4,594 chars | one quoted line; the shown text does not read ("The map literal starting with …1 contains 1 form(s)") |
+| `{… :seon.render/ai src}` | nil | raw | raw (`data-text` runs only for a declared renderer) |
 
-So the stored text is right; the reply converter re-prints it. It is a second printer (the printers inventory row
-repl.clj:177 classed it "legitimate", which is wrong: it prints printer output again). Any rendered value with a cut
-inside a map is turned into an escaped string, because the printer's cut grammar never reads in a map.
+**Change (BEHAVIOR CHANGE, repl.clj):**
 
-Change (BEHAVIOR CHANGE, src/seon/repl.clj, not s5a's files): `response-entries` uses the shown text verbatim for
-`:value`, `:error` and `:diagnostics`, as it already does for unrendered values; delete `data-text` and `one-form?`
-(no other caller). `reply-map` already ends a line whose last token is a comment, so a `;;` line inside the text
-cannot swallow `, :result …`. Consequence: a reply holding prose or cuts does not read back as EDN, which is already
-true of every unrendered value with a cut inside a map. `response`'s docstring ("reads back as data") is corrected in
-the same commit. The other half of `61e6f8134119`, a namespace render that shows 51 agents and other agents'
-evaluation history (13,913 value tokens for `{:seon.ns/name user}`), is `seon.render.walk/with-related`'s, outside this
-slice; it stays on that task.
+- `:value`: the shown text is spliced verbatim, as for unrendered values.
+- `:error`: when the evaluation has shown text (the printer's output of its error value), it is spliced verbatim.
+  Otherwise the prose `:seon.cluster.eval/error` string (declared `:string`) is quoted with the printer's own
+  `seon.print/string-literal`, which this slice makes public. That keeps line breaks and escapes only `"` and `\`.
+- `:diagnostics`: always the printer's text (`floor-text` of diagnostics, eval.clj:3593), spliced verbatim.
+- Delete `data-text` and `one-form?`. `read-shown` and `shown-value` stay: turn refresh and `repl/text` use them, and
+  walk-delete/S4 retire them.
 
-The other `pr-str`s in `response-entries` (`:out`, `:findings`, `:note`) are task
-`seon.print.value/printed-copies-stored-or-sent-instead-of-values`. `:out` matters here: `(clojure.repl/source x)`
-prints to out, and the reply shows it as one line with `\n` escapes. The slice can route `:out` through the value
-printer (a string literal keeps its lines) in the same function; I list it as optional because that task wants the
-output stored as a blob with a dig form, which is larger.
+The discriminator is where the text came from (the shown text or the declared error string), never parsing.
 
-## 6. Costs before and after (same probes)
+Producers that put prose where an error map belongs, each to emit an error map (the `:error` quoting goes when they
+do):
 
-| Probe | Before | After (prototype) |
+- `seon.turn.batch` batch.clj:624: `(str "facts not proposed: " message)`;
+- `seon.turn` turn.clj:3281-3285, the refused-facts receipt: `"Not admitted to the program: …"`;
+- `seon.sci.eval/failure-text` eval.clj:3403, used at :3668 and :3744: an evaluation's failure as a declared string.
+
+**Task `seon.repl/reply-map-is-not-edn-when-elided-or-rendered`** (resources/seon/tasks/seon.repl.edn:1) is rewritten
+in the same commit. The new intent: the reply's keys stay data (`:result`, `:ms`, `:calls`, `:findings` and a prose
+`:error` read back), and `:value` is the value printer's text, which is EDN except where the printer cuts inside a
+collection (`{…1}`, `"…"…+N`) or a render returns prose. Its proof becomes the converted deftest below. Task
+`9245d42cfe6d` (`the-reply-reprints-a-renders-shown-text-as-a-string`) closes with the commit.
+
+**The three red assertions, converted to the new rule:**
+
+| Test | Today | After |
 |---|---|---|
-| HTML of the 155,809-char context, root string | 0.8 ms, 5,264 chars HTML, 66 `\`, no continuation | same selection (one more span per cut), ~5,249 chars, 4 `\`, link to `offset=4726` |
-| HTML of the composed map (s2a view) | 6.8 ms, 25 KB, 26 dead cuts | same ms and size, 26 links |
-| next page (cursor offset) | not reachable | 2.9 ms, 5.2 KB HTML |
-| AI text of 5 real sources (7-140 lines) | 0.2-0.6 ms | unchanged (text face untouched) |
-| reply of a rendered namespace pull | 1 line, 4,594 chars escaped (1,435 shown tokens) | the stored 4,594 chars verbatim, multi-line, fewer tokens (no `\"` `\n` escapes) |
+| repl_test.clj:375, `the-reply-is-one-edn-map-whatever-the-value`, prose render | `(:seon.repl/value (one-map …))` is the prose as one string | the response holds the shown text unchanged as the `:value` entry's text; the `:result` handle and `:ms 12` entries after it read as data (asserted on the entries `response-entries` returns, not by reading the whole reply) |
+| repl_test.clj:241-244, prose saved as shown text | `:error` reads back as the prose string | a failure without shown text: `:error` reads back as the prose string, through `string-literal`, line break kept. A failure with shown text: that text is spliced unchanged |
+| returned_error_test.clj:62-66 | `:seon.repl/error` read back equals the saved shown prose | the response's `:error` entry is the saved shown text unchanged (`response-entries`), and its `:result` stays readable |
 
-Allocation: the per-thread counter reads 0 from SCI (as s2a found); process-wide `getTotalThreadAllocatedBytes`
-gave 0.47 MB for the context's HTML, an upper bound. Compiled numbers need the installed change: re-run in JVM mode
-after root's restart. Work is proportional to what is shown: the hiccup override reuses the node's value; nothing
-re-walks the string.
+The EDN-render row (repl_test.clj:379-389) is unchanged and green. S1 deletes it after this slice.
 
-Census (JVM, default, 163 ms): 5,641 stored function sources; 4,195 contain `"` or `\`; escaping costs 0.7% of their
-tokens (1,692,186 raw vs 1,703,447 as literals); 5,511 (97.7%) fit the 1,500-token budget raw. Escapes are a fidelity
-problem, not a size problem.
+**Ruling 7, folded in.** `ends-in-comment?` lexes every entry. The review measured 73.7 ms and 96 MB on 108,891
+chars, and it runs twice for the last entry (task `fb9d415bff49`). Since a line comment runs to its line end, a text
+ends in a comment only if its last line contains `;`. The replacement:
 
-## 7. Findings and tasks
+```clojure
+(defn- ends-in-comment?
+  "True when `text`'s last line could hold a line comment, so the reply must end that line before the next key."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String text]
+  (not= -1 (.indexOf text ";" (inc (.lastIndexOf text "\n")))))
+```
 
-Created on default after its restart:
+A `;` inside a string on the last line gives a false positive, which only costs an extra newline, never a swallowed
+key. Measured in SCI, interpreted, on 108,891 chars: 7.8 µs per call, with 0.58 MB process-wide over 1,000 calls.
+The test case `a comment-ended text still leaves the map readable` covers it, plus a row with `;` inside a final
+string. `syntax-tokens` stays for colouring. Task `fb9d415bff49` closes with the commit.
 
-- `seon.render.value/render-text-past-the-budget-is-cut-mid-line-with-no-dig-form` (`5d42a25f9a53`, §4.2), proof
-  `seon.render.value-test/a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form`.
-- `seon.repl/the-reply-reprints-a-renders-shown-text-as-a-string` (`9245d42cfe6d`, §5), proof
-  `seon.repl-test/a-rendered-value-with-cuts-is-spliced-verbatim`; or fold into `61e6f8134119` if root prefers one task.
+**Ruling 8, the help warning** (`2d24c2ed98f1`): not in this slice's files. `:large-value` fires on
+`:seon.eval/value-tokens` > 1000 (resources/seon/schemas/seon.config.eval.edn:14-19), and `(help)`'s text is 1,105
+tokens of its own prose. The fix belongs to the bound (judge only cut values: value tokens above shown tokens) or to
+S1's shorter help. Left on its task.
 
-Seen and linked, no new task: `:out` and findings `pr-str` (`seon.print.value/printed-copies-stored-or-sent-instead-of-values`);
-`(dir …)` as an escaped string (`seon.repl/directory-render-returns-text-the-printer-clips-mid-form`, deleted by S1);
-a missing-contract warning appeared on the second `defn measure` but not the first (`4fe2a5d2ba47`).
+Remaining `pr-str`s in the reply owner (`:findings`, `:interrupted`, `:out`, `:note`, repl.clj:410, `source-text`'s
+`pprint`) and in value.clj (node-id's `root-description` :466, breadcrumbs :1483, `render-database-identity-ai`) stay
+on `seon.print.value/printed-copies-stored-or-sent-instead-of-values`. `path-url`'s EDN path encoding is transport
+(root ruled Q4).
 
-Seen, not tasked yet (outside printer scope, owners should file): a refused `seon.db/pull` reply carries 15 stack
-frames per link plus a dig form for 35 more (Seon-generated bulk for an agent's typo); a contract refusal on
-`seon.cluster.prompt/prompt` printed the whole offending request twice, once per problem.
+## 6. Costs
 
-My own mistakes, not tasks: pulling `:seon.task/status` (no such attribute); calling a nonexistent
-`seon.render.hiccup/html`.
+| Probe | Before | After |
+|---|---|---|
+| HTML of the context string | 0.8 ms, 5,264 chars, 66 `\`, no continuation | ~5,249 chars, 4 `\`, next-page and whole-text links |
+| HTML of the composed map | 6.8 ms, 25 KB, 26 dead cuts | same selection, 26 live cuts |
+| next page (as-of basis) | not reachable | 680-784 ms, ~1.1 GB process-wide (the derivation's; the print is 2.9 ms) |
+| whole text, text/plain | not reachable | 0.5 ms and 0.67 MB to serve + derivation (4.6 ms warm, ~0.6 s cold) |
+| reply of a rendered value, 3 KB | 1.9 ms, 2.8 MB (Opus, JVM) | `data-text` gone, about the unrendered 1.0 ms / 1.3 MB, less the lexer |
+| `ends-in-comment?`, 109 KB entry | 73.7 ms, 96 MB | ~8 µs, no allocation that grows with the text |
+| render text over budget (4,950 chars) | cut mid-line, no dig form, value tokens = shown tokens 1,499 | cut at a line end, `(seon.print/full result/…)`, value tokens about 1,550 |
+| ordinary string `prepare` | 1.6-2.1 ms, 671 KB, 293 calls (Astra) | the same; re-run the same probe after landing |
+
+Census of 5,641 stored sources: escaping costs 0.7% of their tokens, so escapes are a fidelity problem, not a size
+problem.
+
+## 7. Tasks
+
+- Created: `seon.render.value/render-text-past-the-budget-is-cut-mid-line-with-no-dig-form` (`5d42a25f9a53`, §4) and
+  `seon.repl/the-reply-reprints-a-renders-shown-text-as-a-string` (`9245d42cfe6d`, §5).
+- Filed by the Opus review and taken here: `fb9d415bff49` (§5). Linked: `8f8ea88a5bea` (§2.2) and `2d24c2ed98f1`
+  (§5, not here).
+- Linked: `seon.print.value/printed-copies-stored-or-sent-instead-of-values`, `61e6f8134119`, and
+  `seon.repl/reply-map-is-not-edn-when-elided-or-rendered` (rewritten in §5).
+- Seen, not yet tasked:
+  - `seon.cluster.prompt/prompt`'s cold cost (≈0.6 s, ≈0.8-1.2 GB process-wide) on every click of the view, which
+    is s2a/S4's;
+  - a refused `seon.db/pull` reply carries 15 frames per link;
+  - a contract refusal printed the offending request twice;
+  - a `defn` with an anonymous `[:fn ifn?]` contract is refused as "No reader function for tag object" with no hint
+    that anonymous contract functions are not allowed.
+
+  I file the first and the last on default with this commit's landing note, if root wants them on me.
+- My mistakes, not tasks: `:seon.task/status`, `seon.render.hiccup/html`, the `[:fn ifn?]` probe contract.
 
 ## 8. The code slice
 
+Ordering (ruling 6): this slice lands before S1. S1 edits repl.clj and repl_test.clj:379-389 afterwards. web.clj
+goes to s2a-code as the §2.4 patch.
+
 Files:
 
-- `src/seon/print.cljc`: `leaf-ops` hiccup overrides (§2.1), ~10 lines changed.
-- `src/seon/render/value.clj`: delete `diagnostic-line`; convert its three callers (§3); render-text cut at line end
-  with continuation and counted omission (§4.2), ~10 lines.
-- `src/seon/repl.clj`: delete `data-text`, `one-form?`; verbatim splice (§5); docstring of `response`.
-- `resources/public/css/input.css`, `output.css`: `.seon-print-string` rules (s2a has them claimed: coordinate).
-- `src/seon/render/web.clj` `sent-context-html` cursor and route base (§2.2): s2a-views' file, by patch or in its slice.
-- Tasks: `resources/seon/tasks/seon.render.value.edn`, `seon.repl.edn` close or link.
+- `src/seon/print.cljc`:
+  - `leaf-ops` hiccup overrides (§2.1);
+  - raw character cut in `elided-text` (§4);
+  - `string-literal` made public;
+  - the :396 comment.
+- `src/seon/render/value.clj`:
+  - delete `diagnostic-line`;
+  - path-carrying diagnostics and the four callers (§3);
+  - raw string node and cut for declared text, `kept` removed (§4);
+  - `path-url` carries `basis` and `text` (§2.2-2.3).
+- `resources/seon/schemas/seon.render.value.edn`: `:seon.render.value/diagnostic`, and `:seon.render.value/basis` on
+  the unit. Published and adopted on a branch.
+- `resources/seon/schemas/seon.print.edn`: `:seon.print/raw?` on the elided and string node kinds.
+- `src/seon/repl.clj`:
+  - delete `data-text` and `one-form?`;
+  - `:error` quoting by source (§5);
+  - `ends-in-comment?` without the lexer;
+  - the `:repeated` tie-break;
+  - `response`'s docstring.
+- `resources/seon/tasks/seon.repl.edn`: rewrite `reply-map-is-not-edn-when-elided-or-rendered`, close `9245d42cfe6d`
+  and `fb9d415bff49`.
+- `resources/seon/tasks/seon.render.value.edn`: close `5d42a25f9a53`.
+- Patches to others:
+  - s5a-reply: eval.clj:3566 reads the diagnostic entry (§3);
+  - s2a-code: web.clj view (§2.4) and CSS (§2.1).
 
-Reaching tests (name these to `bin/lane commit --test`):
+Reaching tests (for `bin/lane commit --test`):
 
-- `seon.print-test` (hiccup of a string, a character cut with and without `::href`).
-- `seon.render.value-test`: `a-failing-renderer-never-replaces-the-value` (converted to data), new
-  `an-html-cut-of-a-long-string-shows-text-and-continues` (table: with route base → link at next offset; without →
-  title naming the form or refusal), new render-text line-end cut test.
-- `seon.render.floor-test` (core and `bounded-text` unchanged), `seon.sci.admit-test` (plain-projection).
-- `seon.repl-test`, `seon.repl-grammar-test` (rendered value spliced verbatim; a reply whose text ends in a comment
-  still closes), `seon.mcp-reply-test` (s5a holds it; read-only reach).
-- Web: `seon.render.web-debug-test` / `web-context-test` for §2.2 (s2a's).
+- `seon.print-test`:
+  - `a-string-literal-keeps-its-line-breaks-and-reads-back`;
+  - `one-cut-face-and-held-order`;
+  - `p-total-generated-grammar-emits-and-readable-faces-round-trip`;
+  - `p-tee-generated-grammar-cannot-disagree`, converted: one selection with the same tokens, and each string's
+    hiccup is its original characters;
+  - new: a string's hiccup, and a character cut with and without `::href`.
+- `seon.render.value-test`:
+  - `a-failing-renderer-never-replaces-the-value` (converted);
+  - new `an-html-cut-of-a-long-string-shows-text-and-continues`: a table of with and without route base, with basis,
+    and a whole-text link only on string cuts;
+  - new `a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form` (the §4 table);
+  - new `a-terminal-structural-failure-does-not-reenter-selection`.
+- `seon.render.floor-test`: the four core tests, unchanged.
+- `seon.sci.admit-test`: `plain-projection`.
+- `seon.repl-test`:
+  - `the-reply-is-one-edn-map-whatever-the-value` (converted);
+  - the response-grammar deftest at :230-244 (converted);
+  - `an-error-in-the-printers-grammar-is-a-map-not-a-string`;
+  - `colouring-preserves-every-character-including-malformed-source`;
+  - new `a-rendered-value-with-cuts-is-spliced-verbatim` and a `;`-in-final-string row.
+- `seon.returned-error-test`: converted.
+- `seon.repl-grammar-test`.
 
-Contracts: every changed function keeps or gains its one-line contract; `leaf-ops` is contracted already.
+S2a owns the route-click proof. S5a owns the parity between held and saved replies. Browser paint of the CSS quotes,
+and copying a selection, are observed separately.
 
 ## 9. Alternatives considered
 
-- A raw "text block" face for root multi-line strings on the text face (my first prototype: tokens 0-3% lower, 20 → 2
-  backslashes on `seon.print/elided-text`). Dropped by root's scope update: S1's `:seon.render/ai` covers source, and
-  a raw root string inside `#:seon.repl{:value …}` needs a reply-grammar change.
-- A larger HTML budget or a debug render profile for the context view: rejected for now; CLAUDE.md gives both consumers
-  one selection. Open question 1.
-- Keeping `data-text` for prose only: still a second print of printer output; refused.
+- **A raw text block for root multi-line strings on the text face.** Dropped: S1's `:seon.render/ai` covers source,
+  and §4 makes that text a real cut.
+- **`seon.print/full` for strings, or a whole-value page.** Rejected by ruling 2: no mechanism for strings, and
+  8-9 MB per 143 K.
+- **Keeping `data-text` and swapping its `pr-str` for `string-literal`.** It still prints printer output a second
+  time and keeps the rendered namespace pull as one string. Rejected by ruling 1 for `:value`.
+- **Unconditional newline between reply entries (Astra).** Also correct and simpler in code, but it changes every
+  reply's layout. The last-line test keeps the one-line layout at the same O(last line) cost.
 
 ## 10. Open questions for root
 
-1. Paging 156 KB at 4.8 KB per page is 33 clicks. Accept (one selection for both faces), or should the HTML expander
-   for a character cut also offer `seon.print/full` (the whole value, the existing explicit opt-in)?
-2. After §5, a rendered prose reply no longer reads back as EDN. Accept, given unrendered cut maps already do not?
-3. Fold §4.2 (render text cut) into this slice, as I recommend, or give it to S1?
-4. `path-url`'s `pr-str` of the path into the URL: transport encoding (keep) or a printed copy (convert)?
+1. §3: should the diagnostic entries move into `:seon.render.value/diagnostics` (and s5a converts eval.clj:3566 by
+   patch), or stay beside it as `:failure-paths`?
+2. §2.3: is the cold as-of derivation per page click (≈0.7 s, ≈1.1 GB process-wide) acceptable until S4 replaces the
+   assembly, given that the whole-text link reads everything in one derivation?
 
 ## 11. Design check
 
-Held against the real code: the selection and the paging were already right; the defects sit in emission (HTML
-literal), a caller (no route base) and the reply (re-print). Wrong in my first reading: I took the escaped
-namespace reply for a printer defect; the stored text is raw and `seon.repl/data-text` escapes it. Awkward: the
-context view's continuation needs a change in a file another lane owns, and the CSS file is claimed by s2a.
-Untraced: browser paint of the CSS quotes (not observed); compiled timings and per-thread allocation (SCI reports 0).
+- Held: emission overrides, verbatim splicing and deleting `data-text` are smaller than what they replace.
+- Wrong in v1, found by the reviews:
+  - converting `plain-projection` to `core-text` would have made the terminal recursive;
+  - the diagnostic lost its path and its lint class;
+  - `seon.print/full` cannot reach a string;
+  - the render-text cut must be a real cut node, or flags, accounting and HTML disagree;
+  - deleting `data-text` reversed an open task without saying so.
+- Found by this revision's probe: a derived text is not a function of its basis while ties sort by iteration order.
+  The producer is fixed (repl.clj `:repeated`), and pages derive as-of.
+- Untraced:
+  - browser paint of the CSS;
+  - compiled after-numbers (SCI reports per-thread allocation as 0; Astra's platform-thread form is the re-run
+    probe);
+  - whether any other renderer in the context sorts ties by iteration order. As-of paging covers that case.
 
-No restart or reset needed for this design. Scratch: SCI definitions in `scratch.printer-text` on agent
-printer-text's branch only (disposable; root may retire the branch).
+No restart or reset is needed for this design. Scratch exists only in `scratch.printer-text` on agent printer-text's
+branch, which is disposable.
