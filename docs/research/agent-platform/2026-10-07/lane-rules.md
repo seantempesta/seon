@@ -73,3 +73,13 @@ tasks for them as a careful engineer would:
 - An error you expected the call to return is not a task.
 - If an error you saw did NOT come back in a reply (only in a log, a fault list or `bin/seon status`), that is a
   delivery defect: file it under the boundary that dropped it.
+
+## One happy path (owner, 2026-10-07)
+
+"WE HAVE ONE HAPPY PATH THAT IS AGENT FOCUSED ON THIS LOOP. No fragile complex bloated shit."
+
+The loop: context = forms that ran (`(help)`, the task's `doc`, its references' `doc`/`source`) plus the agent's own
+forms with their real results → the model → ONE read → eval → record → print → appended. Every change makes that path
+simpler, faster or more correct for the agent. Before adding anything, answer in your notes: which step of this path
+does it serve, what existing owner or library already does it, and what it lets you delete. A second path, a parallel
+mechanism, a new subsystem, a fallback, or a feature no agent turn needs is refused. Smaller diffs that delete code win.
