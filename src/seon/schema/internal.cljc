@@ -483,8 +483,8 @@
       (let [missing (missing-schema-reference e)
             missing-ns (some-> missing namespace)]
         (throw (ex-info
-                 (str "schema/register! " k ": " (pr-str v)
-                      " is not a valid Malli schema (" (ex-message e) "). "
+                 (str "schema/register! " k ": the definition (:seon.schema/definition) "
+                      "is not a valid Malli schema; the cause says why. "
                       (when missing
                         (str "Missing schema reference " missing
                              " from namespace " missing-ns ". "))
@@ -531,15 +531,15 @@
                   (m/form (first present))
                   (into [:or] (map m/form) present))]
       (throw (ex-info
-               (str "schema/register! " k ": " (pr-str v)
-                    " — a registered value is never nil in seon (absent = the "
+               (str "schema/register! " k ": a registered value is never nil in seon (absent = the "
                     "key is omitted), so a value schema may not be "
-                    "nilable/[:maybe …]. Register the non-nil BASE shape: "
-                    "(schema/register! " k " " (pr-str inner) "). Where a map "
-                    "field may be absent, write [" k " {:optional true} "
-                    (pr-str inner) "]. Where a function slot may return nil, "
+                    "nilable/[:maybe …]. Register the non-nil base shape "
+                    "(:seon.schema/base-definition) instead. Where a map "
+                    "field may be absent, mark its entry {:optional true}. "
+                    "Where a function slot may return nil, "
                     "put [:maybe " k "] directly in that function schema.")
                {:seon.schema/error :seon.schema/nilable-value-schema
                 :seon.schema/key   k
                 :seon.schema/definition v
+                :seon.schema/base-definition inner
                 :seon.schema/nilable-value-schema k})))))

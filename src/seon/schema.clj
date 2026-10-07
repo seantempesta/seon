@@ -163,9 +163,8 @@
       (throw
        (ex-info
         (str "Schema population refused " identity
-             ": canonical schema reference cycle "
-             (pr-str cycle-path)
-             ". Recursive canonical registrations are not supported. "
+             ": its canonical schema references form a cycle (:seon.schema/cycle-path). "
+             "Recursive canonical registrations are not supported. "
              "Use a Malli local `:schema` registry for a recursive value "
              "shape, or a named predicate schema when the grammar belongs "
              "to its enforcing function.")
@@ -698,12 +697,11 @@
                     (throw
                      (ex-info
                       (str "A function schema needs an input :cat and an output schema; "
-                           (pr-str value) " declares no output. Name the returned shape: "
+                           "this one (:seon.schema/value) declares no output. Name the returned shape: "
                            "[:=> [:cat :my.ns/request] :my.ns/result].")
                       {:seon.schema/error :seon.schema/noncanonical-definition
                        :seon.schema/noncanonical-definition ::missing-output-schema
-                       :seon.error/message (str "The function schema " (pr-str value)
-                                                " declares no output schema.")
+                       :seon.error/message "The function schema declares no output schema."
                        :seon.schema/value value}))
 
                     (vector? value)

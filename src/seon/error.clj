@@ -2382,10 +2382,11 @@
   (->> (if (coll? faults) faults [])
        (map (fn [fault]
               (if (map? fault) fault
-                  {:seon.error/at (java.util.Date.)
-                   :seon.error/layer :seon.error/reading
-                   :seon.error/operation 'seon.error/fault-entities
-                   :seon.error/message (str "Fault entity was not acquired: " (pr-str fault))})))
+                  (cond-> {:seon.error/at (java.util.Date.)
+                           :seon.error/layer :seon.error/reading
+                           :seon.error/operation 'seon.error/fault-entities
+                           :seon.error/message "A fault entity was not acquired."}
+                    (some? fault) (assoc :seon.error/offending fault)))))
        (sort-by fault-order)))
 
 (defn- faults-input

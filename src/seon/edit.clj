@@ -203,21 +203,6 @@
                                   :my.edit.form/name])
            (line-range source start end))))
 
-(defn- bounded-values
-  [values byte-limit]
-  (loop [remaining values
-         bounded []
-         used 0]
-    (if-let [value (first remaining)]
-      (let [value-bytes (utf8-bytes (pr-str value))]
-        (if (> (+ used value-bytes) byte-limit)
-          {:seon.edit/values bounded
-           :seon.edit/complete? false}
-          (recur (next remaining) (conj bounded value)
-                 (+ used value-bytes))))
-      {:seon.edit/values bounded
-       :seon.edit/complete? true})))
-
 (defn- selector-matches?
   [selector dispatch-form semantic]
   (let [value (:seon.edit/sexpr semantic)]
@@ -339,31 +324,21 @@
                                  semantics)]
             (cond
               (empty? matches)
-              (let [evidence
-                    (bounded-values
-                     (map #(candidate-evidence source starts %) semantics)
-                     context-byte-limit)]
+              (let [candidates (mapv #(candidate-evidence source starts %) semantics)]
                 (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/form
                  {:seon.error/message "No top-level form matches the exact selector."
         :seon.error/offending request
-        :seon.error/data {:seon.edit/candidates (:seon.edit/values evidence)
-                  :seon.edit/candidates-complete?
-                  (:seon.edit/complete? evidence)}
+        :seon.error/data {:seon.edit/candidates candidates}
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"}))
 
               (< 1 (count matches))
-              (let [evidence
-                    (bounded-values
-                     (map #(candidate-evidence source starts %) matches)
-                     context-byte-limit)]
+              (let [candidates (mapv #(candidate-evidence source starts %) matches)]
                 (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/form
                  {:seon.error/message "More than one top-level form matches the selector."
         :seon.error/offending request
-        :seon.error/data {:seon.edit/candidates (:seon.edit/values evidence)
-                  :seon.edit/candidates-complete?
-                  (:seon.edit/complete? evidence)}
+        :seon.error/data {:seon.edit/candidates candidates}
         :my.edit/ambiguous-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"}))
@@ -403,21 +378,16 @@
         new-string (:my.edit/new-string request)
         positions (occurrences source old-string)
         replace-all? (true? (:my.edit/replace-all? request))
-        evidence (bounded-values
-                  (map (fn [position]
-                         (:my.edit/from-line
-                          (line-range source position
-                                      (+ position (count old-string)))))
-                       positions)
-                  context-byte-limit)]
+        lines-of #(mapv (fn [position]
+                          (:my.edit/from-line
+                           (line-range source position (+ position (count old-string)))))
+                        %)]
     (cond
       (empty? positions)
       (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/exact
        {:seon.error/message "The exact prior string does not occur in the source."
         :seon.error/offending request
-        :seon.error/data {:my.edit/replacements 0
-                   :seon.edit/lines (:seon.edit/values evidence)
-                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
+        :seon.error/data {:my.edit/replacements 0 :seon.edit/lines []}
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"})
@@ -427,8 +397,7 @@
        {:seon.error/message "The exact prior string occurs more than once."
         :seon.error/offending request
         :seon.error/data {:my.edit/replacements (count positions)
-                   :seon.edit/lines (:seon.edit/values evidence)
-                   :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
+                          :seon.edit/lines (lines-of positions)}
         :my.edit/ambiguous-match (:my.edit/path request)
         :seon.error/member :my.edit/path
         :seon.error/expected "one matching source region, or explicit replacement of all matches"})

@@ -226,7 +226,7 @@
                             (nil? cause) (assoc :val value)
                             cause (assoc :seon.operator/reader-error (ex-message cause))))
                    cause
-                   (throw (ex-info (str "Malformed PREPL result: " (ex-message cause))
+                   (throw (ex-info "Malformed PREPL result."
                                    (diagnostic "Malformed PREPL result." event :refused cause)
                                    cause))
                    :else value))

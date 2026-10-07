@@ -397,7 +397,7 @@
            ". " (:seon.turn/turns-remaining situation)
            " turns remain in this episode."
            (when-let [trigger (:seon.turn/trigger situation)]
-             (str " This run exists because of " (pr-str trigger) "."))
+             (str " This run exists because of message " (second trigger) "."))
            "\nInjected callables: help — " (doc-line #'bootstrap/help)
            " dir — " (doc-line #'bootstrap/dir)
            " doc — " (doc-line #'bootstrap/doc)

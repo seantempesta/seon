@@ -245,12 +245,13 @@
       (throw
        (ex-info
         (str "Fixture write was refused at the write: "
-             (or (:seon.error/message report)
-                 (str "no :db-after in " (pr-str report)))
-             (when-let [[index entity] (offending-fixture-entity tx-data report)]
-               (str " Offending entity " index ": " (pr-str entity) ".")))
-        (cond-> (if (map? report) report {:seon.db/report report})
-          true (assoc :seon.db/tx-data tx-data)))))
+             (or (:seon.error/message report) "the transaction report has no :db-after.")
+             (when (offending-fixture-entity tx-data report)
+               " The refused row is ::offending-entity [index entity]."))
+        (let [offending (offending-fixture-entity tx-data report)]
+          (cond-> (if (map? report) report {:seon.db/report report})
+            true (assoc :seon.db/tx-data tx-data)
+            offending (assoc ::offending-entity offending))))))
     report))
 
 (defn- held-handle

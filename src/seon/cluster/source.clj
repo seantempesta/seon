@@ -808,8 +808,7 @@
       (throw (ex-info "A merged declaration changed on the destination after the merge was prepared."
                       (seon.error.refusal/diagnostic
                        (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
-                       {:seon.error/message (str "The destination changed " (str/join ", " (map pr-str moved))
-                                                 " after the merge was prepared; prepare it again.")
+                       {:seon.error/message "Merged declarations changed on the destination after the merge was prepared; prepare it again."
                         :seon.error/member :seon.source/expected-digests
                         :seon.error/expected (select-keys expected moved)
                         :seon.error/offending (select-keys held moved)}))))
@@ -1234,8 +1233,7 @@
         kind (fn [entities pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) entities)))]
     (cond
       (seq moved)
-      (write-back-refusal :row-changed (str "The branch changed " (str/join ", " (map pr-str moved))
-                                            " after the merge was accepted; merge that change before writing back.")
+      (write-back-refusal :row-changed "Declarations changed on the branch after the merge was accepted; merge that change before writing back."
                           {:seon.error/member :seon.source/accepted
                            :seon.error/expected (select-keys merged moved)
                            :seon.error/offending (select-keys (held-digests (db/db connection) identities) moved)})

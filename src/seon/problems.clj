@@ -631,8 +631,7 @@
            (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
          :seon.problems/failed-tests-unknown
          (for [entry (:seon.problems/failed-tests-unknown found)]
-           (str "Test evidence unknown: " (:seon.error/message entry)
-                " Offending: " (pr-str (:seon.error/offending entry))))
+           (select-keys entry [:seon.error/message :seon.error/offending]))
          :seon.problems/errored-receipts
          (for [entry (:seon.problems/errored-receipts found)]
            (str "Form " (:seon.cluster.eval/ordinal entry)

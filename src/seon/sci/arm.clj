@@ -38,7 +38,7 @@
 (defn- refusing-root
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] ifn?]}
   [sym t]
-  (let [refusal (ex-info (str sym " is unavailable: its contract did not arm: " (ex-message t))
+  (let [refusal (ex-info (str sym " is unavailable: its contract did not arm; the cause says why.")
                          {:seon.error/member :seon.fn/spec :seon.fn/sym sym} t)]
     (fn [& _] (throw refusal))))
 

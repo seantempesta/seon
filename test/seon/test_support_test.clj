@@ -80,10 +80,9 @@
        (is (str/includes? (ex-message failure)
                           ":seon.agent/not-an-installed-attribute")
            "the failure carries write admission's own diagnostic")
-       (is (str/includes? (ex-message failure)
-                          (str "Offending entity 0: "
-                               (pr-str {:seon.agent/id "refused-fixture-write"
-                                        :seon.agent/not-an-installed-attribute 1})))
+       (is (= [0 {:seon.agent/id "refused-fixture-write"
+                  :seon.agent/not-an-installed-attribute 1}]
+              (:seon.test-support/offending-entity (ex-data failure)))
            "the failure names the authored entity, not the schema it was read against")
        (is (nil? (db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
                        (db/db connection)))
