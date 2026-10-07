@@ -344,7 +344,10 @@
             (cond (identical? r original) state
                   (set? value) (update state :held #(conj (disj % original) r))
                   :else (update state :held assoc k r)))
-    :close (fn [{:keys [held]}] held)}
+    ;; A rebuilt collection's hash is computed as it closes, its children's
+    ;; already cached: a set rebuilt around it then hashes one level, never
+    ;; the whole depth on the JVM stack.
+    :close (fn [{:keys [value held]}] (cond-> held (not (identical? held value)) (doto hash)))}
    value))
 
 (defn references
@@ -654,8 +657,10 @@
   (if throwable
     (let [links (chain throwable projection)
           primary (subvec links 0 (count (cause-links throwable)))
-          ;; `root-frame`, read from the links' own first-party frames
-          frame (some #(first (:seon.error/frames %)) (rseq primary))
+          ;; the root's WHOLE first-party trace, not its link's own frames: a
+          ;; link keeps only frames it does not share with its enclosing link,
+          ;; so its first own frame is the helper that threw, not the call site
+          frame (root-frame throwable)
           root-message (:seon.error/message (peek primary))]
       (cond-> (assoc observation
                      :seon.error/exception-class (symbol (.getName (class throwable)))

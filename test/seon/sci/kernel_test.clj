@@ -186,6 +186,13 @@
         (is (< allocated (* 50 1024 1024)) "was 757 MB before the frames-in-common rule")
         (is (< elapsed-ms 100) "was 187 ms")))))
 
+(deftest an-agents-large-ex-data-is-kept-whole
+  ;; batch-C review 2026-10-07: admission read a throwable through the bounded
+  ;; chain, so an agent's ex-data over 16 KB became a name. The chain keeps it.
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))
+        refusal (failure ctx "(throw (ex-info \"big\" {:v (vec (range 5000))}))")]
+    (is (= (vec (range 5000)) (get-in (:seon.error/chain refusal) [0 :seon.error/data :v])))))
+
 (deftest an-error-holding-a-ten-thousand-deep-value-keeps-its-error
   ;; deep-value lane 2026-10-07: the error's data walk (refusal/referenced)
   ;; recursed once per level and overflowed the stack, so the reply was a

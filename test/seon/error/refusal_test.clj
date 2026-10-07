@@ -178,6 +178,31 @@
   (is (= '[seon.error.refusal_test$inner invokeStatic "refusal_test.clj" 4]
          (error.refusal/root-frame @wrapped))))
 
+(defn- wrap-in-helper [e] (ex-info "wrapped" {} e))
+
+(defn- upper-case-call-site [] (try (str/upper-case nil) (catch Exception e (throw (wrap-in-helper e)))))
+
+(deftest a-helper-built-wrapper-keeps-the-call-site-frame
+  ;; batch-C review 2026-10-07: a link keeps only the frames it does not share
+  ;; with its enclosing link, so the root's own frames were only
+  ;; clojure.string's and `diagnostic` named the wrap helper. The frame is
+  ;; `root-frame`'s: the call site an agent edits.
+  (let [failure (try (upper-case-call-site) (catch Exception e e))
+        frame (:seon.error/frame (error.refusal/diagnostic (assoc observation :seon.error/throwable failure)))]
+    (is (= (error.refusal/root-frame failure) frame))
+    (is (str/starts-with? (str (first frame)) "seon.error.refusal_test$upper_case_call_site"))))
+
+(deftest a-set-holding-a-deep-value-is-referenced-without-the-stack
+  ;; batch-C review 2026-10-07: a set member rebuilt around a referenced place
+  ;; was hashed whole on the JVM stack. Each rebuilt level hashes as it
+  ;; closes. The member is built with its hash cached level by level, so it is
+  ;; deeper than plain construction could hash.
+  (let [deep (reduce (fn [v _] (doto [v] hash)) [(atom 1)] (range 200000))
+        out (error.refusal/references nil #{deep})
+        bottom (loop [v (first out)] (if (vector? (first v)) (recur (first v)) (first v)))]
+    (is (set? out))
+    (is (str/starts-with? bottom "#object[clojure.lang.Atom"))))
+
 (defn probe-var
   "A Var for `frame-function` to name."
   {:malli/schema [:=> [:cat] :nil]}
