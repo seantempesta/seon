@@ -14,7 +14,7 @@ boundary before adding a mechanism.
 
 `seon.flow/var-process` requires a step Var, explicit `:io` or
 `:compute` workload, and an environment in its arguments
-(`src/seon/flow.clj:286-385`). Using a Var keeps behavior live under
+(`seon.flow/var-process`). Using a Var keeps behavior live under
 redefinition; topology changes rebuild the graph.
 
 Core.async's step function arities are describe, init, transition,
@@ -53,18 +53,18 @@ the event that failed to arrive.
 
 ## Agent context ownership
 
-Installed: each turn forks the current base context (`fork-for-turn`,
-`src/seon/sci/eval.clj:3320-3353`). When the agent's previous context is held,
-`regenerate-agent-context!` (`:3246-3318`) forks the new base and carries the
-agent's own private Vars over it as actual objects; inherited program bindings
-are replaced. Base contexts are memoized by program identity in a four-entry
-LRU (`program-cache-policy`, `:3355-3362`). The law is that a context is
-reacquired from its branch head at turn start, and
-private defs, atoms and result objects stay in memory (`AGENTS.md:127-130`). Do not restore `:seon.def` entities or rebuild a private layer from
-the database.
+Installed: each turn forks the current base context
+(`seon.sci.eval/fork-for-turn`). When the agent's previous context is held,
+`regenerate-agent-context!` forks the new base and carries the agent's own
+private Vars over it as actual objects; inherited program bindings are
+replaced. Base contexts are memoized by program identity in a bounded LRU
+(`program-cache-policy` in `src/seon/sci/eval.clj`). The law is that a context
+is reacquired from its branch head and private defs, atoms and result objects
+stay in memory (CLAUDE.md, "An agent's context"). Do not restore `:seon.def`
+entities or rebuild a private layer from the database.
 
-**[TARGET]** (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0,
-lines 88-90): the fork is the context. The binding snapshot, the regeneration
+**[TARGET]** (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §1):
+the fork is the context. The binding snapshot, the regeneration
 diff and the kernel mirrors carried on a context leave; private objects are
 carried by not being replaced.
 
@@ -80,27 +80,27 @@ path.
 
 ## One turn mechanism
 
-Opening is system turn 0: ordinary submitted source, reply present, no
-provider attempt. Before each agent turn, the system turn projects the declared
-opening and every distinct retained read form; unchanged reads contribute no
-evaluation (`system-turn`, `src/seon/turn.clj:2227`). Include generated and
-agent-written reads, never writes or effects (`AGENTS.md:250-251`).
+Installed: before each model turn, `seon.turn/system-turn` projects the declared
+opening and every distinct retained read form into a closed system turn with no
+provider attempt; unchanged reads contribute no evaluation. It includes
+generated and agent-written reads, never writes or effects.
 
-Datahike evidence capture and validity live in `seon.db/read-evidence`
-(`src/seon/db.clj:928`) and `seon.db/read-evidence-current?` (`:1176`).
+Datahike evidence capture and validity live in `seon.db/read-evidence` and
+`seon.db/read-evidence-current?` (`src/seon/db.clj`).
 Extend the one mechanism in place rather than introducing a central
 dispatcher, block-specific refresh handlers, or another cache.
 
-The turn has three writes: open (`open-call`, `src/seon/turn.clj:421`); store
-the reply and its ordered evaluations (`plan-call`, `:681`); close
-(`close-tx`, `:458`). Opening while the agent already has an open turn is a
-no-op inside the writer, and an open turn refuses a second reply. At boot open
-turns close and unfinished evaluations become interrupted
-(`recover-call`, `:1786`); no interrupted execution resumes.
+A model turn opens in the writer before the provider call (`seon.turn/open-call`);
+opening while the agent already has an open turn is a no-op inside the writer.
+The settlement transaction stores the reply and its ordered evaluations
+(`plan-call`) and closes the turn (`close-tx`); a submitted source run is
+written in that one transaction (`with-submission`). At boot open turns close
+and unfinished evaluations become interrupted (`recover-call`); no interrupted
+execution resumes.
 
 The prompt is stored evaluations rendered through their entity pair.
-Old shown text remains unchanged. Compaction wipes evaluations and
-regenerates the opening (`compact!`, `src/seon/turn.clj:2430`).
+Old shown text remains unchanged. Compaction retracts evaluations and
+makes the next system walk fresh (`seon.turn/compact!`).
 The [runtime diagrams](../../../docs/seon/architecture/agent-runtime.md)
 show both additive sequences.
 
