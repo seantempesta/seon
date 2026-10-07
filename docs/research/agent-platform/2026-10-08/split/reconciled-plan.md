@@ -192,10 +192,33 @@ or settles approved semantics.
 
 ### Q4: Which web and debug callers of prompt, walk and capture survive? (S4-04, S4-07) **ROOT**
 
-- **Decision.** The exact caller closure.
+- **Decision.** The exact caller closure, measured by I-Q4 at HEAD `cd8a481c2`.
 - **Both packets.** Keep HTML over saved exchanges. Delete the AI traversal after its last caller.
-- **Recommendation.** Make it data first through inventory slice I-Q4, then size S4-07. The packets' anchors
-  (`render.clj:1721`, `prompt.clj:171-402`, `context.clj:309-415`) are the starting set.
+- **Closure (I-Q4).**
+  - `render.clj:1721` is `acquire-context!`, a router to `web/derive-context!:2459`, not a walk entry. `walk/history:840`
+    has one non-test caller (`web.clj:2497`). `prompt/prompt:403` has two (`turn.clj:4554` and `web.clj:3188`
+    `sent-context`).
+  - Capture rows are written only by `context/capture-tx:359` (`turn.clj:4568`, delay `:65-66`). Their readers are
+    `prompt.clj:74-104 calibration-for`, `capture-mismatch:318` and `committed-attributes` (`turn.clj:3124`). No page,
+    MCP tool or transcript reads a stored capture.
+  - `walk/neighborhood`, `root-acquisition`, `graph`, `related`, `with-related` and `continue` serve pages and value
+    paging and survive. `repl/frame` and `transcript.clj` `history` survive.
+- **Rulings.**
+  - **Calibration.** `:seon.ai.tokens/characters` moves onto the model call's attempt or basis row before the capture is
+    deleted. `calibration-for` reads it there, so `seon.cluster.prompt-test/calibration-uses-the-agents-recent-attempts-and-config-prior`
+    stays green (and `an-unread-usage-history-is-not-an-empty-one`, whose helper `recorded-usage-tx` stops writing capture rows).
+  - **Debug Context view (`?sent=true`, `web.clj:3185-3207`).** It renders the saved exchanges through the SAME pure
+    function the proc uses to build its transcript at acquisition. There is no second assembler, and the web never reads
+    the proc's memory.
+  - **Context-action POST (`web.clj:3390`).** It is deleted with the system turn, virtual turn and compact machinery S4
+    removes (`change-context:2427`, `render.clj:1731-1733`). Re-route only what survives.
+  - **Agent-owned selection and compaction (`context.clj:76-250`: `selection`, `append-tx`, `compact-tx`).** No non-test
+    callers. They are deleted in S4-07 with the contribution schema (`seon.context.contribution.edn`, the `contribution`
+    map in `seon.context.edn`, `:seon.context/contributions` on `rendered-context`), their tests and the capture.
+    `transcript.clj:617` reads `:seon.context.contribution/evaluations` and converts in the same commit.
+  - **`message-custody`.** It survives. It moves out of the capture section of `context.clj`, because
+    `transcript.clj:243` uses it (`test/seon/context_test.clj` `message-custody-accepts-an-absent-run-when-instrumented`).
+- **Recommendation.** Close Q4 on these rulings and size S4-07 from I-Q4 sections 5 and 6.
 
 ### Q5: Who owns a pending write and the blob permit until the write's actual outcome? (S5-01) **ROOT**
 
@@ -253,11 +276,26 @@ or settles approved semantics.
 ### Q10: Which provenance keys replace the run ref, and what is the caller closure? (S6-01, S6-02b, S6-04) **ROOT**
 
 - **Recommendation.**
-  - An effect receipt stores the pass id as a value (today's `:seon.turn/id` string) with
-    `:seon.effect/form-ordinal`, never a ref to an unrecorded run or evaluation.
+  - An effect receipt stores the pass id as a value under a NEW attribute name (not a retyped `:seon.effect/run`), with
+    `:seon.effect/form-ordinal`, never a ref to an unrecorded run or evaluation. `:seon.effect/run` retires in the same
+    slice (accretion: new names for changed semantics). The effect id is already `digest(turn-id, form-ordinal,
+    effect-ordinal)` (`effect.clj:849-866`), so the value is rederivable.
   - `evaluation-eid` (`effect.clj:210`) and the `:seon.effect/eval` ref are deleted. A reader that needs the evaluation
     looks it up by its identity, `id/evaluation(pass-id, ordinal)`, after RECORD.
-  - The exact producer closure comes from I-Q10 before S6-01 is claimed.
+  - A background effect request inside a test attempt is refused by name, and no `:seon.effect/notify` is stored
+    (`effect.clj:872`). The attempt context then needs no throwaway agent or turn row.
+  - The run carrier closure, all deleted together in S6-04: `db/*open*` (`db.clj:184,458,3620`; binder `sci/eval.clj:4027`;
+    producer `turn.clj:4968`; schema `:seon.db/pending-open`), `open-tx`/`open-call` (`turn.clj:694,385`) and their
+    producers, `system-run-*`, `submission-open-tx` with its three writers (`turn.clj:5953`, `:5984`/`:4968`, `with-submission:3509`),
+    `generated-run-tx`, `recover-tx`/`recover-call` (`turn.clj:1505,1514`) with callers `cluster.clj:2938`,
+    `cluster/agent.clj:1453`, `turn.clj:5479`, and the 24 fixture files that call `turn/open-tx`.
+  - `db/*receipt*` (`db.clj:180,3619`) and the `:seon.db/receipt` stamp (`seon.db.edn:258`) join that closure. They are
+    a ref on every transaction to an evaluation that does not exist yet under one RECORD.
+  - Boot's `:seon.boot/recovered-runs` and `recovery-operations` (`cluster/boot.clj:553`, `seon.boot.edn`,
+    `cluster_test.clj:30`, `turn_test.clj:590`, `loop_proof_test.clj:764-774`) are converted in S6-04 to effect and agent
+    counts, with their schema and tests. Recovery shrinks to `effect/interruption-stamps` keyed on the pass id value.
+- **Production readers of the run ref (I-Q10 section 4).** `effect.clj:60-66,79,115,405`, and `turn.clj:1905-1906` (the
+  kept-evaluation reuse check), which the first plan missed.
 - **Grounds.** "Provenance is pass id + position" (§4.2). Identities are values, refs exist only to living entities.
 
 ### Q11: Where do test member pass rows and the request aggregate live? When may the member branch retire? (S5-07e, S6-02a/b, S7-02) **ROOT**
@@ -293,11 +331,40 @@ or settles approved semantics.
 ### Q14: Which deadline bounds disarm and join once the backstop is gone? (S6-07) **ROOT**
 
 - **Recommendation.** The caller's lifecycle deadline passes explicitly into `disarm!` and `stop-graph!`, as §4.8
-  states. On expiry they return a typed error naming the missing exit and keep the resources. There is no new timer or
-  pool. I-Q14 lists the proofs to convert:
-  - `seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted` (`agent_test.clj:843`)
-  - `…/disarm-has-a-declared-loud-turn-completion-backstop` (`:923`)
-  - `…/disarm-drops-the-route-before-closing-it` (`:793`), which uses `with-redefs` and must convert to injected data
+  states. `flow/join-graph!` already waits on it (`flow.clj:136`, `await.clj:117-150`) and leaves the executor shut down
+  but unterminated, so `arm!` and a retried `disarm!` already own the resources until exit (I-Q14 finding 6). There is no
+  new timer or pool.
+  - **Required argument.** `disarm!` takes `:seon.await/deadline-nanos` as a required argument. Every caller passes one:
+    `release-context!` (via `stop-owned-graphs!:904`), `arm!` (`agent.clj:1269`) and the ~40 test sites. A caller with no
+    deadline of its own computes one at its own entry from the configured dial, and the dial survives for those entrants
+    (the dial's consumers in I-Q14 section 1 that are not the deleted backstop: `evaluate-source!`, `stop-work-launcher!`,
+    `flow-workload-attributes`, the await config-attribute enum).
+  - **Per-agent slice.** `disarm-agents!` (`cluster.clj:3557-3561`) gives each agent its own deadline slice. One stuck
+    agent never zeroes the others' budget.
+  - **Detector kept.** Removing the active-turn bound must not drop detection of a pass blocked in a host call (I-Q14
+    finding 5). S6-07 keeps one detector: the actual-exit owner names the missing terminal event when the deadline
+    passes. Dropping detection altogether would need an owner decision.
+  - **Typed error returned.** `disarm!` and `disarm-agents!` return the typed timeout error their contract declares
+    (`[:or :nil :seon.await/timeout-error]`) and stop throwing (`turn-completion-failure!`, `agent.clj:1402,1523-1530`).
+    `disarm!`'s contract widens from `:nil` to that union, and `stop-owned-graphs!`, `arm!` and every caller handle a
+    returned value. Disarm keeps no second fault recorder. Task: `seon.cluster/a-missed-agent-join-throws-instead-of-answering`.
+- **Proofs.** I-Q14 section 2 lists them; `release-joins-every-owned-graph-before-it-closes-the-branch` (`:1020`) and
+  `turn_backstop_test.clj` were missing from the first list.
+  - Converted, deadline passed explicitly, `with-redefs` of `prompt/prompt` replaced by an injected blocked host call:
+    `seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted` (`agent_test.clj:843`),
+    `…/disarm-has-a-declared-loud-turn-completion-backstop` (`:923`; now asserts the returned typed error, not the dial),
+    `…/release-joins-every-owned-graph-before-it-closes-the-branch` (`:1020`).
+  - Converted, `with-redefs` over `async/close!` replaced by data from a watch on the routing atom:
+    `…/disarm-drops-the-route-before-closing-it` (`:793`).
+  - `seon.turn-test/a-fired-turn-bound-requests-its-owners-stop-and-settles-its-join-whole` (`turn_test.clj:2102`)
+    converts to the kept detector.
+  - Deleted with the permit and state atom: `…/turn-start-has-the-same-declared-loud-completion-backstop` (`:1178`),
+    `…/a-failed-turn-transform-releases-its-permit-and-retires-its-backstop` (`:1215`), the three deftests of
+    `test/seon/turn_backstop_test.clj`, `loop_proof_test.clj` "a lost turn permit faults…" (`~208-243`); drop
+    `:seon.agent/turn-backstop-state` in `cluster/turn_test.clj:1661`.
+  - New, none yet: `seon.cluster.turn-test/a-timed-out-pass-keeps-ownership-until-it-exits`, plus a one-stuck-agent case
+    in `disarm-agents!` proving the other agents' joins still get their slices, and a case proving the typed error
+    (not a throw) for a missed agent join.
 
 ### Q15: Does run-test-var take a Var or a symbol, and what does it return? (S7-01) **ROOT**
 
@@ -376,7 +443,7 @@ dependency column means root must accept that answer first.
 | S7-01 | `agent-run-test-var [var] -> summary counters` in `agent-test-namespace`. Resolves task `run-test-var-throws-on-an-sci-test-var` | `src/seon/sci/eval.clj`, `test/seon/sci/documentation_test.clj`, `resources/seon/tasks/seon.sci.eval.edn` (task closes by proof) | new `seon.sci.documentation-test/run-test-var-answers-one-branch-test-as-data` (branch deftest, pass/fail counts, `:out` holds the report, no host root mutation). Existing `…/clojure-test-at-the-agent-repl-reports-into-the-evaluations-output` | T | Q15, after S1-04 (file) | C |
 | S4-01 | Unique tuple `:seon.cluster.eval/agent-ordinal`, assigned once per ordered writer batch. `seon.db/last-agent-ordinal` (rseek that accepts only the same attribute and agent). `of-agent` reads the tuple range | `src/seon/db.clj`, `src/seon/turn.clj` (`receipt-settle-batch-call`, `record-evaluated-call`), `src/seon/eval.clj`, `resources/seon/schemas/seon.cluster.eval.edn`, `test/seon/context_selection_test.clj` | new `seon.context-selection-test/evaluation-ordinals-follow-writer-order`. Existing `…/selection-references-terminal-evaluations-in-writer-decided-order` | H | S3-01 landed, `defn-cost2` released | B |
 | S5-06 | JVM mode stops acquiring. `seon.cluster.agent/held-context` (new) or gone-value with class | `src/seon/mcp.clj`, `src/seon/turn/batch.clj` (jvm-request/jvm-show), `src/seon/turn/world.clj`, `src/seon/cluster/agent.clj`, `test/seon/mcp_entrance_test.clj` | existing `seon.mcp-entrance-test/a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle` (cold row → gone-value), `…/a-jvm-reply-keeps-its-duration-after-an-earlier-run`. New `…/a-jvm-call-does-not-acquire-an-sci-world` | O/F | S3-01, Q9 | E |
-| S6-01 | Effect receipt stores pass id and form ordinal as values. Delete `evaluation-eid` and the `:seon.effect/eval` ref. Producers converted per I-Q10 | `src/seon/effect.clj`, `resources/seon/schemas/seon.effect.edn`, `test/seon/effect_test.clj` (plus producers I-Q10 names) | existing `seon.effect-test/request-commits-before-io-dispatch-and-settles-once`, `…/guarded-sci-evaluation-supplies-the-effect-identity-context`, `…/effect-refs-its-evaluation-and-handler` (converted to identity values), `…/background-settlement-carries-its-connection-across-a-thread-hop` | F/O | Q10, I-Q10 | E |
+| S6-01 | Effect receipt stores pass id under a NEW attribute plus the form ordinal, as values. Retire `:seon.effect/run`, delete `evaluation-eid` and the `:seon.effect/eval` ref. Convert the readers `effect.clj:60-66,79,115,405` and `turn.clj:1905-1906`, and the receipt fixtures in `web/jvm_test`, `shell/jvm_test`, `background_blob_test`, `render_coverage_test`, `background_test`, `my/background_test`, `render/value_test` | `src/seon/effect.clj`, `resources/seon/schemas/seon.effect.edn`, `src/seon/turn.clj` (`:1905`), `test/seon/effect_test.clj` (`:1029` walk converts to identity lookup) plus the fixtures above | existing `seon.effect-test/request-commits-before-io-dispatch-and-settles-once`, `…/guarded-sci-evaluation-supplies-the-effect-identity-context`, `…/effect-refs-its-evaluation-and-handler` (converted to identity values), `…/background-settlement-carries-its-connection-across-a-thread-hop` | F/O | Q10, I-Q10 | E |
 
 ### S1 lookups (group C, in series after S1-04; S1-10 and S1-11 in group A)
 
@@ -406,7 +473,7 @@ files, which is beyond 150 lines.
 | S4-05a | `my.agent/inputs` (new) returns undelivered items with identity and home basis | `src/my/agent.clj`, `resources/seon/schemas/my.agent.edn`, `src/seon/context.clj:257`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/inputs-read-each-home-at-its-own-basis` | L | Q3 |
 | S4-05b | Input pass before the model call. The writer validates and stores `:seon.cluster.eval/delivered`. Message-history append retired | `turn.clj` (`delivery-rows:3173`, `step`), eval schema, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/input-records-only-the-items-it-read` | I | S4-05a, S4-04 |
 | S4-06 | Delete the refresh (`turn.clj:1686-2232`, `receipt-read-evidence-tx:1217`) and persisted freshness evidence, keeping runtime observation | `turn.clj`, `src/seon/render.clj` callers, eval schema, `test/seon/turn_test.clj`, `test/seon/turn_error_test.clj` | new `seon.turn-test/settlement-does-not-store-refresh-evidence`. Delete `seon.turn-test/generated-read-evidence-rejects-turn-activity`, `…/a-turn-dependent-generated-form-keeps-its-value-beside-the-fault` | O + read-heavy row | S4-02b, S4-04, S4-05b; root approves the closure |
-| S4-07 | Delete capture, walk composition and the prompt selection closure per I-Q4 | `src/seon/context.clj:309-415`, `prompt.clj:171-402`, the `render.clj` walk entry, tests named by I-Q4 | new `seon.cluster.prompt-test/a-model-call-stores-basis-without-prompt-capture`. Existing `…/identical-context-does-not-depend-on-a-retained-prompt-cache` | O/H | S4-04, S4-06, I-Q4 |
+| S4-07 | Delete capture, the agent-owned selection and compaction code, walk composition and the prompt selection closure (Q4). First move `:seon.ai.tokens/characters` onto the model call's attempt or basis row and `message-custody` out of the capture section. The debug Context view renders saved exchanges through the proc's pure transcript function. Delete the web context-action POST with the system/virtual/compact machinery | `src/seon/context.clj:76-250,309-415` (keep `message-custody:257`), `prompt.clj:171-402` (`calibration-for:74-104` reads the new row), `render.clj:1721,1731-1733,49-50`, `render/web.clj:2410-2520,3185-3207,3390`, `walk.clj:840`, `turn.clj:3124,4559-4580,65-66`, `render/transcript.clj:617`, schemas `seon.context.capture.edn`, `seon.context.contribution.edn`, `seon.context.edn`, `seon.cluster.prompt.edn`, tests per I-Q4 §5: delete `context_capture_test`, `context_capture_history_test`, `context_selection_test` (its four deftests; S4-01's ordinal proof must live elsewhere), the prompt-test deftests that price retained history (`:93,208,260,281,293,329,493`); convert `turn_loop_test:307`, `web_debug_test:93`, `web_context_test` (four deftests), the survivors listed in I-Q4 §5, and the `with-redefs` of `prompt/prompt` in `agent_test` | new `seon.cluster.prompt-test/a-model-call-stores-basis-without-prompt-capture`. Existing `…/identical-context-does-not-depend-on-a-retained-prompt-cache`, `…/calibration-uses-the-agents-recent-attempts-and-config-prior`, `…/an-unread-usage-history-is-not-an-empty-one`, `seon.context-test/message-custody-accepts-an-absent-run-when-instrumented`, `seon.render.web-context-test/the-context-view-is-computed-only-when-opened` | O/H (split at the calibration move if it exceeds the budget) | S4-04, S4-06, S4-01 (shares `context_selection_test`), Q4 |
 
 S4-02 and S4-05 are split further than in both packets. Each original row mixed a new fact, a producer and a deletion.
 S4-02a puts the fact on with its first producer (the existing settlement), so it is never a consumerless schema.
@@ -430,13 +497,13 @@ I take Sol's S5-03 (ten rows) and S5-07 (a–f). Astra deferred both, and Sol na
 |---|---|---|---|---|---|---|
 | S6-01 | (see Ready, R2) | | | F/O | Q10 | E |
 | S6-02a | Bounded test body through the one fold, member pass on the member branch, aggregate on the requester (Q11) | `src/seon/test.clj` (`member-result:1987`, `bounded-result:216`), `turn/batch.clj:950`, `turn/world.clj:70`, test schemas, `test/seon/test_test.clj` | existing `seon.test-test/interpreted-test-bodies-use-the-sci-interrupt-bound`, `…/recording-preserves-admission-and-refuses-a-deleted-definition`, `…/overlapping-admissions-reserve-complementary-memberships`. New `…/a-member-records-one-pass-before-its-request-aggregate` | T/F | S5-07d, S6-01, Q11 | E |
-| S6-02b | Delete the effect attempt agent/turn preparation | `test.clj:179-216`, test/effect schemas, `test/seon/test_test.clj`, `test/seon/effect_test.clj` | new `seon.test-test/a-test-effect-needs-no-attempt-agent-or-turn`. Existing effect proofs above | T/F | S6-02a, S5-07e, S6-01 | E |
+| S6-02b | Delete the effect attempt agent/turn preparation (`attempt-writers`, `attempt-request-context`); the context keeps a pass id value, ordinal, environment, counter and cluster. A background effect request in an attempt is refused by name and stores no notify | `test.clj:179-216`, `effect.clj:872`, test/effect schemas, `test/seon/test_test.clj`, `test/seon/effect_test.clj`, `test/seon/test/effect_attempt_test.clj` | new `seon.test-test/a-test-effect-needs-no-attempt-agent-or-turn`, `seon.test.effect-attempt-test/a-background-effect-in-a-test-attempt-is-refused-by-name`. Existing `seon.test.effect-attempt-test/an-agent-capability-stub-settles-a-receipt-only-in-an-effect-reaching-attempt` and the effect proofs above | T/F | S6-02a, S5-07e, S6-01 | E |
 | S6-03 | One live cursor (`seon.sci.forgive/next-form`) feeds the fold. Delete `segments`, `source-rows`, `submission-open-tx` and the segmenter where no JVM failure-span caller remains. A prose-only reply is a call row with no evaluation (Q2) | `turn.clj`, `src/seon/cluster/agent.clj:644`, `src/seon/sci/forgive.clj:389`, schemas, reader/entrant tests | existing `seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules`, `seon.cluster.turn-test/reply-reading-follows-evaluated-alias-and-dynamic-require-state`, `…/a-prose-only-provider-reply-settles-without-parking-the-turn-proc`. New `…/one-cursor-reads-each-form-in-its-current-world` | O, 28.7 KB corpus | S4-03, S5-07f | B |
-| S6-04 | Delete the intent commit, `recover-tx` and the open/resume/close/generate families per I-Q10 | `turn.clj`, cluster boot recovery caller, turn/run schemas and tests | new `seon.cluster.turn-test/a-crash-before-record-keeps-only-durable-effects`. Retire `…/turn-intent-is-the-complete-crash-falsifier` | O/F | S6-01, S6-02b, S6-03, I-Q10 | B |
+| S6-04 | Delete the intent commit, `recover-tx`/`recover-call`, the open/resume/close/generate families, `db/*open*` with its binder and `:seon.db/pending-open`, and `db/*receipt*` with the `:seon.db/receipt` stamp, per Q10. Convert boot's `:seon.boot/recovered-runs` and `recovery-operations` to effect and agent counts. The 24 `turn/open-tx` fixture files convert to the pass entrance or pass-id values | `turn.clj`, `db.clj:180-184,458,3619-3620`, `sci/eval.clj:4026-4027`, `cluster.clj:2938`, `cluster/agent.clj:1453`, `cluster/boot.clj:553`, `resources/seon/schemas/seon.db.edn:258-259`, `seon.boot.edn`, turn/run schemas and tests (`settlement_receipt_provenance_test` is the only `*open*` test and is deleted; `cluster_test:30`, `turn_test:590`, `loop_proof_test:764-774`, `effect_test:875` converted) | new `seon.cluster.turn-test/a-crash-before-record-keeps-only-durable-effects`. Retire `…/turn-intent-is-the-complete-crash-falsifier`. Existing `seon.effect-test/recovery-marks-open-receipts-interrupted-without-refiring` (keyed on the pass id) | O/F | S6-01, S6-02b, S6-03, I-Q10 | B |
 | S6-05 | Writer answeredness to the presented basis, a cap counted per anchor, continuation (Q12) | `turn.clj:2584-2908`, agent/call schemas, `test/seon/turn_work_test.clj` | existing `seon.turn-work-test/a-wake-arriving-mid-turn-opens-the-next-turn`, `…/two-wakes-in-one-transaction-are-one-turn`, `…/only-a-turn-whose-reply-came-from-a-model-attempt-answers`. New `…/model-passes-answer-only-the-basis-they-presented` | O/I/F | S6-04, Q12 | B |
 | S6-06a | `assign!` refuses tasks with no proofs or all-current-green proofs, checked at home (Q13) | `src/seon/task.clj:421,467`, `resources/seon/schemas/seon.task.edn`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/assignment-requires-a-non-green-proof` | F/O | Q13 (independent of S6-05: the task writer shares no file) | E |
 | S6-06b | `my.task/complete!` bail with a required reason. Delete `my.turn/complete`, `my.task/done!` and `seon.run/complete` with their callers | `src/my/task.clj`, `src/my/turn.clj`, `src/seon/run.clj`, task/my.turn/my.task schemas, `test/seon/task_ingestion_test.clj`, `test/my/turn_test.clj` | new `seon.task-ingestion-test/completion-with-a-reason-gives-the-task-back`. Converted `my.turn-test/a-blank-completion-is-an-error-value-not-a-throw`, `…/a-disposition-is-an-ordinary-value` | F/O | S6-06a, S6-05 (disposition settlement) | E |
-| S6-07 | Delete the backstop/parking/permit. Disarm and stop take the caller's deadline and keep resources until exit (Q14) | `turn.clj:5635-5824`, `src/seon/cluster/agent.clj:1368-1508`, config/run schemas, `test/seon/cluster/agent_test.clj` | new `seon.cluster.turn-test/a-timed-out-pass-keeps-ownership-until-it-exits`. Converted `seon.cluster.agent-test/disarm-has-a-declared-loud-turn-completion-backstop`, `…/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted`, `…/disarm-drops-the-route-before-closing-it` (with-redefs removed), `seon.turn-test/a-fired-turn-bound-requests-its-owners-stop-and-settles-its-join-whole` | F/O | S6-04, S6-05, I-Q14, Q14 | B |
+| S6-07 | Delete the backstop timer, parking and permit (`turn-completion-error:5593`, `await-turn-permit!:5667`, `write-refusal-bound:5717`, `arm-turn-completion-backstop!:5798`, `step:5856`) but keep one detector: the actual-exit owner names the missing terminal event. `disarm!` takes an explicit deadline from every caller (`release-context!`, `arm!`, ~40 test sites; entrants without one compute it from the dial, which survives for them). `disarm-agents!` gives each agent its own slice. `disarm!`/`disarm-agents!` return the typed timeout error and stop throwing. Fix the docstrings naming the backstop. Resolves task `seon.cluster/a-missed-agent-join-throws-instead-of-answering` | `turn.clj:5593-5856`, `src/seon/cluster/agent.clj:904,921,1269,1304-1354,1402-1535`, `src/seon/cluster.clj:3509-3568`, `src/seon/flow.clj:621,734`, config/run/await schemas, `resources/seon/tasks/seon.cluster.edn`, `test/seon/cluster/agent_test.clj`, `test/seon/cluster/turn_test.clj:1661`, `test/seon/turn_test.clj`, `test/seon/turn_backstop_test.clj`, `test/seon/loop_proof_test.clj`, the ~40 bare `disarm!` test callers and the dial setups listed in I-Q14 §2 | new `seon.cluster.turn-test/a-timed-out-pass-keeps-ownership-until-it-exits`, `seon.cluster.agent-test/a-stuck-agent-does-not-zero-the-others-deadline-slices`, `…/a-missed-agent-join-answers-the-typed-timeout-error`. Converted (injected blocked host call, no `with-redefs`) `…/disarm-has-a-declared-loud-turn-completion-backstop`, `…/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted`, `…/release-joins-every-owned-graph-before-it-closes-the-branch`, `…/disarm-drops-the-route-before-closing-it` (watch on the routing atom), `seon.turn-test/a-fired-turn-bound-requests-its-owners-stop-and-settles-its-join-whole` (to the kept detector). Deleted with the permit: `…/turn-start-has-the-same-declared-loud-completion-backstop`, `…/a-failed-turn-transform-releases-its-permit-and-retires-its-backstop`, `seon.turn-backstop-test` (3 deftests), the `loop_proof_test` lost-permit test | F/O | S6-04, S6-05, I-Q14, Q14 | B |
 
 I take Sol's S6-02a/b. Astra's single S6-02 created a cycle with S5-07: the test adapter needed the old settlement
 retired, and that retirement needed the test body converted. S6-06a is moved earlier: the assignment writer needs only
