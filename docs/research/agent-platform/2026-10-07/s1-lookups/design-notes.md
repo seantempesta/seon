@@ -1,7 +1,7 @@
 ---
 title: S1 lookups and help, design
 type: research
-status: proposed v2 (gate 1, design only; revised for the Opus review and root's rulings, Astra review pending)
+status: proposed v3 (gate 1, design only; revised for the Opus review, the Astra review and root's rulings)
 date: 2026-10-07
 lane: s1-lookups
 ---
@@ -22,7 +22,9 @@ Sources: HEAD `0df0480b2`; v1 measurements at `ec5f13d2f` (default pid 69486, th
 restart; `src` unchanged between them). Probes: MCP `eval_clj` as agents `s1-lookups` (retired) and `s1-lookups-2`
 (SCI, namespaces `scratch.s1-lookups`, `scratch.s1b`) and JVM mode for reads of installed code only. SCI pin
 `ce0aa53b9b`. Inputs: `../repl-lookup/design-notes.md`, `../plan-research/r-context-notes.md` §3,
-`../stopped-wip/repl-lookup.patch` (judged in §8), and the Opus review `review-s1-opus-notes.md` (`bf90498cf`).
+`../stopped-wip/repl-lookup.patch` (judged in §8), the Opus review `review-s1-opus-notes.md` (`bf90498cf`) and the
+Astra review `review-s1-review-codex-notes.md` (`ccda061b6`, of v1 with root's decisions applied; its findings that
+still apply to v2 are folded in as §0b).
 
 ## 0. Root's rulings applied (2026-10-07)
 
@@ -38,6 +40,18 @@ restart; `src` unchanged between them). Probes: MCP `eval_clj` as agents `s1-loo
 | 8 | Fix the producers of `(dir 'ns)`: `seon.render.ns/namespace-form`, `run.clj:84` | §4.6 |
 | 9 | Delete what deleting `seon.agent.loop` needs: schema retirement adopted on a live-store branch, the two task intents, the `reference-code.md` row, walk-delete's stale note | §4.7 |
 | 10 | Add the missing reaching tests; S2a lands first and S1 rebases onto it (`web_debug_test/passive-ledger-never-reconstructs-directory`) | §6 |
+
+## 0b. Astra review folded in (v3)
+
+| Finding | v3 decision | Where |
+|---|---|---|
+| P1 task lookup reads the evaluating branch, misses task-home custody and `must-read` | `(doc task)` stays the task's declared render from one pull, read explicitly at the task home (`seon.task/home`); the `[*]` pull keeps `:seon.task/must-read`, which `task-ai` shows; no `task-edges`, no subject walk (root) | §4.3 |
+| P1 a latest-green result is not current proof | no `proof-status` and no green predicate in the lookup owner; a test's `doc` shows the owner's `recorded-result` labelled as recorded evidence beside the owner's `verified?` | §4.3 |
+| P1 contracts reject promised cases | one classification boundary: the data functions take authored syntax (`authored-reference`, a declared polymorphic boundary) and their dispatch answers `documentation-unavailable` for anything that is not a reference; `lookup-pattern` is string or regex, empty allowed; `var-summary`'s `:sym` is any symbol (namespaces appear in `find-doc`) | §4.3 |
+| P2 namespace render rebuilds dir's work | already ruled (root 3): one pull, no contracts; measured separately in §7 | §4.6, §7 |
+| P2 qualified aliases and adoption proof | the lookups are platform Vars installed once and never replaced, so both spellings stay the same Var; `help` (a program Var) is refreshed at acquisition; proof rows cover fresh and retained contexts, a branch-interpreted `help`, and analysis edges for bare, qualified and `clojure.repl :refer` callers | §4.1, §6 |
+| P2 deletion closure | adds `my.program` docstrings (:918, :1039), task must-reads naming deleted producers (`seon.sci.eval.edn` :123, :190, :204), the help HTML renderer's embedded EDN scan; `nearest`'s deletion labelled BEHAVIOR CHANGE | §4.7 |
+| Proposed tests | adopted where they fit v2 | §6 |
 
 ## 1. What exists (file:line at HEAD, measured)
 
@@ -167,7 +181,12 @@ S0 probe window (`seon.pass-probe/window` over `mcp-pass`; whole-JVM allocation,
 - Deleted: `install-program-doc!` (and its call at :2391), `program-doc-var`, `program-dir-var`, `stored-source-fn`
   (body moves into `source-fn`), the `seon.bootstrap` re-adds, `seon.bootstrap/dir` and `seon.bootstrap/doc` macros.
 - Bare and qualified names are one Var (verified, §1.5): `(clojure.repl/source x)` and `(source x)` return the same
-  data.
+  data. The lookup Vars are platform code: they are never replaced at acquisition, so there is no second list to
+  refresh for the qualified spelling (Astra P2). The only declared target that changes at acquisition is
+  `seon.bootstrap/help` (a program Var); `refer-declared-bindings!` points bare `help` at the acquired Var at the same
+  boundary where acquisition installs `seon.bootstrap`, and `seon.bootstrap/help` itself is the acquired Var. The
+  retained-context tests are rewritten around that surviving behavior (the old one asserted a fresh macro
+  constructor's identity, which is deleted).
 
 ### 4.2 Stop storing interpreter refers (ruling 2, task `seon.fn/analysis-stores-interpreter-refers-on-namespace-entities`)
 
@@ -193,23 +212,46 @@ S0 probe window (`seon.pass-probe/window` over `mcp-pass`; whole-JVM allocation,
 
 | Function | Does | Size |
 |---|---|---|
-| `reference-in` (new) | a qualified symbol with its alias expanded through the current SCI namespace (not var meta, because of the interrupt copies); a simple symbol that resolves to a Var as that Var's symbol; anything else unchanged (so `(doc 'x)` is a list and answers `documentation-unavailable`, not a `ClassCastException`) | ~12 lines |
+| `reference-in` (new) | input: whatever the agent typed (`authored-reference`); a qualified symbol with its alias expanded through the current SCI namespace (not var meta, because of the interrupt copies); a simple symbol that resolves to a Var as that Var's symbol (SCI's public `var->symbol`, `sci/core.cljc:698-703`); anything else unchanged (so `(doc 'x)` stays the list `(quote x)`) | ~12 lines |
 | `directory` (new) | `sci/find-ns` of the alias-expanded name, else `documentation-unavailable`; `dir-fn` names → `[{:sym :arglists :summary}]` from SCI var meta, summary by `docstring-parts` | ~10 lines |
 | `apropos` / `find-doc` | SCI `apropos` as a vector; SCI's `find-doc` walk (interns with `:doc`, plus namespaces) returning `var-summaries` | ~4 + ~12 lines |
 | `source-value` (new) | `stored-source` (program families, private and tests included, branch-correct), else Clojure's `clojure.repl/source-fn` when the reference names a host Var, else `documentation-unavailable`; shape in §4.4 | ~8 lines |
-| `documentation-value` (rewritten, same 3-arg signature, reference widened to keywords) | keyword → schema `{:key :form :description}` (one pull of `:seon.schema/form`); simple symbol → namespace `{:summary :body :example :publics}` (program: `:seon.ns/doc` + one reverse pull; library: host ns meta + `dir-fn`); qualified symbol → test status (DB, `latest-results`), task (§ below), else the Var's SCI metadata for doc parts and arglists, plus, for a program function, the DB contract, supplied keys and override note exactly as today (`agent-documentation-contract`, ruling 3) | ~20 + ~40 lines |
+| `documentation-value` (rewritten, same 3-arg signature; both reference inputs are `authored-reference`) | dispatch on the value: qualified keyword → schema `{:key :form :description}` (one pull of `:seon.schema/form`); simple symbol → namespace `{:summary :body :example :publics}` (program: `:seon.ns/doc` + one reverse pull; library: host ns meta + `dir-fn`; an alias alone is expanded by `reference-in` first); qualified symbol → test (below), task (below), else the Var's SCI metadata for doc parts and arglists, plus, for a program function, the DB contract, supplied keys and override note exactly as today (`agent-documentation-contract`, ruling 3); anything else (a list, a number, a string, an unknown name) → `documentation-unavailable` naming what was typed | ~20 + ~40 lines |
 
 - **Doc and arglists from SCI (ruling 4).** For every Var, `:summary/:body/:example` come from `docstring-parts` of
   `(:doc (meta v))` and `:arglists` from `(:arglists (meta v))`. `function-doc-map` stops calling `arglists-reader`;
   the DB is read only for the contract, supplied keys and override note. A program row with no SCI Var (not acquired)
   answers its arglists as the typed unknown `declaration-absent`.
-- **A task (ruling 6).** `(doc task-sym)` returns the task entity pulled with `[*]` by `[:seon.task/sym sym]`. The
-  value printer selects the schema's declared pair, `seon.render.ns/task-ai` (verified: pulling a task in SCI shows
-  `task-ai`'s fields plus its related `:seon.task/_tasks` and `:must-read`). It walks no subjects and no
-  `task-edges`; the agent calls `(doc x)` on what the task names. Proof status reaches the agent in S7.
-- **Errors.** One variant: `:seon.sci.eval/documentation-unavailable` widens from `:symbol` to the new
-  `:seon.sci.eval/reference`, so keywords use it too (no separate `schema-unavailable-error`). Touched constructors
-  move to the installed `seon.error.refusal/error`.
+- **A task (ruling 6; Astra P1 custody).** Tasks live at their task home (`seon.task/home`, `src/seon/task.clj:340-348`:
+  the home branch's connection seen from a database, nil when that database is the home), as `my.task` already
+  reads them (`src/my/task.clj:78,106`). Astra's probe: a task created after a branch forked is absent on the branch
+  and present at the home. So `(doc task-sym)` is ONE pull at the home:
+  `(db/pull (if-let [home (task/home database)] (db/db home) database) '[*] [:seon.task/sym sym])`. The value
+  printer selects the schema's declared pair, `seon.render.ns/task-ai` (verified: a pulled task shows `task-ai`'s
+  fields, its `:seon.task/must-read` set and related data). `must-read` is part of the pulled task, so the
+  references the opening needs are there; the agent calls `(doc x)` on each. No `task-edges`, no subject walk, no
+  copy of the task onto the branch. The render's related data reads the viewer's database, so reverse task tags
+  (subjects, proofs) come from the worker's program world. The task is read from the home's current value: the
+  opening must see the current revision; a deliberate historical read is an ordinary `seon.db/pull` on the
+  historical value the agent holds, not a `doc` mode. A symbol that names a task at the home and a Var on the
+  branch is a Var first (the dispatch order), since a task symbol is `ns/task-name` and never a defined Var.
+- **A test (Astra P1 proof).** Test Vars are not in SCI, so a test's `doc` reads the DB. It returns
+  `{:sym t :recorded (seon.test/recorded-result db t) :verified? (seon.test/verified? db t)}`: the latest admitted
+  result as the owner records it (or its typed unknown), labelled recorded evidence, beside the proof owner's
+  current verdict (`src/seon/test.clj:1562`: positive passes, input digest, current reach digest, source and
+  fixture rules). No green predicate in the lookup owner; `verified?`'s refusal value is shown as returned. Priced:
+  0.15 ms / 0.02 MB and 0.02-0.04 ms / 0.02 MB on a test with no recorded execution; the cost on a test with a
+  recorded result is measured at implementation (claim 8).
+- **Contracts (Astra P1).** `:seon.sci.eval/authored-reference` is the one polymorphic boundary (whatever follows a
+  lookup macro, with the declared exemption and reason, as `:seon.schema.admission/polymorphic-boundary` entries
+  do); `:seon.sci.eval/reference` is `[:or :symbol :qualified-keyword]` for what `reference-in` resolved;
+  `:seon.sci.eval/lookup-pattern` is `[:or :string <named regex predicate>]` (SCI's `apropos` takes either and
+  `find-doc` calls `re-pattern`, so `#"^symbol-in$"` and `""` are admitted); `:seon.sci.eval/var-summary`'s `:sym` is
+  `:symbol`, since `find-doc` also lists namespaces (`namespaces.cljc:2359-2361`). Malli checks inputs before the
+  body (`malli/core.cljc:2210-2245`), so these are input schemas, not body fallbacks.
+- **Errors.** One variant: `:seon.sci.eval/documentation-unavailable`'s member widens to `authored-reference`, so
+  keywords and lists use it too (no separate `schema-unavailable-error`). Touched constructors move to the installed
+  `seon.error.refusal/error`.
 
 ### 4.4 `source` returns code that prints as code (ruling 7)
 
@@ -280,7 +322,18 @@ deleted with its subject. The class regression walks `:seon.help/forms` and reso
 - `seon.repl`: `render-directory-ai`, `render-directory-html`; `seon.repl.edn` `:directory`.
 - `seon.bootstrap`: `dir`, `doc` macros, `render-help-ai`, `render-help-html`.
 - `my.program`: `source`, `file-line`, `nearest`; `test/my/program_read_test`'s two source tests; the task at
-  `resources/seon/tasks/my.program.edn:59` closes with its subject. `declaration` and `search` stay.
+  `resources/seon/tasks/my.program.edn:59` closes with its subject. `declaration` and `search` stay; the `search` and
+  `declaration-diff` docstrings (:918, :1039) stop naming `my.program/source`. Deleting `nearest` is a BEHAVIOR
+  CHANGE, not an equivalent replacement: it reverse-matched substrings and ranked a capped set, while `apropos`
+  matches forward and unranked; the not-found answer becomes `documentation-unavailable` and the agent runs
+  `(apropos …)`.
+- `bootstrap/render-help-html`'s embedded EDN scan of help lines (`bootstrap.clj:73-97`, a reader) goes with it.
+- Task must-reads naming deleted producers: `resources/seon/tasks/seon.sci.eval.edn:123`
+  (`seon.sci.eval/program-documentation`), :190 (`documentation-value`/`directory-value`), :204 (`directory-value`),
+  and `seon.documentation.edn:4` (`help-value`, signature changes). Each is retargeted to the surviving owner or the
+  task closes when S1 does what it asks (`an-agent-cannot-read-the-private-code-it-must-change`,
+  `dependency-namespaces-have-no-doc-or-dir-in-an-agents-repl`, `dir-shows-each-uncontracted-def-as-two-timestamped-errors`
+  are done by S1's `doc`/`dir` and get S1's table rows as proofs). No dangling references at publication.
 - `seon.agent.loop` (230 lines) and `test/seon/agent/loop_test.clj` (75); `resources/seon/schemas/seon.agent.loop.edn`
   retired, published and adopted on a live-store branch before landing; intents corrected in
   `resources/seon/tasks/seon.task.edn:15` (drop the `task-context` sentence) and `seon.bootstrap.edn:13` (task closed
@@ -315,12 +368,16 @@ about -560 / +170 lines (with `seon.agent.loop`), tests about -75 / +60 plus con
 
 | Risk | Test |
 |---|---|
-| bare and qualified lookups are one Var in every namespace, fresh or stored, before and after acquisition | new table rows in `sci/documentation_test`; `retained-context-receives-the-current-repl-macro-through-its-core-alias` and `bare-test-macros-resolve-without-namespace-referrals` converted to `refer-declared-bindings!`; `retained-context-receives-new-bare-test-referrals` kept |
-| analysis names `clojure.repl/<name>` for each bare lookup | table row asserting stored `:seon.fn/call-arities` |
+| bare and qualified lookups are one Var in every namespace, fresh or stored, before and after acquisition | new table rows in `sci/documentation_test`; `retained-context-receives-the-current-repl-macro-through-its-core-alias` rewritten around the surviving behavior (bare `help` is the acquired `seon.bootstrap/help`, including a branch-interpreted one, in fresh and retained contexts; lookups identical bare and qualified); `bare-test-macros-resolve-without-namespace-referrals` converted to `refer-declared-bindings!`; `retained-context-receives-new-bare-test-referrals` kept |
+| analysis names `clojure.repl/<name>` for each lookup | table rows asserting stored `:seon.fn/call-arities` for a bare call, a qualified call and a `(:require [clojure.repl :refer [doc]])` caller |
+| task custody and references (Astra P1) | new `sci/documentation_test/task-doc-reads-home-declaration-and-branch-proofs`: a task created after the branch forked is found; a task revised at home shows the revision; a task with `must-read` and no reverse tags shows its `must-read`; reverse-tagged proofs come from the branch program, with no home result copied |
+| a stale green is never certified (Astra P1) | new `sci/documentation_test/lookup-does-not-certify-a-stale-test-result`: green result, then a change to a reached definition: `:verified?` false while `:recorded` shows the old green as recorded; an incomplete latest execution never exposes an older green |
+| contract rows (Astra P1) | rows in the lookup table: `(doc 'x)` and `(doc 42)` answer `documentation-unavailable`; `(apropos #"^symbol-in$")`, `(apropos "")`, `(find-doc "")` admitted; a namespace with a docstring appears in `find-doc` |
 | stored namespaces carry no interpreter refers and their source no synthetic require | new row in `test/seon/fn_test` or the owning analysis test: define in a fresh namespace, pull `:seon.ns/refers` and `:seon.ns/source` |
 | each lookup kind answers data | new `sci/documentation_test/each-lookup-answers-its-reference-kind-as-data`: program fn, private fn, library var, aliased var, own SCI `def`, program ns, library ns, schema keyword, unknown keyword, task (renders `task-ai`), test, unknown symbol, quoted symbol, program/test/library source (`:seon.render/ai` text), `dir` program/library/unknown, `apropos`, `find-doc` (asserts `:out` empty) |
 | `dir` sees a function defined after acquisition | `directory-observes-a-function-installed-after-context-acquisition`, converted to the vector shape |
-| help names a form that does not resolve | `help_test`: walk `:seon.help/forms` heads in a fresh agent context |
+| help names a form that does not resolve | new `help_test/help-names-only-installed-forms`: walk `:seon.help/forms` heads in a fresh agent context (proves heads resolve, not that the prose is true; the reader wording stays S2b-1's) |
+| existing tests kept green or converted (Astra list) | `sci/documentation_test`: `directory-observes-a-function-installed-after-context-acquisition`, `documentation-is-returned-data-without-a-second-printed-copy`, `source-at-the-agent-repl-prints-the-stored-declaration` (now data); `render.ns-test/a-namespace-renders-as-one-graph-node`; `render.web-debug-test/passive-ledger-never-reconstructs-directory` (after S2a) and `saved-history-preserves-shown-text-with-numeric-lookups`; `help-test/an-agent-identity-offers-help-as-its-operation`; loop tests retire with their namespace and schema |
 | namespace form evaluates | `render/ns_test` row: evaluating `namespace-form`'s output answers the directory; `my/turn_test.clj:82`, `render/history_test.clj:68,167`, `turn_test.clj:1080-1083` convert from `(dir 'ns)` |
 | source prints as code in the reply | one row asserting the reply's shown text for `(source seon.id/symbol-in)` equals the stored source (printer-face assertion, declared golden) |
 | the reply converter quotes a root render text that is not one EDN value | s5a-reply's converter; S1's source text is one form; coordinate with s5a-reply |
@@ -340,16 +397,19 @@ S1 changes no pass stage, so the ordinary, definition and after-definition passe
 | namespace render of `seon.task` (JVM) | 41-62 ms, 48-90 MB | one pull (1.6 ms, 1.8 MB measured for the reverse pull) plus 31 short reads |
 | `(help)` | 89 ms, 127 MB, 21,662 calls, 1,207 tokens | ≈ `(+ 1 2)`; ~350 tokens (estimate) |
 | `(doc seon.task/create!)` | first 20 ms / 9,407 calls, warm 2-3 ms / 308 | unchanged in S1 (contract slice later), minus the arglists re-read |
-| `(doc <task>)` | `documentation-unavailable` | one pull (≈1 ms) plus the `task-ai` render; no `task-edges` |
+| `(doc <task>)` | `documentation-unavailable` | one pull at the task home (≈1-2 ms; Astra's home pull 2 ms) plus the `task-ai` render; no `task-edges` |
+| `(doc <test>)` | `documentation-unavailable` | `recorded-result` + `verified?`; measured at implementation on a test with a recorded result |
 | `(source x)` | unbound | ≈ `source-fn` today (64 ms pass, 127 tokens) |
 | `(find-doc "symbol-in")` | prints, nil | ≈ 20 ms evaluation, data |
 
 ## 8. The stopped patch, judged
 
-Keep: the per-kind `doc` functions for schema, namespace and test, `reference-in`, `source-value`, SCI-based
-`directory`, the `find-doc` walk (over interns plus namespaces, as SCI's own), most added schemas, the `seon.repl`
-deletions, the table test. Change: its installer becomes base-context-only (§4.1); `task-documentation` and
-`task-doc` are replaced by the task's declared render (ruling 6); `render.ns/directory` reads one pull (ruling 3);
+Keep: the per-kind `doc` functions for schema and namespace, `reference-in`, `source-value`, SCI-based
+`directory`, the `find-doc` walk (over interns plus namespaces, as SCI's own), the `seon.repl` deletions, the table
+test. Change: its installer becomes base-context-only (§4.1); `task-documentation` and `task-doc` are replaced by the
+task's declared render read at the task home (ruling 6, Astra P1); `proof-status`/`proof-statuses` and their schema
+are dropped for the owners' `recorded-result` and `verified?` (Astra P1); its `reference`, `lookup-pattern` and
+`var-summary` schemas are corrected (Astra P1); `render.ns/directory` reads one pull (ruling 3);
 `schema-unavailable(-error)` folds into the widened variant; `documentation_test`'s two lint errors (a removed
 `seon.schema` require still used). Add: §4.2, §4.4, §4.5, the `my.program/source` and `seon.agent.loop` deletions,
 the analysis-edge and stored-refers rows. Never loaded or run; nothing in it is evidence.
@@ -367,6 +427,10 @@ the analysis-edge and stored-refers rows. Never loaded or run; nothing in it is 
 6. `edn/read-string` of every stored `:seon.schema/form` succeeds (census over default).
 7. The reply shows `(source x)`'s rendered text raw for every program source (census of sources through one reply
    path).
+8. `seon.test/verified?` on a test with a recorded result costs well under the ordinary-pass budget (only a test
+   with no execution was priced here).
+9. `seon.task/home` from an agent's branch value answers the home connection; from the home itself nil, so the
+   lookup reads the database it was given (Astra's probe read the home this way).
 
 ## 10. Findings recorded
 
@@ -395,6 +459,8 @@ the analysis-edge and stored-refers rows. Never loaded or run; nothing in it is 
 v1 held for the data functions and the costs. It was wrong about installation (it missed the stored snapshot and
 put the Vars where S4 would move them again), kept per-function contract reads in the namespace render, kept a
 second arglists source in `doc`, invented a third task shape, and left help as escaped strings and `source` as an
-escaped string. v2 follows root's rulings; open for the Astra review: §4.2's exact seam (claim 5) and whether the
-reply converter keeps root render text raw (§4.4, s5a-reply). Awkward: S1 cannot start code while s5a-reply holds
+escaped string. v2 followed root's rulings. v3 folds in the Astra review: task custody (one pull at the home, keeping
+`must-read`), no lookup-made proof verdict (the owner's `recorded-result` and `verified?` side by side), and input
+contracts that admit what the design promises. Still open: §4.2's exact seam (claim 5) and whether the reply
+converter keeps root render text raw (§4.4, s5a-reply). Awkward: S1 cannot start code while s5a-reply holds
 `eval.clj`, and it rebases onto S2a.
