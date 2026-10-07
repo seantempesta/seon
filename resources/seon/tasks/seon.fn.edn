@@ -106,4 +106,9 @@
              :kind :function
              :intent "The lint/contract entrance available to agents, seon.fn/contract-findings, is whole-program and answers 283k tokens. Done when a scoped entrance exists under my.* (a namespace or symbol set) that answers only the findings for that scope in a reply an agent can read, with a size regression."
              :must-read #{seon.fn/contract-findings}
-             :evidence #{"tmp/repl-audit/change.md"}}]
+             :evidence #{"tmp/repl-audit/change.md"}}
+ #:seon.task{:name "an-edit-rewrites-every-definition-below-it"
+             :kind :function
+             :intent "A publication rewrites :seon.fn/form-span and :seon.program/analyzed-source-digest for every definition whose lines moved, not for the ones whose source changed: analyze-forms stamps each definition with its whole FILE's digest (:seon.fn.file/digest of the analyzed source) and same-indexed-entity? only skips a definition when everything but that digest is equal, so a moved span rewrites both. On default's history (2026-10-07, db-watch lane) one publish rewrote 2,674 form-span/digest datoms for 136 changed :seon.fn/source datoms (20x), another 2,892 for 327; overall 19.5k of the 162k history-only datoms on default are these two attributes. Each rewritten definition touches its aevt/avet leaves, so the files written follow the file length below the edit. Smallest fix: the file digest lives once on the file entity (:seon.fn.file/digest), not copied per definition; keep form-span but compare it as position, not as a change of the definition. Done when editing one defn in a 100-definition file writes O(changed definitions) program datoms (measured with watch.clj :since-basis), with a regression on that count."
+             :must-read #{seon.fn/analyze-forms seon.fn/same-indexed-entity?}
+             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}]
