@@ -154,14 +154,20 @@ details.seon-print-node {
 .seon-print-keyword { color: var(--color-info); }
 .seon-print-string,
 .seon-print-char { color: var(--color-success); }
-/* A string literal keeps its line breaks: source and docstrings read as lines. */
+/* A string shows its own characters, its line breaks kept; the quotes are
+   CSS, so a selection copies the characters alone. */
 .seon-print-string { white-space: pre-wrap; }
+.seon-print-string::before,
+.seon-print-string::after { content: '"'; }
+/* Render text is shown as written, line breaks included. */
+.seon-print-projected { white-space: pre-wrap; }
 .seon-print-number,
 .seon-print-boolean,
 .seon-print-nil { color: var(--color-eval); }
 .seon-print-symbol,
 .seon-print-tag { color: var(--color-text-100); }
 .seon-print-elision,
+.seon-print-whole-text,
 .seon-print-prune { color: var(--color-warning); }
 .seon-print-object,
 .seon-print-projected { color: var(--color-text-300); }

@@ -697,10 +697,10 @@ handle))}}
         (is (= (:seon.schema.projection/fingerprint projection)
                (:seon.schema.projection/fingerprint program-identity))
             "the fingerprint comes from the handed SCI context projection")
+        ;; HTML shows a string's own characters (its quotes are CSS), so the labels are compared as shown.
         (is (= {"indexed source digest" (:seon.source/digest program-identity)
-                "schema projection fingerprint" (:seon.schema.projection/fingerprint program-identity)}
-               (update-vals (select-keys (labelled header) ["indexed source digest" "schema projection fingerprint"])
-                            edn/read-string))
+                "schema projection fingerprint" (str (:seon.schema.projection/fingerprint program-identity))}
+               (select-keys (labelled header) ["indexed source digest" "schema projection fingerprint"]))
             "the header shows the indexed source digest and the context projection fingerprint")
         (is (= {"HTML" "page" "AI" ""}
                (into {} (map (fn [^Element link] [(.text link) (.attr link "aria-current")]))

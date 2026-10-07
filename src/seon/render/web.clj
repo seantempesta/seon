@@ -3177,16 +3177,34 @@
                  :seon.render.web/feed-url
                  (route/path ::route/feed {:id agent-id})}))))))
 
+(defn- sent-context
+  "The agent's context as its next model call is sent it, derived at the
+  query's `basis` (else the head), and the value at the query's cursor."
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :map]}
+  [{connection :seon.store/connection-object :as service} agent-id query]
+  (let [head (db/db connection)
+        basis (or (some-> (get query "basis") parse-long) (db/basis-t head))
+        database (db/as-of head basis)
+        composed (dissoc ((requiring-resolve 'seon.cluster.prompt/prompt) database
+                          (debug-turn-request database connection agent-id (:seon.sci.admit/caps service)
+                                              (dissoc service :seon.turn/id)))
+                         :seon.db/db)
+        cursor (data/parse-cursor (get query "path") (get query "offset"))]
+    {::database database ::basis basis ::cursor cursor ::found (data/at composed cursor)}))
+
 (defn- sent-context-html
-  "The agent's context as its next model call is sent it, through the value printer's HTML face."
-  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id] :seon.render/hiccup]}
-  [{connection :seon.store/connection-object :as service} agent-id]
-  (let [database (db/db connection)
-        composed ((requiring-resolve 'seon.cluster.prompt/prompt) database
-                  (debug-turn-request database connection agent-id (:seon.sci.admit/caps service) (dissoc service :seon.turn/id)))]
+  "The agent's context as its next model call is sent it, through the value
+  printer's HTML face; every cut pages it at the same basis."
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :seon.render/hiccup]}
+  [service agent-id query]
+  (let [{::keys [database basis cursor found]} (sent-context service agent-id query)]
     [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
-     (value/html {:seon.render/value (dissoc composed :seon.db/db) :seon.db/db database
-                  :seon.render.value/root [::context agent-id]})]))
+     (value/html {:seon.render/value (if (contains? found :seon.render.data/value) (:seon.render.data/value found) found)
+                  :seon.db/db database
+                  :seon.render.value/root [::context agent-id]
+                  :seon.render.data/cursor cursor
+                  :seon.render.value/route-base (route/path ::route/agent-debug {:id agent-id} {:sent "true"})
+                  :seon.render.value/basis basis})]))
 
 (defn- debug-response
   "The ring response for one agent's or namespace's debug page, or for its record or context fragment."
@@ -3209,8 +3227,15 @@
                 (vals (dissoc page stream-strip-id))))
          {"datastar-mode" "replace"}))
 
+      ;; A string cut's whole text: the string itself, no printing step.
+      (and agent-id (= "true" (get query "sent")) (= "1" (get query "text")))
+      (let [{value :seon.render.data/value :as found} (::found (sent-context service agent-id query))]
+        (if (string? value)
+          (text-response 200 value)
+          (text-response 422 (or (:seon.error/message found) "The path does not name a string."))))
+
       (and agent-id (= "true" (get query "sent")) datastar?)
-      (html-response (hiccup/->string (sent-context-html service agent-id))
+      (html-response (hiccup/->string (sent-context-html service agent-id query))
                      {"datastar-mode" "replace"})
 
       (and agent-id (not (get query "subject")))
