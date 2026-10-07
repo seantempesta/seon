@@ -67,6 +67,30 @@
              {:sink (async/<!! (sut/call-with-root-bindings #(async/go db/*read-evidence-sink*)))
               :caller-sink-after db/*read-evidence-sink*})))))
 
+(defn- idle-step
+  ([] {:ins {} :outs {}})
+  ([args] args)
+  ([state _transition] state)
+  ([state _input _message] [state nil]))
+
+(deftest a-graph-started-inside-an-evaluation-keeps-none-of-its-bindings
+  ;; start-graph! is the graph-side site of call-with-root-bindings: Flow's
+  ;; mult and tap go-loops start in the frame its joins run in, so a graph
+  ;; opened inside an evaluation's binding never holds that evaluation's sink
+  (let [sink (atom [])
+        {::sut/keys [graph joins]}
+        (binding [db/*read-evidence-sink* sink]
+          (sut/start-graph!
+           {::sut/graph-definition
+            {:procs {::idle {:proc (flow/process #'idle-step {:workload :io})}}
+             :conns []}
+            ::sut/joins {::frame (fn [_] {:sink db/*read-evidence-sink*})}}))]
+    (try
+      (is (= {:sink nil} (::frame joins)) "joins, Flow's go-loops' frame, hold no caller binding")
+      (is (= [] @sink))
+      (finally
+        (flow/stop graph)))))
+
 (deftest graph-construction-joins-every-declared-tap-before-resume
   (let [{::sut/keys [graph joins]}
         (sut/start-graph!

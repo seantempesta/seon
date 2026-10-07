@@ -361,6 +361,25 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
+(deftest a-store-writer-never-keeps-the-opening-evaluations-bindings
+  ;; open-store! is the main connection's entrance: a store opened inside an
+  ;; evaluation (a test, a tool) ran its writer under that evaluation's frame
+  (let [dir (fresh-dir)
+        sink (atom [])]
+    (try
+      (let [opened (binding [db/*read-evidence-sink* sink]
+                     (store/open-store! {:seon.store/dir dir}))
+            seen (CompletableFuture.)]
+        (try
+          (d/transact (:seon.store/connection-object opened)
+                      [[:db.fn/call (fn [_] (.complete seen {:sink db/*read-evidence-sink*}) [])]])
+          (is (= {:sink nil} (.get seen 5 TimeUnit/SECONDS)))
+          (is (= [] @sink))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
 (deftest transact-normalizes-only-jdk-integers
   (let [dir (fresh-dir)]
     (try

@@ -29,7 +29,7 @@ Task: seon.sci.kernel/a-failure-keeps-and-classifies-every-frame-of-every-link.
    the outermost frame readers use): a recursion's repeated run collapses to its distinct frames; a
    non-recursive trace is unchanged. Same schema (`:seon.sci.eval/stacktrace` vector of triples).
 
-Cost: chain work O(total distinct frames + links), not links x frames; stacktrace O(depth) to read once,
+Cost: frames kept and classified O(total distinct frames + links); the suffix compare still reads both whole trace arrays per link, so L links of identical depth-D traces cost O(L x D) element comparisons (no conversion, no allocation per frame); stacktrace O(depth) to read once,
 O(distinct frames) kept.
 
 ## Not doing

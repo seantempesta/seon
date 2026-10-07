@@ -572,10 +572,13 @@
                        ; requested setting (or the settled default).
                        :else
                        (do (create-store! dir creation-configuration) true))
-            connection (d/connect (if created?
-                                    creation-configuration
-                                    (cond-> (open-configuration creation-configuration)
-                                      requested? (assoc :keep-history? requested))))]
+            ;; the writer's go-loops keep the frame they start in: never an
+            ;; evaluation's (a test or tool may open a store inside one)
+            connection (flow/call-with-root-bindings
+                        #(d/connect (if created?
+                                      creation-configuration
+                                      (cond-> (open-configuration creation-configuration)
+                                        requested? (assoc :keep-history? requested)))))]
         ; readiness is a COMPLETE connection over a COMPLETE store: the
         ; main branch must be readable before this value escapes
         (try
