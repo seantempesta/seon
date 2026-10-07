@@ -1,6 +1,6 @@
 ---
 type: design
-status: proposed v3 (owner ruling, Opus review 87e6991a2 and root's rulings folded in; gate 1)
+status: v4, root-ruled (ledger option A; golden deleted; gaps 1-2 owned by S4; gap 3 by a printer lane). Code waits on transcript.clj (s5a-reply)
 created: 2026-10-07
 tags: [design, agent-loop, deletion, debug]
 ---
@@ -169,8 +169,8 @@ That retention is an atom beside the ctx, not a `seon.cache` kind, so the ruling
 what it read" is **not met before S4**. Adding a `seon.cache` kind now would mean rewriting `derive-context!`'s
 retention, which is the path S4 deletes. Keying a new cache by commit id is ruled out by CLAUDE.md ("a commit id
 identifies a database value, not an excuse to recompute"). The requirement is met by S4's context, whose units
-render through `seon.cache` by content digest (CLAUDE.md "Presentation"). Root decides whether that interval is
-acceptable.
+render through `seon.cache` by content digest (CLAUDE.md "Presentation"). **Root ruling (v4):** accepted until S4,
+which owns it; slated code is not patched.
 
 **Budget (owner question 3).** Opening the view is over budget today:
 
@@ -193,6 +193,22 @@ open cost as one of its S0 rows; the target is under 100 ms and tens of MB.
 
 ## 3. The ledger (owner question 1)
 
+### Root rulings (v4)
+
+- **Ledger.** Option (A): delete the ledger and its problem panel. Tasks `a9a7bb6e6f29` (`turn-kind`) and
+  `ec70b6017334` (`ledger-effects`) close as deleted when the code lands. The (B)/(C) specification below is kept as
+  the record of what was considered.
+- **Golden test.** `web_test/next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake` is deleted
+  with its subject.
+- **Gap 1 (the cost of opening the view).** Opening it costs 0.4-0.8 s, and up to about 1.2 GB, after any write.
+  - Accepted only until S4. The cost is paid when someone opens the view, never on page load.
+  - S4 deletes that assembly, and slated code is not patched.
+  - **S4 must bring opening this view under budget and prove it with a measured S0 row**: the view's open, cold
+    after a write and warm, in ms and MB.
+- **Gap 2 (no `seon.cache` before S4).** The same treatment applies: accepted until S4, and S4 owns it.
+- **Gap 3 (the printer's HTML cut).** A separate printer lane owns `e3d5afaaa903`, and S2a shows the composed map as
+  it prints today.
+
 What the ledger adds beyond the context view:
 
 | Ledger part | Where it lives after S2a | S4 context |
@@ -213,7 +229,8 @@ What the ledger adds beyond the context view:
 | (B) Thin list: one row per turn with reply intent, results count and kind | about 60 lines (`turn-entities`, `turn-kind` from own facts, `results-summary`) | ≈ 50-100 ms (UNVERIFIED) | ≈ −1,000 |
 | (C) v1's converted ledger, with root's rulings 1, 3 and 4 applied | ≈ 600 lines | `ledger-effects` (≈ 186 MB) plus about 4 turn bodies' emissions; `turn-kind` and churn ≈ 0 | ≈ −500 |
 
-**Recommend (A).** After S4 the context view is the agent's history ("the agent's forms with their real results"), so
+**Root ruling (v4): (A).** The ledger and its problem panel are deleted; the page is the header, the context view and
+Record. Reasoning: After S4 the context view is the agent's history ("the agent's forms with their real results"), so
 a turn list duplicates it, and S6 deletes turns as entities. Every ledger number tied to the old machinery (turn
 budget, churn, prefix, refresh) goes with it. (A) also deletes the two over-budget producers (`turn-kind`,
 `ledger-effects`) instead of fixing them.
@@ -323,7 +340,7 @@ them with the assembly. The shared helpers the graph used (`forward-attribute`, 
 | `web_debug_test`: `passive-ledger-never-reconstructs-directory`, `ledger-derives-shared-data-once` | both use Var redefinition. Under (A) both go with the ledger. Under (B)/(C), `passive-ledger…` converts from `with-redefs` to `support/armed-calls` (test_support.clj:722); `sci.eval/directory-value` and `repl/render-directory-ai` are armed (Opus review finding 5) |
 | `rereads_panel_test` (whole file) | its behavior is the ledger's stale-but-unchanged rule. `rereads_test`'s helpers stay for S4 |
 | `transcript_test/a-refused-render-profile-is-passed-on-never-used-as-the-prefix-profile` | |
-| the golden `web_test/next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake` | its declared behavior is the session view's colourised reader and raw toggle. **Root's call** (goldens are discussed with root); walk-delete recorded root's earlier approval. Its system-turn assertions are S4's |
+| the golden `web_test/next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake` | its declared behavior is the session view's colourised reader and raw toggle. **Root ruling (v4): deleted with its subject.** Its system-turn assertions are S4's |
 
 **Converted:**
 
@@ -438,9 +455,10 @@ The ruling simplified the design: the one view already exists as `sent-context-h
 Var. Problems that remain:
 
 - **The printer's HTML cut of a long string cannot be continued and shows an escaped literal.** The view therefore
-  shows the essence, not every byte, until task `e3d5afaaa903` lands. Recorded as option (a), with alternatives.
-- **`seon.cache` caching of the view is not possible before S4** without rewriting a path S4 deletes. Stated in §2;
-  root decides.
+  shows the essence, not every byte, until task `e3d5afaaa903` lands. Root ruling: a separate printer lane owns that
+  task; S2a takes option (a).
+- **`seon.cache` caching of the view is not possible before S4** without rewriting a path S4 deletes. Root ruling:
+  S4 owns it.
 - **The view's open cost is the old assembly's** (0.4-0.8 s cold after a write; 55 ms when nothing changed). It stays
   over budget until S4.
 - **Root's rulings 1, 3 and 4 (and Opus findings 1, 3 and 4) correct the ledger**, which this revision recommends
