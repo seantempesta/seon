@@ -84,14 +84,14 @@
          (let [requested (subvec symbols 0 n)
                first-digests (runner/reach-digests database requested)
                [_ calls] (test-support/armed-calls
-                          '#{seon.test.runner/reach-closures}
+                          '#{seon.test.runner/reach-components}
                           #(do
                              (is (= first-digests (runner/reach-digests database requested)))
                              (is (= (set requested) (set (keys (runner/reach-memberships database requested)))))))]
            (is (= n (count first-digests)))
            (is (every? string? (vals first-digests)))
-           (is (zero? (get calls 'seon.test.runner/reach-closures))
-               "digest and membership reads never rebuild the same graph closures")))))))
+           (is (zero? (get calls 'seon.test.runner/reach-components))
+               "digest and membership reads never rebuild the same graph's components")))))))
 
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces

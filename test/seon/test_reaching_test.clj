@@ -66,11 +66,11 @@
            '[:seon.test/sym reach.fixture/b-test] "(deftest b-test (is (= 1 (b 1))))"))
 
 (defn- derived-digests
-  "The reach digests the central cache holds for `test-symbol`, one per
-  distinct closure content it was derived for."
-  {:malli/schema [:=> [:cat :seon.test/sym] :int]}
-  [test-symbol]
-  (count (filter #(= test-symbol (first %)) (keys (seon.cache/retained :seon.test.runner/reach-digest)))))
+  "The reach indexes the central cache holds for the request `test-symbols`,
+  one per distinct reached graph content it was derived for."
+  {:malli/schema [:=> [:cat [:set :seon.test/sym]] :int]}
+  [test-symbols]
+  (count (filter #(= test-symbols (first %)) (keys (seon.cache/retained :seon.test.runner/reach-index)))))
 
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
@@ -80,7 +80,7 @@
          initial (runner/reach-digests (db/db connection) [ta tb])]
     (is (= 2 (count initial)))
     (is (= initial (runner/reach-digests (db/db connection) [ta tb])))
-    ;; Source, contract and schema writes each derive a digest only for the
+    ;; Source, contract and schema writes each change the digest of only the
     ;; test they reach; the other test's closure content is unchanged.
     (doseq [write! [#(define! % '[:seon.fn/sym reach.fixture/a]
                               "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
@@ -88,19 +88,17 @@
                               "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :any]} [x] (identity x))")
                     #(support/transacted! % [[:db/add [:seon.schema/key :seon.test/sym]
                                               :seon.schema/form "[:qualified-symbol {:min 2}]"]])]]
-     (let [before (runner/reach-digests (db/db connection) [ta tb])
-           b-derived (derived-digests tb)]
+     (let [before (runner/reach-digests (db/db connection) [ta tb])]
       (write! connection)
       (let [after (runner/reach-digests (db/db connection) [ta tb])]
        (is (not= (get before ta) (get after ta)))
-       (is (= (get before tb) (get after tb)))
-       (is (= b-derived (derived-digests tb)) "the unchanged closure derives no digest"))))
+       (is (= (get before tb) (get after tb))))))
     ;; A data write leaves every closure's content equal.
     (let [before (runner/reach-digests (db/db connection) [ta tb])
-          derived (map derived-digests [ta tb])]
+          derived (derived-digests #{ta tb})]
      (support/transacted! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
-     (is (= derived (map derived-digests [ta tb]))))))))
+     (is (= derived (derived-digests #{ta tb})) "equal reached content derives nothing"))))))
 
 (deftest concurrent-reach-reads-of-one-value-derive-once
  ;; A digest is cached under its closure's content: equal values share one
@@ -110,7 +108,7 @@
    (seed-reach-fixture! connection)
    (let [ta 'reach.fixture/a-test
          database (db/db connection)
-         before (derived-digests ta)
+         before (derived-digests #{ta})
          start (java.util.concurrent.CountDownLatch. 1)
          readers (mapv (fn [_] (future (.await start) (runner/reach-digests database [ta]))) (range 4))
          _ (.countDown start)
@@ -118,7 +116,7 @@
     (is (apply = results))
     (is (string? (get-in results [0 ta])))
     ;; Equal content already derived (an earlier run) derives nothing.
-    (is (contains? #{before (inc before)} (derived-digests ta)))
+    (is (contains? #{before (inc before)} (derived-digests #{ta})))
     (define! connection '[:seon.fn/sym reach.fixture/a]
              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
     (is (not= (first results) (runner/reach-digests (db/db connection) [ta])))))))
@@ -132,7 +130,7 @@
                (fn [connection]
                 (when write?
                  (support/transacted! connection [[:db/add [:seon.test/sym s] :seon.test/pass-count 1]]))
-                [(runner/reach-digests (db/db connection) [s]) (derived-digests s)])))
+                [(runner/reach-digests (db/db connection) [s]) (derived-digests #{s})])))
        [digests derivations] (read-reach false)
        [again again-derivations] (read-reach true)]
   (is (string? (get digests s)))

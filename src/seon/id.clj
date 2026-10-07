@@ -101,9 +101,12 @@
   ## Costs
 
   - Streams the print into the digest: memory is constant in the value's
-    size, time is linear in its printed size. The 2,387 reach-digest inputs
-    of default's tests (about 600 MB printed) take 8.7 s either way;
-    streaming cut allocation from 17.4 GB to 13.4 GB (2026-09-28)."
+    size, time is linear in its printed size. Callers hash small values: on
+    default 2026-10-07, 917,027 calls averaged 21 us (max 23 ms); the largest
+    input found, the schema projection's 3,389 forms, prints 641,443
+    characters in 6.6 ms. A large derived value is hashed by composing its
+    parts' digests, never by printing it (see
+    `seon.test.runner/reach-component-digests`)."
   {:malli/schema
    [:function [:=> [:cat] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:int {:min 1, :max 64}]] [:string {:min 1, :max 64}]]]}
   ([] (id (random-uuid)))

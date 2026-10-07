@@ -72,3 +72,18 @@
              "a changed definition in the closure changes the digest")
          (is (= (get before elsewhere) (get after elsewhere))
              "a test that does not reach it keeps its digest"))))))
+
+(deftest tests-reaching-answers-the-tests-whose-closure-holds-the-target
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           reaching 'seon.id-test/data-shape-and-explicit-length-determine-identity
+           elsewhere 'seon.db-test/semantic-replay-declines-opaque-and-lazy-values-without-realizing
+           symbols [reaching elsewhere]
+           reaches (runner/reach-memberships database symbols)]
+       (is (= (into #{} (filter #(contains? (get reaches %) 'seon.id/id)) symbols)
+              (runner/tests-reaching database symbols 'seon.id/id))
+           "the same tests the memberships name")
+       (is (= #{reaching} (runner/tests-reaching database symbols 'seon.id/id)))
+       (is (= #{} (runner/tests-reaching database symbols reaching))
+           "a test never counts as reaching itself")))))

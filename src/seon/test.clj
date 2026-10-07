@@ -2397,16 +2397,14 @@
                                      (vreset! held-handle
                                               (clean-request-handle execution recording cluster effective)))
                 ;; Once per request: the members an attempt evaluation serves,
-                ;; those whose own reach (the index `reach` read) names the
-                ;; effect owner, never the owner's whole reverse closure
-                ;; (1,539 names, 65-90 ms per request, 2026-09-26).
+                ;; those whose closure names the effect owner, from one reverse
+                ;; walk of the reached graph (all 2,365 tests 18 ms, where every
+                ;; member's closure took 7.8 s and 13.7 GB, 2026-10-07).
                 effect-reach (when (seq ordered)
-                               (let [reaches (runner/reach-memberships database (vec ordered))]
-                                 (if (:seon.error/at reaches)
-                                   (throw (ex-info "Effect reach is unreadable." reaches))
-                                   (into #{} (keep (fn [[test-symbol names]]
-                                                     (when (contains? names 'seon.effect/request*) test-symbol)))
-                                         reaches))))
+                               (let [reaching (runner/tests-reaching database (vec ordered) 'seon.effect/request*)]
+                                 (if (:seon.error/at reaching)
+                                   (throw (ex-info "Effect reach is unreadable." reaching))
+                                   reaching)))
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [run-id (:seon.test.run/id batch-provenance)
