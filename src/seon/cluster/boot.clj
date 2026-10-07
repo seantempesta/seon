@@ -24,7 +24,7 @@
             [seon.health :as health]
             [seon.maintenance :as maintenance]
             [seon.operator.runtime :refer [running-instances]]
-            [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]))
@@ -295,7 +295,7 @@
    ;; This reply crosses the prepl, a wire: every carried value is bounded text
    ;; from the value renderer's projection-free core, never a live handle
    ;; printed whole, and never a render that can fail with what it reports.
-   (let [shown print.value/bounded-text]
+   (let [shown render.value/core-text]
      (-> (refusal/diagnostic
           (assoc (diagnostic message (shown offending) cause) :seon.error/throwable throwable))
          (update :seon.error/chain
@@ -794,7 +794,7 @@
       ;; failure is a core fault, shown first as the floor of its Throwable and
       ;; recorded in the requested cluster.
       (let [refused? (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
-            response (diagnostic (if refused? (ex-message cause) (print.value/throwable-text cause))
+            response (diagnostic (if refused? (ex-message cause) (render.value/core-text cause))
                                  (dissoc (or (ex-data cause) request) :seon.boot/prepl-server)
                                  (if refused? :refused :operation-failed) cause)]
         (if refused?
@@ -820,5 +820,5 @@
   [ready]
   (str "seon " (:seon.boot/cluster-name ready)
        (if (seq (:seon.boot/missing-layers ready)) " partial boot " " ready ")
-       (or (:seon.render.web/url ready) (print.value/bounded-text (:seon.boot/missing-layers ready)))
+       (or (:seon.render.web/url ready) (render.value/core-text (:seon.boot/missing-layers ready)))
        " (pid " (:seon.boot/pid ready) ", prepl " (:seon.boot/prepl-port ready) ")"))

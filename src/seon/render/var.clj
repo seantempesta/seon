@@ -154,10 +154,9 @@
      (when (or contract (seq pending) (seq newly-red) (seq newly-green))
        [:ul
         (when contract [:li (str "contract " (name contract) ": ")
-                        (let [shown (render.value/render-html {:seon.render/value example
-                                                               :seon.db/db (:seon.db/db unit)
-                                                               :seon.render.value/root [::example sym]})]
-                          (if (map? shown) (:seon.error/message shown) shown))])
+                        (render.value/html {:seon.render/value example
+                                            :seon.db/db (:seon.db/db unit)
+                                            :seon.render.value/root [::example sym]})])
         (tests "newly red" newly-red :seon.render.var/newly-red)
         (tests "newly green" newly-green :seon.render.var/newly-green)
         (tests "pending" pending :seon.render.var/pending)])]))

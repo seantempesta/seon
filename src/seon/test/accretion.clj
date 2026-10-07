@@ -6,7 +6,7 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.registry :as mr]
-            [seon.print.value :as print.value]))
+            [seon.render.value :as render.value]))
 
 (defn generatable?
   "True when Malli can construct a generator for `schema` with `options`."
@@ -84,12 +84,12 @@
     ;; generated arguments and a returned actual are arbitrary values: shown
     ;; through the value printer, never through a whole world
     (str "Auto-check seed " (:seon.test.accretion/seed failure)
-         "\narguments: " (print.value/bounded-text (:seon.test.accretion/arguments failure))
+         "\narguments: " (render.value/core-text (:seon.test.accretion/arguments failure))
          "\nexpected: " (:seon.test.accretion/expected failure)
          "\nactual: " (let [actual (:seon.test.accretion/actual failure)]
                           (if (:seon.error/operation actual)
                             (str (:seon.error/operation actual) " — " (:seon.error/message actual))
-                            (print.value/bounded-text actual)))
+                            (render.value/core-text actual)))
          (when-let [explanation (:seon.test.accretion/explanation failure)]
            (str "\nwhy: " explanation)))))
 

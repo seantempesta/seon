@@ -47,7 +47,6 @@
             [seon.operator.runtime :as operator.runtime]
             [seon.problems :as problems]
             [seon.profile :as profile]
-            [seon.print.value :as print.value]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]))
@@ -577,8 +576,7 @@
     (if (or (nil? instance) (nil? database) (db/read-refusal? database))
       (refusal/diagnostic {:seon.error/at (java.util.Date.) :seon.error/layer :seon.health/report
                            :seon.error/operation `report :seon.health/cluster cluster-name
-                           :seon.error/message (str "No running cluster " (print.value/bounded-text cluster-name)
-                                                    " with a readable database in this JVM.")
+                           :seon.error/message "No running cluster named :seon.health/cluster has a readable database in this JVM."
                            :seon.error/fix "Name a cluster bin/seon status lists."})
       (let [loaded @sci.eval/loaded-identity
             units (cond-> {:seon.health/cluster cluster-name
@@ -676,22 +674,6 @@
         '(seon.problems/open-faults (seon.db/db))
         '(seon.cache/status)]})))
 
-(defn- shown-html
-  "`value` through the value printer's HTML face under `root`; a printer
-  refusal shows its message."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.render/hiccup]}
-  [database root value]
-  (let [shown (render.value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
-    (if (map? shown) [:span (:seon.error/message shown)] shown)))
-
-(defn- shown-text
-  "`value` through the value printer's text face under `root`; a printer
-  refusal answers its message."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :string]}
-  [database root value]
-  (let [shown (render.value/render-ai {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
-    (if (string? shown) shown (:seon.error/message shown))))
-
 (defn- finding-item
   "One finding as a list item: score, subject and schema, then its clues and
   tasks on a second line, so it reads at any width."
@@ -700,11 +682,11 @@
   (let [shown-clues (clues (get schemas k) (:seon.health/value finding))]
     [:li {:class "seon-health-finding" :data-schema (str k)}
      [:div [:strong (str (:seon.health/score finding))] " "
-      (shown-html database [::subject k (:seon.health/subject finding)] (:seon.health/subject finding)) " "
+      (render.value/html {:seon.render/value (:seon.health/subject finding) :seon.db/db database :seon.render.value/root [::subject k (:seon.health/subject finding)]}) " "
       [:span {:class "seon-health-schema"} (str k)]]
      (when (or (seq shown-clues) (:seon.health/tasks finding) (:seon.health/callers finding))
        [:div {:class "seon-health-clues"}
-        (str/join " · " (concat (map (fn [[ck v]] (str (name ck) " " (shown-text database [::clue k ck] v))) shown-clues)
+        (str/join " · " (concat (map (fn [[ck v]] (str (name ck) " " (render.value/text {:seon.render/value v :seon.db/db database :seon.render.value/root [::clue k ck]}))) shown-clues)
                                 (when-let [callers (:seon.health/callers finding)]
                                   [(str "callers " (str/join ", " callers))])
                                 (when-let [tasks (:seon.health/tasks finding)]
@@ -716,7 +698,7 @@
   [database title value face]
   [:section {:class "seon-health-unit"}
    [:h2 title]
-   (cond (:seon.health/unit value) [:p {:class "seon-health-pending"} "deriving… " (shown-html database [::requery title] (:seon.health/requery value))]
+   (cond (:seon.health/unit value) [:p {:class "seon-health-pending"} "deriving… " (render.value/html {:seon.render/value (:seon.health/requery value) :seon.db/db database :seon.render.value/root [::requery title]})]
          (:seon.error/at value) [:p {:class "seon-health-error"} (:seon.error/message value)]
          :else (face value))])
 
@@ -729,7 +711,7 @@
   (let [schemas (if database (finding-schemas (db/carried-projection database)) {})]
     [:article {:class "seon-health" :data-state (name (:seon.health/state value :unknown))}
      [:header [:h1 "Health " [:span {:class "seon-health-state"} (name (:seon.health/state value :unknown))]]
-      (shown-html database [::basis] (:seon.health/basis value))]
+      (render.value/html {:seon.render/value (:seon.health/basis value) :seon.db/db database :seon.render.value/root [::basis]})]
      [:section {:class "seon-health-findings"}
       [:h2 (str (count (:seon.health/findings value)) " findings, worst first")]
       (into [:ol {:class "seon-health-list"}] (map (partial finding-item database schemas)) (:seon.health/findings value))]

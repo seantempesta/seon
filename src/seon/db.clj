@@ -113,13 +113,36 @@
 (schema/register-core-predicate! 'seon.db/transaction-report-datom?
                                  transaction-report-datom?)
 
+(def ^:private root-frame
+  "Clojure's root binding frame, as a fresh thread starts with it (`Var.dvals`)."
+  (let [task (java.util.concurrent.FutureTask. ^java.util.concurrent.Callable
+                          (fn [] (clojure.lang.Var/getThreadBindingFrame)))]
+    (.join (Thread/startVirtualThread task))
+    (.get task)))
+
+(defn call-with-root-bindings
+  "The value of `f`, called where every Var has its root binding.
+  Start long-lived go-loops through it (a connection's writer, a graph, a
+  mult): a go block keeps the frame it starts in, so it would keep the
+  caller's evaluation. The database owner holds it because a connection's
+  writer is its first user and every other owner (Flow, the store, the web)
+  sits above it."
+  {:malli/schema [:=> [:cat [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The thunk's own polymorphic result is returned unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The thunk's own polymorphic result is returned unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [f]
+  (let [frame (clojure.lang.Var/getThreadBindingFrame)]
+    (clojure.lang.Var/resetThreadBindingFrame root-frame)
+    (try (f)
+         (finally (clojure.lang.Var/resetThreadBindingFrame frame)))))
+
 (defn- fresh-connection
   []
   (let [configuration {:store {:backend :memory :id (random-uuid)}
                        :schema-flexibility :write}]
     (d/create-database configuration)
-    (d/connect configuration)))
-
+    ;; the connection's writer go-loop keeps no caller binding: a generator
+    ;; may be sampled inside an evaluation
+    (call-with-root-bindings #(d/connect configuration))))
 (def connection-generator
   (gen/fmap (fn [_] (fresh-connection)) (gen/return nil)))
 
@@ -2012,9 +2035,8 @@
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :map :qualified-keyword :seon.schema/value] :seon.error/base]}
   [operation database declaration attribute value]
   (assoc (diagnostic
-   {:seon.error/message (str operation " received " (pr-str value) " for "
-         (pr-str attribute) ", whose installed value type is "
-         (pr-str (:db/valueType declaration)) ".")
+   {:seon.error/message (str operation " received a value (:seon.error/offending) for " attribute
+         " that does not match its installed value type " (:db/valueType declaration) ".")
     :seon.db/invalid-read true
     :seon.error/layer :database-read
     :seon.error/operation operation
@@ -2660,12 +2682,9 @@
                   argument)))))
         source-bindings))
 
-(defn- query-argument-message
-  [query-form arguments]
-  (str "seon.db/q :in " (pr-str (get query-form :in '[$]))
-       " does not match supplied arguments "
-       (pr-str (mapv #(if (db.utils/db? %) 'database %) arguments))
-       ". Every source input must be a database value. "
+(def ^:private query-argument-message
+  (str "seon.db/q's :in does not match its supplied arguments (:seon.error/expected and"
+       " :seon.error/offending). Every source input must be a database value. "
        "Use (seon.db/q query input ...) with the database elided, "
        "or (seon.db/q database query input ...) with an explicit database first."))
 
@@ -2673,7 +2692,7 @@
   {:malli/schema [:=> [:cat :map [:sequential :seon.schema/value]] :seon.error/base]}
   [query-form arguments]
   (assoc (diagnostic
-   {:seon.error/message (query-argument-message query-form arguments)
+   {:seon.error/message query-argument-message
     :seon.db/invalid-read true
     :seon.error/layer :database-read
     :seon.error/operation 'seon.db/q
@@ -2756,23 +2775,16 @@
              (not= :invalid (query-input-position explicit? (:query normalized) (:args normalized))))))))
 
 (defn- query-guard-message
-  "The refusal sentence for a `q` call whose inputs do not match `:in`.
-  Reached only after `query-call-valid?` parsed these inputs and answered
-  false, so parsing here cannot fail differently."
+  "The refusal sentence for a `q` call whose inputs do not match `:in`:
+  fixed text; the inputs are the refusal's data."
   {:malli/schema [:=> [:cat [:map [:value [:tuple [:sequential :seon.schema/value]
                                              :seon.schema/value]]]
                         :seon.schema/value]
                   :string]}
   [{value :value} _options]
-  (let [[[head & tail] result] value]
+  (let [[_ result] value]
     (or (when (:seon.db/invalid-read result) (:seon.error/message result))
-        (let [explicit? (db.utils/db? head)
-              query-input (if explicit? (first tail) head)
-              supplied (if explicit? (rest tail) tail)
-              normalized (query/normalize-q-input query-input supplied)]
-          (query-argument-message (:query normalized)
-                                  (into (vec (:args normalized))
-                                        (when (and (map? query-input) (:args query-input)) supplied)))))))
+        query-argument-message)))
 
 (defn q
   "Run a Datalog query over explicit inputs or the current database value.
@@ -2951,8 +2963,8 @@
                             (vector? options) (not (map? (second arguments)))))]
           (when-not valid?
             (assoc (diagnostic
-             {:seon.error/message (str public-operation " received invalid arguments " (pr-str arguments)
-                   ". Use (" public-operation " selector " (if many? "eids" "eid")
+             {:seon.error/message (str public-operation " received invalid arguments (:seon.error/offending)."
+                   " Use (" public-operation " selector " (if many? "eids" "eid")
                    ") with the database elided, or (" public-operation
                    " database selector " (if many? "eids" "eid")
                    "). Argument maps require :selector and " (if many? ":eids" ":eid") ".")
@@ -3514,12 +3526,8 @@
 (defn- rejection-message
   [conflict throwable]
   (if conflict
-    (str "Transaction rejected: "
-         (pr-str (::conflict-attribute conflict))
-         " value " (pr-str (::conflict-value conflict))
-         " is already held by "
-         (pr-str (or (::conflict-owner conflict) "an existing entity"))
-         ".")
+    (str "Transaction rejected: a unique " (::conflict-attribute conflict)
+         " value is already held by another entity (:seon.error/data names the value and its owner).")
     (loop [failure throwable]
       (if-let [cause (ex-cause failure)]
         (recur cause)
@@ -3954,7 +3962,7 @@
 (defn- write-error-identity
   [refusal identities]
   (-> refusal
-      (update :seon.error/message #(str % " Entity: " (pr-str identities) "."))
+      (update :seon.error/message #(str % " The entity is :seon.error/data's " ::entity "."))
       (assoc-in [:seon.error/data ::entity] identities)))
 
 (defn- write-entity-error
@@ -4118,7 +4126,7 @@
                                   (diagnostic
                                    {::owned-value-refusal cause
                                     :seon.error/message (str "Complete component validation refused: " (name cause) "; bound "
-                                         :seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
+                                         :seon.config.db/validation-node-limit "=" limit "; the refused data is :seon.error/data.")
                                     :seon.error/data (merge {::validation-bound :seon.config.db/validation-node-limit
                                             ::validation-limit limit}
                                            data)
@@ -4800,9 +4808,8 @@
         (assoc (diagnostic
          {::transaction-refused true
           :seon.program/referrers breaks
-          :seon.error/message (str "Program deletion leaves surviving referrers: "
-                                   (pr-str breaks)
-                                   ". Repair or retract them in the same transaction.")
+          :seon.error/message (str "Program deletion leaves " (count breaks) " surviving referrers"
+                                   " (:seon.error/offending). Repair or retract them in the same transaction.")
           :seon.error/layer :database-write
           :seon.error/operation 'seon.db/transact!
           :seon.error/member :seon.program/referrer
@@ -5501,10 +5508,7 @@
          {::transaction-refused true
           :seon.error/message
           (str "Started issue tests and their authority must be preserved; only the creator may remove tests. "
-               "Cannot retract " (pr-str (first key)) " of "
-               (pr-str (or (:seon.db/entity prior) (:seon.db/entity current)))
-               "; tests " (pr-str (mapv #(get-in prior [:seon.db/value-identities %])
-                                        (set/union removed erased))) ".")
+               "Cannot retract " (first key) " of the entity and tests :seon.error/data names.")
           :seon.error/layer :database-write
           :seon.error/operation 'seon.db/transact!
           :seon.error/member (first key)

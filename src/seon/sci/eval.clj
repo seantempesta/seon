@@ -132,7 +132,6 @@
             [seon.program :as program]
             [seon.render :as render]
             [seon.ai.tokens :as tokens]
-            [seon.print.value :as print.value]
             [seon.render.value :as render.value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
@@ -3540,10 +3539,10 @@
                  (or (:seon.render.value/value-text projection)
                      (render.value/render-ai-data projection)))])
           (catch Throwable failure
-            [{:seon.render.value/diagnostics [failure]} (print.value/bounded-text value)]))
+            [{:seon.render.value/diagnostics [failure]} (render.value/core-text value)]))
         failures (into failures (:seon.render.value/diagnostics projection))
         ;; a refusal of the root's description is data: the value printer bounds it
-        shown (if (string? shown) shown (print.value/bounded-text shown))]
+        shown (if (string? shown) shown (render.value/core-text shown))]
     ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's
     ;; estimated tokens from the floor's own cut counts (never a second print),
     ;; the shown tokens, how many cuts it made, and an explicit
@@ -3569,7 +3568,7 @@
       (assoc :seon.cluster.eval/diagnostics
              (let [diagnostics (mapv flat-diagnostic failures)]
                (try (floor-text request diagnostics)
-                    (catch Throwable _ (print.value/bounded-text diagnostics)))))
+                    (catch Throwable _ (render.value/core-text diagnostics)))))
       record (assoc :seon.sci.admit/record record))))
 
 (defn shown-failure

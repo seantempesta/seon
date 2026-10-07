@@ -1192,7 +1192,7 @@
     (cond
       (:seon.print/node answer) (get-in answer [:seon.print/node :seon.print/value])
       (:seon.error/value answer) (:seon.error/value answer)
-      (= output :seon.render/html) (render.value/render-html (assoc unit :seon.render/value value))
+      (= output :seon.render/html) (render.value/html (assoc unit :seon.render/value value))
       :else value)))
 
 (defn- shown-counts
@@ -1284,10 +1284,9 @@
                     [:summary [:code (str attribute)]
                      (when-let [total (:seon.related/count group)] (str " " (count (:seon.related/items group)) " of " total))]
                     (into [:ul] (map #(vector :li %)) (:seon.related/items group))
-                    (when-let [[operation] (:seon.render/operations group)] (let [shown (render.value/render-html {:seon.render/value operation
-                                                                                                 :seon.db/db database
-                                                                                                 :seon.render.value/root [::operation attribute]})]
-                                                                          (if (map? shown) (:seon.error/message shown) shown)))])))
+                    (when-let [[operation] (:seon.render/operations group)] (render.value/html {:seon.render/value operation
+                                                                                      :seon.db/db database
+                                                                                      :seon.render.value/root [::operation attribute]}))])))
           data)))
 
 (defn with-related

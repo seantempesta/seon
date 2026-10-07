@@ -182,8 +182,9 @@
   "Record one admitted recursive deletion BEFORE it runs.
 
   Takes the deletion root, targets, byte count and operation under
-  `:seon.cluster.store`; logs every canonical target and deletion authority,
-  the calling frame, and this process's pid, so a future wipe names itself
+  `:seon.cluster.store`; logs the deletion root, target count and bytes, the
+  deletion authority, the calling frame and this process's pid (the targets
+  are the returned report's data), so a future wipe names itself
   instead of leaving the recurring absence-of-signal. Interpreted callers
   supply their caller explicitly because JVM stack frames name SCI internals.
   Returns the recorded report."
@@ -206,7 +207,12 @@
                       :seon.cluster.store/caller (or (:seon.cluster.store/caller request)
                                                     (caller-frame))
                       :seon.cluster.store/pid (.pid (java.lang.ProcessHandle/current)))]
-    (log/warn (str "seon recursive deletion: " (pr-str report)))
+    ;; fixed text and references; the targets themselves are the returned
+    ;; report's data, never printed here
+    (log/warn (str "seon recursive deletion of " (count (:seon.cluster.store/targets report))
+                   " targets (" (:seon.cluster.store/file-bytes report) " bytes) under "
+                   (:seon.cluster.store/root report) " by " (:seon.cluster.store/operation report)
+                   " from " (:seon.cluster.store/caller report) ", pid " (:seon.cluster.store/pid report)))
     report))
 
 (defn source-directory

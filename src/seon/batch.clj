@@ -33,8 +33,7 @@
   proposed. The one transaction therefore holds only facts already validated
   in order."
   (:require [clojure.string :as str]
-            [seon.error.refusal :as refusal]
-            [seon.print.value :as print.value])
+            [seon.error.refusal :as refusal])
   (:import (java.util Date)))
 
 (def ^:dynamic *world*
@@ -228,8 +227,9 @@
   [r]
   (let [text (:seon.batch/text (:seon.batch/version r))]
     (if (:seon.batch/span-invalid? r)
-      ;; a span the read stage misreported: the form's own print is its source
-      {:seon.batch/source (print.value/bounded-text (:seon.batch/form r))}
+      ;; a span the read stage misreported has no source text: the read
+      ;; diagnostic names it and the form itself is the step's value
+      {}
       (let [[l c] (line-column text (:seon.batch/start r))]
         {:seon.batch/source (str/trimr (subs text (:seon.batch/start r) (:seon.batch/end r)))
          :seon.batch/line l :seon.batch/column c}))))

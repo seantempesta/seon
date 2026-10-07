@@ -143,14 +143,6 @@
    (into [:span] (interpose " " links))
    (when (> total (count links)) (str " and " (- total (count links)) " more"))])
 
-(defn- shown-html
-  "`value` through the value printer's HTML face under `root`; a printer
-  refusal shows its message."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.render/hiccup]}
-  [database root value]
-  (let [shown (render.value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
-    (if (map? shown) [:span (:seon.error/message shown)] shown)))
-
 (defn- check-html
   "The registration's recorded stored-data verdict, or its refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema.usage/check] :seon.render/hiccup]}
@@ -161,7 +153,7 @@
      [:p (str failing " of " checked (when more? " (the first checked)") " stored entities fail the form")]
      (when failing-example
        [:p "First failing: entity " (str (first failing-example)) " "
-        (shown-html database [::failing-example (first failing-example)] (second failing-example))])]))
+        (render.value/html {:seon.render/value (second failing-example) :seon.db/db database :seon.render.value/root [::failing-example (first failing-example)]})])]))
 
 (defn render-html
   "Render a registration or schema entity from the same selection
@@ -173,7 +165,7 @@
     (let [report (selection unit chosen)
           {:seon.schema.usage/keys [previous new? check referenced-by referenced-by-count
                                     contracts contract-count]} report
-          form-text (fn [form] (shown-html (:seon.db/db unit) [::form schema-key (identical? form previous)] form))]
+          form-text (fn [form] (render.value/html {:seon.render/value form :seon.db/db (:seon.db/db unit) :seon.render.value/root [::form schema-key (identical? form previous)]}))]
       (into
        [:article {:class "seon-family-entry seon-schema-entry"}
         [:header [:p {:class "seon-kicker"} (if new? "New schema" "Schema")]

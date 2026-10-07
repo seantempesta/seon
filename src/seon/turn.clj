@@ -24,7 +24,7 @@
             [seon.id :as id]
             [seon.profile.measurement :as measurement]
             [seon.program :as program]
-            [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.render :as render]
             [seon.render.walk :as walk]
             [seon.repl :as repl]
@@ -2144,7 +2144,7 @@
                                                                       (select-keys (:seon.sci.eval/evaluation evaluated)
                                                                                    [:seon.cluster.eval/read-evidence]))]
                                                         (update-in evaluated [:seon.sci.eval/evaluation :seon.cluster.eval/diagnostics]
-                                                                   #(str/join "\n" (remove nil? [% (print.value/bounded-text [fault])])))
+                                                                   #(str/join "\n" (remove nil? [% (render.value/core-text [fault])])))
                                                         evaluated)))))
                                  selected previews)silent (filterv #(= :unchanged (:seon.turn/status (second %)))
                                   (mapv vector selected previews))
@@ -3293,7 +3293,7 @@
   [receipt error]
   (cond-> receipt
     error (update :seon.cluster.eval/diagnostics
-                  #(str/join "\n" (remove nil? [% (print.value/bounded-text [error])])))))
+                  #(str/join "\n" (remove nil? [% (render.value/core-text [error])])))))
 
 (defn- not-admitted
   "`receipt` whose form's program facts were refused: the value stands, the
@@ -4985,7 +4985,7 @@
                                                      (select-keys evaluation [:seon.cluster.eval/read-evidence]))))
                      evaluation (cond-> evaluation
                                   fault (update :seon.cluster.eval/diagnostics
-                                                #(str/join "\n" (remove nil? [% (print.value/bounded-text [fault])]))))]
+                                                #(str/join "\n" (remove nil? [% (render.value/core-text [fault])]))))]
                (when (and run-id (= :pending (:seon.cluster.eval/code-evidence evaluation)))
                  (kernel/own-pending! (receipt-identity run-id ordinal) (:seon.batch/owned entry)))
                (cond-> {:seon.cluster.eval/ordinal ordinal

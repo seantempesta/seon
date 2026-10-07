@@ -178,14 +178,6 @@
   [_unit]
   (list 'seon.db/q (list 'quote cluster-query) '(seon.db/db)))
 
-(defn- shown-html
-  "`value` through the value printer's HTML face, addressed by its key; a
-  printer refusal shows its message."
-  {:malli/schema [:=> [:cat :seon.db/database-value :keyword :seon.schema/value] :seon.render/hiccup]}
-  [database k value]
-  (let [shown (render.value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root [::status k]})]
-    (if (map? shown) [:span (:seon.error/message shown)] shown)))
-
 (defn render-html
   "Show a cluster observation as labeled data: the value it is given when that
   is a `snapshot`, else my cluster and adopted source, as the AI face reads
@@ -195,4 +187,4 @@
   (let [shown (if (and (map? value) (:seon.cluster.status/heap-used value)) value (render-ai unit))]
     [:section {:class "seon-cluster-status"}
      [:h3 "Cluster"]
-     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (shown-html (:seon.db/db unit) k v)]]) shown))]))
+     (into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (render.value/html {:seon.render/value v :seon.db/db (:seon.db/db unit) :seon.render.value/root [::status k]})]]) shown))]))

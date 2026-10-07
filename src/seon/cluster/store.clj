@@ -24,7 +24,7 @@
             [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
-            [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [taoensso.timbre :as log]
@@ -458,7 +458,7 @@
   `trove/set-log-fn!` in place of trove's default console (stdout) backend
   (`taoensso.trove/*log-fn*`: `(fn [ns coords level id lazy_])`). The call's
   message, data and error print as one value bounded by
-  `seon.print.value/bounded-text`, never whole."
+  `seon.render.value/core-text`, never whole."
   {:malli/schema [:=> [:cat :string [:or :nil [:sequential [:maybe :int]]] :keyword
                        [:or {:description "trove's `id` slot as passed: its `log!` hands the `:id` value through unchecked (taoensso/trove.cljc:92-104; declared ?Keyword at :22), and `replikativ.logging` puts its first argument there (logging.cljc:32-80), a keyword or, as in `(log/debug \"fused-scan-rel not applicable:\" msg)` (datahike/query.cljc:4314), a string; nil for a message-only call. Every such call in datahike 591c825d (85) and konserve 08465d6 (84) passes a keyword or string literal."} :nil :keyword :string]
                        [:or :nil :map [:fn clojure.core/delay?]]]
@@ -475,7 +475,7 @@
                    :msg-type :p
                    :loc {:ns callsite-ns :line (first coords)}
                    :vargs (into [] (remove nil?)
-                                [(some-> id str) (print.value/bounded-text event)])})))
+                                [(some-> id str) (render.value/core-text event)])})))
     nil))
 
 (defn- datahike-log-fn
@@ -574,7 +574,7 @@
                        (do (create-store! dir creation-configuration) true))
             ;; the writer's go-loops keep the frame they start in: never an
             ;; evaluation's (a test or tool may open a store inside one)
-            connection (flow/call-with-root-bindings
+            connection (db/call-with-root-bindings
                         #(d/connect (if created?
                                       creation-configuration
                                       (cond-> (open-configuration creation-configuration)
@@ -654,7 +654,7 @@
                                             :backend-config (:store shared)})]
     (assoc store
            ;; a writer started in the caller's frame would keep its evaluation
-           :seon.store/connection-object (flow/call-with-root-bindings #(d/connect configuration))
+           :seon.store/connection-object (db/call-with-root-bindings #(d/connect configuration))
            :seon.store/overlay overlay
            :seon.store/overlay-configuration configuration
            :seon.store/created? false)))
@@ -691,7 +691,7 @@
                  {::dir (:seon.store/dir store)
                   ::branch branch}))
       ;; the writer's go-loops keep the frame they start in: never an evaluation's
-      (flow/call-with-root-bindings #(d/connect configuration)))))
+      (db/call-with-root-bindings #(d/connect configuration)))))
 
 (defn release-branch!
   "Release one proof branch connection before its roster branch is retired.

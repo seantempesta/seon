@@ -1,5 +1,5 @@
 (ns seon.sci.branch-execution-test
-  (:require [seon.print.value]
+  (:require [seon.render.value]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
@@ -24,7 +24,7 @@
                  :seon.sci.eval/time-limit-ms 5000
                  :seon.sci.admit/caps (config/result-caps config/defaults)})]
     (when (:seon.cluster.eval/error result)
-      (println "REALITIES-EVAL-REFUSAL" (seon.print.value/bounded-text (select-keys result [:seon.cluster.eval/error :seon.cluster.eval/triage-edn])))
+      (println "REALITIES-EVAL-REFUSAL" (seon.render.value/core-text (select-keys result [:seon.cluster.eval/error :seon.cluster.eval/triage-edn])))
       (throw (ex-info "Agent evaluation refused." result)))
     result))
 
@@ -158,7 +158,7 @@
                         :seon.sci.eval/interpretation-error) refused))
                  (is (nil? (sci/resolve a-ctx 'seon.env/->Environment)))
                  (is (some? (sci/resolve b-ctx 'seon.env/->Environment)))
-                 (println "REALITIES-HOST-REFUSAL" (seon.print.value/bounded-text refused))))))))))))))
+                 (println "REALITIES-HOST-REFUSAL" (seon.render.value/core-text refused))))))))))))))
 
 (defn- declared!
   "Transact one analyzed declaration through the turn's declaration writer."
@@ -424,8 +424,8 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [changed 'seon.print.value/datum
-             caller 'seon.print.value/bounded-text
+       (let [changed 'seon.render.value/datum
+             caller 'seon.render.value/bounded-text
              unloaded-changed 'seon.cluster.reload-measure/measured-request
              unloaded 'seon.cluster.reload-measure/-main
              before (db/db connection)

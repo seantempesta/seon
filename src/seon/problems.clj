@@ -578,7 +578,7 @@
    (family-section "test evidence unknown"
      (for [entry (:seon.problems/failed-tests-unknown found)]
        (row "error" (:seon.error/message entry)
-            "offending" (pr-str (:seon.error/offending entry)))))
+            "offending" (render.value/core-text (:seon.error/offending entry)))))
    (family-section
     "errors"
     (for [entry (:seon.problems/error-signatures found)]

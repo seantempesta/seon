@@ -37,13 +37,14 @@
 
   ## Recommendations
 
-  - When the projection, profile or admission may be what broke, print with
-    `seon.print.value`: it reads no database and no config."
-  (:require [clojure.string :as str]
+  - `text` and `html` are the total entries for a unit; `core-text` and
+    `core-html` print with no render, database or config, for the edges where
+    those may be what broke."
+  (:require [clojure.main :as main]
+            [clojure.string :as str]
             [seon.id :as id]
             [seon.db :as db]
             [seon.print :as print]
-            [seon.print.value :as print.value]
             [seon.schema.edn :as schema.edn]
             [seon.schema :as schema]
             [seon.env :as env]
@@ -73,22 +74,191 @@
   (delay (requiring-resolve 'seon.render.walk/with-related)))
 
 
-(defn bounded-text
-  "`value` as at most `limit` characters: `seon.print.value/bounded-text`, the
-  projection-free core, which moved there so namespaces below the projection
-  and babashka print through it. Callers convert to it; this delegate then
-  goes."
+;;; THE CORE PRINTER (root ruling 2026-10-07, one printer): printing data
+;;; under one fixed budget, with no render selection, database or config, so
+;;; the edges where those may be what failed (an unrecorded fault, a page's
+;;; emergency body, a printer that threw) still show the value. Its last
+;;; resort is the projection-free text below: clojure.core data walked to a
+;;; few members and levels, host objects as class and identity, a Throwable
+;;; as its cause chain with each link's nearest non-host frames.
+
+(def ^:private text-limits
+  {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 10 :suppressed 3 :throwable-chars 8192})
+
+(defn- datum
+  "`x` as clojure.core data at most `level` collections deep (rules 1–3):
+  `...` marks a cut collection or its omitted members; a string past `limit`
+  keeps its head."
+  {:malli/schema [:=> [:cat :seon.schema/value :int :int] :seon.schema/value]}
+  [x level limit]
+  (let [items (:items text-limits)]
+    (cond
+      (string? x) (if (> (count x) limit) (str (subs x 0 limit) "…") x)
+      (or (nil? x) (boolean? x) (number? x) (char? x) (ident? x) (var? x)
+          (uuid? x) (instance? java.util.Date x)) x
+      (not (and (coll? x) (str/starts-with? (.getName (class x)) "clojure.lang.")))
+      (symbol (str "#object[" (.getName (class x)) " 0x" (Integer/toHexString (System/identityHashCode x)) "]"))
+      (zero? level) '...
+      :else (let [walk #(datum % (dec level) limit)
+                  members (cond-> (mapv (if (map? x) (fn [[k v]] [(walk k) (walk v)]) walk) (take items x))
+                            (> (bounded-count (inc items) x) items) (conj (if (map? x) ['... '...] '...)))]
+              (cond (map? x) (into {} members) (vector? x) members
+                    (set? x) (set members) :else (apply list members))))))
+
+(defn- bounded-text
+  "`value` as at most `limit` characters (default 400).
+
+  ## Edge cases
+
+  - A 200-deep map prints as `{:k 199, :v {:k 198, :v {:k 197, :v ...}}}`.
+  - A host object prints as `#object[Class 0xhash]`, never through its
+    `toString`, print-method or `deref`."
   {:malli/schema [:function [:=> [:cat :seon.schema/value] :string]
                   [:=> [:cat :seon.schema/value [:int {:min 1}]] :string]]}
-  ([value] (print.value/bounded-text value))
-  ([value limit] (print.value/bounded-text value limit)))
+  ([value] (bounded-text value (:chars text-limits)))
+  ([value limit]
+   (try
+     (let [text (binding [*print-length* nil *print-level* nil *print-meta* false *print-readably* true
+                          *print-dup* false *print-namespace-maps* false]
+                  (pr-str (datum value (:depth text-limits) limit)))]
+       (if (> (count text) limit) (str (subs text 0 limit) "…") text))
+     (catch Throwable failure
+       (str "#unprintable[" (.getName (class value)) " " (.getName (class failure)) "]")))))
 
-(defn floor
-  "An unhandled Throwable as bounded text: `seon.print.value/throwable-text`.
-  Callers convert to it; this delegate then goes."
+(defn- causes
+  "`throwable` and its causes, outermost first, each once, at most `:links`."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :seon.error/throwable]]}
+  [throwable]
+  (loop [link throwable seen []]
+    (if (or (nil? link) (= (:links text-limits) (count seen)) (some #(identical? link %) seen))
+      seen
+      (recur (.getCause ^Throwable link) (conj seen link)))))
+
+(defn- host-class?
+  "Whether a frame's class is the JVM's or Clojure's own runtime (`java.*`, `jdk.*`,
+  `clojure.lang.*`...): where a failure passed through, never code an agent
+  wrote. Dependencies and Seon are not host frames: which of those matter is
+  the error render's to say."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String class-name]
+  (boolean (some #(.startsWith class-name ^String %) ["java." "javax." "jdk." "sun." "clojure.lang."])))
+
+(defn- link-lines
+  "One link's lines: class and message, ex-data entries, the nearest non-host
+  frames of the throw and suppressed throwables, each list counting what it leaves out; a
+  link whose accessors throw prints its class and the failure's."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :string]]}
+  [^Throwable link]
+  (let [{:keys [entries frames suppressed]} text-limits]
+    (try
+      (let [trace (into [] (remove #(host-class? (.getClassName ^StackTraceElement %))) (.getStackTrace link))]
+        (into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
+              (concat
+               (for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
+               (when (> (bounded-count (inc entries) (ex-data link)) entries) ["  … further ex-data entries"])
+               (for [^StackTraceElement f (take frames trace)]
+                 (str "  at " (main/demunge (.getClassName f)) " (" (.getFileName f) ":" (.getLineNumber f) ")"))
+               (when (> (count trace) frames)
+                 [(str "  … " (- (count trace) frames) " further frames")])
+               (for [^Throwable other (take suppressed (.getSuppressed link))]
+                 (str "  suppressed " (.getName (class other)) ": " (bounded-text (ex-message other)))))))
+      (catch Throwable failure
+        [(str (.getName (class link)) " #unprintable[" (.getName (class failure)) "]")]))))
+
+(defn- throwable-text
+  "An unhandled Throwable as bounded text from the Throwable alone: one block
+  of lines per cause, each link walked once by identity, so a cyclic chain
+  terminates. Which frames matter is the error render's to say.
+
+  ## Costs
+
+  - A 13-link `ex-info` chain with a 50-item payload per link (714 characters
+    out): 783 µs unarmed, 977 µs armed (default, 2026-09-26)."
   {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
   [throwable]
-  (print.value/throwable-text throwable))
+  (let [chain (causes throwable)
+        text (str/join "\n" (concat (mapcat (fn [position link]
+                                              (cond-> (link-lines link) (pos? position) (update 0 #(str "caused by " %))))
+                                            (range) chain)
+                                    (when (and (= (:links text-limits) (count chain)) (ex-cause (peek chain)))
+                                      ["… further causes"])))]
+    (if (> (count text) (:throwable-chars text-limits))
+      (str (subs text 0 (:throwable-chars text-limits)) "…")
+      text)))
+
+(def ^:private core-profile
+  ;; The core's fixed budget: no config is read, so a broken configuration
+  ;; cannot stop it. Its cuts name no handle: the value has none.
+  {:seon.render.profile/id :seon.render.profile/core
+   :seon.render.profile/token-budget 1000
+   :seon.render.profile/max-depth 8
+   :seon.render.profile/max-children 32
+   :seon.render.profile/composition :multiline
+   :seon.print/requery-refusal "printed by the core printer: the value has no result handle"})
+
+(declare render-ai render-html)
+
+(defn core-text
+  "`value` printed by the value printer's core: its structural selection under
+  a fixed budget, with no render, database or config. A Throwable is shown as
+  its cause chain (`seon.error.refusal/chain`: per link class, message,
+  ex-data and first-party frames). Total: if the selection itself fails, the
+  projection-free text of the value.
+
+  ## Edge cases
+
+  - With no world to supply a database, the selection is refused and the
+    projection-free text answers."
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
+  [value]
+  (try
+    (let [shown (if (instance? Throwable value) (refusal/chain value nil) value)
+          text (render-ai {:seon.render/value shown
+                           :seon.render.value/root 'seon.render.value/core
+                           :seon.render/profile core-profile
+                           :seon.render.value/options {:seon.render.value/structural? true}})]
+      (if (string? text)
+        text
+        (if (instance? Throwable value) (throwable-text value) (bounded-text value))))
+    (catch Throwable _
+      (if (instance? Throwable value) (throwable-text value) (bounded-text value)))))
+
+(defn core-html
+  "`value` printed by the core (`core-text`) as preformatted hiccup."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.render/hiccup]}
+  [value]
+  [:pre {:class "seon-data-panel seon-core-value"} (core-text value)])
+
+(defn- unavailable-line
+  "The one diagnostic line beside a value whose unit the printer refused."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [refused]
+  (str ";; value printer refused the unit, value printed by the core: "
+       (or (:seon.error/message refused) "no message")))
+
+(defn text
+  "The value printer's TOTAL text entry: `unit` through `render-ai`, or, when
+  that refuses or throws, the core's text of the value plus one diagnostic
+  line. Always a string (AGENTS.md: a failed render falls back to the value
+  itself, printed, with one diagnostic)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [unit]
+  (let [shown (try (render-ai unit) (catch Throwable failure {:seon.error/message (str (.getName (class failure)) ": " (ex-message failure))}))]
+    (if (string? shown)
+      shown
+      (str (core-text (:seon.render/value unit)) "\n" (unavailable-line shown)))))
+
+(defn html
+  "The value printer's TOTAL HTML entry: `unit` through `render-html`, or,
+  when that refuses or throws, the core's HTML of the value plus one
+  diagnostic. Always hiccup."
+  {:malli/schema [:=> [:cat :map] :seon.render/hiccup]}
+  [unit]
+  (let [shown (try (render-html unit) (catch Throwable failure {:seon.error/message (str (.getName (class failure)) ": " (ex-message failure))}))]
+    (if (vector? shown)
+      shown
+      [:div (core-html (:seon.render/value unit))
+       [:div {:class "seon-render-unavailable"} (unavailable-line shown)]])))
 
 (defn transacted
   "Restore a pulled entity to its transaction shape.
@@ -770,7 +940,7 @@
   {:malli/schema [:=> [:cat :seon.render.data/path [:or :seon.error/throwable :map] :int] :string]}
   [path failure further]
   (str ";; renderer failed at " (pr-str path) ", value printed as data: "
-       (print.value/bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
+       (bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
        (when (pos? further) (str " (and " further " further renderer failures)"))))
 
 (defn- make-node
@@ -1227,7 +1397,7 @@
   {:malli/schema [:=> [:cat :seon.schema/value :seon.error/throwable :seon.render.data/path]
                   :seon.render.value/projection]}
   [value failure path]
-  (let [value-text (print.value/bounded-text value 8192)
+  (let [value-text (bounded-text value 8192)
         text (str value-text "\n" (diagnostic-line path failure 0))]
     {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
      :seon.render.value/options (print/default-options)

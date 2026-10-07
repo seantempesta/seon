@@ -11,7 +11,6 @@
             [clojure.tools.reader.edn :as reader.edn]
             [clojure.tools.reader.reader-types :as reader-types]
             [seon.schema :as schema]
-            [seon.print.value :as print.value]
             [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as internal]))
 
@@ -312,8 +311,8 @@
                (finding
                 file :warning :schema-exact-reuse
                 (str "Schema " declaration-key
-                     " has the same composite shape as " (print.value/bounded-text matches)
-                     ". If this duplicates one of those schemas, delete "
+                     " has the same composite shape as the schemas in :seon.schema.admission/similar-keys."
+                     " If this duplicates one of those schemas, delete "
                      declaration-key " and reuse that existing key. Create a"
                      " parallel schema only when the user explicitly chooses"
                      " a separate system.")
@@ -410,15 +409,15 @@
                             {:seon.schema/compiled (schema/structural-schema form)})))]
     (finding
      file :warning :schema-polymorphism
-     (str "Schema declaration " declaration-key " accepts anything at "
-          (print.value/bounded-text (:seon.schema/path slot)) " ("
-          (print.value/bounded-text (:seon.schema/definition slot)) "). If that is deliberate,"
+     (str "Schema declaration " declaration-key " accepts anything at :seon.schema/path"
+          " (its definition is :seon.schema/definition). If that is deliberate,"
           " record why: {:seon.schema.admission/exemption"
           " :seon.schema.admission/polymorphic-boundary"
           " :seon.schema.admission/reason \"...\" :gen/schema ...}; otherwise"
           " name the value with a predicate schema.")
      {:seon.schema.admission/declaration declaration-key
-      :seon.schema/path (:seon.schema/path slot)})))
+      :seon.schema/path (:seon.schema/path slot)
+      :seon.schema/definition (:seon.schema/definition slot)})))
 
 (defn admit
   "Return editor-shaped findings for one schema admission request.

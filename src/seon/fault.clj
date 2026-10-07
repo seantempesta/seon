@@ -21,7 +21,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.refusal :as refusal]
-            [seon.print.value :as print.value]))
+            [seon.render.value :as render.value]))
 
 (defn- tagged-run
   "The tagged agent's open turn, or nil.
@@ -329,7 +329,7 @@
   - A cyclic cause chain (`(.initCause a b)` where `b`'s cause is `a`, legal in
     the JDK) never returns and cannot be cancelled: the walk has no identity
     check or bound. A two-link cycle held one core for about seven minutes on
-    2026-09-26. [[seon.print.value/throwable-text]] walks the same chain safely. Task
+    2026-09-26. [[seon.render.value/core-text]] walks the same chain safely. Task
     [[task:465ff60ccda0]]."
   {:seon/tasks #{"465ff60ccda0"}
    :malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
@@ -351,8 +351,8 @@
     the same map built 12.6 million characters in 113 ms."
   {:malli/schema [:=> [:cat :map [:sequential :seon.error/throwable]] :nil]}
   [evidence throwables]
-  (let [text (apply str (interpose "\n" (cons (print.value/bounded-text evidence)
-                                              (map print.value/throwable-text throwables))))]
+  (let [text (apply str (interpose "\n" (cons (render.value/core-text evidence)
+                                              (map render.value/core-text throwables))))]
     (doto ^java.io.Writer *err* (.write text) (.write "\n") (.flush)))
   nil)
 

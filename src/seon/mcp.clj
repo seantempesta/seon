@@ -29,7 +29,7 @@
             [seon.health :as health]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
-            [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.sci.eval :as eval]
             [seon.turn]
             [seon.turn.batch :as turn.batch]
@@ -121,7 +121,7 @@
       (:seon.eval/shown (if (and (map? value) (:seon.error/at value))
                           (eval/shown-failure value request nil)
                           (eval/shown-result value request nil))))
-    (catch Throwable failure (print.value/throwable-text failure))))
+    (catch Throwable failure (render.value/core-text failure))))
 
 (defn- result
   "The MCP CallToolResult as a JSON string: one text item per shown text."

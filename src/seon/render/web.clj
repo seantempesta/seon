@@ -70,7 +70,6 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.route :as route]
             [seon.render.transcript :as transcript]
-            [seon.flow :as seon.flow]
             [seon.print :as print]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
@@ -139,7 +138,7 @@
 ;; The mult's go-loop starts where every Var has its root binding: the delay
 ;; may be forced inside an evaluation, whose frame the loop would keep.
 (defonce ^:private generator-mult
-  (delay (seon.flow/call-with-root-bindings #(async/mult (async/chan (async/sliding-buffer 1))))))
+  (delay (db/call-with-root-bindings #(async/mult (async/chan (async/sliding-buffer 1))))))
 
 (def mult-generator
   "An honest generator: a real mult over a real channel, created once."
@@ -723,22 +722,6 @@
            ::transcript/message-form
            (message-bar-html (with-database {:seon.agent/id agent-id ::message-autofocus? false} request)))))
 
-(defn- value-html
-  "`value` through the value printer's HTML face, its elements addressed under
-  `root`; a printer refusal shows its message."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.render/hiccup]}
-  [database root value]
-  (let [shown (value/render-html {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
-    (if (map? shown) [:p {:class "seon-error"} (:seon.error/message shown)] shown)))
-
-(defn- value-text
-  "`value` through the value printer's text face, addressed under `root`; a
-  printer refusal answers its message."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/value :seon.schema/value] :string]}
-  [database root value]
-  (let [shown (value/render-ai {:seon.render/value value :seon.db/db database :seon.render.value/root root})]
-    (if (string? shown) shown (:seon.error/message shown))))
-
 (defn- scalar-label
   "A graph label for an identity value: a scalar's own text, else nil."
   {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :string]]}
@@ -834,7 +817,7 @@
     (when (seq path)
       [:div
        [:span "selected path"]
-       (value-html database [::selected-path] path)
+       (value/html {:seon.render/value path :seon.db/db database :seon.render.value/root [::selected-path]})
        [:a {:href (debug-page-url
                    debug-request
                    {:seon.render.data/cursor (data/parse-cursor nil nil)})}
@@ -843,14 +826,13 @@
      [:summary "Database and render diagnostics"]
      [:div
      [:span "snapshot"]
-     (value-html database [::snapshot] (:seon.render.data/snapshot observation))]
+     (value/html {:seon.render/value (:seon.render.data/snapshot observation) :seon.db/db database :seon.render.value/root [::snapshot]})]
     [:div
      [:span "indexed source digest"]
-     (value-html database [::source-digest] (:seon.source/digest program-identity))]
+     (value/html {:seon.render/value (:seon.source/digest program-identity) :seon.db/db database :seon.render.value/root [::source-digest]})]
     [:div
      [:span "schema projection fingerprint"]
-     (value-html database [::projection-fingerprint]
-                 (:seon.schema.projection/fingerprint program-identity))]
+     (value/html {:seon.render/value (:seon.schema.projection/fingerprint program-identity) :seon.db/db database :seon.render.value/root [::projection-fingerprint]})]
     [:div
      [:span "render value acquisition"]
      [:code (str acquisition-ms " ms · pull work ≤ "
@@ -967,7 +949,7 @@
     (when contract
       [:details {:class "seon-debug-renderer-evidence"}
        [:summary "declared contract and arities"]
-       (value-html database [::renderer-contract producer] contract)])))
+       (value/html {:seon.render/value contract :seon.db/db database :seon.render.value/root [::renderer-contract producer]})])))
 
 (defn- debug-renderer-definition
   [call-entry]
@@ -1009,14 +991,12 @@
                   [:li
                    [:details
                     [:summary (str "evidence entry " (inc index))]
-                    (value-html
-                     database
-                     [::read-evidence index]
-                     (select-keys
+                    (value/html {:seon.render/value (select-keys
                       read
                       [:seon.db/source-argument-position
                        :datahike.read/dependency-plan
-                       :datahike.read/revision]))]]))
+                       :datahike.read/revision])
+                                 :seon.db/db database :seon.render.value/root [::read-evidence index]})]]))
                evidence)
          [:p "No database read evidence was retained."])])
     [:details {:class "seon-debug-read-dependencies"}
@@ -1294,11 +1274,11 @@
        [:div
        [:h4 "Raw data"]
       (if present?
-        (value-html (:seon.db/db render-request) [::raw-data] value)
+        (value/html {:seon.render/value value :seon.db/db (:seon.db/db render-request) :seon.render.value/root [::raw-data]})
         [:p "This attribute is absent on the selected entity."])
       [:h4 "Malli schema"]
       (if-let [form (or (:seon.schema/form metadata) attribute-schema)]
-        (value-html (:seon.db/db render-request) [::malli-schema] form)
+        (value/html {:seon.render/value form :seon.db/db (:seon.db/db render-request) :seon.render.value/root [::malli-schema]})
         [:p "No schema is registered for this attribute."])]
        (debug-details-link debug-request))]
      (if present?
@@ -3298,16 +3278,16 @@
         link (fn [v] (when-let [a (and (symbol? v) (seq named) (db/q '[:find ?a . :in $ [?a ...] ?v :where [_ ?a ?v]] database named v))]
                        [:a {:href (root-href (pr-str [a v]))} [:code (str v)]]))
         group #(cond ((::render.walk/component-owners structure) %) "component" (refs %) "ref" :else "value")
-        shown #(value-html database [::attribute (:db/id value) %1] (if (refs %1) (if (map? %2) (:db/id %2) (mapv :db/id %2)) %2))
+        shown #(value/html {:seon.render/value (if (refs %1) (if (map? %2) (:db/id %2) (mapv :db/id %2)) %2) :seon.db/db database :seon.render.value/root [::attribute (:db/id value) %1]})
         properties (some->> schema-key (mr/schema (:seon.schema.projection/registry projection)) internal/entity-properties)]
     [:div {:class "seon-graph-attributes"}
      [:p "owning schema " [:code (str schema-key)] " · render pair "
-      (value-html database [::render-pair schema-key] (select-keys properties [:seon.render/ai :seon.render/html]))]
+      (value/html {:seon.render/value (select-keys properties [:seon.render/ai :seon.render/html]) :seon.db/db database :seon.render.value/root [::render-pair schema-key]})]
      (into [:table {:class "seon-graph-summary"} [:tr [:th "kind"] [:th "attribute"] [:th "value"] [:th "declared schema"]]]
            (for [[kind entries] (sort-by key (group-by (comp group key) (dissoc value :db/id)))
                  [a v] (sort-by (comp str key) entries)]
              [:tr [:td kind] [:td [:code (str a)]] [:td (or (link v) (shown a v))]
-              [:td (value-html database [::declared-schema a] (projection-form projection a))]]))]))
+              [:td (value/html {:seon.render/value (projection-form projection a) :seon.db/db database :seon.render.value/root [::declared-schema a]})]]))]))
 
 (defn- context-graph-model
   "The walk as `seon-graph.js`'s tree: each node labeled by its schema and
@@ -3422,7 +3402,7 @@
        (list [:p {:class "seon-graph-counts"} (format "%,d chars · ≈%,d tokens · %d segments" (count text) (tokens/estimate text)
                                                       (count (:seon.context/contributions composed)))]
              [:pre {:class "seon-graph-prompt"} text])
-       (value-html database [::sent-context agent-id] (dissoc composed :seon.db/db)))]))
+       (value/html {:seon.render/value (dissoc composed :seon.db/db) :seon.db/db database :seon.render.value/root [::sent-context agent-id]}))]))
 
 (defn- graph-debug-html
   "The owner's context-tuning page for one agent: the context as sent (lazy),
@@ -3766,7 +3746,7 @@
           {:status 303
            :headers {"location" (route/path ::route/namespace {:namespace (str namespace-name)})}
            :body nil}
-          (text-response 422 (value-text (db/db connection) [::create-owner namespace-name] owner)))))))
+          (text-response 422 (value/text {:seon.render/value owner :seon.db/db (db/db connection) :seon.render.value/root [::create-owner namespace-name]})))))))
 
 (defn- context-action-response
   "One ordinary turn operation requested from the page's context controls."
@@ -3788,7 +3768,7 @@
                                                  :seon.error/expected "system-turn, virtual-turn, or compact"
                                                  :seon.error/offending params}))]
     (if (:seon.render.web/refused-member result)
-      (text-response 422 (value-text (db/db (:seon.store/connection-object service)) [::context-action] result))
+      (text-response 422 (value/text {:seon.render/value result :seon.db/db (db/db (:seon.store/connection-object service)) :seon.render.value/root [::context-action]}))
       (no-content))))
 
 (defn- received-response
@@ -3807,7 +3787,7 @@
                    :seon.error/offending params}))]
     (if (:seon.message/id result)
       (no-content)
-      (text-response 422 (value-text (db/db (:seon.store/connection-object service)) [::received] result)))))
+      (text-response 422 (value/text {:seon.render/value result :seon.db/db (db/db (:seon.store/connection-object service)) :seon.render.value/root [::received]})))))
 
 (defn- context-response
   "The agent context route: the explicit create-owner action, a message
@@ -3945,7 +3925,7 @@
 (defn- failure-response
   "The response to a request whose handling threw: the failure as one error
   value, shown by the error pair's HTML face, status 500. The response never
-  throws: a face that fails answers the error's message instead."
+  throws: a face that fails answers the value printed by the core printer."
   {:malli/schema [:=> [:cat :seon.render.web/service :seon.error/throwable]
                   [:map [:status :int] [:headers [:map-of :string :string]] [:body :string]]]}
   [service failure]
@@ -3957,9 +3937,10 @@
               (hiccup/->string (error/render-html {:seon.render/value value
                                                    :seon.db/db (db/db (:seon.store/connection-object service))})))
              :status 500)
-      ;; Declared case: the face itself failed; the value still answers.
+      ;; Declared case: the face itself failed; the value still answers,
+      ;; printed by the value printer's core (no render, database or config).
       (catch Throwable _
-        (text-response 500 (:seon.error/message value))))))
+        (text-response 500 (value/core-text value))))))
 
 (defn handler
   "Build the one Reitit Ring handler from the route table and service."
@@ -4001,8 +3982,8 @@
           (try (entrance-fault! (env/of (:seon.sci.eval/ctx service)) failure
                                 :seon.render.web/request 'seon.render.web/handler)
                (catch Throwable unrecorded
-                 (log/warn (str "seon.render.web: a request fault could not be recorded: "
-                                (.getName (class unrecorded))))))
+                 (log/warn (str "seon.render.web: a request fault could not be recorded:\n"
+                                (value/core-text unrecorded)))))
           (failure-response service failure))))))
 
 ;;; ---------------------------------------------------------------------------

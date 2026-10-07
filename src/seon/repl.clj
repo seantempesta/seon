@@ -15,7 +15,6 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
-            [seon.print.value :as print.value]
             [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -243,7 +242,7 @@
                 :seon.repl/calls (when (pos-int? call-count) (str call-count))
                 :seon.repl/repeated (when (and (seq repeated)
                                               (some (comp #{:slow} :seon.repl/finding) found))
-                                      (print.value/bounded-text (vec (sort-by (comp - second) repeated))))}]
+                                      (value/core-text (vec (sort-by (comp - second) repeated))))}]
     (into []
           (keep (fn [response-key]
                   (when-some [text (get by-key response-key)]

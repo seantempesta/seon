@@ -108,9 +108,9 @@ Same operation: render one value for both consumers and show both. Survives: `ex
 **D6. Value bounding in four places (~130 lines).** `print.value/bounded-text` print/value.clj:54, delegate
 `value/bounded-text` value.clj:76 (its docstring says it "then goes"), `value/floor` 86 (delegate of `throwable-text`),
 and `error.clj:356 bounded-text` / `853 bound-text` (UNVERIFIED whether these are the same operation; both named
-bounded). CLAUDE.md: one clipping spot. Survives: `seon.print.value` (projection-free floor); delegates deleted and
-callers converted (count of callers UNVERIFIED: my grep of `bounded-text|value/floor` returned 0 through the shell
-glob, so the caller count is unmeasured).
+bounded). CLAUDE.md: one clipping spot. Landed (printers-round2, 2026-10-07): `seon.print.value` folded into
+`seon.render.value` as the core printer's private last resort; `core-text`/`core-html` print with no render,
+database or config, `text`/`html` are the total unit entries; the delegates are deleted and every caller converted.
 
 **D7. Transcript AI/HTML faces restate one selection (~250 lines).**
 `render-ai` 713 and `render-html` 834 share `projection` 697 (good). But `render-run-ai|html`, `render-history-ai|html`,
@@ -168,7 +168,8 @@ One pipeline, per CLAUDE.md "Presentation": **select units, render function per 
    faces of one value come from one `value/prepare` (print.cljc emit-both). Graph and experiment pages use it for
    the AI/HTML pair (D4, D5).
 7. **One graph.** `render.web/graph-page` over `render.walk/graph`, one node/edge builder, one legend.
-8. **One floor.** `seon.print.value/bounded-text` and `throwable-text`; delegates in value.clj deleted.
+8. **One floor.** The value printer's core (`seon.render.value/core-text`, `core-html`), its projection-free text
+   private to it; delegates in value.clj deleted.
 9. **Web proc.** `page-result` handles namespace and debug subjects; `feed`, `render-step`, `render-pass` unchanged in
    role but without the context derivation. `web.clj` splits by owner: routes/handlers, proc/feed/packages, page and
    debug units (three files, none over ~700 lines).

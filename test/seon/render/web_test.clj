@@ -47,7 +47,6 @@
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
-            [seon.print.value :as print.value]
             [seon.render.value :as value]
             [seon.render.web :as web]
             [seon.repl :as repl]
@@ -1229,7 +1228,7 @@ handle))}}
   (support/with-database
    (fn [connection]
      (let [value (vec (repeat 100000 (apply str (repeat 100 "x"))))
-           shown ((web-private 'value-html) @connection [::web/raw-data] value)
+           shown (value/html {:seon.render/value value :seon.db/db @connection :seon.render.value/root [::web/raw-data]})
            page (hiccup/->string shown)]
        (is (= "seon-data-panel" (:class (second shown))) "the value printer's panel is the shown value")
        (is (< (count page) 100000) "the page holds the printer's budget, never the 10 MB value")))))
@@ -2161,7 +2160,7 @@ handle))}}
         (is (= 500 (:status response)))
         (is (str/includes? (:body response) "IllegalArgumentException"))
         (is (<= (count (:body response))
-                (inc (:throwable-chars @#'print.value/text-limits))))))))
+                (inc (:throwable-chars @#'seon.render.value/text-limits))))))))
 
 (deftest start-refuses-a-flat-process-write-before-binding
   (support/with-database

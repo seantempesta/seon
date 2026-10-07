@@ -4,6 +4,7 @@
             [clojure.core.async.flow-monitor :as flow-monitor]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [seon.cluster.store :as store]
             [seon.config :as config]
@@ -64,8 +65,18 @@
   (let [sink (atom [])]
     (is (= {:sink nil :caller-sink-after sink}
            (binding [db/*read-evidence-sink* sink]
-             {:sink (async/<!! (sut/call-with-root-bindings #(async/go db/*read-evidence-sink*)))
+             {:sink (async/<!! (db/call-with-root-bindings #(async/go db/*read-evidence-sink*)))
               :caller-sink-after db/*read-evidence-sink*})))))
+
+(deftest a-generated-connections-writer-keeps-none-of-the-callers-bindings
+  ;; batch-C review 2026-10-07: seon.db/connection-generator connected inside
+  ;; the caller's frame, so the writer's go-loop conveyed a sampling
+  ;; evaluation's bindings to every later transaction on that connection.
+  (let [sink (atom [])
+        connection (binding [db/*read-evidence-sink* sink] (gen/generate db/connection-generator))
+        seen (promise)]
+    (d/transact connection [[:db.fn/call (fn [_] (deliver seen db/*read-evidence-sink*) [])]])
+    (is (nil? (deref seen 5000 ::no-transaction)))))
 
 (defn- idle-step
   ([] {:ins {} :outs {}})

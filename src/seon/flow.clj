@@ -16,6 +16,7 @@
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
             [seon.await :as await]
+            [seon.db :as db]
             [seon.batch]
             [seon.cluster.process :as process]
             [seon.env :as env]
@@ -71,25 +72,6 @@
 (schema/register-core-predicate! 'seon.flow/step-var? step-var?)
 (schema/register-core-predicate! 'seon.flow/write-port? write-port?)
 
-(def ^:private root-frame
-  "Clojure's root binding frame, as a fresh thread starts with it (`Var.dvals`)."
-  (let [task (FutureTask. ^java.util.concurrent.Callable
-                          (fn [] (clojure.lang.Var/getThreadBindingFrame)))]
-    (.join (Thread/startVirtualThread task))
-    (.get task)))
-
-(defn call-with-root-bindings
-  "The value of `f`, called where every Var has its root binding.
-  Start long-lived go-loops through it (a connection's writer, a graph): a go
-  block keeps the frame it starts in, so it would keep the caller's evaluation."
-  {:malli/schema [:=> [:cat [:=> [:cat] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The thunk's own polymorphic result is returned unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]]
-                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The thunk's own polymorphic result is returned unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]}
-  [f]
-  (let [frame (clojure.lang.Var/getThreadBindingFrame)]
-    (clojure.lang.Var/resetThreadBindingFrame root-frame)
-    (try (f)
-         (finally (clojure.lang.Var/resetThreadBindingFrame frame)))))
-
 (defn- graph-executor
   "One graph's own proc-loop executor: a virtual thread per task, running in
   the projection world the graph was handed. It is the join: after
@@ -129,7 +111,7 @@
      [::joins :map]]]}
   [{::keys [graph-definition joins] :as request}]
   ;; Flow's mult and tap go-loops, and the joins', keep the frame they start in
-  (call-with-root-bindings
+  (db/call-with-root-bindings
    (fn []
     (let [executor (graph-executor request)
           ;; every proc's args name its own graph, so a panicking `var-process`

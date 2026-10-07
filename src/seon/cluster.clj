@@ -56,7 +56,7 @@
             [seon.test.cache :as test.cache]
             [seon.operator.runtime :refer [root-store-holder running-instances]]
             [seon.program :as program]
-            [seon.print.value :as print.value]
+            [seon.render.value :as render.value]
             [seon.schedule :as schedule]
             [seon.render.web :as web]
             [seon.sci.eval :as sci.eval]
@@ -1518,7 +1518,7 @@
 
               (> (count (:seon.source/recorded-digests currentness)) 1)
               (str "incoherent (multiple recorded source digests "
-                   (print.value/bounded-text (:seon.source/recorded-digests currentness))
+                   (render.value/core-text (:seon.source/recorded-digests currentness))
                    ")")
 
               :else
