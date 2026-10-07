@@ -1,426 +1,458 @@
 ---
-title: S2b-1 — the reader rules inside today's segments (design)
+title: S2b-1 — the reader rules in the shared stepper (design v2)
 type: design
-status: gate 1, design only (no src/test edits)
+status: gate 1, design only (no src/test edits); v2 after the dual review and root's rulings
 date: 2026-10-07
 ---
 
-# S2b-1: the reader rules of spec §4.3, applied inside `seon.sci.forgive` (design)
+# S2b-1: the reader rules of spec §4.3 in `seon.sci.forgive/next-form` (design v2)
 
-Lane `s2b1-reader`. The spec is `docs/seon/specs/agent-loop.md` §4.3 (approved v4.1). Probes ran against default at
-`0c2a12900`; HEAD has since moved to `2c36b20c2`, which left the owners untouched (`git log 0c2a12900..HEAD` over
-`forgive.clj`, `batch.clj`, `sci/batch.clj`, `turn.clj` and `seon.batch.edn` is empty). Pins: edamame `196ea5e4`,
-sci `ce0aa53b`.
+Lane `s2b1-reader`. The spec is `docs/seon/specs/agent-loop.md` §4.3; this commit amends it in place per root's
+rulings (failed collections, regions, no-value constructs, fence matching, Q1, deferred imitation report, slicing
+and order).
+
+- Reviews: `review-s2b1-opus-notes.md` (e80131ef1) and `review-s2b1-codex-notes.md` (c62786efd). §12 gives the
+  disposition of each finding.
+- Line numbers are at HEAD `25bb94be0`, after s5a-reply landed (`7b5535cf6`).
+- Pins: edamame `196ea5e4`, sci `ce0aa53b`.
 
 **What exists and the approach.**
 - A model reply is read twice:
-  1. `seon.turn/planned-sources` calls `seon.sci.forgive/segments` in `:reply` mode. This structural pass is
-     `forms` → `next-form` and applies the forgiving repairs (prose → `;` comment edits, prompt markers stripped,
-     Parinfer for delimiters).
-  2. Each row is read again live by `seon.turn/read-row` (`next-form` in `:code` mode, the agent's SCI context).
-- The design keeps both passes and the one stepper (`next-form`), and replaces the stepper's `:reply` heuristics
-  with the spec's line rules. A line's first character decides; fences carry state on the text version; nothing is
-  repaired.
-- The reserved shape `#:seon.repl{…}` becomes a declared error value at its producer.
-- S6 inherits `next-form`'s `:reply` rules unchanged through `seon.turn.batch/turn-request` (D5's owner per
-  r-delete §6), and deletes `segments`, `forms` and the row re-read.
+  1. `seon.turn/planned-sources` → `seon.sci.forgive/segments` (`:reply`), a structural pass that applies repairs
+     (prose → `;` edits, prompt markers stripped, Parinfer);
+  2. `seon.turn/read-row` reads each row again live (`next-form :code`).
+- MCP SCI uses the same two passes in `:code`; MCP JVM uses the host reader and stops at its first read error.
+- The design keeps both passes and puts every §4.3 rule into the ONE stepper they share (`step`, called by
+  `next-form`):
+  - the reply is read region by region (the text between fence lines);
+  - each region gets one reader that ends at the region's end;
+  - outside fences, a line's first character decides;
+  - a failed read is its own step, and reading continues after it, in every mode;
+  - nothing is repaired, so the repairs machinery goes entirely.
+- The reserved `#:seon.repl` shape becomes an ordinary read error.
+- S6 inherits the stepper unchanged through `seon.turn.batch/turn-request` and deletes `segments` and the row re-read.
 
-**Which step of the one path this serves.** READ (text in → forms). It adds no owner, path or mechanism, and it
-deletes Parinfer, the structural trials, the code-suffix search, the marker repair and the thrown-error prose
-detection.
+**Which step of the one path this serves.** READ (text in → forms). It adds no owner, path or mechanism. It deletes:
+- Parinfer (the `parinferish` dependency's only caller);
+- the structural trials, the code-suffix search, the marker repair and the thrown-error prose detection;
+- the repair edits and the `:seon.batch/repairs` family;
+- the `:seon.batch/refused` carrier.
 
-## 1. What exists (file:line at `2c36b20c2`, callers, data, measured cost)
+## 1. What exists (file:line at `25bb94be0`)
 
-| Piece | Where | Role today |
+| Piece | Where | Today |
 |---|---|---|
-| `segments` | `src/seon/sci/forgive.clj:443-480` | `forms` over `structural-ctx`, then `comment-of` per form, and recursion on `(subs repaired end)` after a balanced unreadable form |
-| `forms` | `:398-423` | loops `next-form`; applies prose/marker edits once (`repair-edits` `:367`, `apply-edits` `:382`) |
-| `next-form` | `:282-358` | `:reply`: marker regex (`:261`, `:310`), Parinfer (`structural-failure?` `:177`, `form-lines-end` `:219`, `delimiter-repair` `:240`), shape tests (`structured?` `:276`, `structure?` `:263`, `follows-code?`), `code-suffix` `:197` with `structural-forms` `:122` (bare edamame, `suffix-options`), prose found by a THROWN read error (`prose-read-failure` `:135`); every mode: the `#:seon.repl` refusal `:333-337` |
-| `read-one` | `:80-107` | one SCI `parse-next` at the cursor; end from the reader's line/column deltas |
-| reply callers | `seon.turn/segmented-sources` `turn.clj:2982` ← `planned-sources` `:3009` (← `freeze!` `:4442`, generated opening blocks `:1770`, `seon.cluster.agent/segmenter` default `agent.clj:652`) | |
-| code callers | `seon.turn/code-sources` `turn.clj:3024` (MCP SCI, `mcp.clj:230`); live re-read `seon.turn/read-row` `turn.clj:4664-4694` (`:code`); `seon.sci.batch/read-next`/`read-code` `sci/batch.clj:23-33` (tests' `code-request`, the uncalled `turn-request`) | |
-| refusal carrier | `seon.batch/evaluate-step` `batch.clj:411`, `:427-428` | `(ex-info "Only the REPL writes responses: this map was not evaluated." {:seon.batch/refused refused})`: there is no `:seon.batch/error-value` |
-| nil fault | `seon.turn/show-row` `turn.clj:4741-4750` | `(sci.eval/shown-failure (or (:seon.batch/error-value (ex-data error)) value) …)` gets nil |
+| `segments` | `src/seon/sci/forgive.clj:443-480` | `forms` over `structural-ctx`, `comment-of` per form; recursion on `(subs repaired end)` after a balanced unreadable form; an unbalanced rest is `:seon.batch/unread` |
+| `forms` / `next-form` | `:398-423` / `:282-358` | `:reply` repairs: marker regex `:261`, Parinfer (`structural-failure?` `:177`, `form-lines-end` `:219`, `delimiter-repair` `:240`), shape tests (`structure?` `:263`, `structured?` `:276`), `code-suffix` `:197` (bare edamame `structural-forms` `:122`), prose found by a thrown read error (`prose-read-failure` `:135`); the reserved-shape refusal in every mode `:333-337`; edits applied once (`repair-edits` `:367`, `apply-edits` `:382`) |
+| failed-span scan | `collection-open` `:137`, `string-end` `:149`, `balanced-end` `:159` | used by `segments` after an unread rest, and by the Parinfer gate |
+| reply callers | `seon.turn/segmented-sources` `turn.clj:2982` ← `planned-sources` `:3009` ← `freeze!` `:4442`, generated opening blocks `:1770`, `preview-sources` `:4995`/`:5019` (← `seon.render.web/render-source-call` `web.clj:1398`), `seon.cluster.agent/segmenter` default | |
+| code callers | `code-sources` `turn.clj:3025` (MCP SCI); `read-row` `:4659-4703` (live re-read, `:code`; `carried` `:4673`); `seon.sci.batch/read-next` `sci/batch.clj:23` (`code-request`, `turn-request`); `read-code` `:29` (no caller) | |
+| JVM read | `seon.turn.batch/jvm-read-next` `turn/batch.clj:869-886` | host `read+string` after `forgive/skip-to`; a failure is `:seon.batch/unread-from`, which ends the batch |
+| refusal carrier | `seon.batch/evaluate-step` `batch.clj:411`, `:415`, `:427-428` | `(ex-info "Only the REPL writes responses: this map was not evaluated." {:seon.batch/refused refused})`, no `:seon.batch/error-value` |
+| nil fault | `seon.turn/show-row` `turn.clj:4741` | `(sci.eval/shown-failure (or (:seon.batch/error-value (ex-data error)) value) …)` gets nil |
+| duplicate check | `seon.sci.reader/read-events` `reader.cljc:491`, `:570-579` | builds `::response-keys` by hand (no `:seon.error/type`); `reader-error` `:585` is private, and `read-row` reaches it through `#'reader/reader-error` |
 
-Data: `:seon.batch/segmented` (`resources/seon/schemas/seon.batch.edn:29`), `:read-state` (`:52`), `:read-step`
-(`:68`), `:repair-kind [:enum :prose :prompt-marker :delimiters]` (`:39`) and `:refused [:enum :fabricated-response]`
-(`:63`). The variant `:seon.sci.reader/fabricated-response-error` already exists (`seon.sci.reader.edn:15`), and
-nothing builds it in this path.
+**Reproduced now, at HEAD on default.**
+- MCP SCI, agent `s2b1-reader-v2`, `(+ 1 2)` / `[1 bad: (+ 2 3)]` / `#:seon.repl{:value 3}` / `(* 2 3)`:
+  - form 2 answers its read error as a value; continuation works in the MCP code path today through
+    `balanced-end`;
+  - form 3 answers the bare string `"Only the REPL writes responses: this map was not evaluated."`;
+  - form 4 (`6`) carries the `shown-failure` "expected a map, got nil … seon.turn/show-row (turn.clj:4741)" error.
+  - This is task `56e06f9e410a` (the delivery on the next form) and task `fe8f23d6095c`. `7f5dfb6ad7a2` is not in
+    the database; the review (F5) was right.
+- MCP JVM, `(+ 1 1)` / `(vector ::nope.alias/k)` / `(+ 2 2)` answers only `2` (task `e333444a896c`).
 
-**Reproduced at the REPL (SCI, agent `s2b1-reader`, default `0c2a12900`)** with
-`(+ 1 2)` / `scratch.add2=>` / `#:seon.repl{:value 3}` / `(* 2 3)`:
-- form 2 answered `{:seon.error/message "Unable to resolve symbol: scratch.add2=>"}`;
-- form 3 answered the bare string `"Only the REPL writes responses: this map was not evaluated."`;
-- form 4 (`6`) carried `:errors [{… :seon.error/operation seon.sci.eval/shown-failure … "expected a map, got nil …
-  Called from seon.turn/show-row (turn.clj:4750)"}]`, the fault riding the WRONG form.
-- `runtime_status` then listed it as an open fault on `seon.turn/show-row`. Existing tasks: `7f5dfb6ad7a2` (faults of
-  show-row), `fe8f23d6095c` (`evaluate-answers-nil-for-a-refused-form`), `19180cd1866c`
-  (`seon.test-support/evaluate-answers-no-value-for-an-unreadable-source`).
+## 2. Root's rulings, applied
 
-**An unfinished form is already reported well by the live read** (MCP SCI, agent `s2b1-reader`):
-`(defn f [x]\n  (inc x)` answers `{:seon.error/message "EOF while reading, expected ) to match ( at [1,1]",
-:seon.error/member :seon.sci.reader/form}`. The no-repair rule needs no new message.
-
-**Measured cost today** (a throwaway JVM on the checkout's classpath, unarmed, median of 9 after 3 warm runs,
-per-thread allocation on a platform thread; `rr` = live 01, 05-08 and loop 1-2 joined, as in forgive-fix):
-
-| Input | chars | installed `:reply` | installed `:code` |
-|---|---|---|---|
-| rr ×1 | 9,557 | 4.21 ms, 3.82 MB | 1.19 ms, 2.05 MB |
-| rr ×3 | 28,671 | 7.06 ms, 11.28 MB | 1.18 ms, 2.16 MB (stops at the first prose word) |
-| rr ×8 | 76,456 | 16.17 ms, 29.47 MB | 1.17 ms, 2.59 MB (same) |
-| 300 × `(see below\nmore prose: here` | 8,400 | 9.52 ms, 26.33 MB | 0.11 ms, 0.11 MB |
-| 1,000 two-line defns | 23,000 | 6.73 ms, 21.54 MB | 3.98 ms, 13.40 MB |
-| 1,000 stray `)` in a fence | 9,011 | 18.10 ms, 54.44 MB | 0.08 ms, 0.14 MB (stops at the first) |
-
-`:reply` at about 400 bytes per character is still over the 5 MB pass budget at 28 KB (a DeepSeek reply at its
-output cap is about 30 KB).
-
-## 2. Duplicates
-
-- **The fabrication check is written twice.** `forgive.clj:333-337` (every mode) and `seon.sci.reader/read-events`
-  `reader.cljc:570-579`, which builds `::response-keys` with its own message. The reader copy dies with its callers
-  (`seon.sci.reader/read`: the refresh in S4, `evaluable-source?` in S6); this slice adds no third copy.
-  - The new producer builds the existing variant through the installed constructor (`seon.error.refusal/error`).
-- **Two reply rule sets would exist** if the rules lived in a new line scanner in `segments`: `next-form :reply`
-  (reached by `turn-request`) would keep the old heuristics. That is why the rules go into `next-form`; see §5,
-  alternative A.
-- **Today's prose detection is a third read.** A prose word is found by a thrown SCI read error, ~12-70 KB per
-  throw. `forgive-fix` filed it as task `d3b4dd5938dd`; this slice deletes the path in `:reply`.
+| # | Ruling | Where in this design |
+|---|---|---|
+| 1 | Imitation report deferred to S4/S6 | No `:imitation` kind, regex, variant, `:seon.batch/imitation` or turn hunk. Imitation lines are prose comments. A prose-only reply keeps the no-form refusal (unchanged path) |
+| 2 | `preview-sources` and generated opening blocks read with `code-sources` | §4.5 |
+| 3 | Continuation in the one stepper, every mode; a failed collection resumes after its closer; JVM the same; spec amended | §4.2, §4.4; spec §4.3 "Read errors" |
+| 4 | `#_` and no-value constructs stay in their region; classification resumes after them; a fence closes only with its match; a non-code fence is all prose | §4.1 (regions, `enter`, `region-end`), §4.2 (`read-at`); spec §4.3 |
+| 5 | Armed allocation under 5 MB; one reader per text, not per prose line; no reserved-shape error in the segmenting pass | §9: rr ×3 4.94 MB armed. One reader per region (§4.1); error values only in `next-form`, never in `segments` |
+| 6 | The reserved shape is the existing `:seon.batch/read-error` step; delete `:seon.batch/refused` | §4.3 |
+| 7 | The nil show-row regression drives MCP SCI | §10 |
+| 8 | S2b-1 lands before S1; S1 writes the fence rules into `(help)` | spec §4.3 slicing and §5 row |
+| 9 | Q1: `#` + a non-whitespace character other than `#` starts a form; `#1 priority` becomes a visible read error | `form-start?`; spec §4.3; §8 |
 
 ## 3. Library seams
 
-- Reading stays `sci.core/parse-next`. It is the structural `structural-ctx` in `segments` and the live context in
-  `read-row`; SCI normalizes edamame's options (sci `parser.cljc:44-51`).
-- After this slice `forgive.clj` calls no bare edamame: `structural-forms`, `structural-failure?` and `code-suffix`
-  go, so the `edamame.core` require goes. That also retires the raw-options class of r-read §4 at the source.
-- `parinferish` loses its only caller. The `deps.edn:113` entry can go: a dependency change, which root makes outside
-  `bin/lane` as with the datahike bump.
-- No library gives a Markdown fence/line classifier worth taking. The rule is "a line's first character", with fence
-  state. CommonMark's full fence grammar (indentation, `~~~`, backtick counts, info strings) is more than the spec
-  asks for (§7 Q4).
+- **Reading stays SCI `parse-next`**: the structural `structural-ctx` in `segments`, and the agent's context in
+  `read-row`. `forgive.clj` keeps no bare edamame call, so the `edamame.core` and `parinferish.core` requires go.
+- **Failure spans come from edamame's own data.** `parse-to-delimiter` (edamame `impl/parser.cljc:275-315`) adds
+  each enclosing collection to `:edamame/containers` (row, column, opened delimiter) as the failure unwinds. SCI keeps
+  that data on its wrapper.
+  - Probed in a throwaway JVM: `[1 bad: (+ 2 3)]` gives containers `["["]`; `(defn f [x] (let [y #1] …))` gives
+    `["[" "(" "("]`.
+  - The OUTERMOST container (the last) gives the failed form's opener exactly, with no prefix guessing.
+  - One scan from that opener to its matching closer gives the span.
+  - The reader's own stop position is not enough for collections. For `#1` the reader stopped past the `]` it had
+    consumed, so counting closers from there overshoots into the next form; that was observed with the first
+    prototype.
+  - For failures with no open collection (a stray closer, which edamame consumes before throwing at `:768-792`; a
+    token; an odd map, thrown after its `}` was read) the reader's stop position is the span end.
+- **`#_` is handled by edamame inside `parse-next`.** Its `continue` recursion (`:568-578`, `:836-837`) would read
+  the next value from wherever it is, so the stepper reads `#_`'s operand itself. `:uneval` also reads the next
+  value (Codex P1), so it is no seam.
+- A reader conditional is read with `:read-cond :preserve` in the structural pass. Whether it selects a value is
+  plain data: `(:form rc)` against the live features.
+- `edamame.core/source-reader` accepts a `java.io.Reader`, so a region's reader is
+  `(java.io.StringReader. (subs text start end))`. The region copies are disjoint, so the copying is linear.
 
 ## 4. The smallest composition
 
-### 4.1 The rules as `next-form :reply` (`reply-step`)
+### 4.1 Regions and the line rules (`reply-step`)
 
-Every rule is one `cond` row over the line at the cursor; the text never changes during stepping (prose is an edit
-that `forms` applies once, as today). The fence state rides the text version (`:seon.batch/fence`, a value, so no
-read-state threading through `seon.batch`'s fold):
+The version carries its region: `:seon.batch/bound` (the region's end), plus `:seon.batch/fence` (`:code`/`:prose`)
+and `:seon.batch/ticks` inside a fence. Entering a region makes its reader once; inside the region the reader is
+advanced, never rebuilt. The prototype (scratchpad `s2b1-reader/src/s2b1/forgive2.clj`, run only in throwaway
+JVMs) reads:
 
 ```clojure
+(defn- enter
+  [text pos fence ticks]
+  (let [bound (region-end text pos ticks)]
+    (cond-> (assoc (version text pos bound) :seon.batch/bound bound)
+      fence (assoc :seon.batch/fence fence :seon.batch/ticks ticks))))
+
 (defn- reply-step
-  [ctx opts v repairs last-code-end]
-  (loop [v v repairs repairs]
-    (let [^String text (:seon.batch/text v)
-          fence (:seon.batch/fence v)
-          s (skip-blank text (:seon.batch/pos v))
-          to (fn [p] (cond-> (version text p) fence (assoc :seon.batch/fence fence)))]
-      (if (>= s (count text))
-        {:seon.batch/eof true :seon.batch/version (to s) :seon.batch/repairs repairs}
-        (let [[ls le] (line-bounds text s)
-              c (.charAt text (int s))
-              kind (when (str/blank? (subs text ls s)) (fence-kind (subs text ls le) fence))]
-          (cond
-            kind (recur (cond-> (version text le) (not= :close kind) (assoc :seon.batch/fence kind)) repairs)
-            (= :code fence) (if (= \; c) (recur (to le) repairs) (read-at ctx opts (advance v s) s repairs))
-            ;; the rest of a form's own line, any line of a non-code fence: prose
-            (or (= :prose fence) (and last-code-end (<= ls last-code-end)))
-            (recur (to le) (if (= \; c) repairs (conj repairs (prose-edit text s le))))
-            (= \; c) (recur (to le) (cond-> repairs (re-find imitation (subs text s le)) (conj (prose-edit text s le))))
-            (and (= s ls) (form-start? text s)) (read-at ctx opts (advance v s) s repairs)
-            :else (recur (to le) (conj repairs (prose-edit text s le)))))))))
+  [ctx opts v last-code-end]
+  (let [^String text (:seon.batch/text v) n (count text)]
+    (loop [v (if (:seon.batch/bound v) v (enter text (:seon.batch/pos v) nil nil))
+           p (:seon.batch/pos v) code-end last-code-end]
+      (let [{fence :seon.batch/fence bound :seon.batch/bound} v
+            s (min (skip-blank text p) bound)]
+        (cond
+          (>= s n) {:seon.batch/eof true :seon.batch/version v}
+          ;; a region ends at a fence line: close the open fence, or open one by its tag
+          (>= s bound)
+          (let [le (line-end text bound) [t tag] (fence-line text bound le) start (min n (inc le))]
+            (recur (if fence (enter text start nil nil)
+                       (enter text start (if (contains? code-tags tag) :code :prose) t))
+                   start code-end))
+          (= :prose fence) (recur v bound code-end)
+          (= :code fence)
+          (if (= \; (.charAt text (int s)))
+            (recur v (inc (line-end text s)) code-end)
+            (let [r (read-at ctx opts v s)]
+              (if (find r ::skip) (recur (:seon.batch/version r) (or (::skip r) bound) code-end) r)))
+          :else
+          (let [ls (line-start text s)]
+            (cond
+              (and code-end (<= ls code-end)) (recur v (inc (line-end text s)) code-end) ; rest of a form's line
+              (and (= s ls) (form-start? text s))
+              (let [r (read-at ctx opts v s)]
+                (if (find r ::skip) (recur (:seon.batch/version r) (or (::skip r) bound) (or (::skip r) bound)) r))
+              :else (recur v (inc (line-end text s)) code-end))))))))
 ```
 
-| Spec §4.3 rule | Where |
-|---|---|
-| ```` ``` ````/`clojure`/`clj`/`cljc`/`edn` open a code fence, any other tag a prose fence, a bare line closes | `fence-kind` (first info word, lowercased; a tagged line inside a fence reopens by its tag, which is the "fence never closed" case) |
-| inside a code fence every line is code (lone symbols, `result/e…`, `:k`, literals) | the `:code` row: `read-at` at any position |
-| outside fences a form starts at column 0 with `(` `[` `{` `'` `@` `^` `#(` `#{` `#"` `#'` `#_` `#:` `#?` | `form-start?`, `(= s ls)` |
-| `# ` heading, leading backtick, `Done.`, a lone symbol, indented forms and bare literals are prose | the `:else` row (they are not in the start set) |
-| an open form continues whatever the next lines start with | `read-at`: the reader consumes them |
-| after a top-level form closes, the rest of its line is prose | the `last-code-end` row |
-| `;; =>` and `ns=>` outside fences are prose, reported once as an imitation | `imitation` regex → repair kind `:imitation`; `segments` returns the first as `:seon.batch/imitation` |
-| reserved shape `#:seon.repl{…}`/`{:seon.repl/…}` as a form: never evaluated, an error value | `read-at` (every mode) |
-| a failed read is its own error; reading continues from the reader's advanced cursor; an unclosed form reaches EOF as unfinished | `read-one` reports where it stopped; `forms` continues (`failed-end`: a balanced collection to its closer, any other form where the reader stopped); an unclosed collection is the unread rest |
-| SCI `parse-next` with live options | unchanged: `read-row` already reads each row with `sci.batch/parse-options` of the agent's context |
-| MCP code is one code fence | `:code` mode, unchanged (`code-step` = today's `:code` branch) |
-| no repair, no trials, linear | Parinfer, trials and the code-suffix search are deleted; each step costs its line or its form |
+- `region-end` scans lines from a line start with `.indexOf`. It calls `fence-line` only on a line whose first
+  non-blank characters are backticks.
+  - Outside a fence the region ends at the next fence line.
+  - Inside a fence of `ticks` backticks it ends at the first untagged line of at least `ticks` backticks.
+- `form-start?` is `(`, `[`, `{`, `'`, `@`, `^`, or `#` followed by a non-whitespace character other than `#`.
+- `code-tags` is `#{"" "clojure" "clj" "cljc" "edn"}`.
 
-### 4.2 What Parinfer repair does under these rules (owner: no repair)
+### 4.2 One read and its span (`read-one`, `read-at`)
 
-Nothing: `delimiter-repair`, `form-lines-end`, `structural-failure?` and the `:delimiters` repair kind are deleted.
-The consequences, each traced:
-
-- **Unclosed form** (`(defn f [x]\n  (inc x)\n\nNote: done.`): before, Parinfer closed it silently and it ran. Now it
-  is the unread rest through EOF. Its live read answers "EOF while reading, expected ) to match ( at [1,1]" (shown
-  above), which the agent sees. This reverses forgive-fix's behaviors 1-2, deliberately.
-- **Extra closer in a fence** (`(+ 1 2))\n(+ 3 4)`): before, Parinfer dropped the `)` and the agent was not told.
-  Now `)` is its own source, whose live read answers "Unmatched delimiter: )", and `(+ 3 4)` still runs.
-- **Extra closer outside a fence**: by the same-line rule the stray `)` is the rest of the form's line, so it
-  becomes prose (part of the next form's comment), silently. This is a consequence of the spec, not a repair.
-- **In the 23 real replies Parinfer acted only in `run4-7b254915ca94`** (2 of its edits). One closed the reply's
-  last line, a lone `(`, into `()`, which then ran. Now that `(` is the unread rest.
-
-### 4.3 Deleted, changed and added
-
-`src/seon/sci/forgive.clj` (prototype: 480 → 396 lines, `+187 −271`; the namespace docstring is rewritten for the
-rules):
-- **Deleted:**
-  - `structural-options`, `suffix-options`, `structural-forms`, `prose-read-failure`, `structural-failure?`,
-    `code-suffix`, `prose-repair`, `form-lines-end`, `delimiter-repair`, `prompt`, `structure?`, `code-line?`,
-    `structured?`, the old `next-form` body;
-  - the `edamame` and `parinferish` requires;
-  - the `segments` recursion.
-- **Added** (each one line of contract): `code-tags`, `fence-kind`, `form-start?`, `imitation`, `prose-edit`,
-  `skip-blank`, `fabricated?`, `read-at`, `code-step`, `reply-step`, `failed-end`.
-- **Changed:**
-  - `read-one` also answers the `:end` where a failed read stopped;
-  - `next-form` dispatches by mode;
-  - `read-state` no longer computes `structure?`;
-  - `repair-edits` handles `:prose`/`:imitation`;
-  - `forms` continues after a failed read in `:reply`, with the fence carried;
-  - `segments` returns `:seon.batch/imitation`.
-
-`read-at` builds the reserved-shape error with the installed constructor (probed in SCI on default; it answers
-`:seon.error/type :seon.sci.reader/fabricated-response-error` with the members below):
+- `read-one` keeps today's end computation (line and column deltas from the read's start) and adds the failure
+  span:
+  - **opener present:** the end is `(or (closer-end text opener) (count text))`;
+  - **no opener:** the end is where the reader stopped.
+- `read-at` clamps every end to the region's bound, so an unclosed collection is unfinished at its region's end.
+- `closer-end` is today's `balanced-end` loop started at a known opener, so `collection-open` goes.
 
 ```clojure
-(refusal/error :seon.sci.reader/fabricated-response-error
-  {:seon.error/operation `next-form
-   :seon.error/message "Only the REPL supplies results; this form was not evaluated. Send forms and wait for their results."
-   :seon.error/offending source
-   :seon.sci.reader/response-keys (into #{} (filter repl-key?) (keys form))})
+(defn- read-at
+  [ctx opts v s]
+  (let [^String text (:seon.batch/text v)
+        discard? (and (< (inc s) (count text)) (= \# (.charAt text (int s))) (= \_ (.charAt text (int (inc s)))))
+        r (read-one ctx opts (advance v (if discard? (+ s 2) s)))]
+    (cond
+      (:eof r) {::skip nil :seon.batch/version v}
+      (:error r)
+      (let [end (min (max (:end r) (:stop r) (inc s)) (:seon.batch/bound v (count text)))]
+        {:seon.batch/read-error (:error r) :seon.batch/start s :seon.batch/end end
+         :seon.batch/version (advance (:v r) end)})
+      (or discard? (no-value? (:form r) (:features opts #{:clj}))) {::skip (:end r) :seon.batch/version (:v r)}
+      :else {:seon.batch/form (:form r) :seon.batch/start s :seon.batch/end (:end r) :seon.batch/version (:v r)})))
 ```
 
-The value rides the step as `:seon.batch/refused`. `seon.error.refusal` requires only `seon.id`, so `forgive`
-requiring it creates no cycle.
+- **A no-value construct** is `#_` with its operand, or a preserved reader conditional selecting none of the
+  features. It is skipped: in a code fence reading continues after it; outside fences its line's rest is prose.
+  - Probed: `#_ (+ 1 2)\nDone.\n(+ 3 4)` runs only `(+ 3 4)` (task `c98bb97a06a3`'s input).
+  - Probed: `` ```clj\n#_ (+ 1 2)\n```\nDone.\n(+ 3 4) `` runs only `(+ 3 4)`.
+  - Probed: `#?(:cljs 1)\nDone.\n(+ 3 4)` runs only `(+ 3 4)`.
+- **`code-step`** (MCP SCI, `code-request`): today's `skip-to` (fence lines, `~~~` included, and `;` comments
+  skipped) plus `read-at` over one whole-text region. A failed read continues there too (ruling 3).
 
-`src/seon/batch.clj:427-428`: the `refused` branch becomes
-`(ex-info (:seon.error/message refused) {:seon.batch/error-value refused})`.
-- `show-row` and `publish-row` already read `:seon.batch/error-value`, so the nil fault disappears and the refused
-  form's own row shows the error.
-- Nothing else reads `:seon.batch/refused`.
+### 4.3 The live read builds the error value; `segments` never does
 
-`resources/seon/schemas/seon.batch.edn`:
-- `:refused` → `:seon.sci.reader/fabricated-response-error`;
-- `:repair-kind` → `[:enum :prose :imitation]`;
-- `:text-version` gains `[:seon.batch/fence {:optional true} [:enum :code :prose]]`;
-- the unread `:read-step` variant gains `[:seon.batch/end {:optional true} :seon.batch/end]`;
-- `:read-state` drops `:seon.batch/structured?`, and the `:structured?` key is deleted;
-- `:segmented` gains `[:seon.batch/imitation {:optional true} :seon.sci.reader/imitated-output-error]`.
+`next-form` = `step` plus the error value, built only in the live paths (`read-row`, `sci.batch/read-next`):
 
-`resources/seon/schemas/seon.sci.reader.edn` gains the variant `:seon.sci.reader/imitated-output-error`, which is
-`:seon.error/base` plus `:seon.error/offending :string`. A registry search found no existing imitation variant
-(`rg imitat resources/seon/schemas` is empty).
-- Schema resources change, so the slice is proven by publication and adoption on a branch of the live store
-  (AGENTS.md "Change one loadable slice").
+```clojure
+(defn next-form
+  [ctx opts mode state]
+  (let [r (step ctx opts mode state)
+        source #(subs (:seon.batch/text (:seon.batch/version r)) (:seon.batch/start r) (:seon.batch/end r))
+        carried (fn [value] (ex-info (:seon.error/message value) {:seon.batch/error-value value}))]
+    (cond
+      (:seon.batch/read-error r) (update r :seon.batch/read-error #(carried (reader/reader-error (source) %)))
+      (fabricated? (:seon.batch/form r))
+      (-> r (dissoc :seon.batch/form) (assoc :seon.batch/read-error (carried (reader/response-error (source) (:seon.batch/form r)))))
+      :else r)))
+```
 
-**Consumer hunk in a held file (`src/seon/turn.clj`, lane `s5a-reply`):**
-- **(a)** `segmented-sources`: when `:seon.batch/imitation` is present, put one row FIRST,
-  `{:seon.cluster.eval/source <the imitated line> :seon.ns/name ns :seon.sci.eval/event {:seon.sci.reader/error <value>}}`.
-  - `read-row`'s existing `carried` branch (`turn.clj:4673`) answers it as that row's error, never evaluated. That
-    is the "reported once" delivery, with no new mechanism.
-  - Until (a) lands, an imitation line is a prose comment and nothing more: harmless, but not reported.
-- **(b)** `turn.clj:1770` reads Seon's own generated opening blocks with `planned-sources` (`:reply`). Under the line
-  rules a block that is a bare symbol or keyword would become prose, and the whole system turn would refuse as
-  no-forms.
-  - Those blocks are code, so they should use `code-sources`. Untraced risk: the blocks seen in
-    `live-run/raw/system-turns-evals.txt` are all column-0 lists, so UNVERIFIED that any other shape occurs.
-  - S4 deletes the caller.
+- `seon.sci.reader/reader-error` becomes public; `read-row` already calls it through a private Var.
+- New `seon.sci.reader/response-error`, `:clj`, builds the existing `:seon.sci.reader/fabricated-response-error`
+  through `seon.error.refusal/error`.
+  - Message: "Only the REPL writes responses: this form was not evaluated; send forms and wait for their results."
+  - `read-events` (`reader.cljc:570-579`) calls it too, so the duplicate check goes (task `83b10f8c64d2`).
+  - `seon.error.refusal` requires only `seon.id`, so there is no cycle.
+- `batch.clj:411`, `:415`, `:427-428`: the `refused` binding and branch are deleted. The existing `read-error`
+  branch (`:429`) carries the value, and `show-row`/`publish-row` read `:seon.batch/error-value`, so the nil fault
+  is gone at its producer.
+- `read-row` (`turn.clj:4659`) passes a `:seon.batch/read-error` step through as it passes a form. Its `cause`
+  branch goes, and it keeps its own `carried`, bound and empty-row refusals.
 
-Both are a few lines; root routes them to `s5a-reply` as a patch or reassigns `turn.clj` for this slice.
+### 4.4 JVM mode: the same rule
 
-### 4.4 Why no owner or library already does it
+When the host `read+string` fails at `pos`, `jvm-read-next` asks the stepper where that construct ends:
+- new public `(forgive/construct-end text pos)` → the `:seon.batch/end` of `(step @structural-ctx opts :code …)` at
+  `pos`;
+- it answers a `:seon.batch/read-error` step whose carrier holds `seon.sci.reader/reader-error` of that span, with
+  the version at the end.
 
-- The single-read stage (`code-request` + `sci.batch/read-next`) is `:code` only.
-- The stopped patch is judged in §6.
-- The spec puts these rules in the reader, and `next-form` is the reader's only stepper, so the rules go there.
+The fold then continues (`batch.clj:601-606` ends only on eof or unread), so the reply answers 2, the read error, 4
+(task `e333444a896c`). Probed structurally: `(vector ::nope.alias/k)` reads whole with the structural any-alias
+resolver, so its span ends at its `)`.
+
+### 4.5 Callers and deletions
+
+- `turn.clj:1770` (generated opening blocks) and `:5019` (`preview-sources`) call `code-sources` (ruling 2).
+- `segmented-sources` loses its `:seon.batch/unread` branch: the stepper never answers an unread rest. Its
+  `max-source` path becomes one segment whose source is the whole text, which `read-row` refuses with the reader's
+  bound as today.
+- **Deleted from `forgive.clj`:**
+  - `structural-options`, `suffix-options`, `structural-forms`, `prose-read-failure`, `collection-open`,
+    `balanced-end`, `structural-failure?`, `code-suffix`, `prose-repair`, `form-lines-end`, `delimiter-repair`,
+    `prompt`, `structure?`, `code-line?`, `structured?`, `repair-edits`, `apply-edits`;
+  - the edamame and parinferish requires.
+- **Deleted elsewhere:** `seon.sci.batch/read-code` (no caller); `parinferish` from `deps.edn` (root's
+  dependency path).
+- **Deleted from `seon.batch.edn`:** the repairs family is dead once nothing repairs. Scripted sweep:
+  - keys `:repair-kind`, `:prose`, `:at`, `:through`, `:repair`, `:repairs`, `:structured?`, `:refused`;
+  - `:repairs` members in `:read-state`, `:read-step` and the two reply maps (`:221`, `:272`);
+  - consumers: `turn.clj:4657`, `:4668`, `:4680`, `:4693`; `batch.clj:238`, `:740`; `turn/batch.clj:815`, `:881-885`,
+    `:925`, `:947-952`; `test/seon/run_test.clj:24-25`, `:37`, `:81-82`, `:93`, `:208-209`.
+- **Added to `seon.batch.edn`:** `:text-version` gains optional `:seon.batch/bound` (nat-int?),
+  `:seon.batch/fence` `[:enum :code :prose]` and `:seon.batch/ticks` (pos-int?). The `:read-error` step variant is
+  unchanged.
+- **Added functions** (each with a one-line contract): `version`'s three-argument arity, `line-end`, `line-start`,
+  `fence-line`, `region-end`, `form-start?`, `skip-blank`, `closer-end`, `outermost-opener`, `no-value?`,
+  `read-at`, `enter`, `reply-step`, `code-step`, `step`, `construct-end`.
+- **`comment-of`** derives the comment from the text between two forms: prose lines → `; line`, the agent's `;`
+  lines kept, blank and fence lines dropped. So no repair edits are needed and the text read is the text sent.
+- **Size:** prototype `forgive2.clj` is 293 lines, about 315 with `next-form` and `construct-end`, against 480 today (about −165). The `seon.batch.edn` and consumer
+  sweep is net negative.
+
+### 4.6 Why no owner or library already does it
+
+- `next-form` is the stepper every reader entrant already shares.
+- Edamame supplies the failure containers, SCI the read, and Java the bounded reader.
+- No CommonMark library is needed for a first-character rule plus fence matching (both reviews agree).
 
 ## 5. Alternatives
 
-- **A. A line scanner inside `segments`** (prototyped first: scratchpad `s2b1-reader/proto.clj`).
-  - Same results on the corpus, except that it bounded an unclosed form at the next fence.
-  - It costs about the same (rr ×8: 3.66 ms, 8.47 MB).
-  - Rejected: it leaves `next-form :reply` with the old rules for `turn-request` (two rule sets), and S6 would have to
-    port it.
-- **B. Keep `next-form :reply` and only add a pre-pass (the stopped patch's `fenced`).** Rejected in §6.
-- **C. Fence-bounded unclosed forms**: an unclosed form inside a fence stops at its closing fence, so later fences
-  still run.
-  - Kinder, but it deviates from the spec's "reaches EOF".
-  - No real reply needs it: the three truncated defns all end their reply. See §7 Q3.
-- **D. Continuation after a failed read in `:code` too** (MCP), per "MCP is one code fence".
-  - Measured in the prototype: 1,000 prose lines through `:code` cost 56.9 ms and 121 MB (one throw per token),
-    against 0.29 ms and 0.39 MB today, which stops at the first error.
-  - Kept out of S2b-1: `:code` stays EQUIVALENT, and S6 decides with the one cursor. See §7 Q7.
+- **A. Rules in a separate line scanner inside `segments`** (v1 prototype `proto.clj`): rejected, because it creates
+  two rule sets and S6 would have to port it.
+- **B. One reader per text, with a crossing check after each read** (v1 and v2 first form): rejected. 100 fences
+  each holding an unclosed form re-read to the text's end each time: 569 ms, 618 MB armed. Readers bounded by
+  region make it 7.21 ms, 6.95 MB with no crossing check.
+- **C. Span from the reader's stop plus open-container count:** rejected, because it overshoots (`#1` consumed a
+  `]`). The outermost opener plus one closer scan is exact on every probe.
+- **D. Keep the repairs vector, always empty:** rejected. Every armed call would validate it, and a key with no
+  producer has no consumer.
 
-## 6. The stopped patch (`stopped-wip/reader-prose.patch`), judged
+## 6. The stopped patch (`stopped-wip/reader-prose.patch`)
 
-| What it does | Verdict |
-|---|---|
-| `fenced`: rewrites a fenced reply line by line into a second text (every non-Clojure-fence line `; `), then reads it in a new `:fenced` mode | second representation of the reply, a third mode; replaced by fence state on the version |
-| `prompt-line?` + `imitation-end`: a `ns=>`/`=>` line through the next blank/fence line is refused, in EVERY mode (MCP included) | contradicts §4.3 (inside fences markers are code whose error the agent sees; outside they are prose); on loop-pass call 2 it refuses 5 of 6 forms (r-read §5) |
-| `markdown-line?`: heading / leading code span → prose | subsumed by the first-character rule |
-| keeps Parinfer and the trials; `:fenced` forces the `fixed` trial too | the opposite of the owner's no-repair ruling; written before forgive-fix, so it also carried the quadratic cost |
-| changes only the refusal's message at `batch.clj:390` | does not fix the nil fault (no error value) |
-| tag set includes `cljs` | the spec's set is `""`, `clojure`, `clj`, `cljc`, `edn` (§7 Q5) |
-| ~130 lines added | this design is net negative |
+Unchanged verdict from v1:
+- Its `fenced` rewrite, prompt-line refusal in every mode, Parinfer and `:fenced` mode are all rejected. On
+  loop-pass call 2 it refuses 5 of 6 forms.
+- Taken from it: reading the fence info string (first word, lowercased).
 
-Taken from it: the fence info-string reading (first word, lowercased).
+## 7. Open questions for root
 
-## 7. Decisions needed (root/owner), each with my recommendation
+None blocking. Two consequences to confirm on reading:
+1. **An unclosed form inside a fence is unfinished at its closing fence** (the regions rule), where §4.3 previously
+   said EOF. The spec text is amended to match. No real reply changes, because the three truncated defns have no
+   closing fence.
+2. **A mismatched closer** (`(foo]`) spans to the first closer that balances the opener, so `(foo]` is one error and
+   the next form runs (probed). A Clojure REPL would keep waiting for `)`.
 
-1. **Tagged literals at column 0** (`#inst "…"`, `#uuid`, `##Inf`) are not in the spec's start set, so they become
-   prose.
-   - `seon.turn-test/a-reply-keeps-its-dispatch-macro-forms-as-code` asserts `#inst` runs.
-   - Recommend adding "`#` followed by a letter" (a tagged literal). A Markdown heading is `#` + space; `#1` and
-     `##` stay prose.
-2. **The same-line rule vs REPL parity.** `seon.repl-parity-test` C7 plans `"[] [] [999]"`: three forms today, one
-   form plus prose under the rule.
-   - The spec rules it, and inside a fence all three run.
-   - Recommend converting C7's input to a fence and recording the deviation in the parity table.
-3. **An unclosed form in a fence** reads to EOF (spec), swallowing later fences. Recommend the spec, as written.
-4. **`~~~` fences.** The spec names backtick fences only. Today `skip-to` skips `~~~` lines; under the rule they are
-   prose. Recommend the spec: no real reply uses `~~~`.
-5. **`cljs` fences are prose** (spec). Recommend the spec.
-6. **Prompt markers inside a fence** run as symbols, and the agent sees "Unable to resolve symbol: scratch.add2=>"
-   (observed). Recommend no special rule now (zero code); revisit with S8's presentation experiment.
-7. **Continuation after a failed read** is in `:reply` only in this slice (§5 D).
-8. **The imitation report row goes first** in the reply's rows (§4.3a).
-9. **`turn.clj` hunks (a) and (b)** go to `s5a-reply` or a reassignment.
-10. **Removing `parinferish` from `deps.edn`**: root's dependency-change path.
-
-## 8. Every real DeepSeek reply, before → after
-
-Sources = segments `planned-sources` turns into rows (an unread rest adds one row in both columns).
+## 8. Every real DeepSeek reply, before → after (prototype v2, throwaway JVM)
 
 | Reply | chars | before | after | What changes for the agent |
 |---|---|---|---|---|
-| live 01 | 2,042 | 24 | 24 | none (all fenced; prose → comments) |
+| live 01 | 2,042 | 24 | 24 | none |
 | live 02 | 0 | 0 | 0 | none (empty reply; turn path) |
 | live 03 | 424 | 2 | 2 | none |
-| live 04 | 120 | 0 + unread | 0 + unread | none (truncated inside a string; Parinfer could not help either) |
+| live 04 | 120 | 0 + unread | 1 | the truncated `(defn- reply-map "…` is one unfinished source: "EOF while reading" (was the unread rest, same message) |
 | live 05 | 1,420 | 3 | 3 | none |
-| live 06 | 1,518 | 3 | 1 | `` `reply-map` joins … `` and `` ` joins`` (line-start backticks) no longer run as syntax-quote; trailing "turns left: 6 of 12" is still not kept (TARGET S4) |
+| live 06 | 1,518 | 3 | 1 | `` `reply-map` `` and `` ` joins`` (line-start backticks) no longer run as syntax-quote |
 | live 07 | 1,531 | 1 | 1 | none |
 | live 08 | 1,352 | 2 | 2 | none |
-| live 09 | 2,889 | 3 + unread | 3 + unread | none (truncated defn) |
-| live 10 | 448 | 1 + unread | 1 + unread | none |
-| live 11 | 247 | 0 + unread `## What I read …` | 0 | heading and prose are prose: the turn's no-forms refusal instead of "Invalid token: ##What" |
-| loop 1 | 729 | 4 | 7 | 3 `scratch.add2=>` markers (in fences) run as symbols → "Unable to resolve symbol" each; the defn still runs in `user` (the marker never chose the namespace); `#:seon.repl{…}` is refused with its error value on its own row, no nil fault on the next form |
-| loop 2 | 959 | 6 | 11 | 5 marker symbols, each an error; every form after `(in-ns 'scratch.add2)` runs there as before |
+| live 09 | 2,889 | 3 + unread | 4 | the truncated defn is the 4th source, unfinished |
+| live 10 | 448 | 1 + unread | 2 | same |
+| live 11 | 247 | 0 + unread `## What I read …` | 0 | heading and prose are prose: the turn's no-form refusal instead of "Invalid token: ##What" |
+| loop 1 | 729 | 4 | 7 | 3 `scratch.add2=>` markers in fences run as symbols → "Unable to resolve symbol: scratch.add2=>"; `#:seon.repl{…}` is its own read error, with no fault on the next form |
+| loop 2 | 959 | 6 | 11 | 5 marker symbols, each an error; the forms after `(in-ns 'scratch.add2)` run there as before |
 | run4 e2e89497c3c2 | 558 | 1 | 1 | none |
-| run4 d3597309628b | 279 | 0 + unread `)\n```` | 1 | the lone `)` is its own source, "Unmatched delimiter: )" |
-| run4 94f7a885645b | 247 | 1 | 1 | none |
-| run4 b329b5a17aa4 | 362 | 1 | 1 | none |
-| run4 cbfbcf937f35 | 740 | 1 | 1 | none |
-| run4 7b254915ca94 | 12,176 | 48 | 42 | an imitated transcript: 24 `my.agents.juniper=>` lines become prose (one imitation report), so the forms written on those lines no longer run (2 queries, 1 deftest); bare `nil`, `"diagnostic"` and `)` lines become prose; Parinfer's `()` is gone (the last `(` is the unread rest); 24 column-0 `#:seon.repl{…}` lines stay sources, each refused with its error value |
+| run4 d3597309628b | 279 | 0 + unread `)\n```` | 1 | the lone `)` is its own read error, "Unmatched delimiter: )" |
+| run4 94f7a885645b, b329b5a17aa4, cbfbcf937f35 | 247-740 | 1 each | 1 each | none |
+| run4 7b254915ca94 | 12,176 | 48 | 43 | an imitated transcript: unfenced `my.agents.juniper=> (form)` lines are prose, so 2 queries and 1 deftest no longer run; bare `nil`, `"diagnostic"` and `)` lines are prose; the last lone `(` is unfinished (Parinfer made `()` before); 24 column-0 `#:seon.repl{…}` lines are each a read error |
 | run4 f3b3fda9b944 | 6,727 | 3 | 3 | none |
-| fence 94f7a885645b | 955 | 1 | 1 | none |
-| fence e6628e29a42b | 90 | 1 | 1 | none |
-| fence 59cf96d21042 | 228 | 1 | 1 | none |
-| help trial 2026-09-09 (`loop_proof_test` fixture) | — | 2 | 1 | unfenced `my.agents.juniper=> (seon.db/q …)` is a prose imitation, so the query no longer runs; only the fabricated map remains (refused) |
+| fence 94f7a885645b, e6628e29a42b, 59cf96d21042 | 90-955 | 1 each | 1 each | none |
+| help trial (`loop_proof_test`) | — | 2 | 1 | unfenced `my.agents.juniper=> (seon.db/q …)` is prose, so only the reserved map remains (a read error) |
 
-Comments: identical text wherever both read the same forms (prose → `; line`, the agent's own `;` lines kept).
+**Probed rule table** (each row is a proposed table row, §10):
 
-## 9. Cost after (same probe, same throwaway JVM, prototype `s2b1-reader/src/s2b1/forgive.clj`)
+| Input | Sources after |
+|---|---|
+| `[1 bad: (+ 2 3)]` in a fence | the whole vector, one error; `(+ 2 3)` never runs |
+| `(defn f [x] (let [y #1] (inc y)))` then `(+ 1 2)` in a fence | 2 |
+| `(+ 1 2))` then `(+ 3 4)` in a fence | `(+ 1 2)`, `)`, `(+ 3 4)` |
+| `(foo]` then `(+ 1 2)` | 2 |
+| `(str "abc` then a closing fence, then `(+ 1 2)` | unfinished at the fence, then `(+ 1 2)` runs |
+| ```` ```text ```` / ```` ```clj ```` (inside a prose fence) | prose |
+| ```` ````clojure ```` with an inner ```` ``` ```` | the inner line is code (no match) |
+| `#inst "…"`, `#uuid`, `#'x`, `#:a{}` at column 0 | forms |
+| `#1 priority is (launch!)` | `#1 priority` is a read error; the rest of its line is prose |
+| `# Heading`, `## h2` | prose |
+| `#_` alone before a closing fence | no source; the fence closes |
 
-| Input | installed `:reply` | new `:reply` | new `:code` |
-|---|---|---|---|
-| rr ×1 (9,557) | 4.21 ms, 3.82 MB | 1.07 ms, 1.53 MB | 2.33 ms, 2.65 MB¹ |
-| rr ×3 (28,671) | 7.06 ms, 11.28 MB | 2.24 ms, 4.55 MB | — |
-| rr ×8 (76,456) | 16.17 ms, 29.47 MB | 4.35 ms, 11.83 MB | — |
-| unclosed ×300 (8,400) | 9.52 ms, 26.33 MB | 0.06 ms, 0.06 MB | 0.06 ms, 0.06 MB |
-| 1,000 defns (23,000) | 6.73 ms, 21.54 MB | 4.38 ms, 14.42 MB | 4.63 ms, 14.54 MB |
-| 1,000 prose lines (56,000) | 2.07 ms, 2.84 MB | 0.89 ms, 3.39 MB | (§5 D) |
-| 1,000 stray `)` in a fence (9,011) | 18.10 ms, 54.44 MB | 27.92 ms, 37.89 MB² | — |
+## 9. Cost (throwaway JVM on the checkout classpath; armed = `seon.instrument/apply!` over every contracted Var of both namespaces, 47 Vars, packaged projection, counts from a `seon.batch/sink`; median of 5 after 3 warm runs; `rr` = live 01, 05-08 and loop 1-2 joined)
 
-¹ The prototype continued after failed reads in `:code` too. The design keeps `:code` as today (EQUIVALENT): 1.19 ms,
-2.05 MB.
+| Input | chars | installed `:reply` armed | new `:reply` armed | new unarmed |
+|---|---|---|---|---|
+| rr ×1 | 9,557 | 19.0 ms, 5.03 MB, 2,119 calls | 3.9 ms, 1.52 MB, 1,181 calls | 2.7 ms, 1.13 MB |
+| rr ×3 | 28,671 | 12.8 ms, 15.02 MB, 6,307 calls | **2.7 ms, 4.94 MB, 3,733 calls** | 2.9 ms, 3.55 MB |
+| rr ×8 | 76,456 | 34.3 ms, 39.68 MB, 16,777 calls | 6.9 ms, 13.38 MB, 10,113 calls | 6.2 ms, 9.50 MB |
+| 400 prose/form pairs | 8,400 | 33.1 ms, 28.97 MB, 12,410 calls | 2.8 ms, 5.92 MB, 5,609 calls | 1.9 ms, 3.95 MB |
+| 1,000 prose lines | 56,000 | 6.6 ms, 6.20 MB (reads ~65 lines, then stops¹) | 0.6 ms, 1.32 MB, 4,009 calls | 0.1 ms, 0.10 MB |
+| 100 fences each holding an unclosed form | 3,300 | 11.9 ms, 9.74 MB | 7.2 ms, 6.95 MB | 3.8 ms, 4.03 MB |
+| 1,000 stray `)` in a fence | 9,011 | 45.5 ms, 66.06 MB (drops them silently) | **65.1 ms**, 61.49 MB, 2,000 sources² | 29.5 ms, 36.11 MB |
+| run4 7b254915ca94 | 12,176 | 3.2 ms, 3.58 MB | 2.3 ms, 1.84 MB | 1.4 ms, 1.60 MB |
 
-² One thrown SCI read error per stray token (~38 KB each); linear. This is the class of task `d3b4dd5938dd`. No
-real reply has more than one.
+`:code` (MCP), armed:
 
-- **Growth is linear:** ×3 → 2.97× bytes, ×8 → 7.7×.
-- **Pass budget** (< 5 MB at the realistic size): 28.6 KB costs 4.55 MB.
-- **Armed calls: UNVERIFIED.** The prototype is unarmed. In default the private `forgive` functions are armed (r-read
-  counted 805 armed calls for live 01, and per-call contract checks cost there). The new stepper makes about one
-  `fence-kind`/`skip-blank` call per line and one `prose-edit` per prose line, and no thrown errors, so I expect
-  fewer armed calls than today. The landing measures it on the check JVM and on default after the restart.
+| Input | installed | new |
+|---|---|---|
+| rr ×3 | 1.65 ms, 2.91 MB (stops at the first prose word) | 3.50 ms, 4.41 MB, 234 sources |
+| 1,000 prose lines | 0.34 ms, 0.42 MB (stops) | **163 ms, 188 MB**, 10,000 sources³ |
+
+¹ The installed guard stops after 64 repairs. The new number covers the whole input, so it is not like-for-like
+(Opus F7, Codex).
+
+² **Worse in ms.** Each stray closer is now its own error (one thrown read, ~30 KB) where Parinfer used to drop it
+silently. It is linear; no real reply has more than one.
+
+³ **The price of ruling 3 for MCP prose.** 56 KB of prose sent as code becomes 10,000 symbol or error sources at
+~19 KB each, SCI's per-form read cost. It is linear. MCP code is code, so this input is not realistic, but the
+number is reported.
+
+- **Budget:** the realistic reply mix is under 5 MB armed at 28.7 KB (4.94 MB) and linear (×3 → 3.2×, ×8 → 8.8× of
+  ×1).
+- **The margin is thin.** Arming adds ~0.4 KB per armed call: 3,733 calls is about 21 per form plus about 1 per
+  prose line. Cutting further means fewer contracted helper calls per form (`step` → `reply-step` → `read-at` →
+  `read-one` → `advance`), task `seon.instrument/hot-internals-pay-armed-validation` (`ee57516cbaef`).
+- **The live second read** (`read-row`, one `next-form` per row) is unchanged in kind. An error value is built only
+  for a failed row.
+- **Not measured:**
+  - the armed `next-form` live read;
+  - the JVM path (only the structural span is probed);
+  - the S0 probe (a model fixture pass is dominated by the refresh; the read is milliseconds).
 - **Store:** the read writes nothing.
 
-**Expected S0 numbers after:** no visible change. The S0 model fixture replies are a few forms; the read is ≤ 1 ms
-inside a 580-10,806 ms model pass (baseline-7737b8844), which the refresh dominates. S0 was not re-run for this
-design.
+## 10. Tests
 
-## 10. Risks and the tests that reach them
-
-| Risk | Test (owner file) |
+| Behavior | Test |
 |---|---|
-| fixture rows change (live 06, live 11, loop 1-2): regenerate the expected segments, each changed row reviewed against §8 | `seon.sci.forgive-test/recorded-replies-read-into-the-same-segments` (`test/seon/sci/forgive_replies.edn`) |
-| the delimiter-repair table tests deleted machinery | `seon.sci.forgive-test/a-delimiter-repair-is-judged-on-the-forms-own-lines` → DELETED; replaced by ONE table `the-reader-reads-a-reply-by-its-line-rules` (one row per §4.1 rule, asserting sources and `:seon.batch/imitation` as data) |
-| linear allocation | `seon.sci.forgive-test/a-reply-reads-in-allocation-linear-in-its-length` (kept; its unit already holds a marker in a fence, prose, backticks and dispatch forms) |
-| the reserved shape's error value; no fault on the next form | NEW `seon.sci.forgive-test/a-reserved-result-form-answers-its-error-value`, through `seon.test-support/evaluate` of `"#:seon.repl{:value 1}\n(* 2 3)"`: asserts the refused entry's `:seon.error/type` = `:seon.sci.reader/fabricated-response-error` and no `:errors` on `(* 2 3)`. Names tasks `fe8f23d6095c`, `7f5dfb6ad7a2`. Whether it also closes `19180cd1866c` (the last entry lacking an evaluation in `test-support/evaluate`) is UNVERIFIED |
-| repair test with `with-redefs` over `forgive/segments` | `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent` → DELETED (its subject is deleted; its reply's unclosed defn now leaves the run unread) |
-| `#inst`, trailing `Done.` | `seon.turn-test/a-reply-keeps-its-dispatch-macro-forms-as-code`: converts per Q1; its `["(+ 1 2)" "Done."]` becomes `["(+ 1 2)"]` (the fix its comment's issue asks for) |
-| same-line rule | `seon.repl-parity-test` C7 (Q2) |
-| help-trial imitation | `seon.loop-proof-test` "the exact saved trial query evaluates before its fabricated-response error" → converts: the query is prose now; asserts the imitation and the refusal |
-| run4 replies keep forms | `seon.ai-test/captured-run4-replies-stop-before-fabricated-responses` (every stopped reply still yields ≥1 source; traced for all 7) |
-| inputs traced by code only (column-0 forms, expected unaffected): UNVERIFIED until run | `seon.cluster.evaluate-sources-test`, `seon.cluster.host-test`, `seon.render.transcript-test`, `seon.run4-install-test` |
-| MCP `:code` unchanged | `seon.cluster.evaluate-source-test/code-evaluates-as-one-ordinary-run-of-its-agent` (red on HEAD before this slice, per forgive-fix) |
+| recorded replies | `seon.sci.forgive-test/recorded-replies-read-into-the-same-segments`: regenerate `forgive_replies.edn`, each changed row checked against §8 |
+| the rules | `seon.sci.forgive-test/a-delimiter-repair-is-judged-on-the-forms-own-lines` → DELETED (subject deleted). Replaced by one table, `the-reader-reads-a-reply-by-its-line-rules`: the §8 probe rows plus Q1 (`#inst`, `#uuid`, `#1`, `# `, `##`), same line vs fence, discard and conditional (task `c98bb97a06a3`), fence matching, an odd map and a token in a nested collection. It asserts the sources, as data |
+| linear, armed | `seon.sci.forgive-test/a-reply-reads-in-allocation-linear-in-its-length` (kept) |
+| nil fault, at the entrant that faulted | NEW row-table test in `seon.cluster.evaluate-source-test`: an MCP SCI run of `(+ 1 2)` / `#:seon.repl{:value 3}` / `(* 2 3)` answers 3; then the `:seon.error/type` `:seon.sci.reader/fabricated-response-error` on form 2; then 6 with no `:errors`. Names `fe8f23d6095c` and `56e06f9e410a` |
+| continuation in both modes | same test namespace, table over `:mode` `sci` and `jvm`: `(+ 1 1)` / `(vector ::nope.alias/k)` / `(+ 2 2)` answers 2, a read error, 4. Names `e333444a896c` |
+| refused map settles | `seon.turn-test/a-refused-response-map-settles-as-an-unrun-evaluation` (`turn_test.clj:245-277`): converts its message substring to the error type |
+| help trial | `seon.loop-proof-test` testing block at `:808`: converts (the query is prose; the map is a read error) |
+| `#inst`, trailing `Done.` | `seon.turn-test/a-reply-keeps-its-dispatch-macro-forms-as-code`: `#inst` stays a form under Q1, and `["(+ 1 2)" "Done."]` becomes `["(+ 1 2)"]` |
+| same line | `seon.repl-parity-test` C7: input moved into a fence |
+| run4 | `seon.ai-test/captured-run4-replies-stop-before-fabricated-responses` |
+| repair test of deleted machinery | `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent` → DELETED |
+| reply keys | `seon.run-test` (`run_test.clj:93`) asserts the reply's keys: `:seon.batch/repairs` leaves the set |
+| traced by code only, expected unaffected: UNVERIFIED until run | `seon.cluster.evaluate-sources-test`, `seon.cluster.host-test`, `seon.render.transcript-test`, `seon.run4-install-test`, `seon.cluster.prompt-test`, `seon.render-simplification-test` (preview callers) |
 
-Commit command (when coded): `bin/lane commit s2b1-reader --test seon.sci.forgive-test seon.turn-test seon.ai-test
-seon.repl-parity-test …`. The schema resources also need the live-store publication proof.
+Schema resources change, so the slice is proven by publication and adoption on a branch of the live store, then the
+armed probe of §9 repeated on the installed landing.
 
 ## 11. Claims needed
 
-- **Edit:** `src/seon/sci/forgive.clj`, `src/seon/batch.clj`, `resources/seon/schemas/seon.batch.edn`,
-  `resources/seon/schemas/seon.sci.reader.edn`.
-- **Tests:** `test/seon/sci/forgive_test.clj`, `test/seon/sci/forgive_replies.edn`, `test/seon/turn_test.clj`,
-  `test/seon/cluster/turn_test.clj`, `test/seon/repl_parity_test.clj`, `test/seon/loop_proof_test.clj`.
-- **Held by `s5a-reply`:** `src/seon/turn.clj` (hunks a and b) by patch or reassignment.
+- **Source:** `src/seon/sci/forgive.clj`, `src/seon/sci/reader.cljc`, `src/seon/sci/batch.clj`, `src/seon/batch.clj`,
+  `src/seon/turn.clj`, `src/seon/turn/batch.clj`, `resources/seon/schemas/seon.batch.edn`.
+- **Tests:** `test/seon/sci/forgive_test.clj`, `test/seon/sci/forgive_replies.edn`,
+  `test/seon/cluster/evaluate_source_test.clj`, `test/seon/turn_test.clj`, `test/seon/cluster/turn_test.clj`,
+  `test/seon/repl_parity_test.clj`, `test/seon/loop_proof_test.clj`, `test/seon/run_test.clj`.
 - **Root:** `deps.edn` (parinferish).
+- **Collision check at claim time:** `src/seon/sci/eval.clj` and `contracts_compile_test.clj` are held by other
+  lanes. This design edits neither.
 
-## 12. Findings, tasks and incidents
+## 12. Review findings, disposition
 
-- **Incident (mine), RESTART was needed, done by root.** My first prototype ran in default's JVM through JVM mode
-  (`load-string` of a `let`, nothing interned). That broke the rule root restated: prototypes run only on the
-  agent's SCI branch or in a throwaway JVM.
-  - On a joined corpus it looped forever: a tagged fence line inside an open fence gave an empty region, and the loop
-    recurred at the same offset.
-  - Two platform threads (`clojure-agent-send-off-pool-0/-1`) spun. They do not check interruption, and
-    `Thread.stop` is unsupported on JDK 26. Root restarted default.
-  - Everything after that ran in a throwaway `java -cp` JVM on the checkout's classpath, each run bounded by a
-    120 s deadline and exiting.
-- **New task `fd7455e6e6ed`** (`seon.error/a-selected-error-map-prints-as-evidence-unavailable`).
-  - `(select-keys result/<error handle> [...])` printed `"Error evidence is unavailable."` instead of the map.
-  - Same class as `seon.render/declared-metadata-selects-a-value-that-no-longer-fits`.
-- **Linked, not duplicated:**
-  - `7f5dfb6ad7a2`, `fe8f23d6095c` and `19180cd1866c`: the nil fault, reproduced above;
-  - `d3b4dd5938dd`: a thrown error per failed read;
-  - `81773872798e` `prose-after-the-last-form-is-dropped`: still dropped; TARGET S4, where the exchange that keeps it
-    exists;
-  - `eda2e37d4785` `a-prose-only-reply-evaluates-its-first-word`: the turn path in `turn.clj`, not touched here. The
-    prose-only reply still yields no segments, as today. Whether `6082bbaaa`'s carried event already fixed it is
-    UNVERIFIED (no provider turn driven);
-  - `c9f69d5aaa31` `a-prompt-marker-is-stripped-and-its-namespace-ignored`: closed by this slice (markers are no
-    longer stripped);
-  - `56dc5f9cb734` and `61c1346b6ef2`: their trials are deleted.
-- **The S0 probe was not run.** §9 gives the read-stage numbers directly.
+| Finding | Disposition |
+|---|---|
+| Opus F1, imitation report | removed (ruling 1) |
+| Opus F2 / Codex P2, `preview-sources` caller | `code-sources` (ruling 2) |
+| Opus F3, file claims | moot: s5a-reply landed; §11 |
+| Opus F4, help | S1 owns it (ruling 8) |
+| Opus F5 / Codex P2, regression entrant | MCP SCI test (ruling 7); `7f5dfb6ad7a2` replaced by `56e06f9e410a`, `fe8f23d6095c` |
+| Opus F6 / Codex P1, continuation outside the stepper and the guessed closer | the stepper answers `:seon.batch/read-error` steps; the span comes from edamame's outermost container plus one scan; spec amended (ruling 3) |
+| Opus F7, line numbers and non-like-for-like rows | re-located at `25bb94be0`; rows footnoted |
+| Opus F8, Q1 wording | ruling 9 |
+| Opus F9 / Codex P1, a reader per prose line and refusals built in segmenting | one reader per region; no error value in `segments` |
+| Opus F10, smaller carrier | taken (ruling 6) |
+| Codex P1, `#_` crosses prose and fences | regions plus no-value skip (ruling 4) |
+| Codex P1, armed budget | 4.94 MB at 28.7 KB (§9) |
+| Codex P2, fence reopening | a fence closes only with its match; a non-code fence is all prose |
+| Codex P2, `seon.sci.reader/read` survives | correct: only its duplicate response check moves to `response-error`; link `83b10f8c64d2` |
+| Codex P2, `skip-to`'s JVM caller | kept (code mode) |
+
+## 13. Findings and tasks
+
+- **Reproduced at HEAD:** the nil fault (`56e06f9e410a`, `fe8f23d6095c`) and the JVM drop (`e333444a896c`).
+  Results `result/e031448f1175a` and `result/e1148fde1ed83`; agent `s2b1-reader-v2`. Its self-retirement
+  answered "run transition refused: admission-closed" (existing task `bc5e022a68e6`), so root's
+  `retire-branch!` retired `:agent-be6bc235ecd9`.
+- **v1 incident**, kept for the record: a JVM-mode prototype looped in default's JVM, and root restarted it. Every
+  probe since ran in throwaway JVMs.
+- **Task `fd7455e6e6ed`** (selected error map prints "Error evidence is unavailable."): open, outside this slice.
+- **`81773872798e`** (trailing prose dropped): still TARGET S4.
+- **`c9f69d5aaa31`** (marker stripped): closed by this slice.
+- **`56dc5f9cb734` and `61c1346b6ef2`**: their machinery is deleted.
 
 ## Design check
 
-- **Did the design hold against the real code?** Mostly.
-  - The fence state fits on the text version as a value; `seon.batch`'s fold already carries the version.
-  - The reserved-shape fix is a producer change plus one carrier line, because both consumers already read
-    `:seon.batch/error-value`.
-- **What was wrong or awkward:**
-  - The first form (a separate line scanner) was simpler to read but would leave two reply rule sets. Moving the
-    rules into `next-form` is what makes S6 a deletion instead of a port.
-  - Continuing after a failed read needed `read-one` to report where it stopped, and `segments`' recursion on a
-    substring would have lost the fence state; `forms` now continues itself.
-  - The imitation report has no consumer inside my files. It needs the `turn.clj` hunk (§4.3a), so S2b-1 lands in two
-    parts unless root reassigns `turn.clj`.
-- **Where the spec text and the real replies or tests disagree (§7):**
-  - Q1, Q2 and the help trial: unfenced `ns=> (form)` and one-line multi-form replies stop running.
-  - Those are owner rulings, not bugs. They are listed as decisions with their evidence rather than patched around.
+- **The v1 design was wrong in three places the reviews found:**
+  - continuation lived in `forms` rather than in the stepper;
+  - `#_` crossed lines and fences;
+  - its budget claim was unarmed.
+- **v2 fixes each at the owner:** the stepper answers failure steps for every entrant, regions bound every read,
+  and the measurement is armed.
+- **Surprises at the REPL:**
+  - the reader's stop position is wrong for collection failures (edamame's container rows are exact);
+  - a single reader per text made unclosed fenced forms quadratic (618 MB), which forced per-region readers;
+  - deleting the repairs vector removed both armed validation work and about 20 consumer lines.
+- **What remains awkward:**
+  - the armed margin at 28.7 KB (4.94 MB);
+  - the pathological rows that are worse in ms (stray closers) or explode in `:code` (MCP prose). They are reported
+    rather than hidden.

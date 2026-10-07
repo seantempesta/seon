@@ -173,32 +173,48 @@ If a case needs analysis before a later form, the design says so with its measur
 
 ### 4.3 The reader
 
-- **Fences.** A line ```` ``` ````, ```` ```clojure ````, ```` ```clj ```` or ```` ```edn ```` opens a code fence.
-  Any other tag opens a non-code fence, whose lines are prose. Inside a code fence every line is code, and prompt
-  markers there are an error the agent sees.
+- **Fences.** A line of three or more backticks, untagged or tagged `clojure`, `clj`, `cljc` or `edn`, opens a code
+  fence. Any other tag opens a non-code fence. A fence closes only with a line of at least as many backticks and no
+  tag. Inside a code fence every line is code, and prompt markers there are an error the agent sees. Inside a
+  non-code fence every line is prose, a tagged fence line included.
 - **Outside fences:**
-  - a line whose first character is `(`, `[`, `{`, `'`, `@`, `^`, `#(`, `#{`, `#"`, `#'`, `#_`, `#:` or `#?`
-    starts a form;
-  - `#` followed by a space (a Markdown heading) and a leading backtick are prose;
+  - a line whose first character is `(`, `[`, `{`, `'`, `@` or `^`, or `#` followed by a non-whitespace character
+    other than `#`, starts a form (so `#1 priority` is a read error the agent sees);
+  - `#` followed by whitespace or `#` (a Markdown heading) and a leading backtick are prose;
   - while a form is open, following lines continue it whatever they start with;
   - all other lines are prose, so a lone word like `Done.` is prose;
   - a lone symbol is code only inside a fence.
-- **Read errors.** A form that fails to read is its own error. Reading continues from the reader's advanced
-  cursor; an unclosed form reaches EOF and is reported as unfinished. Nothing is repaired and nothing is re-read.
+- **Regions.** No read crosses a fence line: the text between fence lines is one region, and a read ends at its
+  region's end.
+- **Read errors.** A form that fails to read is its own error, in every mode (model reply, MCP SCI and JVM), and
+  reading continues after it:
+  - a collection open at the failure spans to its matching closer, so the forms inside it never run;
+  - any other failure (a token, a stray closer, an odd map) spans to where the reader stopped;
+  - a collection that never closes is unfinished: it spans to its region's end.
+
+  Nothing is repaired and nothing is re-read.
+- **No-value constructs.** `#_` and a reader conditional that selects nothing yield no value. They are skipped
+  within their region; classification resumes after them (outside fences, at the next line), so they never carry
+  prose or a fence line into a form.
 - **Prose** is attached as the next form's comment. Trailing prose is kept on the last exchange. A prose-only
   reply records one exchange with the "no form" refusal and no evaluation.
-- **Imitations.** The reserved shape `#:seon.repl{…}` (and `{:seon.repl/…}`) as a form is never evaluated: it is
-  an error value flagged "only the REPL supplies results", which fixes the nil fault. A `;; =>` line or an
-  `ns=>` line outside fences is prose, reported once as an imitation. This is a syntax rule, not a truth
-  detector.
+- **Imitations.**
+  - The reserved shape `#:seon.repl{…}` (and `{:seon.repl/…}`) as a form is never evaluated. It is that form's read
+    error, flagged "only the REPL supplies results", which fixes the nil fault.
+  - A `;; =>` line or an `ns=>` line outside fences is prose. Reporting it once as an imitation is deferred to the
+    exchange (S4/S6).
+  - This is a syntax rule, not a truth detector.
 - **Same line:** after a top-level form closes, the rest of that line (outside a fence) is prose.
-- **Fence tags** treated as code also include ```` ```cljc ````. Outside fences, bare literals and indented forms are
-  prose (a deliberate compatibility choice); `(help)` teaches fences.
+- **Compatibility.** Outside fences, bare literals and indented forms are prose (a deliberate compatibility
+  choice); `(help)` teaches fences.
 - **Reading** uses SCI's `parse-next` with the agent's live options, not bare edamame.
 - **MCP** code is read as one code fence: every line is code (so `result/e…`, `*1`, `:k` and literals evaluate).
-- **Slicing.** S2b-1 lands these rules inside today's `segments` (normalized edamame options, no Parinfer, no
-  trials, linear). S6 lands the one cursor and deletes `segments`, `forgive` and the second read together with
-  their consumers (`source-rows`, `submission-open-tx`, `plan-call`, the quoted MCP segmenter and its schema key).
+  Code that Seon generates or a page authors (opening blocks, preview sources) is read the same way.
+- **Slicing.**
+  - S2b-1 lands these rules in today's stepper `seon.sci.forgive/next-form`, which `segments`, the live row read and
+    the JVM read share (no Parinfer, no trials, linear). It lands before S1, whose `(help)` teaches the fence rules.
+  - S6 lands the one cursor and deletes `segments`, `forms` and the second read together with their consumers
+    (`source-rows`, `submission-open-tx`, `plan-call`, the quoted MCP segmenter and its schema key).
 
 ### 4.4 Context and inputs
 
@@ -319,7 +335,7 @@ Every slice:
 | S0 | Baseline probe (§3 workload) per entrant, through the HTTP fixture endpoint in agent settings | measured baseline |
 | S1 | Lookups and help | standard lookups |
 | S2a | Delete the dead debug context views | — |
-| S2b-1 | Reader rules inside `segments` (§4.3) | the reader contract, linear |
+| S2b-1 | Reader rules in the shared stepper (§4.3); lands before S1 | the reader contract, linear |
 | S3 | In-place preparations used by today's entrants: origin enum (`:opening :input :model :outside :test`), pass ids, writer-assigned ordinals, the opening fact, input delivery identities, schema adopted on a live-store branch | facts exist |
 | S4 | Context: opening and input passes, the proc-held transcript, the prompt seam. Deletes the system turn, its seed, the old prompt, walk and capture; persisted `:generate` rows are terminated. **Reset point.** | the model sees forms that ran; the refresh is gone |
 | S5 | Reviewed in three parts: (a) in-place recording preparation, including `transact-call` exposing pending completion and the blob permit; (b) entrant, effect and error integration; (c) the admission proof (§4.1), then one settlement owner shared by all entrants. Deletes the fault-window query, problem-assignment routing and the run-observation reread. Old run duties (`*open*`) stay until S6 | one writer |
