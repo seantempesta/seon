@@ -1,7 +1,7 @@
 ---
 title: S1 lookups and help, design
 type: research
-status: proposed v3 (gate 1, design only; revised for the Opus review, the Astra review and root's rulings)
+status: proposed v3.1 (gate 1, design only; revised for the Opus review, the Astra review, root's rulings and the printer design)
 date: 2026-10-07
 lane: s1-lookups
 ---
@@ -261,16 +261,18 @@ S0 probe window (`seon.pass-probe/window` over `mcp-pass`; whole-JVM allocation,
   "(defn f\n  \"Doc with \\\"quotes\\\".\"\n  [x] x)"}` shows `(defn f "Doc with \"quotes\"." [x] x)` on its lines,
   and a body with `;; a comment`, `#(inc %)`, `@(atom 'x)` shows exactly as written.
 - So the smallest general change is no printer change: `(source x)` returns
-  `{:seon.sci.eval/sym s :seon.sci.eval/source text :seon.render/ai text}`, the master override with rendered data
-  (one string object, not a copy). The source prints whole as code at the root; nested in another value it prints
-  as data, which is the printer's no-re-dispatch rule. `clojure.repl/source-fn` keeps answering the bare string for
+  `{:seon.sci.eval/sym s :seon.render/ai text}`, the master override with rendered data, carrying the text once
+  (amended for the printer design, `printer-text/design-notes.md`, `e0eca860a`: a separate `:source` key printed the
+  source twice, both escaped, when the value is nested). The source prints whole as code at the root; nested in
+  another value it prints as data, which is the printer's no-re-dispatch rule; the text is read with
+  `(:seon.render/ai result/e…)`. `clojure.repl/source-fn` keeps answering the bare string for
   agents composing it.
 - Not done: a printer rule that prints multi-line strings raw. It would make a string indistinguishable from code
   everywhere, which is a general regression, and a schema branch for "source" is ruled out.
-- Observed inconsistency, not S1's to fix: a text render selected through a renderer symbol (`(help)`'s
-  `render-help-ai` today) arrives in the MCP reply as a quoted string, while inline rendered data prints raw. The
-  likely cause is the reply converter re-reading shown text as one EDN value (help's text is many forms); UNVERIFIED,
-  and that converter is s5a-reply's. Risk row in §6.
+- The printer slice (printer-text) owns what this relies on: the reply keeps root render text raw (it deletes
+  `seon.repl/data-text`, the converter that quoted `(help)`'s many-form text today), and a render text over the
+  budget is cut at a line end with a dig form. S1 changes no printer or reply file and lands after, or with, that
+  slice.
 - `function-ai`'s docstring claim ("text the printer shows unescaped") is deleted in S1 (`render/ns.clj` is touched).
 
 ### 4.5 `(help)` as data with quoted forms (ruling 5)
@@ -340,7 +342,7 @@ deleted with its subject. The class regression walks `:seon.help/forms` and reso
   by S1); the `reference-code.md:48` sentence naming `seon.agent.loop`; walk-delete's
   `design-notes.md:24,108,134` and `walk-delete-notes.md:12` marked stale (the S4 seam is the proc-held transcript).
 - Schemas: `seon.sci.eval.edn` gains `reference`, `lookup-pattern`, `var-summary(ies)`, `docstring-parts`,
-  `namespace-doc`, `schema-doc`, `source-value`; `seon.help.edn` redeclares `help` as a vector of entries;
+  `namespace-doc`, `schema-doc`, `source-value` (`[:map :seon.sci.eval/sym :seon.render/ai]`); `seon.help.edn` redeclares `help` as a vector of entries;
   `seon.sci.binding.edn` retargets two and adds three declarations. All published and adopted together on a
   live-store branch.
 
@@ -380,7 +382,7 @@ about -560 / +170 lines (with `seon.agent.loop`), tests about -75 / +60 plus con
 | existing tests kept green or converted (Astra list) | `sci/documentation_test`: `directory-observes-a-function-installed-after-context-acquisition`, `documentation-is-returned-data-without-a-second-printed-copy`, `source-at-the-agent-repl-prints-the-stored-declaration` (now data); `render.ns-test/a-namespace-renders-as-one-graph-node`; `render.web-debug-test/passive-ledger-never-reconstructs-directory` (after S2a) and `saved-history-preserves-shown-text-with-numeric-lookups`; `help-test/an-agent-identity-offers-help-as-its-operation`; loop tests retire with their namespace and schema |
 | namespace form evaluates | `render/ns_test` row: evaluating `namespace-form`'s output answers the directory; `my/turn_test.clj:82`, `render/history_test.clj:68,167`, `turn_test.clj:1080-1083` convert from `(dir 'ns)` |
 | source prints as code in the reply | one row asserting the reply's shown text for `(source seon.id/symbol-in)` equals the stored source (printer-face assertion, declared golden) |
-| the reply converter quotes a root render text that is not one EDN value | s5a-reply's converter; S1's source text is one form; coordinate with s5a-reply |
+| root render text shown raw in the reply, cut at a line end over budget | owned and proved by the printer-text slice (`seon.repl/data-text` deleted); S1's row asserts only `(source x)`'s value shape |
 | other reaching tests (Opus finding 10) | `agent_situation_test.clj:49-53` (`(macroexpand '(seon.bootstrap/help))`), `cluster/program_restart_test.clj:324` (`(macroexpand-1 '(help))`), `turn_work_test.clj:390`, `rereads_test.clj:140` (`(doc my.task/done!)`), `sci/render_source_test.clj:55`, `repl_parity_test` family D (D1 now answers the agent macro's doc; D5, D6, D9 pass as data; D2, D7, D13 convert), `render/value_test` :64-77 and :851-864, `data_shapes_test` :270, `repl_test` :31, :201, :267, :379, `render/ns_test` :78, `sci/eval_test` :1236-1238, :1289, `directory_test`, `supplied_documentation_test`, `my/program_test` :135, `repl_grammar_test` :84-112, `html_views_test` :78-81 (+ `fixtures/html_views_ai.edn`), `sci/supplied_database_test` :19, `run4_install_test` :83, `loop_proof_test` :463, :488; fixtures `reader_fences.edn`, `run4_replies.edn`, `forgive_replies.edn`, `schema/datahike_parity.edn`; `resources/seon/tasks/seon.documentation.edn:4` (must-read `help-value`, signature changes) |
 | `web_debug_test/passive-ledger-never-reconstructs-directory` | S2a lands first and converts it; S1 rebases onto S2a |
 | file ownership | `src/seon/sci/eval.clj` is claimed by s5a-reply; `src/seon/task.clj` by file-reader (read only here); a `printer-text` lane exists with an empty claim (S1 changes no printer file) |
@@ -425,8 +427,7 @@ the analysis-edge and stored-refers rows. Never loaded or run; nothing in it is 
    under those names; how it treats the macro arguments (`(dir seon.task)`) as usages is observed, not assumed.
 5. The interpreter-refers drop (§4.2): which seam leaves analysis unchanged and the stored source free of them.
 6. `edn/read-string` of every stored `:seon.schema/form` succeeds (census over default).
-7. The reply shows `(source x)`'s rendered text raw for every program source (census of sources through one reply
-   path).
+7. Closed: the printer-text slice keeps root render text raw and cuts it at a line end (its design, `e0eca860a`).
 8. `seon.test/verified?` on a test with a recorded result costs well under the ordinary-pass budget (only a test
    with no execution was priced here).
 9. `seon.task/home` from an agent's branch value answers the home connection; from the home itself nil, so the
@@ -461,6 +462,6 @@ put the Vars where S4 would move them again), kept per-function contract reads i
 second arglists source in `doc`, invented a third task shape, and left help as escaped strings and `source` as an
 escaped string. v2 followed root's rulings. v3 folds in the Astra review: task custody (one pull at the home, keeping
 `must-read`), no lookup-made proof verdict (the owner's `recorded-result` and `verified?` side by side), and input
-contracts that admit what the design promises. Still open: §4.2's exact seam (claim 5) and whether the reply
-converter keeps root render text raw (§4.4, s5a-reply). Awkward: S1 cannot start code while s5a-reply holds
+contracts that admit what the design promises. Still open: §4.2's exact seam (claim 5) and `verified?`'s cost on a
+recorded result (claim 8); the reply-converter question is closed by the printer-text slice. Awkward: S1 cannot start code while s5a-reply holds
 `eval.clj`, and it rebases onto S2a.
