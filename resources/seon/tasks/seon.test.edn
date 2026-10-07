@@ -65,4 +65,31 @@
              :intent "(my.test/run-owned {:seon.ns/name 'my.e1probe}) from MCP agent e1-probe (hosted on :agent-665a30c12282) refused three times on default fb1437312 (2026-09-28, 2.2-5.1 s, 325k-435k armed calls each): no branch or commit <fresh checkpoint head> to branch from (:seon.cluster.registry/source-absent, request branch :agent-...). The same prepare-checkpoint! -> open-overlay! -> branch! sequence by hand from the default instance's store succeeds in 840 ms. The agent branch's world base is the stale adopted commit 6abadd62 while the cluster records 6abae0f5, so each request prepares a new checkpoint and retires the other checkpoint-default-* ones. Every such run also carried a diagnostic: seon.turn.batch/join-write refused its own output contract (:seon.batch/join). No agent on its own branch can prove a task, so no fault it fixes ever closes. Done when that run answers the test's red result and a regression runs a named test from a hosted agent branch."
              :must-read #{seon.test/clean-request-handle seon.test/prepare-checkpoint! seon.test/run my.test/run-owned}
              :evidence #{"tmp/health-loop-proof/evidence.md"}}
-]
+
+ #:seon.task{:name "a-test-request-refuses-whole-when-one-namespace-has-no-eligible-tests"
+             :kind :function
+             :intent "bin/test refuses the whole request when one namespace has no eligible tests, and does not name it; repl-parity-test reports \"no eligible tests\" without a reason. Done when the refusal names the namespace and why (no deftest, all excluded, unarmed) and the other namespaces run, and repl-parity-test's cause is stated."
+             :must-read #{seon.test/run}}
+ #:seon.task{:name "a-test-run-refusal-escapes-as-an-exception"
+             :kind :function
+             :intent "When a throwaway JVM's test run hit the roster refusal (seon.cluster.store/open-branch!), seon.test/run let it escape as a raw exception, so bin/test-check showed 'PREPL evaluation failed' instead of an error value naming the refusal (lane check-flake, 2026-10-06). CLAUDE.md: the test runner is an entrant boundary; any exception reaching it becomes the one error value, recorded as a fault and delivered as data. Done when an acquisition refusal inside seon.test/run returns its declared error alternative and the check output names it."
+             :must-read #{seon.test/run}}
+ #:seon.task{:name "release-and-rethrow-sites-repeat-instead-of-one-with-release"
+             :kind :namespace
+             :intent "RC9 (tmp/root-cause-census/report.md): test.clj repeats a release-and-rethrow shape seven times. Done when one with-release combinator replaces them and the test still releases resources on setup and cleanup failure."
+             :must-read #{seon.test/run}
+             :evidence #{"tmp/root-cause-census/report.md"}}
+ #:seon.task{:name "the-transitions-test-runs-six-to-seven-seconds-against-a-five-second-bound"
+             :kind :namespace
+             :intent "The transitions test takes 6.4-7.3 s (bound 5 s): per-transaction projection/encode cost. Done when the responsible armed functions are named from a profile and the test fits its bound without raising it."
+             :must-read #{seon.turn/compact!}}
+ #:seon.task{:name "red-tests-on-head-are-unclassified"
+             :kind :namespace
+             :intent "The errors-s1 lane found reds on HEAD a5a21fd58 without its diff (baseline runs 940885360cdd and 4f4d5824dfe8): seon.cluster.host-test x5 (including a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it, 7 assertions), seon.render.entity-pairs-test x2, seon.render.value-test x2 and seon.rereads-test x2. They block naming whole namespaces in bin/lane commit --test, so slices name single tests instead. CLAUDE.md: classify each red from stored runs by the commit that changed its behavior, then delete a test of deleted machinery, update a retired assumption or fix the surviving owner. Done when each red names its classifying commit and is deleted, converted or fixed (or restated as its own task), and the four namespaces run green on HEAD. Proof: the four namespaces' own tests, run by name on HEAD with zero reds (each kept test named by its classification)."
+             :must-read #{seon.test/run}
+             :evidence #{"tmp/errors/s1-s2-notes.md"}}
+ #:seon.task{:name "test-release-closes-branch-connections-out-of-order"
+             :kind :function
+             :intent "A test world's release does not own its connections exactly once. (1) The full-tier run of 2026-10-06 (bin/test, tmp/orchestrator/full-run-2.txt) ended in seon.cluster.store/release-store! throwing Datahike's 'Cannot delete a database with active connections. Release them first.' with two agent overlay connections ([:datahike/overlay ...] on :agent-fa3beda720e7 and :agent-1e8be0903fd1) still open; the request escaped as 'PREPL evaluation failed' and the run's tally was lost. (2) An error recorded on default (2026-10-07, signature 7147098166ec, operation seon.cluster.registry/retire-branch! reached from seon.test/release-context!): 'Connection has been released.' (a release after the connection was already released). Done when a test request releases each hosted agent's overlay connection before its store, retire-branch! never runs on a released connection, a full-tier run ends with its tally, and a regression releases a world holding agent overlays. Proof: a new seon.test-test/a-world-holding-agent-overlays-releases-cleanly (to be written first) naming this task."
+             :must-read #{seon.cluster.agent/release-context! seon.cluster.registry/retire-branch! seon.cluster.store/release-store! seon.test/run}
+             :evidence #{"tmp/orchestrator/full-run-2.txt"}}]

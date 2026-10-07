@@ -1,0 +1,24 @@
+[#:seon.task{:name "a-deep-check-queue-times-out-waiting-for-a-slot"
+             :kind :function
+             :intent "With 10 bin/seon check --test runs queued for the 2 throwaway-JVM slots, the last answered 'No throwaway JVM slot freed within its bound' after waiting: the slot wait is capped at the boot bound, not at the queue's expected drain (each check ~50-100 s). Lanes then retry blind. Done when a queued check waits proportionally to the queue ahead of it (or reports its position and expected wait) instead of failing as if a slot were stuck."}
+ #:seon.task{:name "check-cannot-run-tests-of-host-bound-namespaces-against-a-candidate"
+             :kind :function
+             :intent "Host-bound namespaces (render/web and others compiled into the JVM) cannot be redefined on a branch, so their reaching tests cannot prove a candidate edit. Done when bin/seon check runs the reaching tests against the candidate on its throwaway JVM for a change in a host-bound namespace, with a landing that proves it on a real render/web change."
+             :must-read #{seon.operator/check!}
+             :evidence #{"tmp/repl-audit/change.md"}}
+ #:seon.task{:name "check-test-cannot-run-platform-tests"
+             :kind :function
+             :intent "bin/seon check --test intermittently failed on the throwaway JVM with 'branch :agent-… is absent from the store roster' (seon.cluster.store/open-branch!, store.clj:679). Cause (verified 2026-10-06): konserve's tiered store under Datahike's overlay (:frontend-only writes; seon.test clean-request-handle uses store/open-overlay!): a cold :frontend-first read warmed the memory frontend fire-and-forget, the :branches update after it (datahike versioning.cljc:178) read the still-empty frontend and wrote only the new branch, and the late warm replaced that write with the store's roster. Reproduced on an overlay: k/update :branches with an uncached roster gave #{:agent-y}, dropping :db. Fixed in the konserve fork 8700ca7 (warm only an absent key; a :frontend-only update seeds from the backend), pinned in deps.edn; regression seon.cluster.store-test/an-overlay-roster-write-keeps-the-stores-branches. Done when the pin is loaded (JVM restart), repeated concurrent checks never refuse this way, and cold-start's boot-failure assertion runs green. Also seen: two concurrent checks of the SAME sha race in committed-source! ('staging-<pid> -> data/source/<sha>: Directory not empty')."}
+ #:seon.task{:name "check-test-reports-failed-for-an-excluded-long-test"
+             :kind :function
+             :intent "bin/seon check --test NS reports passed? false with zero failures for a namespace that holds an excluded declared-long test (seon.test.clj:739 excludes long tests unless the request sets :seon.test/include-long? true), so bin/lane commit --test refuses a green slice. Done when bin/seon check and bin/lane accept --include-long and pass it through to the test request (script/seon/operator.clj check!, test-check-arguments, bin/lane), an excluded long test with no failure reports passed, and a regression covers both."
+             :must-read #{seon.operator/check! seon.test/run}
+             :evidence #{"tmp/commit-floor/report.md"}}
+ #:seon.task{:name "committed-source-same-sha-race"
+             :kind :function
+             :intent "Two bin/seon check runs of the SAME commit, started together while data/source/<sha> does not yet exist, race in committed-source! (script/seon/operator.clj:912-943): each builds data/source/<sha>.staging-<pid> and the loser's (fs/move staging target {:atomic-move true}) refuses with '…/<sha>.staging-<pid> -> …/data/source/<sha>: Directory not empty', failing the whole check before it rehearses (2 of 4 concurrent checks of 28ab7df1f, 2026-10-06 08:21, diagnostics data/clusters/default/logs/operator-check-20261006T082157.679.edn and .680.edn). The loser's build is complete and identical by construction (the archive is a function of the sha), so losing the rename is success: answer the winner's target and delete the staging. Done when concurrent checks of one not-yet-built sha all proceed, with a regression that runs two committed-source! of one fresh sha at once."
+             :must-read #{seon.operator/committed-source!}}
+ #:seon.task{:name "status-prints-ok-while-the-cluster-is-still-starting"
+             :kind :function
+             :intent "bin/seon status prints OK while the cluster is still starting. Done when status prints the boot layer reached and a non-OK state until readiness is published (seon.cluster.boot/readiness), with a test on a booting fixture. Boot readiness layers are also not logged anywhere persistent (start output is the only record): record them as facts."
+             :must-read #{seon.cluster.boot/readiness}}]

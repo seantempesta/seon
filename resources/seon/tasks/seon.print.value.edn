@@ -1,0 +1,4 @@
+[#:seon.task{:name "a-contract-refusal-prints-a-generated-example-of-the-whole-schema"
+             :kind :function
+             :intent "A contract refusal on a wrong-type argument prints a generated :example of the whole schema (about 40 lines of fake data, e.g. seon.cluster.boot/readiness given a string). Done when the refusal shows the expected schema name and one dig form, with no generated example for large maps, asserted on the refusal's data."
+             :must-read #{seon.print.value/bounded-text}}]

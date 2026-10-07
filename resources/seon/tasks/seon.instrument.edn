@@ -41,4 +41,8 @@
              :kind :function
              :intent "seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation evals (defn doubled ...) into seon.instrument-test with the JVM compiler and never restores the file's root, so seon.instrument-test/doubled keeps a NO_SOURCE_PATH class for the JVM's life: seon.instrument-test/a-root-replaced-outside-a-reload-is-named is red in every later run (serial included), and runtime_status reports replaced-roots 1. Done when the re-evaluation probe uses its own interned Var (or an SCI context) and both tests pass in either order in one JVM."
              :must-read #{seon.instrument/replaced-roots}
-             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
+ #:seon.task{:name "a-contract-with-an-fn-ifn-cannot-arm-on-a-sci-branch"
+             :kind :function
+             :intent "A contract containing [:fn clojure.core/ifn?] cannot arm on a SCI branch (\"No reader function for tag object\"): how the spec is stored and read back (my-program-reads lane, 67b4d420b). Done when a stored spec with a registered named predicate arms on a branch and the failing form is a regression."
+             :must-read #{seon.schema/register!}}]

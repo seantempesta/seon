@@ -28,4 +28,9 @@
              :kind :function
              :intent "seon.profile/cells builds a vector of every live cell (2,673) on each call: 2.9 ms, and summing each cell's total counter over it 2.5 ms (default 2026-09-28); a health report reads it live every time (the counters move with the read itself, so no key can hold it). Done when the report's candidates (definitions with a second of inclusive time) are found without touching every cell, e.g. from the stored judgments once they land."
              :must-read #{seon.profile/cells seon.profile/observation}
-             :evidence #{"tmp/health-page/RESUME.md"}}]
+             :evidence #{"tmp/health-page/RESUME.md"}}
+ #:seon.task{:name "no-per-symbol-profile-and-zero-calls-reads-as-unmeasured"
+             :kind :function
+             :intent "There is no per-symbol profile function for an agent, and zero calls cannot be told from never measured. Done when a my.* call answers one symbol's calls, mean and max, and a symbol with no measurement answers a typed unknown while a measured zero answers zero."
+             :must-read #{seon.profile/cell}
+             :evidence #{"tmp/repl-audit/read.md"}}]

@@ -3,4 +3,8 @@
              :kind :namespace
              :intent "my.edit/form!, exact! and lines! let an agent edit source files, against 'files are the write-back of accepted entities, not the working medium' (dogfood c8b; root decided removal). Retire my.edit, seon.edit, seon.edit.jvm and their schemas (bundle B4, delete-only)."
              :must-read #{my.edit/exact! my.edit/form! my.edit/lines!}
-             :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
+ #:seon.task{:name "edit-hook-budgets-need-owner-numbers"
+             :kind :function
+             :intent "Edit-hook budgets (function at most 40 lines, a namespace over 800 lines may only shrink, short docstrings, no dated rulings in comments): the exact numbers need the owner's OK before the hook enforces them. Done when the owner rules the numbers and the hook refuses each violation with a fix, with a regression per budget."
+             :must-read #{my.edit/exact!}}]

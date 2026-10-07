@@ -4,4 +4,8 @@
              :intent "stop-work-launcher! cancels each Future and settles it at once, so 'drained' can mean the callback emitted while work-fn is still inside a host call. The launcher lifecycle atoms (atom audit A100-A105) fold into the submission map together with this actual-exit distinction (15-35 lines, reviewed)."
              :must-read #{seon.flow/stop-work-launcher!}
              :evidence #{"docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"
-                         "docs/seon/issues/cancelled-future-is-not-body-exit-evidence.md"}}]
+                         "docs/seon/issues/cancelled-future-is-not-body-exit-evidence.md"}}
+ #:seon.task{:name "blocking-konserve-io-bursts-the-mixed-pool-to-five-hundred-threads"
+             :kind :function
+             :intent "The core.async :mixed pool bursts to about 500 threads from blocking konserve IO. Done when konserve IO runs on virtual threads (our fork) and the thread count under the same load probe is bounded, measured before and after."
+             :must-read #{seon.cluster.store/datahike-configuration}}]

@@ -1,0 +1,4 @@
+[#:seon.task{:name "html-views-identity-and-fault-pairs-are-red"
+             :kind :namespace
+             :intent "Pre-existing reds, classified by cut-small-features: html-views identity-pairs (an agent identity carries :seon.agent/cluster) and fault-pairs (render-faults-ai returns a vector, the golden holds a string). Done when each test asserts the data of the behavior it names and is green; the owner is the render area spec."
+             :must-read #{seon.error/render-faults-ai}}]

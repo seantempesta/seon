@@ -18,4 +18,9 @@
              :kind :function
              :intent "A refusal reaches the agent as its message and a two-frame stack; the evidence its producer decided on is not in the value. Dogfood loop 2026-09-28: propose-merge! refused 'Cannot interpret seon.sci.eval/acquire-program!: ... calls a definition this branch changes' without naming which changed definition or the call path from the refused declaration to it; finding that (seon.render.value/tree, 419 transitive callers, 13 host-bound) took a second evaluation written by hand. A producer's refusal carries the data it decided on (here the changed definitions reached and one path to each), by reference when large, so the reply explains itself and no refusal needs digging."
              :must-read #{seon.error.refusal/diagnostic}
-             :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}]
+             :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
+ #:seon.task{:name "hand-built-error-maps-remain-across-the-namespaces"
+             :kind :namespace
+             :intent "Error sweep: batch 1 converted config (0a75ca319 detection only), the test runner (32ebd64f6) and cluster.agent (d0961f05e); hand-built error maps and per-namespace copies of the error helpers (error?, error, let-ok) remain: ai.clj:635, plan-era copies, render/transcript.clj:744, the 44 (contains? x :seon.error/at) checks, the 15 three-key checks and the 17 debt: comments (tmp/root-cause-census/report.md). Rule: every error is built by ONE constructor validated against its declared alternative where it is made. Done when each remaining namespace, one per commit, rewrites its error? ladders first, then literal maps grouped by enclosing defn with the alternative from its output union (boot-time producers checked: error refuses without a projection), and the census counts fall to zero for it."
+             :must-read #{seon.error.refusal/error? seon.error/render-faults-ai}
+             :evidence #{"tmp/root-cause-census/report.md"}}]

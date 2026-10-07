@@ -102,4 +102,26 @@
              :kind :function
              :intent "Binding seon.db/*read-evidence-sink* around seon.problems failed-tests made it 1,572 ms against 180 ms uncaptured: 1,775 captured (db/datoms :avet) reads at about 0.8 ms each (default, armed, 2026-09-28). The runner patch reads those members in one query (25 ms); the capture's own per-read cost remains for any reader that seeks per item. Done when a captured index seek costs within 2x of an uncaptured one."
              :must-read #{seon.db/read-evidence seon.db/datoms}
-             :evidence #{"tmp/health-page/RESUME.md"}}]
+             :evidence #{"tmp/health-page/RESUME.md"}}
+ #:seon.task{:name "a-transaction-of-many-profile-measurements-hits-the-validation-node-limit"
+             :kind :function
+             :intent "Settlement refused: component validation-node-limit 250000 hit by a transaction with many :seon.profile.measurement rows (profile flush volume scales whole-value validation), and a run-owned would-be transaction carried 150+ :seon.profile.measurement upserts (tmp/store-growth/report.md). Done when a profile flush no longer makes one owning value whose validation scales with the measurements, the settlement is not refused at that volume, and the bound has a regression."
+             :must-read #{seon.db/db seon.profile/cell}
+             :evidence #{"tmp/store-growth/report.md"}}
+ #:seon.task{:name "render-rejection-ai-fails-its-own-input-contract"
+             :kind :function
+             :intent "seon.db/render-rejection-ai fails its own input contract (five problems) for a transaction refused for a missing :seon.turn/agent: the error renderer cannot render an error (seen once, landing-reds-2). Done when a refusal for a missing :seon.turn/agent renders through its AI face with a regression on that exact transaction, and the contract admits every refusal the writer produces."
+             :must-read #{seon.db/render-rejection-ai}}
+ #:seon.task{:name "the-datahike-parity-test-names-an-unadmitted-callable"
+             :kind :namespace
+             :intent "datahike-test canonical-population-native-parity calls seon.error/ordered-explanations?, which has no admitted callable. Done when the test calls the current owner or the function is admitted with its contract, and the test is green."
+             :must-read #{seon.db/db}}
+ #:seon.task{:name "the-world-schema-refuses-the-database-value"
+             :kind :function
+             :intent "RC3 (tmp/root-cause-census/report.md): the world schema refuses :seon.db/db, so the 12 projection-fallback callers return db's refusal. Done when the world admits the database value the way its members are declared and the fallback callers are deleted."
+             :must-read #{seon.db/db}
+             :evidence #{"tmp/root-cause-census/report.md"}}
+ #:seon.task{:name "hot-total-predicates-run-hundreds-of-millions-of-times"
+             :kind :function
+             :intent "runtime_status top on default (2026-10-07) ranks untested hot predicates: seon.db/transaction-report-datom? 201,990,743 calls, 19,102 ms; seon.program/edn-round-trip-symbol? 19,443,655 calls, 15,365 ms; seon.profile/histogram? 4,951,790 calls, 2,227 ms. They are total predicates used as schema leaves (seon.db.edn:301, seon.program.edn:73) and are themselves armed and profiled, so validating a collection pays the armed wrapper per element (a my.fs/stat repeated transaction-report-datom? 168-322 times, seon.effect/a-file-stat-costs-a-thousand-armed-calls). Find what the call count is proportional to (datoms of every report validated whole?) and make it follow the written datoms; a predicate that is a contract leaf gets a test of its law. Done when the same probe shows each predicate off the health top, with call counts per write proportional to that write, and each has a test. Proof: new law tests seon.db-test/transaction-report-datom-law, seon.program-test/edn-round-trip-symbol-law and seon.profile-test/histogram-law (to be written first) naming this task, plus the runtime_status probe re-read after a restart."
+             :must-read #{seon.db/transaction-report-datom? seon.profile/histogram? seon.program/edn-round-trip-symbol?}}]

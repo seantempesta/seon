@@ -38,4 +38,23 @@
              :kind :function
              :intent "(my.program/propose-merge! {}) on an unassigned branch answers the bare string \"seon.task is refused: unassigned.\" (the declared renderer shows only the message): no offending branch/agent, no fix naming who assigns (root's seon.task/assign!) or how a file task in resources/seon/tasks becomes assignable. An agent also has no my.* entrance to create its own branch (MCP's branch tool has none for Seon agents). The refusal names its assignment query and the call that fixes it."
              :must-read #{my.program/propose-merge! seon.task/assignment seon.task/assign!}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "a-merged-change-reaching-the-files-is-unproven"
+             :kind :function
+             :intent "The last unproven step of the dogfood path: an agent's merged change reaches the files through write-back (my.program/write-back!). Done when a live branch change is proposed, merged and written back, the file diff equals the change, and the run is recorded as evidence (tmp/repl-audit/change.md lists the prior gaps)."
+             :must-read #{my.program/prepare-merge! my.program/write-back!}
+             :evidence #{"tmp/repl-audit/change.md"}}
+ #:seon.task{:name "history-shows-the-source-twice-and-no-commit-id"
+             :kind :function
+             :intent "my.program/history shows a definition's source twice per event and the write-back transaction carries no commit id. Done when each history event names the commit id recorded on its write-back transaction and shows a diff render instead of the second source copy."
+             :must-read #{my.program/declaration-diff my.program/history}
+             :evidence #{"tmp/repl-audit/change.md"}}
+ #:seon.task{:name "ns-unmap-and-remove-ns-cost-quarter-thousand-tokens-and-most-of-a-second"
+             :kind :function
+             :intent "my.program/ns-unmap! and remove-ns! add about 250 tokens of constant prose to every reply and take 0.6-0.8 s. Done when a reply is the value and one line, and the call is under 300 ms, timed against the same probe on the parent commit."
+             :must-read #{my.program/ns-unmap! my.program/remove-ns!}
+             :evidence #{"tmp/repl-audit/change.md"}}
+ #:seon.task{:name "the-merge-prepare-costs-three-seconds-and-400k-calls"
+             :kind :function
+             :intent "The merge path: my.program/prepare-merge! takes 2.6-3.1 s and about 400k calls regardless of change size. The cold-projection hypothesis was falsified (800a94abb); it needs a sampled profile (Astra after a bow-out), then the responsible armed functions named and fixed. Done when a small merge prepares under one second, timed on parent and change."
+             :must-read #{my.program/prepare-merge! seon.cluster.source/prepare-merge!}}]

@@ -1,0 +1,4 @@
+[#:seon.task{:name "a-jvm-run-answers-evaluated-but-not-recorded"
+             :kind :function
+             :intent "Two MCP JVM-mode evaluations (lane health-noise, 2026-10-06) answered 'evaluated but not recorded' (:seon.batch/applied true, :tx-count 0) after a 2.6 s form returning a large map: a run answered without its one synchronous settlement, which CLAUDE.md requires to be durable before the run answers. Reproduce with a JVM-mode form that runs ~2-3 s and returns a large map; find which stage drops the settlement (size bound? timeout?) and fix at that producer so the run settles or answers a declared error. Done when the repro settles (the evaluation is stored) or returns the named error alternative, with a regression."
+             :must-read #{seon.batch/evaluate-batch seon.turn.batch/settle}}]

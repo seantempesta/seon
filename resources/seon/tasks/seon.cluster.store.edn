@@ -20,4 +20,14 @@
              :kind :function
              :intent "Datahike's commit! writes the same db-to-store value (the fused-root record, about 134 KB on default) twice, as the immutable commit record and as the mutable branch head, and konserve serializes each write separately: two sequential serializations on every commit's critical path (about 5-8 ms of the 26 ms of CPU a settlement commit spends outside I/O). One serialization written under both keys, or a head that names the durable commit record, removes one; either is a Datahike fork change."
              :must-read #{seon.cluster.store/datahike-configuration}
-             :evidence #{"docs/research/agent-platform/commit-floor-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/commit-floor-2026-09-26.md"}}
+ #:seon.task{:name "an-ordinary-commit-writes-26-files-and-136-kb"
+             :kind :function
+             :intent "Measured on live default (4b29a0689, 2026-09-28): a (+ 1 2) eval is one commit of 30 datoms over 19 distinct attributes and writes 23-28 files / 120-151 KB; a defn plus call writes 61-126 files / 394-801 KB (64 datoms over 44 attributes, about 6 KB per datom). One (+ 1 2) commit: commit record 21.7 KB and branch head 21.6 KB (16% each; :fuse-index-roots? inlines all six roots, written twice, writing.cljc:143-193/523-528), aevt nodes 63.7 KB in 15 files (47%), avet 17 KB (13%), eavt 11.5 KB (8%). The floor is O(distinct attributes touched x branching factor x slot bytes) plus two heads, not the datoms; the aevt/avet share follows from 19-44 one-datom attributes per eval. Done when the levers ranked in tmp/commit-floor/report.md section 4 are tried on a branch of the live store and a (+ 1 2) commit is timed and byte-counted before and after (unfused or single-written heads, fewer distinct attributes per eval settlement, aevt/avet node packing), with the store-writes tasks it builds on (a-small-commit-rewrites-thirty-index-nodes, each-commit-serializes-its-root-record-twice) closed or restated by the result. Also: per tmp/store-growth/report.md the store holds 346,605 files / 1.07 GB (98% index nodes, 43% of du bytes are 4 KB block rounding), collection has never run, and 412-426 dead branch heads (rehearsal 197, building-source 143, checkpoint 40) sit outside the roster."
+             :must-read #{seon.cluster.store/datahike-configuration}
+             :evidence #{"tmp/commit-floor/report.md" "tmp/store-growth/report.md"}}
+ #:seon.task{:name "collection-lists-the-store-keys-twice"
+             :kind :function
+             :intent "Konserve patches to drop the second k/keys listing in collection (astra-referenced-blobs), which lists 346k keys per pass. Done when collection lists once, timed on the live store size."
+             :must-read #{seon.cluster.store/datahike-configuration}
+             :evidence #{"tmp/store-growth/report.md"}}]

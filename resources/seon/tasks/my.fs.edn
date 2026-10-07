@@ -1,0 +1,5 @@
+[#:seon.task{:name "fs-read-ignores-limit-and-has-no-line-addressing"
+             :kind :function
+             :intent "my.fs/read ignores :limit and has no line addressing (offset/count of lines), so agents read whole files. Done when :limit bounds the read and a line range is addressable, with a regression on a multi-line file. The open fault on my.fs/read (refused result missing :my.fs/error-path, my/fs.clj:39) is the same function."
+             :must-read #{my.fs/read}
+             :evidence #{"tmp/repl-audit/read.md"}}]

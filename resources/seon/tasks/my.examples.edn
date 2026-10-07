@@ -1,0 +1,4 @@
+[#:seon.task{:name "the-examples-test-reads-a-docstring-example-as-an-invalid-token"
+             :kind :namespace
+             :intent "my.examples-test reads a docstring example as \"Invalid token: Errors:\" (:158); the public-docstring-examples test fails 31 with 1 error on default (runtime_status). Done when the docstring example that breaks the reader is corrected at its producer and the test is green."
+             :must-read #{my.task/open}}]

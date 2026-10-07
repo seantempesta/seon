@@ -52,4 +52,8 @@
             :kind :function
             :intent "A 32-row vector of [string long] pairs (a profile summary, strings of 40-60 characters) printed each string cut at 32 characters with a dig form per row, and a java.util.HashMap$Node printed as #object: the budget went to cut markers instead of the text. Done when a small tuple's string prints whole under the budget and a Map.Entry prints as its pair."
             :must-read #{seon.render.value/prepare}
-            :evidence #{"tmp/mcp-dogfood/probe.clj"}}]
+            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+ #:seon.task{:name "bounded-text-survives-in-the-render-namespace"
+             :kind :function
+             :intent "Render dedup: seon.print.value/bounded-text and throwable-text are the survivors (6618eda17); render.value/bounded-text and its floor delegates remain until config.clj, test/runner.clj, cluster/wake.clj and render/var.clj convert, plus three test-fixture subjects and task/doc refs. Also the D1 (context owner out of web), D3, D4, D5 and D8 duplicates of the render-dedup series. Done when render.value/bounded-text is deleted and every caller converted in the same commit, lint clean."
+             :must-read #{seon.print.value/bounded-text seon.render.value/bounded-text seon.repl/entity-emission}}]

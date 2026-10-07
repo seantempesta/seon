@@ -101,4 +101,9 @@
              :kind :function
              :intent "Two regressions refused a read by redefining seon.db Vars, and both seams moved: selection's declared-edge query became fn/declared-callers reading datoms (39d94eef0), so selection-test's injected refusal was deleted in red-triage r8; reconcile-tx-in reads through db/pull-many (296dede99), so fn-test refused-index-reads-never-become-publication-entities redefines a pull it no longer calls and answers transaction data. Prove refusal propagation with a genuinely refused read (a world whose read refuses), not a redefinition."
              :must-read #{seon.fn/index! seon.fn/tests-reaching}
-             :evidence #{"test/seon/fn_test.clj" "test/seon/test/selection_test.clj"}}]
+             :evidence #{"test/seon/fn_test.clj" "test/seon/test/selection_test.clj"}}
+ #:seon.task{:name "contract-findings-has-no-scope"
+             :kind :function
+             :intent "The lint/contract entrance available to agents, seon.fn/contract-findings, is whole-program and answers 283k tokens. Done when a scoped entrance exists under my.* (a namespace or symbol set) that answers only the findings for that scope in a reply an agent can read, with a size regression."
+             :must-read #{seon.fn/contract-findings}
+             :evidence #{"tmp/repl-audit/change.md"}}]

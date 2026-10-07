@@ -140,4 +140,12 @@
              :kind :function
              :intent "seon.turn/row-tx has no production caller since the fold writes declarations through seon.turn.batch/entity-facts and schema-tx (its concurrency check and schema attribute-change copy went in the writer-duplicates cut). Test fixtures in ten files still write declarations through it (datahike_fork, db, schema, schema_usage_guard, cluster/acquisition, program, sci/branch_execution, sci/eval, schema/datahike, schema/projection_writer). Done when those fixtures write through the fold's writer and row-tx with its declared-* helpers is deleted."
              :must-read #{seon.turn/row-tx seon.turn.batch/form-facts}
-             :evidence #{"docs/research/agent-platform/one-repl-path-spec-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/one-repl-path-spec-2026-09-27.md"}}
+ #:seon.task{:name "eval-origin-has-no-producer-or-consumer"
+             :kind :namespace
+             :intent ":seon.eval/origin has no producer and no consumer (about fifteen turn.clj sites, e.g. turn.clj:116-117, 848) and Astra's seon.db/retention-check issue-authority code (db.clj:5470) is dead beside it. Done when both are deleted with their schema entries and callers converted in one commit."
+             :must-read #{seon.db/retention-check}}
+ #:seon.task{:name "turn-continue-read-results-arrive-before-done-takes-six-seconds"
+             :kind :namespace
+             :intent "turn-continue read-results-arrive-before-done (:147) takes 5.8-7.3 s: undiagnosed. Done when a profile names the responsible armed functions and the test fits its bound."
+             :must-read #{seon.turn/compact!}}]

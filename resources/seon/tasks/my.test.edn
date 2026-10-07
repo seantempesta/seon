@@ -2,4 +2,9 @@
              :kind :function
              :intent "(my.test/run) in seon.render.value-test ran all 52 members to test one new deftest: over 30 s, past MCP's default bound, which answered only a timeout with no handle (the run finished and recorded at 22:04:14). Its answer is a vector of 52 per-test maps in symbol order, so the shown text starts with green members and the one red test is cut. Answer passed?, counts and the red members first (seon.test/tally's verdict) and accept a named test or the tests naming a task, as my.test/check does for changes."
              :must-read #{my.test/run-owned seon.test/tally}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "run-owned-reply-repeats-its-output"
+             :kind :function
+             :intent "my.test/run-owned answers about 800 tokens for one test, with a duplicated :out. Done when the reply is focused through the render (one output, the verdict, the failing assertions' data) and its token size is asserted in a regression."
+             :must-read #{my.test/run-owned}
+             :evidence #{"tmp/repl-audit/change.md"}}]

@@ -1,0 +1,5 @@
+[#:seon.task{:name "refusal-data-recognizes-errors-by-at-and-layer"
+             :kind :function
+             :intent "seon.test-support/refusal-data (test/seon/test_support.clj:739) recognizes a returned error only when it carries an inst :seon.error/at, a qualified :seon.error/layer and a qualified :seon.error/operation; 102 test sites call it. The errors spec drops :at and :layer from the produced map (errors.md §1, decision 6; slice S2 or with S6 per the S2 re-slicing in tmp/errors/s1-s2-notes.md), after which every returned error reads as committed and those tests silently assert the wrong branch. Done when refusal-data recognizes an error by :seon.error/type (the one error? predicate) in the same commit that drops :at/:layer, and a test-support test covers a typed error without :at. Proof: a new seon.test-support-test/refusal-data-recognizes-a-typed-error (to be written first) naming this task."
+             :must-read #{seon.test-support/refusal-data}
+             :evidence #{"docs/seon/specs/errors.md" "tmp/errors/s1-s2-notes.md"}}]

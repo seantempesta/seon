@@ -65,4 +65,8 @@
             :kind :function
             :intent "(select-keys (seon.db/pull db '[*] [:seon.fn/name 'x/y]) [:q]) is {} but prints as \"Error evidence is unavailable.\": select-keys keeps the refusal's metadata {:seon.error/declared-schema :seon.db/invalid-read-error}, and render selection (seon.render/declared-producers, render.clj:569) takes that declaration's pair without asking whether the value still satisfies it (the validator answers false). Law tension (root 2026-09-28): AGENTS says the producer declares identity and nothing downstream guesses, and entity_pairs_test asserts a declaration selects even when the value does not fit, so validating at selection was not landed. Fix at the derivation instead (a derived value must not carry its source error declaration), or bring the rule to the owner."
             :must-read #{seon.render/request-projection}
-            :evidence #{"tmp/mcp-dogfood/patches/render/01-declared-schema-must-fit.patch"}}]
+            :evidence #{"tmp/mcp-dogfood/patches/render/01-declared-schema-must-fit.patch"}}
+ #:seon.task{:name "landing-reds-2-render-bow-outs"
+             :kind :namespace
+             :intent "Bow-outs from landing-reds-2: render-simplification (selection for [] no longer differs from seon.agent/render-settings-ai :161; one extra kernel/invoke on first render) and the web-debug strip (3,962 vs 23,698 bytes and 8.8 s). Also web reds from web-shrink-reds (5574927cb): render/transcript.clj:1439 render-session calls repl/entity-emission without :seon.db/db (supply), the next-turn fixture opening starts with the :seon.agent/cluster pull, error/render-html's 500 body drops the exception class, agent-render-profile budget 3200 < 3238 needed, and the reconnect tests take 23-42 s (held-pass promise never fires). Done when each is fixed or recorded in the render area spec with its number."
+             :must-read #{seon.render.transcript/render-session seon.repl/entity-emission}}]

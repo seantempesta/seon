@@ -1,0 +1,4 @@
+[#:seon.task{:name "documentation-test-reads-a-retired-doc-and-dir-shape"
+             :kind :namespace
+             :intent "documentation-test is red since 7fc4a5d96 changed the doc/dir data shape, and its is/deftest referral at :198-199. Done when the test follows the current shape and is green."
+             :must-read #{seon.bootstrap/help-value}}]
