@@ -512,7 +512,9 @@
                         (not [?turn :seon.turn/closed-tx _])] database))
              "the open turn is untouched and the fence still holds"))))))
 
-(defn- virtual-turn-fixture []
+(defn- virtual-turn-fixture
+  {:malli/schema [:=> [:cat] [:tuple :string [:vector :seon.schema/value]]]}
+  []
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection

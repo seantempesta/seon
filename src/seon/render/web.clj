@@ -94,7 +94,6 @@
 ;;; Schemas — resources/seon/schema.edn
 ;;; ---------------------------------------------------------------------------
 
-
 ;;; LOAD-CYCLE BOUNDARY. `seon.cluster` requires `seon.render.web`, so this
 ;;; namespace cannot require it back. One resolution, realized at first use,
 ;;; instead of a `requiring-resolve` on every call (AGENTS §2.1).
@@ -222,6 +221,8 @@
    ::pull-max-work 4000})
 
 (defn- debug-query
+  "The debug request a query-parameter map asks for, defaults filled."
+  {:malli/schema [:=> [:cat :map :seon.schema/value [:maybe :seon.ns/name] [:maybe :seon.agent/id]] :map]}
   [query default-subject viewer-namespace agent-id]
   (let [subject (or (query-entity (get query "subject")) default-subject)
         output (read-query-value (get query "output"))]
@@ -263,6 +264,8 @@
              (read-query-value (get query "incomingCursor"))))))
 
 (defn- debug-query-strings
+  "The query-string parameters that round-trip `debug-request`."
+  {:malli/schema [:=> [:cat :map] [:map-of :keyword :string]]}
   [debug-request]
   (cond->
    {:debug "true"
@@ -3174,16 +3177,6 @@
                  :seon.render.web/feed-url
                  (route/path ::route/feed {:id agent-id})}))))))
 
-
-
-
-
-
-
-
-
-
-
 (defn- sent-context-html
   "The agent's context as its next model call is sent it, through the value printer's HTML face."
   {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id] :seon.render/hiccup]}
@@ -3195,8 +3188,10 @@
      (value/html {:seon.render/value (dissoc composed :seon.db/db) :seon.db/db database
                   :seon.render.value/root [::context agent-id]})]))
 
-
 (defn- debug-response
+  "The ring response for one agent's or namespace's debug page, or for its record or context fragment."
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.ns/name [:maybe :seon.agent/id] :map]
+                  [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
   [{connection :seon.store/connection-object
     :as service}
    viewer-namespace agent-id request]
@@ -3221,27 +3216,27 @@
       (and agent-id (not (get query "subject")))
       (html-response
        (shell
-              {:seon.agent/id agent-id
-               ::session? true
-               :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
-               :seon.render.debug/viewer-namespace viewer-namespace
-               :seon.render/page
-               [[:section {:class "seon-session-page"}
-                 (transcript/render-agent-header
-                  (session-controls (debug-turn-request (db/db connection) connection agent-id
-                                                        (:seon.sci.admit/caps service) service)))
-                 [:details {:class "seon-session-context"
-                            (keyword "data-on:toggle")
-                            (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
-                  [:summary "Context"]
-                  [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
-                   "Loading the agent’s context…"]]
-                 [:details {:class "seon-session-record"
-                            (keyword "data-on:toggle")
-                            (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
-                  [:summary "Record"]
-                  [:div {:id (block/surface-id (keyword "session-record" agent-id))}
-                   "Loading the agent’s current record…"]]] ]}))
+        {:seon.agent/id agent-id
+         ::session? true
+         :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
+         :seon.render.debug/viewer-namespace viewer-namespace
+         :seon.render/page
+         [[:section {:class "seon-session-page"}
+           (transcript/render-agent-header
+            (session-controls (debug-turn-request (db/db connection) connection agent-id
+                                                  (:seon.sci.admit/caps service) service)))
+           [:details {:class "seon-session-context"
+                      (keyword "data-on:toggle")
+                      (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
+            [:summary "Context"]
+            [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
+             "Loading the agent’s context…"]]
+           [:details {:class "seon-session-record"
+                      (keyword "data-on:toggle")
+                      (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
+            [:summary "Record"]
+            [:div {:id (block/surface-id (keyword "session-record" agent-id))}
+             "Loading the agent’s current record…"]]]]}))
 
       :else
     (let [db (db/db connection)

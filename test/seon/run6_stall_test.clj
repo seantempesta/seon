@@ -10,6 +10,15 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
+(defn- session-state
+  "The header's state span as `[class text]`."
+  {:malli/schema [:=> [:cat :seon.render/hiccup] [:tuple :string :string]]}
+  [header]
+  (let [[_ _ [_ attributes text]] (first (filter #(and (vector? %) (= :p (first %))
+                                                      (= "seon-session-state" (:class (second %))))
+                                                (tree-seq vector? seq header)))]
+    [(:class attributes) text]))
+
 (defn- transact! {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] :seon.db/transaction-report]}
   [connection data]
   (let [result (db/transact! connection data)]
@@ -65,12 +74,14 @@
                     :seon.sci.admit/caps (config/result-caps (support/effective-config))
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms (support/effective-config))
                     :seon.render/profile (render/agent-render-profile (support/effective-config))}
-           header #(pr-str (transcript/render-agent-header (assoc request :seon.db/db @connection)))]
+           header #(session-state (transcript/render-agent-header (assoc request :seon.db/db @connection)))]
        (is (= 2 (turn/turns-left @connection "run6-stall")))
        (is (nil? (turn/next-agent-work @connection {:seon.agent/id "run6-stall"})))
-       (is (str/includes? (header) "stalled: seon.ai/complete at "))
-       (is (str/includes? (header) ", waiting for an outside wake"))
+       (let [[state-class text] (header)]
+         (is (= "seon-emission-error" state-class))
+         (is (str/starts-with? text "● stalled: seon.ai/complete at "))
+         (is (str/ends-with? text ", waiting for an outside wake")))
        (is (:db-after (db/transact! connection
                                    [[:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply ""]
                                     [:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply-size 0]])))
-       (is (not (str/includes? (header) "stalled:")))))))
+       (is (= "seon-status-idle" (first (header))))))))

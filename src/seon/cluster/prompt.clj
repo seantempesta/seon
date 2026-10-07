@@ -137,25 +137,6 @@
   ([database model fallback-calibration agent-id]
    (calibration-for database model fallback-calibration agent-id)))
 
-(defn agent-calibration
-  "Fit an agent's recent model attempts, falling back to its config prior.
-
-  The caller names the cluster whose configuration supplies that prior; a
-  missing name or configuration is returned as the refusal `prompt` gives."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.boot/cluster-name]
-                       :seon.agent/id :seon.ai/model]
-                  [:or :seon.ai.tokens/calibration :seon.error/value]]}
-  [database cluster-name agent-id model]
-  (let [settings (effective-ai-settings database cluster-name agent-id)]
-    (if (or (:seon.cluster.prompt/missing-cluster settings)
-            (:seon.cluster.prompt/missing-config settings)
-            (:seon.config/error-key settings) (:seon.db/invalid-read settings)
-            (:seon.schema/expected-value settings))
-      settings
-      (model-calibration database model
-                         (tokens/prior-calibration (:seon.config.ai/chars-per-token-prior settings))
-                         agent-id))))
-
 (defn- refuse!
   {:malli/schema [:=> [:cat :keyword :string [:maybe :seon.schema/value]] :nil]}
   [rule message offending]

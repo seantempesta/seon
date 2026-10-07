@@ -102,8 +102,7 @@ database or config, `text`/`html` are the total unit entries; the delegates are 
 `render-ai` 713 and `render-html` 834 share `projection` 697 (good). But `render-run-ai|html`, `render-history-ai|html`,
 `render-runtime-ai|html`, `render-agent-header` and `session-header` 1237 each re-derive turn entities
 (`turn-entities` 1131, `debug-turn-selector` 1115, `history-run-selector` 898, `runtime-selector` 1008: four
-selectors over turns) and time/duration formatting (`runtime-time` 1055, `runtime-duration` 1063, `nav-click`,
-the deleted view URL builders). Survives: one turn pull with
+selectors over turns) and time/duration formatting (`runtime-time` 1055, `runtime-duration` 1063). Survives: one turn pull with
 one selector and one turn-link function in `seon.render.route`.
 
 **D8. Page fragment path vs debug fragment path in the web proc (~250 lines).**
@@ -158,15 +157,14 @@ One pipeline, per CLAUDE.md "Presentation": **select units, render function per 
    debug units (three files, none over ~700 lines).
 
 Cost target: opening a debug page performs one acquisition (today at least two, three with `?sent`; measured: not
-measured). Session render is O(entries); `reread-summary` (transcript 1306) and `turn-bytes` (1391) are single
-passes.
+measured). Session render is O(entries).
 
 ## 4. Deletion estimate
 
 | file | now | after | main cuts |
 |---|---|---|---|
 | render/web.clj | 4197 | ~1900 | D1 context derivation (~300), D4 graph (~200), D5 experiments (~150), D8 debug fragment path (~250), split-out unchanged code moves not deleted; sent-context (~20) |
-| render/transcript.clj | 2452 | ~1300 | D2 receipt-entry/emission (~150), D3 three acquisitions and catches (~150), D7 selectors/urls (~200), ledger/outline share view (~250), findings stay |
+| render/transcript.clj | 2452 | ~1300 | D2 receipt-entry/emission (~150), D3 three acquisitions and catches (~150), D7 selectors/urls (~200) |
 | render.clj | 1963 | ~1700 | takes over cache helpers (+~120), drops requiring-resolves (-~30); net small |
 | repl.clj | 631 | ~560 | absorbs emission callers; `turn.clj:2215` no longer merges maps |
 | render/value.clj | 1479 | ~1400 | delegates (-15), accessors (-10); middle of `prepare` unread |
@@ -176,38 +174,33 @@ passes.
 | walk.clj, prompt.clj, context.clj, web/jvm.clj | 2664 | ~2600 | no duplication found in the ranges read |
 | **total** | **14845** | **~10950** | **~3900 lines** |
 
-Honest limit: this design keeps every feature and reaches roughly 11k, not the 1.5k budget. The 1.5k figure would
-need the bulk of the debug page's findings and ledger to go (about 5k of transcript.clj + web.clj), or the value
-printer and walk to shrink by a redesign. That is a feature cut, which the owner ruled out; see question 1.
+Honest limit: this design keeps the features that remain after S2a (which deleted the turn session, outline, ledger
+and problem panel) and still does not reach the area's 1.5k budget; that needs a redesign of the value printer and
+walk.
 
 ## 5. Known reds in this area, and which the design dissolves
 
 Verified by reading:
-1. `transcript.clj:1439` `render-session` calls `(repl/entity-emission evaluation-entity)` without `:seon.db/db`; the
-   ledger call at 1841 passes it. Dissolved by D2: one converter, one call site over a pull that already carries the
-   database.
-2. `error/render-html` 500 body drops the class: `failure-response` (web.clj:3964) passes the diagnostic to
+1. `error/render-html` 500 body drops the class: `failure-response` (web.clj:3964) passes the diagnostic to
    `error/render-html` whose body is built from `rendered-reply`/`reply-html` (error.clj:2301-2323); the kicker shows
    `:seon.error/operation` (the handler symbol), not the throwable class. Partly dissolved by D6 (one error face);
    the class needs a line in `rendered-reply` (not part of this dedup). Root cause path not traced past error.clj:2323.
    UNVERIFIED which test asserts the class.
 
 UNVERIFIED (named in the assignment, not read or reproduced):
-3. next-turn fixture opening (`web_debug_test`): likely tied to `@turn-opening-db` (render.clj:1731) in
+2. next-turn fixture opening (`web_debug_test`): likely tied to `@turn-opening-db` (render.clj:1731) in
    `acquire-context!`; D1/D3 make the opening a field of the view, but the failing fixture was not run.
-4. `agent-render-profile` budget 3200 < 3238: `agent-render-profile` (render.clj:65) only copies
+3. `agent-render-profile` budget 3200 < 3238: `agent-render-profile` (render.clj:65) only copies
    `:seon.config.render.agent/token-budget`; the 3200 default and the 3238 prompt were not located (grep found no
    `3200` in `resources/seon` and no `token-budget` assertion in the web tests). Not dissolved by this design; it is
    a config default versus a fixture size.
-5. Reconnect tests 23-42 s: `feed` (2826) and `await-feed-package!` (2798) were not timed. D1's merged cache and
+4. Reconnect tests 23-42 s: `feed` (2826) and `await-feed-package!` (2798) were not timed. D1's merged cache and
    D3's single acquisition remove per-connection context derivations (hypothesis, unmeasured); the rest is unknown.
 
 ## 6. Open questions for root
 
-1. Budget. The area's ~1.5k target is not reachable without cutting the ledger, findings or graph pages (about 5k).
-   Options: (a) keep every feature, ~11k after this dedup (simplest, no sacrifice); (b) also cut the ledger and
-   problems (`render-ledger`, `session-problems`, ~1.3k, lose per-turn cost and finding views); (c) redesign value
-   printer plus walk (~1.5k, largest risk). Recommendation (a) now, (b) only if the owner confirms those views unused.
+1. Budget. Decided: S2a cut the ledger, outline, session and problem views; the remaining target is a value-printer
+   and walk redesign, not a feature cut.
 2. Where does the retention cache live: `seon.render` (recommended) or `seon.cache` directly, given CLAUDE.md's
    "every Seon cache is a kind in `seon.cache`"? The current `::calls` and `::ai-calls` are state in the shared
    cache atom (`render/shared-cache` render.clj:1695); confirm that atom has a reason (CLAUDE.md "atoms are a smell").

@@ -1087,7 +1087,10 @@
                                 "unknown time")
                        ", waiting for an outside wake")}))))
 
-(defn- session-header [request entities]
+(defn- session-header
+  "The session header: identity, state and the page toolbar."
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :seon.render/hiccup]}
+  [request entities]
   (let [agent-id (:seon.agent/id request)
         agent-entity (db/pull (:seon.db/db request)
                            '[{:seon.agent/namespace [:seon.ns/name]}]
@@ -1132,23 +1135,6 @@
   [request]
   (let [entities (turn-entities (:seon.db/db request) (:seon.agent/id request))]
     (session-header request (if (vector? entities) entities []))))
-
-;;; ---------------------------------------------------------------------------
-;;; The outline
-;;;
-;;; THE SESSION PANEL IS AN OUTLINE, NOT A DUMP (owner, 2026-09-16). Every unit
-;;; in the agent's history is ONE evaluation rendered through the evaluation
-;;; schema's declared pair, and it knows its origin: the turn that produced it,
-;;; its ordinal, the entity whose render declared it (`:seon.eval/origin`), the
-;;; renderer that produced its shown text (`:seon.eval/renderer`), and what it
-;;; costs under the agent's own calibration.
-;;;
-;;; NOTHING HERE RENDERS A SECOND TIME. The AI bytes are the ones acquisition
-;;; already composed — the same bytes `seon.cluster.prompt/compose` joins — and
-;;; the HTML is the same declared pair the agent page selects. There is no
-;;; presentation clipping on this path (2.4): the shown text each unit carries
-;;; was bounded once, at evaluation time, by the value renderer.
-;;; ---------------------------------------------------------------------------
 
 (defn render-runtime-html
   "Show transaction times, message triggers, listens, and newest-first turns."

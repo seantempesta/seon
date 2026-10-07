@@ -394,16 +394,16 @@
                               :seon.agent/settings {:seon.config.ai/chars-per-token-prior 4.5}}])
        (support/transacted! connection foreign)
        (is (= 9.0 (:seon.ai.tokens/chars-per-token
-                    (prompt/agent-calibration (db/db connection) "prompt-walk" "other" model))))
+                    (prompt/model-calibration (db/db connection) model (tokens/prior-calibration 4.5) "other"))))
        (is (= 4.5 (:seon.ai.tokens/chars-per-token
-                    (prompt/agent-calibration (db/db connection) "prompt-walk" "walker" model)))
+                    (prompt/model-calibration (db/db connection) model (tokens/prior-calibration 4.5) "walker")))
            "another agent's usage cannot replace this agent's configured prior")
        (doseq [ordinal (reverse (range 12))]
          (support/transacted! connection
                               (recorded-usage-tx model ordinal
                                                  (if (< ordinal 2) 6400 2800) 1000)))
        (support/transacted! connection (recorded-usage-tx model 100 10000 0))
-       (let [calibration (prompt/agent-calibration (db/db connection) "prompt-walk" "walker" model)
+       (let [calibration (prompt/model-calibration (db/db connection) model (tokens/prior-calibration 4.5) "walker")
              rendered (prompt/prompt (db/db connection) (dissoc (request connection ctx) :seon.turn/id))]
          (is (= :seon.ai.tokens/observed (:seon.ai.tokens/basis calibration)))
          (is (= 10 (:seon.ai.tokens/sample-count calibration)))
@@ -421,26 +421,16 @@
   (planted
    (fn [connection _ctx]
      (let [database (db/db connection)
-           model (db/q '[:find ?model . :where [_ :seon.config.ai/model ?model]] database)
            named (support/fork-cluster-ctx connection "prompt-walk")
            unconfigured (support/fork-cluster-ctx connection "no-such-cluster")
            rendered (fn [ctx] (prompt/prompt database (dissoc (request connection ctx) :seon.turn/id)))]
        (testing "the named cluster's configuration drives the prompt"
          (is (string? (:seon.cluster.prompt/text (rendered named)))))
        (testing "a named cluster without configuration refuses, never a default"
-         (let [refusal (rendered unconfigured)
-               calibration (prompt/agent-calibration database "no-such-cluster" "walker" model)]
+         (let [refusal (rendered unconfigured)]
            (is (= "no-such-cluster" (:seon.config/missing-effective refusal)))
            (is (= "walker" (:seon.cluster.prompt/missing-config refusal)))
-           (is (= "walker" (:seon.cluster.prompt/error-agent-id refusal)))
-           (is (= (select-keys refusal [:seon.config/missing-effective :seon.cluster.prompt/missing-config
-                                        :seon.config/error-key :seon.error/operation])
-                  (select-keys calibration [:seon.config/missing-effective :seon.cluster.prompt/missing-config
-                                            :seon.config/error-key :seon.error/operation]))
-               "the prompt and the transcript's calibration refuse identically")))
-       (testing "a caller naming no cluster refuses by name"
-         (is (= "walker" (:seon.cluster.prompt/missing-cluster
-                          (prompt/agent-calibration database nil "walker" model)))))))))
+           (is (= "walker" (:seon.cluster.prompt/error-agent-id refusal)))))))))
 
 (deftest provider-calibration-reports-over-budget-without-refusing
   ;; THE CLASS: the guard was correct against a measurement that was
