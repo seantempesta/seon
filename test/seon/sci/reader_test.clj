@@ -522,6 +522,19 @@
   (is (= [:error] (read-kinds (events (str (apply str (repeat 200 "{:a "))
                                            (apply str (repeat 199 "}"))))))))
 
+(deftest a-failed-collection-ends-where-its-delimiters-balance
+  ;; THE CLASS: a valid form after a malformed closed collection is read,
+  ;; whether it opens with `(` at column zero or not, on the same line or the
+  ;; next; the error event's source is the malformed form alone.
+  (doseq [[source expected-source]
+          [["[1 2 3x 4]\nmy-var" "[1 2 3x 4]"]
+           ["[1 2 3x 4] (+ 1 2)" "[1 2 3x 4]"]
+           ["{:a {:a 1 :b}}\n[5 6]" "{:a {:a 1 :b}}"]
+           ["(f \"]\" \\) ; ]\n 3x)\n:k" "(f \"]\" \\) ; ]\n 3x)"]]]
+    (let [result (events source)]
+      (is (= [:error :form] (read-kinds result)))
+      (is (= expected-source (:seon.sci.reader/source (first result)))))))
+
 (deftest recovery-never-hides-a-real-failure
   (let [broken (events "(+ 1 3x)")
         eof (events "(db/transact! :seon [{:a 1}")]

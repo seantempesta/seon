@@ -2570,7 +2570,7 @@
        (is (nil? (:seon.cluster.eval/diagnostics evaluation))
            "the print had its database: no diagnostic")))))
 
-(deftest showing-a-value-realizes-and-stores-only-what-is-shown
+(deftest ^{:seon/tasks #{"8874c8ec8093"}} showing-a-value-realizes-and-stores-only-what-is-shown
   ;; waste-rank V1 (2026-10-07): the show stage admitted every printed value
   ;; again under the 8 MB bound and serialized its print node for storage:
   ;; (vec (range 100000)) cost 417 ms, 740 MB and a 5.3 MB stored copy, and an

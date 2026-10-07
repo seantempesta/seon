@@ -669,12 +669,15 @@
                         (take-while some? (iterate ex-cause failure)))
              :cljs false) :bad-metadata
           :else :other)]
-    {::recovery-kind (if unclosed? :unclosed :localized)
+    (merge
+     {::recovery-kind (if unclosed? :unclosed :localized)
      ::error-kind detail
      ::prose-span? (and (= :symbol (:edamame/token-kind data))
                         (empty? (:edamame/containers data)))
      ::nested? (boolean (seq (:edamame/containers data)))
-     ::failure-offset failure-offset}))
+     ::failure-offset failure-offset}
+     (when-let [{:edamame/keys [row column]} (last (:edamame/containers data))]
+       {::form-offset (cursor-offset starts (count text) row column)}))))
 
 (defn- line-start-anchor
   [text floor accepted]
@@ -710,20 +713,51 @@
         (max (inc start) offset)
         (recur (inc offset))))))
 
+(defn- balanced-end
+  "The offset just past the collection opening at `start` when its delimiters
+  balance before the text ends (strings, character literals and comments
+  skipped), else nil."
+  {:malli/schema [:=> [:cat :string [:int {:min 0}]] [:maybe [:int {:min 0}]]]}
+  [text start]
+  (let [length (count text)]
+    (loop [offset start depth 0 in-string? false]
+      (when (< offset length)
+        (let [character (get text offset)]
+          (cond
+            in-string? (case character
+                         \\ (recur (+ offset 2) depth true)
+                         \" (recur (inc offset) depth false)
+                         (recur (inc offset) depth true))
+            (= \\ character) (recur (+ offset 2) depth false)
+            (= \" character) (recur (inc offset) depth true)
+            (= \; character) (let [eol (str/index-of text "\n" offset)]
+                                (when eol (recur (inc eol) depth false)))
+            (contains? #{\( \[ \{} character) (recur (inc offset) (inc depth) false)
+            (closer? character) (if (= 1 depth) (inc offset) (recur (inc offset) (dec depth) false))
+            :else (recur (inc offset) depth false)))))))
+
 (defn- recovery-point
   "Where reading resumes after a failed form. Only a top-level invalid token
-  is skipped by itself; a failure nested in a collection skips the whole form
-  to the next column-zero anchor, so a malformed `[...]` or `{...}` neither
-  leaks its inner elements as forms nor is re-read once per nesting level
-  (which made recovery cubic in depth: 200 levels took 6.7 s)."
+  is skipped by itself; a failure nested in a collection skips the whole form,
+  to where its delimiters balance or else the next column-zero anchor, so a
+  malformed `[...]` or `{...}` neither leaks its inner elements as forms nor is
+  re-read once per nesting level."
   {:malli/schema [:=> [:cat :string [:int {:min 0}] :map] [:int {:min 0}]]}
-  [text failure-start {::keys [recovery-kind error-kind prose-span? nested?]}]
+  [text failure-start {::keys [recovery-kind error-kind prose-span? nested? form-offset]}]
   (let [text-length (count text)
         point
         (cond
           (and (= :invalid-token error-kind) (not prose-span?) (not nested?)
                (not= \( (get text failure-start)))
           (token-end text failure-start)
+
+          ;; A bad token or map inside a closed collection: the failed form
+          ;; ends where its delimiters balance, so the forms after it, on its
+          ;; line or the next, are read.
+          (and nested? form-offset (= :localized recovery-kind)
+               (not (contains? #{:stray-closer :unclosed} error-kind)))
+          (or (balanced-end text form-offset)
+              (line-start-anchor text failure-start #{\( \;}))
 
           (= :unclosed recovery-kind)
           (when-let [anchor (line-start-anchor text failure-start #{\(})]
