@@ -215,7 +215,7 @@
               [:seon.error/value :seon.error/value]
               [:seon.db/tx-data :seon.store/transaction-data]],
              :prepare-request :seon.error/normalize-request,
-             :data [:map {:description "A cause link's ex-data, worlds and places referenced. In a live chain (seon.error.refusal/chain) it is within the evidence bound, each larger value held by its class, identity and size: a name that is NOT retrievable. The recorder admits the whole chain (seon.error.refusal/recorded-chain), so the recorded occurrence's :seon.error/data-blob keeps the whole value once by content, and is retrievable."}],
+             :data [:map {:description "A cause link's ex-data, whole, with worlds and places referenced (seon.error.refusal/chain). The value printer bounds what is shown; the recorded occurrence's :seon.error/data-blob keeps the whole value once by content."}],
              :prepared
              [:map
               [:seon.error/fact :seon.error/fact]
@@ -279,7 +279,6 @@
               [:seon.error/cause-of {:optional true} :seon.error/cause-of]],
              :suppressed-by [:int {:min 0 :description "The index in the same chain of the link that suppressed this throwable (Throwable.addSuppressed): a cleanup failure kept beside the primary, which no cause link reaches."}],
              :cause-of [:int {:min 0 :description "The index in the same chain of the suppressed-chain link this throwable caused; primary-chain links carry no relation."}],
-             :bounded-chain [:and {:description "A live cause chain (seon.error.refusal/chain): every link's data within the evidence bound, each larger value held by a name that is not retrievable."} :seon.error/chain [:fn {:error/message "each link's data must print within the evidence bound, each larger value held by its name and size (seon.error.refusal/link)"} seon.error.refusal/within-evidence-bound-chain?]],
              :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable as flat links: the primary chain outermost to root, then suppressed throwables and their causes, each naming its relation by index. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
              :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
              :resolved-tx :seon.db/ref,

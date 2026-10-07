@@ -268,72 +268,31 @@
   [projection]
   (if projection ((:projector @schema-seam) projection) (constantly nil)))
 
-(def ^:private evidence-characters
-  ;; What one cause link's data holds, in printed characters. The failure it
-  ;; prevents (2026-09-27): an instrument refusal's offending arguments held a
-  ;; schema projection's 3,576 forms (663 KB printed); the eval_clj error
-  ;; value's chain copied them and the bridge stored a 2.8 MB blob. The live
-  ;; refusal keeps its actual arguments; the chain, the error as data, holds
-  ;; each larger value by name. The tests' bound for "prints in kilobytes".
-  16384)
-
 (defn- object-name
   "How Clojure prints an object it does not enter, `#object[Class 0xhash]`,
-  as a STRING a reader reads back; `size` names what a held value holds."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}] [:maybe :int]] :string]}
-  [value size]
-  (str "#object[" (.getName (class value)) " 0x"
-       (Integer/toHexString (System/identityHashCode value))
-       (when size (str " {:count " size "}")) "]"))
-
-(defn- held-by-name
-  "`value` held by its name and size, with the characters the name costs."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple :string :int]]}
+  as a STRING a reader reads back."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
   [value]
-  (let [label (object-name value (when (or (counted? value) (string? value)) (count value)))]
-    [label (count label)]))
-
-(defn- held-members
-  "`members` (each key, referenced value, printed cost and original value)
-  with the costliest values held by name until they fit the evidence bound,
-  or nil when even their names do not fit."
-  {:malli/schema [:=> [:cat [:vector [:tuple [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}] :int [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]]]
-                  [:maybe [:vector [:tuple [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}] :int [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]]]]}
-  [members]
-  (let [total (reduce + (count members) (map #(nth % 2) members))]
-    (if (<= total evidence-characters)
-      members
-      ;; Costliest first, the running total carried: a member whose name
-      ;; costs no less than it does cannot help, and neither can any after it.
-      (loop [members (vec (sort-by #(- (long (nth % 2))) members)) i 0 total total]
-        (if (<= total evidence-characters)
-          members
-          (when (< i (count members))
-            (let [[k _ cost original] (nth members i)
-                  [label label-cost] (held-by-name original)]
-              (when (< label-cost cost)
-                (recur (assoc members i [k label label-cost original]) (inc i)
-                       (+ (- total cost) label-cost))))))))))
+  (str "#object[" (.getName (class value)) " 0x" (Integer/toHexString (System/identityHashCode value)) "]"))
 
 (defn- post-order
   "Fold `value` bottom-up over an explicit stack, so a value nested
   10,000 deep costs heap, never JVM stack. `open` answers a value's
   `{::result r}` when it is a leaf, else `{::state s ::entries [[k child] ..]}`;
   `step` folds one child's result into its parent's state, `(step state k
-  result child)`; `stop?` ends a node's walk early; `(close state complete?)`
-  is the node's result, `complete?` false when `stop?` ended it."
+  result child)`; `(close state)` is the node's result."
   {:malli/schema [:=> [:cat [:map [:open :seon.instrument/callable] [:step :seon.instrument/callable]
-                             [:stop? :seon.instrument/callable] [:close :seon.instrument/callable]]
+                             [:close :seon.instrument/callable]]
                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]
                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
-  [{:keys [open step stop? close]} value]
+  [{:keys [open step close]} value]
   (let [root (open value)]
     (if-not (contains? root ::entries)
       (::result root)
       (loop [stack (list root)]
         (let [{::keys [state entries] :as top} (peek stack)]
-          (if (or (nil? entries) (stop? state))
-            (let [result (close state (nil? entries))
+          (if (nil? entries)
+            (let [result (close state)
                   stack (pop stack)]
               (if-let [parent (peek stack)]
                 (recur (conj (pop stack) (update parent ::state step (::key top) result (::child top))))
@@ -354,43 +313,6 @@
         (vector? value) (seq (map-indexed vector value))
         :else (seq (map vector value value))))
 
-(def ^:private bounded-walk
-  ;; `bounded-cost`'s node fold: members `[k out cost original]`, the walk
-  ;; ending once they cost four bounds
-  {:open (fn [value]
-           (cond
-             (string? value)
-             {::result (if (<= (count value) evidence-characters) [value (+ 2 (count value))] (held-by-name value))}
-             (or (keyword? value) (symbol? value))
-             {::result [value (+ 1 (count (name value)) (if-some [n (namespace value)] (inc (count n)) 0))]}
-             (record? value) {::result [value 8]}
-             (or (map? value) (vector? value) (set? value))
-             {::state {:value value :members (transient []) :spent 0} ::entries (entries value)}
-             :else {::result [value 8]}))
-   :step (fn [state k [out cost] original]
-           (-> state (update :members conj! [k out cost original]) (update :spent + (long cost))))
-   :stop? (fn [{:keys [spent]}] (> spent (* 4 evidence-characters)))
-   :close (fn [{:keys [value members]} complete?]
-            (let [kept (when complete? (held-members (persistent! members)))
-                  cost (when kept (reduce + (+ 2 (count kept)) (map #(nth % 2) kept)))
-                  changed (remove (fn [[_ out _ original]] (identical? out original)) kept)]
-              (cond
-                (nil? kept) (held-by-name value)
-                (empty? changed) [value cost]
-                (set? value) [(into (empty value) (map second) kept) cost]
-                :else [(reduce (fn [out [k v]] (assoc out k v)) value changed) cost])))})
-
-(defn- bounded-cost
-  "`[kept cost]`: `value` with whatever would print past the evidence bound
-  held by its name and size, and the printed characters it keeps. A
-  collection changing nothing is returned identical. A collection's walk
-  stops once its members cost four bounds, holding it whole: the work is
-  bounded by what an error may keep, not by the value's size, and its depth
-  costs heap, not stack (`post-order`)."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] [:tuple [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}] :int]]}
-  [value]
-  (post-order bounded-walk value))
-
 (defn- referenced
   "`value` with every world inside it replaced by its identity; a collection
   holding no world is returned identical. Depth costs heap (`post-order`)."
@@ -409,7 +331,7 @@
                 ;; The name is a STRING: as a symbol it printed `#object[...]`, a tag
                 ;; no reader accepts, so a stored error holding a place never read back.
                 (and (instance? clojure.lang.IDeref value) (not (var? value)))
-                {::result (object-name value nil)}
+                {::result (object-name value)}
                 (record? value) {::result value}
                 ;; A vector by index, never reduce-kv: a map entry is a vector that
                 ;; reduce-kv walks as a map (Keyword -> Map$Entry), and an explained
@@ -422,26 +344,8 @@
             (cond (identical? r original) state
                   (set? value) (update state :held #(conj (disj % original) r))
                   :else (update state :held assoc k r)))
-    :stop? (constantly false)
-    :close (fn [{:keys [held]} _] held)}
+    :close (fn [{:keys [held]}] held)}
    value))
-
-(defn within-evidence-bound?
-  "True when `data` prints within the evidence bound, holding nothing
-  `bounded-cost` would hold by name: what a cause link's data is by
-  construction (`link`), declared on `:seon.error/data`."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [data]
-  (identical? data (first (bounded-cost data))))
-
-(defn within-evidence-bound-chain?
-  "True when `links` is a vector whose every link's data is
-  `within-evidence-bound?`: what `chain` returns and `recorded-chain` need
-  not."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary values and answers false when they are not a bounded chain.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [links]
-  (and (vector? links)
-       (every? #(within-evidence-bound? (:seon.error/data % {})) links)))
 
 (defn references
   "`value` with every world in it — any value a schema declares
@@ -461,26 +365,17 @@
 (defn- link
   "One throwable as a flat link, the frames it does not share with
   `enclosing` (`stack-frames`) held under `::frames` until the chain keeps
-  only the first-party ones, its ex-data with worlds
-  referenced and then passed through `hold`: `bounded-data` for the live
-  chain, `identity` for the recorder's (`recorded-chain`)."
-  {:malli/schema [:=> [:cat :seon.instrument/callable :seon.instrument/callable :seon.error/throwable
+  only the first-party ones, its ex-data whole with worlds referenced."
+  {:malli/schema [:=> [:cat :seon.instrument/callable :seon.error/throwable
                        [:maybe :seon.error/throwable] [:maybe :map]] :map]}
-  [project hold ^Throwable throwable enclosing relation]
+  [project ^Throwable throwable enclosing relation]
   (let [message (ex-message throwable)
         data (ex-data throwable)]
     (cond-> (merge {:seon.error/throwable-class (.getName (class throwable))
                     ::frames (stack-frames throwable enclosing)}
                    relation)
       (seq message) (assoc :seon.error/message message)
-      data (assoc :seon.error/data (hold (referenced project data))))))
-
-(defn- bounded-data
-  "`data` within the evidence bound, each larger value held by name
-  (`bounded-cost`)."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
-  [data]
-  (first (bounded-cost data)))
+      data (assoc :seon.error/data (referenced project data)))))
 
 (defn- first-party-links
   "`links` with each link's frames narrowed to its first-party ones (a link
@@ -493,32 +388,6 @@
               (cond-> (dissoc entry ::frames)
                 (seq frames) (assoc :seon.error/frames frames))))
           links)))
-
-(defn- walk-links
-  "The flat links of `throwable`'s whole cause chain (`chain`), each link's
-  ex-data passed through `hold`."
-  {:malli/schema [:=> [:cat :seon.error/throwable [:maybe :map] :seon.instrument/callable] :seon.error/chain]}
-  [throwable projection hold]
-  (let [project (identity-projector projection)]
-    ;; each pending head carries the throwable enclosing it: nil for the
-    ;; outermost, else the link that suppressed it
-    (loop [pending [[throwable nil nil]] seen #{} links []]
-      (if-let [[head relation suppressor] (first pending)]
-        (let [own (vec (take-while (complement seen) (cause-links head)))
-              start (count links)
-              links (into links
-                          (map-indexed
-                           (fn [i t]
-                             (link project hold t (if (zero? i) suppressor (own (dec i)))
-                                   (when relation
-                                     (if (zero? i) relation
-                                         {:seon.error/cause-of (+ start i -1)})))))
-                          own)
-              suppressed (for [[i ^Throwable t] (map-indexed vector own)
-                               s (.getSuppressed t)]
-                           [s {:seon.error/suppressed-by (+ start i)} t])]
-          (recur (into (subvec pending 1) suppressed) (into seen own) links))
-        (first-party-links links)))))
 
 (defn chain
   "The whole cause chain as FLAT links: first the primary chain, outermost to
@@ -536,29 +405,38 @@
   outermost link holds its whole first-party trace and every distinct frame
   appears once: the walk costs the chain's distinct frames, not links x
   depth. Which of them an agent sees is its error schema's render pair's
-  selection. Each link's data is within the
-  evidence bound (`:seon.error/data`): a larger value is held by its class,
-  identity and size, a name that is not retrievable; the recorder's
-  `recorded-chain` keeps it whole in the occurrence's data blob."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.error/throwable] :seon.error/bounded-chain]
-                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/bounded-chain]]}
-  ([throwable] (chain throwable (operation-projection)))
-  ([throwable projection] (walk-links throwable projection bounded-data)))
-
-(defn recorded-chain
-  "`chain` with each link's data whole (worlds and places still referenced):
-  the chain the recorder admits as a fault's evidence, whose storage bound
-  caps the inline text and whose occurrence `:seon.error/data-blob` keeps the
-  whole value once by content (`seon.error/evidence-stage`). Only the
-  recorder, which holds the connection and the root, reads this chain.
+  selection. Each link's data is the ex-data itself, whole (worlds and
+  places referenced): the value printer bounds what is shown, and the
+  recorder keeps it once by content in the occurrence's data blob.
 
   ## Costs
 
-  Unarmed, the walk only: no value is printed here."
-  {:malli/schema [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]}
-  [throwable projection]
-  (walk-links throwable projection identity))
+  The walk only: no value is printed or measured here."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.error/throwable] :seon.error/chain]
+                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]]}
+  ([throwable] (chain throwable (operation-projection)))
+  ([throwable projection]
+   (let [project (identity-projector projection)]
+     ;; each pending head carries the throwable enclosing it: nil for the
+     ;; outermost, else the link that suppressed it
+     (loop [pending [[throwable nil nil]] seen #{} links []]
+       (if-let [[head relation suppressor] (first pending)]
+         (let [own (vec (take-while (complement seen) (cause-links head)))
+               start (count links)
+               links (into links
+                           (map-indexed
+                            (fn [i t]
+                              (link project t (if (zero? i) suppressor (own (dec i)))
+                                    (when relation
+                                      (if (zero? i) relation
+                                          {:seon.error/cause-of (+ start i -1)})))))
+                           own)
+               suppressed (for [[i ^Throwable t] (map-indexed vector own)
+                                s (.getSuppressed t)]
+                            [s {:seon.error/suppressed-by (+ start i)} t])]
+           (recur (into (subvec pending 1) suppressed) (into seen own) links))
+         (first-party-links links))))))
 
 (defn without-links
   "`links` (a `chain`) without the links `drop?` selects, every remaining
@@ -801,7 +679,7 @@
   "The `:seon.error/base` refusal for a malformed `error` construction: it
   names the `alternative`, carries the Malli `problems` (humanized, or nil
   where none could be computed) and holds the `attempted` value in its
-  `:seon.error/chain` (a link's data, worlds referenced and bounded), so the
+  `:seon.error/chain` (a link's data, worlds referenced), so the
   malformed producer is loud and local. The blame rule's first authored frame
   is the caller of `error`."
   {:malli/schema [:=> [:cat :qualified-keyword :map :string :any] :seon.error/base]}

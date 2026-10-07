@@ -14,8 +14,6 @@
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.error :as error]
-            [seon.error.refusal :as error.refusal]
-            [seon.print.value :as print.value]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
@@ -124,7 +122,8 @@
     (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))))
     (is (= 'java.lang.ArithmeticException (symbol (str (:seon.error/exception-class reply)))))
     (is (= (:seon.sci.eval/stacktrace divide) (:seon.sci.eval/stacktrace reply)))
-    (is (not-any? #(str/includes? (print.value/bounded-text reply 100000) %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."])
+    (is (not-any? (fn [text] (some #(str/includes? text %) ["seon.sci.eval$" "sci/eval.clj" "sci.impl."]))
+                  (map str (filter #(or (string? %) (symbol? %)) (tree-seq coll? seq reply))))
         "no evaluator frame is shown")))
 
 (deftest a-contract-refusals-reply-is-the-failing-path-and-an-example
@@ -188,14 +187,14 @@
         (is (< elapsed-ms 100) "was 187 ms")))))
 
 (deftest an-error-holding-a-ten-thousand-deep-value-keeps-its-error
-  ;; deep-value lane 2026-10-07: the error's data walks (refusal/referenced,
-  ;; bounded-cost) recursed once per level and overflowed the stack, so the
-  ;; reply was a bare StackOverflowError. They fold over an explicit stack.
+  ;; deep-value lane 2026-10-07: the error's data walk (refusal/referenced)
+  ;; recursed once per level and overflowed the stack, so the reply was a
+  ;; bare StackOverflowError. It folds over an explicit stack.
   (let [ctx (eval/build-base-ctx (schema/handed-projection))
         deep (failure ctx "(let [deep (reduce (fn [v _] [v]) [] (range 10000))] (throw (ex-info \"deep\" {:v deep})))")
         reply (error/reply-value nil deep)]
     (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class deep)))
     (is (= "deep" (:seon.error/message (first (:seon.error/chain deep)))))
-    (is (error.refusal/within-evidence-bound-chain? (:seon.error/chain deep))
-        "the 20,000-character value is held within the evidence bound")
-    (is (string? (print.value/bounded-text reply 4000)))))
+    (is (vector? (get-in (:seon.error/chain deep) [0 :seon.error/data :v]))
+        "the deep value is kept whole as the link's data")
+    (is (= "deep" (:seon.error/message reply)) "the reply is built from the deep error")))
