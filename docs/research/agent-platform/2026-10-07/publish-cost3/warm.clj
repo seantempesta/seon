@@ -1,0 +1,15 @@
+(let [directory (seon.fs/source-directory)
+      path "src/my/background.clj"
+      file (clojure.java.io/file directory path)
+      _ (spit file (str (slurp file) "\n; publication allocation probe\n"))
+      bean (java.lang.management.ManagementFactory/getThreadMXBean)
+      mark (seon.profile/begin)
+      bytes (.getTotalThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean)
+      own (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean (.threadId (Thread/currentThread)))
+      began (System/nanoTime)
+      result (seon.cluster/refresh-source! (System/getProperty "seon.operator.root") [path] nil directory)]
+  {:ms (/ (- (System/nanoTime) began) 1e6)
+   :allocated (- (.getTotalThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean) bytes)
+   :thread-allocated (- (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean (.threadId (Thread/currentThread))) own)
+   :result (dissoc result :seon.profile/explanation)
+   :profile (let [p (seon.profile/explain mark 40)] {:calls (:seon.profile/calls p) :growths (mapv (juxt :seon.profile/sym :seon.profile/calls :seon.profile/total-ms) (:seon.profile/growths p))})})

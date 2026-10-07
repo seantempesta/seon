@@ -1,0 +1,29 @@
+#:seon.repl{:value {:first
+   {:ms 8.192792,
+    :allocated 2255968,
+    :files 2,
+    :findings [],
+    :calls [{:to callee, :name f, :arity 1, :fixed-arities #{1}}]},
+ :same-input
+   {:ms 2.339208,
+    :allocated 2229560,
+    :files 2,
+    :findings [],
+    :calls [{:to callee, :name f, :arity 1, :fixed-arities #{1}}]},
+ :cached-callee
+   {:ms 1.746375,
+    :allocated 2049536,
+    :files 1,
+    :findings [],
+    :calls [{:to callee, :name f, :arity 1, :fixed-arities #{1}}]},
+ :changed-callee
+   {:ms 1.978,
+    :allocated 2227992,
+    :files 2,
+    :findings
+      [{:type :invalid-arity,
+        :row 1,
+        :col 50,
+        :message "callee/f is called with 1 arg but expects 0"}],
+    :calls [{:to callee, :name f, :arity 1, :fixed-arities #{0}}]},
+ :namespace-cache-keys [f :filename :source]}, :result result/e7b7990769598, :ms 17}

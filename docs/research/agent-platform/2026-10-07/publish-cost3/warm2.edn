@@ -1,0 +1,51 @@
+#:seon.repl{:value {:ms 187.614834,
+ :allocated 180948168,
+ :thread-allocated 159456208,
+ :result
+   {:seon.source/digest
+      "c49178665ef85cff51b7af3f217d6a0288c2a518e07b42af1ba29f064fdcdc19",
+    :seon.source/built? true,
+    :seon.source/commit-id #uuid "6ac67336-9e14-5f93-a12a-268a07cb9b60",
+    :seon.source/branch :current-src,
+    :seon.source/expected-commit-id
+      #uuid "6ac6731a-bb98-5f3e-b0df-55565ba5e149",
+    :seon.source/reloaded-namespaces [],
+    :seon.source/arming-identities #{},
+    :seon.reconcile/adopt-identities
+      #{[:seon.fn.file/relative-path "src/my/background.clj"]}},
+ :profile
+   {:calls 22823,
+    :growths
+      [[seon.schema/call-with-projection 4 188]
+       [seon.cluster/refresh-source! 1 187]
+       [seon.cluster/full-source-refresh! 1 184]
+       [seon.cluster.source/publish! 1 109]
+       [seon.db/with-declarations 72 52]
+       [seon.db/q 16 33]
+       [seon.db/transact! 2 31]
+       [seon.db/transact-call 2 31]
+       [seon.db/vector-query-call 16 28]
+       [seon.fn/index! 1 27]
+       [seon.cluster/populate-source! 1 27]
+       [seon.schema/call-with-forms 2 27]
+       [seon.cluster.registry/branch! 1 18]
+       [seon.fn/analyzed-files 1 18]
+       [seon.fn/analyze-entities 1 18]
+       [seon.cluster/selected-analyzer-digest 1 17]
+       [seon.db/pull-call 18 17]
+       [seon.db/pull-many 18 17]
+       [seon.db/carried-projection 91 17]
+       [seon.fn/analyzed-artifacts 2 16]
+       [seon.db/content-projection 1 16]
+       [seon.db/decode-query-result 16 16]
+       [seon.cluster.source/index-tasks! 1 16]
+       [seon.cluster/analyzer-reach 1 16]
+       [seon.db/query-find-attributes 16 16]
+       [seon.fn.analyzer/analyze 1 12]
+       [seon.db/pull-logical 18 12]
+       [seon.schema/load-projection 1 12]
+       [seon.cache/lookup 984 9]
+       [seon.cache/claim 984 8]
+       [seon.cluster.registry/retire-branch! 1 8]
+       [seon.schema/projection-from-entities 1 8]
+       …8 (drop 32 (get-in result/e7dc3ffd19600 [:profile :growths]))]}}, :result result/e7dc3ffd19600, :ms 194}
