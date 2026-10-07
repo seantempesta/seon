@@ -108,8 +108,11 @@ owners; this is a target, not a callable installed `pass`:
    completion (§4) or re-wake model work; an unknown outcome retains ownership under §2.1.
 6. The entrant catch converts with `refusal/caught`, then explicitly records the error and attaches its receipt
    through the recorder (§6 of errors). `caught` alone does not record. Keep any held evaluated values in the reply;
-   deliver each request's terminal reply before closing its port. Forward the recorded error to the supervisor
-   without counting it again. A recording failure follows the recorder's stop path.
+   deliver each request's terminal reply before closing its port. The pass is the entrant: after recording it
+   answers and continues with its state, and never rethrows a recorded error. `seon.flow/var-process` already catches
+   every transform throw and records it through `proc-failed!` (`seon.fault/fault!`), so a rethrow would record the
+   same error twice [V]. The pass throws only when recording itself failed, so `var-process` runs the owner's stop
+   request.
 
 - `admission` reads the effective settings once: the cap `:seon.config.run/max-episode-runs` and `provider?`. A test or
   fixture supplies `:seon.ai/send!` as a request value; nothing is redefined.
@@ -204,6 +207,8 @@ disarmed. The completion permit, backstop and `record-interruption!` go.
 
 ## 3. Context: a system message and task-generated context
 
+Superseded: being redesigned (context-design notes).
+
 The provider request is two messages (`ai/request-body` already sends `:seon.ai/system` as a system message and
 `:seon.ai/prompt` as the user message [V]; nothing produces a system message today):
 
@@ -276,14 +281,21 @@ A task's success is its tests. The mechanism on the existing task API (`seon.tas
 
 - **Admission.** A task names its success tests before it is assigned or launched: `seon.task/assign!` refuses a task
   whose proofs (deftests naming it with `:seon/tasks`; `seon.task/task-edges` `:proofs`, the union of home and branch
-  edges) are empty (`:no-proofs`, already a refusal value [V]). Today `assign!` does not check this [V].
+  edges) are empty (`:no-proofs`, already a refusal value [V]). It also refuses a task whose proofs are all green on
+  the task home (`(true? (seon.test/verified? …))` for each): close it, or fix a test so it fails before the work
+  (`:already-proven`, a new value beside `:no-proofs` in `seon.task.edn`'s refusal enum). Today `assign!` checks
+  neither (its `cond` refuses only `:unknown-task` and `:unassigned`) [V].
+- **Launch.** A model agent is launched only on an assigned task with proofs. `my.task/own-task` (`:work`) stays for
+  outside agents' tracking and never completes by tests: it ends when the agent waits (`my.turn/wait`) or reaches the
+  call cap.
 - **Running the proofs.** After a committed pass whose program facts changed a definition the task's proofs reach
   (`seon.test` reach selection over the changed definitions), the loop runs those proofs on the agent's branch for its
   current program (`seon.test/run` `:named`, origin `:test`), the check `my.program/propose-merge!` runs today,
   extracted once into `seon.task/proven`. A pass that changed nothing they reach runs nothing.
 - **All green is completion.** Through the task writer, at the task home: a completion row naming the assignment, the
   tested branch and commit, the run id, the program and the proofs that passed; `seon.task/task-resolution` derives
-  closed (`:seon.task/closed-by :completion`) from it, so the ordinary task view shows the task done. In the same home
+  closed (`:seon.task/closed-by :seon.task/completion`, a new value P0 adds to the installed enum
+  `[:enum :seon.task/faults :seon.task/signal :seon.task/outcome]` in `seon.task.edn` [V]) from it, so the ordinary task view shows the task done. In the same home
   transaction one message to the assigner (root assigns; root's home is the task home). Disposition `:completed`. The
   assignment basis is validated at the writer: a completion against a superseded assignment or a changed task refuses.
   **Unresolved P5 seam:** the completion/message live at the task home, while disposition lives at the agent's
@@ -297,8 +309,8 @@ A task's success is its tests. The mechanism on the existing task API (`seon.tas
   opening wake. A new opening wake answers again whatever the disposition. `my.turn/complete` and its reply delivery
   retire at the cut. Merge proposals stay root's separate flow.
 - **Evidence from the live run**: task 18c37812b5bc's proof was green on HEAD while the task stayed open, and none of
-  the bucket-D tasks examined had a red proof; open tasks whose proofs are all green are a finding (task
-  `seon.task/open-tasks-with-all-proofs-green-are-not-flagged`).
+  the bucket-D tasks examined had a red proof; such a task is refused at assignment after P5, and already-open ones
+  are the finding of task `seon.task/open-tasks-with-all-proofs-green-are-not-flagged`.
 
 ## 5. Deleted, kept unused, converted
 
@@ -334,7 +346,7 @@ boots after each, and each is dual-reviewed. Then ONE dependency-complete cut, p
 branch of the live store before it lands. Order with errors: §8.9.
 
 - **P0 Schema accretion.** §1's agent, evaluation and call attributes (context-inert), `run` optional on the receipt and
-  `:seon.eval/entity`, the origin enum, the completion row, `:seon.agent.loop/unsendable-context-error`; published and
+  `:seon.eval/entity`, the origin enum, the completion row and `:seon.task/completion` in `:seon.task/closed-by`, `:seon.agent.loop/unsendable-context-error`; published and
   adopted on a live-store branch. References: `malli/src/malli/registry.cljc:17-96`;
   `datahike/src/datahike/db/transaction.cljc:1225-1234`.
 - **P1 Shared settlement owner.** First extract the schema-derived row, namespace and read-evidence calculations
@@ -362,7 +374,7 @@ branch of the live store before it lands. Order with errors: §8.9.
   overlay cannot lift it today, task `seon.config/no-provider-cannot-be-lifted-per-agent`; model `deepseek-flash` as
   configured on default, endpoint verified from config before the call): check the call, the evaluations,
   `answered-t`, `disposition`, and exact rebuilt text. References: `core.async/src/main/clojure/clojure/core/async/flow.clj:165-200,291-305`.
-- **P5 Task completion (additive feature).** Admission `:no-proofs` in `assign!`; `seon.task/proven` extracted from
+- **P5 Task completion (additive feature).** Admission `:no-proofs` and `:already-proven` in `assign!`; `seon.task/proven` extracted from
   `propose-merge!`; the completion row through the task writer and its `task-resolution` consumer; `my.task/complete!`
   as bail. The old loop's `my.turn/complete` still works. Tests: T7, T17, T18. References:
   `kaocha/src/kaocha/testable.clj:105-137`; `clojure/src/clj/clojure/test.clj:708-736`.
@@ -416,7 +428,8 @@ asserted on data, through injected worlds and a fixture `:seon.ai/send!` value (
 - **T15 context failure**: a context that throws records a call with its error and counts against the cap.
 - **T16 handles**: handles minted during evaluation equal the ids stored after concurrent outside and model settlements
   assign agent ordinals.
-- **T17 admission**: assigning a task with no proofs refuses `:no-proofs`.
+- **T17 admission**: assigning a task with no proofs refuses `:no-proofs`; one whose proofs are all green refuses
+  `:already-proven`.
 - **T18 bail**: `my.task/complete!` with a reason ends the assignment, records the reason, messages the assigner and
   records no completion.
 - **T19 model pass**: a model pass with no reply port settles and rewakes.
@@ -446,7 +459,8 @@ by the commit that changed the behavior [U: exact list].
    uses it until the cut, with its old duties kept. No second writer.
 4. Errors reach the agent as errors §6 rules: every occurrence on the evaluation or call where it happened, in the
    reply of the agent that caused it; the opening's one message goes to root. The temporal fault window goes.
-5. Completion is test-based: a task names its success tests before assignment; after a pass that changed code they
+5. Completion is test-based: a task names its success tests, failing, before assignment, and a model agent launches
+   only on an assigned task with proofs (an own `:work` task ends by wait or the cap); after a pass that changed code they
    reach, the loop runs them; all green completes the task, the only success. `my.task/complete!` is only the agent's
    way to give back a broken or impossible task, with a reason.
 6. Invisible preparatory slices, then ONE dependency-complete cut proven by publish+adopt on a live-store branch.

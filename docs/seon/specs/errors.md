@@ -49,7 +49,8 @@ the recorder's signature reads layer (`seon.error/signature`), the recorded-erro
 
 `:seon.error/world` holds references only. `world-reference` derives the evaluation id with the two-argument
 `(id/evaluation run-id ordinal)` today [V]; after the loop cut the run id is the pass id and the ordinal the position in
-the pass (agent-loop §1), so the formula is unchanged.
+the pass (agent-loop §1), so the formula is unchanged; the world keys it reads (`:seon.turn/id`,
+`:seon.batch/ordinal`) change in agent-loop P2.
 
 **Variations.** Each variant is the base plus its own members, in its owner's schema EDN. Seon's registry has no
 `:merge` (`(mr/schema r :merge)` nil, `:multi` present [V]), so a variant is an `:and`; a function that RETURNS errors
@@ -169,6 +170,10 @@ producer and world references without overwriting producer-supplied fields.
 - `producer` receives the chosen map, never nil. `producer`, `attributed` and `world-reference` stay as the blame rule;
   their inputs move to the new report fields in the cut (§5).
 - An error already recorded in this propagation keeps its receipt in its link's data and is not recounted.
+- Recording is the entrant's step, not `caught`'s: each entrant calls the recorder (§6) on the map when it is Seon's
+  own error and assocs the receipt as `:seon.error/recorded`; an agent's own mistake is delivered and not recorded.
+  The classification rule is not decided [U: owner question, before P4]. An entrant that recorded an error never
+  rethrows it to an enclosing boundary (`seon.flow/var-process` records every transform throw again).
 
 Entrants, each with exactly one catch [V for location]: the one REPL path (`seon.batch` stage guards, `seon.sci.kernel`);
 MCP (`seon.mcp`); Flow procs (`seon.flow`); boot (`seon.cluster.boot`); web (`seon.render.web` handler); the test runner
@@ -287,10 +292,14 @@ folded repeats.
   task has a current green run recorded on the task home after `latest-at`. Require a nonempty proof set,
   `(true? (seon.test/verified? ...))` for each proof, and the explicit time check: `verified?` returns a refusal
   map when evidence is unavailable, which is truthy and is not proof. Use `seon.task/task-edges` for the proofs.
-  A digest change alone never resolves a surviving producer.
+  A digest change alone never resolves a surviving producer. A task with no proofs keeps its error open: adding the
+  regression that names the task is part of fixing it.
 
 Both are judged on the task home's program: a fix on a branch resolves when root merges it and its tests run green
 there. `seon.task/task-resolution` reads this through `seon.error/resolution` (rewritten in place).
+
+Cost: the home is root's branch, so a branch agent's errored form costs one home transaction before its branch
+settlement (N recorded errors in a pass, N home writes); P4 measures that against the settlement's 100 ms bound.
 
 An unknown or refused recording write runs the owner's stop request and prints through `print-unrecorded!`, never
 retried. Goes: `prepare` and the admission stack, `commit-call`/`recording`/`occurred-since` (12 existence reads per
@@ -384,7 +393,7 @@ One behavior each, asserted on data:
 - **T9 chain and primary**: a two-link cause cycle terminates; distinct equal Throwables both remain; a plain exception with a suppressed typed cleanup error
   stays `:seon.error/exception` with the cleanup error in its chain.
 - **T10 resolution**: a new digest without a green run stays open; a green run after it resolves; deleting the producer
-  resolves; empty proofs and refused or stale evidence stay open.
+  resolves; empty proofs (a task with no proofs after a digest change) and refused or stale evidence stay open.
 - **T11 recurrence**: a failure after resolution opens one new message and links the same task.
 - **T12 registry failure**: an error built while schema lookup throws is a literal, with no recursive explain.
 

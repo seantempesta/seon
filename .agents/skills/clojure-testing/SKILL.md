@@ -136,18 +136,19 @@ appears in three test files and `with-cluster` in four; check that their respons
 merging them.
 
 **2.11 A docstring example is documentation, not a test.** The owner ruled `test/my/examples_test.clj`, which executed
-public `my.*` examples, deleted (lane task-tags removes it). A public `my.*` behavior at risk gets one focused test
+public `my.*` examples, deleted (removed in `819a8ed4b`). A public `my.*` behavior at risk gets one focused test
 through its entrance; an example that no longer runs is a docstring defect fixed where it is touched.
 
 **2.12 A test that proves a task names it.** `(deftest ^{:seon/tasks #{…}} a-refused-settlement-is-the-forms-refusal
-…)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`), the task cannot be assigned
-without them under the target admission rule, and after a pass that changes code they reach, all green completes
-the task (TARGET: agent-loop spec §4; installed `seon.task/assign!` does not enforce proof admission). Metadata
+…)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`). TARGET (agent-loop §4,
+P5; owner ruling): the task cannot be assigned without them, nor when they are all green already, and after a pass
+that changes code they reach, all green completes the task. Installed `seon.task/assign!` checks neither. Metadata
 placed after the test name is refused (`:metadata-after-test-name`). Today the set holds the task's derived handle
 (`seon.task/task-handle` of namespace, name and kind; never hand-type it); TARGET (lane task-tags): it holds the
 `ns/task-name` symbol. A new behavior or bug regression fails before the work and passes after it. A behavior-preserving refactor names
-existing green tests (§1); green alone cannot establish that the refactor has been done. A blanket refusal of
-assignments with green proofs is not an implemented or settled rule.
+existing green tests (§1); green alone cannot establish that the refactor has been done, so under the target
+admission rule a refactor task needs one proof that fails before it (how such tasks name that proof is an open owner
+question).
 
 ## 3. Delete or convert
 
@@ -188,7 +189,9 @@ function.
 ## 4. Three minimal Seon tests
 
 Each is source-verified against `test/seon/test_support.clj` and the subject's source (2026-10-07); none was run for
-this skill. Each runs as a member of `seon.test/run`, which supplies the execution handle `with-database` needs.
+this skill. Examples 2 and 3 show shape only: `seon.reset-edges-test/analysis-is-a-required-positive-fact` and
+`seon.sci.admit-test/an-absent-storage-bound-refuses-and-names-the-key-it-wanted` already prove those behaviors, so
+do not add them. Each runs as a member of `seon.test/run`, which supplies the execution handle `with-database` needs.
 
 **Example 1: a pure value table (no world).** `seon.id/symbol-in` builds a runnable qualified handle from a
 namespace, leading letter and id. This example avoids the printed-data hash that the identity owner is replacing.
@@ -266,7 +269,7 @@ symbol name. Re-check a symbol before relying on it.
   :seon.test/policy :named|:incremental|:platform|:all}` plus optional `:seon.test/identities`, `:seon.test/namespaces`,
   `:seon.test/changed`, `:seon.test/include-long?` and `:seon.test/check-time-limit-ms`. It runs each member on its own
   branch, records the result, and returns `:seon.test/passed?`. Agents call `(my.test/run)` and
-  `(my.test/check {:seon.test/changed [...]})`; from an agent's SCI context `clojure.test/run-test-var` cannot see
+  `(my.test/check {:seon.test/changed ['ns/test-name]})` (a test named as changed is itself a member); from an agent's SCI context `clojure.test/run-test-var` cannot see
   test Vars (live run 1), so a named test runs through `my.test/check`.
 - **Worlds.** `support/with-database` runs its body on a fresh branch of the executing member's commit and releases
   it afterwards; outside a `seon.test/run` member it refuses by name (`execution-handle`).

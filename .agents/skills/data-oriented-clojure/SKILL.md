@@ -298,8 +298,7 @@ cause attached, or returns those fields plus `:exception` when the caller asked 
 
 SEON: `seon.test.runner/throwable-signature` walks `ex-cause` in its own `loop` and never ends on a cause cycle that
 carries no signature. Rewrite (BEHAVIOR CHANGE: a cycle now terminates; the same result on every acyclic chain):
-`(some (comp :seon.error/signature ex-data) (refusal/cause-links t))`. Check the load order (`seon.test.runner` must be
-able to require `seon.error.refusal`) before writing it.
+`(some (comp :seon.error/signature ex-data) (refusal/cause-links t))`.
 
 **3.4 Law: only functions that return errors list error alternatives** (TARGET form: one `:multi` on
 `:seon.error/type`). A function that throws declares only its success value. A returning entrant such as
@@ -556,7 +555,7 @@ GOOD: `hyperlith/src/hyperlith/core.clj:24`: `;; Make futures use virtual thread
 **10.1 Review prompt: name by role, short and clear.** The namespace already names the domain. A pure function is
 usually the noun of what it returns, an effect ends in `!`, a predicate in `?`. Short locals (`db`, `conn`, `tx`, `m`)
 are good until two values of one kind meet: then name the roles (`db-before`, `db-after`). Long persistent keys
-cost on every use: `:seon.schema.admission/polymorphic-boundary` (45 characters, 169 uses).
+cost on every use: `:seon.schema.admission/polymorphic-boundary`.
 
 ## 11. Macros
 

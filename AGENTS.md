@@ -280,14 +280,15 @@ root.
   references, never copies: a database is its commit id or basis, a transaction its id, a context its agent and
   branch, a large value one blob digest, a place (atom, delay, promise) its class and identity, never its contents.
   Missing evidence is a typed unknown, never nil, a default or message-only success.
-- **Deliver every error to whoever can act on it.** There is no separate fault concept: Seon's own failures are
-  errors. Every occurrence returns as data in the reply of the agent whose evaluation or call it happened in (the MCP
-  reply for outside agents, the next context for Seon agents, both reading the same saved observation), with a result
-  handle to dig into. Seon's own errors are also recorded once per signature at the task home, with a count, a task
-  and one notification; repeats only count. A recorded error resolves when its producer is deleted, or when the
-  producer changed and its task's tests ran green since. Recording without delivery, a log line or a panic alone is a
-  defect. A graph stops only when its own
-  execution cannot continue or storage fails. Diagnose at the REPL; no fallback store or retry loop.
+- **Deliver every error to whoever can act on it.** Seon's own failures are errors (the errors cut retires the
+  separate fault concept). Every occurrence returns as data in the reply of the agent whose evaluation or call it
+  happened in (the MCP reply for outside agents, the next context for Seon agents, both reading the same saved
+  observation), with a result handle to dig into; an agent's own mistake is only delivered. Target (the errors cut;
+  today `seon.fault` records faults): the entrant records Seon's own errors once per signature at the task home, with
+  a count, a task and one notification; repeats only count. A recorded error resolves when its producer is deleted, or
+  when the producer changed and its task's proofs (at least one) ran green since. Recording without delivery, a log
+  line or a panic alone is a defect. A graph stops only when its own execution cannot continue or storage fails.
+  Diagnose at the REPL; no fallback store or retry loop.
 - **Let Flow own execution.** Each agent has a graph; procs declare `:io` or `:compute`, transforms reference Vars,
   topology changes rebuild graphs. No central scheduler or dispatcher. Listen before deriving work; channels carry
   only rederivable or replaceable data and buffers express that loss policy. Durable recovery payloads belong in
@@ -305,12 +306,13 @@ root.
   write-back, tasks, config, schema adoption, boot and publication records, recorded errors, branch lifecycle,
   deliveries) is likewise durable before its caller is answered.
 - **Derive work and completion.** Work is a listened wake the agent has not answered; a message subject is literal,
-  `:seon.message/from` marks inside wakes; never replay writes or effects. Context composition is under owner redesign
-  (`docs/research/agent-platform/2026-10-07/context-design/`); the rejected system-message plus task-producer
-  design is not an implementation authority. Keep rendering through the existing owners. A task names
-  its success tests before it is assigned. After a pass that changed code those tests reach, they run; all green
-  completes the task and is the only success. `my.task/complete!` is the agent's explicit way to give back a broken or
-  impossible task, with its reason; the task returns to its assigner, who is notified. Target (the agent-loop cut): the
+  `:seon.message/from` marks inside wakes; never replay writes or effects. Context is rendered live from the agent's
+  task and its references, never stored. A task names its success tests (deftests carrying it in `:seon/tasks`)
+  before it is assigned or launched; a test already green before the work does not prove it. Target (agent-loop P5
+  and cut): `seon.task/assign!` refuses a task with no proofs or whose proofs are all green; after a pass that
+  changed code its proofs reach, they run, and all green completes the task, the only success; `my.task/complete!`,
+  with a required reason, gives a broken or impossible task back to its assigner, who is notified; a model agent
+  launches only on an assigned task with proofs, and its own `:work` task ends by `my.turn/wait` or the call cap; the
   answered basis is `:seon.agent/answered-t`, and system turns and context capture are gone. Archive agents; preserve
   task and agent identity on loud, resumable budget exhaustion.
 
