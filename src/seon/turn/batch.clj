@@ -575,9 +575,8 @@
         (when (seq changed)
           (seon.error.refusal/diagnostic
            (java.util.Date.) :seon.turn.batch/program 'seon.turn.batch/program-facts
-           {:seon.error/message (str "Changed by another writer since this run read it: "
-                                     (str/join ", " (map (comp pr-str second) changed))
-                                     ". Evaluate your definition again against the current one.")
+           {:seon.error/message (str "Definitions in :seon.error/offending changed by another writer since this run read them."
+                                     " Evaluate your definition again against the current one.")
             :seon.error/offending changed
             :seon.error/member :seon.program/definition-digest
             :seon.error/expected :seon.program/definition-digest}))))))
