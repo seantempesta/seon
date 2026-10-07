@@ -30,6 +30,7 @@
             [clojure.walk :as walk]
             [edamame.core :as edamame]
             [malli.core :as m]
+            [seon.cache :as cache]
             [seon.error.refusal :as error.refusal]
             [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
@@ -103,65 +104,76 @@
   "The context of a text with no `ns` form: nothing aliased or referred."
   {:requires #{} :aliases {} :refers {} :imports {}})
 
+(defn- namespace-name-in
+  "The name of the `ns` form among read `forms`, or `user` when there is none."
+  {:malli/schema [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] :symbol]}
+  [forms]
+  (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) forms) 'user))
+
 (defn- through-ns-form
-  "The text up to the end of its `ns` form, or nil when it has none.
+  "The text up to the end of the `ns` form among its read `forms`, or nil.
 
   A prefix keeps every row and column of the form, and the namespace context
   reads only the form's clauses, so analysing it answers as the whole file
-  does (all 442 checkout files, 2026-09-24) at a fifteenth of the cost."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [text]
-  (when-some [ns-form (first (filter #(and (seq? %) (= 'ns (first %)))
-                                     (read-source text)))]
+  does."
+  {:malli/schema [:=> [:cat :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:maybe :string]]}
+  [text forms]
+  (when-some [ns-form (first (filter #(and (seq? %) (= 'ns (first %))) forms))]
     (let [{:keys [end-row end-col]} (meta ns-form)
-          lines (str/split text #"\n" -1)]
-      (subs text 0 (+ (reduce + (map #(inc (count %)) (take (dec end-row) lines)))
-                      (dec end-col))))))
+          line-start (loop [offset 0 row 1]
+                       (if (= row end-row) offset (recur (inc (.indexOf ^String text "\n" (int offset))) (inc row))))]
+      (subs text 0 (+ line-start (dec end-col))))))
 
 (defn- namespace-contexts
-  "The indexer's own alias/refer context for each text's `ns` form, by path.
+  "The indexer's own alias/refer context for each read text's `ns` form, by path.
 
-  One `seon.fn.analyzer/analyze` over each text through its `ns` form, keyed
-  by canonical path (the analysis mirror resolves only canonical paths), then
+  `texts` maps each path to its text and read forms. One
+  `seon.fn.analyzer/analyze` over each text through its `ns` form, keyed by
+  canonical path (the analysis mirror resolves only canonical paths), then
   `seon.fn/namespace-context` on each namespace definition: symbol
   qualification is the indexer's rule, not a copy of it. The analysis writes a
   private clj-kondo cache, so a reconstructed text never answers for the
-  checkout's namespace of the same name in the shared cache."
-  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :map]]}
+  checkout's namespace of the same name in the shared cache. No `ns` form
+  analyses nothing."
+  {:malli/schema [:=> [:cat [:map-of :string [:map [::text :string] [::forms [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]]]] [:map-of :string :map]]}
   [texts]
   (let [paths (into {} (map (fn [path] [(.getCanonicalPath (io/file path)) path]))
                     (keys texts))
-        cache (.toFile (java.nio.file.Files/createTempDirectory
-                        "contracts-compile-kondo"
-                        (make-array java.nio.file.attribute.FileAttribute 0)))]
-    (try
-      (into {}
-            (map (fn [entry]
-                   [(get paths (:seon.fn.analyzer/filename entry))
-                    (@#'seon.fn/namespace-context entry)]))
-            (:seon.fn.analyzer/namespace-definitions
-             (analyzer/analyze
-              {:seon.fn.analyzer/sources
-               (into {} (keep (fn [[path text]]
-                                (when-some [prefix (through-ns-form text)]
-                                  [(.getCanonicalPath (io/file path)) prefix])))
-                     texts)
-               :seon.fn.analyzer/cache-root (.getPath cache)})))
-      (finally (@#'seon.fn.analyzer/delete-tree! cache)))))
+        prefixes (into {} (keep (fn [[path {::keys [text forms]}]]
+                                  (when-some [prefix (through-ns-form text forms)]
+                                    [(.getCanonicalPath (io/file path)) prefix])))
+                       texts)]
+    (if (empty? prefixes)
+      {}
+      (let [cache (.toFile (java.nio.file.Files/createTempDirectory
+                            "contracts-compile-kondo"
+                            (make-array java.nio.file.attribute.FileAttribute 0)))]
+        (try
+          (into {}
+                (map (fn [entry]
+                       [(get paths (:seon.fn.analyzer/filename entry))
+                        (@#'seon.fn/namespace-context entry)]))
+                (:seon.fn.analyzer/namespace-definitions
+                 (analyzer/analyze
+                  {:seon.fn.analyzer/sources prefixes
+                   :seon.fn.analyzer/cache-root (.getPath cache)})))
+          (finally (@#'seon.fn.analyzer/delete-tree! cache)))))))
+
+(defn- read-texts
+  "Each text by path with its top-level forms, each text read once."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string [:map [::text :string] [::forms [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]]]]}
+  [texts]
+  (update-vals texts (fn [text] {::text text ::forms (read-source text)})))
 
 (defn declared-contracts
-  "Every `:malli/schema` declared in one source text, as the indexer stores it.
+  "Every `:malli/schema` declared in one source's read `forms`, as the indexer stores it.
 
   Each entry names its file, row, column and definition; `::stored` is the
   contract after the indexer's qualification, canonicalization and EDN round
   trip, or `::read-refusal` when that round trip itself refuses."
-  {:malli/schema [:=> [:cat :string :string :map] [:vector :map]]}
-  [path text context]
-  (let [forms (read-source text)
-        namespace-name (or (some #(when (and (seq? %) (= 'ns (first %)))
-                                    (second %))
-                                 forms)
-                           'user)]
+  {:malli/schema [:=> [:cat :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] :map] [:vector :map]]}
+  [path forms context]
+  (let [namespace-name (namespace-name-in forms)]
     (into []
           (keep (fn [form]
                   (when-some [authored (declared-schema form)]
@@ -221,17 +233,15 @@
        ":seon.schema.admission/polymorphic-boundary :seon.schema.admission/reason \"...\"}]."))
 
 (defn incomplete-changes
-  "Findings for every `defn`/`defn-` in `text` that `baseline` lacks or
+  "Findings for every `defn`/`defn-` in `forms` that `baseline` lacks or
   defines differently and whose contract is missing or uses `:any` as a
-  stand-in. Forms compare as read data, so moving or reformatting a function
-  changes nothing; a baseline of \"\" is a new file."
-  {:malli/schema [:=> [:cat :string :string :string] [:vector :map]]}
-  [path text baseline]
-  (let [forms (read-source text)
-        namespace-name (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) forms)
-                           'user)
-        before (into {} (map (juxt second identity))
-                     (definition-forms (read-source baseline)))]
+  stand-in, both given as read top-level forms. Forms compare as read data,
+  so moving or reformatting a function changes nothing; an empty baseline is
+  a new file."
+  {:malli/schema [:=> [:cat :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:vector :map]]}
+  [path forms baseline]
+  (let [namespace-name (namespace-name-in forms)
+        before (into {} (map (juxt second identity)) (definition-forms baseline))]
     (into []
           (keep (fn [form]
                   (when (and (function-heads (first form))
@@ -252,6 +262,12 @@
                         (refusal (str "with :any standing in for a data shape: "
                                       (pr-str authored) ".")))))))
           (definition-forms forms))))
+
+(defn- read-file
+  "The UTF-8 text of the file at `path`, read into one exactly sized string."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [path]
+  (java.nio.file.Files/readString (.toPath (io/file path))))
 
 (defn source-files
   "Every JVM source file under `roots`, relative to the working directory."
@@ -414,6 +430,23 @@
               :when (and (= :as k) (symbol? v))]
           [v (first spec)])))
 
+(defn- form-transaction-functions
+  "Every function the read `forms` of one text name as the target of
+  `[:db.fn/call f ...]`, qualified through the text's `ns` aliases."
+  {:malli/schema [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:set :qualified-symbol]]}
+  [forms]
+  (let [namespace-name (namespace-name-in forms)
+        aliases (require-aliases forms)]
+    (into #{}
+          (for [node (tree-seq coll? seq forms)
+                :when (and (vector? node) (= :db.fn/call (first node)))
+                :let [target (second node)
+                      target (if (and (seq? target) (= 'var (first target))) (second target) target)]
+                :when (symbol? target)]
+            (if-let [target-ns (namespace target)]
+              (symbol (str (get aliases (symbol target-ns) target-ns)) (name target))
+              (symbol (str namespace-name) (name target)))))))
+
 (defn transaction-functions
   "Every function a text names as the target of `[:db.fn/call f ...]`,
   qualified. Datahike's writer calls it with the transaction database
@@ -425,18 +458,7 @@
   (into #{}
         (mapcat (fn [text]
                   (when (str/includes? text ":db.fn/call")
-                    (let [forms (read-source text)
-                          namespace-name (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) forms)
-                                             'user)
-                          aliases (require-aliases forms)]
-                      (for [node (tree-seq coll? seq forms)
-                            :when (and (vector? node) (= :db.fn/call (first node)))
-                            :let [target (second node)
-                                  target (if (and (seq? target) (= 'var (first target))) (second target) target)]
-                            :when (symbol? target)]
-                        (if-let [target-ns (namespace target)]
-                          (symbol (str (get aliases (symbol target-ns) target-ns)) (name target))
-                          (symbol (str namespace-name) (name target))))))))
+                    (form-transaction-functions (read-source text)))))
         (vals texts)))
 
 (defn- parameters
@@ -475,20 +497,19 @@
   runner it is handed to) or made by a function whose own failure never
   leaves the file.
   A declared function or a `:db.fn/call` target of the text does not pass
-  its throws on. With `selected`, only those definitions are answered."
+  its throws on. `source` is the text's read top-level forms, `forms` the
+  schema population. With `selected`, only those definitions are answered."
   {:malli/schema [:function
-                  [:=> [:cat :string :map] [:vector :map]]
-                  [:=> [:cat :string :map [:maybe [:set :symbol]]] [:vector :map]]]}
-  ([text forms] (containment text forms nil))
-  ([text forms selected]
-  (let [source (read-source text)
-        namespace-name (or (some #(when (and (seq? %) (= 'ns (first %))) (second %)) source)
-                           'user)
+                  [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] :map] [:vector :map]]
+                  [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] :map [:maybe [:set :symbol]]] [:vector :map]]]}
+  ([source forms] (containment source forms nil))
+  ([source forms selected]
+  (let [namespace-name (namespace-name-in source)
         definitions (filterv #(function-heads (first %)) (definition-forms source))
         names (into #{} (map second) definitions)
         converting (runners definitions)
         local-transactions (into #{} (map #(symbol (name %)))
-                                 (transaction-functions {"" text}))
+                                 (form-transaction-functions source))
         facts (into {}
                     (map (fn [form]
                            (let [sites (form-sites form throw-site? converting)
@@ -552,21 +573,21 @@
   (or (str/starts-with? path "test/") (str/includes? path "/test/")))
 
 (defn uncontained-changes
-  "Findings for every `defn`/`defn-` in the source `text` that `baseline`
-  lacks or defines differently and that holds a throw reaching its caller
-  with no error alternative in its output union: the crash the owner's
+  "Findings for every `defn`/`defn-` in the read `source` forms that the read
+  `baseline` forms lack or define differently and that holds a throw reaching
+  its caller with no error alternative in its output union (`forms` is the
+  schema population): the crash the owner's
   2026-09-28 law forbids. A throw its own function converts, a resurfaced
   caught cause and a private function every same-file caller converts are
   internal control flow. Test sources are the test runner's to convert.
   A transaction function is judged by [[check]], which knows every text."
-  {:malli/schema [:=> [:cat :string :string :string :map] [:vector :map]]}
-  [path text baseline forms]
+  {:malli/schema [:=> [:cat :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] :map] [:vector :map]]}
+  [path source baseline forms]
   (if (test-source? path)
     []
-    (let [before (into {} (map (juxt second identity))
-                       (definition-forms (read-source baseline)))
+    (let [before (into {} (map (juxt second identity)) (definition-forms baseline))
           changed (into #{} (comp (remove #(same-definition? % (get before (second %)))) (map second))
-                        (definition-forms (read-source text)))]
+                        (definition-forms source))]
       (into []
             (keep (fn [{::keys [row escaping declared? caller-converted?] function-symbol ::symbol}]
                     (when (and (changed (symbol (name function-symbol)))
@@ -582,13 +603,13 @@
                                      "output union, e.g. [:=> [:cat ...] [:or :my.ns/result "
                                      ":my.ns/refused-error]]; or convert the throw in this "
                                      "function's own try/catch.")})))
-            (when (seq changed) (containment text forms changed))))))
+            (when (seq changed) (containment source forms changed))))))
 
 (defn- checkout-sources
   "Every JVM source text under `root`'s src/, by path."
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [root]
-  (into {} (map (fn [path] [path (slurp path)]))
+  (into {} (map (fn [path] [path (read-file path)]))
         (source-files [(.getPath (io/file root "src"))])))
 
 ;;; ---------------------------------------------------------------------------
@@ -604,6 +625,28 @@
        (sort-by #(.getName ^java.io.File %))
        (mapv #(.getPath ^java.io.File %))))
 
+(defn- resources-population
+  "The packaged schema population the read schema `resources` compose."
+  {:malli/schema [:=> [:cat [:vector [:map [::schema.edn/forms :map]]]] :map]}
+  [resources]
+  (schema.edn/derive-config-forms (apply merge (map ::schema.edn/forms resources))))
+
+(defn- schema-resources
+  "The checkout's schema resource files at `root` (`::resources`) and the
+  population they compose (`::population`), each file read once and parsed
+  once per content: a `seon.cache` kind keyed by every file's path and text."
+  {:malli/schema [:=> [:cat :string] [:map [::resources [:vector [:map ::schema.edn/file ::schema.edn/resource [::schema.edn/forms :map]]]] [::population :map]]]}
+  [root]
+  (let [texts (mapv (fn [path] [path (read-file path)]) (schema-files root))]
+    (cache/lookup ::schema-resources texts
+                  #(* 50000 (count (::resources %)))
+                  #(let [resources (mapv (fn [[path text]]
+                                           {::schema.edn/file path
+                                            ::schema.edn/resource (str "seon/schemas/" (.getName (io/file path)))
+                                            ::schema.edn/forms (edn/read-string text)})
+                                         texts)]
+                     {::resources resources ::population (resources-population resources)}))))
+
 (defn checkout-packaged-forms
   "The packaged schema population of the checkout at `root`, read from disk.
 
@@ -614,33 +657,31 @@
   admission's refusals, not this check's."
   {:malli/schema [:=> [:cat :string] :map]}
   [root]
-  (->> (schema-files root)
-       (map #(edn/read-string (slurp %)))
-       (apply merge)
-       (schema.edn/derive-config-forms)))
+  (::population (schema-resources root)))
 
-(defn placement-findings
-  "A finding for a schema key the checkout at `root` declares outside
+(defn- resources-placement
+  "A finding for a schema key the read schema `resources` declare outside
   `<its namespace>.edn`: the placement schema admission refuses when a JVM
   loads the resources (`seon.schema.edn/validate-resource-placement!`, which
   names the first such key). Empty when every key is in its own file."
+  {:malli/schema [:=> [:cat [:vector [:map ::schema.edn/file ::schema.edn/resource [::schema.edn/forms :map]]]] [:vector :map]]}
+  [resources]
+  (try
+    (#'schema.edn/validate-resource-placement! resources)
+    []
+    ;; Declared case: the placement refusal, reported as the gate's finding.
+    (catch clojure.lang.ExceptionInfo refusal
+      (if-let [attribute (::schema.edn/misplaced-attribute (ex-data refusal))]
+        [{:filename (::schema.edn/file (ex-data refusal)) :row 1 :col 1 :level :error
+          :type :schema-placement :message (ex-message refusal)
+          ::misplaced-attribute attribute}]
+        (throw refusal)))))
+
+(defn placement-findings
+  "The schema placement findings of the checkout at `root`: see `resources-placement`."
   {:malli/schema [:=> [:cat :string] [:vector :map]]}
   [root]
-  (let [loaded (mapv (fn [path]
-                       {::schema.edn/file path
-                        ::schema.edn/resource (str "seon/schemas/" (.getName (io/file path)))
-                        ::schema.edn/forms (edn/read-string (slurp path))})
-                     (schema-files root))]
-    (try
-      (#'schema.edn/validate-resource-placement! loaded)
-      []
-      ;; Declared case: the placement refusal, reported as the gate's finding.
-      (catch clojure.lang.ExceptionInfo refusal
-        (if-let [attribute (::schema.edn/misplaced-attribute (ex-data refusal))]
-          [{:filename (::schema.edn/file (ex-data refusal)) :row 1 :col 1 :level :error
-            :type :schema-placement :message (ex-message refusal)
-            ::misplaced-attribute attribute}]
-          (throw refusal))))))
+  (resources-placement (::resources (schema-resources root))))
 
 (defn- namespace-source
   "The checkout source text that declares namespace `namespace-name`, or nil."
@@ -649,7 +690,7 @@
   (let [relative (-> (str namespace-name) (.replace "-" "_") (.replace "." "/"))]
     (some (fn [[directory extension]]
             (let [file (io/file root directory (str relative extension))]
-              (when (.isFile file) (slurp file))))
+              (when (.isFile file) (read-file (.getPath file)))))
           (for [directory ["src" "test"] extension [".clj" ".cljc"]]
             [directory extension]))))
 
@@ -687,16 +728,22 @@
           {::bound {} ::unresolved #{}}
           (sort (into #{} (mapcat @#'schema/predicate-symbols-in) definitions))))
 
-(defn packaged-projection
-  "The projection publication builds from the checkout's schema resources."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [root]
-  (let [forms (checkout-packaged-forms root)
-        {::keys [bound unresolved]} (predicate-bindings root (vals forms))]
+(defn- population-projection
+  "The projection publication builds from the packaged schema population `forms`
+  of the checkout at `root`."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [root forms]
+  (let [{::keys [bound unresolved]} (predicate-bindings root (vals forms))]
     (when (seq unresolved)
       (throw (ex-info "The checkout's schema resources name predicates nothing defines."
                       {::unresolved unresolved})))
     (schema/build-projection forms {} {:seon.schema/predicate-functions bound})))
+
+(defn packaged-projection
+  "The projection publication builds from the checkout's schema resources."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [root]
+  (population-projection root (checkout-packaged-forms root)))
 
 (defn contract-refusal
   "The refusal publication would raise compiling one stored contract, or nil.
@@ -755,7 +802,7 @@
   (let [forms (checkout-packaged-forms root)
         texts (checkout-sources root)
         transactional (transaction-functions texts)
-        rows (into [] (mapcat (fn [[path text]] (map #(assoc % ::path path) (containment text forms))))
+        rows (into [] (mapcat (fn [[path text]] (map #(assoc % ::path path) (containment (read-source text) forms))))
                    texts)
         class-of (fn [row]
                    (cond (empty? (::escaping row)) ::contained-in-function
@@ -779,15 +826,15 @@
                                                               #(mapv ::symbol %)))}))
 
 (defn- uncontained
-  "The uncontained-throw findings of the edited `texts` against their
-  `baselines`, less transaction functions: the checkout's sources are read
+  "The uncontained-throw findings of the edited read `texts` against their
+  read `baselines`, less transaction functions: the checkout's sources are read
   for `:db.fn/call` targets only when a finding needs the answer."
-  {:malli/schema [:=> [:cat :string [:map-of :string :string] [:maybe [:map-of :string :string]] :map]
+  {:malli/schema [:=> [:cat :string [:map-of :string [:map [::text :string] [::forms [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]]] [:maybe [:map-of :string [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]] :map]
                   [:vector :map]]}
   [root texts baselines projection]
-  (let [findings (into [] (mapcat (fn [[path text]]
+  (let [findings (into [] (mapcat (fn [[path {::keys [forms]}]]
                                     (when-some [[_ baseline] (find baselines path)]
-                                      (uncontained-changes path text baseline
+                                      (uncontained-changes path forms baseline
                                                            (:seon.schema.projection/forms projection)))))
                        (sort-by key texts))]
     (if (empty? findings)
@@ -795,7 +842,7 @@
       (let [names (into #{} (map #(name (::symbol %))) findings)
             ;; only a text naming a flagged function can make it transactional
             candidates (into {} (filter (fn [[_ text]] (some #(str/includes? text %) names)))
-                             (merge (checkout-sources root) texts))
+                             (merge (checkout-sources root) (update-vals texts ::text)))
             transactional (transaction-functions candidates)]
         (filterv #(not (transactional (::symbol %))) findings)))))
 
@@ -815,23 +862,23 @@
                            [::baselines {:optional true} [:map-of :string :string]]]]
                   [:vector :map]]}
   [{::keys [root paths sources projection candidate baselines] :or {root "."}}]
-  (let [projection (or projection
-                       (when (and candidate
-                                  (= (checkout-packaged-forms root)
-                                     (:seon.schema.projection/forms candidate)))
-                         candidate)
-                       (packaged-projection root))
-        texts (merge (into {} (map (fn [path] [path (slurp path)])) paths)
-                     sources)
+  (let [{::keys [resources population]} (schema-resources root)
+        projection (or projection
+                       (if (and candidate (= population (:seon.schema.projection/forms candidate)))
+                         candidate
+                         (population-projection root population)))
+        texts (read-texts (merge (into {} (map (fn [path] [path (read-file path)])) paths)
+                                 sources))
+        baselines (some-> baselines (update-vals read-source))
         contexts (namespace-contexts texts)]
-    (into (into (into (placement-findings root)
-                      (mapcat (fn [[path text]]
+    (into (into (into (resources-placement resources)
+                      (mapcat (fn [[path {::keys [forms]}]]
                                 (when-some [[_ baseline] (find baselines path)]
-                                  (incomplete-changes path text baseline))))
+                                  (incomplete-changes path forms baseline))))
                       (sort-by key texts))
                 (uncontained root texts baselines projection))
-          (comp (mapcat (fn [[path text]]
-                          (declared-contracts path text
+          (comp (mapcat (fn [[path {::keys [forms]}]]
+                          (declared-contracts path forms
                                               (get contexts path no-namespace-context))))
                 (keep #(contract-refusal root projection %))
                 (map finding))
@@ -842,12 +889,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest every-declared-contract-compiles-against-the-packaged-projection
-  (let [texts (into {} (map (fn [path] [path (slurp path)]))
-                    (source-files ["src" "test"]))
+  (let [texts (read-texts (into {} (map (fn [path] [path (read-file path)]))
+                               (source-files ["src" "test"])))
         contexts (namespace-contexts texts)
         contracts (into []
-                        (mapcat (fn [[path text]]
-                                  (declared-contracts path text
+                        (mapcat (fn [[path {::keys [forms]}]]
+                                  (declared-contracts path forms
                                                       (get contexts path no-namespace-context))))
                         texts)
         projection (packaged-projection ".")
@@ -875,6 +922,12 @@
       (is (= [] (placement-findings root)) "the same key in its own file passes")
       (finally
         (doseq [f (reverse (file-seq (io/file root)))] (io/delete-file f true))))))
+
+(deftest a-check-of-no-sources-has-no-contract-findings
+  ;; `seon.contracts-compile-test/empty-input-calls-analyzer-with-a-refused-empty-source-map`:
+  ;; no selected text, or a text without an `ns` form, analyses nothing.
+  (is (= [] (check {::paths []})))
+  (is (= [] (check {::sources {"src/seon/probe.clj" "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)"}}))))
 
 (def ^:private historical-sources
   "The three from-zero breaks, reconstructed in their namespaces' shape."

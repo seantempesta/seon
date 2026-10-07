@@ -199,7 +199,15 @@
 ;; (`ifn?`, `string?`) is that Malli schema and stays itself; qualifying it to
 ;; `clojure.core/ifn?` names no schema and refuses the whole projection.
 ;; Inside `[:fn …]` a symbol is a predicate and resolves as source does.
-(defn- qualify-schema-symbols [form {:keys [aliases refers]}]
+(def ^:private malli-schema-symbols
+  "The simple symbols Malli's default registry names, derived once."
+  (into #{} (filter symbol?) (keys (m/default-schemas))))
+
+(defn- qualify-schema-symbols
+  "The authored contract `form` with its symbols qualified through the namespace context, if any."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil 0 :k [] {}]}] [:maybe [:map [:aliases [:map-of :symbol :symbol]] [:refers [:map-of :symbol :qualified-symbol]]]]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil 0 :k [] {}]}]]}
+  [form {:keys [aliases refers]}]
   (let [qualify
         (fn [value]
           (if-not (symbol? value)
@@ -211,12 +219,11 @@
               (or (get refers value)
                   (when (ns-resolve 'clojure.core value)
                     (symbol "clojure.core" (name value)))
-                  value))))
-        malli-schemas (m/default-schemas)]
+                  value))))]
     ((fn walk [value]
        (cond
          (and (vector? value) (= :fn (first value))) (walk/postwalk qualify value)
-         (and (simple-symbol? value) (contains? malli-schemas value)) value
+         (and (simple-symbol? value) (contains? malli-schema-symbols value)) value
          (coll? value) (walk/walk walk identity value)
          :else (qualify value)))
      form)))

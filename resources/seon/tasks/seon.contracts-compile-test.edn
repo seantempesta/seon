@@ -11,4 +11,11 @@
             :intent
             "contracts-compile-test/check with :paths [] reaches namespace-contexts and calls seon.fn.analyzer/analyze with an empty sources map; the analyzer requires min 1 and throws a contract refusal. Return zero contract findings without analyzing when the selected source set is empty; preserve placement findings. Reproduced on default 42e569d9d, JVM root, result/e0f9f608c27e4. Regression should invoke check with no selected sources and assert its data result. Evidence: docs/research/agent-platform/2026-10-07/spec-reviews/review-final-codex-notes.md.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/spec-reviews/review-final-codex-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/spec-reviews/review-final-codex-notes.md"}}
+ #:seon.task{:name
+            "corpus-check-allocation-is-floored-by-edamame-per-char-boxing",
+            :kind :function,
+            :intent
+            "seon.contracts-compile-test/check over the whole corpus (472 src/test files, 10.0 M chars) allocates about 1.7 GB after the contract-check lane's read-once fix; about 1,040 MB of it is one edamame parse (seon.contracts-compile-test/read-source, ~100 bytes per char). JFR allocation samples: edamame.impl.parser/read-token and parse-string* call (.append sb ch) with a boxed Character, which resolves to StringBuilder.append(Object) and allocates a String per character (~31% of edamame allocation); location-metadata assoc/vary-meta ~20%. Probe in a throwaway JVM: patching the three appends to (.append sb (char ch)) cut a corpus parse from 1,042 MB to 832 MB. reference-code/edamame is upstream borkdude at 196ea5e4ef, not a fork: the fix is an upstream patch (or a deliberate fork decision by the owner). The remaining ~400 MB is clj-kondo over 471 ns prefixes (seon.fn.analyzer/invoke-kondo, ~0.85 MB per file). Done when a whole-corpus check allocates under 1 GB, measured with getThreadAllocatedBytes.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/contract-check/contract-check-notes.md"}}]
