@@ -55,19 +55,29 @@ its cluster is; deletes the duplicated stop tail in `retire!`.
 
 Probe after `(System/gc)` ×2 through the root's prepl (`scratchpad/reset-leak/probe.clj`).
 
-| | before fix (HEAD 99bdb12a) | after fix |
+| | before fix (HEAD 99bdb12a) | after fix (71439648a) |
 |---|---|---|
-| fresh boot heap used | 338 MB | see below |
-| after hosting 8 agents | 1153 MB, 8 `:agent-*` connected | see below |
-| after `reset --force` | **1334 MB**, roster still 8 `:agent-*`, all 8 connected, children 0 | see below |
-| reset phases | stop 14 ms, unlink 27 ms, total 12,656 ms | see below |
+| fresh boot heap used | 338 MB | 315 MB |
+| after hosting 8 agents | 1153 MB, 8 `:agent-*` connected, 8 children | 1131 MB, 8 `:agent-*` connected, 8 children |
+| after `reset --force` | **1334 MB**, roster still holds all 8 `:agent-*`, all 8 connected | **339 MB**, roster `:cluster-* :current-src :db` only, no `:agent-*` connected |
+| reset phases | stop 14 ms, unlink 27 ms, total 12,656 ms | stop 198 ms (8 hosts joined), unlink 14 ms, total 6,441 ms |
+
+The fix's cost is the 184 ms of joining 8 host graphs inside `stop!`; nothing else on the
+reset path changed. Default at 5.1 GB was the same leak at scale (16 hosts with long-lived
+indexes). The disposable root (`bin/seon --root scratchpad/reset-leak/root`, pids 88190 then
+91184) was brought down and deleted.
+
+Publication of the persisted task entry: `bin/seon check` adopts onto a fork of default's live
+cluster branch, which holds the runtime row of the same task; it adopted (73 identities), so
+`seon.task/a-file-task-is-refused-while-a-runtime-task-holds-its-symbol` did not reproduce here.
 
 ## Findings (recorded)
 
-- Hosting one MCP agent plus one trivial SCI run costs ~1.4 s and ~100 MB of live heap per
-  host (8 hosts: 11.0 s, 338 → 1153 MB). Over the 1 s / 10 MB budget.
-- `reset` total 12.7 s on a fresh disposable root (stop 14 ms, unlink 27 ms; the rest is
-  `start!`). Over the 10 s bound.
+- Hosting one MCP agent plus one trivial SCI run costs ~1.4-1.6 s and ~100 MB of live heap per
+  host (8 hosts: 11.0-12.6 s, 315-338 → 1131-1153 MB). Over the 1 s / 10 MB budget. Task
+  `seon.cluster.host/hosting-an-agent-costs-seconds-and-a-hundred-megabytes` (runtime, default).
+- `reset` total 6.4-12.7 s on a fresh disposable root (stop and unlink under 0.2 s; the rest is
+  `start!`). Over budget. Task `seon.cluster.boot/reset-takes-over-six-seconds` (runtime, default).
 - Host's own nested children (a host acquiring another branch) are released by
   `release-context!` (owning executions) but a nested *host's* graph is not stopped by
   `host/stop!`. No caller creates nested hosts today; not fixed.
@@ -81,6 +91,6 @@ piece of the fix already existed (`disarm-agents!` for a host, `release-context!
 called from boot.clj rather than inside `disarm-agents!`; and hosts are recorded only as a
 private `::host` delay in a child roster, so finding them means walking the children.
 
-Root restart: the fix is in compiled code on the stop path, so default must be restarted onto
-the commit (`start --head`) before its next reset benefits. **RESET NEEDED** is not required;
-a restart clears the current leak anyway.
+Root restart: the fix is compiled code on the stop path, so default must be restarted onto the
+commit (`start --head`) before its next reset benefits; that restart also clears any current
+leak (boot's `retire-unclaimed!` retires the orphaned `:agent-*` branches). No reset needed.
