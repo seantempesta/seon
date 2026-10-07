@@ -3015,3 +3015,17 @@
             "the retained branch's record names another builder")
         (is (identical? projection (db/carried-projection retained))
             "its projection is the loaded builder's, not one keyed by its recorded program")))))
+
+(deftest ^{:seon/tasks #{"54a8f328a32e"}} transaction-report-datom-law
+  ;; The leaf of every :seon.db/transaction-report contract: true for each
+  ;; datom a real write reports, false for anything else.
+  (test-support/with-database
+   (fn [connection]
+     (let [report (test-support/transacted! connection (test-support/agent-tx (db/db connection) "datom-law"))
+           datom (first (:tx-data report))]
+       (is (seq (:tx-data report)))
+       (is (every? db/transaction-report-datom? (:tx-data report)))
+       (is (not-any? db/transaction-report-datom?
+                     [nil false 0 "" :k [] {}
+                      [(:e datom) (:a datom) (:v datom) (:tx datom) (:added datom)]
+                      {:e (:e datom) :a (:a datom) :v (:v datom) :tx (:tx datom) :added (:added datom)}]))))))

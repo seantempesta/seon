@@ -76,3 +76,25 @@
       (let [refusal (try (decode stored) (catch clojure.lang.ExceptionInfo error (ex-data error)))]
         (is (= attribute (:seon.schema.datahike/attr refusal)))
         (is (= rule (:seon.schema.datahike/rule refusal)))))))
+
+(deftest ^{:seon/tasks #{"00c46a820209"}} final-validation-asks-cell-storage-of-written-attributes-only
+  ;; A declaration write leaves a new projection whose holder answers nothing
+  ;; yet. Default, 2026-10-07: every defn commit then asked all 3,389 forms
+  ;; whether they are vector-shaped (143-177 ms of a 190-315 ms validation).
+  (support/with-database
+   (fn [connection]
+     (let [report (support/transacted! connection (support/agent-tx (db/db connection) "cells-probe"))
+           after (:db-after report)
+           projection (#'schema/with-compiled-cache (db/carried-projection after))
+           {:seon.db-overhead/keys [value by-function]}
+           (observe #(schema/call-with-projection
+                      projection (fn [] (#'seon.db/write-report-error projection report))))
+           entities (into #{} (map :e) (:tx-data report))
+           read-datoms (into [] (mapcat #(db/datoms after :eavt %)) entities)
+           bound (+ (count (:tx-data report)) (count read-datoms))
+           asked (get by-function 'seon.schema.datahike/vector-shaped-attr-in? 0)]
+       (is (nil? value) "the agent write passes final validation")
+       (is (< bound (count (:seon.schema.projection/forms projection)))
+           "the bound is below the registry, so asking every form exceeds it")
+       (is (<= asked bound)
+           "cell storage is asked per attribute the write holds, never per registry form")))))

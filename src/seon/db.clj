@@ -3920,7 +3920,8 @@
                    (write-attribute-plan projection attribute (db.utils/multival? database attribute))))
         entity-datoms (d/datoms database :eavt entity-id)
         cell? (some #(= :seon.db.vector/position (:a %)) entity-datoms)
-        cell-attribute? (when (and refuse! (not cell?)) (schema.datahike/vector-attributes-in projection))
+        cell-attribute? (when (and refuse! (not cell?))
+                          (schema.datahike/vector-attributes-in projection (map :a entity-datoms)))
         stored
         (reduce
          (fn [entity-map {:keys [a v]}]
@@ -4107,10 +4108,9 @@
         ;; charges through a callback (`write-entity-value`) that no loop owns.
         traversal (volatile! {::seen #{} ::rows {} ::owners {}})
         ;; Cell -> the vector attribute a sweep retracted from it in this report.
-        swept (let [cell-attribute? (schema.datahike/vector-attributes-in projection)]
-                (into {} (keep #(when (and (not (:added %)) (cell-attribute? (:a %)))
-                                  [(:e %) (:a %)]))
-                      (:tx-data report)))
+        swept (let [retracted (into [] (remove :added) (:tx-data report))
+                    cell-attribute? (schema.datahike/vector-attributes-in projection (map :a retracted))]
+                (into {} (keep #(when (cell-attribute? (:a %)) [(:e %) (:a %)])) retracted))
         fail! (fn [cause data]
                 (throw (ex-info "Owned entity validation refused."
                                 {::owned-refusal
@@ -4371,13 +4371,15 @@
    (if-not (contains? (:seon.schema.projection/forms projection) :seon.db.vector/cells)
      tx-data
      (let [owner #(or (cell-owner after %) (cell-owner before %))
-           ;; Asked once: a per-datom question is a cache lookup per datom.
-           cell-attribute? (schema.datahike/vector-attributes-in projection)
+           ;; Asked once per distinct attribute: a per-datom question is a
+           ;; cache lookup per datom.
+           cell-attribute? (schema.datahike/vector-attributes-in projection (map :a tx-data))
            ;; A cell whose element this report wrote is new: its element datom says it all.
            written (into #{} (comp (filter #(cell-attribute? (:a %))) (map :e)) tx-data)
            element (fn [cell]
-                     (some #(when (cell-attribute? (:a %)) %)
-                           (concat (d/datoms after :eavt cell) (d/datoms before :eavt cell))))]
+                     (let [held (concat (d/datoms after :eavt cell) (d/datoms before :eavt cell))
+                           element? (schema.datahike/vector-attributes-in projection (map :a held))]
+                       (some #(when (element? (:a %)) %) held)))]
        (into []
              (keep (fn [datom]
                      (let [attribute (:a datom)]
