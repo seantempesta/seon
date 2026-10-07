@@ -3033,7 +3033,9 @@
            (is (= 1 (get operations :pull-many 0))
                "one previous-row batch for any number of authored declarations")
            (is (zero? (get operations :pull 0))
-               "unchanged declarations never reread their previous entity individually")))))))
+               "unchanged declarations never reread their previous entity individually")
+           (is (zero? (get operations :q 0))
+               "unchanged declarations have no reverse reach to query")))))))
 
 (deftest file-entities-read-in-batches-not-per-entity
   ;; Each armed read costs ~0.1 ms of owner overhead, so a pull per entity made a

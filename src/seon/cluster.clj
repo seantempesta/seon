@@ -2191,83 +2191,62 @@
         (finally (d/release-materialized-db database))))))
 
 (defn- analyzer-reach
-  "The declarations that determine a derived entity's value: reached through
-  `calls` from its two producers, `seon.fn/analyze-entities` (the rows) and
-  `seon.fn/desired-entities` (the stored entity; `index!` writes only the
-  difference), without entering the database owner (`seon.db`,
-  `seon.schema.datahike`) or the error owner (`seon.error.*`). Their values
-  reach an entity only as read results or refusals: across two measured change
-  sets, 35 and 325 changed definitions, none of them in this reach, left every
-  re-derived entity equal (tmp/boot-source-perf/evidence.md)."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:sequential :qualified-symbol]]]
-                  [:set :qualified-symbol]]}
-  [calls]
-  (let [plumbing? (fn [function]
+  "The analyzer's reached declarations, overlaying authored files on stored rows."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] [:map-of :qualified-symbol :map] [:set :string] [:set :string]] [:map-of :qualified-symbol :map]]}
+  [database authored replaced stored-loaded]
+  (let [path-of #(let [file (:seon.fn/file %)]
+                  (if (map? file) (:seon.fn.file/relative-path file) (second file)))
+        deriving? (fn [function]
                     (let [owner (namespace function)]
-                      (or (#{"seon.db" "seon.schema.datahike" "seon.error"} owner)
-                          (str/starts-with? owner "seon.error."))))]
-    (loop [reached #{} pending (list `seon.fn/analyze-entities `seon.fn/desired-entities)]
-      (if-let [[function & more] (seq pending)]
-        (if (or (reached function) (plumbing? function))
-          (recur reached more)
-          (recur (conj reached function) (into more (remove reached) (get calls function))))
-        reached))))
+                      (not (or (#{"seon.db" "seon.schema.datahike" "seon.error"} owner)
+                               (str/starts-with? owner "seon.error.")))))
+        selector [:seon.fn/sym :seon.program/definition-digest :seon.fn/calls
+                  {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/digest]}]]
+    (loop [functions {} seen #{} pending #{`seon.fn/analyze-entities `seon.fn/desired-entities}]
+      (if (empty? pending)
+        functions
+        (let [stored (when database
+                       (db/pull-many database selector (mapv #(vector :seon.fn/sym %) pending)))
+              _ (when (:seon.error/at stored)
+                  (refused! "Published function entities could not be read." stored))
+              rows (into {} (keep (fn [row]
+                                   (when-let [path (path-of row)]
+                                     (when-not (replaced path) [(:seon.fn/sym row) row])))) stored)
+              rows (into rows (keep (fn [symbol]
+                                     (when-let [row (get authored symbol)]
+                                       (when-not (stored-loaded (path-of row)) [symbol row])))) pending)
+              seen (into seen pending)]
+          (recur (into functions rows) seen
+                 (into #{} (comp (mapcat :seon.fn/calls) (filter deriving?) (remove seen)) (vals rows))))))))
 
 (defn- selected-analyzer-digest
-  "The identity of the code that derived `entities`, which their derivation keys name:
-  the digest of the definition digests `analyzer-reach` reaches through the
-  stored calls of `database`, with the files at `paths`, and every file
-  `entities` analyzed, replaced by `entities`.
-
-  The JVM that analyzed them loaded the files `loaded` (`loaded-files`). A
-  reached declaration whose file `inputs` publishes as those bytes contributes
-  its definition digest. When the stored file matches the loaded bytes instead,
-  its stored declarations supply both the calls and definition digests: publishing
-  other bytes does not change the code doing the analysis. Only when neither
-  source describes the loaded file does its byte digest stand in. A publication
-  of the files the JVM loaded therefore names
-  exactly the identity the stored entities name, and an unchanged tree
-  publishes nothing after it; one
-  analyzed by other code names an analyzer no stored program has, and every
-  file republishes once that code is replaced. A nil `database` is the first
-  publication."
-  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] [:set :string] :seon.program/rows
-                       :seon.source/relative-file-digests :seon.source/relative-file-digests]
-                  :seon.source/analyzer-digest]}
+  "The identity of the loaded analyzer declarations reached through the selected file overlay."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] [:set :string] :seon.program/rows :seon.source/relative-file-digests :seon.source/relative-file-digests] :seon.source/analyzer-digest]}
   [database paths entities inputs loaded]
   (let [path-of #(let [file (:seon.fn/file %)]
-                   (if (map? file) (:seon.fn.file/relative-path file) (second file)))
+                  (if (map? file) (:seon.fn.file/relative-path file) (second file)))
         analyzed (filterv #(and (:seon.fn/sym %) (path-of %)) entities)
-        stored (if database
-                 (db/q '[:find [(pull ?function [:seon.fn/sym :seon.program/definition-digest :seon.fn/calls
-                                                 {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/digest]}]) ...]
-                         :where [?function :seon.fn/sym]] database)
-                 [])]
-    (when (map? stored) (refused! "Published function entities could not be read." stored))
-    (let [stored-loaded (into #{}
-                              (keep (fn [function]
-                                      (let [path (path-of function)
-                                            digest (get loaded path)]
-                                        (when (and digest (not= digest (get inputs path))
-                                                   (= digest (get-in function [:seon.fn/file :seon.fn.file/digest])))
-                                          path))))
-                              stored)
-          replaced (set/difference (into paths (map path-of) analyzed) stored-loaded)
-          functions (into {} (map (juxt :seon.fn/sym identity))
-                          (concat (sequence (comp (filter path-of)
-                                                  (remove #(contains? replaced (path-of %)))
-                                                  (map #(update % :seon.fn/calls set)))
-                                            stored)
-                                  (remove #(contains? stored-loaded (path-of %)) analyzed)))
-          contribution (fn [function]
-                         (let [path (path-of function)]
-                           (if (or (contains? stored-loaded path)
-                                   (= (get inputs path) (get loaded path)))
-                             (:seon.program/definition-digest function)
-                             (get loaded path ::not-loaded))))]
-      (id/digest 64 [(into (sorted-map)
-                           (keep #(some->> (get functions %) contribution (vector %)))
-                           (analyzer-reach (update-vals functions (comp vec :seon.fn/calls))))]))))
+        other-bytes (into [] (keep (fn [[path digest]]
+                                    (when (not= digest (get inputs path))
+                                      [:seon.fn.file/relative-path path]))) loaded)
+        files (when (and database (seq other-bytes))
+                (db/pull-many database [:seon.fn.file/relative-path :seon.fn.file/digest] other-bytes))
+        _ (when (:seon.error/at files)
+            (refused! "Published analyzer files could not be read." files))
+        stored-loaded (into #{} (keep (fn [{path :seon.fn.file/relative-path digest :seon.fn.file/digest}]
+                                       (when (and digest (= digest (get loaded path))) path))) files)
+        replaced (set/difference (into paths (map path-of) analyzed) stored-loaded)
+        functions (analyzer-reach database (into {} (map (juxt :seon.fn/sym identity)) analyzed)
+                                  replaced stored-loaded)]
+    (id/digest 64
+      [(into (sorted-map)
+             (keep (fn [[symbol function]]
+                     (let [path (path-of function)
+                           digest (if (or (stored-loaded path) (= (get inputs path) (get loaded path)))
+                                    (:seon.program/definition-digest function)
+                                    (get loaded path ::not-loaded))]
+                       (when digest [symbol digest]))))
+             functions)])))
 
 (defn- loaded-files
   "The bytes the code this JVM runs came from, which a publication's seal reads

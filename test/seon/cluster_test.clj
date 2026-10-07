@@ -467,6 +467,22 @@
         (is (zero? (get calls 'seon.db/q 0)))
         (is (<= (get calls 'seon.cluster.source/commit-database 0) n))))))
 
+(deftest analyzer-identity-reads-only-reached-declarations
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           files (into {} (db/q '[:find ?path ?digest
+                                  :where [?file :seon.fn.file/relative-path ?path]
+                                         [?file :seon.fn.file/digest ?digest]] database))
+           reads (atom [])
+           digest (binding [db/*read-evidence-sink* reads]
+                    (#'cluster/selected-analyzer-digest database #{} [] files files))
+           symbols (into #{} (comp (mapcat :seon.db/read-result) (keep :seon.fn/sym)) @reads)]
+       (is (= 64 (count digest)))
+       (is (contains? symbols 'seon.fn/analyze-entities))
+       (is (not (contains? symbols 'seon.cluster/serve!))
+           "an unrelated declaration is never read to identify the analyzer")))))
+
 (deftest the-analyzer-digest-follows-the-analyzing-declarations-only
   ;; A file's derivation key (`derivation-keys`) names the deriving code's
   ;; identity: a changed declaration in its reach changes every key, and a

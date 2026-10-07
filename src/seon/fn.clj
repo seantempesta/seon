@@ -2539,12 +2539,14 @@
         affected (when database
                    (loop [selected changed
                           pending selected]
-                     (let [parents (db/q '[:find [?symbol ...]
+                     (let [parents (if (seq pending)
+                                     (db/q '[:find [?symbol ...]
                                             :in $ [?target ...] [?edge ...]
                                             :where [?caller ?edge ?target]
                                                    [?caller :seon.fn/sym ?symbol]]
                                           database (vec pending)
                                           [:seon.fn/calls :seon.effect/capability])
+                                     [])
                            _ (when (:seon.error/at parents)
                                (throw (ex-info (:seon.error/message parents) parents)))
                            added (set/difference (set parents) selected)]
