@@ -1,0 +1,58 @@
+diff --git a/test/seon/read_evidence_test.clj b/test/seon/read_evidence_test.clj
+index 28b9e1d47..341446fe7 100644
+--- a/test/seon/read_evidence_test.clj
++++ b/test/seon/read_evidence_test.clj
+@@ -35,19 +35,18 @@
+                 (into (test-support/agents-tx @connection ["juniper" "root"])
+                   [{:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message"}])))))
+      (let [ctx (test-support/fork-cluster-ctx connection)
+-           captured (atom [])
+            evaluation
+-           (binding [db/*read-evidence-sink* captured]
+-             (test-support/evaluate
+-              {:seon.sci.eval/ctx ctx
+-               :seon.db/connection connection
+-               :seon.db/db @connection
+-               :seon.agent/id "juniper"
+-               :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/from])])"
+-               :seon.cluster.eval/ns [:seon.ns/name 'user]
+-               :seon.sci.admit/caps (config/result-caps config/defaults)
+-               :seon.sci.eval/time-limit-ms 5000}))
+-           evidence (db/read-evidence @captured)
++           (test-support/evaluate
++             {:seon.sci.eval/ctx ctx
++              :seon.db/connection connection
++              :seon.db/db @connection
++              :seon.agent/id "juniper"
++              :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/from])])"
++              :seon.cluster.eval/ns [:seon.ns/name 'user]
++              :seon.sci.admit/caps (config/result-caps config/defaults)
++              :seon.sci.eval/time-limit-ms 5000})
++           ;; the reads the one path recorded for the form
++           evidence (db/read-evidence (:seon.batch/reads evaluation))
+            patterns (mapcat :seon.db/read-index-patterns
+                             (mapcat #(get-in % [:datahike.read/dependency-plan
+                                                :datahike.query.dependency/sources])
+diff --git a/test/seon/test_support.clj b/test/seon/test_support.clj
+index 7edb56dd4..1eb36d1d0 100644
+--- a/test/seon/test_support.clj
++++ b/test/seon/test_support.clj
+@@ -374,7 +374,7 @@
+   "`:seon.cluster.eval/source` evaluated through the one REPL path (the fold,
+   with the turn's evaluate and show stages) in the request's context: the
+   last form's evaluation map — value, shown text, error, record, ending
+-  namespace — with every form's printed output, and `:seon.batch/unread`
++  namespace, the reads it recorded — with every form's printed output, and `:seon.batch/unread`
+   when the text stops being readable. Nothing settles: the forms' program
+   facts are not proposed.
+ 
+@@ -433,7 +433,8 @@
+                            :seon.batch/fold :seon.batch/observe)))
+         entries (:seon.batch/entries batch)
+         output (apply str (keep #(get-in % [:seon.batch/evaluation :seon.cluster.eval/output]) entries))]
+-    (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries)))
++    (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries))
++                   (select-keys (peek entries) [:seon.batch/reads]))
+       (seq output) (assoc :seon.cluster.eval/output output)
+       (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch)))))
+ 

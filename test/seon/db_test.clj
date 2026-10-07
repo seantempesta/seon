@@ -2524,8 +2524,11 @@
                        (db/history refusal)
                        (db/as-of refusal 0)
                        (db/db refusal)]]
+         ;; the read names its own variant; the refusal's evidence is kept
+         (is (= :seon.db/invalid-read-error (:seon.error/type result)))
          (is (true? (:seon.db/invalid-read result)))
-         (is (= refusal (dissoc result :seon.db/invalid-read :seon.db/refused-read-operation))))
+         (is (= (dissoc refusal :seon.error/type)
+                (dissoc result :seon.db/invalid-read :seon.db/refused-read-operation :seon.error/type))))
        ;; A read refusal handed on keeps the read that produced it, verbatim.
        (let [refused (db/q refusal '[:find ?e :where [?e :seon.agent/id]])]
          (is (= 'seon.db/q (:seon.db/refused-read-operation refused)))
@@ -2534,7 +2537,9 @@
            (is (= refused result))))
        (let [result (db/transact! refusal {:tx-data []})]
          (is (true? (:seon.db/transaction-refused result)))
-         (is (= refusal (dissoc result :seon.db/transaction-refused :seon.db.write.attempt/request-id))))))))
+         (is (= :seon.db.write/validation-refusal (:seon.error/type result)))
+         (is (= (dissoc refusal :seon.error/type)
+                (dissoc result :seon.db/transaction-refused :seon.db.write.attempt/request-id :seon.error/type))))))))
 
 (deftest an-unknown-read-operation-refuses-naming-the-attribute
   ;; CLASS: no-matching-clause (critical finding #19). `replay-read`'s `case`
