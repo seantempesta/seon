@@ -74,41 +74,7 @@ design work: name the roles (bounded charging, cycle and owner checks, attempted
 
 **Worked decomposition (EQUIVALENT in result, under the preconditions below).** `seon.cluster/transact-initialization!` mixes, inside one `loop`: reading the
 database, refusing a failed readiness read, partitioning ready from waiting (calling `entity-ready?` twice per
-entity), building the "missing" refusal, and transacting. Before:
-
-```clojure
-(defn- transact-initialization!
-  [connection entities]
-  (config/require-functions! (db/db connection) entities)
-  (loop [pending (vec entities)]
-    (when (seq pending)
-      (let [database (db/db connection)
-            refusal (some #(entity-lookup-refusal database %) pending)]
-        (when refusal
-          (let [[attribute value] (::lookup refusal)]
-            (refused! (str "An initialization readiness read was refused: "
-                           (:seon.error/message (::refusal refusal)))
-                      {:seon.activation/lookup-attribute attribute
-                       :seon.activation/lookup-value value
-                       :seon.boot/population :seon.config/initialization
-                       :seon.boot/result (::refusal refusal)})))
-        (let [ready (into [] (filter #(entity-ready? database %)) pending)
-              waiting (into [] (remove #(entity-ready? database %)) pending)]
-          (when (empty? ready)
-            (refused! "Initialization lookup refs do not resolve."
-                      {:seon.activation/missing
-                       (into [] (comp (mapcat #(lookup-refs-in database %)) (distinct)
-                                      (map (fn [[attribute value]]
-                                             {:seon.activation/lookup-attribute attribute
-                                              :seon.activation/lookup-value value})))
-                             waiting)}))
-          (require-committed!
-           (db/transact! connection {:tx-data ready
-                                     :tx-meta {:seon.db/process [:seon.db.process/id boot-process-identity]}})
-           {:seon.boot/population :seon.config/initialization})
-          (recur waiting)))))
-  nil)
-```
+entity), building the "missing" refusal, and transacting. Read `seon.cluster/transact-initialization!` for the original; the rewrite below preserves its writer protocol.
 
 After: a readiness-read round, refusal construction and a short effectful shell. The round is not pure: it reads
 through Seon's read owner (`entity-ready?` → `lookup-resolution` → `db/pull`), which captures read evidence. With
@@ -247,7 +213,7 @@ time fallback, run relationships, a shared entry envelope), not a mirror; remove
 
 **2.4 Copy present optional keys with `select-keys` and `merge`.** `select-keys` is a presence test
 (`clojure/src/clj/clojure/core.clj:1559-1571` uses `find` and copies the returned entry); `(cond-> r (:k m) (assoc :k (:k m)))` is a
-truthiness test. The rewrite `(merge r (select-keys m [:k …]))` is EQUIVALENT only when no value of those keys is
+truthiness test. The rewrite `(merge r (select-keys m [:k …]))` is EQUIVALENT only when `r` is a map, no value of those keys is
 `nil` or `false` and the copy may overwrite a key already in `r`; otherwise it is a BEHAVIOR CHANGE (with
 `r = {:k :old}` and `m = {:k false}` the old code returns `{:k :old}`, the new `{:k false}`).
 
@@ -304,8 +270,8 @@ SEON: `seon.render.web/turn-function-result` builds its refusal with `refusal/di
 operation typed out and generic fix prose. There are about 225 such call sites; the errors slices rewrite them by
 family.
 
-**3.2 Law: no new round trips.** Never test a returned value for an error key only to rethrow it, and never catch only
-to wrap and rethrow. Existing unwraps of returned read refusals are **load-bearing until errors S-reads**: reads still
+**3.2 Preserve the installed read-refusal contract until S-reads.** Never catch only to wrap and rethrow.
+Unwraps of returned read refusals are **load-bearing until errors S-reads**: reads still
 return refusal values, so deleting an unwrap passes an error map downstream as data (live run 1: a refused `seon.db/q`
 became map entries under `sort-by`). S-reads converts each read family's owner and every caller together.
 
@@ -317,7 +283,8 @@ SEON: `my.program/caller-data` unwraps five reads; `src` holds about 119 copies 
 ```
 
 TARGET (errors S-reads): `(db/pull database [:db/id :seon.fn/form-span] [:seon.fn/sym stored])`. Until then keep the
-unwrap, add no new one, and do not use `seon.error.refusal/let-ok` in new code.
+unwrap. A new caller must also discriminate the installed union before consuming a read as data; reuse the
+owner's handling rather than treating a target throwing read as installed. Convert that caller with its read family.
 
 **3.3 Law: catch once, at the entrant boundary.** A returning tool whose failure is detected deep inside catches its
 own declared variants once at its top; a deliberate translation names its own type and keeps the cause. Walk a cause
@@ -482,7 +449,7 @@ precondition:
 
 | Before | After | Label |
 |---|---|---|
-| `filter` then `remove` with one predicate | `(group-by p xs)` once | EQUIVALENT when `p` returns exactly `true`/`false` (destructure `{yes true no false}`) and is free of effects; buckets are eager |
+| `filter` then `remove` with one predicate | `(group-by p xs)` once | EQUIVALENT in result for finite inputs when `p` returns exactly `true`/`false` (destructure `{yes true no false}`), is free of effects, and the consumer needs both full buckets; realization becomes eager |
 | `(first (filter p xs))` | `(some #(when (p %) %) xs)` | EQUIVALENT only when no matching element is `nil` or `false`; with `p = some?` and `[false :later]` the first returns `false`, the second `:later` |
 | `(into {} (map (fn [[k v]] [k (f v)])) m)` | `(update-vals m f)` | BEHAVIOR CHANGE in metadata: `update-vals` keeps `m`'s metadata (`core.clj:8136-8150`), `into {}` drops it |
 | `(set (map f xs))` | `(into #{} (map f) xs)` | EQUIVALENT |
@@ -671,13 +638,13 @@ Each row is safe only under its condition; follow the section for the full rule.
 |---|---|---|
 | `(let [a (:x/a m) b (:x/b m)] …)` | `[{:x/keys [a b] :as m}]` in the arglist | EQUIVALENT (2.2) |
 | `{:y/a (:x/a m) :y/b (:x/b m)}` in one domain | pass `m`; at a real boundary `(set/rename-keys (select-keys m ks) kmap)` | BEHAVIOR CHANGE for consumers of the copy (2.3) |
-| `(cond-> r (:k m) (assoc :k (:k m)))` per key | `(merge r (select-keys m [:k …]))` | EQUIVALENT only if no value is `nil`/`false` (2.4) |
-| a new `(if (:seon.db/invalid-read r) (throw …) r)` | keep existing ones; write no new one | TARGET errors S-reads for the bare call (3.2) |
+| `(cond-> r (:k m) (assoc :k (:k m)))` per key | `(merge r (select-keys m [:k …]))` | EQUIVALENT only if `r` is a map and no copied value is `nil`/`false` (2.4) |
+| a read returning success or a refusal | discriminate its installed union before consuming it | TARGET errors S-reads permits the bare call only after that family throws (3.2) |
 | `(catch Throwable t (error-value …))` mid-function | let it reach the boundary, or the returning tool's one top catch | BEHAVIOR CHANGE (3.3) |
 | an `ex-cause` loop at a boundary | `(refusal/cause-links t)` once, then reuse it | BEHAVIOR CHANGE: terminates on a cause cycle (3.3) |
 | `[:k :k]` entries in a contract | `[:map :k …]` naked entries, or a registry name | EQUIVALENT when `:k` is registered (4.1) |
 | `(contains? x :k)` on an armed input | remove only if the exact contract requires `:k` | EQUIVALENT under that condition (5.1) |
-| `filter` and `remove` with one predicate | `group-by` once | EQUIVALENT if `p` returns `true`/`false` (6.2) |
+| `filter` and `remove` with one predicate | `group-by` once | EQUIVALENT in result for finite inputs, a pure boolean predicate and a consumer needing both full buckets; eager (6.2) |
 | `(first (filter p xs))` | `(some #(when (p %) %) xs)` | EQUIVALENT only if no match is `nil`/`false` (6.2) |
 | `(into {} (map (fn [[k v]] [k (f v)])) m)` | `(update-vals m f)` | BEHAVIOR CHANGE: keeps metadata (6.2) |
 | `(set (map f xs))` | `(into #{} (map f) xs)` | EQUIVALENT (6.2) |
@@ -707,7 +674,7 @@ Each row is safe only under its condition; follow the section for the full rule.
 
 ## 16. Working as a lane
 
-Mistakes lanes made on 2026-10-07, each now a rule:
+Operational checks:
 
 - Probe uncommitted code on your own agent's SCI branch (MCP `eval_clj` with your lane name), never by loading it into
   scratch namespaces in default's JVM.
@@ -715,4 +682,4 @@ Mistakes lanes made on 2026-10-07, each now a rule:
 - Verify a tool's limit (a timeout, a cap, "cannot") at the REPL or in its source before you report it.
 - When the design is wrong, stop and report it with priced options; never patch around it.
 - Record every finding, "pre-existing" ones included, as a task (`seon.task/create!`) or name its existing task.
-- Never describe a fix as "a new printer", "a new cache" or "a new runner": fix the existing owner.
+- Fix the existing printer, cache or runner; renaming a duplicate does not make it one owner.

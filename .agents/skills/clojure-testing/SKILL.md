@@ -30,7 +30,8 @@ Add none when one of these holds:
    or lint already performs. Name the installed check before relying on it.
 7. **The claim is a wall-clock time.** Profile it and record the number as evidence; the runner holds the bound.
    Deterministic work counts (cache misses, recomputations, query counts) are different: when the spec states them,
-   test them (agent-loop T4 requires zero `::eval-unit` misses on a repeated context).
+   test them. Context-specific cache counts await the owner's context redesign; the rejected agent-loop §3
+   design does not establish an implementation requirement.
 
 Otherwise, if an agent or a user would notice the break, write one test through the entrance, asserting data.
 
@@ -140,11 +141,13 @@ through its entrance; an example that no longer runs is a docstring defect fixed
 
 **2.12 A test that proves a task names it.** `(deftest ^{:seon/tasks #{…}} a-refused-settlement-is-the-forms-refusal
 …)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`), the task cannot be assigned
-without them, and after a pass that changes code they reach, all green completes the task (agent-loop spec §4). Metadata
+without them under the target admission rule, and after a pass that changes code they reach, all green completes
+the task (TARGET: agent-loop spec §4; installed `seon.task/assign!` does not enforce proof admission). Metadata
 placed after the test name is refused (`:metadata-after-test-name`). Today the set holds the task's derived handle
 (`seon.task/task-handle` of namespace, name and kind; never hand-type it); TARGET (lane task-tags): it holds the
-`ns/task-name` symbol. A success test fails before the work and passes after it: a task whose tests are already green
-is done or mis-specified, not open work.
+`ns/task-name` symbol. A new behavior or bug regression fails before the work and passes after it. A behavior-preserving refactor names
+existing green tests (§1); green alone cannot establish that the refactor has been done. A blanket refusal of
+assignments with green proofs is not an implemented or settled rule.
 
 ## 3. Delete or convert
 
@@ -187,31 +190,19 @@ function.
 Each is source-verified against `test/seon/test_support.clj` and the subject's source (2026-10-07); none was run for
 this skill. Each runs as a member of `seon.test/run`, which supplies the execution handle `with-database` needs.
 
-**Example 1: a pure value table (no world).** TARGET-dependent: this states today's identity, a function of the
-printed data. When lane task-tags lands structural hashing, equal maps in different entry order and `1`/`1N` hash
-equal, so those rows flip; root replaces this example with that lane's deftest. The shape (one `are` table, no setup)
-is the lesson. This is the table form of `seon.id-test/data-shape-and-explicit-length-determine-identity`'s first
-assertions plus edge rows probed at the REPL. Add it to the existing `seon.id-test`; do not copy its `ns` form over
-that namespace.
+**Example 1: a pure value table (no world).** `seon.id/symbol-in` builds a runnable qualified handle from a
+namespace, leading letter and id. This example avoids the printed-data hash that the identity owner is replacing.
+Add the test to the existing `seon.id-test`; do not replace that namespace's `ns` form.
 
 ```clojure
-(ns seon.id-test
-  (:require [clojure.test :refer [deftest is are]]
-            [seon.id :as id]))
-
-(deftest identity-is-a-function-of-printed-data
-  (are [a b same?] (= same? (= (id/id a) (id/id b)))
-    [:a 1]      [:a 1]      true
-    [:a 1]      [:a 2]      false
-    {:a 1 :b 2} {:b 2 :a 1} false
-    nil         false       false
-    1           1N          false
-    'abc        "abc"       false)
-  (is (= "ba7816bf8f01" (id/id 'abc)))
-  (is (= "ba7816bf" (id/id 'abc 8))))
+(deftest result-handles-keep-their-namespace-and-prefix
+  (are [space letter identity expected] (= expected (id/symbol-in space letter identity))
+    "result" \e "abc123" 'result/eabc123
+    "result" \e "012345" 'result/e012345
+    "other"  \r "abc123" 'other/rabc123))
 ```
 
-No setup and no teardown: the subject reads nothing.
+Require `seon.id` as `id` and refer `deftest` and `are` from `clojure.test`. No setup or teardown is needed.
 
 **Example 2: a refused write leaves the basis unchanged (a database branch).** The behavior: the writer refuses
 retracting a required analysis fact, answers a write-attempt identity, and commits nothing. Shape of

@@ -305,8 +305,9 @@ root.
   write-back, tasks, config, schema adoption, boot and publication records, recorded errors, branch lifecycle,
   deliveries) is likewise durable before its caller is answered.
 - **Derive work and completion.** Work is a listened wake the agent has not answered; a message subject is literal,
-  `:seon.message/from` marks inside wakes; never replay writes or effects. Context is a system message (protocol and
-  tools) plus context generated from the agent's task, rendered live through `seon.cache`, never stored. A task names
+  `:seon.message/from` marks inside wakes; never replay writes or effects. Context composition is under owner redesign
+  (`docs/research/agent-platform/2026-10-07/context-design/`); the rejected system-message plus task-producer
+  design is not an implementation authority. Keep rendering through the existing owners. A task names
   its success tests before it is assigned. After a pass that changed code those tests reach, they run; all green
   completes the task and is the only success. `my.task/complete!` is the agent's explicit way to give back a broken or
   impossible task, with its reason; the task returns to its assigner, who is notified. Target (the agent-loop cut): the
