@@ -1266,31 +1266,6 @@
    :seon.message/about (:seon.error/signature fact)})
 
 
-(def ^:private auto-task-tempid "seon.error/producer-task")
-
-(defn- producer-task
-  "The runtime task a producer's faults answer: one per producing definition,
-  its handle the aspect `[ns \"faults-of-<name>\" :function]` minted as
-  `seon.task/task-handle` mints it and its symbol `ns/faults-of-<name>`, so a second signature of the same producer
-  lands on the same task. It refs each signature it answers
-  (`:seon.task/faults`); it is closed when every one is resolved
-  (`seon.task/resolution`), never by a stored flag."
-  {:malli/schema [:=> [:cat :seon.error/producer :string [:maybe [:tuple [:= :seon.agent/id] :seon.agent/id]]] :map]}
-  [producer signature-tempid created-by]
-  (let [task-ns (symbol (namespace producer))
-        task-name (str "faults-of-" (name producer))]
-    (cond-> {:db/id auto-task-tempid
-             :seon.task/id (id/id [task-ns task-name :function])
-             :seon.task/sym (symbol (name task-ns) task-name)
-             :seon.task/ns task-ns :seon.task/name task-name :seon.task/kind :function
-             :seon.task/intent (str "Make " producer " stop producing the failures its faults record: each fault"
-                                    " names the refused schema and path, where it happened and the reproduction."
-                                    " Prove the fix with a deftest naming this task, red before the fix and green"
-                                    " after.")
-             :seon.task/must-read #{producer}
-             :seon.task/faults #{signature-tempid}}
-      created-by (assoc :seon.task/created-by created-by))))
-
 (defn- occurrence-slot
   "The occurrence a failure lands on: the first of the request's slots
   (`recording`: at most `:seon.config.error/recurrence-limit` per signature
@@ -1380,7 +1355,6 @@
         agent-id (or (second (:seon.error/agent fact)) (:seon.agent/id world))
         turn-id (or (second (:seon.error/run fact)) (:seon.turn/id world))
         escalate-to (:seon.config.error/escalate-to request)
-        root-present (entity-exists? database :seon.agent/id "root")
         agent-present (when agent-id (entity-exists? database :seon.agent/id agent-id))
         turn-present (when turn-id (entity-exists? database :seon.turn/id turn-id))
         escalation-present (when escalate-to (entity-exists? database :seon.agent/id escalate-to))
@@ -1390,7 +1364,7 @@
         read-refusal (some #(when (observation? %) %)
                            [(when-not (:seon.error.occurrence/id old) old)
                             (when (map? notified) notified)
-                            agent-present turn-present escalation-present root-present
+                            agent-present turn-present escalation-present
                             steward-id steward-present opened])]
     (cond
       read-refusal read-refusal
@@ -1481,10 +1455,6 @@
                                           :seon.error/exception-class :seon.error/producer])
                             :db/id (fact-tempid (:seon.error/id request))
                             :seon.error/occurrences #{occurrence})
-        ;; a producer's faults answer its one task, riding this write
-        task (when-let [producer (:seon.error/producer fact)]
-               (producer-task producer (fact-tempid (:seon.error/id request))
-                              (when root-present [:seon.agent/id "root"])))
         ;; WHO ACTS ON A RECORDED FAULT is the writer's reading of held
         ;; relations, never of the evidence's shape (a Throwable's presence
         ;; says how it escaped, not who fixes it): the steward of its function,
@@ -1513,8 +1483,7 @@
                                                   :seon.error/notified %))
                                    notified)
               true (conj (cond-> error-entity
-                           (seq messages) (assoc :seon.error/notified (set (map :db/id messages)))))
-              task (conj task))
+                           (seq messages) (assoc :seon.error/notified (set (map :db/id messages))))))
             messages))))))
 
 (defn evidence-stage

@@ -7,6 +7,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error.attribution-test :refer [triaged-task!]]
             [seon.fault :as fault]
             [seon.problems :as problems]
             [seon.task :as task]
@@ -33,12 +34,10 @@
            receipt (fault/fault! environment (refused misuse)
                                  {:seon.error/layer ::boundary :seon.error/operation `boundary
                                   :seon.db.process/id "task-queue-test"})
-           handle (-> (db/pull (db/db connection) [{:seon.task/_faults [:seon.task/id]}]
-                               [:seon.error/signature (:seon.error/signature receipt)])
-                      :seon.task/_faults first :seon.task/id)
+           [handle] (triaged-task! connection (:seon.error/signature receipt) `misuse)
            database (db/db connection)
            pulled (db/pull database task/resolution-selector [:seon.task/id handle])]
-       (is (string? handle) "the fault's task exists")
+       (is (string? handle) "the task filed for the fault exists")
        (is (= (task/resolution database handle) (task/task-resolution database pulled))
            "resolving the pulled task is resolving it by handle")
        (is (= [handle] (mapv :seon.task/id (my.task/open database)))

@@ -408,8 +408,7 @@
         caps (or carried-caps
                  (config/result-caps (config/effective (db/db connection) cluster-name)))
         ;; the failing world's agent when the boundary names none: its cluster
-        ;; copy then carries the fault and its producer's task to the task home,
-        ;; where the task can be claimed (task 00c9e7a97e1b)
+        ;; copy then carries the fault to the cluster branch root reads
         agent-id (or (:seon.agent/id context) (:seon.agent/id seon.batch/*world*))
         throwable? (instance? Throwable failure)
         [fact outcome occurrence recipients]

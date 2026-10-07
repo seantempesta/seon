@@ -79,25 +79,38 @@
 
 (defn- read-shown
   "The one complete EDN value `shown` holds, else `shown` itself (prose, or
-  text followed by more text). A tag with no reader goes to `unknown-tag`
-  (`tagged-literal`), else the text is not read."
-  {:malli/schema [:=> [:cat :string [:maybe [:fn clojure.core/ifn?]]] :seon.schema/value]}
-  [shown unknown-tag]
+  text followed by more text)."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [shown]
   (try
     (with-open [reader (java.io.PushbackReader. (java.io.StringReader. shown))]
       (let [end (Object.)
-            options (cond-> {:eof end} unknown-tag (assoc :default unknown-tag))
-            value (edn/read options reader)]
+            value (edn/read {:eof end} reader)]
         (if (and (not (identical? end value))
-                 (identical? end (edn/read options reader)))
+                 (identical? end (edn/read {:eof end} reader)))
           value shown)))
     (catch Exception _ shown)))
+
+(defn- one-form?
+  "True when `text` reads, without evaluation, as exactly one Clojure form
+  that is not a string: the value printer's grammar (`#'v`, `#\"re\"`, and
+  `#object[…]` as a tagged literal) is Clojure's, not EDN's."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [text]
+  (try
+    (binding [*read-eval* false *default-data-reader-fn* tagged-literal]
+      (with-open [reader (java.io.PushbackReader. (java.io.StringReader. text))]
+        (let [end (Object.)
+              form (read {:eof end} reader)]
+          (and (not (identical? end form)) (not (string? form))
+               (identical? end (read {:eof end} reader))))))
+    (catch Exception _ false)))
 
 (defn shown-value
   "Read a complete shown EDN value; preserve terminal prose as its string."
   {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [shown]
-  (read-shown shown nil))
+  (read-shown shown))
 
 (defn source-text
   "Print a generated form with reader quotes and explicit keyword keys."
@@ -169,9 +182,7 @@
   string, so no comment ever lands inside the reply map."
   {:malli/schema [:=> [:cat :string] :string]}
   [text]
-  ;; the printer's own grammar: a host object prints as `#object[…]`, data
-  ;; the reply embeds as it stands (read back as a tagged literal)
-  (if (or (string? (read-shown text tagged-literal))
+  (if (or (not (one-form? text))
           (some #(= "comment" (first %)) (syntax-tokens text)))
     (pr-str text)
     text))

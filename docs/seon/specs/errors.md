@@ -14,7 +14,7 @@ reports, a separate "fault" vocabulary for Seon's own failures and a 4,735-line 
 suppressed edges cycle-safely and keeps each link's data whole. Data flow after this spec: a producer builds ONE error
 map with ONE validating constructor; it returns the map when answering is its job, else throws it as `ex-info` data;
 the entrant boundary takes it back once; Seon's own errors are recorded once per signature at the task home with a
-count, a task and one notification to root; every occurrence rides the evaluation or call where it happened and
+count and one notification to root, and an agent or root files the task; every occurrence rides the evaluation or call where it happened and
 reaches the agent that caused it in that reply. There is no separate fault concept. Principal approach: Malli's own
 shapes (`:multi` on a type key, the instrument report, cached explainers, `malli.error`) and Clojure's (`ex-info`).
 
@@ -268,12 +268,11 @@ different classes at one frame, are different rows. Member names reuse installed
 (`:seon.error/occurrence-count`, `:seon.error/shown`) [U: P1 registry search].
 
 **Opening.** The writer function reads the row on the in-transaction database. It OPENS when the row is absent or
-resolved (below). An opening, in the same home transaction: creates or links the producer's task through the canonical
-task writer (`seon.task/adopt-tasks-tx` on the in-transaction database; one task per producer, its aspect as
-`seon.error/producer-task` mints it today), linking the row from the task (`:seon.task/errors`, replacing
-`:seon.task/faults`); and writes ONE message to root, its content the error's message, referring to the row
-(`:seon.message/error`, new, so the message renders the recorded error as data). Root's home branch is the task home,
-so this is one transaction. A repeat increments the count and updates `latest-digest`/`latest-at`; it sends nothing.
+resolved (below). An opening writes, in the same home transaction, ONE message to root, its content the error's
+message, referring to the row (`:seon.message/error`, new, so the message renders the recorded error as data). It
+creates no task (owner, 2026-10-07): the error comes back to the agent whose call caused it, and that agent or root
+triages it into a task with a failing test through `seon.task/create!`, one per defect class. Tasks linked by
+`:seon.task/faults` exist only from before that ruling. A repeat increments the count and updates `latest-digest`/`latest-at`; it sends nothing.
 
 **Every occurrence is attached and delivered.** The recorder returns a receipt `{signature count opened?}` for repeats
 too; the boundary assocs it as `:seon.error/recorded`. The settlement stores the signature on the evaluation or provider
@@ -383,7 +382,7 @@ One behavior each, asserted on data:
   `:seon.error/exception` carrying the original kind.
 - **T4 references**: an error whose data holds a connection carries its identity, not the object; its stored shown
   text prints an opaque value and an unrealized sequence by class without realizing it.
-- **T5 recording**: the same failure twice gives one row, count 2, one task, one message to root; both evaluations
+- **T5 recording**: the same failure twice gives one row, count 2, no task, one message to root; both evaluations
   carry the signature. Mixed-type problem paths do not throw, and insertion order does not change the signature.
 - **T6 unrecordable**: a refused recording write runs the stop request and prints (`fault_test.clj`'s case, renamed).
 - **T7 undeclared variant**: a returning function answering a type outside its `:multi` is an output refusal naming the
@@ -394,7 +393,7 @@ One behavior each, asserted on data:
   stays `:seon.error/exception` with the cleanup error in its chain.
 - **T10 resolution**: a new digest without a green run stays open; a green run after it resolves; deleting the producer
   resolves; empty proofs (a task with no proofs after a digest change) and refused or stale evidence stay open.
-- **T11 recurrence**: a failure after resolution opens one new message and links the same task.
+- **T11 recurrence**: a failure after resolution opens one new message.
 - **T12 registry failure**: an error built while schema lookup throws is a literal, with no recursive explain.
 
 Kept, adapted: `refusal-test` (cleanup failure beside the primary, worlds referenced, wrapped cause recorded whole);
@@ -415,7 +414,7 @@ construction-refusal cases of `refusal_test.clj`, `refusal_grammar_test.clj`, vi
 3. Returned when answering is the job, else thrown in `ex-info`; taken back once at the boundary.
 4. Instrumentation from Malli's report; refusal-path spelling suggestions against `mu/closed-schema`.
 5. No fault concept: Seon's own failures are errors, recorded once per signature (64 characters) at the task home with a
-   count, the first occurrence's shown text, the latest producer digest and time, a task and one notification. Every
+   count, the first occurrence's shown text, the latest producer digest and time, and one notification; no task until an agent or root files one. Every
    occurrence is attached to the evaluation or call where it happened. A deleted producer's error resolves on deletion;
    otherwise resolution = the producer changed AND the task's success tests have a green run since. No escalation,
    stewards, folding or branch-to-cluster copy.

@@ -4,13 +4,14 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.error.attribution-test :refer [context signature-row world]]
+            [seon.error.attribution-test :refer [context signature-row triaged-task! world]]
             [seon.fault :as fault]
             [seon.task :as task]
             [seon.test-support :as test-support]))
 
 (defn- fault-in
-  "Records a fault `producer` produced as of another digest; answers its signature and its task's handle and symbol."
+  "Records a fault `producer` produced as of another digest and the task root files for it; answers its signature
+  and that task's handle and symbol."
   [connection environment producer]
   (let [receipt (fault/fault! environment
                               {:seon.error/at (java.util.Date.) :seon.error/layer ::boundary
@@ -20,7 +21,7 @@
                                :seon.task/refused :unproven :seon.task/holder (symbol (namespace producer))}
                               (assoc context :seon.error/declared-schema :seon.task/refused-error))
         signature (:seon.error/signature receipt)]
-    (into [signature] ((juxt :seon.task/id :seon.task/sym) (-> (signature-row connection signature) :seon.task/_faults first)))))
+    (into [signature] (triaged-task! connection signature producer))))
 
 (defn- define-in!
   "Writes `producer` as a stored declaration, and the test `tested` naming the task `tag` with one stored run of
@@ -57,7 +58,7 @@
            [green] (scenario 'attribution.green/target 0)
            [red] (scenario 'attribution.red/target 1)
            [deleted handle] (fault-in connection environment 'attribution.deleted/target)]
-       (is (string? handle) "the producer's task answers the fault")
+       (is (string? handle) "the filed task answers the fault")
        (is (= :seon.task/proof (resolved-by green))
            "a changed producer whose task's test has a green stored run resolves")
        (is (open? red) "a changed producer whose task's test is red stays open")

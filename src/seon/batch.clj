@@ -582,34 +582,35 @@
 ;;; After the loop
 ;;; ---------------------------------------------------------------------------
 
+(defn- compiled-function?
+  "True when `producer` is a Var the host JVM compiled, not a definition
+  only an agent's SCI world holds."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [producer]
+  (some? (some-> (find-ns (symbol (namespace producer)))
+                 (.findInternedVar (symbol (name producer))))))
+
 (defn- produced-failures
-  "A diagnostic for each form whose failure a definition produced: its error
-  value (`:seon.batch/error-value`) names `:seon.error/producer`, the blame
-  rule stated where the value was built. The failure is handed as that value,
-  so the recorder keeps its producer. A producer this batch defined states
-  the digest visible at that entry, never a later definition: its settlement may commit
-  after the fault. A failure the agent's own form produced names none: it
-  returns to the agent and is no fault."
+  "A diagnostic for each form whose failure a compiled definition produced:
+  its error value (`:seon.batch/error-value`) names `:seon.error/producer`,
+  the blame rule stated where the value was built, and that producer is a
+  host function this batch has not redefined by that entry. A failure an
+  agent's own form or definition produced returns to the agent and is no
+  fault."
   {:malli/schema [:=> [:cat :seon.batch/failure-source] [:vector :seon.batch/diagnostic]]}
   [batch]
   (second
    (reduce
     (fn [[defined diagnostics] {failure :seon.batch/error ordinal :seon.batch/ordinal change :seon.batch/change}]
-      (let [defined (into defined
-                          (keep (fn [{sym :seon.fn/sym digest :seon.program/definition-digest}]
-                                  (when (and sym digest) [sym digest])))
-                          (:seon.batch/entities change))
+      (let [defined (into defined (keep :seon.fn/sym) (:seon.batch/entities change))
             error (:seon.batch/error-value (ex-data failure))
-            ran (get defined (:seon.error/producer error))]
+            producer (:seon.error/producer error)]
         [defined
          (cond-> diagnostics
-           (:seon.error/producer error)
+           (and (qualified-symbol? producer) (not (defined producer)) (compiled-function? producer))
            (conj (diagnostic :evaluate ordinal
-                             (ex-info (str (:seon.error/message error "The evaluation failed."))
-                                      (cond-> error
-                                        (and ran (nil? (:seon.error/producer-digest error)))
-                                        (assoc :seon.error/producer-digest ran))))))]))
-    [{} []] (:seon.batch/entries batch))))
+                             (ex-info (str (:seon.error/message error "The evaluation failed.")) error))))]))
+    [#{} []] (:seon.batch/entries batch))))
 
 (defn- record-faults
   "Each diagnostic, and each form's failure a definition produced

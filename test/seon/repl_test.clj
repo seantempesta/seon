@@ -383,18 +383,20 @@
         (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))
             "a render that is EDN is data")))))
 
-(deftest an-error-holding-a-host-object-is-a-map-not-a-string
-  ;; Root, 2026-09-28: an input refusal whose offending value held a channel
-  ;; came back as `:error "{…}"`, the whole map printed into one string,
-  ;; because `#object[…]` has no EDN reader. The printer's grammar is data.
-  (let [reply (one-map (repl/response
-                        {:seon.cluster.eval/source "(f {})"
-                         :seon.cluster.eval/error "refused"
-                         :seon.eval/shown (str "{:seon.error/message \"f refused argument 0\",\n"
-                                               " :seon.error/offending {:c #object[clojure.core.async.impl.channels.ManyToManyChannel 0x7c6ba730]}}")}))]
-    (is (map? (:seon.repl/error reply)))
-    (is (= "f refused argument 0" (get-in reply [:seon.repl/error :seon.error/message])))
-    (is (tagged-literal? (get-in reply [:seon.repl/error :seon.error/offending :c])))))
+(deftest an-error-in-the-printers-grammar-is-a-map-not-a-string
+  ;; An error holding a host object, a Var (every `[:fn #'pred]` contract) or a
+  ;; regex came back as `:error "{…}"`: none of them is EDN. The printer's
+  ;; grammar is Clojure's, so the reply embeds the map as data.
+  (doseq [[offending read-back?] [["#object[clojure.core.async.impl.channels.ManyToManyChannel 0x7c6ba730]" tagged-literal?]
+                                  ["#'seon.db/database-value?" #(= '(var seon.db/database-value?) %)]
+                                  ["#\"a+\"" #(instance? java.util.regex.Pattern %)]]]
+    (let [reply (one-map (repl/response
+                          {:seon.cluster.eval/source "(f {})"
+                           :seon.cluster.eval/error "refused"
+                           :seon.eval/shown (str "{:seon.error/message \"f refused argument 0\",\n"
+                                                 " :seon.error/offending {:c " offending "}}")}))]
+      (is (= "f refused argument 0" (get-in reply [:seon.repl/error :seon.error/message])))
+      (is (read-back? (get-in reply [:seon.repl/error :seon.error/offending :c]))))))
 
 (deftest a-reply-within-every-declared-bound-adds-nothing-and-an-exceeded-bound-is-a-findings-entry
   (let [emission {:seon.cluster.eval/source "(inc 1)"

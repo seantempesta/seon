@@ -13,15 +13,11 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.error :as error]
             [seon.error.refusal :as refusal]
             [seon.fault :as fault]
             [seon.problems :as problems]
-            [seon.sci.eval :as sci.eval]
             [seon.task :as task]
-            [seon.test-support :as test-support]
-            [seon.turn.batch :as turn.batch]
-            [seon.turn.world :as turn.world]))
+            [seon.test-support :as test-support]))
 
 (def context
   {:seon.error/layer ::boundary
@@ -76,6 +72,18 @@
             {:seon.task/_faults [:seon.task/id :seon.task/sym :seon.task/must-read]}]
            [:seon.error/signature signature]))
 
+(defn triaged-task!
+  "The task root files for the recorded `signature` through the task writer,
+  linked to it as a task answering faults (`:seon.task/faults`); answers the task's handle and symbol."
+  [connection signature producer]
+  (let [{handle :seon.task/id} (task/create! {:seon.db/connection connection :seon.agent/id "root"
+                                              :seon.task/ns (symbol (namespace producer))
+                                              :seon.task/name (str "fix-" (name producer)) :seon.task/kind :function
+                                              :seon.task/intent "Make the producer stop failing."
+                                              :seon.task/must-read #{producer}})]
+    (test-support/transacted! connection [[:db/add [:seon.task/id handle] :seon.task/faults [:seon.error/signature signature]]])
+    [handle (:seon.task/sym (db/pull (db/db connection) [:seon.task/sym] [:seon.task/id handle]))]))
+
 (deftest a-recorded-violation-lands-on-the-event-graph
   (test-support/with-database
    (fn [connection]
@@ -94,8 +102,8 @@
          (is (= `misuse (:seon.error/producer row)))
          (is (= 'seon.problems/open-faults (:seon.instrument/fn row)) "the refusing function, never the recorder")
          (is (= #{`misuse} (set (map :seon.error/caller (:seon.error/occurrences row))))))
-       (testing "the producer's task answers the signature, riding the same write"
-         (is (= [[`misuse]] (mapv :seon.task/must-read (:seon.task/_faults row)))))
+       (testing "the recording writes no task: root or an agent triages it"
+         (is (empty? (:seon.task/_faults row))))
        (testing "occurrences are bounded per producer digest"
          (is (= limit (count (:seon.error/occurrences row)))))
        (testing "a repeat past the cap makes no commit; its count rides the next commit"
@@ -110,8 +118,8 @@
    (fn [connection]
      (let [environment (world connection "attribution-queue")
            receipt (fault/fault! environment (refused misuse) context)
+           [handle] (triaged-task! connection (:seon.error/signature receipt) `misuse)
            database (db/db connection)
-           handle (-> (signature-row connection (:seon.error/signature receipt)) :seon.task/_faults first :seon.task/id)
            queued (some #(when (= handle (:seon.task/id %)) %) (my.task/open database))]
        (is (= 1 (:seon.task/occurrences queued)))
        (is (= [(list 'my.task/claim! {:seon.task/assigned handle})] (:seon.render/operations queued)))
@@ -121,7 +129,7 @@
          (is (= :claimed (:seon.task/refused (my.task/claim! {:seon.db/connection connection :seon.agent/id "mcp/other"
                                                                :seon.task/assigned handle})))))))))
 
-(deftest a-fault-in-an-agents-world-carries-its-task-to-the-cluster
+(deftest a-fault-in-an-agents-world-is-copied-to-the-cluster
   ;; The fixture branch is the agent's; a sibling `:cluster-<name>` branch of the
   ;; same store is the cluster, open as a running one's (seon.fault-test's
   ;; copy fixture). The boundary names no agent: the world does.
@@ -152,8 +160,8 @@
                                              (refused misuse)
                                              context)))]
                (is (true? (:seon.fault/committed? receipt)))
-               (is (= [[`misuse]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row cluster (:seon.error/signature receipt)))))
-                   "the cluster copy carries the producer's task, where a claim is written")
+               (is (= `misuse (:seon.error/producer (signature-row cluster (:seon.error/signature receipt))))
+                   "the cluster copy names the producer, where root reads it")
                (testing "a definition only the agent's branch holds: the copy keeps the digest that ran"
                  ;; the fixture declares its namespace: an ambient my.probe row
                  ;; in the captured world is not the fixture's
@@ -180,61 +188,13 @@
                (store/release-branch! cluster)
                (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))))))
 
-(deftest a-definitions-failure-in-an-evaluation-is-its-fault-and-task
-  ;; Health loop E1 (fault 103511's class): an evaluation whose definition
-  ;; handed an armed contract a bad value. The agent reads the producer in
-  ;; its error value; the fold records it as that definition's fault, whose
-  ;; task the queue offers. An agent's own form producing it is no fault.
-  (test-support/with-database
-   (fn [connection]
-     (let [environment (world connection "attribution-evaluation")
-           run (fn [text]
-                 (seon.batch/evaluate-batch
-                  (dissoc (test-support/code-request
-                           {:seon.batch/world (turn.world/agent-world
-                                               {:seon.db/connection connection :seon.cluster/name "attribution-evaluation"
-                                                :seon.env/environment environment
-                                                :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
-                                               {:seon.agent/id "root" :seon.db.process/id "attribution-test"})
-                            :seon.batch/start-ns 'user
-                            :seon.batch/text text})
-                          :seon.batch/settle)))
-           faults-of (fn [producer]
-                       (db/q '[:find [?signature ...] :in $ ?producer
-                               :where [?e :seon.error/producer ?producer] [?e :seon.error/signature ?signature]]
-                             (db/db connection) producer))
-           batch (run (str "(defn make-row [] (seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})) (make-row) "
-                           "(defn make-row \"second version\" [] (seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})) (make-row)"))
-           error (:seon.batch/error-value (ex-data (get-in batch [:seon.batch/entries 1 :seon.batch/error])))
-           [signature] (faults-of 'user/make-row)]
-       (testing "the error value names the definition that produced the bad value"
-         (is (= 'user/make-row (:seon.error/producer error)))
-         (is (= 'seon.problems/open-faults (:seon.instrument/fn error))))
-       (testing "the fold records it as the producer's fault, answered by its task"
-         (is (string? signature))
-         (is (= 'user/make-row (:seon.error/producer (first (problems/open-faults (db/db connection) signature))))
-             "the open fault names who it counts against")
-         (is (= [['user/make-row]] (mapv :seon.task/must-read (:seon.task/_faults (signature-row connection signature)))))
-         (is (some #(= (:seon.task/id (first (:seon.task/_faults (signature-row connection signature)))) (:seon.task/id %))
-                   (my.task/open (db/db connection)))))
-       (testing "the agent's own form is its mistake, returned and never recorded"
-         (let [before (db/basis-t (db/db connection))]
-           (run "(seon.problems/open-faults {:seon.error/at (java.util.Date.)} {})")
-           (is (= before (db/basis-t (db/db connection))))))))))
-
-(deftest a-batch-failure-names-the-definition-visible-when-it-ran
-  ;; Entry order decides the version: a failure before any definition names
-  ;; none, and a later redefinition never relabels an earlier failure
-  ;; (live probe 2026-09-28: B/B/B before the fold, unknown/A/B after).
-  (let [error (ex-info "probe" {:seon.batch/error-value {:seon.error/producer 'probe/f :seon.error/message "probe"}})
-        a (apply str (repeat 64 "a"))
-        b (apply str (repeat 64 "b"))
-        define (fn [digest] {:seon.batch/change {:seon.batch/entities [{:seon.fn/sym 'probe/f :seon.program/definition-digest digest}]}})
-        batch {:seon.batch/entries [{:seon.batch/error error :seon.batch/ordinal 0}
-                                    (define a)
-                                    {:seon.batch/error error :seon.batch/ordinal 2}
-                                    (define b)
-                                    {:seon.batch/error error :seon.batch/ordinal 4}]}]
-    (is (= [nil a b]
-           (mapv #(get-in % [:seon.error/data :seon.error/producer-digest])
-                 (#'seon.batch/produced-failures batch))))))
+(deftest only-a-compiled-producer-not-redefined-by-the-batch-is-a-fault
+  ;; A failure produced by the agent's own definition (or redefinition) is its
+  ;; mistake: delivered to it, never recorded as a core fault.
+  (let [error (fn [producer] (ex-info "probe" {:seon.batch/error-value {:seon.error/producer producer :seon.error/message "probe"}}))
+        batch {:seon.batch/entries [{:seon.batch/error (error `misuse) :seon.batch/ordinal 0}
+                                    {:seon.batch/ordinal 1 :seon.batch/change {:seon.batch/entities [{:seon.fn/sym `misuse}]}}
+                                    {:seon.batch/error (error `misuse) :seon.batch/ordinal 2}
+                                    {:seon.batch/error (error 'probe/f) :seon.batch/ordinal 3}]}]
+    (is (= [0] (mapv :seon.batch/ordinal (#'seon.batch/produced-failures batch)))
+        "the compiled producer before the batch redefines it; an agent's definition never")))
