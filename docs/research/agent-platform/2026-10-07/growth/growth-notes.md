@@ -220,3 +220,9 @@ Measured with 2,766 live cells (thread-allocated; the window's own `begin`/`expl
   inside a small vector (existing task `seon.render.value/a-short-identifier-string-is-cut-at-its-first-chunk`).
 - `bin/seon check` boot: ready-ms 81,227, boot-ms 96,636 of a 122 s check.
 - 1,000 SCI `ex-info` constructions cost 331 ms / 234 MB (agent's own work, ~234 KB per exception).
+- `(my.agent/retire-branch! {:seon.store/branch (:seon.agent/branch (my.agent/branch))})` run by the agent on its
+  own branch answers only `{:seon.error/message "run transition refused: admission-closed"}`: the retirement closes
+  admission before the run that asked for it settles, so the agent never sees the call's value (agents
+  `growth-deep`, `growth-probe`).
+- `(seon.db/q <10,000-deep map>)` ran past the 32 s MCP limit before 3071fef19 (18.3M `sci-context?` calls);
+  the agent stayed responsive afterwards.
