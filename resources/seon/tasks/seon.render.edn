@@ -65,4 +65,9 @@
  #:seon.task{:name "landing-reds-2-render-bow-outs"
              :kind :namespace
              :intent "Bow-outs from landing-reds-2: render-simplification (selection for [] no longer differs from seon.agent/render-settings-ai :161; one extra kernel/invoke on first render). Also web reds from web-shrink-reds (5574927cb): the next-turn fixture opening starts with the :seon.agent/cluster pull, error/render-html's 500 body drops the exception class, agent-render-profile budget 3200 < 3238 needed, and the reconnect tests take 23-42 s (held-pass promise never fires). Done when each is fixed or recorded in the render area spec with its number."
-             :must-read #{seon.repl/entity-emission}}]
+             :must-read #{seon.repl/entity-emission}}
+ #:seon.task{:name "the-viewer-scans-every-program-function"
+             :kind :function
+             :intent "seon.render/viewer -> seon.sci.kernel/public-functions-in walked every function of the context's program snapshot (5,663 rows) to find the viewing namespace's public functions, once per shown value: 2.3 MB per (+ 1 2) pass. Correct: work proportional to the namespace's functions (an index by namespace in the snapshot). Proof: viewer on a namespace with 0 functions allocates under 50 KB."
+             :must-read #{seon.sci.kernel/public-functions-in}
+             :evidence #{"docs/research/agent-platform/2026-10-07/pass-cost/design-notes.md"}}]

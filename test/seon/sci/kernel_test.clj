@@ -36,6 +36,29 @@
     (is (nil? (:seon.cluster.eval/error evaluation)))
     (:seon.sci.admit/value evaluation)))
 
+(deftest ^{:seon/tasks #{'seon.render/the-viewer-scans-every-program-function}}
+  public-functions-follow-the-current-namespace-snapshot
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))]
+    (is (= [] (kernel/public-functions-in ctx 'viewer)))
+    (kernel/cache-function! ctx 'viewer/first {:seon.sci.eval/function-private? false})
+    (is (= '[viewer/first] (kernel/public-functions-in ctx 'viewer)))
+    (kernel/cache-program!
+     ctx
+     {'viewer/z {:seon.sci.eval/function-private? false}
+      'viewer/a {:seon.sci.eval/function-private? false}
+      'viewer/private {:seon.sci.eval/function-private? true}
+      'viewer/unknown {}
+      'viewer.extra/a {:seon.sci.eval/function-private? false}
+      'before/a {:seon.sci.eval/function-private? false}} {})
+    (is (= '[viewer/a viewer/z] (kernel/public-functions-in ctx 'viewer)))
+    (is (= [] (kernel/public-functions-in ctx 'absent)))
+    (kernel/cache-function! ctx 'viewer/a {:seon.sci.eval/function-private? true})
+    (kernel/cache-function! ctx 'viewer/unknown {:seon.sci.eval/function-private? false})
+    (is (= '[viewer/unknown viewer/z] (kernel/public-functions-in ctx 'viewer)))
+    (is (= '[viewer.extra/a] (kernel/public-functions-in ctx 'viewer.extra)))
+    (kernel/cache-program! ctx {} {})
+    (is (= [] (kernel/public-functions-in ctx 'viewer)))))
+
 (deftest the-interpreter-resolves-the-classpath-and-loaded-namespaces
   (let [ctx (eval/build-base-ctx (schema/handed-projection))]
     (testing "java.lang short names, as Clojure's default imports"

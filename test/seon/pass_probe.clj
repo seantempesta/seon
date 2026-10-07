@@ -77,7 +77,7 @@
 (defn- written
   "The `[op key commit-id branch]` of each key one konserve write event names;
   commit id and branch are read only from a written commit record."
-  {:malli/schema [:=> [:cat :map] [:vector :tuple]]}
+  {:malli/schema [:=> [:cat :map] [:vector [:tuple :keyword :seon.schema/value [:maybe :uuid] [:maybe :keyword]]]]}
   [{op :api-op k :key v :value kvs :kvs}]
   (let [one (fn [k v] (let [record (when (map? v) v)]
                         [op k (get-in record [:meta :datahike/commit-id]) (get-in record [:config :branch])]))]
@@ -100,7 +100,8 @@
   "Durable commits by branch (every branch the window committed on; on a shared
   store other writers' too), those on `own-branches`, and the final sizes of
   the files the window touched, from the hook's `events` on the store at `base`."
-  {:malli/schema [:=> [:cat [:sequential :tuple] [:maybe :string] [:set :keyword]] :map]}
+  {:malli/schema [:=> [:cat [:sequential [:tuple :keyword :seon.schema/value [:maybe :uuid] [:maybe :keyword]]]
+                       [:maybe :string] [:set :keyword]] :map]}
   [events base own-branches]
   (let [commits (reduce (fn [m [_ _ cid branch]] (if cid (update m branch (fnil conj #{}) cid) m)) {} events)
         size (fn [k] (let [f (io/file base (konserve.defaults/key->store-key k))] (when (.exists f) (.length f))))

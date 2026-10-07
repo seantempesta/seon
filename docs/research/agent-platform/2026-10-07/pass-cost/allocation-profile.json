@@ -1,0 +1,54 @@
+{
+  "sci": {
+    "sampled-bytes": 1047250376,
+    "samples": 1400,
+    "buckets": {
+      "seon/db$vector_query_call.invokeStatic": 386509576,
+      "java/nio/HeapByteBuffer.<init>": 199941608,
+      "seon/instrument$arm_var_BANG_$fn__15137$fn__15139.doInvoke": 174962240,
+      "org/fressian/impl/InterleavedIndexHopMap.<init>": 36635824,
+      "seon/id$structural_digest.invokeStatic": 19486336,
+      "clojure/data/priority_map/PersistentPriorityMap.assoc": 19308152,
+      "seon/db$call_with_custody.invokeStatic": 15299552,
+      "net/jpountz/lz4/LZ4FrameOutputStream.<init>": 14062600,
+      "seon/db$pull_plan_with_evidence.invokeStatic": 13652928,
+      "seon/call_preparation$unavailable.invokeStatic": 10773424,
+      "seon/db$q.invokeStatic": 8583064,
+      "seon/sci/eval$bind_result_BANG_$fn__16138.invoke": 8384440,
+      "seon/db$declares_program_QMARK_.invokeStatic": 6418552,
+      "seon/db$carried_projection.invokeStatic": 5163648,
+      "seon/db$may_read_vectors_QMARK_.invokeStatic": 5040568,
+      "seon/sci/eval$regenerate_agent_context_BANG_.invokeStatic": 4796712,
+      "java/lang/reflect/Field.copy": 4522704,
+      "seon/id$hex.invokeStatic": 4228656,
+      "seon/sci/arm$changed_namespaces.invokeStatic": 3583624,
+      "seon/sci/eval$regenerate_agent_context_BANG_$iter__16984__16990$fn__16991$iter__16986__16995$fn__16996.invoke": 3583576
+    }
+  },
+  "jvm": {
+    "sampled-bytes": 496766208,
+    "samples": 800,
+    "buckets": {
+      "java/nio/HeapByteBuffer.<init>": 90709152,
+      "seon/db$write_entity_error.invokeStatic": 64199128,
+      "seon/repl$token_boundary_QMARK_.invokeStatic": 62031976,
+      "seon/instrument$arm_var_BANG_$fn__15137$fn__15139.doInvoke": 36457160,
+      "seon/render/value$prepare.invokeStatic": 32393472,
+      "seon/turn/batch$jvm_request$fn__253833.invoke": 21910608,
+      "seon/id$structural_digest$frame__448.invoke": 20212368,
+      "net/jpountz/lz4/LZ4FrameOutputStream.<init>": 18813824,
+      "seon/sci/eval$regenerate_agent_context_BANG_.invokeStatic": 13695128,
+      "seon/id$structural_digest.invokeStatic": 10601104,
+      "seon/db$pull_plan_with_evidence.invokeStatic": 9893168,
+      "seon/db$identity_attributes.invokeStatic": 9162008,
+      "konserve/impl/defaults$io_operation$fn__27985$state_machine__5956__auto____28016$fn__28023.invoke": 7774376,
+      "seon/batch$evaluate_step.invokeStatic": 5398600,
+      "seon/sci/eval$replaced_definitions$fn__16977.invoke": 4136720,
+      "seon/config$effective_in.invokeStatic": 3850536,
+      "seon/cluster/store$connection_object_QMARK_.invokeStatic": 3444008,
+      "java/lang/Long.valueOf": 3427432,
+      "seon/batch$place_step$fn__2883.invoke": 3225152,
+      "seon/env/Environment.cons": 3219912
+    }
+  }
+}

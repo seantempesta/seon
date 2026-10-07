@@ -774,16 +774,13 @@
                  :seon.error/expected-key :seon.boot/cluster-name
                  :seon.error/message "this database names no cluster."}
         result (config/result-caps refusal)]
-    (is (inst? (:seon.error/at result)))
-    (is (= {:seon.error/at (:seon.error/at result)
-            :seon.error/layer :seon.config/read
+    (is (= {:seon.error/type :seon.config/error
             :seon.error/operation 'seon.config/result-caps
-            :seon.config/error-key :seon.config.eval.result/max-bytes
-            :seon.error/expected-key :seon.config.eval.result/max-bytes
-            :seon.error/message "Value-admission caps require every declared configuration bound."
-            :seon.error/offending refusal
-            :seon.config/key :seon.config.eval.result/max-bytes}
-           result))))
+            :seon.config/key :seon.config.eval.result/max-bytes
+            :seon.error/offending refusal}
+           (select-keys result [:seon.error/type :seon.error/operation :seon.config/key
+                                :seon.error/offending])))
+    (is (not (contains? result :seon.config/missing-effective)))))
 
 (deftest two-clusters-on-one-jvm-have-no-config-bleed
   (test-support/with-database
@@ -806,16 +803,15 @@
             (doseq [refusal [missing-beta missing-alpha]
                     :let [caps-refusal (config/result-caps refusal)]]
               (is (= :seon.config/effective (:seon.error/expected-key refusal)))
-              (is (= {:seon.error/at (:seon.error/at caps-refusal)
-                      :seon.error/layer :seon.config/read
+              ;; The constructor attributes type and calling world; assert the
+              ;; members this behavior is about.
+              (is (= {:seon.error/type :seon.config/error
                       :seon.error/operation 'seon.config/result-caps
-                      :seon.config/error-key :seon.config.eval.result/max-bytes
-                      :seon.error/expected-key :seon.config.eval.result/max-bytes
-                      :seon.error/message "Value-admission caps require every declared configuration bound."
-                      :seon.error/offending refusal
                       :seon.config/key :seon.config.eval.result/max-bytes
+                      :seon.error/offending refusal
                       :seon.config/missing-effective (:seon.config/missing-effective refusal)}
-                     caps-refusal))
+                     (select-keys caps-refusal [:seon.error/type :seon.error/operation :seon.config/key
+                                                :seon.error/offending :seon.config/missing-effective])))
               (is (string? (:seon.error/message refusal))))))))))
 
 (deftest a-refused-read-is-returned-as-the-cause-not-reported-as-missing-facts

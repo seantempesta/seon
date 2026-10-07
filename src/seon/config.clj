@@ -163,20 +163,24 @@
           (mr/schema (:seon.schema.projection/registry projection) :seon.config/effective)))))
 
 (defn- registration-defaults
+  "Return the defaults derived from this immutable declaration projection."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-keyword :seon.schema/value]]}
   [projection]
-  (let [required (required-dial-attributes projection)]
-    (into {}
-          (keep
-           (fn [attribute]
-             (let [properties
-                   (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute))]
-               (cond
-                 (contains? properties :seon.config/default)
-                 [attribute (:seon.config/default properties)]
+  (schema/projection-cache-value
+   projection ::registration-defaults
+   #(let [required (required-dial-attributes projection)]
+      (into {}
+            (keep
+             (fn [attribute]
+               (let [properties
+                     (m/properties (mr/schema (:seon.schema.projection/registry projection) attribute))]
+                 (cond
+                   (contains? properties :seon.config/default)
+                   [attribute (:seon.config/default properties)]
 
-                 (not (contains? required attribute))
-                 [attribute absent])))
-          (dial-attributes projection)))))
+                   (not (contains? required attribute))
+                   [attribute absent])))
+            (dial-attributes projection))))))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :seon.config/rule-error [:maybe :seon.error/throwable]]

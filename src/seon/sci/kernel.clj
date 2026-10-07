@@ -216,12 +216,12 @@
      :built-in-call-observer (::built-in-call-observer guard)}))
 
 (defn cache-program!
-  "Publish immutable function and namespace rows used by lazy installation."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map :map]
+  "Publish immutable function and namespace rows, ordered for namespace lookup."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :qualified-symbol :map] [:map-of :symbol :map]]
                   :nil]}
   [ctx functions namespaces]
   (reset! (::program-snapshot ctx)
-          {:functions functions :namespaces namespaces})
+          {:functions (into (sorted-map) functions) :namespaces namespaces})
   nil)
 
 (defn cache-function!
@@ -229,8 +229,8 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :map]
                   :qualified-symbol]}
   [ctx function-symbol row]
-  (swap! (::program-snapshot ctx) assoc-in
-         [:functions function-symbol] row)
+  (swap! (::program-snapshot ctx) update :functions
+         #(assoc (if (seq %) % (sorted-map)) function-symbol row))
   function-symbol)
 
 (defn program-function
@@ -248,18 +248,18 @@
   (get-in @(::program-snapshot ctx) [:namespaces namespace-name]))
 
 (defn public-functions-in
-  "Return public contracted functions in `namespace-name` from the snapshot."
+  "Return public functions in `namespace-name` by seeking its snapshot range."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.ns/name]
   [:vector :qualified-symbol]]}
   [ctx namespace-name]
-  (->> (:functions @(::program-snapshot ctx))
-       (keep (fn [[function-symbol row]]
-               (when (and (= namespace-name
-                             (symbol (namespace function-symbol)))
-                          (false? (:seon.sci.eval/function-private? row)))
-                 function-symbol)))
-       (sort-by str)
-       vec))
+  (let [functions (:functions @(::program-snapshot ctx))
+        space (str namespace-name)]
+    (into []
+          (comp (take-while #(= space (namespace (key %))))
+                (keep (fn [[function-symbol row]]
+                        (when (false? (:seon.sci.eval/function-private? row))
+                          function-symbol))))
+          (when (seq functions) (subseq functions >= (symbol space ""))))))
 
 (defn mark-installed!
   "Record that `function-symbol` has been installed from database source."

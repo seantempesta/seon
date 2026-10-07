@@ -3289,16 +3289,53 @@
         (update :seon.cluster.eval/error #(or % message))
         (with-diagnostic (assoc refusal :seon.error/message message)))))
 
+(defn- terminal-agent-ordinal
+  "Return the last form's ordinal when a triggered run ends in an agent form."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id] [:or :nil :seon.cluster.eval/ordinal]]}
+  [database run-id]
+  (let [ordinal (db/q '[:find (max ?ordinal) .
+                        :in $ ?run-id
+                        :where
+                        [?run :seon.turn/id ?run-id]
+                        [?run :seon.turn/trigger _]
+                        [?form :seon.cluster.eval/run ?run]
+                        [?form :seon.cluster.eval/ordinal ?ordinal]]
+                      database run-id)]
+    (when (db/read-refusal? ordinal)
+      (throw (ex-info (:seon.error/message ordinal) ordinal)))
+    (when (some? ordinal)
+      (let [agent-form (db/q '[:find ?form .
+                              :in $ ?run-id ?ordinal
+                              :where
+                              [?run :seon.turn/id ?run-id]
+                              [?form :seon.cluster.eval/run ?run]
+                              [?form :seon.cluster.eval/ordinal ?ordinal]
+                              [?form :seon.cluster.eval/author :agent]]
+                            database run-id ordinal)]
+        (when (db/read-refusal? agent-form)
+          (throw (ex-info (:seon.error/message agent-form) agent-form)))
+        (when agent-form ordinal)))))
+
 (defn- evaluation-terminal-data
   "One settled evaluation's receipt, delivery and close as transaction data."
-  {:malli/schema [:=> [:cat :seon.turn.loop/settle-evaluation-request]
+  {:malli/schema [:function
+                 [:=> [:cat :seon.turn.loop/settle-evaluation-request]
                   [:map [:seon.turn.loop/settled [:or :nil :my.turn/value]]
                    [:seon.turn.loop/undisposed? :boolean]
                    [:seon.turn.loop/evaluation :seon.turn.loop/evaluation]
                    [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]
                    [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]
-                   [:seon.db/tx-data :seon.store/transaction-data]]]}
-  [{cluster :seon.turn.loop/cluster
+                   [:seon.db/tx-data :seon.store/transaction-data]]]
+                 [:=> [:cat :seon.turn.loop/settle-evaluation-request [:or :nil :seon.cluster.eval/ordinal]]
+                  [:map [:seon.turn.loop/settled [:or :nil :my.turn/value]]
+                   [:seon.turn.loop/undisposed? :boolean]
+                   [:seon.turn.loop/evaluation :seon.turn.loop/evaluation]
+                   [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]
+                   [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]
+                   [:seon.db/tx-data :seon.store/transaction-data]]]]}
+  ([{cluster :seon.turn.loop/cluster run-id :seon.turn/id :as request}]
+   (evaluation-terminal-data request (terminal-agent-ordinal (db/db (:seon.db/connection cluster)) run-id)))
+  ([{cluster :seon.turn.loop/cluster
     now :seon.turn.loop/now
     agent-id :seon.agent/id
     run-id :seon.turn/id
@@ -3306,7 +3343,7 @@
     ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
     trigger :seon.message/trigger
-    batch? :seon.turn.loop/batch?}]
+    batch? :seon.turn.loop/batch?} terminal-ordinal]
   (let [database (db/db (get cluster :seon.db/connection))
         ;; the disposition the fold's publish stage read, as data
         raw-settled (:my.turn/value evaluation)
@@ -3330,29 +3367,9 @@
                    (select-keys (final-shown cluster database agent-id (:seon.sci.admit/value admitted))
                                 [:seon.eval/shown :seon.eval/renderer])))
           evaluation)
-        last-ordinal
-        (db/q '[:find (max ?ordinal) .
-                :in $ ?run-id
-                :where
-                [?run :seon.turn/id ?run-id]
-                [?form :seon.cluster.eval/run ?run]
-                [?form :seon.cluster.eval/ordinal ?ordinal]]
-              database run-id)
-        triggered-agent-form?
-        (boolean
-         (db/q '[:find ?form .
-                 :in $ ?run-id ?ordinal
-                 :where
-                 [?run :seon.turn/id ?run-id]
-                 [?run :seon.turn/trigger _]
-                 [?form :seon.cluster.eval/run ?run]
-                 [?form :seon.cluster.eval/ordinal ?ordinal]
-                 [?form :seon.cluster.eval/author :agent]]
-               database run-id ordinal))
         undisposed?
         (and (nil? settled)
-             triggered-agent-form?
-             (= ordinal last-ordinal)
+             (= ordinal terminal-ordinal)
              (nil? (:seon.cluster.eval/error evaluation))
              (nil? (:seon.cluster.eval/interrupted-at evaluation)))
         asked (asked-value
@@ -3407,7 +3424,7 @@
      :seon.turn.loop/receipt receipt
      :seon.blob/staged-writes (into (vec settlement-stages)
                                     (:seon.blob/staged-writes delivery))
-     :seon.db/tx-data tx-data}))
+     :seon.db/tx-data tx-data})))
 
 (declare settle-batch-refusal! close-escaped-run!)
 
@@ -3504,9 +3521,13 @@
   [cluster requests {program-request :seon.batch/request program :seon.batch/program changes :seon.batch/changes}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
+        database (db/db connection)
+        terminal-ordinals (into {} (map (fn [run-id] [run-id (terminal-agent-ordinal database run-id)]))
+                               (distinct (map :seon.turn/id requests)))
         prepared (mapv #(evaluation-terminal-data
                          (assoc % :seon.turn.loop/batch? true
-                                  :seon.db.process/id process))
+                                  :seon.db.process/id process)
+                         (get terminal-ordinals (:seon.turn/id %)))
                        requests)
         ;; The definitions these forms executed whose measurement moved,
         ;; once for every attempt: measuring advances their cells' marks.
@@ -4632,16 +4653,12 @@
                 (report :error 0)))))))))
 
 (defn- evaluation-entity-id
-  "The entity id of one already-transacted evaluation, or nil.
-
-  Absence is the whole answer: an in-memory preview never froze an evaluation
-  entity, and asking for one that is not there must say so rather than mint
-  an identity nothing else can resolve."
+  "Return the stored evaluation's entity id, nil when absent, or the read refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.eval/id]
+                  [:or :nil :int :seon.db/error-result]]}
   [database evaluation-id]
-  (db/q '[:find ?evaluation .
-          :in $ ?evaluation-id
-          :where [?evaluation :seon.cluster.eval/id ?evaluation-id]]
-        database evaluation-id))
+  (let [entity (db/pull database [:db/id] [:seon.cluster.eval/id evaluation-id])]
+    (if (db/read-refusal? entity) entity (:db/id entity))))
 
 (defn- early-disposition?
   "Whether `form`'s value `value` is a disposition, or `form` calls

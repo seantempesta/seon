@@ -25,12 +25,14 @@
             [my.program :as my.program]
             [sci.core :as sci]
             [seon.db :as db]
+            [seon.config :as config]
             [seon.fn :as sfn]
             [seon.batch]
             [seon.blob :as blob]
             [seon.fn.analyzer :as analyzer]
             [seon.profile.measurement :as measurement]
             [seon.program :as program]
+            [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.id :as id]
@@ -891,7 +893,8 @@
   context in the world, the value is bound there under its result handle
   (`result/e<evaluation id>`), so the agent digs it as it digs an SCI value."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/entry] :seon.batch/printed]}
-  [{{profile :seon.render/profile cluster :seon.boot/cluster-name ctx :seon.sci.eval/ctx
+  [{{profile :seon.render/profile caps :seon.sci.admit/caps
+     cluster :seon.boot/cluster-name ctx :seon.sci.eval/ctx
      turn-id :seon.turn/id limit :seon.sci.eval/time-limit-ms} :seon.batch/world db :seon.batch/working}
    {:seon.batch/keys [value error source duration-ms allocated-bytes ordinal] :as entry}]
   (let [req (cond-> {:seon.cluster.eval/source (or source "")}
@@ -899,7 +902,7 @@
               profile (assoc :seon.render/profile profile)
               db (assoc :seon.db/db db)
               ctx (assoc :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms (or limit 30000)
-                         :seon.sci.admit/caps (:seon.sci.admit/caps (#'eval/instrumentation-config db)))
+                         :seon.sci.admit/caps caps)
               (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal))))
         record {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0
                 :seon.eval/duration-ms (Math/round (double duration-ms)) :seon.eval/allocated-bytes (or allocated-bytes -1)
@@ -913,28 +916,32 @@
        (eval/shown-result value req nil)))))
 
 (defn jvm-request
-  "An MCP JVM evaluation: the host reader at the live `*ns*`, host `eval`, no
-  SCI observation or program facts; its evaluations are recorded as the run
-  of `:seon.agent/id`."
+  "Return a host-read/eval pass with render settings acquired from its starting basis."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
   [{world :seon.batch/world :as request}]
-  ;; the host evaluates: no SCI write observer, no program facts
-  (dissoc
-   (merge {:seon.batch/basis (world/basis world)
-           :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
-                                             :seon.batch/repairs []})
-          :seon.batch/read-next jvm-read-next
-          :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
-          :seon.batch/ns-name (fn [_] (ns-name *ns*))
-          :seon.batch/around (fn [{n :seon.batch/start-ns} body]
-                               (binding [*ns* (create-ns n)] (refer-clojure) (body)))
-          :seon.batch/show jvm-show
-          :seon.batch/fault world/record-fault
-          :seon.batch/within world/with-world
-          :seon.batch/settle settle
-          :seon.batch/start-ns 'user}
-         request)
-   :seon.batch/observe :seon.batch/derive))
+  (let [database (world/basis world)
+        settings (delay
+                   (let [effective (config/effective database (:seon.boot/cluster-name world))]
+                     {:seon.sci.admit/caps (config/result-caps effective)
+                      :seon.render/profile (render/agent-render-profile effective)}))]
+    ;; the host evaluates: no SCI write observer, no program facts
+    (dissoc
+     (merge {:seon.batch/basis database
+             :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
+                                               :seon.batch/repairs []})
+            :seon.batch/read-next jvm-read-next
+            :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
+            :seon.batch/ns-name (fn [_] (ns-name *ns*))
+            :seon.batch/around (fn [{n :seon.batch/start-ns} body]
+                                 (binding [*ns* (create-ns n)] (refer-clojure) (body)))
+            :seon.batch/show (fn [request entry]
+                               (jvm-show (update request :seon.batch/world #(merge @settings %)) entry))
+            :seon.batch/fault world/record-fault
+            :seon.batch/within world/with-world
+            :seon.batch/settle settle
+            :seon.batch/start-ns 'user}
+           request)
+     :seon.batch/observe :seon.batch/derive)))
 
 (defn test-request
   "A test agent's resolved body: one entry whose evaluation is the body, its

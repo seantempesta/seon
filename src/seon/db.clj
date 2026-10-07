@@ -1988,15 +1988,6 @@
 
     :else value))
 
-(defn- parsed-nodes
-  [root]
-  (tree-seq #(or (map? %) (coll? %))
-            #(cond
-               (map? %) (vals %)
-               (coll? %) %
-               :else nil)
-            root))
-
 (defn- installed-attribute-declarations
   [database]
   (into (sorted-map)
@@ -2150,8 +2141,10 @@
         input-values))
 
 (defn- query-patterns
+  "Return the data patterns collected by the Datalog parser's traversal."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [parsed-query]
-  (filter #(instance? Pattern %) (parsed-nodes (:qwhere parsed-query))))
+  (parser.impl/collect-type Pattern (:qwhere parsed-query)))
 
 (defn- parsed-node-value
   [node]
