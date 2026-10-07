@@ -57,3 +57,19 @@ design or edit. Read the evidence your assignment names end to end before design
 7. Tests (clojure-testing): through the agent's entrance, asserting DATA (error `:seon.error/type` plus the one member). Text only in the value printer's own tests. Tables for cases of one behavior. Never `with-redefs`/`alter-var-root`/`intern`. Don't add a test that re-expresses a schema or a wall-clock time.
 8. Read once and pass the value: no db reads in a loop (`pull-many`), no collection walked twice, eager across effects/binding/try.
 9. Today's lane mistakes: running uncommitted code in scratch namespaces in DEFAULT's JVM (use your own agent's SCI branch); shared scratch files crossing commit messages (only scratchpad/<lane>/); unverified tool-limit claims; patching around a wrong design instead of stopping with options; "pre-existing" findings left unrecorded.
+
+## Errors come back to you; you file the tasks (owner, 2026-10-07)
+
+Seon does not auto-create tasks from errors right now. Every error your calls cause comes back in the MCP reply
+(`:errors`, `:diagnostics`, `:findings`, each with a result handle to dig into). Read them in EVERY reply, and file
+tasks for them as a careful engineer would:
+
+- First search for an existing task on the same defect class (`(my.task/open (seon.db/db))`, `rg` in
+  `resources/seon/tasks/`). Link to it rather than duplicating it. One task per defect class, not per occurrence.
+- Create one with `seon.task/create!` on default, in the namespace of the producing function, named for the
+  behavior (`ns/what-is-wrong`). The intent says what happens, where, the exact reproducing form and value, and what
+  the correct behavior is. Name the proof test that should fail today.
+- An error that is your own mistake (a wrong call or a typo) is not a task: fix your form.
+- An error you expected the call to return is not a task.
+- If an error you saw did NOT come back in a reply (only in a log, a fault list or `bin/seon status`), that is a
+  delivery defect: file it under the boundary that dropped it.
