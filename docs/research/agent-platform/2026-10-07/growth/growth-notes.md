@@ -1,3 +1,9 @@
+---
+type: research
+status: reviewed-with-findings
+created: 2026-10-07
+---
+
 # growth lane notes (2026-10-07)
 
 Default pid 65136 on 42e569d9d, measured through `seon.mcp/call` from a JVM-mode probe namespace (`growth.probe`) for
@@ -133,11 +139,18 @@ A single deep value is linear (references on a nested map: 2.3 KB and ~3 us per 
 is proportional to the data kept (the recorder stores the referenced data whole, errors spec); the waste was walking
 one value once per mention.
 
-Fix: `post-order` folds a collection met again by identity once, reusing its first result (an `IdentityHashMap`
-local to the one walk). Work becomes proportional to the distinct data. EQUIVALENT in result: `open`/`step`/`close`
-are pure functions of the node, so a reused result equals a recomputed one; repeated members now share one rebuilt
-value. Regression: `seon.error.shared-data-test/a-value-repeated-under-every-problem-is-referenced-once` (300 problems
-sharing a 10,000-deep value holding a place: every problem keeps the identical rebuilt value).
+Fix: `post-order` folds a completed composite met again by identity once, reusing its first result (an
+`IdentityHashMap` local to the one walk). For stable, finite acyclic values and deterministic node callbacks, the
+fold's visits follow distinct composite nodes plus their outgoing edges. Leaves are not memoized. Collection
+updates, hashing and identity projection have their own costs; this is not a bound on all data admitted by `:any`.
+EQUIVALENT in value equality under those preconditions; rebuilt repeated members now share identity. BEHAVIOR
+CHANGE for the broader callable contract: a stateful projector under a repeated map produces `[{ :x 1} {:x 2}]`
+on the parent and `[{ :x 1} {:x 1}]` on the change. The contract does not require purity. Root must settle that
+semantic scope; see [the independent review](review-growth-codex-notes.md), including reproduction and options.
+Regression: `seon.error.shared-data-test/a-value-repeated-under-every-problem-is-referenced-once` (300 problems
+sharing a 10,000-deep value holding a place: every problem keeps the identical rebuilt value). The review measured
+the same shared-depth input on SCI copies of parent/change: 11,336.9/93.8 ms and 7,249,546,240/27,523,840
+thread-allocated bytes. These are private SCI probes, not proof of installation or a test run.
 
 Not fixed here (held files, patches for root in §6): `seon.db/q` handing its raw argument to `refused-read`; the
 instrument refusal building 326 problems that each carry the whole argument (133 MB for one refusal of a 50-deep
@@ -199,8 +212,9 @@ Measured with 2,766 live cells (thread-allocated; the window's own `begin`/`expl
   `references` all go through it. It is a local accumulator of one fold, not an atom or a cache; nothing outlives
   the call.
 - Awkward: the recorder still walks the error data more than once per fault (`chain` per link, then `references` on
-  the refusal in `prepare`, then admission); each walk is now proportional to distinct data. Sharing one walk across
-  them needs `seon.error` (held).
+  the refusal in `prepare`, then admission). The memo is per walk, not shared across those calls. Its fold visits
+  follow distinct composites and edges under §3's preconditions; hashing an opaque leaf can still realize a lazy
+  sequence or overflow on cyclic Java data. Sharing one walk across calls needs `seon.error` (held).
 - Item 1's design held only as a diagnosis: the producer is Datahike's planner, so the fix is a dependency decision.
 
 ## Commits and tasks
