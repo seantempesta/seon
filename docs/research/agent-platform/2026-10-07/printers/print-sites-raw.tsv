@@ -1,0 +1,546 @@
+file	line	pattern	fn	class-guess	text
+src/seon/mcp.clj	301	clip-fn	arguments	clip	(refused (str "Invalid arguments: " (print.value/bounded-text (me/humanize explanation)))
+src/seon/mcp.clj	328	id/printed	runtime-status	hash/id	source (str "(seon.health/report {:seon.boot/cluster-name " (id/printed running-name) "})")]
+src/seon/mcp.clj	385	clip-fn	call	clip	[[(printed (refused (str "Unknown tool " (print.value/bounded-text tool) ".") :seon.mcp/name
+src/seon/mcp.clj	393	subs	call	clip	source (str/trim (subs request 0 (min 200 (count request))))]
+src/seon/test.clj	1117	pr-str	admission-refusal!	error-message	(when-not (coll? expected) (str ", expected " (pr-str expected)))
+src/seon/test.clj	1728	clip-fn	world-refusal	error-message	:seon.error/offending (print.value/bounded-text (:seon.error/offending refusal) 400)}))
+src/seon/test.clj	2076	clip-fn	member-result	clip	(print.value/bounded-text drifted)))))]
+src/seon/id.clj	49	print-vars	print-canonical!	clip	`*print-length*`, `*print-meta*` or other print binding cannot change the
+src/seon/id.clj	54	print-vars	print-canonical!	clip	(binding [*out* writer *print-length* nil *print-level* nil *print-meta* false *print-dup* false
+src/seon/id.clj	96	clip-fn	id	hash/id	"SHA-256 of the canonical EDN text of data ([[printed]]), truncated to n
+src/seon/id.clj	112	subs	id	hash/id	(subs (printed-digest data) 0 n)))
+src/seon/blob.clj	47	pr-str	store-faithful-edn	other	(let [serialized (binding [*print-meta* true] (pr-str value))
+src/seon/db.clj	539	pr-str	foreign-connection-error	error-message	(str "This write names branch " (pr-str explicit-branch)
+src/seon/db.clj	541	pr-str	foreign-connection-error	other	(pr-str ambient-branch)
+src/seon/db.clj	544	pr-str	foreign-connection-error	other	(pr-str explicit-branch)
+src/seon/db.clj	1179	pr-str	replay-read	error-message	(pr-str (:seon.db/read-operation request)) ".")
+src/seon/db.clj	1393	println	projection-fallback	log/console	(println "WARN seon.db/projection-fallback caller=" operation
+src/seon/db.clj	2002	pr-str	unknown-attribute-error	error-message	(pr-str attribute) ".")
+src/seon/db.clj	2015	pr-str	value-type-error	error-message	{:seon.error/message (str operation " received " (pr-str value) " for "
+src/seon/db.clj	2016	pr-str	value-type-error	error-message	(pr-str attribute) ", whose installed value type is "
+src/seon/db.clj	2017	pr-str	value-type-error	error-message	(pr-str (:db/valueType declaration)) ".")
+src/seon/db.clj	2044	pr-str	lookup-ref-error	error-message	(pr-str attribute) " is not unique.")
+src/seon/db.clj	2665	pr-str	query-argument-message	error-message	(str "seon.db/q :in " (pr-str (get query-form :in '[$]))
+src/seon/db.clj	2667	pr-str	query-argument-message	other	(pr-str (mapv #(if (db.utils/db? %) 'database %) arguments))
+src/seon/db.clj	2954	pr-str	pull-call	error-message	{:seon.error/message (str public-operation " received invalid arguments " (pr-str arguments)
+src/seon/db.clj	3518	pr-str	rejection-message	other	(pr-str (::conflict-attribute conflict))
+src/seon/db.clj	3519	pr-str	rejection-message	other	" value " (pr-str (::conflict-value conflict))
+src/seon/db.clj	3521	pr-str	rejection-message	other	(pr-str (or (::conflict-owner conflict) "an existing entity"))
+src/seon/db.clj	3956	pr-str	write-error-identity	error-message	(update :seon.error/message #(str % " Entity: " (pr-str identities) "."))
+src/seon/db.clj	4121	pr-str	write-owned-values-error	error-message	:seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
+src/seon/db.clj	4802	pr-str	removed-definition-error	error-message	(pr-str breaks)
+src/seon/db.clj	5272	pr-str	write-digest-error	hash/id	(str "The stored definition digest of " (pr-str [identity-attribute (get entity-map identity-attribute)])
+src/seon/db.clj	5502	pr-str	retention-check	error-message	"Cannot retract " (pr-str (first key)) " of "
+src/seon/db.clj	5503	pr-str	retention-check	other	(pr-str (or (:seon.db/entity prior) (:seon.db/entity current)))
+src/seon/db.clj	5504	pr-str	retention-check	other	"; tests " (pr-str (mapv #(get-in prior [:seon.db/value-identities %])
+src/seon/error.clj	144	subs	frame-site	clip	(cond (and cut (digits? (subs text (+ cut 2)))) (subs text 0 cut)
+src/seon/error.clj	145	subs	frame-site	clip	(and (str/starts-with? text "eval") (digits? (subs text 4))) "eval"
+src/seon/error.clj	149	subs	frame-site	clip	(recur (subs text (inc cut)) (conj found (subs text 0 cut)))
+src/seon/error.clj	171	id/id	signature	hash/id	(id/id [(:seon.error/layer observation)
+src/seon/error.clj	357	clip-fn	bounded-text	clip	(defn- bounded-text
+src/seon/error.clj	467	pr-str	fit-fact-payload	other	available (max 1 (- inline-limit (blob/utf8-size (pr-str base-fact))))]
+src/seon/error.clj	473	clip-fn	fit-fact-payload	error-message	(bounded-text message-value field-caps projection)
+src/seon/error.clj	481	clip-fn	fit-fact-payload	clip	(bounded-text expected field-caps projection))
+src/seon/error.clj	484	clip-fn	fit-fact-payload	clip	(bounded-text arguments field-caps projection))
+src/seon/error.clj	487	clip-fn	fit-fact-payload	clip	(bounded-text (val actual) field-caps projection)))]
+src/seon/error.clj	488	pr-str	fit-fact-payload	other	(if (or (<= (blob/utf8-size (pr-str fact)) inline-limit)
+src/seon/error.clj	540	id/id	offending-record	hash/id	(assoc :seon.error/offending-digest (id/id (:seon.sci.admit/value whole) 64)))))
+src/seon/error.clj	854	clip-fn	bound-text	clip	(defn- bound-text
+src/seon/error.clj	878	clip-fn	schema-expectation	clip	bound (bound-text (or (m/properties check) {}))
+src/seon/error.clj	949	pr-str	explain-problem	other	missing? (str "the required key " (pr-str (last path)) " with " expected)
+src/seon/error.clj	955	pr-str	explain-problem	other	missing? (str "a map missing " (pr-str (last path)))
+src/seon/error.clj	960	pr-str	explain-problem	other	missing? (str "Supply " (pr-str (last path)) " with " expected ".")
+src/seon/error.clj	967	pr-str	explain-problem	other	(when (seq path) (str " at " (pr-str (vec path)))) "."))}
+src/seon/error.clj	984	pr-str	problem-parts	other	(when (seq path) (str " at " (pr-str path)))
+src/seon/error.clj	1022	pr-str	scalar-text	other	(pr-str value)))
+src/seon/error.clj	1249	id/id	notification-id	hash/id	(id/id (cond-> [error-signature recipient] (not= 0 opening-token) (conj opening-token))))
+src/seon/error.clj	1264	clip-fn	message-tx	error-message	:seon.message/content (print.value/bounded-text (value fact))
+src/seon/error.clj	1282	id/id	producer-task	hash/id	:seon.task/id (id/id [task-ns task-name :function])
+src/seon/error.clj	1608	id/id	recording	hash/id	(id/id (into (sorted-map)
+src/seon/error.clj	1873	pr-str	evidence-path	other	{:entity (pr-str [:seon.error/id id])
+src/seon/error.clj	2253	clip-fn	reply-html	clip	(let [shown (fn [value] [:code (print.value/bounded-text value)])
+src/seon/error.clj	2282	clip-fn	reply-html	clip	(map (fn [frame] [:li [:code (print.value/bounded-text frame)]]))
+src/seon/error.clj	2344	pr-str	render-html	other	{:entity (pr-str reference)})}
+src/seon/error.clj	2361	pr-str	render-html	other	{:entity (pr-str turn-ref)})}
+src/seon/error.clj	2388	pr-str	fault-entities	error-message	:seon.error/message (str "Fault entity was not acquired: " (pr-str fault))})))
+src/seon/error.clj	2535	pr-str	evidence-text	other	(str/join "\n" (map (fn [[attribute value]] (str attribute "=" (pr-str value))) evidence))))
+src/seon/error.clj	2571	pr-str	elision-html	other	[:dd (pr-str evidence-value)]]))
+src/seon/error.clj	2743	pr-str	^:private	other	(cond-> {:seon.error.key/projection (pr-str scalar)
+src/seon/fn.clj	58	pr-str	require-committed!	error-message	(pr-str (select-keys result [:seon.db/attribute :seon.db/offending]))
+src/seon/fn.clj	59	pr-str	require-committed!	error-message	" Entity: " (pr-str (get-in result [:seon.error/data :seon.db/entity])))
+src/seon/fn.clj	114	format	sha-256	hash/id	(apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
+src/seon/fn.clj	127	subs	text-context	clip	(alength (.getBytes (subs text start end) StandardCharsets/UTF_8)))
+src/seon/fn.clj	178	subs	exact-source	error-message	(subs text
+src/seon/fn.clj	192	subs	exact-form-span	clip	(alength (.getBytes (subs text start stop)
+src/seon/fn.clj	564	pr-str	^:private	other	(pr-str (schema/canonical-definition
+src/seon/fn.clj	789	pr-str	var-entity	other	(pr-str (schema/canonical-definition
+src/seon/fn.clj	990	pr-str	runtime-analysis-batch	other	(pr-str (runtime-namespace-form
+src/seon/fn.clj	1267	pr-str	analyze-forms	error-message	(pr-str namespace-ref)
+src/seon/fn.clj	1473	subs	namespace-context	clip	[(symbol (subs class-name (inc (or (str/last-index-of class-name ".") -1))))
+src/seon/fn.clj	1647	id/id	lint-entities	hash/id	(conj result (cond-> {:seon.lint/id (id/id [signature occurrence])
+src/seon/fn.clj	2718	pr-str	manifest-data	hash/id	(pr-str (mapv (juxt :seon.fn.file/relative-path
+src/seon/fn.clj	4026	pr-str	reconciled-paths	error-message	(pr-str missing))
+src/seon/fault.clj	275	pr-str	record!	error-message	:seon.error/message (str "No open connection to branch " (pr-str branch)
+src/seon/fault.clj	354	clip-fn	print-unrecorded!	clip	(let [text (apply str (interpose "\n" (cons (print.value/bounded-text evidence)
+src/seon/schedule.clj	126	clip-fn	overlap-twin	clip	local (.toLocalDateTime (.truncatedTo reference ChronoUnit/MINUTES))
+src/seon/problems.clj	513	subs	resolution-text	hash/id	(cond digest-now (str "by change to " producer " (" (subs digest-then 0 8) "→" (subs digest-now 0 8) ")")
+src/seon/problems.clj	581	pr-str	html-report	error-message	"offending" (pr-str (:seon.error/offending entry)))))
+src/seon/problems.clj	635	pr-str	ai-prose	error-message	" Offending: " (pr-str (:seon.error/offending entry))))
+src/seon/print.cljc	16	print-vars	literal	printer-owner	*print-length* nil *print-level* nil *print-meta* false]
+src/seon/print.cljc	17	pr-str	literal	printer-owner	(pr-str value)))
+src/seon/print.cljc	140	clip-fn	node-generator	printer-owner	(gen/fmap (fn [value] {::face ::truncated-string
+src/seon/print.cljc	307	subs	continuation	printer-owner	offset: `(drop n …)` for members, `(subs … n)` for characters, over the
+src/seon/print.cljc	314	subs	continuation	printer-owner	(subs (get-in result/e7b3 [:rows 0 :title]) 16)"
+src/seon/print.cljc	396	clip-fn	^:private	printer-owner	::inst ::uuid ::var ::type ::class ::object ::truncated-string
+src/seon/print.cljc	452	clip-fn	leaf-ops	printer-owner	::truncated-string [(text-op ::string (literal (str value "…")))]
+src/seon/schema.clj	167	pr-str	assert-acyclic-references!	other	(pr-str cycle-path)
+src/seon/schema.clj	359	pr-str	compilable-form	error-message	(str "Predicate " (pr-str predicate)
+src/seon/schema.clj	701	pr-str	canonical-definition	hash/id	(pr-str value) " declares no output. Name the returned shape: "
+src/seon/schema.clj	705	pr-str	canonical-definition	error-message	:seon.error/message (str "The function schema " (pr-str value)
+src/seon/schema.clj	760	pr-str	canonical-definition	other	encoded (pr-str canonical)
+src/seon/schema.clj	1092	subs	frame-namespace	clip	(if (neg? separator) demunged (subs demunged 0 separator))))
+src/seon/schema.clj	1142	println	warn-classpath-fallback!	log/console	(println (str "seon.schema: DECLARATION POPULATION FALLBACK ×"
+src/seon/schema.clj	1400	pr-str	malli-form?	hash/id	(let [encoded (pr-str value)
+src/seon/schema.clj	1775	pr-str	register-candidate!	other	(let [encoded (pr-str v)
+src/seon/schema.clj	2021	pr-str	render-contract-refusal!	other	(str " whose declared input " (pr-str render-input)
+src/seon/schema.clj	3269	id/id	pulled-schema-key	hash/id	(keyword "seon.schema.pulled" (id/id [schema-key selector])))
+src/seon/schema.clj	3500	id/id	projection-with-pulled-form-in	hash/id	cache-key [::pulled-form (id/id [schema-key selector])]]
+src/seon/schema.clj	3742	pr-str	canonical-schema-entities	other	(binding [*print-namespace-maps* false] (pr-str (get forms schema-key)))
+src/seon/schema.clj	4102	pr-str	bind-contract-predicates	error-message	(str "Contract predicate " (pr-str predicate)
+src/seon/repl.clj	107	print-vars	source-text	clip	(binding [*print-namespace-maps* false *print-length* nil *print-level* nil
+src/seon/repl.clj	177	pr-str	data-text	other	(pr-str text)
+src/seon/repl.clj	211	pr-str	response-entries	other	(binding [*print-namespace-maps* true] (pr-str found)))
+src/seon/repl.clj	222	pr-str	response-entries	other	(pr-str interrupted-at))
+src/seon/repl.clj	228	pr-str	response-entries	other	:seon.repl/out (when (seq output) (pr-str output))
+src/seon/repl.clj	246	clip-fn	response-entries	clip	(print.value/bounded-text (vec (sort-by (comp - second) repeated))))}]
+src/seon/repl.clj	400	pr-str	text	other	(str "\n;; full value: " (pr-str (list 'get-in full-handle [])))))))
+src/seon/repl.clj	435	subs	syntax-tokens	clip	token (subs source position end)
+src/seon/repl.clj	468	subs	render-emission-html	clip	(when (pos? prefix-length) (syntax-spans (subs emitted 0 prefix-length)))
+src/seon/repl.clj	469	subs	render-emission-html	clip	[:span {:class "seon-syntax-prompt"} (subs emitted prefix-length prompt-end)]
+src/seon/repl.clj	470	subs	render-emission-html	clip	(syntax-spans (subs emitted prompt-end input-end))
+src/seon/repl.clj	476	subs	render-emission-html	clip	(subs emitted (inc input-end))
+src/seon/repl.clj	477	subs	render-emission-html	clip	(syntax-spans (subs emitted (inc input-end))))]))]))
+src/seon/repl.clj	610	pr-str	render-html	other	(:seon.render.value/root-description live) [:pre (pr-str live)]
+src/seon/turn.clj	1677	pr-str	render-ai	other	(str "Run " id (when opened (str ", opened " (pr-str opened))) ". "
+src/seon/turn.clj	1735	id/printed	unit-read	hash/id	(cond-> {:seon.cluster.eval/source (id/printed (:seon.repl/form entry))}
+src/seon/turn.clj	2160	clip-fn	system-turn	clip	#(str/join "\n" (remove nil? [% (print.value/bounded-text [fault])])))
+src/seon/turn.clj	2201	pr-str	system-turn	other	(pr-str {:seon.repl/changes changed})))) )
+src/seon/turn.clj	3309	clip-fn	with-diagnostic	clip	#(str/join "\n" (remove nil? [% (print.value/bounded-text [error])])))))
+src/seon/turn.clj	3774	pr-str	proposal-text	other	(str "Evaluation " ordinal " proposed deleting " (pr-str (second identity))
+src/seon/turn.clj	3776	pr-str	proposal-text	other	(str/join ", " (map #(pr-str (:seon.program/referrer %)) referrers)) ".")
+src/seon/turn.clj	3778	pr-str	proposal-text	other	(when identity (str " with deleting " (pr-str (second identity))))
+src/seon/turn.clj	3808	pr-str	settle-batch-refusal!	other	(binding [*print-length* nil *print-level* nil] (pr-str proposals))))
+src/seon/turn.clj	3808	print-vars	settle-batch-refusal!	clip	(binding [*print-length* nil *print-level* nil] (pr-str proposals))))
+src/seon/turn.clj	4006	clip-fn	attempt-evidence	clip	[:seon.ai/truncation {:optional true} :seon.ai/stream-truncated-error]]]}
+src/seon/turn.clj	4008	clip-fn	attempt-evidence	clip	(let [truncation (or (:seon.ai/truncation completion)
+src/seon/turn.clj	4032	clip-fn	attempt-evidence	clip	truncation (assoc :seon.ai/truncation truncation))))
+src/seon/turn.clj	4080	clip-fn	record-attempt!	clip	"Commit ONE model attempt and its error or truncation facts.
+src/seon/turn.clj	4112	clip-fn	record-attempt!	clip	[:seon.ai/truncation {:optional true} :seon.ai/stream-truncated-error]]
+src/seon/turn.clj	4126	clip-fn	record-attempt!	clip	truncation :seon.ai/truncation} request
+src/seon/turn.clj	4133	clip-fn	record-attempt!	clip	truncation (if retain-reasoning? truncation
+src/seon/turn.clj	4134	clip-fn	record-attempt!	clip	(cond-> (dissoc truncation :seon.ai/reasoning-content)
+src/seon/turn.clj	4135	clip-fn	record-attempt!	clip	(:seon.error/data truncation)
+src/seon/turn.clj	4161	clip-fn	record-attempt!	clip	truncation-recording
+src/seon/turn.clj	4163	clip-fn	record-attempt!	clip	(nil? truncation) nil
+src/seon/turn.clj	4164	clip-fn	record-attempt!	clip	(= truncation failure) failure-recording
+src/seon/turn.clj	4165	clip-fn	record-attempt!	clip	:else (error/recording cluster db :seon.ai/stream-truncated-error truncation now attribution))
+src/seon/turn.clj	4167	clip-fn	record-attempt!	clip	(when (not= truncation failure)
+src/seon/turn.clj	4168	clip-fn	record-attempt!	clip	(:seon.db/tx-data truncation-recording)))
+src/seon/turn.clj	4187	clip-fn	record-attempt!	clip	truncation-recording
+src/seon/turn.clj	4188	clip-fn	record-attempt!	clip	(assoc :seon.ai.attempt/truncation
+src/seon/turn.clj	4189	clip-fn	record-attempt!	clip	(:db/id (first (:seon.db/tx-data truncation-recording))))
+src/seon/turn.clj	4192	pr-str	record-attempt!	other	(assoc :seon.ai.attempt/settings-edn (pr-str settings))
+src/seon/turn.clj	4194	pr-str	record-attempt!	other	{:seon.ai.attempt/usage-edn (pr-str usage)})
+src/seon/turn.clj	4213	clip-fn	record-attempt!	clip	(distinct (keep identity [failure-recording truncation-recording])))
+src/seon/turn.clj	5001	clip-fn	evaluate-sources	clip	#(str/join "\n" (remove nil? [% (print.value/bounded-text [fault])]))))]
+src/seon/turn.clj	5418	pr-str	episode-exhausted!	error-message	(str "Agent " (pr-str agent-id) " spent its " limit " episode runs; "
+src/seon/turn.clj	5554	pr-str	turn-completion-error	error-message	{:seon.error/message (str "Agent " (pr-str agent-id)
+src/seon/turn.clj	5556	pr-str	turn-completion-error	error-message	(str " run " (pr-str run-id))
+src/seon/turn.clj	5606	pr-str	dial-absent	error-message	{:seon.error/message (str "Cluster " (pr-str cluster-name) " declares no " dial
+src/seon/turn.clj	5607	pr-str	dial-absent	error-message	", so agent " (pr-str agent-id) "'s turn has no bound. Apply the config manifest.")
+src/seon/turn.clj	5691	pr-str	write-refusal-error	error-message	{:seon.error/message (str "Agent " (pr-str agent-id)
+src/seon/turn.clj	5692	pr-str	write-refusal-error	error-message	(if run-id (str " turn " (pr-str run-id)) " with no open turn")
+src/seon/edit.clj	22	subs	byte-span	clip	{:seon.edit/form-span [(utf8-bytes (subs text 0 start))
+src/seon/edit.clj	23	subs	byte-span	clip	(utf8-bytes (subs text 0 end))]})
+src/seon/edit.clj	40	subs	prefix-end-within	clip	next-bytes (utf8-bytes (subs text index next-index))]
+src/seon/edit.clj	52	subs	suffix-start-within	clip	previous-bytes (utf8-bytes (subs text previous-index index))]
+src/seon/edit.clj	59	subs	context-window	clip	(let [changed-bytes (utf8-bytes (subs source start end))]
+src/seon/edit.clj	62	subs	context-window	clip	{:my.edit/source-window (subs source start context-end)
+src/seon/edit.clj	71	subs	context-window	clip	(utf8-bytes (subs source context-start start)))
+src/seon/edit.clj	73	subs	context-window	clip	(utf8-bytes (subs source end context-end)))
+src/seon/edit.clj	78	subs	context-window	clip	{:my.edit/source-window (subs source final-start final-end)
+src/seon/edit.clj	212	pr-str	bounded-values	other	(let [value-bytes (utf8-bytes (pr-str value))]
+src/seon/edit.clj	231	subs	splice	clip	(str (subs source 0 start) fragment (subs source end)))
+src/seon/edit.clj	393	subs	replace-occurrences	clip	(conj parts (subs source previous-end position) new-string))
+src/seon/edit.clj	394	subs	replace-occurrences	clip	(apply str (conj parts (subs source previous-end)))))))
+src/seon/edit.clj	475	subs	lines	clip	actual (subs source start end)
+src/seon/render.clj	1480	pr-str	render-default-ai-source	other	(pr-str form))))
+src/seon/render.clj	1780	id/id	renderer-failure	hash/id	message-id (id/id (random-uuid) 8)
+src/seon/render.clj	1910	pr-str	walk	other	(pr-str effective)
+src/seon/render.clj	1915	pr-str	walk	other	(str "Cluster " (pr-str cluster-name)
+src/seon/render.clj	1917	pr-str	walk	other	(str "Agent " (pr-str agent-id)
+src/seon/render.clj	1950	pr-str	walk	other	(pr-str branch) "."))
+src/seon/instrument.clj	146	subs	caller-frame	clip	(subs frame-fn (count prefix)))))]
+src/seon/instrument.clj	314	pr-str	actionable-problem	other	(pr-str (:seon.error/path description)) "."))
+src/seon/instrument.clj	356	pr-str	attributed-problem	other	at (when (seq path) (str " at " (pr-str path)))]
+src/seon/instrument.clj	516	subs	violation	clip	unmarked (if (.startsWith written "_") (subs written 1) written)]
+src/seon/instrument.clj	714	id/printed	problem-location	hash/id	(let [printed (seon.id/printed k)]
+src/seon/ai.clj	177	format	usd-per-million	other	(format "$%.6f/M" (double value))))
+src/seon/ai.clj	214	format	model-ai	other	(str ", " (format "%.2f" (double rate)) " tokens/s"))
+src/seon/ai.clj	225	format	model-html	other	rate #(some-> % double (->> (format "%.2f")) (str " tokens/s"))]
+src/seon/ai.clj	675	subs	stream-event	clip	(str/trim (subs line 5)))]
+src/seon/ai.clj	981	clip-fn	interruptible-lines	clip	This is the whole reason a truncated stream can keep what arrived: the
+src/seon/ai.clj	995	clip-fn	truncation	clip	(defn- truncation
+src/seon/ai.clj	996	clip-fn	truncation	clip	"ONE flat `::stream-truncated` error value for a stream that ended
+src/seon/ai.clj	1001	clip-fn	truncation	clip	`:seon.ai/truncation`, so the same fact reaches the durable record
+src/seon/ai.clj	1007	clip-fn	truncation	clip	{:malli/schema [:=> [:cat :seon.ai/partial [:maybe :seon.error/throwable]] :seon.ai/stream-truncated-error]}
+src/seon/ai.clj	1017	clip-fn	truncation	clip	(declared-error :seon.ai/stream-truncated-error 'seon.ai/truncation
+src/seon/ai.clj	1030	clip-fn	truncated-completion	clip	(defn- truncated-completion
+src/seon/ai.clj	1036	clip-fn	truncated-completion	clip	ORDINARY completion carrying the truncation fact beside it —
+src/seon/ai.clj	1037	clip-fn	truncated-completion	clip	downstream settles the forms that arrived, and the truncation is
+src/seon/ai.clj	1039	clip-fn	truncated-completion	clip	partial to keep, so the truncation IS the outcome, and it says that
+src/seon/ai.clj	1045	clip-fn	truncated-completion	clip	{:malli/schema [:=> [:cat :seon.ai/partial [:maybe :seon.error/throwable]] [:or :seon.ai/successful-completion :seon.ai/stream-truncated-err
+src/seon/ai.clj	1047	clip-fn	truncated-completion	clip	(let [ended (truncation snapshot failure)]
+src/seon/ai.clj	1053	clip-fn	truncated-completion	clip	(assoc :seon.ai/truncation ended))
+src/seon/ai.clj	1073	clip-fn	streamed-completion	clip	and the transport ending early (`truncated-completion`, which keeps
+src/seon/ai.clj	1081	clip-fn	streamed-completion	clip	{:malli/schema [:=> [:cat :seon.blob/input-stream [:maybe :seon.ai/sink]] [:or :seon.ai/parsed-completion :seon.ai/stream-truncated-error]]}
+src/seon/ai.clj	1089	clip-fn	streamed-completion	clip	(some? failure) (truncated-completion snapshot failure)
+src/seon/ai.clj	1281	clip-fn	complete	clip	- `::stream-truncated` — 2xx whose stream ended before ANY assistant
+src/seon/ai.clj	1284	clip-fn	complete	clip	`:seon.ai/truncation` fact, so the turn keeps what was paid for.
+src/seon/call_preparation.clj	233	pr-str	coherent-supplier	other	(pr-str (m/type output)) ".")
+src/seon/batch.clj	190	subs	line-column	clip	(let [before (subs text 0 start)
+src/seon/batch.clj	232	clip-fn	source-of	clip	{:seon.batch/source (print.value/bounded-text (:seon.batch/form r))}
+src/seon/batch.clj	234	subs	source-of	clip	{:seon.batch/source (str/trimr (subs text (:seon.batch/start r) (:seon.batch/end r)))
+src/seon/batch.clj	420	clip-fn	evaluate-step	error-message	:seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil (print.value/bounded-text %)) bad)))}}))
+src/seon/maintenance.clj	234	clip-fn	rotate-logs!	clip	Copy and truncate run under System/out's and System/err's monitors, so a
+src/seon/cluster.clj	410	format	warn-low-space!	other	(format "LOW DISK SPACE under %s: %.2f GiB usable (%.1f%%); the boot continues."
+src/seon/cluster.clj	1520	clip-fn	require-coherent-program!	hash/id	(print.value/bounded-text (:seon.source/recorded-digests currentness))
+src/seon/cluster.clj	2128	subs	loaded-namespace-paths	clip	(subs path (count root))))))
+src/seon/cluster.clj	3167	pr-str	ensure-entity!	error-message	(str "Agent " (pr-str agent-id)
+src/seon/program.cljc	92	pr-str	edn-round-trip-symbol?	other	(pr-str value)))
+src/seon/program.cljc	731	pr-str	component-id	other	(str "seon.fn.contract/" function-symbol "/" (pr-str path)))
+src/seon/program.cljc	812	pr-str	map-binding-entries	other	(pr-str (get defaults local-binding)))))))
+src/seon/program.cljc	837	pr-str	key-kind	error-message	{:seon.schema.map-entry/key-edn (pr-str value)}))))
+src/seon/program.cljc	849	pr-str	typed-key-facts	hash/id	:seon.schema.map-entry/key-edn (pr-str value)}]
+src/seon/program.cljc	934	pr-str	binding-entity	other	:seon.fn.binding/form (pr-str binding)
+src/seon/program.cljc	943	pr-str	binding-entity	other	:seon.fn.binding/form (pr-str binding)
+src/seon/program.cljc	960	pr-str	binding-entity	other	:seon.fn.binding/form (pr-str binding)
+src/seon/program.cljc	1036	pr-str	label-facts	other	(cond-> {:seon.fn.argument/label-edn (pr-str label)}
+src/seon/program.cljc	1085	pr-str	arity-entity	other	:seon.fn.arity/arity (pr-str (:arity info))
+src/seon/agent.clj	27	pr-str	identity	error-message	:seon.error/message (str "No agent has id " (pr-str agent-id) ".")}
+src/seon/agent.clj	48	pr-str	archived?	error-message	:seon.error/message (str "No agent has id " (pr-str agent-id) ".")})))
+src/seon/agent.clj	218	format	render-settings-html	other	(integer? value) (format "%,d" value)
+src/seon/health.clj	579	clip-fn	report	error-message	:seon.error/message (str "No running cluster " (print.value/bounded-text cluster-name)
+src/seon/health.clj	641	clip-fn	^:private	clip	agent budget ten came to 841 tokens with every clue clipped (default,
+src/seon/health.clj	686	clip-fn	finding-item	clip	[:code (print.value/bounded-text (:seon.health/subject finding))] " "
+src/seon/health.clj	690	clip-fn	finding-item	clip	(str/join " · " (concat (map (fn [[ck v]] (str (name ck) " " (print.value/bounded-text v))) shown-clues)
+src/seon/health.clj	702	clip-fn	unit-section	clip	(cond (:seon.health/unit value) [:p {:class "seon-health-pending"} "deriving… " [:code (print.value/bounded-text (:seon.health/requery value
+src/seon/health.clj	703	clip-fn	unit-section	error-message	(:seon.error/at value) [:p {:class "seon-health-error"} (print.value/bounded-text (:seon.error/message value))]
+src/seon/health.clj	715	clip-fn	render-html	clip	[:code (print.value/bounded-text (:seon.health/basis value))]]
+src/seon/env.clj	58	pr-str	environment?	other	(pr-str (:seon.boot/cluster-name environment))
+src/seon/env.clj	60	pr-str	environment?	other	(pr-str (vec (sort (remove #{:seon.boot/cluster-name}
+src/seon/env.clj	90	pr-str	members-of	other	(symbol (pr-str (type value)))))
+src/seon/effect.clj	87	pr-str	render-ai	other	(pr-str (:seon.effect/interrupted-at unit))
+src/seon/effect.clj	90	pr-str	render-ai	other	(pr-str (:seon.effect/opened-at unit)) ".")))]
+src/seon/fs.clj	24	pr-str	write-edn-atomically!	other	(spit (.toFile temporary) (str (pr-str value) "\n"))
+src/seon/fs.clj	114	pr-str	admit-destructive-path!	other	"authority (" (pr-str root) "); the root is the disposable "
+src/seon/fs.clj	120	pr-str	admit-destructive-path!	other	(pr-str target) ")")
+src/seon/fs.clj	124	pr-str	admit-destructive-path!	other	(str "the deletion authority " (pr-str root-string)
+src/seon/fs.clj	126	pr-str	admit-destructive-path!	other	(pr-str (System/getProperty "user.dir"))
+src/seon/fs.clj	131	pr-str	admit-destructive-path!	other	(str "the deletion target " (pr-str target-string)
+src/seon/fs.clj	133	pr-str	admit-destructive-path!	other	(pr-str (System/getProperty "user.dir")))
+src/seon/fs.clj	150	pr-str	admit-destructive-path!	other	"this JVM declared operator root " (pr-str declared)
+src/seon/fs.clj	151	pr-str	admit-destructive-path!	other	", not " (pr-str working)
+src/seon/fs.clj	205	pr-str	log-deletion!	hash/id	(log/warn (str "seon recursive deletion: " (pr-str report)))
+src/seon/fs.clj	244	subs	canonical-relative-path	clip	(subs path (inc (count directory)))
+src/seon/task.clj	50	id/id	task-handle	hash/id	(id/id [ns name kind]))
+src/seon/task.clj	397	id/id	assign!	hash/id	:else (let [assignment (id/id [handle agent-id branch])
+src/seon/task.clj	582	id/id	propose!	hash/id	view (cond-> (assoc view :seon.task/proposal (id/id [key (:seon.task/commit view)]) :seon.task/merge (:seon.task/id entity))
+src/seon/background.clj	55	pr-str	poll	other	:my.background/result-observation (pr-str result-ref)
+src/seon/config.clj	599	pr-str	desired-tempid	other	(str "seon.config.initialization/" (pr-str config-identity)))
+src/seon/config.clj	673	clip-fn	require-functions!	error-message	:seon.error/message (str "Configuration names functions with no program entity: " (render.value/bounded-text missing))
+src/seon/bootstrap.clj	82	subs	render-help-html	clip	(let [source (subs remaining start)
+src/seon/bootstrap.clj	90	subs	render-help-html	clip	(recur (subs source length)
+src/seon/bootstrap.clj	91	subs	render-help-html	clip	(conj children (subs remaining 0 start)
+src/seon/bootstrap.clj	92	subs	render-help-html	clip	[:code (subs source 0 length)]))
+src/seon/bootstrap.clj	281	pr-str	supervision-tx	other	":args [(seon.db/db) " (pr-str agent-id) "] "
+src/seon/bootstrap.clj	290	pr-str	supervision-tx	error-message	(pr-str (list 'my.message/send
+src/seon/bootstrap.clj	309	pr-str	supervision-tx	other	{:seon.agent/id "root" :seon.turn/id turn-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/
+src/seon/bootstrap.clj	330	id/id	seed-tx	hash/id	message-id (id/id (random-uuid) 8)
+src/seon/cluster/status.clj	190	clip-fn	render-html	clip	(into [:dl] (map (fn [[k v]] [:div [:dt (name k)] [:dd (print.value/bounded-text v)]]) shown))]))
+src/seon/cluster/source.clj	82	subs	snapshot	clip	(sort-by #(subs (.getPath ^java.io.File %) prefix)))
+src/seon/cluster/source.clj	90	subs	snapshot	clip	:relative-path (subs (.getPath ^java.io.File entry) prefix)
+src/seon/cluster/source.clj	1140	subs	proven-file	clip	(let [start (alength (.getBytes (subs base-text 0 at) "UTF-8"))]
+src/seon/cluster/boot.clj	298	clip-fn	diagnostic	clip	(let [shown print.value/bounded-text]
+src/seon/cluster/boot.clj	406	println	memory-pressure-crossed!	error-message	(binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (print.value/bounded-text (:seon.error/message refusal))) (flush))
+src/seon/cluster/boot.clj	406	clip-fn	memory-pressure-crossed!	error-message	(binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (print.value/bounded-text (:seon.error/message refusal))) (flush))
+src/seon/cluster/boot.clj	823	clip-fn	banner	clip	(or (:seon.render.web/url ready) (print.value/bounded-text (:seon.boot/missing-layers ready)))
+src/seon/cluster/message.clj	161	pr-str	inbound-tx	error-message	:seon.error/message (str "There is no agent named " (pr-str id) ".")}
+src/seon/cluster/message.clj	175	id/id	inbound-tx	hash/id	[{:seon.message/id (id/id (random-uuid) 8)
+src/seon/cluster/message.clj	197	pr-str	delivery	error-message	:seon.message/refused-chain-limit (pr-str max-chain)
+src/seon/cluster/message.clj	220	pr-str	delivery	error-message	:seon.error/message (str "There is no agent named " (pr-str recipient) ".")}
+src/seon/cluster/message.clj	268	pr-str	data-link	other	{:entity (pr-str identity-ref)})}
+src/seon/cluster/message.clj	313	pr-str	format-ai	other	from-ref (str "An unresolved sender " (pr-str from-ref) " said")
+src/seon/cluster/message.clj	317	pr-str	format-ai	other	to-ref (str " to unresolved recipient " (pr-str to-ref)))
+src/seon/cluster/message.clj	708	pr-str	read	error-message	:seon.error/message (str "There is no message named " (pr-str message-id) ".")
+src/seon/cluster/message.clj	867	pr-str	send!	error-message	:seon.error/message (str (pr-str (:my.message/to candidate)) " lives on branch " (pr-str home)
+src/seon/cluster/wake.clj	254	clip-fn	declarations-refusal	error-message	"read as absent: " (render.value/bounded-text (vec (sort unindexed))))
+src/seon/cluster/agent.clj	181	pr-str	namespace-seed-call	other	(let [source (pr-str (list 'ns namespace-name
+src/seon/cluster/agent.clj	367	pr-str	render-id-html	other	(str "No agent entity carries the id " (pr-str agent-id) ".")]]
+src/seon/cluster/agent.clj	400	pr-str	render-situation-ai	other	(str " This run exists because of " (pr-str trigger) "."))
+src/seon/cluster/agent.clj	764	pr-str	submit-source-in-projection	other	(cond-> {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :se
+src/seon/cluster/prompt.clj	10	clip-fn	-	clip	clipping spot. [[select]] then chooses the NEWEST units the token budget can
+src/seon/cluster/prompt.clj	186	clip-fn	validate-request!	clip	(str "Prompt request is missing required input " (print.value/bounded-text missing) ".")
+src/seon/cluster/prompt.clj	399	pr-str	acquire-context-report	other	(pr-str (:seon.agent/id request))
+src/seon/cluster/store.clj	461	clip-fn	datahike-log!	error-message	`seon.print.value/bounded-text`, never whole."
+src/seon/cluster/store.clj	478	clip-fn	datahike-log!	clip	[(some-> id str) (print.value/bounded-text event)])})))
+src/seon/cluster/registry.clj	617	pr-str	retention-cutoff	other	(pr-str (:seon.config/cluster %)))
+src/seon/test/accretion.clj	87	clip-fn	render-failure	clip	"\narguments: " (print.value/bounded-text (:seon.test.accretion/arguments failure))
+src/seon/test/accretion.clj	92	clip-fn	render-failure	error-message	(print.value/bounded-text actual)))
+src/seon/test/runner.clj	233	pr-str	report-identity	hash/id	(pr-str [test-symbol
+src/seon/test/runner.clj	301	println	report-error!	log/console	(println "\nERROR in" (test/testing-vars-str event))
+src/seon/test/runner.clj	302	println	report-error!	error-message	(println (failure-message options event report))
+src/seon/test/runner.clj	304	println	report-error!	error-message	(println "  signature:" signature))))
+src/seon/test/runner.clj	320	println	report-event!	log/console	(println (str "\n" (str/upper-case (name (:type event))) " in")
+src/seon/test/runner.clj	322	println	report-event!	error-message	(println (failure-message options event report)))
+src/seon/test/runner.clj	439	clip-fn	run-vars!	error-message	"Worker-global state changed: " (value/bounded-text drift)))))
+src/seon/test/runner.clj	778	pr-str	reach-canonical	other	(map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
+src/seon/test/runner.clj	779	pr-str	reach-canonical	other	(set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
+src/seon/test/runner.clj	798	subs	reach-bits	clip	[(Long/parseUnsignedLong (subs leaf 0 16) 16) (Long/parseUnsignedLong (subs leaf 16 32) 16)]
+src/seon/test/runner.clj	1093	pr-str	reach-digests	hash/id	":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
+src/seon/test/runner.clj	1095	pr-str	reach-digests	hash/id	(pr-str (vec (take 10 (keys undigested)))) "."))
+src/seon/test/runner.clj	1217	id/id	report-entity	hash/id	(id/id [test-symbol (:seon.test/failure-identity report)
+src/seon/test/runner.clj	1407	id/id	prepare-failures!	hash/id	(assoc :seon.test.failure/id (id/id [test-symbol site ordinal])
+src/seon/test/cache.clj	195	subs	gitlink-digests	clip	(java.util.StringTokenizer. (subs line 0 tab))))]
+src/seon/test/cache.clj	196	subs	gitlink-digests	clip	[(subs line (inc tab))
+src/seon/test/cache.clj	237	pr-str	input-evidence-digest	hash/id	(hasch/hash->str (hasch/sha256 (.getBytes (pr-str (into (sorted-map) inputs)) "UTF-8"))))
+src/seon/web/jvm.clj	228	subs	split-once	clip	[(subs text 0 index)
+src/seon/web/jvm.clj	229	subs	split-once	clip	(subs text (+ index (count separator)))])))
+src/seon/web/jvm.clj	250	subs	unquote-parameter	clip	(subs value 1 (dec (count value)))
+src/seon/sci/forgive.clj	79	subs	skip-to	clip	(and (str/blank? (subs text ls p)) (fence-line? (subs text ls le))) (recur le)
+src/seon/sci/forgive.clj	139	subs	code-suffix	clip	(let [forms (structural-forms (subs tail i))]
+src/seon/sci/forgive.clj	150	subs	comment-rest-of-line	clip	tail (subs text start le)
+src/seon/sci/forgive.clj	152	subs	comment-rest-of-line	clip	prose (str/trim (if suffix (subs tail 0 suffix) tail))]
+src/seon/sci/forgive.clj	153	subs	comment-rest-of-line	clip	{:text (str (subs text 0 start) "; " prose (when suffix (str "\n" (subs tail suffix))) (subs text le))
+src/seon/sci/forgive.clj	161	subs	delimiter-repair	clip	(let [rest-text (subs text pos)
+src/seon/sci/forgive.clj	166	subs	delimiter-repair	clip	{:text (str (subs text 0 pos) candidate)
+src/seon/sci/forgive.clj	208	subs	next-form	clip	begins-line? (str/blank? (subs text ls start))
+src/seon/sci/forgive.clj	210	subs	next-form	clip	(str/blank? (subs text last-code-end start))
+src/seon/sci/forgive.clj	211	subs	next-form	clip	(not (str/includes? (subs text last-code-end start) "\n")))
+src/seon/sci/forgive.clj	214	subs	next-form	clip	marker (when (and reply? begins-line?) (re-find prompt (subs text start le)))
+src/seon/sci/forgive.clj	216	subs	next-form	clip	fixed (delay (when (and reply? (< start (count text)) (not (first-form-structural? (subs text start))))
+src/seon/sci/forgive.clj	223	subs	next-form	clip	[:redo (str (subs text 0 start) (subs text (+ start (count marker)))) start
+src/seon/sci/forgive.clj	232	subs	next-form	clip	source (when (contains? r :form) (subs text start (:end r)))]
+src/seon/sci/forgive.clj	244	subs	next-form	clip	(= (str/trim (subs text ls le)) (str/trim source))))
+src/seon/sci/forgive.clj	253	subs	next-form	clip	(not (code-line? (subs text ls le))))
+src/seon/sci/forgive.clj	287	subs	forms	clip	(conj out (str/trimr (subs t (:seon.batch/start r) (:seon.batch/end r))))
+src/seon/sci/forgive.clj	361	subs	segments	clip	(let [c (comment-of (subs repaired previous-end start))]
+src/seon/sci/forgive.clj	369	subs	segments	clip	end (let [c (comment-of (subs repaired (peek ends) start))
+src/seon/sci/forgive.clj	370	subs	segments	clip	rest-segments (segments (subs repaired end) mode)]
+src/seon/sci/forgive.clj	372	subs	segments	clip	#(into (conj found (cond-> {:seon.batch/source (subs repaired start end)}
+src/seon/sci/forgive.clj	375	subs	segments	clip	(str/blank? (subs repaired unread-from)) {:seon.batch/segments found}
+src/seon/sci/forgive.clj	376	subs	segments	clip	:else {:seon.batch/segments found :seon.batch/unread (str/trim (subs repaired unread-from))}))))
+src/seon/sci/reader.cljc	289	pr-str	function-declaration	other	{:seon.fn/arglists (pr-str arglists)
+src/seon/sci/reader.cljc	302	pr-str	function-declaration	other	schema (assoc :seon.fn/spec (pr-str schema))
+src/seon/sci/reader.cljc	340	pr-str	schema-declaration	other	:seon.schema/form (pr-str (nth form 2))})))
+src/seon/sci/reader.cljc	485	subs	skip-fences!	clip	(str/blank? (subs text (inc (.lastIndexOf text "\n" (dec offset))) offset))
+src/seon/sci/reader.cljc	486	subs	skip-fences!	clip	(fence-line? (subs text offset line-end)))
+src/seon/sci/reader.cljc	543	subs	read-events	clip	(let [consumed (subs text source-offset end)
+src/seon/sci/reader.cljc	548	subs	read-events	clip	source (subs text source-start source-end)
+src/seon/sci/reader.cljc	734	subs	error-event	clip	source (subs text start end)]
+src/seon/sci/reader.cljc	764	subs	recovering-events	clip	source (subs text absolute-start absolute-end)
+src/seon/sci/kernel.clj	145	pr-str	memory-pressure-error	other	(if (seq in-flight) (pr-str in-flight) "no open run") ".")
+src/seon/sci/admit.clj	89	id/printed	canonical-edn	hash/id	(id/printed value))
+src/seon/sci/admit.clj	185	pr-str	object-node	other	(assoc ::print/rep (pr-str (str (sci.types/getName value))))))
+src/seon/sci/admit.clj	353	subs	open-node	clip	::print/name (subs (str value) 2)})}
+src/seon/sci/admit.clj	580	clip-fn	semantic-leaf	clip	::print/truncated-string {::truncated-string (::print/value print-node)
+src/seon/sci/eval.clj	300	println	agent-test-ns	log/console	(println "\nTesting" (str (sci.namespaces/sci-the-ns* (sci.ctx-store/get-ctx) namespace-designator))))
+src/seon/sci/eval.clj	607	subs	bind-result!	clip	(swap! objects assoc (subs (name handle) 1) value))
+src/seon/sci/eval.clj	692	pr-str	namespace-source	other	(if declared? text (pr-str (list 'ns namespace-name)))
+src/seon/sci/eval.clj	698	pr-str	namespace-source	other	(map #(str "\n" (apply str (repeat (+ col 9) \space)) (pr-str %)) libspecs)
+src/seon/sci/eval.clj	700	subs	namespace-source	clip	(str (subs text 0 at) (apply str lines) (subs text at))))))
+src/seon/sci/eval.clj	1884	subs	example-start	clip	(or (some #(when (str/starts-with? line %) (str/trim (subs line (count %))))
+src/seon/sci/eval.clj	1903	subs	docstring-parts	clip	summary (if stop (subs flat 0 (inc stop)) flat)
+src/seon/sci/eval.clj	1904	subs	docstring-parts	clip	leftover (when stop (str/trim (subs flat (+ stop 2))))
+src/seon/sci/eval.clj	2652	print-vars	session-print-options	clip	A REPL session keeps a form's `set!` of `*print-length*` until another form
+src/seon/sci/eval.clj	3437	pr-str	failure-text	error-message	(some? message) (pr-str message)
+src/seon/sci/eval.clj	3502	subs	evaluated-source	clip	{:seon.render/source (apply str (conj shown (subs source offset)))}
+src/seon/sci/eval.clj	3520	subs	evaluated-source	error-message	(recur more end (conj shown (subs source offset end) "\n;=> "
+src/seon/sci/eval.clj	3601	clip-fn	shown-result	clip	[{:seon.render.value/diagnostics [failure]} (print.value/bounded-text value)]))
+src/seon/sci/eval.clj	3604	clip-fn	shown-result	clip	shown (if (string? shown) shown (print.value/bounded-text shown))]
+src/seon/sci/eval.clj	3630	clip-fn	shown-result	clip	(catch Throwable _ (print.value/bounded-text diagnostics)))))
+src/seon/sci/eval.clj	4002	subs	evaluate	clip	(subs x off (+ off len))
+src/seon/sci/arm.clj	64	pr-str	arm!	other	ctx {:seon.fn/sym sym :seon.fn/spec (pr-str contract) :seon.sci.eval/sci-var v}
+src/seon/render/test.clj	127	id/id	failure-html	hash/id	(or (:seon.test.report/id failure) (id/id failure)))))
+src/seon/render/hiccup.clj	280	pr-str	shorthand	error-message	:seon.render.hiccup/unparseable-tag (pr-str head)
+src/seon/render/hiccup.clj	281	pr-str	shorthand	other	:seon.error/data {::head (pr-str head)}
+src/seon/render/hiccup.clj	300	subs	shorthand	clip	tag (subs text 0 stop)]
+src/seon/render/hiccup.clj	303	pr-str	shorthand	other	{:seon.render.hiccup/unparseable-tag (pr-str head)
+src/seon/render/hiccup.clj	306	pr-str	shorthand	error-message	:seon.error/data {::head (pr-str head)}
+src/seon/render/hiccup.clj	319	subs	shorthand	clip	token (subs text (inc index) stop)]
+src/seon/render/hiccup.clj	322	pr-str	shorthand	other	{:seon.render.hiccup/unparseable-tag (pr-str head)
+src/seon/render/hiccup.clj	327	pr-str	shorthand	other	:seon.error/data {::head (pr-str head)}})
+src/seon/render/block.clj	82	subs	surface-id	clip	(let [text (subs (str name) 1)
+src/seon/render/walk.clj	118	subs	connection-attributes	clip	(keyword (namespace display) (subs (name display) 1))
+src/seon/render/walk.clj	220	clip-fn	connection-observation	clip	a returned count past it is the pull's truncation, reported always; reading
+src/seon/render/walk.clj	635	subs	declared-acquisition	clip	attribute (if reverse? (keyword (namespace display) (subs (name display) 1)) display)
+src/seon/render/walk.clj	813	subs	continue	clip	(if-some [entry (some-> (:seon.sci.eval/result-objects ctx) deref (find (subs (name node) 1)))]
+src/seon/render/walk.clj	1019	subs	joined	clip	:attachment ['[[?t ?a ?e]] (into [] (comp (mapcat val) (distinct) (map #(keyword (namespace %) (subs (name %) 1))))
+src/seon/render/walk.clj	1111	subs	finished-graph	clip	(definition? (keyword (namespace a) (subs (name a) 1))) (update m t (fnil conj #{}) e)
+src/seon/render/walk.clj	1288	clip-fn	related-html	clip	(when-let [[operation] (:seon.render/operations group)] [:code (print.value/bounded-text operation)])])))
+src/seon/render/web.clj	272	pr-str	debug-query-strings	other	:subject (pr-str (:seon.render.debug/subject debug-request))
+src/seon/render/web.clj	273	pr-str	debug-query-strings	other	:output (pr-str (:seon.render/output debug-request))
+src/seon/render/web.clj	281	pr-str	debug-query-strings	other	:path (pr-str (get-in debug-request
+src/seon/render/web.clj	287	pr-str	debug-query-strings	other	(pr-str (:seon.render.data/outgoing-cursor debug-request)))
+src/seon/render/web.clj	291	pr-str	debug-query-strings	other	(pr-str (:seon.render.data/incoming-cursor debug-request)))
+src/seon/render/web.clj	427	pr-str	surface-html	other	:data-walk-path (pr-str (:seon.render.walk/path unit))}]
+src/seon/render/web.clj	604	subs	forward-attribute	clip	(keyword (namespace attribute) (subs (name attribute) 1))
+src/seon/render/web.clj	726	pr-str	debug-value-html	other	[:pre (pr-str value)])
+src/seon/render/web.clj	753	pr-str	debug-subject-link	other	[:code (pr-str label)]])
+src/seon/render/web.clj	795	pr-str	debug-header-html	other	[:code (pr-str (:seon.render.debug/subject debug-request))]
+src/seon/render/web.clj	803	pr-str	debug-header-html	other	[:code (pr-str [attribute value])]))
+src/seon/render/web.clj	817	pr-str	debug-header-html	other	[:code (pr-str path)]
+src/seon/render/web.clj	826	pr-str	debug-header-html	other	[:code (pr-str (:seon.render.data/snapshot observation))]]
+src/seon/render/web.clj	829	pr-str	debug-header-html	hash/id	[:code (pr-str (:seon.source/digest program-identity))]]
+src/seon/render/web.clj	855	pr-str	graph-node-id	other	(pr-str [branch eid]))
+src/seon/render/web.clj	872	pr-str	graph-model	other	(let [id (pr-str [branch e a v tx])]
+src/seon/render/web.clj	885	pr-str	graph-model	other	(pr-str selected-eid))
+src/seon/render/web.clj	889	pr-str	graph-model	other	selected-label (pr-str eid))
+src/seon/render/web.clj	984	pr-str	debug-read-dependencies-html	other	(pr-str (:seon.render.call/basis-transaction entry))]
+src/seon/render/web.clj	2202	pr-str	watched-registration-keys	other	(into (sorted-set-by #(compare (pr-str %1) (pr-str %2)))
+src/seon/render/web.clj	2306	pr-str	unreportable-page-result	other	" — page " (pr-str registration-key)))
+src/seon/render/web.clj	3163	clip-fn	page-response	error-message	(text-response 503 (print.value/bounded-text (:seon.error/message database)))
+src/seon/render/web.clj	3233	pr-str	graph-node-name	other	attribute (pr-str named)
+src/seon/render/web.clj	3277	pr-str	node-attributes-html	other	[:a {:href (root-href (pr-str [a v]))} [:code (print.value/bounded-text v)]]))
+src/seon/render/web.clj	3277	clip-fn	node-attributes-html	clip	[:a {:href (root-href (pr-str [a v]))} [:code (print.value/bounded-text v)]]))
+src/seon/render/web.clj	3279	clip-fn	node-attributes-html	clip	shown #(if (refs %1) (print.value/bounded-text (if (map? %2) (:db/id %2) (mapv :db/id %2))) (print.value/bounded-text %2))
+src/seon/render/web.clj	3283	pr-str	node-attributes-html	other	[:code (pr-str (select-keys properties [:seon.render/ai :seon.render/html]))]]
+src/seon/render/web.clj	3288	clip-fn	node-attributes-html	clip	[:td [:code (print.value/bounded-text (projection-form projection a))]]]))]))
+src/seon/render/web.clj	3324	clip-fn	context-graph-model	clip	:label (str/join "  ·  " (cons (str (if schema (name schema) "unowned") " " (if (and (some? identity-value) (not (map? identity-value))) (pr
+src/seon/render/web.clj	3325	subs	context-graph-model	clip	:full (str (some-> schema str (subs 1)) " " named " · e" id)}}))
+src/seon/render/web.clj	3383	subs	graph-node-label	clip	[:span {:class "seon-graph-kind"} (if schema-key (subs (str schema-key) 1) "unowned")]
+src/seon/render/web.clj	3387	pr-str	graph-node-label	other	[:a {:class "seon-graph-reroot" :href (graph-debug-href agent-id query {"root" (pr-str [attribute named]) "more" nil})} "walk from here"])])
+src/seon/render/web.clj	3400	format	sent-context-html	other	(list [:p {:class "seon-graph-counts"} (format "%,d chars · ≈%,d tokens · %d segments" (count text) (tokens/estimate text)
+src/seon/render/web.clj	3403	clip-fn	sent-context-html	clip	[:pre {:class "seon-graph-prompt"} (print.value/bounded-text (dissoc composed :seon.db/db))])]))
+src/seon/render/web.clj	3472	subs	graph-debug-html	clip	{[(parse-long e) (keyword (subs a 1))] (parse-long o)} {}))
+src/seon/render/web.clj	3475	clip-fn	graph-debug-html	clip	(map (fn [[a x]] (str (name a) ": " (print.value/bounded-text x 28)))))
+src/seon/render/web.clj	3481	pr-str	graph-debug-html	other	[:h1 (str "Context · " (pr-str lookup) (when branch (str " · branch " branch)) " · viewed by " agent-id)]
+src/seon/render/web.clj	3490	pr-str	graph-debug-html	other	[:input {:name "root" :value (pr-str lookup) :spellcheck "false" :aria-label "walk root lookup"}]
+src/seon/render/web.clj	3495	format	graph-debug-html	other	(str (count order) (if (= 1 (count order)) " node" " nodes") " · ≈" (format "%,d" (reduce + (map size order))) " tokens · "
+src/seon/render/web.clj	3520	format	graph-debug-html	other	[:tr [:td level] [:td [:code (if k (subs (str k) 1) "unowned")]] [:td (count ids)] [:td (format "%,d" (reduce + (map size ids)))]])
+src/seon/render/web.clj	3520	subs	graph-debug-html	clip	[:tr [:td level] [:td [:code (if k (subs (str k) 1) "unowned")]] [:td (count ids)] [:td (format "%,d" (reduce + (map size ids)))]])
+src/seon/render/web.clj	3527	format	graph-debug-html	other	(format "%,d" (reduce + (map size (levels level)))) " tokens")]]]
+src/seon/render/web.clj	3648	pr-str	debug-response	other	[:div [:span "viewer"] [:code (pr-str viewer-namespace)]]
+src/seon/render/web.clj	3650	pr-str	debug-response	other	[:code (pr-str (:seon.render.debug/subject debug-request))]]
+src/seon/render/web.clj	3652	pr-str	debug-response	other	[:code (pr-str (db/database-value-identity db))]]
+src/seon/render/web.clj	3654	pr-str	debug-response	other	[:code (pr-str (:seon.render/output debug-request))]]]
+src/seon/render/web.clj	3709	clip-fn	health-response	error-message	(text-response 503 (print.value/bounded-text (:seon.error/message database)))
+src/seon/render/web.clj	3747	pr-str	create-owner-response	other	(text-response 422 (pr-str owner)))))))
+src/seon/render/web.clj	3769	clip-fn	context-action-response	clip	(text-response 422 (print.value/bounded-text result))
+src/seon/render/web.clj	3788	clip-fn	received-response	error-message	(text-response 422 (print.value/bounded-text result)))))
+src/seon/render/web.clj	3940	clip-fn	failure-response	clip	(text-response 500 (print.value/bounded-text value))))))
+src/seon/render/schema.clj	136	id/printed	link	hash/id	[:a {:href (render.route/path :seon.render.route/data {} {:entity (id/printed [identity-attribute value])})}
+src/seon/render/schema.clj	156	clip-fn	check-html	clip	[:code (print.value/bounded-text (second failing-example))]])]))
+src/seon/render/schema.clj	168	clip-fn	render-html	clip	form-text (fn [form] [:pre [:code (print.value/bounded-text form)]])]
+src/seon/render/var.clj	156	clip-fn	render-html	clip	(when contract [:li (str "contract " (name contract) ": ") [:code (render.value/bounded-text example)]])
+src/seon/render/transcript.clj	405	clip-fn	floor-text	clip	"One history value as the value renderer's text, the one clipping spot.
+src/seon/render/transcript.clj	426	pr-str	message-text	error-message	sentence (str (pr-str (list 'my.message/read {:my.message/id (:seon.message/id entity)})) "\n"
+src/seon/render/transcript.clj	779	pr-str	turn-header	other	[:dt "Opened"] [:dd (pr-str (get-in entity [:seon.turn/opened-tx :db/txInstant]))]
+src/seon/render/transcript.clj	988	format	runtime-duration	other	(< millis 60000) (format "%.1f s" (/ millis 1000.0))
+src/seon/render/transcript.clj	989	format	runtime-duration	other	(< millis 120000) (format "%.0f s" (/ millis 1000.0))
+src/seon/render/transcript.clj	997	pr-str	runtime-message-link	error-message	[:a {:href (route/path ::route/data {} {:entity (pr-str [:seon.message/id message-id])})}
+src/seon/render/transcript.clj	1100	format	attempt-html	other	" · prompt tokens: " (if-let [n (::prompt usage)] (format "%,d" n) "unavailable")
+src/seon/render/transcript.clj	1101	format	attempt-html	other	" · completion tokens: " (if-let [n (::out usage)] (format "%,d" n) "unavailable")
+src/seon/render/transcript.clj	1103	format	attempt-html	other	(format "%,d" n) "unavailable")
+src/seon/render/transcript.clj	1104	format	attempt-html	other	" · miss: " (if-let [n (::miss usage)] (format "%,d" n) "unavailable"))]))
+src/seon/render/transcript.clj	1318	format	render-session	other	(str (format "%,d" (blob/utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
+src/seon/render/transcript.clj	1477	pr-str	outline-unit	other	(str "declared by " (pr-str declared))])
+src/seon/render/transcript.clj	1481	format	outline-unit	other	(str "≈" (format "%,d" (tokens/estimate bytes calibration)) " tokens")]]
+src/seon/render/transcript.clj	1522	format	outline-everything	other	(format "%,d" (blob/utf8-size text)) " bytes · ≈"
+src/seon/render/transcript.clj	1523	format	outline-everything	other	(format "%,d" (tokens/estimate text)) " tokens")))]
+src/seon/render/transcript.clj	1601	format	render-outline	other	(str "≈" (format "%,d" (tokens/estimate turn-bytes calibration)) " tokens")]]
+src/seon/render/transcript.clj	1658	clip-fn	reply-intent	clip	"The reply's first comment line, whole: HTML never clips."
+src/seon/render/transcript.clj	1785	format	ledger-turn-body	other	"seon" (str (count generated) " emissions · " (format "%,d" added-bytes) " bytes"))
+src/seon/render/transcript.clj	1818	format	ledger-turn-body	other	(str ": " (format "%,d" (blob/utf8-size capture)) " bytes · "
+src/seon/render/transcript.clj	1821	format	ledger-turn-body	other	(str "rebuilt ≈" (format "%,d" (tokens/estimate capture calibration)) " tokens"))))
+src/seon/render/transcript.clj	1822	format	ledger-turn-body	other	(when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
+src/seon/render/transcript.clj	1827	format	ledger-turn-body	other	(ledger-heading "AGENT REPLIED" "agent" (str (format "%,d" (blob/utf8-size reply)) " bytes"))
+src/seon/render/transcript.clj	1985	subs	render-captured-prefix	clip	(str/ends-with? text suffix) (subs text 0 (- (count text) (count suffix)))
+src/seon/render/transcript.clj	2104	format	budget-html	other	(str (format "%,d" (get (::totals budget) k 0)) " " label)))
+src/seon/render/transcript.clj	2105	format	budget-html	other	" · " (cond (number? (::cost budget)) (format "$%.5f at rates on file" (double (::cost budget)))
+src/seon/render/transcript.clj	2145	format	problems-html	other	[:div [:p (str (::detail group) " · " (format "%,d" (::bytes group)) " bytes")]
+src/seon/render/transcript.clj	2193	format	ledger-strip	other	(format "%tT" opened))
+src/seon/render/transcript.clj	2194	format	ledger-strip	other	" · " (format "%,d" amount) " bytes added"
+src/seon/render/transcript.clj	2202	format	ledger-strip	other	(str (if (number? value) (format "%,d" value) "unavailable") " " label)))))
+src/seon/render/transcript.clj	2265	format	render-ledger	other	" · " (format "%,d" (get usage ::prompt 0)) " in / "
+src/seon/render/transcript.clj	2266	format	render-ledger	other	(format "%,d" (get usage ::out 0)) " out"))
+src/seon/render/value.clj	11	clip-fn	-	printer-owner	output included; nothing else clips.
+src/seon/render/value.clj	76	clip-fn	bounded-text	printer-owner	(defn bounded-text
+src/seon/render/value.clj	77	clip-fn	bounded-text	printer-owner	"`value` as at most `limit` characters: `seon.print.value/bounded-text`, the
+src/seon/render/value.clj	83	clip-fn	bounded-text	printer-owner	([value] (print.value/bounded-text value))
+src/seon/render/value.clj	84	clip-fn	bounded-text	printer-owner	([value limit] (print.value/bounded-text value limit)))
+src/seon/render/value.clj	154	pr-str	render-database-identity-ai	printer-owner	(str "database " (pr-str (:db-name unit))
+src/seon/render/value.clj	255	pr-str	node-id	error-message	:seon.render.value/root-description (pr-str identity-members)
+src/seon/render/value.clj	271	pr-str	path-url	printer-owner	"path=" (encoded (pr-str path)) "&offset=" offset)))
+src/seon/render/value.clj	582	pr-str	leaf-width	printer-owner	(count (pr-str (::print/value node)))
+src/seon/render/value.clj	772	pr-str	diagnostic-line	printer-owner	(str ";; renderer failed at " (pr-str path) ", value printed as data: "
+src/seon/render/value.clj	773	clip-fn	diagnostic-line	printer-owner	(print.value/bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
+src/seon/render/value.clj	817	subs	make-node	printer-owner	(str (subs text 0 kept) "…+" (- (count text) kept)))
+src/seon/render/value.clj	1065	subs	select-nodes	printer-owner	text (subs (text-key node) start)
+src/seon/render/value.clj	1122	subs	cut-node	printer-owner	::print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node))
+src/seon/render/value.clj	1221	pr-str	breadcrumbs	printer-owner	(pr-str (nth path index)) "seon-data-crumb"))
+src/seon/render/value.clj	1230	clip-fn	plain-projection	printer-owner	(let [value-text (print.value/bounded-text value 8192)
+src/seon/render/value.clj	1234	clip-fn	plain-projection	printer-owner	:seon.render.value/truncated? true
+src/seon/render/value.clj	1334	clip-fn	prepare	printer-owner	:seon.render.value/truncated? (boolean (or cut? (pos? (:offset context))))
+src/seon/turn/batch.clj	192	subs	local-offset	clip	(blob/utf8-size (subs source 0 (+ (get ls (- r first-row)) (dec c))))))
+src/seon/turn/batch.clj	200	subs	definition-source	clip	(subs t (off r c) (off er ec))))
+src/seon/turn/batch.clj	272	pr-str	write-entity	other	(assoc row :seon.fn/spec (pr-str contract)))
+src/seon/turn/batch.clj	435	pr-str	schema-tx	other	forms {:seon.schema/key k :seon.schema/form (pr-str form)
+src/seon/turn/batch.clj	848	subs	jvm-read-next	clip	rdr (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. (subs text pos)))
+src/seon/print/value.clj	42	subs	datum	printer-owner	(string? x) (if (> (count x) limit) (str (subs x 0 limit) "…") x)
+src/seon/print/value.clj	54	clip-fn	bounded-text	printer-owner	(defn bounded-text
+src/seon/print/value.clj	64	clip-fn	bounded-text	printer-owner	([value] (bounded-text value (:chars text-limits)))
+src/seon/print/value.clj	67	print-vars	bounded-text	printer-owner	(let [text (binding [*print-length* nil *print-level* nil *print-meta* false *print-readably* true
+src/seon/print/value.clj	69	pr-str	bounded-text	printer-owner	(pr-str (datum value (:depth text-limits) limit)))]
+src/seon/print/value.clj	70	subs	bounded-text	printer-owner	(if (> (count text) limit) (str (subs text 0 limit) "…") text))
+src/seon/print/value.clj	101	clip-fn	link-lines	error-message	(into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
+src/seon/print/value.clj	103	clip-fn	link-lines	error-message	(for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
+src/seon/print/value.clj	110	clip-fn	link-lines	error-message	(str "  suppressed " (.getName (class other)) ": " (bounded-text (ex-message other)))))))
+src/seon/print/value.clj	132	subs	throwable-text	printer-owner	(str (subs text 0 (:throwable-chars text-limits)) "…")
+src/seon/schema/internal.cljc	486	pr-str	assert-compilable-schema!	error-message	(str "schema/register! " k ": " (pr-str v)
+src/seon/schema/internal.cljc	534	pr-str	assert-non-nilable-value-schema!	error-message	(str "schema/register! " k ": " (pr-str v)
+src/seon/schema/internal.cljc	538	pr-str	assert-non-nilable-value-schema!	hash/id	"(schema/register! " k " " (pr-str inner) "). Where a map "
+src/seon/schema/internal.cljc	540	pr-str	assert-non-nilable-value-schema!	other	(pr-str inner) "]. Where a function slot may return nil, "
+src/seon/schema/edn.clj	200	subs	directory-resource-paths	clip	(filter #(not (str/includes? (subs % (count prefix)) "/")))
+src/seon/schema/edn.clj	283	subs	resource-filename	clip	(subs resource (inc separator))))
+src/seon/schema/edn.clj	290	subs	validate-resource-placement!	clip	file-namespace (subs filename 0 (- (count filename) 4))
+src/seon/schema/datahike.clj	37	pr-str	registration-form	other	(pr-str (list 'schema/register! attr schema-form)))
+src/seon/schema/datahike.clj	523	id/printed	storage-compare	hash/id	(compare (id/printed left)
+src/seon/schema/datahike.clj	524	id/printed	storage-compare	hash/id	(id/printed right)))
+src/seon/schema/datahike.clj	529	id/printed	reader-round-trips?	hash/id	(= value (edn/read-string (id/printed value)))
+src/seon/schema/datahike.clj	558	id/printed	storage-string	hash/id	(id/printed (storage-data value)))
+src/seon/schema/admission.clj	234	subs	file-namespace	clip	(subs filename 0 (- (count filename) 4))))))
+src/seon/schema/admission.clj	248	pr-str	house-findings	other	(str "Schema declaration key " (pr-str declaration-key)
+src/seon/schema/admission.clj	315	clip-fn	exact-reuse-findings	hash/id	" has the same composite shape as " (print.value/bounded-text matches)
+src/seon/schema/admission.clj	414	clip-fn	undefined-slot-finding	clip	(print.value/bounded-text (:seon.schema/path slot)) " ("
+src/seon/schema/admission.clj	415	clip-fn	undefined-slot-finding	clip	(print.value/bounded-text (:seon.schema/definition slot)) "). If that is deliberate,"
+src/seon/schema/admission.clj	509	prn	-main	log/console	(prn (admit (edn/read-string (slurp *in*))))
+src/seon/fn/signature.cljc	70	pr-str	declaration-parts	other	{:seon.fn.signature/form (pr-str form)}))
+src/seon/fn/signature.cljc	81	pr-str	declaration-parts	other	{:seon.fn.signature/form (pr-str form)}))
+src/seon/fn/signature.cljc	93	pr-str	declaration-parts	other	{:seon.fn.signature/form (pr-str form)}))
+src/seon/fn/analyzer.clj	83	pr-str	expansion-hooks	other	"(let [at '" (pr-str at) "]\n"
+src/seon/fn/analyzer.clj	123	subs	analyzed-source-path	clip	(let [tail (subs path (count prefix))
+src/seon/fn/analyzer.clj	125	subs	analyzed-source-path	clip	(if separator (subs tail separator) path))
+src/seon/fn/analyzer.clj	340	id/id	dependency-cache-key	hash/id	(id/id [(sort entries) version pins]))
+src/seon/fn/analyzer.clj	444	subs	write-mirror!	clip	(subs 1))
+src/seon/eval/drive.clj	362	subs	sample-cluster-name	clip	(str "inspect-sample-" (subs (uuid-text) 0 12)))
+src/seon/eval/drive.clj	374	subs	run-sample!	clip	episode-id (str sample-id "-" (subs (uuid-text) 0 8))
+src/seon/eval/drive.clj	375	subs	run-sample!	clip	agent-id (str "inspect-" (subs (uuid-text) 0 12))
+src/seon/error/refusal.clj	90	subs	frame-site	clip	(let [simple (subs demunged (inc separator))
+src/seon/error/refusal.clj	92	subs	frame-site	clip	simple (if (neg? nested) simple (subs simple 0 nested))
+src/seon/error/refusal.clj	94	subs	frame-site	clip	[(subs demunged 0 separator) (if (neg? suffix) simple (subs simple 0 suffix))]))))
+src/seon/error/refusal.clj	113	subs	authored-prefixes	clip	(when (pos? cut) [(subs text 0 cut) class-name]))))
+src/seon/error/refusal.clj	139	subs	first-party-in	clip	(and (pos? cut) (contains? authored (subs text 0 cut))
+src/my/program.clj	910	subs	match-row	clip	:snippet (let [t (str/trim line)] (if (< 100 (count t)) (str (subs t 0 97) "...") t))
+src/my/background.clj	16	clip-fn	invalid-call	hash/id	:my.background/call-source (print.value/bounded-text forms)

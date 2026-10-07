@@ -1,0 +1,14 @@
+Read-only REVIEW task. Edit no tracked file, make no commits, run no tests, start/stop no JVM. Write only your report file (path below).
+
+Repository: /Users/sean/src/seon (Clojure; Malli, Datahike, SCI). Review commit 33fb994f2 ("errors S1": an error names its variant with a new :seon.error/type key instead of a :seon.error/declared-schema metadata stamp).
+
+Read end to end first: docs/seon/specs/errors.md (the reviewed spec; S1 is in section 7, rulings in section 9), CLAUDE.md sections "Failure and execution" and "Data and contracts", tmp/errors/s1-s2-notes.md (the implementing lane's own notes), then `git show 33fb994f2` and every function it touches in full context (not only the hunks). Reference: reference-code/malli/src/malli/core.cljc (-exception/-fail! ~203, :multi), reference-code/malli/src/malli/error.cljc.
+
+Find real defects, citing file:line for each:
+1. Correctness: any producer that now emits a wrong or missing :seon.error/type; any reader of the old metadata stamp that was missed (search the whole tree, including resources/ and test/); behavior that changed because the key survives merge/assoc where metadata did not (the lane flagged this; verify concrete cases).
+2. Spec conformance: anything S1 did that the spec did not ask for, or skipped.
+3. Simplicity: needless code added, duplicated logic, a simpler form the commit missed.
+4. Tests: do the named tests prove the behavior on data? Any test kept green that only tested deleted machinery?
+For each finding give: severity (high/medium/low), file:line, the concrete failure scenario (inputs -> wrong result), and the fix. Mark anything you could not verify. Do not pad: zero findings in a category is a fine answer.
+
+Report path: tmp/model-trial/review-s1-<YOUR LANE NAME>.md (your lane name is in $SEON_CODEX_LANE). End the report with: total findings by severity, and the files you read.

@@ -1,0 +1,11 @@
+;; ordinal 0 ns #:db{:id 9848} ms 
+## What I read (the required reading)
+
+**`seon.repl/response`** — `(reply-map (response-entries emission))`; one `
+=> #:seon.error{:expected :seon.sci.reader/accepted-source,
+ :member :seon.sci.reader/form,
+ :message "[line 1, col 8] Invalid token: ##What",
+ :offending
+   "## What I read (the required reading)\n\n**`seon.repl/response`** — `(reply-map (response-entries emission))`; one `"}
+ERROR: "[line 1, col 8] Invalid token: ##What"
+

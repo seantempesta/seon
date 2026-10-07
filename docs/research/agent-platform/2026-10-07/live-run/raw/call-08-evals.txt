@@ -1,0 +1,28 @@
+;; ordinal 0 ns #:db{:id 51311} ms 0
+;; comment: ; Looking at the analysis:
+; **The bug**: `response-entries` builds `by-key` including `:seon.repl/result` (from handle) and `:seon.repl/ms` (from duration), and those keys ARE in `response-order`. So `:result` and `:ms` are present in the map. But the test's rendered-value cases assert `:seon.repl/result` and `:seon.repl/ms` survive — and the note says a declared renderer's response drops them.
+; Let me look at the path for rendered values. In `response-entries`, `value = (value-text emission)`, `rendered? = (some? (:seon.eval/renderer emission))`. The `:seon.repl/ms` is emitted only `when (and (int? duration) (not (:seon.repl/changed-since? emission)))`. And `:seon.repl/result` there — those are unconditional on `rendered?`. So why would they drop?
+; Let me check `response-order` and whether `response-entries` is even what `response` uses — actually the source shows `response` calls `(reply-map (response-entries emission))`. Let me look at where the renderer path differs.
+; Let me find `renderer-response` or where rendered values bypass.
+(filter #(re-find #"response" (name (key %))) (ns-publics 'seon.repl))
+=> ([response #'seon.repl/response])
+
+;; ordinal 1 ns #:db{:id 51311} ms 0
+;; comment: ; Let me instead just try the proof test now to see current failures — that's the ground truth I keep avoiding.
+(clojure.test/run-test-var #'seon.repl-test/the-reply-is-one-edn-map-whatever-the-value)
+=> {:seon.error/message
+   "Unable to resolve var: seon.repl-test/the-reply-is-one-edn-map-whatever-the-value",
+ :seon.error/chain
+   [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+     :message
+       "Unable to resolve var: seon.repl-test/the-reply-is-one-edn-map-whatever-the-value",
+     :data
+       {:type :sci/error,
+        :line 1,
+        :column 28,
+        :file nil,
+        :phase "analysis"}}],
+ :seon.sci.eval/stacktrace
+   [[user 1 28] [clojure.test/run-test-var 797 1] [user 1 1] [user 1 1]]}
+ERROR: "Execution error (ExceptionInfo) at (REPL:1:28).\nUnable to resolve var: seon.repl-test/the-reply-is-one-edn-map-whatever-the-value"
+

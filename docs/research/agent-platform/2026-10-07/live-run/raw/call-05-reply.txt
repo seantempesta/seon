@@ -1,0 +1,29 @@
+I've been thrashing. Let me settle down and actually read the two functions I was told to read.
+
+The proof I already have from `source-fn`:
+
+**`reply-map`** joins entries with `", "`, but when a previous entry's text *ends in a comment* (like an elided value's trailing `;; …N = N more …` legend) it emits a `"\n "` instead, and adds a trailing `"\n"` before `}` when the last entry ends in a comment. So the splice of shown text into the map is what breaks EDN — the value's own text is dropped in verbatim, comments and all.
+
+**`value-text`** just returns the saved shown text unchanged.
+
+**`response-entries`** puts `:seon.repl/value` (and `:error`, `:findings`, `:diagnostics`) as the *present keys* already text — but crucially flattens them via `reply-map`, so a rendered value keeps `:value` only, while an elided value's `;;` legend corrupts the map.
+
+Let me look at the elision/finding side and the test to understand what "reads back as EDN" requires.
+
+```clojure
+(clojure.repl/source-fn 'seon.repl/ends-in-comment?)
+```
+
+Let me also see the proof test's expectations:
+
+```clojure
+(clojure.repl/source-fn 'seon.repl-test/the-reply-is-one-edn-map-whatever-the-value)
+```
+
+I need both before I write anything.
+
+```clojure
+[(clojure.repl/source-fn 'seon.repl/ends-in-comment?)
+ (clojure.repl/source-fn 'seon.repl-test/the-reply-is-one-edn-map-whatever-the-value)
+ (clojure.repl/source-fn 'seon.repl/findings)]
+```

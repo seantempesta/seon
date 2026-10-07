@@ -1,0 +1,4044 @@
+({:sym seon.schema/call-with-projection-state,
+  :calls 750,
+  :ms 1411911,
+  :us-per-call 1882548}
+ {:sym seon.db/call-with-custody,
+  :calls 690,
+  :ms 186027,
+  :us-per-call 269604}
+ {:sym seon.mcp/call, :calls 73, :ms 148206, :us-per-call 2030219}
+ {:sym seon.mcp/eval-clj, :calls 73, :ms 148185, :us-per-call 2029931}
+ {:sym seon.batch/evaluate-batch,
+  :calls 316,
+  :ms 145614,
+  :us-per-call 460803}
+ {:sym seon.batch/guard, :calls 1353, :ms 145594, :us-per-call 107608}
+ {:sym seon.batch/form-step,
+  :calls 687,
+  :ms 144197,
+  :us-per-call 209893}
+ {:sym seon.batch/within, :calls 662, :ms 138137, :us-per-call 208666}
+ {:sym seon.turn.world/with-world,
+  :calls 662,
+  :ms 138079,
+  :us-per-call 208578}
+ {:sym seon.batch/evaluate-step,
+  :calls 371,
+  :ms 138049,
+  :us-per-call 372099}
+ {:sym seon.schema/call-with-projection,
+  :calls 141348,
+  :ms 122370,
+  :us-per-call 865}
+ {:sym seon.mcp/jvm-run, :calls 34, :ms 94596, :us-per-call 2782235}
+ {:sym seon.flow/in-world, :calls 1022, :ms 78502, :us-per-call 76812}
+ {:sym seon.cluster.agent/turn-step,
+  :calls 497,
+  :ms 78000,
+  :us-per-call 156941}
+ {:sym seon.turn/step, :calls 497, :ms 77997, :us-per-call 156935}
+ {:sym seon.turn/turn, :calls 246, :ms 74533, :us-per-call 302979}
+ {:sym seon.mcp/sci-run, :calls 243, :ms 71113, :us-per-call 292646}
+ {:sym seon.cluster.boot/request!,
+  :calls 3,
+  :ms 68383,
+  :us-per-call 22794333}
+ {:sym seon.cluster/rehearse-source!,
+  :calls 3,
+  :ms 68382,
+  :us-per-call 22794000}
+ {:sym seon.cluster.agent/evaluate-source!,
+  :calls 243,
+  :ms 66695,
+  :us-per-call 274465}
+ {:sym seon.await/await!, :calls 248, :ms 66063, :us-per-call 266383}
+ {:sym seon.await/await-port-operations,
+  :calls 245,
+  :ms 66059,
+  :us-per-call 269628}
+ {:sym seon.turn/resume-turn,
+  :calls 243,
+  :ms 65668,
+  :us-per-call 270238}
+ {:sym seon.turn/phase, :calls 1224, :ms 64330, :us-per-call 52557}
+ {:sym seon.sci.eval/call-detecting-program-change,
+  :calls 317,
+  :ms 62042,
+  :us-per-call 195716}
+ {:sym seon.db/with-declarations,
+  :calls 96242,
+  :ms 58709,
+  :us-per-call 610}
+ {:sym seon.cluster/full-source-refresh!,
+  :calls 3,
+  :ms 54263,
+  :us-per-call 18087666}
+ {:sym seon.turn/evaluate-sources,
+  :calls 280,
+  :ms 54157,
+  :us-per-call 193417}
+ {:sym seon.sci.batch/around,
+  :calls 282,
+  :ms 53478,
+  :us-per-call 189638}
+ {:sym seon.sci.kernel/with-arm,
+  :calls 705,
+  :ms 47457,
+  :us-per-call 67314}
+ {:sym seon.sci.observe/observe,
+  :calls 291,
+  :ms 47277,
+  :us-per-call 162463}
+ {:sym seon.db/q, :calls 28483, :ms 45716, :us-per-call 1605}
+ {:sym seon.turn/evaluate-row,
+  :calls 293,
+  :ms 44492,
+  :us-per-call 151849}
+ {:sym seon.schema/call-with-registration-delta,
+  :calls 293,
+  :ms 44481,
+  :us-per-call 151812}
+ {:sym seon.sci.eval/evaluate,
+  :calls 293,
+  :ms 44479,
+  :us-per-call 151805}
+ {:sym seon.sci.eval/trusted-evaluation,
+  :calls 293,
+  :ms 43898,
+  :us-per-call 149822}
+ {:sym seon.db/vector-query-call,
+  :calls 28479,
+  :ms 41975,
+  :us-per-call 1473}
+ {:sym seon.db/transact!, :calls 390, :ms 38360, :us-per-call 98358}
+ {:sym seon.db/transact-call,
+  :calls 390,
+  :ms 38334,
+  :us-per-call 98292}
+ {:sym seon.fn/analyze-entities,
+  :calls 6,
+  :ms 32722,
+  :us-per-call 5453666}
+ {:sym seon.fn/analyzed-files,
+  :calls 6,
+  :ms 32706,
+  :us-per-call 5451000}
+ {:sym seon.test/run, :calls 4, :ms 30028, :us-per-call 7507000}
+ {:sym seon.fn/analyzed-artifacts,
+  :calls 12,
+  :ms 29567,
+  :us-per-call 2463916}
+ {:sym seon.schema/call-with-forms,
+  :calls 388,
+  :ms 28784,
+  :us-per-call 74185}
+ {:sym my.test/check, :calls 2, :ms 26267, :us-per-call 13133500}
+ {:sym seon.test/member-result,
+  :calls 32,
+  :ms 20891,
+  :us-per-call 652843}
+ {:sym seon.fn.analyzer/analyze,
+  :calls 293,
+  :ms 20861,
+  :us-per-call 71197}
+ {:sym seon.sci.eval/fork-cluster-ctx,
+  :calls 58,
+  :ms 19337,
+  :us-per-call 333396}
+ {:sym seon.test/bounded-result,
+  :calls 32,
+  :ms 18172,
+  :us-per-call 567875}
+ {:sym seon.test.runner/run-vars!,
+  :calls 32,
+  :ms 17927,
+  :us-per-call 560218}
+ {:sym seon.test.runner/run-var!,
+  :calls 31,
+  :ms 17900,
+  :us-per-call 577419}
+ {:sym seon.sci.eval/acquire!,
+  :calls 96,
+  :ms 17760,
+  :us-per-call 185000}
+ {:sym seon.cluster.source/publish!,
+  :calls 3,
+  :ms 17719,
+  :us-per-call 5906333}
+ {:sym seon.cluster/populate-source!,
+  :calls 3,
+  :ms 17309,
+  :us-per-call 5769666}
+ {:sym seon.test-support/with-database,
+  :calls 10,
+  :ms 17247,
+  :us-per-call 1724700}
+ {:sym seon.test-support/with-branched-database,
+  :calls 10,
+  :ms 17247,
+  :us-per-call 1724700}
+ {:sym seon.fn/index!, :calls 3, :ms 16736, :us-per-call 5578666}
+ {:sym seon.test-support/run-database-body,
+  :calls 10,
+  :ms 16428,
+  :us-per-call 1642800}
+ {:sym seon.sci.eval/base-ctx,
+  :calls 17,
+  :ms 16229,
+  :us-per-call 954647}
+ {:sym seon.sci.eval/derive-base-ctx,
+  :calls 16,
+  :ms 16173,
+  :us-per-call 1010812}
+ {:sym seon.sci.eval/acquire-program!,
+  :calls 16,
+  :ms 16147,
+  :us-per-call 1009187}
+ {:sym seon.db/pull-call, :calls 55679, :ms 13823, :us-per-call 248}
+ {:sym seon.fn.analyzer/invoke-kondo,
+  :calls 293,
+  :ms 12837,
+  :us-per-call 43812}
+ {:sym seon.test-support/fork-cluster-ctx,
+  :calls 12,
+  :ms 12337,
+  :us-per-call 1028083}
+ {:sym seon.cluster/rehearsal-adoption!,
+  :calls 3,
+  :ms 12058,
+  :us-per-call 4019333}
+ {:sym seon.cluster/adopt-entities!,
+  :calls 3,
+  :ms 12036,
+  :us-per-call 4012000}
+ {:sym seon.db/pull-logical, :calls 55679, :ms 11961, :us-per-call 214}
+ {:sym seon.blob/with-publication!,
+  :calls 261,
+  :ms 11924,
+  :us-per-call 45685}
+ {:sym seon.db/validate-write-report,
+  :calls 389,
+  :ms 11858,
+  :us-per-call 30483}
+ {:sym seon.schema.datahike/encode-call-output-in,
+  :calls 1717,
+  :ms 11252,
+  :us-per-call 6553}
+ {:sym seon.turn/settle-evaluated!,
+  :calls 243,
+  :ms 10974,
+  :us-per-call 45160}
+ {:sym seon.turn/settle-batch!,
+  :calls 243,
+  :ms 10966,
+  :us-per-call 45127}
+ {:sym seon.db/write-report-error,
+  :calls 389,
+  :ms 10894,
+  :us-per-call 28005}
+ {:sym seon.turn/system-turn, :calls 4, :ms 9196, :us-per-call 2299000}
+ {:sym seon.turn/open-turn, :calls 1, :ms 8770, :us-per-call 8770000}
+ {:sym seon.db/write-owned-values-error,
+  :calls 389,
+  :ms 7863,
+  :us-per-call 20213}
+ {:sym seon.db/decode-query-result,
+  :calls 28476,
+  :ms 7336,
+  :us-per-call 257}
+ {:sym seon.db/pull, :calls 55279, :ms 7161, :us-per-call 129}
+ {:sym seon.fn/desired-entities,
+  :calls 3,
+  :ms 7019,
+  :us-per-call 2339666}
+ {:sym seon.db/pull-many, :calls 400, :ms 6757, :us-per-call 16892}
+ {:sym seon.db/carried-projection,
+  :calls 390516,
+  :ms 6350,
+  :us-per-call 16}
+ {:sym seon.turn/latest-evaluations,
+  :calls 8,
+  :ms 6341,
+  :us-per-call 792625}
+ {:sym seon.cluster.agent/acquire-context!,
+  :calls 82,
+  :ms 6249,
+  :us-per-call 76207}
+ {:sym seon.cluster.agent/acquire-once!,
+  :calls 82,
+  :ms 6238,
+  :us-per-call 76073}
+ {:sym seon.db/decode-query-field,
+  :calls 47888,
+  :ms 5735,
+  :us-per-call 119}
+ {:sym seon.batch/derive-step,
+  :calls 291,
+  :ms 5641,
+  :us-per-call 19384}
+ {:sym seon.turn.batch/derive-form,
+  :calls 291,
+  :ms 5622,
+  :us-per-call 19319}
+ {:sym seon.db/decode-query-tuple,
+  :calls 2493,
+  :ms 5621,
+  :us-per-call 2254}
+ {:sym seon.test/clean-request-handle,
+  :calls 2,
+  :ms 5537,
+  :us-per-call 2768500}
+ {:sym seon.mcp/observed, :calls 277, :ms 5253, :us-per-call 18963}
+ {:sym seon.cluster.agent/run-observation,
+  :calls 277,
+  :ms 5252,
+  :us-per-call 18960}
+ {:sym seon.fn/file-entities, :calls 9, :ms 5245, :us-per-call 582777}
+ {:sym seon.fn/published-index-entities,
+  :calls 14,
+  :ms 5128,
+  :us-per-call 366285}
+ {:sym seon.schema.datahike/decode-attribute-value-in,
+  :calls 140187,
+  :ms 4725,
+  :us-per-call 33}
+ {:sym seon.schema.datahike/compiled-storage,
+  :calls 551856,
+  :ms 4417,
+  :us-per-call 8}
+ {:sym seon.turn.batch/analyze-form,
+  :calls 287,
+  :ms 4415,
+  :us-per-call 15383}
+ {:sym seon.cache/lookup, :calls 305115, :ms 4148, :us-per-call 13}
+ {:sym seon.fn/runtime-analysis-batch,
+  :calls 287,
+  :ms 4007,
+  :us-per-call 13961}
+ {:sym my.test/run-owned, :calls 3, :ms 3768, :us-per-call 1256000}
+ {:sym seon.fn.analyzer/parsed-facts,
+  :calls 916,
+  :ms 3646,
+  :us-per-call 3980}
+ {:sym seon.fn/reached-entities,
+  :calls 14,
+  :ms 3571,
+  :us-per-call 255071}
+ {:sym seon.id/print-canonical!,
+  :calls 541240,
+  :ms 3418,
+  :us-per-call 6}
+ {:sym seon.schema/projection-cache-value,
+  :calls 3935460,
+  :ms 3375,
+  :us-per-call 0}
+ {:sym seon.cache/settle!, :calls 8433, :ms 3368, :us-per-call 399}
+ {:sym seon.sci.eval/install-row!,
+  :calls 1950,
+  :ms 3263,
+  :us-per-call 1673}
+ {:sym seon.sci.eval/database-effective-config,
+  :calls 12210,
+  :ms 3261,
+  :us-per-call 267}
+ {:sym seon.batch/print-into, :calls 371, :ms 3214, :us-per-call 8663}
+ {:sym seon.render.transcript/history-entries,
+  :calls 286,
+  :ms 3173,
+  :us-per-call 11094}
+ {:sym seon.schema/assert-complete-contract!,
+  :calls 5319,
+  :ms 3134,
+  :us-per-call 589}
+ {:sym seon.sci.eval/shown-result,
+  :calls 389,
+  :ms 3127,
+  :us-per-call 8038}
+ {:sym seon.fn/reconcile-tx-in,
+  :calls 8,
+  :ms 3103,
+  :us-per-call 387875}
+ {:sym seon.config/effective, :calls 13219, :ms 2940, :us-per-call 222}
+ {:sym seon.schema.datahike/edn-encoded-attr-in?,
+  :calls 235521,
+  :ms 2858,
+  :us-per-call 12}
+ {:sym seon.schema.datahike/attribute-decoder-in,
+  :calls 155523,
+  :ms 2828,
+  :us-per-call 18}
+ {:sym seon.turn/show-row, :calls 293, :ms 2730, :us-per-call 9317}
+ {:sym seon.db/write-entity-value,
+  :calls 54327,
+  :ms 2703,
+  :us-per-call 49}
+ {:sym seon.turn/next-agent-work,
+  :calls 250,
+  :ms 2701,
+  :us-per-call 10804}
+ {:sym seon.fn/incremental-projection,
+  :calls 3,
+  :ms 2607,
+  :us-per-call 869000}
+ {:sym seon.schema/load-projection,
+  :calls 41,
+  :ms 2540,
+  :us-per-call 61951}
+ {:sym seon.schema.datahike/decode-vectors,
+  :calls 112653,
+  :ms 2536,
+  :us-per-call 22}
+ {:sym seon.config/effective-in,
+  :calls 13219,
+  :ms 2319,
+  :us-per-call 175}
+ {:sym seon.fn/var-entity, :calls 24072, :ms 2293, :us-per-call 95}
+ {:sym seon.schema/projection-from-entities,
+  :calls 41,
+  :ms 2222,
+  :us-per-call 54195}
+ {:sym seon.id/id, :calls 97991, :ms 2201, :us-per-call 22}
+ {:sym seon.id/digest, :calls 91079, :ms 2188, :us-per-call 24}
+ {:sym seon.db/speculative-projection,
+  :calls 89872,
+  :ms 2180,
+  :us-per-call 24}
+ {:sym seon.id/printed-digest, :calls 97991, :ms 2162, :us-per-call 22}
+ {:sym seon.program/definition-digest,
+  :calls 33329,
+  :ms 2087,
+  :us-per-call 62}
+ {:sym seon.schema.datahike/vector-shaped-attr-in?,
+  :calls 1460168,
+  :ms 2067,
+  :us-per-call 1}
+ {:sym seon.sci.eval/value-storage,
+  :calls 387,
+  :ms 2055,
+  :us-per-call 5310}
+ {:sym seon.test/admit-run, :calls 2, :ms 2000, :us-per-call 1000000}
+ {:sym seon.sci.arm/arm!, :calls 8502, :ms 1973, :us-per-call 232}
+ {:sym seon.schema.internal/assert-complete-schema!,
+  :calls 6129,
+  :ms 1964,
+  :us-per-call 320}
+ {:sym seon.schema.datahike/vector-attributes-in,
+  :calls 43680,
+  :ms 1933,
+  :us-per-call 44}
+ {:sym seon.test.runner/program-written-since?,
+  :calls 2,
+  :ms 1931,
+  :us-per-call 965500}
+ {:sym seon.eval.drive/run-receipts,
+  :calls 277,
+  :ms 1908,
+  :us-per-call 6888}
+ {:sym seon.render.transcript/branch-errors,
+  :calls 284,
+  :ms 1897,
+  :us-per-call 6679}
+ {:sym seon.schema.internal/assert-error-declaration!,
+  :calls 6129,
+  :ms 1867,
+  :us-per-call 304}
+ {:sym seon.fn/assert-capability-contracts!,
+  :calls 6,
+  :ms 1726,
+  :us-per-call 287666}
+ {:sym seon.schema/contract-references,
+  :calls 20771,
+  :ms 1686,
+  :us-per-call 81}
+ {:sym seon.sci.eval/fork-for-turn,
+  :calls 283,
+  :ms 1648,
+  :us-per-call 5823}
+ {:sym seon.db/write-entity-error,
+  :calls 42582,
+  :ms 1614,
+  :us-per-call 37}
+ {:sym seon.db/stored-collection,
+  :calls 266887,
+  :ms 1602,
+  :us-per-call 6}
+ {:sym seon.db/content-projection,
+  :calls 40,
+  :ms 1600,
+  :us-per-call 40000}
+ {:sym seon.sci.admit/admit-value,
+  :calls 519,
+  :ms 1595,
+  :us-per-call 3073}
+ {:sym seon.program/with-contract-facts,
+  :calls 9021,
+  :ms 1567,
+  :us-per-call 173}
+ {:sym seon.schema.datahike/decode-canonical-edn,
+  :calls 7728,
+  :ms 1553,
+  :us-per-call 200}
+ {:sym seon.id/printed, :calls 443249, :ms 1544, :us-per-call 3}
+ {:sym seon.db/encode-query-request,
+  :calls 28479,
+  :ms 1489,
+  :us-per-call 52}
+ {:sym seon.config/apply-compiled!,
+  :calls 12,
+  :ms 1476,
+  :us-per-call 123000}
+ {:sym seon.sci.admit/admit*, :calls 553, :ms 1473, :us-per-call 2663}
+ {:sym seon.turn/opening-deferred?,
+  :calls 249,
+  :ms 1427,
+  :us-per-call 5730}
+ {:sym seon.db/report-arity-comparison,
+  :calls 12,
+  :ms 1377,
+  :us-per-call 114750}
+ {:sym seon.schema.datahike/decode-pulled,
+  :calls 750410,
+  :ms 1357,
+  :us-per-call 1}
+ {:sym seon.config/apply!, :calls 10, :ms 1324, :us-per-call 132400}
+ {:sym seon.turn/close-folded-call,
+  :calls 241,
+  :ms 1301,
+  :us-per-call 5398}
+ {:sym seon.fn/normalized-index-entity,
+  :calls 26736,
+  :ms 1258,
+  :us-per-call 47}
+ {:sym seon.db/write-digest-error,
+  :calls 388,
+  :ms 1193,
+  :us-per-call 3074}
+ {:sym seon.schema/build-projection,
+  :calls 50,
+  :ms 1191,
+  :us-per-call 23820}
+ {:sym seon.turn/system-run-plan,
+  :calls 734,
+  :ms 1179,
+  :us-per-call 1606}
+ {:sym seon.turn.batch/settle, :calls 34, :ms 1177, :us-per-call 34617}
+ {:sym seon.schema/deleted-predicate-functions,
+  :calls 41,
+  :ms 1160,
+  :us-per-call 28292}
+ {:sym seon.schema/projection-with-declarations,
+  :calls 44,
+  :ms 1153,
+  :us-per-call 26204}
+ {:sym seon.schema/projection-build,
+  :calls 44,
+  :ms 1153,
+  :us-per-call 26204}
+ {:sym seon.reconcile/plan, :calls 22, :ms 1128, :us-per-call 51272}
+ {:sym seon.db/query-find-attributes,
+  :calls 28476,
+  :ms 1096,
+  :us-per-call 38}
+ {:sym seon.turn/spent-runs, :calls 250, :ms 1091, :us-per-call 4364}
+ {:sym seon.fn/file-identities,
+  :calls 18,
+  :ms 1055,
+  :us-per-call 58611}
+ {:sym seon.turn/system-run-call,
+  :calls 491,
+  :ms 1038,
+  :us-per-call 2114}
+ {:sym seon.render.value/prepare,
+  :calls 419,
+  :ms 1026,
+  :us-per-call 2448}
+ {:sym seon.fn/declaration-digests,
+  :calls 629,
+  :ms 1020,
+  :us-per-call 1621}
+ {:sym seon.turn/open-for-agent,
+  :calls 1501,
+  :ms 1018,
+  :us-per-call 678}
+ {:sym seon.test/select, :calls 4, :ms 931, :us-per-call 232750}
+ {:sym seon.test/selection-admission,
+  :calls 4,
+  :ms 931,
+  :us-per-call 232750}
+ {:sym seon.db/loaded-builder, :calls 67, :ms 928, :us-per-call 13850}
+ {:sym seon.program/contract-facts,
+  :calls 2255,
+  :ms 905,
+  :us-per-call 401}
+ {:sym seon.schema.datahike/declared-storable?,
+  :calls 273917,
+  :ms 899,
+  :us-per-call 3}
+ {:sym seon.schema.datahike/vector-attribute-in?,
+  :calls 1302051,
+  :ms 893,
+  :us-per-call 0}
+ {:sym seon.db/query-index-patterns,
+  :calls 18588,
+  :ms 880,
+  :us-per-call 47}
+ {:sym seon.db/declaration-content-key,
+  :calls 92,
+  :ms 860,
+  :us-per-call 9347}
+ {:sym seon.repl/entity-emission,
+  :calls 476,
+  :ms 838,
+  :us-per-call 1760}
+ {:sym seon.profile/cells, :calls 125, :ms 820, :us-per-call 6560}
+ {:sym seon.schema.datahike/attribute-declaration,
+  :calls 280438,
+  :ms 787,
+  :us-per-call 2}
+ {:sym seon.fn/host-bound-callers,
+  :calls 293,
+  :ms 775,
+  :us-per-call 2645}
+ {:sym seon.fn/assert-clean-analysis!,
+  :calls 12,
+  :ms 774,
+  :us-per-call 64500}
+ {:sym seon.render/acquire-context!,
+  :calls 8,
+  :ms 753,
+  :us-per-call 94125}
+ {:sym seon.render.web/derive-context!,
+  :calls 8,
+  :ms 752,
+  :us-per-call 94000}
+ {:sym seon.print/node?, :calls 268988, :ms 740, :us-per-call 2}
+ {:sym seon.render.walk/neighborhood,
+  :calls 6,
+  :ms 694,
+  :us-per-call 115666}
+ {:sym seon.sci.reader/read, :calls 5733, :ms 680, :us-per-call 118}
+ {:sym seon.turn/previous-ending-namespace,
+  :calls 979,
+  :ms 659,
+  :us-per-call 673}
+ {:sym seon.schema.internal/entity-entries,
+  :calls 84138,
+  :ms 653,
+  :us-per-call 7}
+ {:sym seon.fn.signature/declaration-metadata,
+  :calls 24079,
+  :ms 639,
+  :us-per-call 26}
+ {:sym seon.schema.datahike/storable-attribute-in?,
+  :calls 186522,
+  :ms 622,
+  :us-per-call 3}
+ {:sym seon.cluster/stored-derivation-schema-keys,
+  :calls 6,
+  :ms 620,
+  :us-per-call 103333}
+ {:sym seon.fn/reverse-closure, :calls 16, :ms 609, :us-per-call 38062}
+ {:sym seon.cluster/selected-analyzer-digest,
+  :calls 6,
+  :ms 608,
+  :us-per-call 101333}
+ {:sym seon.schema.datahike/vector-pull,
+  :calls 56304,
+  :ms 598,
+  :us-per-call 10}
+ {:sym seon.db/storage-q-in, :calls 36, :ms 591, :us-per-call 16416}
+ {:sym seon.turn/open-call, :calls 753, :ms 589, :us-per-call 782}
+ {:sym seon.schema.datahike/compiled-attribute-selection,
+  :calls 15,
+  :ms 583,
+  :us-per-call 38866}
+ {:sym seon.schema/canonical-database-attributes,
+  :calls 15,
+  :ms 583,
+  :us-per-call 38866}
+ {:sym seon.schema.datahike/database-attributes-in,
+  :calls 15,
+  :ms 583,
+  :us-per-call 38866}
+ {:sym seon.fn/report-identities,
+  :calls 3,
+  :ms 578,
+  :us-per-call 192666}
+ {:sym seon.db/lowered-query-request,
+  :calls 4230,
+  :ms 570,
+  :us-per-call 134}
+ {:sym seon.sci.eval/install-evaluated-rows!,
+  :calls 3,
+  :ms 549,
+  :us-per-call 183000}
+ {:sym seon.schema/contract-product,
+  :calls 2255,
+  :ms 549,
+  :us-per-call 243}
+ {:sym seon.sci.kernel/failure-value,
+  :calls 8,
+  :ms 549,
+  :us-per-call 68625}
+ {:sym seon.db/definition-digest-of,
+  :calls 7388,
+  :ms 547,
+  :us-per-call 74}
+ {:sym seon.db/declaration-value,
+  :calls 7556,
+  :ms 545,
+  :us-per-call 72}
+ {:sym seon.instrument/instrumented,
+  :calls 64,
+  :ms 526,
+  :us-per-call 8218}
+ {:sym seon.health/report, :calls 1, :ms 526, :us-per-call 526000}
+ {:sym seon.health/collected, :calls 8, :ms 525, :us-per-call 65625}
+ {:sym seon.test/prepare-checkpoint!,
+  :calls 1,
+  :ms 525,
+  :us-per-call 525000}
+ {:sym seon.cluster/accrete-schema-population!,
+  :calls 3,
+  :ms 521,
+  :us-per-call 173666}
+ {:sym seon.error.refusal/walk-links,
+  :calls 62,
+  :ms 518,
+  :us-per-call 8354}
+ {:sym seon.render.transcript/render-session,
+  :calls 6,
+  :ms 517,
+  :us-per-call 86166}
+ {:sym seon.schema/arity-references,
+  :calls 2255,
+  :ms 514,
+  :us-per-call 227}
+ {:sym seon.error.refusal/chain,
+  :calls 48,
+  :ms 514,
+  :us-per-call 10708}
+ {:sym seon.turn/fault-window, :calls 248, :ms 513, :us-per-call 2068}
+ {:sym seon.fn/adoption-tx, :calls 3, :ms 509, :us-per-call 169666}
+ {:sym seon.turn/declared-sources,
+  :calls 4,
+  :ms 507,
+  :us-per-call 126750}
+ {:sym seon.schema.datahike/ref-attr-in?,
+  :calls 1131714,
+  :ms 507,
+  :us-per-call 0}
+ {:sym seon.problems/error-signatures,
+  :calls 7,
+  :ms 506,
+  :us-per-call 72285}
+ {:sym seon.schema.datahike/lower-where,
+  :calls 4230,
+  :ms 500,
+  :us-per-call 118}
+ {:sym seon.turn/with-fault-windows,
+  :calls 243,
+  :ms 500,
+  :us-per-call 2057}
+ {:sym seon.render.value/select-nodes,
+  :calls 419,
+  :ms 500,
+  :us-per-call 1193}
+ {:sym seon.test-support/transacted!,
+  :calls 27,
+  :ms 499,
+  :us-per-call 18481}
+ {:sym seon.task/stored-tasks, :calls 27, :ms 497, :us-per-call 18407}
+ {:sym seon.cluster/seed-cluster-facts!,
+  :calls 1,
+  :ms 496,
+  :us-per-call 496000}
+ {:sym seon.health/derived, :calls 12, :ms 483, :us-per-call 40250}
+ {:sym seon.db/query-variable-attributes,
+  :calls 56955,
+  :ms 479,
+  :us-per-call 8}
+ {:sym seon.turn.batch/jvm-show, :calls 78, :ms 474, :us-per-call 6076}
+ {:sym seon.cluster/derivation-keys,
+  :calls 6,
+  :ms 474,
+  :us-per-call 79000}
+ {:sym seon.schema/declaration-projection,
+  :calls 13285,
+  :ms 473,
+  :us-per-call 35}
+ {:sym seon.fn/writes-by-writer,
+  :calls 293,
+  :ms 472,
+  :us-per-call 1610}
+ {:sym seon.health/problems-unit,
+  :calls 1,
+  :ms 464,
+  :us-per-call 464000}
+ {:sym seon.cache/lookup-within,
+  :calls 2,
+  :ms 464,
+  :us-per-call 232000}
+ {:sym seon.problems/problems, :calls 1, :ms 464, :us-per-call 464000}
+ {:sym seon.sci.eval/installation-covers-program-change?,
+  :calls 3,
+  :ms 461,
+  :us-per-call 153666}
+ {:sym seon.config/reconcile-call,
+  :calls 10,
+  :ms 456,
+  :us-per-call 45600}
+ {:sym seon.config/compile-manifest,
+  :calls 11,
+  :ms 452,
+  :us-per-call 41090}
+ {:sym seon.render.walk/root-acquisition,
+  :calls 6,
+  :ms 447,
+  :us-per-call 74500}
+ {:sym seon.error.refusal/first-party-links,
+  :calls 62,
+  :ms 446,
+  :us-per-call 7193}
+ {:sym seon.schema.datahike/lower-clauses,
+  :calls 5274,
+  :ms 441,
+  :us-per-call 83}
+ {:sym seon.test.runner/reach-entries,
+  :calls 11,
+  :ms 435,
+  :us-per-call 39545}
+ {:sym seon.cluster.agent/submit-source!,
+  :calls 243,
+  :ms 435,
+  :us-per-call 1790}
+ {:sym seon.cluster.agent/submit-source-in-projection,
+  :calls 243,
+  :ms 432,
+  :us-per-call 1777}
+ {:sym seon.db/may-read-vectors?,
+  :calls 28479,
+  :ms 430,
+  :us-per-call 15}
+ {:sym seon.schema.internal/entity-maps,
+  :calls 290563,
+  :ms 428,
+  :us-per-call 1}
+ {:sym seon.program/edn-round-trip-symbol?,
+  :calls 538688,
+  :ms 420,
+  :us-per-call 0}
+ {:sym seon.instrument/wrap-interpreted,
+  :calls 12131,
+  :ms 411,
+  :us-per-call 33}
+ {:sym seon.task/adopt-tasks-tx,
+  :calls 12,
+  :ms 411,
+  :us-per-call 34250}
+ {:sym seon.render.walk/acquire-entity,
+  :calls 48,
+  :ms 402,
+  :us-per-call 8375}
+ {:sym seon.render.web/context-response,
+  :calls 2,
+  :ms 402,
+  :us-per-call 201000}
+ {:sym seon.render.web/context-action-response,
+  :calls 2,
+  :ms 401,
+  :us-per-call 200500}
+ {:sym seon.render.web/change-context,
+  :calls 2,
+  :ms 401,
+  :us-per-call 200500}
+ {:sym seon.problems/form-problem,
+  :calls 249,
+  :ms 400,
+  :us-per-call 1606}
+ {:sym seon.turn.batch/analyzed-entities,
+  :calls 287,
+  :ms 400,
+  :us-per-call 1393}
+ {:sym seon.render.web/turn-function-result,
+  :calls 2,
+  :ms 400,
+  :us-per-call 200000}
+ {:sym seon.cluster.agent/armer-step,
+  :calls 253,
+  :ms 397,
+  :us-per-call 1569}
+ {:sym seon.test.runner/reach-memberships,
+  :calls 5,
+  :ms 391,
+  :us-per-call 78200}
+ {:sym seon.schema/canonical-data-string,
+  :calls 37070,
+  :ms 390,
+  :us-per-call 10}
+ {:sym seon.error.refusal/diagnostic,
+  :calls 11590,
+  :ms 389,
+  :us-per-call 33}
+ {:sym seon.turn/unanswered-wakes,
+  :calls 245,
+  :ms 386,
+  :us-per-call 1575}
+ {:sym seon.test/changed-definition-symbols,
+  :calls 1,
+  :ms 382,
+  :us-per-call 382000}
+ {:sym seon.schema/canonical-value-string,
+  :calls 37070,
+  :ms 382,
+  :us-per-call 10}
+ {:sym seon.db/stored-call-reach,
+  :calls 65,
+  :ms 381,
+  :us-per-call 5861}
+ {:sym seon.db/call-reach, :calls 65, :ms 380, :us-per-call 5846}
+ {:sym seon.render/viewer, :calls 462, :ms 376, :us-per-call 813}
+ {:sym seon.schema.edn/packaged-forms,
+  :calls 13361,
+  :ms 375,
+  :us-per-call 28}
+ {:sym seon.problems/open-faults,
+  :calls 6,
+  :ms 374,
+  :us-per-call 62333}
+ {:sym seon.schema.edn/packaged-population,
+  :calls 13361,
+  :ms 369,
+  :us-per-call 27}
+ {:sym seon.sci.kernel/public-functions-in,
+  :calls 404,
+  :ms 362,
+  :us-per-call 896}
+ {:sym seon.sci.admit/semantic-value,
+  :calls 538,
+  :ms 361,
+  :us-per-call 671}
+ {:sym seon.render.value/make-node,
+  :calls 7322,
+  :ms 360,
+  :us-per-call 49}
+ {:sym seon.cluster.source/index-tasks!,
+  :calls 3,
+  :ms 360,
+  :us-per-call 120000}
+ {:sym seon.turn/latest-answering-turn-t,
+  :calls 245,
+  :ms 355,
+  :us-per-call 1448}
+ {:sym seon.render.value/artifact-edn,
+  :calls 50,
+  :ms 354,
+  :us-per-call 7080}
+ {:sym seon.schema.datahike/encode-transaction-data-in,
+  :calls 2106,
+  :ms 352,
+  :us-per-call 167}
+ {:sym seon.sci.eval/install-caller-host-bindings!,
+  :calls 16,
+  :ms 344,
+  :us-per-call 21500}
+ {:sym seon.test/definition-digests,
+  :calls 2,
+  :ms 340,
+  :us-per-call 170000}
+ {:sym seon.test.runner/reach-graph,
+  :calls 13,
+  :ms 339,
+  :us-per-call 26076}
+ {:sym seon.db/append-pull-evidence!,
+  :calls 55671,
+  :ms 337,
+  :us-per-call 6}
+ {:sym seon.schema/pull-selector?,
+  :calls 96992,
+  :ms 336,
+  :us-per-call 3}
+ {:sym seon.db/value-projection, :calls 9, :ms 335, :us-per-call 37222}
+ {:sym seon.render/render-call, :calls 89, :ms 330, :us-per-call 3707}
+ {:sym seon.db/query-value-type-error,
+  :calls 28485,
+  :ms 330,
+  :us-per-call 11}
+ {:sym seon.config/declared-projection,
+  :calls 13230,
+  :ms 320,
+  :us-per-call 24}
+ {:sym seon.render/produce, :calls 129, :ms 318, :us-per-call 2465}
+ {:sym seon.schema/projection-entities,
+  :calls 82,
+  :ms 318,
+  :us-per-call 3878}
+ {:sym seon.schema/validate-declarations!,
+  :calls 14,
+  :ms 317,
+  :us-per-call 22642}
+ {:sym seon.db/logical-datoms, :calls 708, :ms 317, :us-per-call 447}
+ {:sym seon.test.runner/commit-results!,
+  :calls 2,
+  :ms 315,
+  :us-per-call 157500}
+ {:sym seon.task/index-tasks!, :calls 3, :ms 314, :us-per-call 104666}
+ {:sym seon.fs/delete-recursively!,
+  :calls 3,
+  :ms 314,
+  :us-per-call 104666}
+ {:sym seon.program/base-context-injected-symbols,
+  :calls 309,
+  :ms 311,
+  :us-per-call 1006}
+ {:sym seon.sci.eval/overridden-row?,
+  :calls 1950,
+  :ms 308,
+  :us-per-call 157}
+ {:sym seon.cluster.agent/steward-call,
+  :calls 26,
+  :ms 308,
+  :us-per-call 11846}
+ {:sym seon.sci.kernel/invoke, :calls 129, :ms 308, :us-per-call 2387}
+ {:sym seon.schema.datahike/clause-variables,
+  :calls 28999,
+  :ms 308,
+  :us-per-call 10}
+ {:sym seon.db/projection-cache-key,
+  :calls 390295,
+  :ms 305,
+  :us-per-call 0}
+ {:sym seon.db/datoms, :calls 12078, :ms 301, :us-per-call 24}
+ {:sym seon.error/resolution, :calls 166, :ms 300, :us-per-call 1807}
+ {:sym seon.db/attribute-holders,
+  :calls 7425,
+  :ms 300,
+  :us-per-call 40}
+ {:sym seon.cache/claim, :calls 312589, :ms 299, :us-per-call 0}
+ {:sym seon.schema.datahike/assert-storable-schema!,
+  :calls 27314,
+  :ms 297,
+  :us-per-call 10}
+ {:sym seon.fn/interpreted-namespaces,
+  :calls 293,
+  :ms 296,
+  :us-per-call 1010}
+ {:sym seon.db/database-value?,
+  :calls 3499887,
+  :ms 291,
+  :us-per-call 0}
+ {:sym seon.render/request-profile,
+  :calls 1653,
+  :ms 290,
+  :us-per-call 175}
+ {:sym seon.cluster/derivation-schema-keys,
+  :calls 12,
+  :ms 286,
+  :us-per-call 23833}
+ {:sym seon.schema/validate-contracts!,
+  :calls 14,
+  :ms 283,
+  :us-per-call 20214}
+ {:sym seon.fn/reconciled-paths, :calls 3, :ms 283, :us-per-call 94333}
+ {:sym seon.db/datoms-call, :calls 12078, :ms 275, :us-per-call 22}
+ {:sym seon.db/call-edges, :calls 12, :ms 271, :us-per-call 22583}
+ {:sym seon.test.runner/reach-digests,
+  :calls 6,
+  :ms 270,
+  :us-per-call 45000}
+ {:sym seon.schema.datahike/encode-entity,
+  :calls 13230,
+  :ms 270,
+  :us-per-call 20}
+ {:sym seon.db/schema-database, :calls 569335, :ms 270, :us-per-call 0}
+ {:sym seon.fault/fault!, :calls 5, :ms 267, :us-per-call 53400}
+ {:sym seon.fault/record!, :calls 5, :ms 266, :us-per-call 53200}
+ {:sym seon.error/occurred-since,
+  :calls 247,
+  :ms 266,
+  :us-per-call 1076}
+ {:sym seon.test.cache/input-path?,
+  :calls 83478,
+  :ms 265,
+  :us-per-call 3}
+ {:sym seon.program/canonical-row,
+  :calls 63301,
+  :ms 262,
+  :us-per-call 4}
+ {:sym seon.test/selection-facts,
+  :calls 16,
+  :ms 260,
+  :us-per-call 16250}
+ {:sym seon.db/pull-index-patterns,
+  :calls 40156,
+  :ms 258,
+  :us-per-call 6}
+ {:sym seon.schema/canonical-definition,
+  :calls 10481,
+  :ms 258,
+  :us-per-call 24}
+ {:sym seon.problems/failed-tests,
+  :calls 1,
+  :ms 254,
+  :us-per-call 254000}
+ {:sym seon.db/malformed-query-pattern-error,
+  :calls 28483,
+  :ms 251,
+  :us-per-call 8}
+ {:sym seon.render-coverage-test/seed-entities!,
+  :calls 1,
+  :ms 251,
+  :us-per-call 251000}
+ {:sym seon.id/writer?, :calls 541240, :ms 248, :us-per-call 0}
+ {:sym seon.cluster.source/capture-paths,
+  :calls 18,
+  :ms 247,
+  :us-per-call 13722}
+ {:sym seon.schema/projection-registry,
+  :calls 22,
+  :ms 245,
+  :us-per-call 11136}
+ {:sym seon.turn/record-evaluated-call,
+  :calls 74,
+  :ms 244,
+  :us-per-call 3297}
+ {:sym seon.db/native-query-result?,
+  :calls 28476,
+  :ms 244,
+  :us-per-call 8}
+ {:sym seon.task/tasks-tx, :calls 6, :ms 241, :us-per-call 40166}
+ {:sym seon.profile/histogram?, :calls 487552, :ms 241, :us-per-call 0}
+ {:sym seon.render.value/declared,
+  :calls 419,
+  :ms 241,
+  :us-per-call 575}
+ {:sym seon.batch/apply-pending,
+  :calls 1003,
+  :ms 237,
+  :us-per-call 236}
+ {:sym seon.error.refusal/first-party-in,
+  :calls 1145,
+  :ms 236,
+  :us-per-call 206}
+ {:sym seon.profile/begin, :calls 33, :ms 235, :us-per-call 7121}
+ {:sym seon.schema/compilable-form,
+  :calls 29769,
+  :ms 235,
+  :us-per-call 7}
+ {:sym seon.render/declared-projection,
+  :calls 81,
+  :ms 234,
+  :us-per-call 2888}
+ {:sym seon.sci.admit/canonical-edn,
+  :calls 123,
+  :ms 234,
+  :us-per-call 1902}
+ {:sym seon.program/program-attributes,
+  :calls 21,
+  :ms 233,
+  :us-per-call 11095}
+ {:sym seon.fn/population-targets,
+  :calls 311,
+  :ms 233,
+  :us-per-call 749}
+ {:sym seon.schema.datahike/cell-attribute,
+  :calls 219853,
+  :ms 231,
+  :us-per-call 1}
+ {:sym seon.db/builder-digest, :calls 29, :ms 231, :us-per-call 7965}
+ {:sym seon.error.refusal/references,
+  :calls 11606,
+  :ms 230,
+  :us-per-call 19}
+ {:sym seon.turn.batch/apply-facts,
+  :calls 2,
+  :ms 225,
+  :us-per-call 112500}
+ {:sym seon.db/with, :calls 2, :ms 225, :us-per-call 112500}
+ {:sym seon.error.refusal/authored-prefixes,
+  :calls 132,
+  :ms 225,
+  :us-per-call 1704}
+ {:sym seon.sci.eval/shown-failure,
+  :calls 9,
+  :ms 224,
+  :us-per-call 24888}
+ {:sym seon.render/call-cache-evidence,
+  :calls 95,
+  :ms 222,
+  :us-per-call 2336}
+ {:sym seon.turn/close-call, :calls 244, :ms 220, :us-per-call 901}
+ {:sym seon.test.runner/reach-fixed-point,
+  :calls 26,
+  :ms 219,
+  :us-per-call 8423}
+ {:sym seon.render/render-program-evidence,
+  :calls 73,
+  :ms 219,
+  :us-per-call 3000}
+ {:sym seon.db/aligned-query-arguments,
+  :calls 28483,
+  :ms 219,
+  :us-per-call 7}
+ {:sym seon.print/node-child?, :calls 1539624, :ms 211, :us-per-call 0}
+ {:sym seon.cluster/file-derivation-key,
+  :calls 479,
+  :ms 205,
+  :us-per-call 427}
+ {:sym seon.test.runner/latest-results,
+  :calls 1,
+  :ms 203,
+  :us-per-call 203000}
+ {:sym seon.test/attempt-request-context,
+  :calls 14,
+  :ms 202,
+  :us-per-call 14428}
+ {:sym seon.render/call-reach, :calls 73, :ms 202, :us-per-call 2767}
+ {:sym seon.batch/record-faults, :calls 316, :ms 201, :us-per-call 636}
+ {:sym seon.turn/system-plan, :calls 3, :ms 195, :us-per-call 65000}
+ {:sym seon.test/green-members, :calls 4, :ms 193, :us-per-call 48250}
+ {:sym seon.turn.world/record-fault,
+  :calls 2,
+  :ms 192,
+  :us-per-call 96000}
+ {:sym seon.fn/dependent-paths, :calls 9, :ms 192, :us-per-call 21333}
+ {:sym seon.ai/agent-overlay, :calls 1025, :ms 191, :us-per-call 186}
+ {:sym seon.error/proof, :calls 77, :ms 190, :us-per-call 2467}
+ {:sym seon.db/declares-program?,
+  :calls 92545,
+  :ms 187,
+  :us-per-call 2}
+ {:sym seon.mcp/execution, :calls 277, :ms 187, :us-per-call 675}
+ {:sym seon.render.value/admit-member,
+  :calls 4396,
+  :ms 187,
+  :us-per-call 42}
+ {:sym seon.schema.datahike/storable-properties-in,
+  :calls 34856,
+  :ms 186,
+  :us-per-call 5}
+ {:sym seon.test/checkpoint-head,
+  :calls 3,
+  :ms 185,
+  :us-per-call 61666}
+ {:sym seon.task/file-declarations,
+  :calls 408,
+  :ms 183,
+  :us-per-call 448}
+ {:sym seon.db/query-input-position,
+  :calls 56963,
+  :ms 182,
+  :us-per-call 3}
+ {:sym seon.db/query-input-values,
+  :calls 61186,
+  :ms 182,
+  :us-per-call 2}
+ {:sym seon.turn/current-run, :calls 1326, :ms 180, :us-per-call 135}
+ {:sym seon.cluster.source/snapshot-test-input-digest,
+  :calls 6,
+  :ms 180,
+  :us-per-call 30000}
+ {:sym seon.schema/projection-admissions,
+  :calls 41,
+  :ms 177,
+  :us-per-call 4317}
+ {:sym seon.cluster.source/discover-paths,
+  :calls 6,
+  :ms 174,
+  :us-per-call 29000}
+ {:sym seon.render.hiccup/hiccup?,
+  :calls 1906,
+  :ms 174,
+  :us-per-call 91}
+ {:sym seon.fn/invoker-paths, :calls 9, :ms 172, :us-per-call 19111}
+ {:sym seon.render/raw-output, :calls 90, :ms 170, :us-per-call 1888}
+ {:sym seon.fn/call-reach, :calls 52, :ms 169, :us-per-call 3250}
+ {:sym seon.schema.internal/entity-schema?,
+  :calls 96061,
+  :ms 164,
+  :us-per-call 1}
+ {:sym seon.test.cache/widening-path?,
+  :calls 28548,
+  :ms 163,
+  :us-per-call 5}
+ {:sym seon.schema.internal/entity-properties,
+  :calls 110364,
+  :ms 163,
+  :us-per-call 1}
+ {:sym seon.schema/malli-form?, :calls 10537, :ms 163, :us-per-call 15}
+ {:sym seon.cluster.message/trigger,
+  :calls 492,
+  :ms 162,
+  :us-per-call 329}
+ {:sym seon.program/row-identity,
+  :calls 449628,
+  :ms 161,
+  :us-per-call 0}
+ {:sym seon.fn/declared-callers, :calls 68, :ms 161, :us-per-call 2367}
+ {:sym seon.program/used-resolver-context,
+  :calls 30845,
+  :ms 160,
+  :us-per-call 5}
+ {:sym seon.db/transaction-report-datom?,
+  :calls 1506235,
+  :ms 159,
+  :us-per-call 0}
+ {:sym seon.profile/explain, :calls 11, :ms 159, :us-per-call 14454}
+ {:sym seon.fn/compile-index-transaction,
+  :calls 8,
+  :ms 157,
+  :us-per-call 19625}
+ {:sym seon.batch/publish-step, :calls 291, :ms 156, :us-per-call 536}
+ {:sym seon.db/query-call-valid?,
+  :calls 28483,
+  :ms 154,
+  :us-per-call 5}
+ {:sym seon.schema.datahike/logical-collection,
+  :calls 110318,
+  :ms 153,
+  :us-per-call 1}
+ {:sym seon.cluster/declared-attributes,
+  :calls 9,
+  :ms 151,
+  :us-per-call 16777}
+ {:sym seon.sci.eval/function-digests,
+  :calls 16,
+  :ms 151,
+  :us-per-call 9437}
+ {:sym seon.schema/changed-keys, :calls 280, :ms 148, :us-per-call 528}
+ {:sym seon.schema/admit-declarations!,
+  :calls 11,
+  :ms 147,
+  :us-per-call 13363}
+ {:sym seon.fn/identity-names, :calls 360, :ms 146, :us-per-call 405}
+ {:sym seon.profile/explain-slow,
+  :calls 32,
+  :ms 146,
+  :us-per-call 4562}
+ {:sym seon.fn/seek, :calls 7824, :ms 145, :us-per-call 18}
+ {:sym seon.schema.internal/reference-id,
+  :calls 690071,
+  :ms 144,
+  :us-per-call 0}
+ {:sym seon.turn/receipt-settle-batch-call,
+  :calls 245,
+  :ms 144,
+  :us-per-call 587}
+ {:sym seon.turn/receipt-settle-call,
+  :calls 251,
+  :ms 142,
+  :us-per-call 565}
+ {:sym my.task/open, :calls 4, :ms 138, :us-per-call 34500}
+ {:sym seon.error.refusal/attributed,
+  :calls 11607,
+  :ms 135,
+  :us-per-call 11}
+ {:sym seon.fn/gate-sets, :calls 36, :ms 134, :us-per-call 3722}
+ {:sym seon.error/for-agent, :calls 3, :ms 133, :us-per-call 44333}
+ {:sym seon.render.var/render-ai,
+  :calls 34,
+  :ms 130,
+  :us-per-call 3823}
+ {:sym seon.cluster/ensure-cluster-entity!,
+  :calls 6,
+  :ms 129,
+  :us-per-call 21500}
+ {:sym seon.render.var/status, :calls 34, :ms 129, :us-per-call 3794}
+ {:sym seon.test/program-overlay-tx,
+  :calls 2,
+  :ms 127,
+  :us-per-call 63500}
+ {:sym seon.sci.admit/semantic-leaf,
+  :calls 264205,
+  :ms 126,
+  :us-per-call 0}
+ {:sym seon.task/task-resolution,
+  :calls 45,
+  :ms 126,
+  :us-per-call 2800}
+ {:sym seon.render.value/artifact,
+  :calls 50,
+  :ms 124,
+  :us-per-call 2480}
+ {:sym seon.test.runner/reach-entry,
+  :calls 83,
+  :ms 123,
+  :us-per-call 1481}
+ {:sym seon.db/query-binding-values,
+  :calls 101663,
+  :ms 123,
+  :us-per-call 1}
+ {:sym seon.print/print-number?,
+  :calls 1363200,
+  :ms 121,
+  :us-per-call 0}
+ {:sym seon.profile.measurement/significant-tx,
+  :calls 277,
+  :ms 121,
+  :us-per-call 436}
+ {:sym seon.render/selection, :calls 171, :ms 120, :us-per-call 701}
+ {:sym seon.schema.datahike/lower-clause,
+  :calls 23271,
+  :ms 119,
+  :us-per-call 5}
+ {:sym seon.test.runner/recorded-member-results,
+  :calls 3,
+  :ms 118,
+  :us-per-call 39333}
+ {:sym seon.schema.internal/extends-schema?,
+  :calls 67620,
+  :ms 116,
+  :us-per-call 1}
+ {:sym seon.profile/adder?, :calls 975008, :ms 115, :us-per-call 0}
+ {:sym seon.program/exact-replacement-tx-in,
+  :calls 8905,
+  :ms 115,
+  :us-per-call 12}
+ {:sym seon.fn/namespace-entity, :calls 1504, :ms 115, :us-per-call 76}
+ {:sym seon.fn.analyzer/unanalyzed-namespaces,
+  :calls 293,
+  :ms 114,
+  :us-per-call 389}
+ {:sym seon.cluster/declaration-changes,
+  :calls 6,
+  :ms 111,
+  :us-per-call 18500}
+ {:sym seon.sci.eval/acquisition-attributes,
+  :calls 135,
+  :ms 110,
+  :us-per-call 814}
+ {:sym seon.turn/publish-row, :calls 291, :ms 109, :us-per-call 374}
+ {:sym seon.db/write-attribute-plans,
+  :calls 422,
+  :ms 109,
+  :us-per-call 258}
+ {:sym seon.turn/agent-dial, :calls 492, :ms 108, :us-per-call 219}
+ {:sym seon.call-preparation/snapshot,
+  :calls 12139,
+  :ms 107,
+  :us-per-call 8}
+ {:sym seon.render.walk/history, :calls 7, :ms 107, :us-per-call 15285}
+ {:sym seon.turn/settle-batch-refusal!,
+  :calls 2,
+  :ms 105,
+  :us-per-call 52500}
+ {:sym seon.cluster.host/host!, :calls 242, :ms 105, :us-per-call 433}
+ {:sym seon.test.accretion/schema-row-in,
+  :calls 963,
+  :ms 104,
+  :us-per-call 107}
+ {:sym seon.config/dial-attributes,
+  :calls 39715,
+  :ms 104,
+  :us-per-call 2}
+ {:sym seon.db/read-declarations,
+  :calls 96242,
+  :ms 103,
+  :us-per-call 1}
+ {:sym seon.fn/same-indexed-entity?,
+  :calls 35810,
+  :ms 103,
+  :us-per-call 2}
+ {:sym seon.sci.eval/agent-namespace,
+  :calls 568,
+  :ms 102,
+  :us-per-call 179}
+ {:sym seon.test.runner/admitted-members,
+  :calls 5,
+  :ms 102,
+  :us-per-call 20400}
+ {:sym seon.program/replacement-tx,
+  :calls 8911,
+  :ms 101,
+  :us-per-call 11}
+ {:sym seon.render.transcript/pulled-many,
+  :calls 572,
+  :ms 100,
+  :us-per-call 174}
+ {:sym seon.test.runner/reach-declarations,
+  :calls 13,
+  :ms 100,
+  :us-per-call 7692}
+ {:sym seon.test.accretion/generatable?,
+  :calls 963,
+  :ms 99,
+  :us-per-call 102}
+ {:sym seon.error/observation-selector,
+  :calls 297,
+  :ms 97,
+  :us-per-call 326}
+ {:sym seon.db/declared-collections,
+  :calls 57355,
+  :ms 95,
+  :us-per-call 1}
+ {:sym seon.task/adopt-tasks-call,
+  :calls 3,
+  :ms 95,
+  :us-per-call 31666}
+ {:sym seon.turn/disposition, :calls 570, :ms 94, :us-per-call 164}
+ {:sym seon.fn.signature/function-signatures,
+  :calls 2255,
+  :ms 94,
+  :us-per-call 41}
+ {:sym seon.sci.arm/arming-projection,
+  :calls 6064,
+  :ms 94,
+  :us-per-call 15}
+ {:sym seon.db/cell-vectors, :calls 14345, :ms 91, :us-per-call 6}
+ {:sym seon.render.value/settle, :calls 5262, :ms 91, :us-per-call 17}
+ {:sym seon.repl/response, :calls 804, :ms 90, :us-per-call 111}
+ {:sym seon.db/lookup-ref-error, :calls 55279, :ms 88, :us-per-call 1}
+ {:sym seon.call-preparation/memoized-snapshot,
+  :calls 24,
+  :ms 87,
+  :us-per-call 3625}
+ {:sym seon.schema.datahike/edn-encoded-slot?,
+  :calls 79483,
+  :ms 87,
+  :us-per-call 1}
+ {:sym seon.call-preparation/derive-snapshot,
+  :calls 17,
+  :ms 87,
+  :us-per-call 5117}
+ {:sym seon.schema/widen-component-children,
+  :calls 29769,
+  :ms 86,
+  :us-per-call 2}
+ {:sym seon.render/declared-producers,
+  :calls 169,
+  :ms 86,
+  :us-per-call 508}
+ {:sym seon.test/digest-differences,
+  :calls 2,
+  :ms 86,
+  :us-per-call 43000}
+ {:sym seon.schema/assert-entity-partition!,
+  :calls 2889,
+  :ms 86,
+  :us-per-call 29}
+ {:sym seon.repl/syntax-tokens, :calls 3256, :ms 85, :us-per-call 26}
+ {:sym seon.schema.datahike/encode-value,
+  :calls 62470,
+  :ms 85,
+  :us-per-call 1}
+ {:sym seon.schema.internal/fold-walk,
+  :calls 6129,
+  :ms 83,
+  :us-per-call 13}
+ {:sym seon.schema.internal/assert-compilable-schema!,
+  :calls 6279,
+  :ms 83,
+  :us-per-call 13}
+ {:sym seon.db/write-attribute-plan,
+  :calls 19170,
+  :ms 82,
+  :us-per-call 4}
+ {:sym seon.render/entity-owner, :calls 96, :ms 82, :us-per-call 854}
+ {:sym seon.schema.edn/read-schema-resource,
+  :calls 609,
+  :ms 82,
+  :us-per-call 134}
+ {:sym seon.schema/structural-schema,
+  :calls 39932,
+  :ms 82,
+  :us-per-call 2}
+ {:sym seon.fn.analyzer/with-namespace-clauses,
+  :calls 293,
+  :ms 80,
+  :us-per-call 273}
+ {:sym seon.error.refusal/producer,
+  :calls 11607,
+  :ms 79,
+  :us-per-call 6}
+ {:sym seon.print/emit-both, :calls 419, :ms 79, :us-per-call 188}
+ {:sym seon.repl/reply-map, :calls 959, :ms 78, :us-per-call 81}
+ {:sym seon.turn/max-episode-runs,
+  :calls 251,
+  :ms 75,
+  :us-per-call 298}
+ {:sym seon.repl/ends-in-comment?,
+  :calls 2600,
+  :ms 74,
+  :us-per-call 28}
+ {:sym seon.cluster.host/start!, :calls 1, :ms 73, :us-per-call 73000}
+ {:sym seon.fn/lint-entities, :calls 629, :ms 73, :us-per-call 116}
+ {:sym seon.schema.datahike/lower-pattern,
+  :calls 19641,
+  :ms 73,
+  :us-per-call 3}
+ {:sym seon.call-preparation/supply,
+  :calls 1726,
+  :ms 73,
+  :us-per-call 42}
+ {:sym seon.sci.kernel/mark-installed!,
+  :calls 97446,
+  :ms 72,
+  :us-per-call 0}
+ {:sym seon.cluster.agent/agents-to-arm,
+  :calls 246,
+  :ms 72,
+  :us-per-call 292}
+ {:sym seon.schedule/schedule-step,
+  :calls 7,
+  :ms 71,
+  :us-per-call 10142}
+ {:sym seon.id/evaluation, :calls 10159, :ms 70, :us-per-call 6}
+ {:sym seon.schedule/fire-due!, :calls 2, :ms 69, :us-per-call 34500}
+ {:sym seon.db/retention-report-check,
+  :calls 389,
+  :ms 69,
+  :us-per-call 177}
+ {:sym seon.db/read-evidence, :calls 416, :ms 69, :us-per-call 165}
+ {:sym seon.id/hex, :calls 103915, :ms 69, :us-per-call 0}
+ {:sym seon.profile/entries, :calls 39698, :ms 69, :us-per-call 1}
+ {:sym seon.program/arity-entity, :calls 2422, :ms 67, :us-per-call 27}
+ {:sym seon.fn/program-entities, :calls 9, :ms 67, :us-per-call 7444}
+ {:sym seon.schema.datahike/query-variable?,
+  :calls 704427,
+  :ms 66,
+  :us-per-call 0}
+ {:sym seon.sci.eval/acquired-database?,
+  :calls 133,
+  :ms 66,
+  :us-per-call 496}
+ {:sym seon.test.runner/record-tx,
+  :calls 2,
+  :ms 65,
+  :us-per-call 32500}
+ {:sym seon.sci.eval/copy-host-var,
+  :calls 148253,
+  :ms 65,
+  :us-per-call 0}
+ {:sym seon.cache/kind-counters, :calls 313782, :ms 65, :us-per-call 0}
+ {:sym seon.schema.datahike/chain-properties,
+  :calls 55559,
+  :ms 64,
+  :us-per-call 1}
+ {:sym seon.call-preparation/supply-from-world,
+  :calls 1719,
+  :ms 64,
+  :us-per-call 37}
+ {:sym seon.render.value/flat-width,
+  :calls 25687,
+  :ms 63,
+  :us-per-call 2}
+ {:sym seon.db/read-evidence-current?,
+  :calls 90,
+  :ms 62,
+  :us-per-call 688}
+ {:sym seon.db/carry-projection-state,
+  :calls 25122,
+  :ms 61,
+  :us-per-call 2}
+ {:sym seon.call-preparation/unavailable,
+  :calls 1164,
+  :ms 60,
+  :us-per-call 51}
+ {:sym seon.error/prepare, :calls 16, :ms 59, :us-per-call 3687}
+ {:sym seon.cluster.store/open-branch!,
+  :calls 54,
+  :ms 58,
+  :us-per-call 1074}
+ {:sym seon.db/prepared-write, :calls 391, :ms 58, :us-per-call 148}
+ {:sym seon.ai/agent-setting-attributes,
+  :calls 1026,
+  :ms 58,
+  :us-per-call 56}
+ {:sym seon.fn/analysis-projection,
+  :calls 9,
+  :ms 57,
+  :us-per-call 6333}
+ {:sym seon.error.refusal/link, :calls 1075, :ms 56, :us-per-call 52}
+ {:sym seon.sci.eval/base-ctx-key,
+  :calls 17,
+  :ms 56,
+  :us-per-call 3294}
+ {:sym seon.db/append-read-evidence!,
+  :calls 73039,
+  :ms 55,
+  :us-per-call 0}
+ {:sym seon.render.value/classify,
+  :calls 10165,
+  :ms 54,
+  :us-per-call 5}
+ {:sym seon.db/nil-query-input-error,
+  :calls 28483,
+  :ms 53,
+  :us-per-call 1}
+ {:sym seon.schema.datahike/vector-position?,
+  :calls 25441,
+  :ms 52,
+  :us-per-call 2}
+ {:sym seon.call-preparation/contract-arities,
+  :calls 25,
+  :ms 52,
+  :us-per-call 2080}
+ {:sym seon.batch/read-step, :calls 687, :ms 52, :us-per-call 75}
+ {:sym seon.program/argument-entity,
+  :calls 5109,
+  :ms 52,
+  :us-per-call 10}
+ {:sym seon.profile.measurement/stored-measurements,
+  :calls 17,
+  :ms 51,
+  :us-per-call 3000}
+ {:sym my.agent/retire-branch!, :calls 1, :ms 51, :us-per-call 51000}
+ {:sym seon.error/render-faults-html,
+  :calls 1,
+  :ms 51,
+  :us-per-call 51000}
+ {:sym seon.turn/early-disposition?,
+  :calls 285,
+  :ms 50,
+  :us-per-call 175}
+ {:sym seon.schema/canonical-schema-entities,
+  :calls 3,
+  :ms 50,
+  :us-per-call 16666}
+ {:sym seon.error.refusal/stack-frames,
+  :calls 1138,
+  :ms 49,
+  :us-per-call 43}
+ {:sym seon.fn.analyzer/analysis-cache-root,
+  :calls 299,
+  :ms 48,
+  :us-per-call 160}
+ {:sym seon.profile/reusable?, :calls 12131, :ms 48, :us-per-call 3}
+ {:sym seon.cluster/dropped-attributes,
+  :calls 3,
+  :ms 47,
+  :us-per-call 15666}
+ {:sym seon.turn/code-currency, :calls 3, :ms 47, :us-per-call 15666}
+ {:sym seon.schema/declaration-changes,
+  :calls 176,
+  :ms 47,
+  :us-per-call 267}
+ {:sym seon.fn/changed-schema-keys,
+  :calls 9,
+  :ms 47,
+  :us-per-call 5222}
+ {:sym seon.fs/absolute-path, :calls 5126, :ms 47, :us-per-call 9}
+ {:sym seon.schema.datahike/encode-transaction-in,
+  :calls 391,
+  :ms 47,
+  :us-per-call 120}
+ {:sym seon.turn.batch/write-entity,
+  :calls 7405,
+  :ms 46,
+  :us-per-call 6}
+ {:sym seon.render.value/cut-text, :calls 7356, :ms 46, :us-per-call 6}
+ {:sym seon.fn/index-tempids, :calls 8, :ms 46, :us-per-call 5750}
+ {:sym seon.program/shapes-in, :calls 2415, :ms 46, :us-per-call 19}
+ {:sym seon.error.refusal/authored-namespace?,
+  :calls 13033,
+  :ms 46,
+  :us-per-call 3}
+ {:sym seon.program/changed-attributes,
+  :calls 8905,
+  :ms 45,
+  :us-per-call 5}
+ {:sym seon.profile/thread-local?,
+  :calls 487528,
+  :ms 45,
+  :us-per-call 0}
+ {:sym seon.cluster.registry/branch!,
+  :calls 57,
+  :ms 45,
+  :us-per-call 789}
+ {:sym seon.schedule/transact-result!,
+  :calls 2,
+  :ms 45,
+  :us-per-call 22500}
+ {:sym seon.profile/accumulator?,
+  :calls 487568,
+  :ms 45,
+  :us-per-call 0}
+ {:sym seon.error.refusal/authored-function?,
+  :calls 11593,
+  :ms 44,
+  :us-per-call 3}
+ {:sym seon.profile/measured-mark?,
+  :calls 487564,
+  :ms 43,
+  :us-per-call 0}
+ {:sym seon.render.web-test/painted,
+  :calls 3,
+  :ms 43,
+  :us-per-call 14333}
+ {:sym seon.fn/host-bound-declaration?,
+  :calls 18180,
+  :ms 43,
+  :us-per-call 2}
+ {:sym seon.fn/program-namespaces,
+  :calls 287,
+  :ms 43,
+  :us-per-call 149}
+ {:sym seon.render.web-test/dom, :calls 3, :ms 42, :us-per-call 14000}
+ {:sym seon.test.runner/reach-closures,
+  :calls 4,
+  :ms 42,
+  :us-per-call 10500}
+ {:sym seon.cluster.host/retire!, :calls 1, :ms 42, :us-per-call 42000}
+ {:sym seon.config/agent-cluster-dial,
+  :calls 270,
+  :ms 42,
+  :us-per-call 155}
+ {:sym seon.profile/throw-counts?,
+  :calls 487500,
+  :ms 42,
+  :us-per-call 0}
+ {:sym seon.turn/agent-eid, :calls 495, :ms 41, :us-per-call 82}
+ {:sym seon.cache/cache?, :calls 321071, :ms 41, :us-per-call 0}
+ {:sym seon.db/identity-attributes,
+  :calls 3224,
+  :ms 41,
+  :us-per-call 12}
+ {:sym seon.db/index-evidence-current,
+  :calls 67,
+  :ms 41,
+  :us-per-call 611}
+ {:sym seon.test.runner/restore-live-cluster-schema!,
+  :calls 32,
+  :ms 41,
+  :us-per-call 1281}
+ {:sym seon.db/cell-rows, :calls 14406, :ms 40, :us-per-call 2}
+ {:sym seon.schema/sha-256, :calls 5924, :ms 40, :us-per-call 6}
+ {:sym seon.db/render-declaration-touched?,
+  :calls 389,
+  :ms 40,
+  :us-per-call 102}
+ {:sym seon.error.refusal/world-reference,
+  :calls 11605,
+  :ms 40,
+  :us-per-call 3}
+ {:sym seon.sci.forgive/next-form, :calls 800, :ms 39, :us-per-call 48}
+ {:sym seon.turn/segmented-sources,
+  :calls 247,
+  :ms 39,
+  :us-per-call 157}
+ {:sym seon.turn/more-agent-work?,
+  :calls 1,
+  :ms 39,
+  :us-per-call 39000}
+ {:sym seon.config/result-caps, :calls 12511, :ms 38, :us-per-call 3}
+ {:sym seon.error.refusal/root-frame,
+  :calls 53,
+  :ms 38,
+  :us-per-call 716}
+ {:sym seon.turn/code-sources, :calls 243, :ms 38, :us-per-call 156}
+ {:sym seon.schema/identity-attr?,
+  :calls 99347,
+  :ms 38,
+  :us-per-call 0}
+ {:sym seon.sci.forgive/segments, :calls 247, :ms 38, :us-per-call 153}
+ {:sym seon.test-support/evaluate,
+  :calls 2,
+  :ms 38,
+  :us-per-call 19000}
+ {:sym seon.task/task-delta, :calls 18, :ms 38, :us-per-call 2111}
+ {:sym seon.repl/text, :calls 368, :ms 37, :us-per-call 100}
+ {:sym seon.call-preparation/arity-facts,
+  :calls 11382,
+  :ms 37,
+  :us-per-call 3}
+ {:sym seon.test.runner/closure-digest,
+  :calls 32,
+  :ms 37,
+  :us-per-call 1156}
+ {:sym seon.cluster.instruction/toolkit-namespaces,
+  :calls 6,
+  :ms 37,
+  :us-per-call 6166}
+ {:sym seon.db/stamp-transaction, :calls 389, :ms 36, :us-per-call 92}
+ {:sym seon.cache/join, :calls 304113, :ms 36, :us-per-call 0}
+ {:sym seon.repl/read-shown, :calls 1712, :ms 36, :us-per-call 21}
+ {:sym seon.instrument/calling-environment,
+  :calls 3642,
+  :ms 36,
+  :us-per-call 9}
+ {:sym seon.schema/reference-children,
+  :calls 58548,
+  :ms 35,
+  :us-per-call 0}
+ {:sym seon.health/read-attributes,
+  :calls 9,
+  :ms 35,
+  :us-per-call 3888}
+ {:sym seon.sci.eval/interpretation-failure,
+  :calls 12,
+  :ms 35,
+  :us-per-call 2916}
+ {:sym seon.db/connection-object?,
+  :calls 362323,
+  :ms 35,
+  :us-per-call 0}
+ {:sym seon.turn/outside-wake-t, :calls 250, :ms 35, :us-per-call 140}
+ {:sym seon.turn/planner-scoped-attempt?,
+  :calls 249,
+  :ms 34,
+  :us-per-call 136}
+ {:sym seon.sci.forgive/forms, :calls 247, :ms 34, :us-per-call 137}
+ {:sym seon.repl/shown-value, :calls 1638, :ms 34, :us-per-call 20}
+ {:sym seon.schema/projection-identity,
+  :calls 56304,
+  :ms 34,
+  :us-per-call 0}
+ {:sym seon.cluster/loaded-files, :calls 3, :ms 34, :us-per-call 11333}
+ {:sym seon.id/sha-256, :calls 5924, :ms 34, :us-per-call 5}
+ {:sym seon.fn.analyzer/forget-namespaces!,
+  :calls 6,
+  :ms 33,
+  :us-per-call 5500}
+ {:sym seon.fn/reconcile-tx, :calls 2, :ms 33, :us-per-call 16500}
+ {:sym seon.error/recording, :calls 11, :ms 33, :us-per-call 3000}
+ {:sym seon.print/form-text, :calls 7057, :ms 33, :us-per-call 4}
+ {:sym seon.fn/task-links, :calls 24961, :ms 33, :us-per-call 1}
+ {:sym seon.profile/observation, :calls 3479, :ms 33, :us-per-call 9}
+ {:sym seon.env/environment?, :calls 319371, :ms 33, :us-per-call 0}
+ {:sym seon.profile/transaction-observation,
+  :calls 389,
+  :ms 32,
+  :us-per-call 82}
+ {:sym seon.config/agent-cluster, :calls 271, :ms 32, :us-per-call 118}
+ {:sym seon.test.runner/complete-members,
+  :calls 2,
+  :ms 32,
+  :us-per-call 16000}
+ {:sym seon.cluster.agent/namespace-seed-call,
+  :calls 26,
+  :ms 32,
+  :us-per-call 1230}
+ {:sym seon.schema/projection-value?,
+  :calls 288022,
+  :ms 32,
+  :us-per-call 0}
+ {:sym seon.schema.datahike/vector-handle,
+  :calls 13539,
+  :ms 32,
+  :us-per-call 2}
+ {:sym seon.schema.datahike/vector-request,
+  :calls 35971,
+  :ms 31,
+  :us-per-call 0}
+ {:sym seon.profile.measurement/window,
+  :calls 2209,
+  :ms 31,
+  :us-per-call 14}
+ {:sym seon.turn/receipt-identity,
+  :calls 2732,
+  :ms 31,
+  :us-per-call 11}
+ {:sym seon.fs/canonical-relative-path,
+  :calls 34612,
+  :ms 31,
+  :us-per-call 0}
+ {:sym seon.schema/predicate-bindings,
+  :calls 6,
+  :ms 30,
+  :us-per-call 5000}
+ {:sym seon.error/commit-call, :calls 10, :ms 30, :us-per-call 3000}
+ {:sym seon.task/declared, :calls 9786, :ms 30, :us-per-call 3}
+ {:sym seon.turn/generated-read-fault,
+  :calls 96,
+  :ms 29,
+  :us-per-call 302}
+ {:sym seon.db/namespace-digests-tx,
+  :calls 4,
+  :ms 29,
+  :us-per-call 7250}
+ {:sym seon.turn/unit-read, :calls 15, :ms 29, :us-per-call 1933}
+ {:sym seon.test/open-world!, :calls 3, :ms 29, :us-per-call 9666}
+ {:sym seon.db/render-face?, :calls 61151, :ms 28, :us-per-call 0}
+ {:sym seon.sci.eval/run-test, :calls 1, :ms 28, :us-per-call 28000}
+ {:sym seon.sci.eval/run-tests, :calls 1, :ms 28, :us-per-call 28000}
+ {:sym seon.cluster.agent/release-context!,
+  :calls 46,
+  :ms 28,
+  :us-per-call 608}
+ {:sym seon.sci.forgive/read-one, :calls 551, :ms 27, :us-per-call 49}
+ {:sym seon.schema/identity-only-projector,
+  :calls 11835,
+  :ms 27,
+  :us-per-call 2}
+ {:sym seon.db/nil-query-binding?,
+  :calls 46209,
+  :ms 27,
+  :us-per-call 0}
+ {:sym seon.cluster.source/database,
+  :calls 11,
+  :ms 27,
+  :us-per-call 2454}
+ {:sym seon.schema.datahike/storage-schema,
+  :calls 34223,
+  :ms 27,
+  :us-per-call 0}
+ {:sym seon.fn/caller-files, :calls 3, :ms 27, :us-per-call 9000}
+ {:sym seon.turn/call-turn, :calls 1, :ms 27, :us-per-call 27000}
+ {:sym seon.turn/stage-reply!, :calls 248, :ms 27, :us-per-call 108}
+ {:sym seon.db/report-identity-attributes,
+  :calls 389,
+  :ms 27,
+  :us-per-call 69}
+ {:sym seon.schema.datahike/declared-reference,
+  :calls 10533,
+  :ms 26,
+  :us-per-call 2}
+ {:sym seon.turn/read-row, :calls 571, :ms 26, :us-per-call 45}
+ {:sym seon.bootstrap/help-value, :calls 2, :ms 26, :us-per-call 13000}
+ {:sym seon.schema.datahike/identity-attr-in?,
+  :calls 55576,
+  :ms 26,
+  :us-per-call 0}
+ {:sym seon.error.refusal/without-links,
+  :calls 8,
+  :ms 26,
+  :us-per-call 3250}
+ {:sym seon.eval/of-agent, :calls 10, :ms 26, :us-per-call 2600}
+ {:sym seon.fs/relative-path, :calls 1456, :ms 25, :us-per-call 17}
+ {:sym seon.cluster.wake/wake-attributes,
+  :calls 1054,
+  :ms 25,
+  :us-per-call 23}
+ {:sym seon.sci.eval/build-base-ctx,
+  :calls 16,
+  :ms 25,
+  :us-per-call 1562}
+ {:sym seon.db/db, :calls 4516, :ms 25, :us-per-call 5}
+ {:sym seon.profile/cell, :calls 1230, :ms 25, :us-per-call 20}
+ {:sym seon.turn/refuse-closed-admission!,
+  :calls 736,
+  :ms 25,
+  :us-per-call 33}
+ {:sym seon.program/declaration-at,
+  :calls 4323,
+  :ms 24,
+  :us-per-call 5}
+ {:sym seon.db/pull-call-valid?, :calls 55679, :ms 24, :us-per-call 0}
+ {:sym seon.error/bounded-error-admission,
+  :calls 16,
+  :ms 24,
+  :us-per-call 1500}
+ {:sym seon.cluster/missing-process-entities,
+  :calls 3,
+  :ms 24,
+  :us-per-call 8000}
+ {:sym seon.fn/function-definition?,
+  :calls 91888,
+  :ms 24,
+  :us-per-call 0}
+ {:sym seon.render.value/render-ai,
+  :calls 28,
+  :ms 24,
+  :us-per-call 857}
+ {:sym seon.turn/require-open-run, :calls 246, :ms 23, :us-per-call 93}
+ {:sym seon.batch/freeze-step, :calls 371, :ms 23, :us-per-call 61}
+ {:sym seon.sci.eval/projection-state?,
+  :calls 26567,
+  :ms 23,
+  :us-per-call 0}
+ {:sym seon.fn/exact-source, :calls 25576, :ms 23, :us-per-call 0}
+ {:sym seon.task/task-basis, :calls 3, :ms 23, :us-per-call 7666}
+ {:sym seon.turn/close-turn, :calls 1, :ms 22, :us-per-call 22000}
+ {:sym seon.cluster.agent/arm!, :calls 243, :ms 22, :us-per-call 90}
+ {:sym seon.sci.eval/rendered-evaluation,
+  :calls 14,
+  :ms 22,
+  :us-per-call 1571}
+ {:sym seon.schema.datahike/property-dependents-in,
+  :calls 3,
+  :ms 22,
+  :us-per-call 7333}
+ {:sym seon.profile/counts, :calls 5907, :ms 22, :us-per-call 3}
+ {:sym seon.repl/source-text, :calls 5, :ms 21, :us-per-call 4200}
+ {:sym seon.error/render-faults-ai,
+  :calls 5,
+  :ms 21,
+  :us-per-call 4200}
+ {:sym seon.test-support/seeded-cluster-name,
+  :calls 15,
+  :ms 21,
+  :us-per-call 1400}
+ {:sym seon.test-support/cluster-names,
+  :calls 30,
+  :ms 21,
+  :us-per-call 700}
+ {:sym seon.cluster.store/release-branch!,
+  :calls 51,
+  :ms 21,
+  :us-per-call 411}
+ {:sym seon.db/write-render-target-error,
+  :calls 6,
+  :ms 21,
+  :us-per-call 3500}
+ {:sym seon.render/render-form-value,
+  :calls 15,
+  :ms 21,
+  :us-per-call 1400}
+ {:sym seon.sci.arm/write-event, :calls 8502, :ms 21, :us-per-call 2}
+ {:sym seon.sci.admit/sci-context?,
+  :calls 231718,
+  :ms 21,
+  :us-per-call 0}
+ {:sym seon.cluster/cluster-name?,
+  :calls 80141,
+  :ms 21,
+  :us-per-call 0}
+ {:sym seon.schema.edn/derive-config-forms,
+  :calls 3,
+  :ms 20,
+  :us-per-call 6666}
+ {:sym seon.sci.eval/ctx?, :calls 144405, :ms 20, :us-per-call 0}
+ {:sym seon.db/write-attribute-error,
+  :calls 8714,
+  :ms 20,
+  :us-per-call 2}
+ {:sym seon.fn/removed-definition-caller-paths,
+  :calls 9,
+  :ms 20,
+  :us-per-call 2222}
+ {:sym seon.db/written-declaration-identities,
+  :calls 389,
+  :ms 20,
+  :us-per-call 51}
+ {:sym seon.cluster.message/render-inbox-ai,
+  :calls 5,
+  :ms 19,
+  :us-per-call 3800}
+ {:sym seon.schema/explain-candidate-value,
+  :calls 25004,
+  :ms 19,
+  :us-per-call 0}
+ {:sym seon.batch/last-entry, :calls 1324, :ms 19, :us-per-call 14}
+ {:sym seon.db/source-argument-error,
+  :calls 28483,
+  :ms 19,
+  :us-per-call 0}
+ {:sym seon.cluster.store/connection-object?,
+  :calls 53293,
+  :ms 18,
+  :us-per-call 0}
+ {:sym my.agent/create-branch!, :calls 1, :ms 18, :us-per-call 18000}
+ {:sym seon.cluster.agent/arm-graph!,
+  :calls 1,
+  :ms 18,
+  :us-per-call 18000}
+ {:sym seon.env/of, :calls 5385, :ms 18, :us-per-call 3}
+ {:sym seon.fn/invocations-by-definition,
+  :calls 586,
+  :ms 18,
+  :us-per-call 30}
+ {:sym seon.render.walk/root-pull-plan,
+  :calls 12,
+  :ms 18,
+  :us-per-call 1500}
+ {:sym seon.error.refusal/recorded-chain,
+  :calls 14,
+  :ms 17,
+  :us-per-call 1214}
+ {:sym seon.db/query-input-bindings,
+  :calls 28479,
+  :ms 17,
+  :us-per-call 0}
+ {:sym seon.schema/identity-only-descriptors-in,
+  :calls 4,
+  :ms 17,
+  :us-per-call 4250}
+ {:sym seon.health/profile-unit, :calls 1, :ms 17, :us-per-call 17000}
+ {:sym seon.cluster.source/stored-path-digests,
+  :calls 9,
+  :ms 17,
+  :us-per-call 1888}
+ {:sym seon.fn.analyzer/referenced-program-namespaces,
+  :calls 287,
+  :ms 17,
+  :us-per-call 59}
+ {:sym seon.sci.eval/loaded-program,
+  :calls 17,
+  :ms 17,
+  :us-per-call 1000}
+ {:sym seon.render.web/handler, :calls 8, :ms 17, :us-per-call 2125}
+ {:sym seon.sci.eval/directory-value,
+  :calls 1,
+  :ms 17,
+  :us-per-call 17000}
+ {:sym seon.test.runner/failure-report,
+  :calls 12,
+  :ms 16,
+  :us-per-call 1333}
+ {:sym seon.render.value/tuple-node,
+  :calls 7322,
+  :ms 16,
+  :us-per-call 2}
+ {:sym seon.test.runner/report-pair,
+  :calls 12,
+  :ms 16,
+  :us-per-call 1333}
+ {:sym seon.db/cell-owner, :calls 3587, :ms 16, :us-per-call 4}
+ {:sym seon.test.cache/input-paths,
+  :calls 12,
+  :ms 16,
+  :us-per-call 1333}
+ {:sym seon.db/write-agent-retraction-error,
+  :calls 389,
+  :ms 16,
+  :us-per-call 41}
+ {:sym seon.render.walk/root-selector,
+  :calls 12,
+  :ms 16,
+  :us-per-call 1333}
+ {:sym seon.db/vectors-tx, :calls 29, :ms 16, :us-per-call 551}
+ {:sym seon.env/environment-state?,
+  :calls 32202,
+  :ms 16,
+  :us-per-call 0}
+ {:sym seon.test.runner/program-digest-read-attributes,
+  :calls 2,
+  :ms 16,
+  :us-per-call 8000}
+ {:sym seon.batch/clock, :calls 1393, :ms 15, :us-per-call 10}
+ {:sym seon.mcp/arguments, :calls 277, :ms 15, :us-per-call 54}
+ {:sym seon.sci.arm/changed-namespaces,
+  :calls 291,
+  :ms 15,
+  :us-per-call 51}
+ {:sym seon.test.runner/report-value,
+  :calls 24,
+  :ms 15,
+  :us-per-call 625}
+ {:sym seon.schema.datahike/lower-branch,
+  :calls 1044,
+  :ms 15,
+  :us-per-call 14}
+ {:sym seon.schema/matching-shapes-in,
+  :calls 81,
+  :ms 15,
+  :us-per-call 185}
+ {:sym seon.test/resolve-test, :calls 32, :ms 15, :us-per-call 468}
+ {:sym seon.schema/projection-from-database,
+  :calls 78,
+  :ms 15,
+  :us-per-call 192}
+ {:sym seon.schema.internal/nilable-union?,
+  :calls 31694,
+  :ms 14,
+  :us-per-call 0}
+ {:sym seon.cluster.message/inbox*,
+  :calls 3,
+  :ms 14,
+  :us-per-call 4666}
+ {:sym seon.render.value/held-order,
+  :calls 616,
+  :ms 14,
+  :us-per-call 22}
+ {:sym seon.sci.eval/bind-result!, :calls 669, :ms 14, :us-per-call 20}
+ {:sym seon.cluster.registry/retire-branch!,
+  :calls 50,
+  :ms 14,
+  :us-per-call 280}
+ {:sym seon.db/missing-pull-selector-error,
+  :calls 55679,
+  :ms 14,
+  :us-per-call 0}
+ {:sym seon.render.value/render-ai-data,
+  :calls 417,
+  :ms 14,
+  :us-per-call 33}
+ {:sym seon.db/vector-diff, :calls 71, :ms 14, :us-per-call 197}
+ {:sym seon.render.value/more?, :calls 78178, :ms 14, :us-per-call 0}
+ {:sym seon.render.value/extras, :calls 32293, :ms 14, :us-per-call 0}
+ {:sym seon.sci.eval/program-identity,
+  :calls 596,
+  :ms 13,
+  :us-per-call 21}
+ {:sym seon.render.value/tree, :calls 419, :ms 13, :us-per-call 31}
+ {:sym seon.cluster.wake/agent-wake-datoms,
+  :calls 495,
+  :ms 13,
+  :us-per-call 26}
+ {:sym seon.schema.internal/same-scoped-schema?,
+  :calls 5359,
+  :ms 13,
+  :us-per-call 2}
+ {:sym seon.sci.kernel/without-interrupt-marker,
+  :calls 1009,
+  :ms 13,
+  :us-per-call 12}
+ {:sym seon.turn/entry-bindings, :calls 590, :ms 13, :us-per-call 22}
+ {:sym seon.db/index-read-dependencies,
+  :calls 12078,
+  :ms 13,
+  :us-per-call 1}
+ {:sym seon.db/dependency-error, :calls 11, :ms 13, :us-per-call 1181}
+ {:sym seon.fn/program-targets, :calls 293, :ms 13, :us-per-call 44}
+ {:sym seon.fn/assert-one-entity-per-identity!,
+  :calls 6,
+  :ms 13,
+  :us-per-call 2166}
+ {:sym seon.batch/allocated-bytes, :calls 742, :ms 13, :us-per-call 17}
+ {:sym seon.test.runner/reach-successors,
+  :calls 4,
+  :ms 13,
+  :us-per-call 3250}
+ {:sym seon.db/arity-comparison, :calls 12, :ms 13, :us-per-call 1083}
+ {:sym seon.health/findings, :calls 1, :ms 13, :us-per-call 13000}
+ {:sym seon.fn/invocation-attributes,
+  :calls 72216,
+  :ms 13,
+  :us-per-call 0}
+ {:sym seon.config/hold-retired-attributes,
+  :calls 12,
+  :ms 12,
+  :us-per-call 1000}
+ {:sym seon.turn/system-run-if-admitted-call,
+  :calls 4,
+  :ms 12,
+  :us-per-call 3000}
+ {:sym seon.render.transcript/recent-message-entities,
+  :calls 4,
+  :ms 12,
+  :us-per-call 3000}
+ {:sym seon.program/derived-shape, :calls 90, :ms 12, :us-per-call 133}
+ {:sym seon.config/require-functions!,
+  :calls 12,
+  :ms 12,
+  :us-per-call 1000}
+ {:sym seon.cluster/report-analysis-warnings!,
+  :calls 3,
+  :ms 12,
+  :us-per-call 4000}
+ {:sym seon.cluster.prompt/prompt,
+  :calls 1,
+  :ms 12,
+  :us-per-call 12000}
+ {:sym seon.call-preparation/argument-facts,
+  :calls 23088,
+  :ms 12,
+  :us-per-call 0}
+ {:sym seon.render/viewing-namespace,
+  :calls 462,
+  :ms 12,
+  :us-per-call 25}
+ {:sym seon.health/regressions, :calls 1, :ms 12, :us-per-call 12000}
+ {:sym seon.schema.datahike/two-keyword-members?,
+  :calls 64302,
+  :ms 12,
+  :us-per-call 0}
+ {:sym seon.print.value/bounded-text,
+  :calls 86,
+  :ms 12,
+  :us-per-call 139}
+ {:sym seon.health/stored, :calls 2, :ms 11, :us-per-call 5500}
+ {:sym seon.health/replaced-roots,
+  :calls 1,
+  :ms 11,
+  :us-per-call 11000}
+ {:sym seon.schema/projection-explainer,
+  :calls 25005,
+  :ms 11,
+  :us-per-call 0}
+ {:sym seon.render.value/node-id, :calls 419, :ms 11, :us-per-call 26}
+ {:sym seon.batch/place-step, :calls 371, :ms 11, :us-per-call 29}
+ {:sym seon.turn/arm-turn-completion-backstop!,
+  :calls 492,
+  :ms 11,
+  :us-per-call 22}
+ {:sym seon.cluster.wake/declarations-refusal,
+  :calls 251,
+  :ms 11,
+  :us-per-call 43}
+ {:sym seon.schema/direct-reference-keys-in,
+  :calls 18,
+  :ms 11,
+  :us-per-call 611}
+ {:sym seon.render.value/throwable-value,
+  :calls 1,
+  :ms 11,
+  :us-per-call 11000}
+ {:sym seon.sci.eval/interpretation-error,
+  :calls 144,
+  :ms 11,
+  :us-per-call 76}
+ {:sym seon.task/task-findings, :calls 3, :ms 11, :us-per-call 3666}
+ {:sym seon.sci.kernel/stacktrace, :calls 8, :ms 11, :us-per-call 1375}
+ {:sym seon.sci.eval/committed-row?,
+  :calls 3,
+  :ms 11,
+  :us-per-call 3666}
+ {:sym seon.fn.analyzer/program-prelude,
+  :calls 287,
+  :ms 11,
+  :us-per-call 38}
+ {:sym seon.instrument/replaced-roots,
+  :calls 1,
+  :ms 11,
+  :us-per-call 11000}
+ {:sym seon.render.value/leaf-width,
+  :calls 5562,
+  :ms 11,
+  :us-per-call 1}
+ {:sym seon.error/opening, :calls 10, :ms 11, :us-per-call 1100}
+ {:sym seon.turn.batch/jvm-read-next,
+  :calls 112,
+  :ms 10,
+  :us-per-call 89}
+ {:sym seon.schema.datahike/malli->datahike-attr-in,
+  :calls 6521,
+  :ms 10,
+  :us-per-call 1}
+ {:sym seon.sci.eval/bind-settled-results!,
+  :calls 4,
+  :ms 10,
+  :us-per-call 2500}
+ {:sym seon.task/task-handles, :calls 9, :ms 10, :us-per-call 1111}
+ {:sym seon.render.value/complete-tail,
+  :calls 109,
+  :ms 10,
+  :us-per-call 91}
+ {:sym seon.schema.edn/validate-resource-placement!,
+  :calls 3,
+  :ms 10,
+  :us-per-call 3333}
+ {:sym seon.mcp/decoded, :calls 277, :ms 10, :us-per-call 36}
+ {:sym seon.render.hiccup/raw?, :calls 111602, :ms 10, :us-per-call 0}
+ {:sym seon.fn/invoked-attributes, :calls 293, :ms 10, :us-per-call 34}
+ {:sym seon.turn.batch/changed-schema-keys,
+  :calls 291,
+  :ms 10,
+  :us-per-call 34}
+ {:sym seon.error.refusal/classify-namespace,
+  :calls 14,
+  :ms 10,
+  :us-per-call 714}
+ {:sym seon.db/arity-verdict, :calls 12, :ms 10, :us-per-call 833}
+ {:sym seon.flow/proc-world, :calls 1022, :ms 10, :us-per-call 9}
+ {:sym seon.cluster/analyzer-reach,
+  :calls 6,
+  :ms 10,
+  :us-per-call 1666}
+ {:sym seon.schema.datahike/value-schema,
+  :calls 9901,
+  :ms 10,
+  :us-per-call 1}
+ {:sym seon.mcp/result, :calls 277, :ms 10, :us-per-call 36}
+ {:sym seon.task/task-handle, :calls 2004, :ms 10, :us-per-call 4}
+ {:sym seon.sci.eval/agent-documentation-contract,
+  :calls 8,
+  :ms 10,
+  :us-per-call 1250}
+ {:sym seon.profile.measurement/measurement-id,
+  :calls 1844,
+  :ms 10,
+  :us-per-call 5}
+ {:sym seon.cluster/loaded-code-mark,
+  :calls 68,
+  :ms 9,
+  :us-per-call 132}
+ {:sym seon.render/request-projection,
+  :calls 930,
+  :ms 9,
+  :us-per-call 9}
+ {:sym seon.turn/applied, :calls 241, :ms 9, :us-per-call 37}
+ {:sym seon.error/declared-schema-keys,
+  :calls 20,
+  :ms 9,
+  :us-per-call 450}
+ {:sym seon.schema.datahike/malli->datahike-schema-in,
+  :calls 97,
+  :ms 9,
+  :us-per-call 92}
+ {:sym seon.sci.kernel/sci-location?,
+  :calls 1009,
+  :ms 9,
+  :us-per-call 8}
+ {:sym seon.render.value/seq-cells, :calls 101, :ms 9, :us-per-call 89}
+ {:sym seon.sci.eval/program-documentation,
+  :calls 1,
+  :ms 9,
+  :us-per-call 9000}
+ {:sym seon.cluster.store/open-overlay!,
+  :calls 5,
+  :ms 9,
+  :us-per-call 1800}
+ {:sym seon.render.value/admit-chunk,
+  :calls 456,
+  :ms 9,
+  :us-per-call 19}
+ {:sym seon.turn.batch/program-request,
+  :calls 282,
+  :ms 9,
+  :us-per-call 31}
+ {:sym seon.db/element-key, :calls 156, :ms 9, :us-per-call 57}
+ {:sym seon.render.value/list-row, :calls 101, :ms 9, :us-per-call 89}
+ {:sym seon.task/task-files, :calls 6, :ms 9, :us-per-call 1500}
+ {:sym seon.cluster/derivation-form,
+  :calls 20340,
+  :ms 9,
+  :us-per-call 0}
+ {:sym seon.schema.edn/resource-loader,
+  :calls 13976,
+  :ms 9,
+  :us-per-call 0}
+ {:sym seon.sci.eval/settled-results,
+  :calls 4,
+  :ms 9,
+  :us-per-call 2250}
+ {:sym seon.test.cache/input-roots, :calls 12, :ms 9, :us-per-call 750}
+ {:sym seon.turn/settlement-projection,
+  :calls 249,
+  :ms 9,
+  :us-per-call 36}
+ {:sym seon.render.value/member-rank,
+  :calls 7356,
+  :ms 9,
+  :us-per-call 1}
+ {:sym seon.print.value/link-lines, :calls 3, :ms 8, :us-per-call 2666}
+ {:sym seon.render.web/start!, :calls 1, :ms 8, :us-per-call 8000}
+ {:sym seon.fn/namespace-context, :calls 1504, :ms 8, :us-per-call 5}
+ {:sym seon.program/source-family?,
+  :calls 50842,
+  :ms 8,
+  :us-per-call 0}
+ {:sym seon.repl/render-emission-html,
+  :calls 50,
+  :ms 8,
+  :us-per-call 160}
+ {:sym seon.cluster.wake/arming-attributes,
+  :calls 304,
+  :ms 8,
+  :us-per-call 26}
+ {:sym seon.render.web/render-step, :calls 26, :ms 8, :us-per-call 307}
+ {:sym seon.render.walk/namespace-connections,
+  :calls 9,
+  :ms 8,
+  :us-per-call 888}
+ {:sym seon.print.value/throwable-text,
+  :calls 3,
+  :ms 8,
+  :us-per-call 2666}
+ {:sym seon.render.value/grown-to, :calls 457, :ms 8, :us-per-call 17}
+ {:sym seon.bootstrap/run-id, :calls 356, :ms 8, :us-per-call 22}
+ {:sym seon.render/entity-owners, :calls 96, :ms 8, :us-per-call 83}
+ {:sym seon.turn/evaluation-facts, :calls 291, :ms 8, :us-per-call 27}
+ {:sym seon.print/emit-text, :calls 994, :ms 8, :us-per-call 8}
+ {:sym seon.profile/quantile-position,
+  :calls 9118,
+  :ms 8,
+  :us-per-call 0}
+ {:sym seon.mcp/pages-changed!, :calls 34, :ms 8, :us-per-call 235}
+ {:sym seon.render.value/floor, :calls 3, :ms 8, :us-per-call 2666}
+ {:sym seon.profile.measurement/measure,
+  :calls 1844,
+  :ms 8,
+  :us-per-call 4}
+ {:sym seon.db/foreign-connection-error,
+  :calls 390,
+  :ms 7,
+  :us-per-call 17}
+ {:sym seon.sci.arm/var-symbol, :calls 25506, :ms 7, :us-per-call 0}
+ {:sym seon.sci.forgive/read-state, :calls 249, :ms 7, :us-per-call 28}
+ {:sym seon.render.value/node-continuation,
+  :calls 7816,
+  :ms 7,
+  :us-per-call 0}
+ {:sym seon.cluster/retired-attributes,
+  :calls 12,
+  :ms 7,
+  :us-per-call 583}
+ {:sym seon.error.refusal/bounded-cost,
+  :calls 2136,
+  :ms 7,
+  :us-per-call 3}
+ {:sym seon.sci.admit/admit-partitioned,
+  :calls 16,
+  :ms 7,
+  :us-per-call 437}
+ {:sym seon.sci.eval/install-namespace-bindings!,
+  :calls 1775,
+  :ms 7,
+  :us-per-call 3}
+ {:sym seon.render.transcript/pinned-receipt-ids,
+  :calls 4,
+  :ms 7,
+  :us-per-call 1750}
+ {:sym seon.cluster.store/file-lock-object?,
+  :calls 53224,
+  :ms 7,
+  :us-per-call 0}
+ {:sym seon.task/create!, :calls 6, :ms 7, :us-per-call 1166}
+ {:sym seon.fn/assert-seed-contracts!,
+  :calls 6,
+  :ms 7,
+  :us-per-call 1166}
+ {:sym seon.program/binding-entry-entity,
+  :calls 903,
+  :ms 7,
+  :us-per-call 7}
+ {:sym seon.call-preparation/coherent-supplier,
+  :calls 68,
+  :ms 7,
+  :us-per-call 102}
+ {:sym seon.profile/cells-of, :calls 2209, :ms 7, :us-per-call 3}
+ {:sym seon.render.value/breaks?, :calls 8626, :ms 7, :us-per-call 0}
+ {:sym seon.sci.eval/floor-text, :calls 1, :ms 7, :us-per-call 7000}
+ {:sym seon.sci.forgive/version, :calls 540, :ms 7, :us-per-call 12}
+ {:sym seon.cluster.host/hosted, :calls 242, :ms 7, :us-per-call 28}
+ {:sym seon.test.cache/gitlink-digests,
+  :calls 18,
+  :ms 7,
+  :us-per-call 388}
+ {:sym seon.render.transcript/floor-text,
+  :calls 2,
+  :ms 7,
+  :us-per-call 3500}
+ {:sym seon.render.hiccup/->string, :calls 27, :ms 7, :us-per-call 259}
+ {:sym seon.test.runner/reach-postorder,
+  :calls 4,
+  :ms 7,
+  :us-per-call 1750}
+ {:sym seon.task/refusal-data, :calls 6, :ms 6, :us-per-call 1000}
+ {:sym seon.render.value/omitted-characters,
+  :calls 419,
+  :ms 6,
+  :us-per-call 14}
+ {:sym seon.batch/call-profile, :calls 371, :ms 6, :us-per-call 16}
+ {:sym seon.test.cache/input-evidence-digest,
+  :calls 6,
+  :ms 6,
+  :us-per-call 1000}
+ {:sym seon.schema/with-predicate-functions,
+  :calls 2277,
+  :ms 6,
+  :us-per-call 2}
+ {:sym seon.db/replay-read, :calls 2, :ms 6, :us-per-call 3000}
+ {:sym seon.health/fold-callers, :calls 1, :ms 6, :us-per-call 6000}
+ {:sym seon.batch/executed, :calls 371, :ms 6, :us-per-call 16}
+ {:sym seon.fault/delivered-to, :calls 8, :ms 6, :us-per-call 750}
+ {:sym seon.db/unknown-attribute-error,
+  :calls 6,
+  :ms 6,
+  :us-per-call 1000}
+ {:sym seon.cluster/loaded-code-changed?,
+  :calls 34,
+  :ms 6,
+  :us-per-call 176}
+ {:sym seon.sci.eval/function-doc-map,
+  :calls 2,
+  :ms 6,
+  :us-per-call 3000}
+ {:sym seon.repl/findings, :calls 962, :ms 6, :us-per-call 6}
+ {:sym seon.sci.eval/program-basis, :calls 426, :ms 6, :us-per-call 14}
+ {:sym seon.profile.measurement/advance!,
+  :calls 1844,
+  :ms 6,
+  :us-per-call 3}
+ {:sym seon.repl/data-text, :calls 23, :ms 6, :us-per-call 260}
+ {:sym seon.schema/assert-acyclic-references!,
+  :calls 1,
+  :ms 6,
+  :us-per-call 6000}
+ {:sym seon.db/basis-instant, :calls 2875, :ms 6, :us-per-call 2}
+ {:sym seon.sci.eval/documentation-value,
+  :calls 2,
+  :ms 6,
+  :us-per-call 3000}
+ {:sym seon.schema/runtime-predicate,
+  :calls 539,
+  :ms 6,
+  :us-per-call 11}
+ {:sym seon.sci.admit/admit, :calls 34, :ms 6, :us-per-call 176}
+ {:sym seon.render.value/reference-value,
+  :calls 2517,
+  :ms 6,
+  :us-per-call 2}
+ {:sym seon.db/comparable-component,
+  :calls 126,
+  :ms 6,
+  :us-per-call 47}
+ {:sym seon.cluster.registry/branch-commit-id,
+  :calls 19,
+  :ms 6,
+  :us-per-call 315}
+ {:sym seon.blob/stage!, :calls 11, :ms 6, :us-per-call 545}
+ {:sym seon.cluster.message/agent-reference-id,
+  :calls 6,
+  :ms 6,
+  :us-per-call 1000}
+ {:sym seon.render.transcript/turn-entities,
+  :calls 6,
+  :ms 6,
+  :us-per-call 1000}
+ {:sym seon.schema.edn/merge-schema-resources,
+  :calls 3,
+  :ms 6,
+  :us-per-call 2000}
+ {:sym seon.error.refusal/var-digest,
+  :calls 11593,
+  :ms 6,
+  :us-per-call 0}
+ {:sym seon.cluster.status/snapshot,
+  :calls 1,
+  :ms 6,
+  :us-per-call 6000}
+ {:sym seon.sci.eval/documentation-schemas,
+  :calls 14,
+  :ms 6,
+  :us-per-call 428}
+ {:sym seon.print.value/datum, :calls 86, :ms 6, :us-per-call 69}
+ {:sym seon.sci.eval/commit-id-of, :calls 830, :ms 6, :us-per-call 7}
+ {:sym seon.sci.eval/remember-program-identity!,
+  :calls 598,
+  :ms 6,
+  :us-per-call 10}
+ {:sym seon.call-preparation/supplied-map-entries,
+  :calls 8,
+  :ms 6,
+  :us-per-call 750}
+ {:sym seon.program/map-binding-entries,
+  :calls 255,
+  :ms 6,
+  :us-per-call 23}
+ {:sym seon.fn/with-seed-keywords, :calls 5277, :ms 6, :us-per-call 1}
+ {:sym seon.error/message-tx, :calls 3, :ms 6, :us-per-call 2000}
+ {:sym seon.task/task-call, :calls 6, :ms 6, :us-per-call 1000}
+ {:sym seon.db/jdk-integers->long, :calls 391, :ms 6, :us-per-call 15}
+ {:sym seon.reconcile/normalize-value,
+  :calls 3368,
+  :ms 5,
+  :us-per-call 1}
+ {:sym seon.turn.batch/form-relative-expansions,
+  :calls 286,
+  :ms 5,
+  :us-per-call 17}
+ {:sym seon.turn/deferred-triggers, :calls 1, :ms 5, :us-per-call 5000}
+ {:sym seon.turn/with-submission, :calls 245, :ms 5, :us-per-call 20}
+ {:sym seon.health/candidates, :calls 16, :ms 5, :us-per-call 312}
+ {:sym seon.render.ns/held-task, :calls 6, :ms 5, :us-per-call 833}
+ {:sym seon.error.refusal/bounded-data,
+  :calls 1051,
+  :ms 5,
+  :us-per-call 4}
+ {:sym seon.db/absent-call, :calls 495, :ms 5, :us-per-call 10}
+ {:sym seon.turn.batch/join-write, :calls 7405, :ms 5, :us-per-call 0}
+ {:sym seon.turn/final-shown, :calls 2, :ms 5, :us-per-call 2500}
+ {:sym seon.cluster.wake/inside-attributes,
+  :calls 501,
+  :ms 5,
+  :us-per-call 9}
+ {:sym seon.render.value/cut-node, :calls 232, :ms 5, :us-per-call 21}
+ {:sym seon.sci.arm/refusing-root, :calls 26, :ms 5, :us-per-call 192}
+ {:sym seon.turn/next-id, :calls 7, :ms 5, :us-per-call 714}
+ {:sym seon.turn.batch/sci-stages, :calls 282, :ms 5, :us-per-call 17}
+ {:sym seon.render/target-profile, :calls 405, :ms 5, :us-per-call 12}
+ {:sym seon.render.ns/held-task-ai, :calls 5, :ms 5, :us-per-call 1000}
+ {:sym seon.schema/fingerprint-with,
+  :calls 126,
+  :ms 5,
+  :us-per-call 39}
+ {:sym seon.profile/histogram-calls,
+  :calls 5653,
+  :ms 5,
+  :us-per-call 0}
+ {:sym seon.db/read-refusal?, :calls 16834, :ms 5, :us-per-call 0}
+ {:sym seon.render.value/value-identity,
+  :calls 443,
+  :ms 5,
+  :us-per-call 11}
+ {:sym seon.render.value/schedule, :calls 7160, :ms 5, :us-per-call 0}
+ {:sym seon.turn.batch/namespace-entity,
+  :calls 289,
+  :ms 5,
+  :us-per-call 17}
+ {:sym seon.call-preparation/state?,
+  :calls 33126,
+  :ms 5,
+  :us-per-call 0}
+ {:sym seon.fn.signature/declaration-parts,
+  :calls 2255,
+  :ms 5,
+  :us-per-call 2}
+ {:sym seon.batch/counters, :calls 742, :ms 5, :us-per-call 6}
+ {:sym seon.instrument/original-interpreted,
+  :calls 12131,
+  :ms 5,
+  :us-per-call 0}
+ {:sym seon.sci.forgive/skip-to, :calls 912, :ms 5, :us-per-call 5}
+ {:sym seon.profile/counts?, :calls 33775, :ms 5, :us-per-call 0}
+ {:sym seon.batch/form-world, :calls 371, :ms 5, :us-per-call 13}
+ {:sym seon.cluster.wake/turn-opening-attributes,
+  :calls 246,
+  :ms 5,
+  :us-per-call 20}
+ {:sym seon.cluster.source/current, :calls 16, :ms 4, :us-per-call 250}
+ {:sym seon.error/reply-value, :calls 12, :ms 4, :us-per-call 333}
+ {:sym seon.render.transcript/recent-receipt-entities,
+  :calls 4,
+  :ms 4,
+  :us-per-call 1000}
+ {:sym seon.db/database-identity, :calls 1198, :ms 4, :us-per-call 3}
+ {:sym seon.env/scope, :calls 722, :ms 4, :us-per-call 5}
+ {:sym seon.program/shape, :calls 1991, :ms 4, :us-per-call 2}
+ {:sym seon.sci.kernel/cache-function!,
+  :calls 1948,
+  :ms 4,
+  :us-per-call 2}
+ {:sym seon.error.refusal/current-world,
+  :calls 11605,
+  :ms 4,
+  :us-per-call 0}
+ {:sym seon.render/entity-satisfied?,
+  :calls 57,
+  :ms 4,
+  :us-per-call 70}
+ {:sym seon.turn/code-evidence, :calls 291, :ms 4, :us-per-call 13}
+ {:sym seon.error.refusal/within-evidence-bound-chain?,
+  :calls 60,
+  :ms 4,
+  :us-per-call 66}
+ {:sym seon.batch/owned?, :calls 30815, :ms 4, :us-per-call 0}
+ {:sym seon.test.runner/thrown-artifact,
+  :calls 3,
+  :ms 4,
+  :us-per-call 1333}
+ {:sym seon.render.value/render-html,
+  :calls 1,
+  :ms 4,
+  :us-per-call 4000}
+ {:sym seon.schema/predicate-functions-in,
+  :calls 2320,
+  :ms 4,
+  :us-per-call 1}
+ {:sym seon.db/basis-t, :calls 7566, :ms 4, :us-per-call 0}
+ {:sym seon.turn.batch/form-facts, :calls 43, :ms 4, :us-per-call 93}
+ {:sym seon.schema.datahike/query-source?,
+  :calls 23014,
+  :ms 4,
+  :us-per-call 0}
+ {:sym seon.turn/plan-call, :calls 2, :ms 4, :us-per-call 2000}
+ {:sym seon.turn/namespace-rows, :calls 810, :ms 4, :us-per-call 4}
+ {:sym seon.db/history, :calls 309, :ms 4, :us-per-call 12}
+ {:sym seon.turn/turns-left, :calls 1, :ms 4, :us-per-call 4000}
+ {:sym seon.sci.eval/loaded-commit-id,
+  :calls 17,
+  :ms 4,
+  :us-per-call 235}
+ {:sym seon.error.refusal/contract-refusal,
+  :calls 11607,
+  :ms 4,
+  :us-per-call 0}
+ {:sym seon.batch/sink?, :calls 29776, :ms 4, :us-per-call 0}
+ {:sym seon.turn/record-evaluated-tx,
+  :calls 4,
+  :ms 4,
+  :us-per-call 1000}
+ {:sym seon.render.value/push-work, :calls 4974, :ms 4, :us-per-call 0}
+ {:sym seon.call-preparation/newest-entity-transaction,
+  :calls 17,
+  :ms 4,
+  :us-per-call 235}
+ {:sym seon.turn/opening-db, :calls 29, :ms 4, :us-per-call 137}
+ {:sym seon.turn/episode-exhausted!,
+  :calls 3,
+  :ms 4,
+  :us-per-call 1333}
+ {:sym seon.db/diff, :calls 25, :ms 4, :us-per-call 160}
+ {:sym seon.sci.admit/result-handle, :calls 823, :ms 4, :us-per-call 4}
+ {:sym seon.profile/world-counter?,
+  :calls 59898,
+  :ms 4,
+  :us-per-call 0}
+ {:sym seon.turn.batch/captured-locals,
+  :calls 1,
+  :ms 4,
+  :us-per-call 4000}
+ {:sym seon.cluster.source/commit-database,
+  :calls 5,
+  :ms 4,
+  :us-per-call 800}
+ {:sym seon.render.value/throwable-safe?,
+  :calls 1002,
+  :ms 4,
+  :us-per-call 3}
+ {:sym seon.render/render-ai, :calls 3, :ms 4, :us-per-call 1333}
+ {:sym seon.render.transcript/render-ai,
+  :calls 3,
+  :ms 4,
+  :us-per-call 1333}
+ {:sym seon.print.value/host-class?, :calls 726, :ms 3, :us-per-call 4}
+ {:sym seon.env/advance-projection!, :calls 382, :ms 3, :us-per-call 7}
+ {:sym seon.turn/resume-artifact?, :calls 4, :ms 3, :us-per-call 750}
+ {:sym seon.test.runner/reach-node, :calls 63, :ms 3, :us-per-call 47}
+ {:sym seon.sci.forgive/line-starts, :calls 540, :ms 3, :us-per-call 5}
+ {:sym seon.db/datoms-call-valid?, :calls 12078, :ms 3, :us-per-call 0}
+ {:sym seon.env/replace-environment!,
+  :calls 373,
+  :ms 3,
+  :us-per-call 8}
+ {:sym seon.error/fit-fact-payload, :calls 16, :ms 3, :us-per-call 187}
+ {:sym seon.render.value/chain, :calls 5262, :ms 3, :us-per-call 0}
+ {:sym seon.fn.analyzer/literal-value?,
+  :calls 1811,
+  :ms 3,
+  :us-per-call 1}
+ {:sym seon.schema.edn/schema-resource-paths,
+  :calls 3,
+  :ms 3,
+  :us-per-call 1000}
+ {:sym seon.task/home, :calls 12, :ms 3, :us-per-call 250}
+ {:sym seon.turn/episode-runs, :calls 1, :ms 3, :us-per-call 3000}
+ {:sym seon.db/matched-cells, :calls 71, :ms 3, :us-per-call 42}
+ {:sym seon.turn/provider-targets, :calls 1, :ms 3, :us-per-call 3000}
+ {:sym seon.batch/write?, :calls 8625, :ms 3, :us-per-call 0}
+ {:sym seon.test.runner/reach-row, :calls 63, :ms 3, :us-per-call 47}
+ {:sym seon.turn.batch/namespace-facts,
+  :calls 8,
+  :ms 3,
+  :us-per-call 375}
+ {:sym seon.program/declaration-row,
+  :calls 137,
+  :ms 3,
+  :us-per-call 21}
+ {:sym seon.render.value/fold-collapsed-tail,
+  :calls 419,
+  :ms 3,
+  :us-per-call 7}
+ {:sym seon.print/continuation, :calls 7285, :ms 3, :us-per-call 0}
+ {:sym seon.cluster.wake/inert-attributes,
+  :calls 108,
+  :ms 3,
+  :us-per-call 27}
+ {:sym seon.env/environment, :calls 165, :ms 3, :us-per-call 18}
+ {:sym seon.turn.batch/entry-coords,
+  :calls 7405,
+  :ms 3,
+  :us-per-call 0}
+ {:sym seon.render/agent-render-profile,
+  :calls 492,
+  :ms 3,
+  :us-per-call 6}
+ {:sym seon.repl/def-note, :calls 923, :ms 3, :us-per-call 3}
+ {:sym seon.render.value/nest, :calls 22733, :ms 3, :us-per-call 0}
+ {:sym seon.schema/handed-projection,
+  :calls 11772,
+  :ms 3,
+  :us-per-call 0}
+ {:sym seon.repl/cost-attributes, :calls 475, :ms 3, :us-per-call 6}
+ {:sym seon.sci.kernel/execution-error-text,
+  :calls 7,
+  :ms 3,
+  :us-per-call 428}
+ {:sym seon.error.refusal/within-evidence-bound?,
+  :calls 1085,
+  :ms 3,
+  :us-per-call 2}
+ {:sym seon.test/selection-seeds, :calls 4, :ms 3, :us-per-call 750}
+ {:sym seon.program/typed-key-facts, :calls 921, :ms 3, :us-per-call 3}
+ {:sym seon.batch/stamped-clock?, :calls 18099, :ms 3, :us-per-call 0}
+ {:sym seon.schedule/latest-nominal-at-or-before,
+  :calls 3,
+  :ms 3,
+  :us-per-call 1000}
+ {:sym seon.fault/folded-tx, :calls 251, :ms 3, :us-per-call 11}
+ {:sym seon.render/head-function, :calls 287, :ms 3, :us-per-call 10}
+ {:sym seon.db/committed-value-identity,
+  :calls 868,
+  :ms 3,
+  :us-per-call 3}
+ {:sym seon.render.value/escaped-width,
+  :calls 1199,
+  :ms 3,
+  :us-per-call 2}
+ {:sym seon.sci.eval/loaded-program-current?,
+  :calls 133,
+  :ms 3,
+  :us-per-call 22}
+ {:sym seon.config/compile-settings,
+  :calls 11,
+  :ms 3,
+  :us-per-call 272}
+ {:sym seon.sci.eval/loaded-digests,
+  :calls 16,
+  :ms 3,
+  :us-per-call 187}
+ {:sym seon.mcp/printed, :calls 2, :ms 3, :us-per-call 1500}
+ {:sym seon.turn.batch/schema-notes,
+  :calls 291,
+  :ms 3,
+  :us-per-call 10}
+ {:sym seon.test.runner/class-loader?,
+  :calls 14371,
+  :ms 3,
+  :us-per-call 0}
+ {:sym seon.test.cache/declared-input-roots,
+  :calls 12,
+  :ms 3,
+  :us-per-call 250}
+ {:sym seon.render.transcript/render-runtime-html,
+  :calls 1,
+  :ms 3,
+  :us-per-call 3000}
+ {:sym seon.error/steward, :calls 10, :ms 3, :us-per-call 300}
+ {:sym seon.error/problem-shown, :calls 3, :ms 3, :us-per-call 1000}
+ {:sym seon.batch/source-of, :calls 371, :ms 3, :us-per-call 8}
+ {:sym seon.render/refresh-read-evidence,
+  :calls 8,
+  :ms 3,
+  :us-per-call 375}
+ {:sym seon.error.refusal/machinery-namespace?,
+  :calls 13129,
+  :ms 3,
+  :us-per-call 0}
+ {:sym seon.render/producer, :calls 5, :ms 3, :us-per-call 600}
+ {:sym seon.db/changed-read-attributes,
+  :calls 28,
+  :ms 3,
+  :us-per-call 107}
+ {:sym seon.task/agent-task, :calls 6, :ms 3, :us-per-call 500}
+ {:sym seon.db/database-view, :calls 343, :ms 3, :us-per-call 8}
+ {:sym seon.turn.batch/program-facts,
+  :calls 38,
+  :ms 3,
+  :us-per-call 78}
+ {:sym seon.error/declared-output-validators,
+  :calls 9,
+  :ms 3,
+  :us-per-call 333}
+ {:sym seon.schema/projection-validator,
+  :calls 2536,
+  :ms 2,
+  :us-per-call 0}
+ {:sym seon.test-support/execution-handle,
+  :calls 45,
+  :ms 2,
+  :us-per-call 44}
+ {:sym seon.print/elision, :calls 232, :ms 2, :us-per-call 8}
+ {:sym seon.cluster.registry/roster, :calls 57, :ms 2, :us-per-call 35}
+ {:sym seon.schema/byte-array?, :calls 6089, :ms 2, :us-per-call 0}
+ {:sym seon.error/stored-observation,
+  :calls 27,
+  :ms 2,
+  :us-per-call 74}
+ {:sym seon.ai.tokens/estimate-chars,
+  :calls 838,
+  :ms 2,
+  :us-per-call 2}
+ {:sym seon.cluster.process/handle-start-instant,
+  :calls 8,
+  :ms 2,
+  :us-per-call 250}
+ {:sym seon.schema.datahike/reads-cells?,
+  :calls 90,
+  :ms 2,
+  :us-per-call 22}
+ {:sym seon.db/nearest-base, :calls 41, :ms 2, :us-per-call 48}
+ {:sym seon.render.value/sibling-level,
+  :calls 6992,
+  :ms 2,
+  :us-per-call 0}
+ {:sym seon.fault/folded-counts, :calls 251, :ms 2, :us-per-call 7}
+ {:sym seon.turn/evaluated-namespaces,
+  :calls 319,
+  :ms 2,
+  :us-per-call 6}
+ {:sym seon.render.transcript/receipt-entry,
+  :calls 350,
+  :ms 2,
+  :us-per-call 5}
+ {:sym seon.error.refusal/held-members,
+  :calls 2304,
+  :ms 2,
+  :us-per-call 0}
+ {:sym seon.sci.eval/loaded-source, :calls 150, :ms 2, :us-per-call 13}
+ {:sym seon.error/signature, :calls 16, :ms 2, :us-per-call 125}
+ {:sym seon.sci.eval/acquired-program,
+  :calls 357,
+  :ms 2,
+  :us-per-call 5}
+ {:sym seon.sci.kernel/program-namespace,
+  :calls 1718,
+  :ms 2,
+  :us-per-call 1}
+ {:sym seon.sci.eval/record-refusals-once!,
+  :calls 17,
+  :ms 2,
+  :us-per-call 117}
+ {:sym seon.turn/submission-open-tx, :calls 243, :ms 2, :us-per-call 8}
+ {:sym seon.render.value/charge, :calls 5945, :ms 2, :us-per-call 0}
+ {:sym seon.flow/start-graph!, :calls 2, :ms 2, :us-per-call 1000}
+ {:sym seon.cluster/disarm-agents!, :calls 1, :ms 2, :us-per-call 2000}
+ {:sym seon.cluster/attribute-adoption,
+  :calls 9837,
+  :ms 2,
+  :us-per-call 0}
+ {:sym seon.error/occurrence-slot, :calls 18, :ms 2, :us-per-call 111}
+ {:sym seon.call-preparation/planned-arities,
+  :calls 8,
+  :ms 2,
+  :us-per-call 250}
+ {:sym seon.test-support/agent-tx, :calls 5, :ms 2, :us-per-call 400}
+ {:sym seon.cluster.status/render-ai,
+  :calls 3,
+  :ms 2,
+  :us-per-call 666}
+ {:sym seon.test.runner/reach-bits, :calls 65, :ms 2, :us-per-call 30}
+ {:sym seon.sci.forgive/comment-of, :calls 258, :ms 2, :us-per-call 7}
+ {:sym seon.render.value/transacted, :calls 255, :ms 2, :us-per-call 7}
+ {:sym seon.sci.eval/install-refusing-root!,
+  :calls 132,
+  :ms 2,
+  :us-per-call 15}
+ {:sym seon.agent/render-settings-ai,
+  :calls 5,
+  :ms 2,
+  :us-per-call 400}
+ {:sym seon.cluster.agent/assigned-to,
+  :calls 6,
+  :ms 2,
+  :us-per-call 333}
+ {:sym seon.batch/environment-members,
+  :calls 314,
+  :ms 2,
+  :us-per-call 6}
+ {:sym seon.fs/source-directory, :calls 9, :ms 2, :us-per-call 222}
+ {:sym seon.batch/line-column, :calls 371, :ms 2, :us-per-call 5}
+ {:sym seon.mcp/instance, :calls 277, :ms 2, :us-per-call 7}
+ {:sym seon.render.value/start-column,
+  :calls 5510,
+  :ms 2,
+  :us-per-call 0}
+ {:sym seon.ai/targets, :calls 1, :ms 2, :us-per-call 2000}
+ {:sym seon.ai.tokens/estimate, :calls 425, :ms 2, :us-per-call 4}
+ {:sym seon.cluster.store/release-store!,
+  :calls 5,
+  :ms 2,
+  :us-per-call 400}
+ {:sym seon.sci.kernel/program-function,
+  :calls 1788,
+  :ms 2,
+  :us-per-call 1}
+ {:sym seon.cluster/drop-retired-families!,
+  :calls 3,
+  :ms 2,
+  :us-per-call 666}
+ {:sym seon.error/latest-fact, :calls 200, :ms 2, :us-per-call 10}
+ {:sym seon.program/test-markers, :calls 5310, :ms 2, :us-per-call 0}
+ {:sym seon.render.route/path, :calls 102, :ms 2, :us-per-call 19}
+ {:sym seon.cluster.wake/route!, :calls 2, :ms 2, :us-per-call 1000}
+ {:sym seon.cluster/attribute-change-tx,
+  :calls 9,
+  :ms 2,
+  :us-per-call 222}
+ {:sym seon.schema.datahike/new-entity-id?,
+  :calls 13543,
+  :ms 2,
+  :us-per-call 0}
+ {:sym seon.render.value/referent-identity,
+  :calls 14,
+  :ms 2,
+  :us-per-call 142}
+ {:sym seon.env/construct, :calls 165, :ms 2, :us-per-call 12}
+ {:sym seon.fn/task-refused!, :calls 5, :ms 2, :us-per-call 400}
+ {:sym seon.schema.edn/directory-resource-paths,
+  :calls 3,
+  :ms 2,
+  :us-per-call 666}
+ {:sym seon.error/example, :calls 3, :ms 2, :us-per-call 666}
+ {:sym seon.id/symbol-in, :calls 822, :ms 2, :us-per-call 2}
+ {:sym seon.cluster.wake/unindexed-listened-attributes,
+  :calls 251,
+  :ms 2,
+  :us-per-call 7}
+ {:sym seon.cluster.message/render-inbox-html,
+  :calls 1,
+  :ms 2,
+  :us-per-call 2000}
+ {:sym seon.db/populated-identity-attributes,
+  :calls 6,
+  :ms 2,
+  :us-per-call 333}
+ {:sym seon.render.transcript/bootstrap-task-message-eid,
+  :calls 4,
+  :ms 2,
+  :us-per-call 500}
+ {:sym seon.cluster.source/classify-paths,
+  :calls 6,
+  :ms 2,
+  :us-per-call 333}
+ {:sym seon.turn/call-profile-facts, :calls 291, :ms 2, :us-per-call 6}
+ {:sym seon.error.refusal/prepared-call-prefix,
+  :calls 1145,
+  :ms 2,
+  :us-per-call 1}
+ {:sym seon.sci.forgive/line-bounds,
+  :calls 1492,
+  :ms 2,
+  :us-per-call 1}
+ {:sym seon.cluster.process/current-identity,
+  :calls 8,
+  :ms 2,
+  :us-per-call 250}
+ {:sym seon.health/with-tasks, :calls 1, :ms 2, :us-per-call 2000}
+ {:sym seon.batch/produced-failures, :calls 316, :ms 2, :us-per-call 6}
+ {:sym seon.sci.forgive/structure?, :calls 249, :ms 2, :us-per-call 8}
+ {:sym seon.agent/settings, :calls 5, :ms 2, :us-per-call 400}
+ {:sym seon.db/removed-definition-error,
+  :calls 389,
+  :ms 2,
+  :us-per-call 5}
+ {:sym seon.schema/dependent-schema-keys,
+  :calls 35,
+  :ms 2,
+  :us-per-call 57}
+ {:sym seon.turn.batch/program-facts-call,
+  :calls 4,
+  :ms 2,
+  :us-per-call 500}
+ {:sym seon.test/owned-symbols, :calls 1, :ms 2, :us-per-call 2000}
+ {:sym seon.cluster.agent/segmenter, :calls 243, :ms 2, :us-per-call 8}
+ {:sym seon.sci.eval/projection-state,
+  :calls 91,
+  :ms 2,
+  :us-per-call 21}
+ {:sym seon.turn/receipt-settle-batch-tx,
+  :calls 245,
+  :ms 2,
+  :us-per-call 8}
+ {:sym seon.maintenance/result-entity,
+  :calls 1,
+  :ms 2,
+  :us-per-call 2000}
+ {:sym seon.cluster/dropped-summary, :calls 3, :ms 1, :us-per-call 333}
+ {:sym seon.turn.batch/record-facts, :calls 34, :ms 1, :us-per-call 29}
+ {:sym seon.test-support/held-handle,
+  :calls 52,
+  :ms 1,
+  :us-per-call 19}
+ {:sym seon.error/validate-declaration!,
+  :calls 32,
+  :ms 1,
+  :us-per-call 31}
+ {:sym seon.reconcile/canonical-desired-entity,
+  :calls 342,
+  :ms 1,
+  :us-per-call 2}
+ {:sym seon.print/value-at, :calls 166, :ms 1, :us-per-call 6}
+ {:sym seon.ai/request-attributes, :calls 1, :ms 1, :us-per-call 1000}
+ {:sym seon.test/arm-first-loads!, :calls 2, :ms 1, :us-per-call 500}
+ {:sym seon.batch/settled-into, :calls 34, :ms 1, :us-per-call 29}
+ {:sym seon.sci.kernel/context-projection,
+  :calls 159,
+  :ms 1,
+  :us-per-call 6}
+ {:sym seon.agent/render-settings-html,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.cluster.registry/connection-branch-commit-id,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.await/remaining-ms, :calls 494, :ms 1, :us-per-call 2}
+ {:sym seon.cluster/resolve-bootstrap,
+  :calls 3,
+  :ms 1,
+  :us-per-call 333}
+ {:sym seon.error/project-observation,
+  :calls 2,
+  :ms 1,
+  :us-per-call 500}
+ {:sym seon.batch/sink, :calls 687, :ms 1, :us-per-call 1}
+ {:sym seon.test.cache/source-file?,
+  :calls 6000,
+  :ms 1,
+  :us-per-call 0}
+ {:sym seon.health/score, :calls 345, :ms 1, :us-per-call 2}
+ {:sym seon.db/element-kind, :calls 884, :ms 1, :us-per-call 1}
+ {:sym seon.error/repeat-of, :calls 8, :ms 1, :us-per-call 125}
+ {:sym seon.render/refined-names, :calls 90, :ms 1, :us-per-call 11}
+ {:sym seon.profile/upper-us, :calls 5440, :ms 1, :us-per-call 0}
+ {:sym seon.config/held-overlay, :calls 10, :ms 1, :us-per-call 100}
+ {:sym seon.error/value-edn, :calls 18, :ms 1, :us-per-call 55}
+ {:sym seon.cluster.host/agent-entity,
+  :calls 4,
+  :ms 1,
+  :us-per-call 250}
+ {:sym seon.error.refusal/frame-function,
+  :calls 19,
+  :ms 1,
+  :us-per-call 52}
+ {:sym seon.schedule/fire-call, :calls 1, :ms 1, :us-per-call 1000}
+ {:sym seon.db/commit-id, :calls 330, :ms 1, :us-per-call 3}
+ {:sym seon.db/as-of-key, :calls 221, :ms 1, :us-per-call 4}
+ {:sym seon.render/invocation-unknown,
+  :calls 129,
+  :ms 1,
+  :us-per-call 7}
+ {:sym seon.cluster/retire-attributes!,
+  :calls 3,
+  :ms 1,
+  :us-per-call 333}
+ {:sym seon.error.refusal/library-url?,
+  :calls 11,
+  :ms 1,
+  :us-per-call 90}
+ {:sym seon.test.runner/duration-failures,
+  :calls 32,
+  :ms 1,
+  :us-per-call 31}
+ {:sym seon.schema/identity-only-projection-in,
+  :calls 82,
+  :ms 1,
+  :us-per-call 12}
+ {:sym seon.fault/landed-occurrence, :calls 8, :ms 1, :us-per-call 125}
+ {:sym seon.error.refusal/checking-projection,
+  :calls 43,
+  :ms 1,
+  :us-per-call 23}
+ {:sym seon.sci.eval/namespace-source,
+  :calls 8,
+  :ms 1,
+  :us-per-call 125}
+ {:sym seon.schedule/next-nominal-after,
+  :calls 3,
+  :ms 1,
+  :us-per-call 333}
+ {:sym seon.cluster.boot/readiness, :calls 1, :ms 1, :us-per-call 1000}
+ {:sym seon.render/transacted, :calls 81, :ms 1, :us-per-call 12}
+ {:sym seon.db/revision-agreement, :calls 298, :ms 1, :us-per-call 3}
+ {:sym seon.turn.world/jvm-world, :calls 34, :ms 1, :us-per-call 29}
+ {:sym seon.schema.datahike/logical-attribute?,
+  :calls 8065,
+  :ms 1,
+  :us-per-call 0}
+ {:sym seon.error/throwable?, :calls 4309, :ms 1, :us-per-call 0}
+ {:sym seon.sci.eval/host-bound-row?,
+  :calls 3748,
+  :ms 1,
+  :us-per-call 0}
+ {:sym seon.repl/cost, :calls 962, :ms 1, :us-per-call 1}
+ {:sym seon.task/file-namespace, :calls 1020, :ms 1, :us-per-call 0}
+ {:sym seon.render/attribute-identity,
+  :calls 96,
+  :ms 1,
+  :us-per-call 10}
+ {:sym seon.fn/reconcile-call, :calls 6, :ms 1, :us-per-call 166}
+ {:sym seon.program/shapes, :calls 6, :ms 1, :us-per-call 166}
+ {:sym seon.cluster.agent/render-identity-ai,
+  :calls 5,
+  :ms 1,
+  :us-per-call 200}
+ {:sym seon.render/render-html, :calls 2, :ms 1, :us-per-call 500}
+ {:sym seon.sci.eval/loaded-basis, :calls 150, :ms 1, :us-per-call 6}
+ {:sym seon.error/value, :calls 16, :ms 1, :us-per-call 62}
+ {:sym seon.print/elided-text, :calls 232, :ms 1, :us-per-call 4}
+ {:sym seon.render.transcript/render-runtime-ai,
+  :calls 5,
+  :ms 1,
+  :us-per-call 200}
+ {:sym seon.repl/value-text, :calls 959, :ms 1, :us-per-call 1}
+ {:sym seon.render.web/candidate-call-ids,
+  :calls 6,
+  :ms 1,
+  :us-per-call 166}
+ {:sym seon.db/retention-check, :calls 389, :ms 1, :us-per-call 2}
+ {:sym seon.cluster.wake/arming-refusal,
+  :calls 2,
+  :ms 1,
+  :us-per-call 500}
+ {:sym seon.health/definition-comparisons,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.batch/outcome?, :calls 371, :ms 1, :us-per-call 2}
+ {:sym seon.sci.forgive/advance, :calls 800, :ms 1, :us-per-call 1}
+ {:sym seon.batch/ms-since, :calls 2451, :ms 1, :us-per-call 0}
+ {:sym seon.cluster.agent/mailbox-step,
+  :calls 254,
+  :ms 1,
+  :us-per-call 3}
+ {:sym seon.db/apply-diff, :calls 18, :ms 1, :us-per-call 55}
+ {:sym seon.error/entity-exists?, :calls 36, :ms 1, :us-per-call 27}
+ {:sym seon.turn/terminal?, :calls 684, :ms 1, :us-per-call 1}
+ {:sym seon.error/bounded-admission, :calls 18, :ms 1, :us-per-call 55}
+ {:sym seon.schema/incremental-base?,
+  :calls 129,
+  :ms 1,
+  :us-per-call 7}
+ {:sym seon.render.walk/distance-cap-unit,
+  :calls 38,
+  :ms 1,
+  :us-per-call 26}
+ {:sym seon.cluster.agent/disarm!, :calls 1, :ms 1, :us-per-call 1000}
+ {:sym seon.render/selection-refusal,
+  :calls 96,
+  :ms 1,
+  :us-per-call 10}
+ {:sym seon.profile.measurement/moved?,
+  :calls 1844,
+  :ms 1,
+  :us-per-call 0}
+ {:sym seon.cluster.agent/creation-tx,
+  :calls 26,
+  :ms 1,
+  :us-per-call 38}
+ {:sym seon.cluster.agent/record-interruption!,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.error.refusal/cause-links,
+  :calls 174,
+  :ms 1,
+  :us-per-call 5}
+ {:sym seon.db/missing-transaction-data-error,
+  :calls 390,
+  :ms 1,
+  :us-per-call 2}
+ {:sym seon.test.runner/reach-schema-node,
+  :calls 2,
+  :ms 1,
+  :us-per-call 500}
+ {:sym seon.turn.batch/jvm-request, :calls 34, :ms 1, :us-per-call 29}
+ {:sym seon.call-preparation/supply-from-row,
+  :calls 7,
+  :ms 1,
+  :us-per-call 142}
+ {:sym seon.render.walk/with-related,
+  :calls 38,
+  :ms 1,
+  :us-per-call 26}
+ {:sym seon.task/resolution, :calls 1, :ms 1, :us-per-call 1000}
+ {:sym seon.error.refusal/error, :calls 43, :ms 1, :us-per-call 23}
+ {:sym seon.ai.tokens/estimate-of-characters,
+  :calls 814,
+  :ms 1,
+  :us-per-call 1}
+ {:sym seon.db/branch-connection, :calls 8, :ms 1, :us-per-call 125}
+ {:sym seon.test/apply-seeds!, :calls 32, :ms 1, :us-per-call 31}
+ {:sym seon.schema/function-matching-outputs-in,
+  :calls 348,
+  :ms 1,
+  :us-per-call 2}
+ {:sym seon.render.value/keyword-lookup?,
+  :calls 1861,
+  :ms 1,
+  :us-per-call 0}
+ {:sym seon.schema/begin-registration-delta,
+  :calls 282,
+  :ms 1,
+  :us-per-call 3}
+ {:sym seon.test.runner/reach-keywords,
+  :calls 65,
+  :ms 1,
+  :us-per-call 15}
+ {:sym seon.turn/planned-sources, :calls 4, :ms 1, :us-per-call 250}
+ {:sym seon.cluster.host/home-call, :calls 2, :ms 1, :us-per-call 500}
+ {:sym seon.render.hiccup/shorthand,
+  :calls 2871,
+  :ms 1,
+  :us-per-call 0}
+ {:sym seon.sci.batch/read-next, :calls 4, :ms 1, :us-per-call 250}
+ {:sym seon.turn/turn-rows-state, :calls 280, :ms 1, :us-per-call 3}
+ {:sym seon.fn/contract-facts-row, :calls 2, :ms 1, :us-per-call 500}
+ {:sym seon.fn/read-or-throw!, :calls 2022, :ms 1, :us-per-call 0}
+ {:sym seon.print/default-options, :calls 419, :ms 1, :us-per-call 2}
+ {:sym seon.sci.forgive/fence-line?, :calls 875, :ms 1, :us-per-call 1}
+ {:sym seon.db/arity-mismatch-report,
+  :calls 12,
+  :ms 1,
+  :us-per-call 83}
+ {:sym seon.sci.eval/revision-basis, :calls 786, :ms 1, :us-per-call 1}
+ {:sym seon.error.refusal/error?, :calls 2223, :ms 1, :us-per-call 0}
+ {:sym seon.error/distinguishing-members,
+  :calls 11,
+  :ms 1,
+  :us-per-call 90}
+ {:sym seon.fn/unresolved-macro-refusal,
+  :calls 293,
+  :ms 1,
+  :us-per-call 3}
+ {:sym seon.task/home-connection, :calls 6, :ms 1, :us-per-call 166}
+ {:sym seon.turn.world/settlement-connection,
+  :calls 34,
+  :ms 1,
+  :us-per-call 29}
+ {:sym seon.render/most-specific, :calls 85, :ms 1, :us-per-call 11}
+ {:sym seon.render.web/stop!, :calls 1, :ms 1, :us-per-call 1000}
+ {:sym seon.program/binding-child, :calls 139, :ms 1, :us-per-call 7}
+ {:sym seon.agent/render-settings-form,
+  :calls 3,
+  :ms 1,
+  :us-per-call 333}
+ {:sym seon.sci.kernel/ensure-function!,
+  :calls 128,
+  :ms 1,
+  :us-per-call 7}
+ {:sym seon.turn.batch/changed-since-basis,
+  :calls 38,
+  :ms 1,
+  :us-per-call 26}
+ {:sym seon.sci.forgive/first-form-structural?,
+  :calls 9,
+  :ms 1,
+  :us-per-call 111}
+ {:sym seon.schedule/invoke-handler,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.render.value/tuple?, :calls 3057, :ms 1, :us-per-call 0}
+ {:sym seon.turn.batch/entity-facts, :calls 16, :ms 1, :us-per-call 62}
+ {:sym seon.db/connection?, :calls 801, :ms 1, :us-per-call 1}
+ {:sym seon.profile/bucket-at, :calls 9114, :ms 1, :us-per-call 0}
+ {:sym seon.schema/function-accepts-in?,
+  :calls 234,
+  :ms 1,
+  :us-per-call 4}
+ {:sym seon.cluster.agent/open-turn!,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.sci.batch/parse-options, :calls 295, :ms 1, :us-per-call 3}
+ {:sym seon.cluster.agent/stop-graph!,
+  :calls 1,
+  :ms 1,
+  :us-per-call 1000}
+ {:sym seon.render/face-valid?, :calls 128, :ms 1, :us-per-call 7}
+ {:sym seon.cluster/report-source-progress!,
+  :calls 60,
+  :ms 1,
+  :us-per-call 16}
+ {:sym seon.task/task-path?, :calls 774, :ms 1, :us-per-call 1}
+ {:sym seon.cluster/published-changes,
+  :calls 3,
+  :ms 1,
+  :us-per-call 333}
+ {:sym seon.fn.analyzer/under?, :calls 598, :ms 1, :us-per-call 1}
+ {:sym seon.env/refuse-incomplete-environment!,
+  :calls 162,
+  :ms 1,
+  :us-per-call 6}
+ {:sym seon.await/closed-operation?, :calls 246, :ms 1, :us-per-call 4}
+ {:sym seon.cluster.registry/active-branch-connection,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.status/thread-counts,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn/open-tx, :calls 18, :ms 0, :us-per-call 0}
+ {:sym seon.sci.kernel/cache-program!,
+  :calls 16,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test/selection-read!, :calls 70, :ms 0, :us-per-call 0}
+ {:sym seon.error/refusal, :calls 40, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/channels, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.error/rendered-reply, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.fault/carried-receipt, :calls 13, :ms 0, :us-per-call 0}
+ {:sym seon.sci.kernel/unarmed-record,
+  :calls 14,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test-support/task-row, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.source/changed-identities,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.bootstrap/task-message-id, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.boot/selected-instance,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.profile/snapshot?, :calls 76, :ms 0, :us-per-call 0}
+ {:sym seon.schedule/arm-timer, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.test-support/checked-fixture-result,
+  :calls 11,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.env/environment-state, :calls 284, :ms 0, :us-per-call 0}
+ {:sym seon.db/write-problem, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.config/accrete-entity-attributes!,
+  :calls 12,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/contains-pos?, :calls 8, :ms 0, :us-per-call 0}
+ {:sym seon.db/database-value-identity,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn/close-tx, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.render.value/diagnostic-line,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render.web/message-bar-html,
+  :calls 6,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster/cluster-paths, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.render.value/render-html-data,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render.var/var-symbol, :calls 34, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/cancel-turn-backstop!,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn/code-current?, :calls 9, :ms 0, :us-per-call 0}
+ {:sym seon.task/read-error, :calls 93, :ms 0, :us-per-call 0}
+ {:sym seon.schedule/cancel-timer, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.error/bound-text, :calls 11, :ms 0, :us-per-call 0}
+ {:sym seon.batch/diagnostic, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.repl/render-html, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.ai/model-ai, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error/render-ai, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.call-preparation/by-schema-key,
+  :calls 8,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/local-offset, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.error/config-expectation-present?,
+  :calls 22,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.status/render-form,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.store/datahike-log-level,
+  :calls 14,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.sci.eval/copy-base-ctx, :calls 17, :ms 0, :us-per-call 0}
+ {:sym seon.render/canonical-name, :calls 102, :ms 0, :us-per-call 0}
+ {:sym seon.render/same-committed-database?,
+  :calls 19,
+  :ms 0,
+  :us-per-call 0}
+ {:sym scratch.waste/wr-add, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/wake-channel,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.db/invalid-write, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.flow/join-graph!, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.turn/refuse!, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.call-preparation/arity-plan,
+  :calls 8,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.db/diagnostic, :calls 8, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/row-definition-digest,
+  :calls 24,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/line-starts, :calls 6, :ms 0, :us-per-call 0}
+ {:sym seon.turn/open?, :calls 499, :ms 0, :us-per-call 0}
+ {:sym seon.repl/render-directory-ai, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.wake/deliver!, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.boot/connection, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/render-identity-html,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/classifying-error-data,
+  :calls 16,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render.web/socket, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.render.var/var-value?, :calls 34, :ms 0, :us-per-call 0}
+ {:sym seon.turn.batch/synthetic, :calls 12, :ms 0, :us-per-call 0}
+ {:sym seon.profile/growth-line, :calls 103, :ms 0, :us-per-call 0}
+ {:sym seon.db/write-refusal, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.call-preparation/snapshot-revision-key,
+  :calls 24,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.context/message-custody, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error/expected-shown, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.fault/unfold!, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.sci.kernel/author-throwable,
+  :calls 8,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test-support/attempt-routing,
+  :calls 2,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/satisfied-alternatives,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.print/path-step, :calls 112, :ms 0, :us-per-call 0}
+ {:sym seon.render.value/budget-refused?,
+  :calls 135,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/exclusive-members?, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/refusing, :calls 132, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/routing, :calls 46, :ms 0, :us-per-call 0}
+ {:sym seon.render.web/mult?, :calls 18, :ms 0, :us-per-call 0}
+ {:sym seon.error/scalar-text, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.render.transcript/runtime-owner,
+  :calls 6,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn/deletion-proposals, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/reach-weight, :calls 65, :ms 0, :us-per-call 0}
+ {:sym seon.turn/plan-tx, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.blob/utf8-size, :calls 135, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.process/process-handle?,
+  :calls 8,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/call-reach-key, :calls 73, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/program-doc-var, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.sci.admit/missing-marker, :calls 50, :ms 0, :us-per-call 0}
+ {:sym seon.error/explain-problem, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.flow/graph-executor, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.render/branch-scope, :calls 74, :ms 0, :us-per-call 0}
+ {:sym seon.error/problem-sentence, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.maintenance/observe-footprint!,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.fs/filesystem-space, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.turn.world/basis, :calls 34, :ms 0, :us-per-call 0}
+ {:sym seon.db/render-rejection-ai, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.source/resolve-population,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/custody-database, :calls 9, :ms 0, :us-per-call 0}
+ {:sym seon.sci.kernel/pending?, :calls 41, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/arglists-reader, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.maintenance/attempt, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.status/unknown, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.call-preparation/entity-attributes,
+  :calls 17,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/schema-expectation, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.error/fault-order, :calls 86, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/bind-handles!, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/interrupt-turn!,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster/candidate-resources,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cache/eviction, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.schema/population-options, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.call-preparation/world-member?,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render.web/route-namespace,
+  :calls 6,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.agent/stop-owned-graphs!,
+  :calls 46,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/printed, :calls 78, :ms 0, :us-per-call 0}
+ {:sym seon.test/world-base, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.task/replacement-tx, :calls 20, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.wake/inside-wake?,
+  :calls 98,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.wake/delivery, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.db/since, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.error/observation?, :calls 96, :ms 0, :us-per-call 0}
+ {:sym seon.render.block/surface-id, :calls 18, :ms 0, :us-per-call 0}
+ {:sym seon.call-preparation/supply-index,
+  :calls 8,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test.runner/provenance, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/branch-call, :calls 9, :ms 0, :us-per-call 0}
+ {:sym seon.program/exact-replacement-tx,
+  :calls 6,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.schema/declaration-population,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/invalid-output, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.render.web/read-browser-edn,
+  :calls 6,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/frame-site, :calls 8, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/form-read-sink, :calls 293, :ms 0, :us-per-call 0}
+ {:sym seon.render/output-alternatives,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test/host-exclusions, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.health/state, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error/message, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.batch/unprintable, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.error/bounded-text, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/var-reference?,
+  :calls 224,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test/green?, :calls 10, :ms 0, :us-per-call 0}
+ {:sym seon.error/evidence-caps, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.config/render-ai, :calls 3, :ms 0, :us-per-call 0}
+ {:sym my.program/supplied-context, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.blob/input-stream?, :calls 22, :ms 0, :us-per-call 0}
+ {:sym seon.env/members, :calls 165, :ms 0, :us-per-call 0}
+ {:sym seon.env/require-environment, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.turn.batch/schema-tx, :calls 43, :ms 0, :us-per-call 0}
+ {:sym seon.error/rendered-error-value,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/explicit-value, :calls 171, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.store/connection?, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.db/write-observation, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.cache/status, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.env/carry, :calls 4, :ms 0, :us-per-call 0}
+ {:sym my.agent/shared-branch?, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error.refusal/object-name,
+  :calls 12,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster/render-ai, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.flow/var-process, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/reach-read!, :calls 93, :ms 0, :us-per-call 0}
+ {:sym seon.error.refusal/refusal, :calls 51, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/report-entity,
+  :calls 12,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.health/weight, :calls 14, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.store/datahike-log!,
+  :calls 14,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/fact-tempid, :calls 25, :ms 0, :us-per-call 0}
+ {:sym seon.db/as-of, :calls 30, :ms 0, :us-per-call 0}
+ {:sym seon.turn.batch/span-of, :calls 65, :ms 0, :us-per-call 0}
+ {:sym seon.db/transaction-result, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/watch-program-identity!,
+  :calls 58,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/render-form, :calls 6, :ms 0, :us-per-call 0}
+ {:sym seon.schema.datahike/physical-selector,
+  :calls 10,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/code-request, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.await/blocking-deref?, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.error/throwable, :calls 48, :ms 0, :us-per-call 0}
+ {:sym seon.health/finding-schemas, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.render/declared-return?, :calls 7, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/program-digest,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn/open-run-tx-call, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.render/same-invocation-evidence?,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/missing-symbol, :calls 12, :ms 0, :us-per-call 0}
+ {:sym seon.test-support/effective-config,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test.runner/report-identity,
+  :calls 12,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render.value/complete-chunk,
+  :calls 27,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.blob/stored-binary, :calls 11, :ms 0, :us-per-call 0}
+ {:sym seon.env/refuse-absent-environment!,
+  :calls 5,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.program/key-kind, :calls 921, :ms 0, :us-per-call 0}
+ {:sym seon.error/projection-complete?,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.sci.admit/interrupt-fn?,
+  :calls 1122,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.test-support/reply, :calls 12, :ms 0, :us-per-call 0}
+ {:sym seon.error/leaf-expected, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/throw-causes!,
+  :calls 138,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/problem-parts, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/docstring-parts, :calls 8, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.wake/unlisten!, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.cluster/render-html, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.sci.kernel/context-options,
+  :calls 16,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.sci.kernel/memory-pressure,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.schema/set-changes, :calls 88, :ms 0, :us-per-call 0}
+ {:sym seon.render.transcript/read-or-throw,
+  :calls 288,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/evidence-stage, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.branch/cluster-branch,
+  :calls 10,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cache/evict!, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.db/attempted-transaction, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.health/refused-schemas, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error/evidence-source, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.cluster/identity-hash-map?,
+  :calls 136,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.agent/child-roster!,
+  :calls 44,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/fold-change, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.task/task-entity, :calls 6, :ms 0, :us-per-call 0}
+ {:sym seon.error.refusal/frame-site, :calls 19, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/armed, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.registry/head-guard-tx,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.health/untested, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.config/render-html, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/native-mutation, :calls 64, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/failure-message,
+  :calls 24,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.agent/graph-definition,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/shared-cache, :calls 74, :ms 0, :us-per-call 0}
+ {:sym seon.error/producer-task, :calls 4, :ms 0, :us-per-call 0}
+ {:sym seon.error.refusal/interpreted-frames,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.env/carry-state, :calls 193, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/reach-canonical,
+  :calls 2,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/faults-input, :calls 11, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/record-acquisition-refusals!,
+  :calls 33,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.schema/valid-candidate-value?,
+  :calls 6,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.sci.eval/flat-diagnostic, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/live-cluster-schema-states,
+  :calls 32,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.bootstrap/render-help-ai, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.registry/fork-entity,
+  :calls 4,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.health/boot-comparisons, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.render.web/server?, :calls 7, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.store/declared-operator-root,
+  :calls 7,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.db/carry-connection-projection-state!,
+  :calls 106,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/fault-entities, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.print.value/causes, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.agent/identity-form,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.schema/replacement-base, :calls 44, :ms 0, :us-per-call 0}
+ {:sym seon.render.ns/held-task-html, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error/value-description, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.db/error-value, :calls 11, :ms 0, :us-per-call 0}
+ {:sym seon.turn.batch/definition-source,
+  :calls 1,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.sci.eval/example-start, :calls 56, :ms 0, :us-per-call 0}
+ {:sym seon.sci.eval/store-identity, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.error/meaningful-source, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.flow/fault-port, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.error/contract-violation-data,
+  :calls 32,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.error/offending-entry, :calls 16, :ms 0, :us-per-call 0}
+ {:sym seon.render/unknown, :calls 1, :ms 0, :us-per-call 0}
+ {:sym seon.error/collection-member-problem,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym my.agent/own-branch, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.db/connection-identity, :calls 17, :ms 0, :us-per-call 0}
+ {:sym seon.cluster.process/id, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.health/derivation-key, :calls 14, :ms 0, :us-per-call 0}
+ {:sym seon.error/notification-id, :calls 3, :ms 0, :us-per-call 0}
+ {:sym seon.program/declaration-families,
+  :calls 2,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.sci.kernel/interrupted?, :calls 17, :ms 0, :us-per-call 0}
+ {:sym seon.test.runner/schema-restore-drift,
+  :calls 32,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.cluster.source/loaded-dependencies,
+  :calls 12,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.db/supplied-database-value,
+  :calls 2,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render/named-alternatives, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.test/resolve-loaded, :calls 31, :ms 0, :us-per-call 0}
+ {:sym seon.error/faults-form, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.schema/function-accepts-and-returns-in?,
+  :calls 3,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.turn.batch/evaluation-record,
+  :calls 78,
+  :ms 0,
+  :us-per-call 0}
+ {:sym seon.render.web/await-exit!, :calls 2, :ms 0, :us-per-call 0}
+ {:sym seon.print/compare-values, :calls 24, :ms 0, :us-per-call 0}
+ {:sym seon.sci.forgive/structured?, :calls 9, :ms 0, :us-per-call 0}
+ {:sym seon.cluster/socket-server?, :calls 5, :ms 0, :us-per-call 0}
+ {:sym seon.ai/settings, :calls 1, :ms 0, :us-per-call 0})

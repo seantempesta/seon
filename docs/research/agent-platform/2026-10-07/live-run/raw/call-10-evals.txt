@@ -1,0 +1,19 @@
+;; ordinal 0 ns #:db{:id 9848} ms 0
+;; comment: ; I'm nearly out of turns, so let me be decisive. I'll finish the `reply-map` definition using `str` with escaped quotes, then verify against the proof test's elided-value case.
+(in-ns 'seon.repl)
+=> #namespace[seon.repl]
+
+;; ordinal 1 ns #:db{:id 9848} ms 
+(defn- reply-map
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
+  [entries]
+  (when (seq entries)
+    (let [ends (fn [text] (if (ends-in-comment? text) "\n " ", "))]
+      (str "
+=> #:seon.error{:expected :seon.sci.reader/accepted-source,
+ :member :seon.sci.reader/form,
+ :message "EOF while reading, expected \" to match \" at [6,12]",
+ :offending
+   "(defn- reply-map\n  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}\n  [entries]\n  (when (seq entries)\n    (let [ends (fn [text] (if (ends-in-comment? text) \"\\n \" \", \"))]\n      (str \""}
+ERROR: "EOF while reading, expected \" to match \" at [6,12]"
+

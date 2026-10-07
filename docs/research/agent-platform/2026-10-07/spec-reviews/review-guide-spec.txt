@@ -1,0 +1,21 @@
+Read-only REVIEW task. Edit no tracked file, make no commits, run no tests, start/stop no JVM. Write only your report file (path below).
+
+Repository: /Users/sean/src/seon (Clojure). A new reference guide was drafted (uncommitted) that Seon's coding agents must read before EVERY implementation. The owner: agents should "read good clojure code and relevant references for all implementations"; "if 50k tokens of pure gold stops agents from writing shit we have to fix later, it's worth it". Review it for quality, correctness and usefulness.
+
+Draft files (read in full; `git diff` shows the change from the old versions):
+- .agents/skills/data-oriented-clojure/SKILL.md (how to write Seon Clojure)
+- .agents/skills/clojure-testing/SKILL.md (how and when to test; deletion policy)
+- docs/seon/architecture/reference-code.md (new "Read before you build" table + existing seam table)
+- tmp/clojure-guide/guide-notes.md (drafter's notes: CLAUDE.md conflicts, dropped rules, unverified citations)
+Binding inputs: docs/seon/specs/errors.md and docs/seon/specs/agent-loop.md (owner decisions sections), CLAUDE.md, and the research it was built from: tmp/clojure-guide/{idioms-src,idioms-tests,census,canon,map-*}.md.
+
+Check, citing file:line:
+1. Every reference-code citation: open it at the pinned checkout. Does the cited code exist there and actually show what the rule claims? List each wrong or weak citation.
+2. Every rule: is it correct Clojure advice, stated precisely enough that an agent can follow it and a reviewer can check a diff against it? Flag rules that are vague, wrong, overstated, or that conflict with each other, with the reviewed specs' owner decisions, or with CLAUDE.md (beyond what guide-notes already lists).
+3. Seon counter-examples: does each named function really show the problem (find it by name in src/)? Is each rewrite correct and actually smaller/clearer?
+4. Coverage: what high-value rules from the research reports are missing (the biggest sources of bloat: error plumbing, re-keying, giant functions, prose, inline schemas, defensive guards, test setup)? What in the guide is low value and could go?
+5. The "Read before you build" table: for each Seon area, is the chosen library code the best model to read, and is anything important missing?
+6. Usability: would an agent that reads this write noticeably better code? Is the size right (currently ~13.6k tokens; the owner would accept far more if it is gold)? Concrete additions or cuts.
+Severity-rank findings (high/medium/low); give exact replacement text for the important ones. Mark anything unverified. No padding.
+
+Report path: tmp/model-trial/review-guide-<YOUR LANE NAME>.md (your lane name is in $SEON_CODEX_LANE). End with findings count by severity and the files you read.

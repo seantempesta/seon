@@ -1,0 +1,12 @@
+Read-only DESIGN REVIEW (second round). Edit no tracked file, no commits, no tests, no JVM lifecycle. Write only your report file.
+
+Repository /Users/sean/src/seon. Two specs were revised today after a first design review: docs/seon/specs/errors.md and docs/seon/specs/agent-loop.md. The reviser's change log, verified claims and rejected findings are in tmp/specs-revision/notes.md. First-round reviews: tmp/model-trial/review-specs-trial-astra-specs.md and tmp/model-trial/review-specs-trial-sol61-specs.md. Owner rulings (binding) are in each spec's decisions section and in /Users/sean/.claude/projects/-Users-sean-src-seon/memory/project_rulings_errors_docs_context_2026_10_07.md. Context: CLAUDE.md, tmp/agent-loop/map.md, tmp/errors/s1-s2-notes.md, tmp/agent-loop/s1-notes.md, the draft guide .agents/skills/data-oriented-clojure/SKILL.md and docs/seon/architecture/reference-code.md, and the library code each slice's References line names.
+
+Answer, citing file:line in specs, code and reference-code:
+1. Were the first-round findings correctly resolved? For each first-round HIGH finding, say resolved / partially / not, with evidence. Were any findings wrongly rejected?
+2. New problems the revision introduced (contradictions, missing duties, wrong claims about current code, designs that rebuild what Malli/Clojure/Datahike/SCI/core.async already provide, extra machinery beyond the owner's rulings).
+3. Is each prep slice truly invisible (no behavior change) and is HEAD bootable after each? Is the cut dependency-complete? Is the order errors/loop right?
+4. Is each slice small enough for one lane with a clear proof (named tests, live-store adoption)? What would you split or merge?
+5. Concrete edits as "section -> replace X with Y".
+Severity-rank (high/medium/low); mark unverified; no padding — say plainly where the spec is now fine.
+Report path: tmp/model-trial/review-specs2-<REVIEWER>.md where REVIEWER is your lane name ($SEON_CODEX_LANE) or "opus". End with counts by severity per spec and files read.

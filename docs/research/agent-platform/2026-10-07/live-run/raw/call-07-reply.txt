@@ -1,0 +1,17 @@
+I have the code and the test. Let me analyze the bug precisely.
+
+**The failing cases in the test:**
+
+1. **Elided value** — `:seon.eval/shown` is `"[0 1 2 …2997 (drop 3 result/ee7b3)]"`, but the test expects `(:seon.repl/value reply)` to equal `[0 1 2 (symbol "…2997") '(drop 3 result/ee7b3)]` — i.e. the value must be embedded as *data*, not as a string. Currently `value-text` returns the shown string unchanged, and `reply-map` splices it verbatim → the `…` isn't a reader symbol, and the whole thing is one string, not the vector.
+
+2. **Comment-ended text** — `"[1 2]\n;; a trailing diagnostic line"`. `reply-map` appends `\n` after if it ends in comment, but the value *string itself* contains a `;;` mid-value, so read back it's parsed as a string containing a comment — which `one-map` reads as `"[1 2]\n"` (a string) not `[1 2]`. Must be `data-text`ed.
+
+3. **Rendered value** — `:value` must be the *data* (`{:seon.repl/columns [...]}`) when text is EDN, else a string. Currently rendered values bypass `data-text`, so `:seon.repl/value` gets the raw shown text; and the test also asserts `:seon.repl/result` and `:seon.repl/ms` survive — which they currently *don't* because rendered values presumably take a different path.
+
+Let me confirm what `response-entries` does for the handle/duration keys — I only saw a truncated prefix. Let me read the whole thing and `renderer-response`.
+
+```clojure
+(binding [*print-namespace-maps* true]
+  (let [s (clojure.repl/source-fn 'seon.repl/response-entries)]
+    (subs s 2048)))
+```

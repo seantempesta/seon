@@ -1,0 +1,336 @@
+user=> (my.agent/identity)
+#:seon.repl{:value #:my.agent{:id "live-run-1", :namespace user, :steward "live-run-1"}, :result result/e3239b8aa61e2, :ms 18, :calls 106}
+
+user=> (my.agent/branch)
+#:seon.repl{:value #:seon.agent{:branch :agent-80e4a2ca8c45, :mode :live}, :result result/e59c9bb7745ac, :ms 0, :calls 106}
+
+user=> (my.agent/settings)
+#:seon.repl{:value {:my.agent/settings {},
+ :seon.render/operations
+   [(seon.agent/effective-settings (seon.db/db) "live-run-1")]}, :result result/efea21f48210c, :ms 0, :calls 125}
+
+user=> (my.agent/settings! {:seon.config.run/max-episode-runs 12 :seon.config.ai/max-tokens 8192})
+#:seon.repl{:value {:my.agent/settings {},
+ :seon.render/operations
+   [(seon.agent/effective-settings (seon.db/db) "live-run-1")]}, :result result/ee0ddae16c8c6, :ms 29, :calls 561}
+
+user=> (seon.agent/effective-settings (seon.db/db) "live-run-1")
+#:seon.repl{:value [#:seon.config.ai{:model "deepseek-flash", :no-provider true}
+ {:seon.config.eval/time-limit-ms 30000}
+ {:seon.config.run/max-episode-runs 12}], :result result/ef50e08c479f7, :ms 2, :calls 444}
+
+;; changed since your last turn
+user=> (try (seon.config/apply! {:seon.db/connection user/lr-branch :seon.boot/cluster-name "default" :seon.config/manifest {:seon.config.ai/no-provider :seon.config/absent}})
+  (catch Throwable t {:msg (ex-message t) :data (ex-data t)}))
+#:seon.repl{:value #:seon.reconcile{:converged? false, :operations 1}, :result result/e273bc4ef0019}
+
+;; changed since your last turn
+user=> (seon.db/pull (quote [:seon.agent/id #:seon.agent{:namespace [:seon.ns/name #:seon.ns{:steward [:seon.agent/id]}]} :seon.agent/cluster]) [:seon.agent/id "live-run-1"])
+#:seon.repl{:value {:seon.agent/id "live-run-1",
+ :seon.agent/cluster "default",
+ :seon.agent/namespace
+   #:seon.ns{:name user, :steward {:seon.agent/id "live-run-1"}},
+ :seon.render/operations [(help)]}, :result result/e81a5dcea860b}
+
+;; changed since your last turn
+user=> (my.task/steps {})
+#:seon.repl{:value {:seon.task/id "18c37812b5bc",
+ :seon.task/steps [],
+ :seon.task/name "reply-map-is-not-edn-when-elided-or-rendered",
+ :seon.task/intent
+   "seon.repl/response splices shown text into the reply map verbatim. (vec (range 3000)) answered #:seon.repl{:value [0 1 … …2968] then a newline and the floor's ';; …N = N more … (seon.print/value-at result/e7b3b69b578ae [...]).' legend, so ', :result result/e7b3b69b578ae, :ms 711}' sits on the comment line: read as EDN the reply loses its handle, its time and its closing brace. A declared renderer's response keeps only diagnostics and errors (a pull of a turn answered prose alone), so every rendered value loses :result and :ms. One composer: the reply map must read back as data for every value, and a rendered value keeps its handle and time.",
+ :seon.render/operations [(my.task/step! {:seon.step/text "Next step"})]}, :result result/e0e8e7c7db69a}
+
+;; changed since your last turn
+user=> (get (seon.db/pull (quote [:seon.message/_to]) [:seon.agent/id "live-run-1"]) :seon.message/_to)
+#:seon.repl{:value [{:my.message/id "3cadb339ed3f",
+  :my.message/from "root",
+  :seon.message/lines
+    ["You are assigned task 18c37812b5bc (seon.repl/reply-map-is-not-edn-when-elided-or-rendered) on your branch. Intent: seon.repl/response splices shown text into the reply map verbatim, so an elided value's trailing ';; ...' legend comments out ', :result ..., :ms ...}' and a declared renderer's response drops :result and :ms. Done when: the REPL reply map reads back as EDN for every value (elided or rendered) and keeps :seon.repl/result and :seon.repl/ms. Proof test: seon.repl-test/the-reply-is-one-edn-map-whatever-the-value. Must read: seon.repl/response, seon.repl/value-text. Work at your REPL: read the code, change it with defn in seon.repl, run the proof test on your branch, then propose the merge (my.program/propose-merge! {})."],
+  :seon.render/operations [(my.message/received! "3cadb339ed3f")]}], :result result/e7ff637e51377}
+
+;; changed since your last turn
+user=> (seon.agent/settings (seon.db/db) "live-run-1")
+#:seon.repl{:value {:my.agent/settings
+   {:seon.config.run/max-episode-runs 12,
+    :seon.config.ai/max-tokens 8192},
+ :seon.render/operations
+   [(seon.agent/effective-settings (seon.db/db) "live-run-1")]}, :result result/e62952b057d01}
+
+;; changed since your last turn
+user=> (dir (quote user))
+#:seon.repl{:value {:seon.ns/name user,
+ :seon.ns/requires [],
+ :seon.repl/rows [],
+ :seon.repl/columns [:sym :arglists :doc :in :out]}, :result result/eb5315c878a72}
+
+;; changed since your last turn
+user=> (seon.db/pull (quote [*]) [:seon.runtime/agent {:seon.agent/id "live-run-1", :db/id 110237}])
+#:seon.repl{:value {:seon.render/operations
+   [(seon.db/pull
+     '[{:seon.turn/_agent [:seon.turn/id]}]
+     [:seon.agent/id "live-run-1"])]}, :result result/e109566cbdf7b}
+
+;; changed since your last turn
+user=> (seon.error/for-agent (seon.db/db) "live-run-1")
+#:seon.repl{:value [], :result result/e59e661826a25, :calls 382}
+
+;; changed since your last turn
+user=> (my.agent/settings)
+#:seon.repl{:value {:seon.repl/changes {[:my.agent/settings :seon.config.ai/max-tokens] {:seon.db.diff/after 8192}, [:my.agent/settings :seon.config.run/max-episode-runs] {:seon.db.diff/after 12}}}, :result result/ebeff1645ea8a, :calls 266}
+;; full value: (get-in result/ebeff1645ea8a [])
+
+;; changed since your last turn
+user=> (seon.agent/effective-settings (seon.db/db) "live-run-1")
+#:seon.repl{:value {:seon.repl/changes {[0 :seon.config.ai/no-provider] {:seon.db.diff/removed? true}}}, :result result/e9f5cefe9a5b8, :calls 444}
+;; full value: (get-in result/e9f5cefe9a5b8 [])
+
+user=> ; I'll start by reading the code. Let me look at `seon.repl/response` and `seon.repl/value-text`.
+(seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/e26f94af03a8a, :ms 2, :calls 1}
+
+user=> ; Let me pull up the relevant source.
+(clojure.repl/source seon.repl/response)
+#:seon.repl{:value nil, :result result/ecfd12edff2f0, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 2, :calls 71}
+
+user=> ; Let me try the more systematic approach — find the file and read the functions.
+(seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/ed9570ca22208, :ms 1, :calls 1}
+
+user=> ; I'll just look directly.
+(my.task/steps)
+#:seon.repl{:value {:seon.task/id "18c37812b5bc",
+ :seon.task/steps [],
+ :seon.render/operations [(my.task/step! {:seon.step/text "Next step"})]}, :result result/e2ff52213e3ce, :ms 1, :calls 292}
+
+user=> (seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/ef467a926f0c5, :ms 1, :calls 1}
+
+user=> ; Let me try to require and inspect.
+(require 'seon.repl)
+#:seon.repl{:value nil, :result result/e4ec3010530a9, :ms 0}
+
+user=> (clojure.repl/source seon.repl/response)
+#:seon.repl{:value nil, :result result/e332e7409ba53, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 0, :calls 71}
+
+user=> ; Let me just call it and see what comes back.
+(seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/e79487b3fbbec, :ms 1, :calls 1}
+
+user=> ; I need to read the actual source. Let me find where it is.
+(seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/e3bc607668a2c, :ms 1, :calls 1}
+
+user=> ; OK let me try a real form.
+(clojure.repl/source-fn 'seon.repl/response)
+#:seon.repl{:value "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))", :result result/ec17a5c52be41, :ms 0, :calls 71}
+
+user=> (seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/eb1ede7485dee, :ms 1, :calls 1}
+
+user=> ; Let me try pulling the var metadata.
+(meta #'seon.repl/response)
+#:seon.repl{:value {:ns #namespace[seon.repl],
+ :name response,
+ :file "seon/repl.clj",
+ :line 349,
+ :column 1,
+ :doc
+   "The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.",
+ :arglists ([emission])}, :result result/e841cd0b5af3a, :ms 0}
+
+user=> (seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/e6b4e1cd48eeb, :ms 1, :calls 1}
+
+user=> ; Let me try the file directly.
+(seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/e5bd058fe7d1b, :ms 1, :calls 1}
+
+user=> ; I'll just try reading the source via the var.
+(-> #'seon.repl/response meta :file)
+#:seon.repl{:value "seon/repl.clj", :result result/ea7119b40225a, :ms 0}
+
+user=> (seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/e27e056e40895, :ms 1, :calls 1}
+
+user=> ; Hmm, I keep echoing. Let me actually do something.
+(clojure.repl/source seon.repl/response)
+#:seon.repl{:value nil, :result result/e07b2ac40f3d7, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 0, :calls 71}
+
+user=> ; Since these tool calls seem to be echoing, let me try a different approach and look at the task step.
+(my.task/step! {:seon.step/text "Reading seon.repl/response and value-text"})
+#:seon.repl{:value {:seon.task/id "18c37812b5bc",
+ :seon.task/progress "0/1",
+ :seon.task/current-step "Reading seon.repl/response and value-text",
+ :seon.task/steps
+   [#:seon.step{:position 0,
+     :status :current,
+     :text "Reading seon.repl/response and value-text"}],
+ :seon.render/operations [(my.task/done!)]}, :result result/e6e00307391a0, :ms 28, :calls 716}
+
+user=> (clojure.repl/source seon.repl/response)
+#:seon.repl{:value nil, :result result/e3d5a25246bed, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 0, :calls 71}
+
+user=> ; I'm going to try to actually get source. The issue is I don't know if my calls are going through. Let me try once more with a definitive form.
+(seon.repl/response)
+#:seon.repl{:error {:seon.error/message
+   "seon.repl/response refused argument count: expected a declared argument count (1), got an argument count of 0. Fix: Call one of the declared arglists.",
+ :seon.error/problems
+   [#:seon.error{:path [], :offending 0, :expected ([emission])}],
+ :seon.instrument/arglists ([emission]),
+ :seon.instrument/declared-arities
+   #{#:seon.instrument.arity{:ordinal 0, :min 1, :max 1}},
+ :seon.sci.eval/stacktrace [[seon.repl/response 349 1] [user 1 1]]}, :result result/efefd6c1264c8, :ms 1, :calls 1}
+
+user=> (println (clojure.repl/source-fn 'seon.repl/response))
+#:seon.repl{:value nil, :result result/eec1f4fd1c693, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 0, :calls 71}
+
+user=> (clojure.repl/source seon.repl/response)
+#:seon.repl{:value nil, :result result/e037ffcdad061, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 0, :calls 71}
+
+user=> ; Given the pattern, let me try requiring and printing.
+(require '[seon.repl :as r])
+#:seon.repl{:value nil, :result result/e5e7f52eb2d8a, :ms 0}
+
+user=> (println (clojure.repl/source-fn 'seon.repl/response))
+#:seon.repl{:value nil, :result result/e32e0b8ea572c, :out "(defn response\n  \"The reply: exactly one `#:seon.repl{…}` map that reads back as data.\n\n  Returns nil when the evaluation has settled nothing — a running form has\n  not printed a result, and inventing an empty map would say it had.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (reply-map (response-entries emission)))\n", :ms 0, :calls 71}
+
+;; changed since your last turn
+user=> (dir (quote user))
+#:seon.repl{:value {:seon.repl/changes {[:seon.ns/requires] {:seon.db.diff/after [seon.repl]}}}, :result result/e332b8495b757}
+;; full value: (get-in result/e332b8495b757 [])
+
+;; changed since your last turn
+user=> (seon.db/pull (quote [*]) [:seon.runtime/agent {:seon.agent/id "live-run-1", :db/id 110237}])
+#:seon.repl{:value {:seon.repl/changes {[:seon.runtime/trigger] {:seon.db.diff/after {:seon.message/id "3cadb339ed3f", :seon.message/from {:seon.agent/id "root"}, :seon.message/content "You are assigned task 18c37812b5bc (seon.repl/reply-map-is-not-edn-when-elided-or-rendered) on your branch. Intent: seon.repl/response splices shown text into the reply map verbatim, so an elided value's trailing ';; ...' legend comments out ', :result ..., :ms ...}' and a declared renderer's response drops :result and :ms. Done when: the REPL reply map reads back as EDN for every value (elided or rendered) and keeps :seon.repl/result and :seon.repl/ms. Proof test: seon.repl-test/the-reply-is-one-edn-map-whatever-the-value. Must read: seon.repl/response, seon.repl/value-text. Work at your REPL: read the code, change it with defn in seon.repl, run the proof test on your branch, then propose the merge (my.program/propose-merge! {})."}}}}, :result result/e99dc0d821648}
+;; full value: (get-in result/e99dc0d821648 [])
+
+user=> 
+
+#:seon.repl{:error "Your reply began with a response; send a form."}
+
+;; changed since your last turn
+user=> (seon.error/for-agent (seon.db/db) "live-run-1")
+#:seon.repl{:value {:seon.repl/changes {[] {:seon.db.diff/after [{:seon.error/operation seon.sci.eval/shown-failure, :seon.error/occurrences [{:seon.error.occurrence/id "8fb4e2b91c1d", :seon.error.occurrence/count 1, :seon.error.occurrence/agent [:seon.agent/id "live-run-1"], :seon.instrument/check :input, :seon.error/operation seon.sci.eval/shown-failure, :seon.error.occurrence/process [:seon.db.process/id "30874-1791285324710"], :seon.error/capped? true, :seon.instrument/actual-size 2, :seon.error/caller-digest "bac25c781bbf0f397510244cbd4c253b9f6eec87c1434adcbad384ef59d41d0c", :seon.error.occurrence/branch :agent-80e4a2ca8c45, :seon.error/data-edn "#:seon.sci.admit{:reason :over-bound, :bytes 3095}", :seon.error/expected-key :seon.sci.eval/shown-request, :seon.instrument/fn seon.sci.eval/shown-failure, :seon.error/message "seon.sci.eval/shown-failure refused argument 1 `request` at [:seon.cluster.eval/source]: expected :seon.sci.eval/shown-request (a string of length at least 1), got a string. Fix: Supply a string of length at least 1 at [:seon.cluster.eval/source]. Called from seon.turn/show-row (turn.clj:4763).", …4 (get-in result/eb8dc8594c0d4 [0 :seon.error/occurrences 0]), :seon.error.occurrence/last-at #inst "2026-10-07T01:49:04.473-00:00", :seon.error/producer seon.turn/show-row, :seon.error/layer :seon.instrument/invocation, :seon.error/member :seon.fn.arity/input, :seon.error/producer-digest "bac25c781bbf0f397510244cbd4c253b9f6eec87c1434adcbad384ef59d41d0c", :seon.error.occurrence/first-at #inst "2026-10-07T01:49:04.473-00:00", :db/id 110558, :seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest "47a351ca8e3e7cf0034d6e5f3667873b8dc61a17ac22bd62a435ada20a6d086d"], :seon.error/expected-shape "a7d6bb2abc563fafada2489db8b2b4db7d6ef3ff7e16b664d8ee3d5efc11abd7", :seon.error/data-size 8834, :seon.error/caller seon.turn/show-row, :seon.error.occurrence/turn [:seon.turn/id "0afa04660b68"], :seon.error/at #inst "2026-10-07T01:49:04.471-00:00", :seon.error/throwable-class "clojure.lang.ExceptionInfo", :seon.instrument/arity 3, :seon.instrument/arm :input, :seon.instrument/actual "", :seon.error/process "30874-1791285324710"}], :seon.instrument/fn seon.sci.eval/shown-failure, :seon.error/id "8ef41c77e87f9a0dbc90bd0cbfc1622a741b47131dd69010a2d1d799e59754b2", :seon.error/producer seon.turn/show-row, :seon.error/declared-schema :seon.instrument/contract-error, :seon.error/layer :seon.instrument/invocation, :seon.error/notified [[:seon.message/id "5a7532019309"]], :db/id 110556, :seon.error/exception-class clojure.lang.ExceptionInfo, :seon.error/frame [seon.turn$show_row$fn__21060 invoke "turn.clj" 4763], :seon.error/signature "8ef41c77e87f9a0dbc90bd0cbfc1622a741b47131dd69010a2d1d799e59754b2"}]}}}, :findings [{:seon.repl/finding :large-value, :seon.eval/value-tokens 1001, :seon.eval/shown-tokens 928, :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}], :diagnostics "[{:seon.error/expected :seon.wake/context-inert, :seon.turn/generated-read-attributes #{:seon.turn/agent :seon.turn/starting-ns :seon.turn/reply :seon.turn/attempts :seon.turn/closed-tx :seon.turn/opened-tx :seon.turn/id :seon.turn/reply-size}, :seon.error/operation seon.turn/system-turn, :seon.error/message \"A generated context read depends on the agent's own turn-taking.\", :seon.error/offending …", :result result/eb8dc8594c0d4, :calls 2656}
+;; full value: (get-in result/eb8dc8594c0d4 [])
+
+user=> ; I'll read the source code directly. Let me use the file path.
+(slurp "seon/repl.clj")
+#:seon.repl{:error {:seon.error/message "Unable to resolve symbol: slurp",
+ :seon.error/offending slurp,
+ :seon.error/in-namespace {user []},
+ :seon.sci.eval/stacktrace [[user 1 1]]}, :result result/e55e728087334, :ms 0}
+
+user=> ; Actually, let me first check if I can access source more directly via the SCI environment. Let me look at the `response-entries` and `reply-map` functions since `response` delegates to them.
+(map (fn [s] (clojure.repl/source-fn s)) ['seon.repl/response-entries 'seon.repl/reply-map 'seon.repl/value-text])
+#:seon.repl{:value ("(defn- response-entries\n  \"The response's present keys, in declared order, each already text.\n\n  ONE MAP, DATA ONLY (owner 2026-09-27: \\\"return data, not comments\\\"). A\n  declared renderer's text is the `:value` (read back as data when it is EDN,\n  else one string), a failure is `:error`, and the declared bounds' findings\n  are `:findings`; nothing is printed above or around the map.\"\n  [{output :seon.cluster.eval/output\n    source :seon.cluster.eval/source\n    handle :seon.repl/handle\n    ending-ns :seon.sci.eval/ending-ns\n    prompt-ns :seon.ns/name\n    duration :seon.eval/duration-ms\n    interrupted-at :seon.cluster.eval/interrupted-at\n    call-count :seon.cluster.eval/call-count\n    repeated :seon.cluster.eval/repeated-calls\n    :as emission}]\n  (let [value (value-text emission)\n        ;; The evaluation's own failure: its shown text IS its flat error.\n        ;; Diagnostics are a later stage's, beside a value that stands.\n        diagnostics (:seon.cluster.eval/diagnostics emission)\n        failed? (and (:seon.cluster.eval/error emission) (not diagnostics))\n        rendered? (some? (:seon.eval/renderer emission))\n        found (findings emission)\n        by-key {:seon.repl/value (when (and (not failed?) (some? value))\n                                   (if rendered? (data-text value) value))\n                :seon.repl/error (when failed?\n                                   (data-text (or value (:seon.cluster.eval/error emission))))\n                :seon.repl/findings (when (seq found)\n                                      (binding [*print-namespace-maps* true] (pr-str found)))\n                :seon.repl/diagnostics (some-> diagnostics data-text)\n                ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response\n                ;; for an interrupted evaluation carried `:ms` alone and read\n                ;; exactly like one still running — absence of signal read as\n                ;; health, in the agent's own history (PRD §4).\n                :seon.repl/interrupted\n                ;; AN INSTANT IS A"…+2201 (subs (get-in result/e82f6b25bcc66 [0]) 2048)
+ "(defn- reply-map\n  \"The entries as one `#:seon.repl{…}` map that reads back as data: entries\n  join with `, ` on one line, and a line an entry's text ends in a comment is\n  ended before the next key or the closing brace.\"\n  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}\n  [entries]\n  (when (seq entries)\n    (let [ends (fn [text] (if (ends-in-comment? text) \"\\n \" \", \"))]\n      (str \"#:seon.repl{\"\n           (str/join (map-indexed\n                      (fn [index [response-key text]]\n                        (str (when (pos? index) (ends (second (nth entries (dec index)))))\n                             \":\" (name response-key) \" \" text))\n                      entries))\n           (when (ends-in-comment? (second (peek entries))) \"\\n\")\n           \"}\"))))"
+ "(defn value-text\n  \"Return the saved shown text unchanged.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}\n  [emission]\n  (or (:seon.eval/shown emission) (:seon.repl/value emission)))"), :findings [{:seon.repl/finding :large-value, :seon.eval/value-tokens 1687, :seon.eval/shown-tokens 1000, :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/e82f6b25bcc66, :ms 0}
+
+;; changed since your last turn
+user=> (seon.error/for-agent (seon.db/db) "live-run-1")
+#:seon.repl{:value {:seon.repl/changes {[0 :seon.error/occurrences 0 …4 1] {:seon.db.diff/after result/e9dccf2528b9e}}}, :findings [{:seon.repl/finding :large-value, :seon.eval/value-tokens 1001, :seon.eval/shown-tokens 928, :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}], :diagnostics "[{:seon.error/expected :seon.wake/context-inert, :seon.turn/generated-read-attributes #{:seon.turn/agent :seon.turn/starting-ns :seon.turn/reply :seon.turn/attempts :seon.turn/closed-tx :seon.turn/opened-tx :seon.turn/id :seon.turn/reply-size}, :seon.error/operation seon.turn/system-turn, :seon.error/message \"A generated context read depends on the agent's own turn-taking.\", :seon.error/offending …", :result result/e9dccf2528b9e, :calls 2656}
+;; full value: (get-in result/e9dccf2528b9e [])
+
+user=> (defn- reply-map
+  "The entries as one `
+#:seon.repl{:error #:seon.error{:expected :seon.sci.reader/accepted-source,
+ :member :seon.sci.reader/form,
+ :message "EOF while reading, expected \" to match \" at [2,3]",
+ :offending "(defn- reply-map\n  \"The entries as one `"}, :result result/e8ab677e4f02c}
+
+;; changed since your last turn
+user=> (seon.error/for-agent (seon.db/db) "live-run-1")
+#:seon.repl{:value {:seon.repl/changes {[0 :seon.error/occurrences 0 …4 1] {:seon.db.diff/after result/e77310aa01ced}}}, :findings [{:seon.repl/finding :large-value, :seon.eval/value-tokens 1001, :seon.eval/shown-tokens 928, :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}], :diagnostics "[{:seon.error/expected :seon.wake/context-inert, :seon.turn/generated-read-attributes #{:seon.turn/agent :seon.turn/starting-ns :seon.turn/reply :seon.turn/attempts :seon.turn/closed-tx :seon.turn/opened-tx :seon.turn/id :seon.turn/reply-size}, :seon.error/operation seon.turn/system-turn, :seon.error/message \"A generated context read depends on the agent's own turn-taking.\", :seon.error/offending …", :result result/e77310aa01ced, :calls 2656}
+;; full value: (get-in result/e77310aa01ced [])
+
+user=> ; I've been thrashing. Let me settle down and actually read the two functions I was told to read.
+; The proof I already have from `source-fn`:
+; **`reply-map`** joins entries with `", "`, but when a previous entry's text *ends in a comment* (like an elided value's trailing `;; …N = N more …` legend) it emits a `"\n "` instead, and adds a trailing `"\n"` before `}` when the last entry ends in a comment. So the splice of shown text into the map is what breaks EDN — the value's own text is dropped in verbatim, comments and all.
+; **`value-text`** just returns the saved shown text unchanged.
+; **`response-entries`** puts `:seon.repl/value` (and `:error`, `:findings`, `:diagnostics`) as the *present keys* already text — but crucially flattens them via `reply-map`, so a rendered value keeps `:value` only, while an elided value's `;;` legend corrupts the map.
+; Let me look at the elision/finding side and the test to understand what "reads back as EDN" requires.
+(clojure.repl/source-fn 'seon.repl/ends-in-comment?)
+#:seon.repl{:value "(defn- ends-in-comment?\n  \"True when `text`'s last token is a line comment (the floor's elision legend,\n  a diagnostic line): anything written after it on the same line would be\n  read as part of the comment, so the reply map must end that line first.\"\n  {:malli/schema [:=> [:cat :string] :boolean]}\n  [text]\n  (= \"comment\" (first (peek (into [] (remove (comp #{\"space\"} first))\n                                   (syntax-tokens text))))))", :result result/e8397bbb6d803, :ms 0, :calls 71}
+
+user=> ; Let me also see the proof test's expectations:
+(clojure.repl/source-fn 'seon.repl-test/the-reply-is-one-edn-map-whatever-the-value)
+#:seon.repl{:value "(deftest ^{:seon/tasks #{\"18c37812b5bc\"}} the-reply-is-one-edn-map-whatever-the-value\n  ;; Owner 2026-09-27: \"The repl should be returning the timing and the result\n  ;; so it's already a map\" — \"return data whenever possible so it's\n  ;; unambiguous.\" Value, error, findings, handle and time are keys of the one\n  ;; map; nothing is printed above or around it.\n  (let [handle (admit/result-handle \"e7b3\")]\n    (testing \"an elided value keeps its cut and continuation as data\"\n      (let [reply (one-map (repl/response\n                            {:seon.cluster.eval/source \"(vec (range 3000))\"\n                             :seon.repl/handle handle\n                             :seon.eval/duration-ms 711\n                             :seon.eval/shown \"[0 1 2 …2997 (drop 3 result/ee7b3)]\"}))]\n        (is (= [0 1 2 (symbol \"…2997\") '(drop 3 result/ee7b3)] (:seon.repl/value reply)))\n        (is (= handle (:seon.repl/result reply)))\n        (is (= 711 (:seon.repl/ms reply)))))\n    (testing \"a comment-ended text still leaves the map readable\"\n      (let [reply (one-map (repl/response {:seon.cluster.eval/source \"x\" :seon.repl/handle handle\n                                           :seon.eval/shown \"[1 2]\\n;; a trailing diagnostic line\"\n                                           :seon.eval/duration-ms 1}))]\n        (is (= [1 2] (:seon.repl/value reply)))\n        (is (= 1 (:seon.repl/ms reply)))))\n    (testing \"a declared renderer's text is the :value, not text before the map\"\n      (let [reply (one-map (repl/response {:seon.cluster.eval/source \"(my.task/steps {})\"\n                                           :seon.eval/renderer 'my.task/steps\n                                           :seon.repl/handle handle\n                                           :seon.eval/duration-ms 12\n                                           :seon.eval/shown \";; The plan has two steps.\\n(my.task/steps {})\"}))]\n        (is (= \";; The plan has two steps.\\n(my.task/steps {})\" (:seon.repl/value reply)) \"prose renders are one string\")\n        (is (= handle (:seon.repl/result reply)))\n        (is (= 12 (:seon.repl/ms reply))))\n      (let [reply (one-map (repl/response {:seon.cluster.eval/source \"(dir x)\"\n                                           :seon.eval/renderer 'seon.repl/render-directory-ai\n                                           :seon.eval/shown \"#:seon.repl{:columns [:sym], :rows [[x/f]]}\"\n                                           :seon.eval/duration-ms 3}))]\n        (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))\n            \"a render that is EDN is data\")))))", :result result/e5101195d6ce3, :ms 1, :calls 173}
+
+user=> ; I need both before I write anything.
+[(clojure.repl/source-fn 'seon.repl/ends-in-comment?)
+ (clojure.repl/source-fn 'seon.repl-test/the-reply-is-one-edn-map-whatever-the-value)
+ (clojure.repl/source-fn 'seon.repl/findings)]
+#:seon.repl{:value ["(defn- ends-in-comment?\n  \"True when `text`'s last token is a line comment (the floor's elision legend,\n  a diagnostic line): anything written after it on the same line would be\n  read as part of the comment, so the reply map must end that line first.\"\n  {:malli/schema [:=> [:cat :string] :boolean]}\n  [text]\n  (= \"comment\" (first (peek (into [] (remove (comp #{\"space\"} first))\n                                   (syntax-tokens text))))))"
+ "(deftest ^{:seon/tasks #{\"18c37812b5bc\"}} the-reply-is-one-edn-map-whatever-the-value\n  ;; Owner 2026-09-27: \"The repl should be returning the timing and the result\n  ;; so it's already a map\" — \"return data whenever possible so it's\n  ;; unambiguous.\" Value, error, findings, handle and time are keys of the one\n  ;; map; nothing is printed above or around it.\n  (let [handle (admit/result-handle \"e7b3\")]\n    (testing \"an elided value keeps its cut and continuation as data\"\n      (let [reply (one-map (repl/response\n                            {:seon.cluster.eval/source \"(vec (range 3000))\"\n                             :seon.repl/handle handle\n                             :seon.eval/duration-ms 711\n                             :seon.eval/shown \"[0 1 2 …2997 (drop 3 result/ee7b3)]\"}))]\n        (is (= [0 1 2 (symbol \"…2997\") '(drop 3 result/ee7b3)] (:seon.repl/value reply)))\n        (is (= handle (:seon.repl/result reply)))\n        (is (= 711 (:seon.repl/ms reply)))))\n    (testing \"a comment-ended text still leave"…+1586 (subs (get-in result/eb31949a42cec [1]) 1024)
+ "(defn findings\n  \"One map per declared bound the evaluation's cost exceeds: what it is\n  (`:seon.repl/finding`), the measure and what was observed, the other\n  measures the bound reports, and its fix. Empty within every bound, which is\n  the normal reply: nothing is added to it.\"\n  {:malli/schema [:=> [:cat :seon.repl/emission] [:vector :seon.repl/finding-value]]}\n  [emission]\n  (let [{explainer ::explainer declared ::declared} @bounds\n        measured (cost emission)\n        values (merge (select-keys emission (::named @bounds)) measured)]\n    (into []\n          (map (fn [{[measure] :in observed :value}]\n                 (let [{kind :seon.repl/finding with :seon.repl/with fix :seon.repl/fix} (get declared measure)]\n                   (cond-> (merge {:seon.repl/finding kind measure observed}\n                                  (select-keys values with))\n                     fix (assoc :seon.repl/fix fix)))))\n          (:errors (explainer measured)))))"], :findings [{:seon.repl/finding :large-value, :seon.eval/value-tokens 1293, :seon.eval/shown-tokens 798, :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}], :result result/eb31949a42cec, :ms 1, :calls 315}
+
+;; changed since your last turn
+user=> (seon.error/for-agent (seon.db/db) "live-run-1")
+#:seon.repl{:value {:seon.repl/changes {[0 :seon.error/occurrences 0 …4 1] {:seon.db.diff/after result/e823eeb581d9f}}}, :findings [{:seon.repl/finding :large-value, :seon.eval/value-tokens 1001, :seon.eval/shown-tokens 928, :seon.repl/fix "A value this big usually means a query or function returns more than it should: select what you need."}], :diagnostics "[{:seon.error/expected :seon.wake/context-inert, :seon.turn/generated-read-attributes #{:seon.turn/agent :seon.turn/starting-ns :seon.turn/reply :seon.turn/attempts :seon.turn/closed-tx :seon.turn/opened-tx :seon.turn/id :seon.turn/reply-size}, :seon.error/operation seon.turn/system-turn, :seon.error/message \"A generated context read depends on the agent's own turn-taking.\", :seon.error/offending …", :result result/e823eeb581d9f, :calls 2656}
+;; full value: (get-in result/e823eeb581d9f [])
+
+turns left: 6 of 12

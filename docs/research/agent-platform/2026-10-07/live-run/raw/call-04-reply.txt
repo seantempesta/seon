@@ -1,0 +1,5 @@
+Now I can see the source. Let me look at the surrounding functions:
+
+```clojure
+(defn- reply-map
+  "The entries as one `

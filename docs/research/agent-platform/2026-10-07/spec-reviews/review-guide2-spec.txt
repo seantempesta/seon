@@ -1,0 +1,14 @@
+Read-only REVIEW (second round). Edit no tracked file, no commits, no tests, no JVM lifecycle. Write only your report file.
+
+Repository /Users/sean/src/seon. The mandatory reference guide for Seon's coding agents and CLAUDE.md (a symlink to AGENTS.md) were revised after a first review round. Files (uncommitted; `git diff` shows changes vs HEAD): .agents/skills/data-oriented-clojure/SKILL.md, .agents/skills/clojure-testing/SKILL.md, docs/seon/architecture/reference-code.md, AGENTS.md. Change log with CLAUDE.md old->new sentences: tmp/clojure-guide/guide-revision-notes.md. First-round reviews: tmp/model-trial/review-guide-trial-astra-guide.md and tmp/model-trial/review-guide-trial-sol61-guide.md. Specs it must agree with: docs/seon/specs/errors.md, docs/seon/specs/agent-loop.md.
+
+Owner rulings made AFTER this revision began (the docs may not reflect them yet; flag every place that contradicts them): (a) there is no separate "fault" concept: Seon's own failures are just errors, recorded once per signature with a count, a task and one notification, at the task home; the fault vocabulary retires. (b) Completion is test-based: after a pass that changed code the task's tests reach, the loop runs them; all green = task done. complete! stays ONLY as the agent's explicit way to bail when the task is broken/impossible (reason recorded, task returns to its assigner); green tests are the only success. (c) Tasks must name their success tests before they can be launched/assigned. (d) :seon.cluster.eval/origin (:model/:outside/:test) replaces the old :seon.eval/origin string. (e) A recorded error whose producer is deleted resolves on deletion. (f) Every review is dual: a fresh Opus agent plus Astra.
+
+Check, citing file:line:
+1. First-round HIGH/MEDIUM findings: resolved / partially / not, with evidence. Any wrongly rejected?
+2. Every reference-code citation added or changed in this round: open it at the pinned checkout; does it show what is claimed?
+3. The new worked examples (three minimal tests, transact-initialization! decomposition, error flow, absent/nil/false section, schema registration, cache key): correct against current source and helpers? Would they compile/run as written (judge by reading the helpers' signatures)? Are EQUIVALENT / BEHAVIOR CHANGE / TARGET labels right?
+4. CLAUDE.md edits: does each new sentence state current reality or a clearly marked target? Any law weakened by accident, contradictions between sections, or contradictions with the specs and rulings (a)-(f)?
+5. Usability: anything still vague, over-absolute or low value; anything high-value still missing. Is ~19.7k tokens right?
+Severity-rank; exact replacement text for important fixes; mark unverified; no padding.
+Report path: tmp/model-trial/review-guide2-<REVIEWER>.md where REVIEWER is your lane name ($SEON_CODEX_LANE) or "opus". End with counts by severity and files read.

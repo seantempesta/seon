@@ -1,0 +1,190 @@
+{
+ "doc_by": {
+  "ns": 1445,
+  "defn": 6988,
+  "defn-": 4973,
+  "defmacro": 59,
+  "def": 345
+ },
+ "doc_n": {
+  "ns": 107,
+  "defn": 1318,
+  "defn-": 1265,
+  "defmacro": 10,
+  "def": 139
+ },
+ "buckets": {
+  "1": 999,
+  "7-12": 432,
+  "4-6": 630,
+  "13+": 213,
+  "2-3": 565
+ },
+ "bucket_lines": {
+  "1": 999,
+  "7-12": 3774,
+  "4-6": 3108,
+  "13+": 4538,
+  "2-3": 1391
+ },
+ "sections": {},
+ "cm_types": {
+  ";; form comment": 3846,
+  "banner rule": 337,
+  ";;; runtime-structure/section": 607,
+  "; prose": 80
+ },
+ "sch_parts": {
+  "lines naming :seon.error/value": 190,
+  "lines naming a -error alternative": 410,
+  "lines naming database-value": 653,
+  "admission exemption/reason lines": 175,
+  "generator hint lines": 145,
+  "custom :fn error-message lines": 12
+ },
+ "schema_forms": 2559,
+ "schema_lines": 5528,
+ "schema_dup_groups": 146,
+ "schema_dup_forms": 511,
+ "schema_dup_lines_saved": 111,
+ "schema_len_hist": {
+  "1": 1373,
+  "2-5": 1027,
+  "6-15": 152,
+  "16+": 7
+ },
+ "schema_len_hist_lines": {
+  "1": 1373,
+  "2-5": 2738,
+  "6-15": 1278,
+  "16+": 139
+ },
+ "top_dups": [
+  [
+   45,
+   1,
+   "{:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason \"A total predicate "
+  ],
+  [
+   33,
+   1,
+   "{:malli/schema [:=> [:cat :seon.schema/value] :boolean]}"
+  ],
+  [
+   1,
+   25,
+   "[:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.db.process/id {:optional true} :seon.db.process/id] [:seon.sci.admit/caps {:optional true} :se"
+  ],
+  [
+   1,
+   23,
+   "[:=> [:cat :seon.db/database-value [:map [::id ::id] [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal] [:seon.eval/shown {:optional true} :seon.eval/shown"
+  ],
+  [
+   1,
+   22,
+   "[:=> [:cat [:and [:map [::paths {:optional true} [:vector {:min 1} [:string {:min 1}]]] [::cache-root {:optional true} :string] [::config-root {:optional true} "
+  ]
+ ],
+ "edn": {
+  "total": 13939,
+  "files": 203,
+  "errlines": 875,
+  "errdecls": 204,
+  "comment": 373,
+  "top": [
+   [
+    "resources/seon/schemas/seon.error.edn",
+    456,
+    2,
+    1
+   ],
+   [
+    "resources/seon/schemas/seon.print.edn",
+    408,
+    0,
+    22
+   ],
+   [
+    "resources/seon/schemas/seon.ai.edn",
+    403,
+    90,
+    1
+   ],
+   [
+    "resources/seon/schemas/seon.test.edn",
+    357,
+    31,
+    2
+   ],
+   [
+    "resources/seon/schemas/seon.db.edn",
+    355,
+    18,
+    46
+   ],
+   [
+    "resources/seon/schemas/seon.sci.eval.edn",
+    354,
+    49,
+    3
+   ],
+   [
+    "resources/seon/schemas/seon.program.edn",
+    349,
+    22,
+    1
+   ],
+   [
+    "resources/seon/schemas/seon.turn.loop.edn",
+    291,
+    9,
+    12
+   ],
+   [
+    "resources/seon/schemas/seon.render.edn",
+    275,
+    3,
+    1
+   ],
+   [
+    "resources/seon/schemas/seon.effect.edn",
+    274,
+    67,
+    0
+   ]
+  ],
+  "toperr": [
+   [
+    "resources/seon/schemas/my.web.edn",
+    181,
+    104,
+    1
+   ],
+   [
+    "resources/seon/schemas/seon.ai.edn",
+    403,
+    90,
+    1
+   ],
+   [
+    "resources/seon/schemas/seon.effect.edn",
+    274,
+    67,
+    0
+   ],
+   [
+    "resources/seon/schemas/seon.sci.eval.edn",
+    354,
+    49,
+    3
+   ],
+   [
+    "resources/seon/schemas/seon.instrument.edn",
+    152,
+    41,
+    13
+   ]
+  ]
+ }
+}

@@ -1,0 +1,130 @@
+[#:seon.error{:signature
+              "5657423227ce4e1c064b13d337b0062e1d91a1f62b0df580202e47868aa2acc4",
+              :operation user/bad4,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "fcf-1"}}]}
+ #:seon.error{:signature
+              "1a040a96b440fdfedb9e1a22707545dca7994d0bf4b04ef6f2e3a199e3462882",
+              :operation my.auditchange/add2,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "audit-change"}}]}
+ #:seon.error{:signature
+              "ef66a594f2717def9a0a25e8e003388f0ac8d128e6fc32598751a905adc319c8",
+              :operation refusal-cause.probe/bad-err,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "refusal-cause"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "refusal-cause"}}]}
+ #:seon.error{:signature
+              "20eed493fb3c43e69164e52280a48c44fc247ee04810f36b33d408e9c06280ad",
+              :operation user/bad3,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "fcf-1"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "fcf-1"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "fcf-1"}}]}
+ #:seon.error{:signature
+              "49b99be77309f5773283aa7ec99906af0048a948a82dd1480ade3efe76767282",
+              :operation my.fs/write!,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "dogfood-tools"}}]}
+ #:seon.error{:signature
+              "d3a00a35589d8dc01ada5900ff79d47f398a7c546e8681ca5e01977052a1e93c",
+              :operation my.program/diff,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "dogfood-tools"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "program-reads"}}]}
+ #:seon.error{:signature
+              "2c83e9c0384408290332028ed99bb9ad7628f58811dfdc3671e0c716c2f4b214",
+              :operation my.shell/run!,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "dogfood-tools"}}]}
+ #:seon.error{:signature
+              "e9ba11080272e38c75201315eb893a4679fca62d856b037e30deb598bee05561",
+              :operation my.fs/read,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "dogfood-tools"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "tool-errors"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "tool-errors"}}]}
+ #:seon.error{:signature
+              "0abae616b9c2a963cd91d9da7a8f828cb92e2cb76748fef88b2592a97fd99ffd",
+              :operation seon.db/transact!,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "root"}}]}
+ #:seon.error{:signature
+              "8ef41c77e87f9a0dbc90bd0cbfc1622a741b47131dd69010a2d1d799e59754b2",
+              :operation seon.sci.eval/shown-failure,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id
+                                                    "live-run-1"}}]}
+ #:seon.error{:signature
+              "438e41f190c279de035fdcaca3eda49813b85549f8bf69bfd3c3da40fbbd6ef5",
+              :operation my.probe/x,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "fcf-1"}}]}
+ #:seon.error{:signature
+              "632864f809b963b10d527ad08e57dc201f77d6fbd224b3ae0e670189c0e733dd",
+              :operation my.probe/y,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent
+                                       #:seon.agent{:id "fcf-1"}}]}
+ #:seon.error{:signature
+              "7147098166ec845e7dd355f2217c2d8fab65c4df30e2b2e6ddbf86936fcd3fbe",
+              :operation seon.test/release-context!,
+              :occurrences
+              [#:seon.error.occurrence{:count 1}
+               #:seon.error.occurrence{:count 1}
+               #:seon.error.occurrence{:count 1}]}
+ #:seon.error{:signature
+              "7b2cf983e1a4ea9bfc5f56c8c6652d8cee807b13b3bea0a966317c64314a86d8",
+              :operation seon.db/transact!,
+              :occurrences
+              [#:seon.error.occurrence{:count 1,
+                                       :agent #:seon.agent{:id "root"}}
+               #:seon.error.occurrence{:count 1,
+                                       :agent #:seon.agent{:id "root"}}
+               #:seon.error.occurrence{:count 5,
+                                       :agent
+                                       #:seon.agent{:id "root"}}]}]

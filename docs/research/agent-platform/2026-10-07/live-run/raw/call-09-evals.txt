@@ -1,0 +1,36 @@
+;; ordinal 0 ns #:db{:id 51311} ms 0
+;; comment: ; I'm running low on turns and I've been thrashing. Let me focus: I have both functions read, the proof test read, and the analysis. Let me make the fix.
+; The bug: `response-entries` builds `:seon.repl/value` from `value-text` (the raw shown text) and only wraps it in `data-text` when `rendered?`. For an elided value, `value-text` returns the raw shown text verbatim, which is not EDN (`…` and comments). And `reply-map` splices that text in. The fix is to make `value-text` (or the value key) always go through `data-text` so the value reads back as EDN.
+; Let me check `data-text`'s behavior: it returns `(pr-str text)` when the text reads as a non-string or contains a comment; otherwise returns text unchanged. For the elided shown `"[0 1 2 …2997 (drop 3 result/ee7b3)]"`, it does *not* read as data (the `…` breaks it) so it becomes a string — but the test expects it to *be* the vector `[0 1 2 (symbol "…2997") ...]`. So the elision must be handled so the value text is readable data.
+; Given my turn budget, the safest single fix that matches the test: make the `:seon.repl/value` always pass through `data-text`, and in `data-text`, when text does not read as data due to the elision ellipsis/bad tokens, fall back to a readable representation. Let me write the one change I'm confident about and run the test.
+(clojure.repl/source-fn 'seon.repl/response-order)
+=> "(def ^:private response-order\n  [:seon.repl/value\n   :seon.repl/error\n   :seon.repl/findings\n   :seon.repl/diagnostics\n   :seon.repl/interrupted\n   :seon.repl/result\n   :seon.repl/out\n   :seon.repl/errors\n   :seon.repl/note\n   :seon.repl/ns\n   :seon.repl/ms\n   :seon.repl/calls\n   :seon.repl/repeated])"
+
+;; ordinal 1 ns #:db{:id 51311} ms 0
+;; comment: ; Actually I must be disciplined. Let me make the fix now.
+(in-ns 'seon.repl)
+=> #namespace[seon.repl]
+
+;; ordinal 2 ns #:db{:id 9848} ms 1
+(defn- data-text
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text]
+  (if (or (string? (read-shown text tagged-literal))
+          (some #(= "comment" (first %)) (syntax-tokens text)))
+    (pr-str text)
+    text))
+=> {:seon.render.var/symbol seon.repl/data-text}
+
+;; ordinal 3 ns #:db{:id 9848} ms 
+(defn- reply-map
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
+  [entries]
+  (when (seq entries)
+    (str "
+=> #:seon.error{:expected :seon.sci.reader/accepted-source,
+ :member :seon.sci.reader/form,
+ :message "EOF while reading, expected \" to match \" at [5,10]",
+ :offending
+   "(defn- reply-map\n  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}\n  [entries]\n  (when (seq entries)\n    (str \""}
+ERROR: "EOF while reading, expected \" to match \" at [5,10]"
+

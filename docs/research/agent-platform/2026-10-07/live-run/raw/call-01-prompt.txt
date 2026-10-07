@@ -1,0 +1,88 @@
+user=> (my.agent/identity)
+#:seon.repl{:value #:my.agent{:id "live-run-1", :namespace user, :steward "live-run-1"}, :result result/e3239b8aa61e2, :ms 18, :calls 106}
+
+user=> (my.agent/branch)
+#:seon.repl{:value #:seon.agent{:branch :agent-80e4a2ca8c45, :mode :live}, :result result/e59c9bb7745ac, :ms 0, :calls 106}
+
+user=> (my.agent/settings)
+#:seon.repl{:value {:my.agent/settings {},
+ :seon.render/operations
+   [(seon.agent/effective-settings (seon.db/db) "live-run-1")]}, :result result/efea21f48210c, :ms 0, :calls 125}
+
+user=> (my.agent/settings! {:seon.config.run/max-episode-runs 12 :seon.config.ai/max-tokens 8192})
+#:seon.repl{:value {:my.agent/settings {},
+ :seon.render/operations
+   [(seon.agent/effective-settings (seon.db/db) "live-run-1")]}, :result result/ee0ddae16c8c6, :ms 29, :calls 561}
+
+user=> (seon.agent/effective-settings (seon.db/db) "live-run-1")
+#:seon.repl{:value [#:seon.config.ai{:model "deepseek-flash", :no-provider true}
+ {:seon.config.eval/time-limit-ms 30000}
+ {:seon.config.run/max-episode-runs 12}], :result result/ef50e08c479f7, :ms 2, :calls 444}
+
+;; changed since your last turn
+user=> (try (seon.config/apply! {:seon.db/connection user/lr-branch :seon.boot/cluster-name "default" :seon.config/manifest {:seon.config.ai/no-provider :seon.config/absent}})
+  (catch Throwable t {:msg (ex-message t) :data (ex-data t)}))
+#:seon.repl{:value #:seon.reconcile{:converged? false, :operations 1}, :result result/e273bc4ef0019}
+
+;; changed since your last turn
+user=> (seon.db/pull (quote [:seon.agent/id #:seon.agent{:namespace [:seon.ns/name #:seon.ns{:steward [:seon.agent/id]}]} :seon.agent/cluster]) [:seon.agent/id "live-run-1"])
+#:seon.repl{:value {:seon.agent/id "live-run-1",
+ :seon.agent/cluster "default",
+ :seon.agent/namespace
+   #:seon.ns{:name user, :steward {:seon.agent/id "live-run-1"}},
+ :seon.render/operations [(help)]}, :result result/e81a5dcea860b}
+
+;; changed since your last turn
+user=> (my.task/steps {})
+#:seon.repl{:value {:seon.task/id "18c37812b5bc",
+ :seon.task/steps [],
+ :seon.task/name "reply-map-is-not-edn-when-elided-or-rendered",
+ :seon.task/intent
+   "seon.repl/response splices shown text into the reply map verbatim. (vec (range 3000)) answered #:seon.repl{:value [0 1 … …2968] then a newline and the floor's ';; …N = N more … (seon.print/value-at result/e7b3b69b578ae [...]).' legend, so ', :result result/e7b3b69b578ae, :ms 711}' sits on the comment line: read as EDN the reply loses its handle, its time and its closing brace. A declared renderer's response keeps only diagnostics and errors (a pull of a turn answered prose alone), so every rendered value loses :result and :ms. One composer: the reply map must read back as data for every value, and a rendered value keeps its handle and time.",
+ :seon.render/operations [(my.task/step! {:seon.step/text "Next step"})]}, :result result/e0e8e7c7db69a}
+
+;; changed since your last turn
+user=> (get (seon.db/pull (quote [:seon.message/_to]) [:seon.agent/id "live-run-1"]) :seon.message/_to)
+#:seon.repl{:value [{:my.message/id "3cadb339ed3f",
+  :my.message/from "root",
+  :seon.message/lines
+    ["You are assigned task 18c37812b5bc (seon.repl/reply-map-is-not-edn-when-elided-or-rendered) on your branch. Intent: seon.repl/response splices shown text into the reply map verbatim, so an elided value's trailing ';; ...' legend comments out ', :result ..., :ms ...}' and a declared renderer's response drops :result and :ms. Done when: the REPL reply map reads back as EDN for every value (elided or rendered) and keeps :seon.repl/result and :seon.repl/ms. Proof test: seon.repl-test/the-reply-is-one-edn-map-whatever-the-value. Must read: seon.repl/response, seon.repl/value-text. Work at your REPL: read the code, change it with defn in seon.repl, run the proof test on your branch, then propose the merge (my.program/propose-merge! {})."],
+  :seon.render/operations [(my.message/received! "3cadb339ed3f")]}], :result result/e7ff637e51377}
+
+;; changed since your last turn
+user=> (seon.agent/settings (seon.db/db) "live-run-1")
+#:seon.repl{:value {:my.agent/settings
+   {:seon.config.run/max-episode-runs 12,
+    :seon.config.ai/max-tokens 8192},
+ :seon.render/operations
+   [(seon.agent/effective-settings (seon.db/db) "live-run-1")]}, :result result/e62952b057d01}
+
+;; changed since your last turn
+user=> (dir (quote user))
+#:seon.repl{:value {:seon.ns/name user,
+ :seon.ns/requires [],
+ :seon.repl/rows [],
+ :seon.repl/columns [:sym :arglists :doc :in :out]}, :result result/eb5315c878a72}
+
+;; changed since your last turn
+user=> (seon.db/pull (quote [*]) [:seon.runtime/agent {:seon.agent/id "live-run-1", :db/id 110237}])
+#:seon.repl{:value {:seon.render/operations
+   [(seon.db/pull
+     '[{:seon.turn/_agent [:seon.turn/id]}]
+     [:seon.agent/id "live-run-1"])]}, :result result/e109566cbdf7b}
+
+;; changed since your last turn
+user=> (seon.error/for-agent (seon.db/db) "live-run-1")
+#:seon.repl{:value [], :result result/e59e661826a25, :calls 382}
+
+;; changed since your last turn
+user=> (my.agent/settings)
+#:seon.repl{:value {:seon.repl/changes {[:my.agent/settings :seon.config.ai/max-tokens] {:seon.db.diff/after 8192}, [:my.agent/settings :seon.config.run/max-episode-runs] {:seon.db.diff/after 12}}}, :result result/ebeff1645ea8a, :calls 266}
+;; full value: (get-in result/ebeff1645ea8a [])
+
+;; changed since your last turn
+user=> (seon.agent/effective-settings (seon.db/db) "live-run-1")
+#:seon.repl{:value {:seon.repl/changes {[0 :seon.config.ai/no-provider] {:seon.db.diff/removed? true}}}, :result result/e9f5cefe9a5b8, :calls 444}
+;; full value: (get-in result/e9f5cefe9a5b8 [])
+
+turns left: 11 of 12

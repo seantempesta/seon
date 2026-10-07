@@ -1,0 +1,17 @@
+Read-only DESIGN REVIEW task. Edit no tracked file, make no commits, run no tests, start/stop no JVM. You may run a few small read-only MCP-free probes by reading code. Write only your report file (path below).
+
+Repository: /Users/sean/src/seon (Clojure; Malli, Datahike, SCI, core.async.flow). Two specs were marked reviewed today and implementation started; the implementing lanes then found problems in the real code. Review the DESIGN of both specs before more code is written.
+
+Specs: docs/seon/specs/errors.md and docs/seon/specs/agent-loop.md (owner decisions in their last sections are binding requirements, not suggestions).
+What the lanes found: tmp/errors/s1-s2-notes.md (errors S1 landed as commit 33fb994f2; S2 found 52 diagnostic call sites passing a throwable, 120 hand-built error maps, :at/:layer feeding the fault signature) and tmp/agent-loop/s1-notes.md (fold works without a turn entity; ordinals vs result handles; the evaluation writer needs a turn; fault-window duty missing).
+Context: CLAUDE.md, tmp/agent-loop/map.md (exact map of today's loop), tmp/clojure-guide/map-data-contracts.md, tmp/clojure-guide/map-repl-path.md, and the library code the specs lean on: reference-code/malli/src/malli/{core.cljc,error.cljc,instrument.clj}, reference-code/core.async (flow), reference-code/sci/src/sci/core.cljc, reference-code/nrepl/src/clojure/nrepl/middleware/interruptible_eval.clj.
+
+For EACH spec answer, citing file:line in specs and code:
+1. Is the design right? Where does it contradict the real code, the owner decisions, or itself? Which lane findings show the design (not just the slicing) is wrong, and what is the correct design?
+2. What is missing that implementation will hit (duties of the old code the spec drops, data the new code needs earlier than the spec provides, migration of existing data/callers)?
+3. Is it the simplest design that meets the owner's rulings? Name machinery that could be deleted instead of rebuilt, and places the spec rebuilds what a library (malli, Clojure, Datahike, SCI, core.async.flow) already does.
+4. Slicing: is each slice small, provable, and does HEAD boot after it? Propose a corrected slice order where needed.
+5. Concrete spec edits: list them as "section -> replace X with Y" so they can be applied.
+Severity-rank findings (high/medium/low). Mark anything unverified. No padding; say plainly where the spec is fine.
+
+Report path: tmp/model-trial/review-specs-<YOUR LANE NAME>.md (your lane name is in $SEON_CODEX_LANE). End with findings count by severity per spec and the files you read.

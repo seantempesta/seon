@@ -1,0 +1,37 @@
+I'm running low on turns and I've been thrashing. Let me focus: I have both functions read, the proof test read, and the analysis. Let me make the fix.
+
+The bug: `response-entries` builds `:seon.repl/value` from `value-text` (the raw shown text) and only wraps it in `data-text` when `rendered?`. For an elided value, `value-text` returns the raw shown text verbatim, which is not EDN (`…` and comments). And `reply-map` splices that text in. The fix is to make `value-text` (or the value key) always go through `data-text` so the value reads back as EDN.
+
+Let me check `data-text`'s behavior: it returns `(pr-str text)` when the text reads as a non-string or contains a comment; otherwise returns text unchanged. For the elided shown `"[0 1 2 …2997 (drop 3 result/ee7b3)]"`, it does *not* read as data (the `…` breaks it) so it becomes a string — but the test expects it to *be* the vector `[0 1 2 (symbol "…2997") ...]`. So the elision must be handled so the value text is readable data.
+
+Given my turn budget, the safest single fix that matches the test: make the `:seon.repl/value` always pass through `data-text`, and in `data-text`, when text does not read as data due to the elision ellipsis/bad tokens, fall back to a readable representation. Let me write the one change I'm confident about and run the test.
+
+```clojure
+(clojure.repl/source-fn 'seon.repl/response-order)
+```
+
+Actually I must be disciplined. Let me make the fix now.
+
+```clojure
+(in-ns 'seon.repl)
+(defn- data-text
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text]
+  (if (or (string? (read-shown text tagged-literal))
+          (some #(= "comment" (first %)) (syntax-tokens text)))
+    (pr-str text)
+    text))
+```
+
+The elided value in the test is `"[0 1 2 …2997 (drop 3 result/ee7b3)]"` and must come back as `[0 1 2 (symbol "…2997") '(drop 3 result/ee7b3)]`. That requires reading it with the `…2997` token as a symbol and `drop 3` as a list. So it must be spliced verbatim into the map (not quoted), because `one-map` reads the whole map and the value position inside it should read as that vector.
+
+So the value key for an elided value should be the raw text if it reads as EDN, else the data it decodes to. Let me write `value-text` to return the shown text unchanged (as-is), but have `response-entries` splices it so the map reads back. For the comment case `"[1 2]\n;; a trailing diagnostic line"`, the value key must be `[1 2]` — i.e. the comment must be stripped.
+
+Given limited turns, the cleanest fix: in `response-entries`, set the `:seon.repl/value` to `(or (read-shown value tagged-literal) value)` wrapped so it prints as EDN, and for comment-ended text, strip trailing comment lines first. Let me write it and run the test.
+
+```clojure
+(defn- reply-map
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
+  [entries]
+  (when (seq entries)
+    (str "

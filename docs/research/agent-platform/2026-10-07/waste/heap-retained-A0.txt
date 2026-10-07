@@ -1,0 +1,301 @@
+30874:
+ num     #instances         #bytes  class name (module)
+-------------------------------------------------------
+   1:      12681301     1561439400  [B (java.base@26.0.1)
+   2:      16254204     1257512392  [Ljava.lang.Object; (java.base@26.0.1)
+   3:      24499608      979984320  datahike.datom.Datom
+   4:      18757686      450184464  java.lang.Long (java.base@26.0.1)
+   5:       9840936      314909952  clojure.lang.Symbol
+   6:      12675836      304220064  java.lang.String (java.base@26.0.1)
+   7:       6423245      256929800  clojure.lang.PersistentVector
+   8:       4894658      117471792  clojure.lang.PersistentVector$Node
+   9:       5270686       84330976  java.util.concurrent.atomic.AtomicReference (java.base@26.0.1)
+  10:       2546668       61120032  clojure.lang.PersistentHashMap$BitmapIndexedNode
+  11:       1640552       52497664  clojure.lang.PersistentArrayMap
+  12:        970425       46580400  java.lang.StackTraceElement (java.base@26.0.1)
+  13:         35475       44757792  [Ljdk.internal.vm.FillerElement; (java.base@26.0.1)
+  14:        575916       18429312  java.util.UUID (java.base@26.0.1)
+  15:        529952       16958464  clojure.lang.LazySeq
+  16:        416598       16663920  java.lang.ref.SoftReference (java.base@26.0.1)
+  17:        498130       15940160  clojure.lang.Cons
+  18:        404075       12930400  org.replikativ.persistent_sorted_set.Leaf
+  19:         88754       12780576  [Lclojure.lang.PersistentHashMap$INode;
+  20:        312641       10004512  clojure.lang.Delay
+  21:         35833        9788512  [J (java.base@26.0.1)
+  22:         59779        9424800  java.lang.Class (java.base@26.0.1)
+  23:        275031        8800992  java.util.HashMap$Node (java.base@26.0.1)
+  24:        219886        8795440  clojure.lang.PersistentHashMap
+  25:        264928        8477696  clojure.lang.Atom
+  26:        219491        7023712  java.util.concurrent.ConcurrentHashMap$Node (java.base@26.0.1)
+  27:        211613        6771616  java.util.concurrent.locks.ReentrantLock$NonfairSync (java.base@26.0.1)
+  28:        104560        6691840  malli.core$_schema_schema$reify$reify__64074
+  29:        251402        6033648  java.util.Date (java.base@26.0.1)
+  30:        181996        5823872  clojure.lang.PersistentHashSet
+  31:         46429        5725232  [I (java.base@26.0.1)
+  32:          2001        5582496  [Ljava.util.HashMap$Node; (java.base@26.0.1)
+  33:          4016        4838776  [Ljava.lang.StackTraceElement; (java.base@26.0.1)
+  34:        116046        4641840  clojure.lang.PersistentTreeMap$BlackBranchVal
+  35:        121096        3875072  java.util.concurrent.atomic.LongAdder (java.base@26.0.1)
+  36:          9673        3764864  [Ljava.util.concurrent.ConcurrentHashMap$Node; (java.base@26.0.1)
+  37:        211613        3385808  java.util.concurrent.locks.ReentrantLock (java.base@26.0.1)
+  38:        104598        3347136  malli.core$_schema_schema$reify__64065
+  39:         78208        3128320  clojure.lang.PersistentList
+  40:         53714        2578272  org.replikativ.persistent_sorted_set.Branch
+  41:         32198        2577952  [S (java.base@26.0.1)
+  42:         33373        2402856  java.lang.reflect.Field (java.base@26.0.1)
+  43:         74820        2394240  clojure.lang.PersistentTreeMap$BlackVal
+  44:         40566        2271696  malli.core$_simple_schema$reify$reify__63327
+  45:         54503        2180120  com.github.benmanes.caffeine.cache.PSMW
+  46:         88754        2130096  clojure.lang.PersistentHashMap$ArrayNode
+  47:         52217        2088680  sci.lang.Var
+  48:         50852        2034080  org.replikativ.persistent_sorted_set.Slot
+  49:         32844        1576512  malli.core$_schema_schema$reify__64065$fn__64068
+  50:         23217        1485888  java.util.concurrent.ConcurrentHashMap (java.base@26.0.1)
+  51:         46376        1484032  clojure.lang.PersistentTreeMap$RedVal
+  52:         36912        1476480  malli.core$_val_schema$reify$reify__63569
+  53:         20616        1319424  malli.core$_map_schema$reify$reify__63621
+  54:         23499        1315944  org.replikativ.persistent_sorted_set.PersistentSortedSet
+  55:         54503        1308072  java.util.concurrent.CompletableFuture (java.base@26.0.1)
+  56:         53714        1289136  org.replikativ.persistent_sorted_set.Branch$BufState
+  57:         53714        1289136  org.replikativ.persistent_sorted_set.Branch$NodeState
+  58:         36979        1183328  clojure.lang.MapEntry
+  59:         29564        1182560  clojure.lang.PersistentTreeMap$RedBranchVal
+  60:         36912        1181184  malli.core$_val_schema$reify__63564$fn__63567
+  61:         69930        1118880  java.lang.Object (java.base@26.0.1)
+  62:           358        1110208  [C (java.base@26.0.1)
+  63:         26029        1041160  clojure.lang.PersistentTreeMap
+  64:         19653         943344  clojure.lang.Var
+  65:         11503         828216  malli.core$_sequence_schema$reify$reify__64240
+  66:         20616         824640  malli.core$_map_schema$reify__63579$__GT_parser__63591
+  67:          2813         787640  java.util.concurrent.atomic.Striped64$Cell (java.base@26.0.1)
+  68:         19410         776400  java.lang.invoke.BoundMethodHandle$Species_LL (java.base@26.0.1)
+  69:          9621         769680  malli.core$_collection_schema$reify$reify__63789
+  70:         23292         745344  malli.core$_simple_schema$reify__63324$fn__63325
+  71:         22088         706816  clojure.test.check.generators.Generator
+  72:          8311         672176  [Ljava.util.WeakHashMap$Entry; (java.base@26.0.1)
+  73:         20851         667232  malli.core$_simple_entry_parser$reify__63112
+  74:         13724         658752  java.lang.invoke.MemberName (java.base@26.0.1)
+  75:         11573         648088  malli.core$__EQ__GT$reify$reify__64103
+  76:         36912         590592  malli.core$_val_schema$reify__63564
+  77:         24076         577824  clojure.core$constantly$fn__5761
+  78:         13994         559760  org.replikativ.persistent_sorted_set.Settings
+  79:         11394         546912  java.util.HashMap (java.base@26.0.1)
+  80:         33134         530144  java.util.concurrent.atomic.AtomicBoolean (java.base@26.0.1)
+  81:         16105         515360  java.lang.ref.WeakReference (java.base@26.0.1)
+  82:          2872         505472  [Ljava.util.concurrent.atomic.LongAdder; (java.base@26.0.1)
+  83:         20616         494784  malli.core$_map_schema$reify__63579$simple_default_parser_QMARK___63589
+  84:         15022         480704  malli.core$_map_schema$reify__63579$fn__63581
+  85:          4971         477216  clojure.lang.DynamicClassLoader
+  86:          9621         461808  malli.core$_collection_schema$reify__63760$__GT_parser__63775
+  87:          9611         461328  java.lang.invoke.DirectMethodHandle$Accessor (java.base@26.0.1)
+  88:            89         459248  jdk.internal.vm.StackChunk (java.base@26.0.1)
+  89:         27751         444016  java.lang.Integer (java.base@26.0.1)
+  90:          9205         441840  malli.core$_or_schema$reify$reify__63482
+  91:          7314         409584  malli.core$_simple_schema$reify__63324
+  92:          7188         402528  malli.core$_and_schema$reify$reify__63376
+  93:          8309         398832  java.util.WeakHashMap (java.base@26.0.1)
+  94:         16545         397080  java.util.ArrayList (java.base@26.0.1)
+  95:         16156         387744  malli.core$_map_schema$reify__63579$fn__63583
+  96:         16156         387744  malli.core$_map_schema$reify__63579$fn__63586
+  97:         15825         379800  clojure.lang.Keyword
+  98:         11722         375104  java.lang.ThreadLocal$ThreadLocalMap$Entry (java.base@26.0.1)
+  99:         11285         361120  malli.core$_map_schema$reify$reify__63621$fn__63625$fn__63630
+ 100:         11210         358720  malli.core$_simple_schema$reify$reify__63327$explain__63331
+ 101:          4059         357192  java.lang.reflect.Method (java.base@26.0.1)
+ 102:         14788         354912  clojure.test.check.generators$gen_fmap$fn__69874
+ 103:         11073         354336  malli.core$__EQ__GT$reify__64089$fn__64098
+ 104:         10872         347904  malli.core$_sequence_schema$reify__64235$fn__64238
+ 105:         10692         342144  clojure.lang.ChunkedCons
+ 106:         21028         336448  clojure.lang.KeywordLookupSite
+ 107:         12877         309048  clojure.lang.KeywordLookupSite$1
+ 108:          7434         297360  clojure.lang.APersistentVector$SubVector
+ 109:         12268         294432  clojure.test.check.generators$fmap$fn__69900
+ 110:          5039         282184  java.lang.Module (java.base@26.0.1)
+ 111:          8342         266944  java.lang.ref.ReferenceQueue (java.base@26.0.1)
+ 112:         10705         256920  clojure.lang.ArrayChunk
+ 113:          3154         252320  malli.core$__EQ__GT$reify$reify__64103$fn__64138
+ 114:         10506         252144  clojure.core$map$fn__5956
+ 115:          6070         242800  java.lang.invoke.MethodType (java.base@26.0.1)
+ 116:          9621         230904  malli.core$_collection_schema$reify__63760$simple_parser_QMARK___63772
+ 117:          7188         230016  malli.core$_and_schema$reify__63352$__GT_transforming_parser_idx__63358
+ 118:          8732         223800  [Ljava.lang.Class; (java.base@26.0.1)
+ 119:            75         222560  [Ljava.nio.ByteBuffer; (java.base@26.0.1)
+ 120:          6936         221952  malli.core$_and_schema$reify__63352$fn__63356
+ 121:          9205         220920  malli.core$_or_schema$reify__63471$__GT_parser__63476
+ 122:          6724         215168  malli.core$_or_schema$reify__63471$fn__63474
+ 123:           148         215104  [Ljava.util.concurrent.ForkJoinTask; (java.base@26.0.1)
+ 124:          5032         201280  java.security.CodeSource (java.base@26.0.1)
+ 125:          4972         198880  jdk.internal.loader.URLClassPath (java.base@26.0.1)
+ 126:          8207         196968  malli.generator$_entry_gen$fn__78787
+ 127:          6071         194272  jdk.internal.util.WeakReferenceKey (java.base@26.0.1)
+ 128:          5876         188032  malli.core$_collection_schema$reify__63760$fn__63770
+ 129:          4610         184400  malli.core$_map_schema$reify$reify__63621$fn__63645$fn__63650
+ 130:          7188         172512  malli.core$_and_schema$reify__63352$__GT_parsers__63372
+ 131:          7188         172512  malli.core$_and_schema$reify__63352$fn__63368
+ 132:          1658         172432  datahike.db.DB
+ 133:         10470         167520  malli.core$_simple_entry_parser$fn__63107
+ 134:          2892         161952  seon.instrument$compiled_wrapper$refusal__14834
+ 135:          5034         161088  java.security.ProtectionDomain (java.base@26.0.1)
+ 136:          4975         159200  jdk.internal.loader.NativeLibraries (java.base@26.0.1)
+ 137:          2827         158312  seon.instrument$arm_var_BANG_$fn__14859$fn__14861
+ 138:          4859         155488  clojure.test.check.generators$choose$fn__69946
+ 139:          4491         143712  java.util.LinkedList (java.base@26.0.1)
+ 140:          5893         141432  clojure.test.check.generators$gen_bind$fn__69879
+ 141:           497         139856  [Ljava.lang.ThreadLocal$ThreadLocalMap$Entry; (java.base@26.0.1)
+ 142:          3460         138400  clojure.lang.Repeat
+ 143:          8344         133504  java.lang.ref.ReferenceQueue$Lock (java.base@26.0.1)
+ 144:          5260         126240  java.util.ArrayDeque (java.base@26.0.1)
+ 145:          3154         126160  malli.core$__EQ__GT$reify$reify__64103$valid_QMARK___64135
+ 146:          3010         120400  clojure.lang.ExceptionInfo
+ 147:          2973         118920  java.util.WeakHashMap$Entry (java.base@26.0.1)
+ 148:          2872         114880  java.util.concurrent.atomic.LongAccumulator (java.base@26.0.1)
+ 149:          3562         113984  jdk.internal.reflect.MethodHandleObjectFieldAccessorImpl (java.base@26.0.1)
+ 150:          4622         110928  java.lang.NamedPackage (java.base@26.0.1)
+ 151:          6822         109152  malli.core$_collection_schema$reify__63760$fn__63763
+ 152:          4450         106800  clojure.test.check.generators$bind_helper$fn__69905
+ 153:          4434         106416  clojure.test.check.generators$one_of$fn__69953
+ 154:          4408         105792  malli.core$_map_schema$reify$reify__63621$fn__63639
+ 155:          4291         102984  malli.core$_simple_schema$reify$reify__63327$fn__63328
+ 156:          2471          98840  java.util.LinkedHashMap$Entry (java.base@26.0.1)
+ 157:          4092          98208  malli.core$_safe_pred$fn__62939
+ 158:          4009          96216  clojure.lang.AFunction$1
+ 159:          1492          95488  malli.core$_map_of_schema$reify$reify__63721
+ 160:          3978          95472  java.util.ImmutableCollections$List12 (java.base@26.0.1)
+ 161:          2968          94976  clojure.test.check.generators$such_that$fn__70004
+ 162:          2363          94520  java.util.TreeMap$Entry (java.base@26.0.1)
+ 163:          2335          93400  jdk.internal.util.SoftReferenceKey (java.base@26.0.1)
+ 164:          1943          93264  malli.core$_fn_schema$reify$reify__63917
+ 165:          3841          92184  jdk.internal.net.http.hpack.QuickHuffman$ImmutableNode (java.net.http@26.0.1)
+ 166:          3561          85464  malli.core$comparator_schemas$fn__64423$fn__64428$fn__64432
+ 167:          1770          84960  malli.core$_enum_schema$reify$reify__63889
+ 168:          1759          84432  java.lang.invoke.LambdaForm (java.base@26.0.1)
+ 169:          3508          84192  sci.lang.Namespace
+ 170:          1581          83584  [Ljava.lang.String; (java.base@26.0.1)
+ 171:          3480          83520  java.util.Collections$SetFromMap (java.base@26.0.1)
+ 172:          5034          80544  [Ljava.security.Principal; (java.base@26.0.1)
+ 173:          3337          80088  java.lang.invoke.ResolvedMethodName (java.base@26.0.1)
+ 174:          1993          79720  clojure.core.async.impl.channels.ManyToManyChannel
+ 175:          1935          77400  clojure.lang.PersistentVector$ChunkedSeq
+ 176:          3137          75288  malli.core$_cat_items_validator$fn__64213
+ 177:          1564          75072  malli.core$_maybe_schema$reify$reify__63936
+ 178:          3086          74064  clojure.test.check.generators$sized$fn__69935
+ 179:          3051          73224  java.util.Collections$SynchronizedSet (java.base@26.0.1)
+ 180:          3032          72768  malli.registry$composite_registry$reify__61990
+ 181:          1764          72296  [Ljava.lang.invoke.LambdaForm$Name; (java.base@26.0.1)
+ 182:          2892          69408  seon.instrument$compiled_wrapper$arity_ordinal__14819
+ 183:          2892          69408  seon.instrument$compiled_wrapper$fn__14839
+ 184:          2892          69408  seon.instrument$compiled_wrapper$minimal__14827
+ 185:          2839          68136  seon.instrument$compiled_wrapper$fn__14823
+ 186:          2712          65088  java.lang.Double (java.base@26.0.1)
+ 187:          2688          64512  clojure.core.async.impl.mutex$mutex$reify__546
+ 188:           358          62920  [Z (java.base@26.0.1)
+ 189:          1247          59856  malli.core$_tuple_schema$reify$reify__63838
+ 190:          1848          59136  malli.core$_collection_schema$reify$reify__63789$fn__63790
+ 191:          2351          56424  malli.core$_min_max_pred$fn__63275$fn__63283
+ 192:          2283          54792  clojure.reflect$typesym$fn__12175
+ 193:          3334          53344  java.util.WeakHashMap$KeySet (java.base@26.0.1)
+ 194:          2149          51576  clojure.test.check.generators$gen_tuple$fn__69894
+ 195:          2146          51504  malli.impl.util$f__60627__60628$fn__60634
+ 196:          2040          48960  malli.core$_or_schema$reify$reify__63482$explain__63489
+ 197:          1993          47832  clojure.core.async.impl.channels$chan$fn__690
+ 198:           664          47808  java.lang.reflect.Constructor (java.base@26.0.1)
+ 199:          1492          47744  malli.core$_map_of_schema$reify__63697$__GT_parser__63710
+ 200:           737          47168  java.util.LinkedHashMap (java.base@26.0.1)
+ 201:          2941          47056  java.util.concurrent.ConcurrentHashMap$EntrySetView (java.base@26.0.1)
+ 202:          2909          46544  malli.registry$var_registry$reify__61998
+ 203:          2892          46272  seon.instrument$compiled_wrapper$reraise_bound_BANG___14832
+ 204:           148          46176  java.util.concurrent.ForkJoinPool$WorkQueue (java.base@26.0.1)
+ 205:          2881          46096  java.lang.ThreadLocal (java.base@26.0.1)
+ 206:          1903          45672  malli.core$_min_max_pred$fn__63275$fn__63285
+ 207:          2845          45520  java.util.concurrent.ConcurrentHashMap$ValuesView (java.base@26.0.1)
+ 208:          1421          45472  malli.core$_fn_schema$reify__63914$fn__63915
+ 209:          1404          44928  malli.core$_enum_schema$reify__63886$fn__63887
+ 210:          1822          43728  malli.generator$__GT_such_that_opts$fn__78729
+ 211:          1822          43728  malli.impl.util$f__60953__60954$fn__60960
+ 212:          1090          43600  seon.call_preparation$preparing$fn__12263
+ 213:          1350          43200  sun.security.util.ObjectIdentifier (java.base@26.0.1)
+ 214:          1306          41792  malli.core$_tuple_schema$reify$reify__63838$fn__63851
+ 215:          1675          40200  jdk.jfr.AnnotationElement (jdk.jfr@26.0.1)
+ 216:           609          38976  java.net.URL (java.base@26.0.1)
+ 217:           804          38592  jdk.internal.ref.CleanerImpl$PhantomCleanableRef (java.base@26.0.1)
+ 218:          1580          37920  jdk.jfr.internal.AnnotationConstruct (jdk.jfr@26.0.1)
+ 219:          1183          37856  java.util.Locale (java.base@26.0.1)
+ 220:          1183          37856  sun.util.locale.BaseLocale (java.base@26.0.1)
+ 221:          1564          37536  malli.core$_maybe_schema$reify__63924$__GT_parser__63932
+ 222:           490          37240  [Ljava.lang.ref.SoftReference; (java.base@26.0.1)
+ 223:           422          37136  java.util.regex.Pattern (java.base@26.0.1)
+ 224:           325          36400  java.lang.Thread (java.base@26.0.1)
+ 225:          1492          35808  malli.core$_map_of_schema$reify__63697$simple_parser_QMARK___63706
+ 226:           861          34440  jdk.jfr.ValueDescriptor (jdk.jfr@26.0.1)
+ 227:          2149          34384  clojure.test.check.generators$tuple$fn__70012
+ 228:           712          34176  java.lang.invoke.BoundMethodHandle$Species_LLL (java.base@26.0.1)
+ 229:           609          34104  clojure.reflect.Method
+ 230:           233          33552  sun.nio.fs.UnixFileAttributes (java.base@26.0.1)
+ 231:           837          33480  java.math.BigInteger (java.base@26.0.1)
+ 232:          1046          33472  java.lang.invoke.LambdaForm$Name (java.base@26.0.1)
+ 233:           836          33440  sun.security.util.DerInputStream (java.base@26.0.1)
+ 234:          1324          32448  [Ljava.util.concurrent.atomic.Striped64$Cell; (java.base@26.0.1)
+ 235:           670          32160  java.lang.invoke.DirectMethodHandle$Constructor (java.base@26.0.1)
+ 236:           272          32008  [Ljava.lang.reflect.Method; (java.base@26.0.1)
+ 237:           998          31936  malli.core$_map_schema$reify$reify__63621$fn__63660
+ 238:           280          31360  java.util.jar.JarFile$JarFileEntry (java.base@26.0.1)
+ 239:           964          30848  malli.core$_map_of_schema$reify__63697$fn__63704
+ 240:           951          30432  clojure.lang.Namespace
+ 241:          1247          29928  malli.core$_tuple_schema$reify__63827$__GT_parser__63832
+ 242:          1231          29544  jdk.internal.lang.LazyConstantImpl (java.base@26.0.1)
+ 243:          1227          29448  java.util.LinkedList$Node (java.base@26.0.1)
+ 244:           712          28480  datalog.parser.pull.PullSpec
+ 245:           440          28160  java.lang.Class$ReflectionData (java.base@26.0.1)
+ 246:           696          27840  java.lang.invoke.DirectMethodHandle (java.base@26.0.1)
+ 247:           858          27456  malli.core$_tuple_schema$reify__63827$fn__63830
+ 248:           856          27392  datalog.parser.type.Variable
+ 249:           840          26880  jdk.internal.reflect.MethodHandleByteFieldAccessorImpl (java.base@26.0.1)
+ 250:           836          26752  sun.security.util.DerValue (java.base@26.0.1)
+ 251:          1661          26576  java.util.concurrent.atomic.AtomicLongArray (java.base@26.0.1)
+ 252:          1080          25920  clojure.test.check.generators$large_integer_STAR_$fn__70142
+ 253:          1080          25920  clojure.test.check.generators$large_integer_STAR__STAR_$fn__70129
+ 254:          1044          25056  sun.security.util.DomainName$Rule (java.base@26.0.1)
+ 255:          1042          25008  clojure.test.check.generators$vector$fn__70026
+ 256:           506          24288  malli.core$_function_schema$reify$reify__64163
+ 257:           980          23520  clojure.lang.Var$TBox
+ 258:           483          23184  clojure.lang.MethodImplCache
+ 259:           695          22240  clojure.core.async$alt_flag$reify__853
+ 260:           338          21632  sun.security.ssl.CipherSuite (java.base@26.0.1)
+ 261:           883          21192  java.security.Provider$ServiceKey (java.base@26.0.1)
+ 262:           378          21168  clojure.test.check.generators$coll_distinct_by$fn__70106
+ 263:           202          21008  jdk.jfr.internal.PlatformEventType (jdk.jfr@26.0.1)
+ 264:           650          20800  malli.core$_maybe_schema$reify__63924$fn__63930
+ 265:           836          20064  [Lsun.security.x509.AVA; (java.base@26.0.1)
+ 266:           836          20064  sun.security.x509.AVA (java.base@26.0.1)
+ 267:           836          20064  sun.security.x509.RDN (java.base@26.0.1)
+ 268:           209          20064  sun.util.calendar.Gregorian$Date (java.base@26.0.1)
+ 269:           813          19512  malli.core$_and_schema$reify$reify__63376$explain__63383
+ 270:           405          19440  java.lang.Thread$FieldHolder (java.base@26.0.1)
+ 271:           796          19104  clojure.core.async$alt_handler$reify__856
+ 272:           796          19104  clojure.core.async$do_alts$fret_with__862$fn__863
+ 273:           297          19008  java.security.Provider$Service (java.base@26.0.1)
+ 274:          1180          18880  java.util.Locale$3 (java.base@26.0.1)
+ 275:           336          18816  malli.core$_sequence_schema$reify__64235
+ 276:           232          18560  java.util.zip.ZipFile$Source (java.base@26.0.1)
+ 277:           286          18304  java.util.zip.Inflater (java.base@26.0.1)
+ 278:           742          17808  clojure.test.check.generators$gen_pure$fn__69869
+ 279:           742          17808  clojure.test.check.rose_tree.RoseTree
+ 280:           740          17760  java.lang.module.ModuleDescriptor$Exports (java.base@26.0.1)
+ 281:           542          17344  malli.core$_min_max_pred$fn__63275$fn__63277
+ 282:          1046          16736  clojure.core.async.impl.buffers.PromiseBuffer
+ 283:          1042          16672  clojure.test.check.generators$vector$fn__70024
+ 284:           412          16480  [Ljava.util.HashSet; (java.base@26.0.1)
+ 285:             1          16400  [Ljava.nio.BufferCleaner$PhantomCleaner; (java.base@26.0.1)
+ 286:             1          16400  [Ljdk.internal.ref.PhantomCleanable; (java.base@26.0.1)
+ 287:            80          16088  [Ljava.lang.invoke.MethodHandle; (java.base@26.0.1)
+ 288:          1000          16000  jdk.internal.classfile.impl.LineNumberImpl (java.base@26.0.1)
+ 289:           328          15744  malli.core$_collection_schema$reify$reify__63789$fn__63798
+ 290:           647          15528  seon.schema.datahike$attribute_decoder_in$fn__3793
+ 291:           646          15504  java.util.regex.Pattern$BmpCharProperty (java.base@26.0.1)
+ 292:           645          15480  malli.core$_memoize$fn__63008
+ 293:           478          15296  malli.core$_function_schema$reify__64154$fn__64158
+ 294:           232          14848  java.util.jar.JarFile (java.base@26.0.1)
+ 295:           305          14640  java.util.concurrent.ThreadPoolExecutor$Worker (java.base@26.0.1)
+ 296:           228          14592  sci.impl.utils.StackFrame
+ 297:           599          14376  jdk.internal.jimage.ImageLocation (java.base@26.0.1)
+Total     124048307     5831512864

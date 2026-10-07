@@ -1,0 +1,22 @@
+;; ordinal 0 ns #:db{:id 51311} ms 0
+;; comment: ; I've now read both required functions and the proof test. Let me analyze the problem carefully.
+; **The bug, stated precisely:**
+`reply-map
+=> user/reply-map
+
+;; ordinal 1 ns #:db{:id 51311} ms 0
+` joins
+=> user/joins
+
+;; ordinal 2 ns #:db{:id 51311} ms 0
+;; comment: ; entries with `", "`, but between entries it emits `"\n "` when the *previous* entry's text ends in a comment. There are two failures:
+; 1. **Elided values**: `value-text` splices `:seon.eval/shown` (the raw, comment-laden shown text like `[0 1 2 …2997 (drop 3 result/ee7b3)]`) verbatim into the map. If that shown text *ends* in a comment legend, the `ends-in-comment?` fixup only helps the *next* entry — but the value text itself is not data, it's text (with `…` ellipsis and comment legends), so it never "reads back as EDN" as `[0 1 2 (symbol "…2997") '(drop 3 result/ee7b3)]`.
+; 2. **Rendered values**: The test wants `:seon.repl/value` to be the *data* when the renderer's text is EDN (`{:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]}`) or a prose string otherwise — but critically, **`:seon.repl/result` and `:seon.repl/ms` must also be present**. The task says "a declared renderer's response keeps only diagnostics and errors … so every rendered value loses `:result` and `:ms`."
+; Let me look at how the handle and duration get attached, and whether `response-entries` includes them. I need to see the rest of `response-entries` (it was truncated) and the `one-map` test helper.
+[(clojure.repl/source-fn 'seon.repl-test/one-map)
+ (clojure.repl/source-fn 'seon.repl/data-text)
+ (-> #'seon.repl/response-entries meta :line)]
+=> ["(defn- one-map\n  \"The reply read back: exactly one EDN map, nothing before or after it.\"\n  [text]\n  (with-open [reader (java.io.PushbackReader. (java.io.StringReader. text))]\n    (let [end (Object.)\n          reply (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read {:eof end} reader))]\n      (is (map? reply))\n      (is (identical? end (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read {:eof end} reader)))\n          \"nothing follows the reply map\")\n      (is (not (str/starts-with? (str/triml text) \";\")) \"nothing precedes the reply map\")\n      reply)))"
+ "(defn- data-text\n  \"Saved text as it enters the reply map: floor-printed data verbatim, any\n  other text (an unrun evaluation's message, a receipt saved before its error\n  was data, a render's REPL entries with their `;;` prose) as one readable\n  string, so no comment ever lands inside the reply map.\"\n  {:malli/schema [:=> [:cat :string] :string]}\n  [text]\n  ;; the printer's own grammar: a host object prints as `#object[…]`, data\n  ;; the reply embeds as it stands (read back as a tagged literal)\n  (if (or (string? (read-shown text tagged-literal))\n          (some #(= \"comment\" (first %)) (syntax-tokens text)))\n    (pr-str text)\n    text))"
+ 182]
+

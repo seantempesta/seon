@@ -1,0 +1,13 @@
+I'm nearly out of turns, so let me be decisive. I'll finish the `reply-map` definition using `str` with escaped quotes, then verify against the proof test's elided-value case.
+
+```clojure
+(in-ns 'seon.repl)
+```
+
+```clojure
+(defn- reply-map
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
+  [entries]
+  (when (seq entries)
+    (let [ends (fn [text] (if (ends-in-comment? text) "\n " ", "))]
+      (str "

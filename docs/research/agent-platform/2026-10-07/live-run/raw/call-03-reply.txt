@@ -1,0 +1,11 @@
+I'll read the source code directly. Let me use the file path.
+
+```clojure
+(slurp "seon/repl.clj")
+```
+
+Actually, let me first check if I can access source more directly via the SCI environment. Let me look at the `response-entries` and `reply-map` functions since `response` delegates to them.
+
+```clojure
+(map (fn [s] (clojure.repl/source-fn s)) ['seon.repl/response-entries 'seon.repl/reply-map 'seon.repl/value-text])
+```

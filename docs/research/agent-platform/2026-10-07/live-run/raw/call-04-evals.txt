@@ -1,0 +1,9 @@
+;; ordinal 0 ns #:db{:id 51311} ms 
+(defn- reply-map
+  "The entries as one `
+=> #:seon.error{:expected :seon.sci.reader/accepted-source,
+ :member :seon.sci.reader/form,
+ :message "EOF while reading, expected \" to match \" at [2,3]",
+ :offending "(defn- reply-map\n  \"The entries as one `"}
+ERROR: "EOF while reading, expected \" to match \" at [2,3]"
+

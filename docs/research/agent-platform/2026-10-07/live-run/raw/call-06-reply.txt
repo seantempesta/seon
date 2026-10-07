@@ -1,0 +1,19 @@
+I've now read both required functions and the proof test. Let me analyze the problem carefully.
+
+**The bug, stated precisely:**
+
+`reply-map` joins entries with `", "`, but between entries it emits `"\n "` when the *previous* entry's text ends in a comment. There are two failures:
+
+1. **Elided values**: `value-text` splices `:seon.eval/shown` (the raw, comment-laden shown text like `[0 1 2 …2997 (drop 3 result/ee7b3)]`) verbatim into the map. If that shown text *ends* in a comment legend, the `ends-in-comment?` fixup only helps the *next* entry — but the value text itself is not data, it's text (with `…` ellipsis and comment legends), so it never "reads back as EDN" as `[0 1 2 (symbol "…2997") '(drop 3 result/ee7b3)]`.
+
+2. **Rendered values**: The test wants `:seon.repl/value` to be the *data* when the renderer's text is EDN (`{:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]}`) or a prose string otherwise — but critically, **`:seon.repl/result` and `:seon.repl/ms` must also be present**. The task says "a declared renderer's response keeps only diagnostics and errors … so every rendered value loses `:result` and `:ms`."
+
+Let me look at how the handle and duration get attached, and whether `response-entries` includes them. I need to see the rest of `response-entries` (it was truncated) and the `one-map` test helper.
+
+```clojure
+[(clojure.repl/source-fn 'seon.repl-test/one-map)
+ (clojure.repl/source-fn 'seon.repl/data-text)
+ (-> #'seon.repl/response-entries meta :line)]
+```
+
+turns left: 6 of 12

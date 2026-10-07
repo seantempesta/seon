@@ -1,0 +1,5 @@
+I've been thrashing and I'm nearly out of turns. Let me state where things stand honestly rather than make a change I can't verify.
+
+## What I read (the required reading)
+
+**`seon.repl/response`** — `(reply-map (response-entries emission))`; one `
