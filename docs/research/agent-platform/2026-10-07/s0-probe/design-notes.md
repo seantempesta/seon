@@ -182,3 +182,69 @@ is the nearest measurement and is labeled so.
    wanted scope, or should the probe's deftest live in `seon.mcp-entrance-test` and use its helper in place?
 3. The test entrant as an MCP SCI pass of `my.test/check` (how an agent runs a test) rather than a direct
    `seon.test/run` call: the record carries the check form's own `:ms` beside the pass total.
+
+## v2 (after both reviews; root's decisions, 2026-10-07)
+
+Reviews: `review-review-s0-opus-notes.md`, `review-s0-astra-notes.md` (both: revise, then go). Where v2 and §§2-7 above
+disagree, v2 wins; §§2-7 stay as the reviewed v1 text.
+
+1. **Storage.** Durable commits are DISTINCT commit ids per branch, read inside the write hook from each written
+   value's `[:meta :datahike/commit-id]` and `[:config :branch]` (events `:assoc`, `:update`, and every pair of a
+   `:multi-assoc`'s `:kvs`); the hook keeps those two values and the key, never the value. Branch creation
+   (`versioning.cljc:270`) therefore counts no commit; merges and `force-branch!` do. Store bytes are labeled
+   "final apparent size of the distinct files touched in the window" (file backend only), with unavailable sizes
+   counted, and foreign-branch commit ids seen in the window reported as contamination. `seon.db/transact-call`
+   growth is labeled "attempts through `seon.db`"; `seon.cluster.registry`/`seon.cluster.source` branch writers are
+   named as the other writers. Test worlds (request and member branches) are in-memory overlays with no hooks:
+   inside a test world the probe asserts only allocation, checked calls, attempts, tokens and fixture requests;
+   durable commits and store bytes are proven on the throwaway root.
+2. **History.** Real prior passes with the semantics the measured entrant consumes: model history is built by
+   model passes through the real model entrance answering from the fixture's reply queue; MCP history by MCP
+   passes. Each record carries the prior pass count and the eligible exchange count. The one-submission/N-forms
+   build is deleted from acceptance; it may appear only as a separately labeled batch diagnostic.
+3. **Scenario table** (below) maps every §3 row to start/end event, included work and history precondition.
+   Opening, input and proc-transcript acquisition are UNAVAILABLE until S4. Full-pass allocation is an upper bound
+   until body work can be separated.
+4. **Model pass correlation.** Overlay `:seon.config.run/max-episode-runs 1`. Observation is registered before
+   the wake is written; the window ends at the actual pass exit observed through existing owners
+   (`seon.eval.drive`'s awaited facts, `support/await-event!`, the disarm/join owners). A timeout marks the record
+   `:incomplete`, keeps ownership (no hook removal or branch retirement while work runs), never polls or sleeps.
+5. **Tokens.** `seon.ai.tokens/estimate` on the request's message content (not the raw JSON), with the calibration
+   recorded.
+6. **Profile mark: fixed at the producer.** `seon.profile/cells` declares its output by a held-cell schema (the
+   cell's identity: `cell`, the roster's only writer, checked the counters when it made it), so a read validates
+   no JDK object per cell; `begin` and `explain` read counters directly from held cells (no armed `entries` per
+   cell); `explain` also answers the unfiltered call growth (total and by calls) beside its ranked growths. The
+   probe calls `begin`/`explain`; it has no profile code of its own. Regression: reading the profile moves no
+   per-cell predicate counter. Tasks `seon.profile/reading-the-profile-validates-every-cell`,
+   `seon.profile/begin-validates-every-cell-with-armed-predicates` (561d2f7ee288).
+7. **Wake.** `seon.eval.drive/inbound!` and `await-fact!` become public (contracted) and the probe uses them: no
+   third message writer.
+8. **Fixtures.** `with-running-agent` and ONE provider fixture (agent-test's, extended with a reply queue and a
+   request log with instants) move into `seon.test-support`; every caller converts in the same commit
+   (`mcp_entrance_test`, `cluster/agent_test`, `cluster/turn_test`'s server half). `ai_stream_fold_test`'s wire
+   fixture stays (it tests the wire).
+9. **Test entrant.** MCP SCI `(my.test/check {:seon.test/changed [sym]})` for one small named test; the record
+   reports the outer pass, the request's orchestration, the member and the recording separately from the run
+   result's own evidence, and whether the member executed or its proof was reused.
+10. **Scope.** Today's three passes (ordinary MCP SCI, one model pass, one defn pass) run in the test world; the
+    full matrix runs only on the throwaway root (and, labeled, on default).
+
+### Scenario table
+
+| §3 row | available today | start event | end event | included work | history precondition |
+|---|---|---|---|---|---|
+| ordinary pass, MCP SCI | yes | `seon.mcp/call` entered | reply returned | read, eval, settlement, reply; the agent's form | N prior MCP SCI passes |
+| ordinary pass, MCP JVM | yes (default: ordinary only) | `seon.mcp/call` entered | reply returned | host read/eval, settlement, reply | N prior MCP passes |
+| ordinary pass, model | yes | wake transaction submitted | the triggered turn's terminal fact and the proc's exit of that pass | wake commit, system-turn refresh, open, prompt, provider (fixture, timed separately), attempt, plan, fold, settlement | N prior model passes from fixture replies |
+| definition (one-line `defn`) | yes (SCI, model; JVM on the throwaway root) | as the entrant | as the entrant | as the entrant, plus program facts and installation | as the entrant |
+| the pass after a definition | yes | as the entrant | as the entrant | the next ordinary pass (reacquisition) | right after the definition pass |
+| opening pass | UNAVAILABLE until S4 | — | — | — | — |
+| input pass | UNAVAILABLE until S4 (today's wake is inside the model row) | — | — | — | — |
+| context append | UNAVAILABLE until S4 (today: the system-turn refresh, inside the model row, shown by its profile growth) | — | — | — | — |
+| cold history acquisition at 1/10/200 | UNAVAILABLE until S4 (proc-held transcript); the throwaway root's first pass after boot is labeled nearest | — | — | — | — |
+| one-test check | yes | MCP SCI `my.test/check` pass entered | reply returned | outer pass, request orchestration, member run (overlay), recording | named test, cold then warm |
+| two encodings (S8) | UNAVAILABLE until S8 | — | — | — | — |
+
+Allocation in every row is the JVM total over the window: an upper bound on Seon's work (it includes the agent's form,
+the fixture and concurrent work), split by platform thread.
