@@ -192,16 +192,48 @@
     (is (= (error.refusal/root-frame failure) frame))
     (is (str/starts-with? (str (first frame)) "seon.error.refusal_test$upper_case_call_site"))))
 
-(deftest a-set-holding-a-deep-value-is-referenced-without-the-stack
-  ;; batch-C review 2026-10-07: a set member rebuilt around a referenced place
-  ;; was hashed whole on the JVM stack. Each rebuilt level hashes as it
-  ;; closes. The member is built with its hash cached level by level, so it is
-  ;; deeper than plain construction could hash.
-  (let [deep (reduce (fn [v _] (doto [v] hash)) [(atom 1)] (range 200000))
-        out (error.refusal/references nil #{deep})
-        bottom (loop [v (first out)] (if (vector? (first v)) (recur (first v)) (first v)))]
-    (is (set? out))
-    (is (str/starts-with? bottom "#object[clojure.lang.Atom"))))
+(deftest error-data-of-any-shape-is-referenced-without-the-stack-or-its-leaves
+  ;; one row per shape the walk overflowed on, hung on, realized or repeated
+  (let [place (delay 1)
+        named (error.refusal/references nil place)
+        deep (fn [n bottom] (reduce (fn [v _] {:a v}) bottom (range n)))
+        ;; built with each level's hash cached, so a set can hold it at this depth
+        hashed-deep (fn [n bottom] (reduce (fn [v _] (doto {:a v} hash)) bottom (range n)))
+        bottom (fn [m] (if-let [[_ child] (find m :a)] (recur child) m))
+        cyclic (let [m (java.util.HashMap.)] (.put m :self m) m)
+        lazy (map inc (range 5))
+        deep-key (deep 100000 1)
+        shared (deep 10000 {:p place})]
+    (doseq [[label input holds?]
+            [[:a-deep-sibling-of-a-place {:p place :deep (deep 100000 1)}
+              (fn [in out] (identical? (:deep in) (:deep out)))]
+             [:a-deep-key-beside-a-place {:p place deep-key :v}
+              (fn [_ out] (identical? :v (get out deep-key)))]
+             [:a-set-member-deep-over-a-place #{(hashed-deep 200000 {:p place})}
+              (fn [_ out] (= {:p named} (bottom (first out))))]
+             [:an-infinite-seq-beside-a-place {:p place :r (range)}
+              (fn [in out] (identical? (:r in) (:r out)))]
+             [:a-lazy-seq-beside-a-place {:p place :s lazy}
+              (fn [_ _] (not (realized? lazy)))]
+             [:a-cyclic-java-map-beside-a-place {:p place :m cyclic}
+              (fn [in out] (identical? (:m in) (:m out)))]
+             [:one-value-under-every-problem {:problems (vec (repeat 300 shared))}
+              (fn [_ {:keys [problems]}]
+                (and (= 300 (count problems))
+                     (every? #(identical? (first problems) %) problems)
+                     (= {:p named} (bottom (first problems)))))]]]
+      (let [out (error.refusal/references nil input)]
+        (is (holds? input out) (str (name label) ": the walk returns its value whole"))
+        (when (and (map? input) (find input :p))
+          (is (= named (:p out)) (str (name label) ": the place is named")))))))
+
+(deftest a-world-is-projected-once-per-walk
+  ;; one walk is one snapshot, even when a world's identity reads state
+  (let [n (java.util.concurrent.atomic.AtomicLong.)
+        project (fn [x] (when (= ::world x) {:seon.schema/identity-value (.incrementAndGet n)}))
+        held {:x ::world}]
+    (is (= [{:x 1} {:x 1} {:y 1} #{{:x 1}}]
+           (@#'error.refusal/referenced project [held held {:y ::world} #{held}])))))
 
 (defn probe-var
   "A Var for `frame-function` to name."

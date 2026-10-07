@@ -276,41 +276,6 @@
   [value]
   (str "#object[" (.getName (class value)) " 0x" (Integer/toHexString (System/identityHashCode value)) "]"))
 
-(defn- post-order
-  "Fold `value` bottom-up over an explicit stack, so a value nested
-  10,000 deep costs heap, never JVM stack. `open` answers a value's
-  `{::result r}` when it is a leaf, else `{::state s ::entries [[k child] ..]}`;
-  `step` folds one child's result into its parent's state, `(step state k
-  result child)`; `(close state)` is the node's result. A collection met
-  again by identity is folded once: its first result is reused."
-  {:malli/schema [:=> [:cat [:map [:open :seon.instrument/callable] [:step :seon.instrument/callable]
-                             [:close :seon.instrument/callable]]
-                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]
-                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
-  [{:keys [open step close]} value]
-  ;; folded collections by identity, local to this one walk: error data repeats
-  ;; one value under every problem that names it
-  (let [folded (IdentityHashMap.)
-        open (fn [value] (if (.containsKey folded value) {::result (.get folded value)} (open value)))
-        root (open value)]
-    (if-not (contains? root ::entries)
-      (::result root)
-      (loop [stack (list root)]
-        (let [{::keys [state entries] :as top} (peek stack)]
-          (if (nil? entries)
-            (let [result (close state)
-                  stack (pop stack)]
-              (when-let [[_ child] (find top ::child)] (.put folded child result))
-              (if-let [parent (peek stack)]
-                (recur (conj (pop stack) (update parent ::state step (::key top) result (::child top))))
-                result))
-            (let [[k child] (first entries)
-                  top (assoc top ::entries (next entries))
-                  opened (open child)]
-              (if (contains? opened ::entries)
-                (recur (conj (pop stack) top (assoc opened ::key k ::child child)))
-                (recur (conj (pop stack) (update top ::state step k (::result opened) child)))))))))))
-
 (defn- entries
   "A map's, vector's or set's members as `[key member]`: a vector's key is
   its index, a set member is its own key."
@@ -322,40 +287,65 @@
 
 (defn- referenced
   "`value` with every world inside it replaced by its identity; a collection
-  holding no world is returned identical. Depth costs heap (`post-order`)."
+  holding no world is returned identical. Walked over an explicit stack, so
+  depth costs heap, never JVM stack. One walk is one snapshot: each world is
+  projected once and a collection met again by identity reuses its result."
   {:malli/schema [:=> [:cat :seon.instrument/callable [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [project value]
-  (post-order
-   {:open (fn open [value]
-            (if-some [declared (project value)]
-              (open (:seon.schema/identity-value declared))
-              (cond
-                ;; A PLACE IS ITS NAME. An atom, delay or promise prints its CURRENT
-                ;; STATE (`core_print.clj` deref-as-map), so an error holding the agent
-                ;; roster printed every context's projection: 2 GB, default's OOM of
-                ;; 2026-09-26. Named, never entered, as value admission names it
-                ;; (`seon.sci.admit`, "reference types ... named, never entered").
-                ;; The name is a STRING: as a symbol it printed `#object[...]`, a tag
-                ;; no reader accepts, so a stored error holding a place never read back.
-                (and (instance? clojure.lang.IDeref value) (not (var? value)))
-                {::result (object-name value)}
-                (record? value) {::result value}
-                ;; A vector by index, never reduce-kv: a map entry is a vector that
-                ;; reduce-kv walks as a map (Keyword -> Map$Entry), and an explained
-                ;; problem carries entries (`find`), so the refusal of a data value
-                ;; against a union output could not be built (render-call, 2026-09-28).
-                (or (map? value) (vector? value) (set? value))
-                {::state {:value value :held value} ::entries (entries value)}
-                :else {::result value})))
-    :step (fn [{:keys [value] :as state} k r original]
-            (cond (identical? r original) state
-                  (set? value) (update state :held #(conj (disj % original) r))
-                  :else (update state :held assoc k r)))
-    ;; A rebuilt collection's hash is computed as it closes, its children's
-    ;; already cached: a set rebuilt around it then hashes one level, never
-    ;; the whole depth on the JVM stack.
-    :close (fn [{:keys [value held]}] (cond-> held (not (identical? held value)) (doto hash)))}
-   value))
+  ;; Identity tables local to this one walk: error data repeats one value
+  ;; under every problem naming it. A result built inside a hash set serves
+  ;; anywhere; one built outside serves only outside.
+  (let [^IdentityHashMap projected (IdentityHashMap.)
+        ^IdentityHashMap in-set (IdentityHashMap.)
+        ^IdentityHashMap outside (IdentityHashMap.)
+        project (fn [v] (if (.containsKey projected v)
+                          (.get projected v)
+                          (let [declared (project v)] (when (some? declared) (.put projected v declared)) declared)))
+        ;; a leaf's `{::result r}`, else the node to walk; `hashed?`: a hash set encloses it
+        opened (fn opened [value hashed?]
+                 (if-some [declared (project value)]
+                   (opened (:seon.schema/identity-value declared) hashed?)
+                   (cond
+                     ;; A PLACE IS ITS NAME: an atom, delay or promise prints its
+                     ;; current state (`core_print.clj` deref-as-map), so it is
+                     ;; named, never entered; a string, so a stored error reads back.
+                     (and (instance? clojure.lang.IDeref value) (not (var? value))) {::result (object-name value)}
+                     (record? value) {::result value}
+                     ;; a vector by index, never reduce-kv, which walks a map entry as a map
+                     (or (map? value) (vector? value) (set? value))
+                     {::value value ::held value ::entries (entries value) ::hashed? hashed?}
+                     :else {::result value})))
+        open (fn [child hashed?]
+               (cond (.containsKey in-set child) {::result (.get in-set child)}
+                     (and (not hashed?) (.containsKey outside child)) {::result (.get outside child)}
+                     :else (opened child hashed?)))
+        ;; Only a rebuilt node inside a hash set is hashed, as it closes, its
+        ;; children's hashes cached: the set's insert hashes one level, and no
+        ;; leaf (a lazy seq, a cyclic Java collection) is hashed or realized.
+        closed (fn [{::keys [value held hashed?]}]
+                 (cond-> held (and hashed? (not (identical? held value))) (doto hash)))
+        folded-in (fn [{::keys [value] :as node} k result child]
+                    (cond (identical? result child) node
+                          (set? value) (update node ::held #(conj (disj % child) result))
+                          :else (update node ::held assoc k result)))
+        root (opened value false)]
+    (if-not (contains? root ::entries)
+      (::result root)
+      (loop [stack (list root)]
+        (let [{pending ::entries ::keys [value hashed?] :as top} (peek stack)]
+          (if (nil? pending)
+            (let [result (closed top)
+                  stack (pop stack)]
+              (when-let [[_ child] (find top ::child)] (.put (if hashed? in-set outside) child result))
+              (if-let [parent (peek stack)]
+                (recur (conj (pop stack) (folded-in parent (::key top) result (::child top))))
+                result))
+            (let [[k child] (first pending)
+                  top (assoc top ::entries (next pending))
+                  node (open child (or hashed? (and (set? value) (not (sorted? value)))))]
+              (if (contains? node ::entries)
+                (recur (conj (pop stack) top (assoc node ::key k ::child child)))
+                (recur (conj (pop stack) (folded-in top k (::result node) child)))))))))))
 
 (defn references
   "`value` with every world in it — any value a schema declares
@@ -363,7 +353,7 @@
   a database is its name and basis-t, a connection its id, a projection its
   fingerprint, an environment or SCI context the references it holds. Maps,
   vectors and sets are entered; records, sequences and other objects are
-  not. A place (atom, delay, promise: any deref-able but a Var) becomes the
+  not, and are never hashed or realized. A place (atom, delay, promise: any deref-able but a Var) becomes the
   string `#object[Class 0xhash]`, since printing it copies its state. Without
   a projection no world is recognized; places are still named."
   {:malli/schema [:=> [:cat [:maybe :map]
