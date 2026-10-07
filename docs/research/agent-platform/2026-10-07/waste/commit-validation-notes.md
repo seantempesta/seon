@@ -51,3 +51,21 @@ Expected: new-defn validate-write-report ~190-315 ms -> ~35-140 ms (minus 143-17
 - load-projection / carried-projection rebuild per declaration commit (~150 ms in transact! outside validation):
   projection owner's area (seon.schema), not this slice.
 - seon.program/edn-round-trip-symbol?: 8 calls on a defn commit; not on this path.
+
+## Landing
+
+- Code landed in 649829332, which carries the WRONG commit message (another lane's "Branch writers and Flow
+  graphs start from root bindings..."): `bin/lane commit commit-validation -m ...` committed exactly this lane's
+  five paths (src/seon/db.clj, src/seon/schema/datahike.clj, test/seon/db_overhead_test.clj,
+  test/seon/db_test.clj, test/seon/schema/vector_storage_test.clj) under a concurrent lane's message. History
+  not rewritten; the intended message is this section. Tool defect to investigate in bin/lane (message source
+  shared between concurrent commits).
+- Check: seon.db-overhead-test, seon.schema.vector-storage-test, seon.owned-value-test green
+  (candidate archive, throwaway JVM). seon.db-test ran green for the new law test; its only reds
+  (database-operations-preserve-refusals-at-their-declared-boundary, query-and-pull-append-evidence-only-when-captured)
+  are red on HEAD 77c9f5459 without this diff (run 745c7af6adca), so it was not named in the final commit gate.
+- Regression: seon.db-overhead-test/final-validation-asks-cell-storage-of-written-attributes-only (task 00c46a820209);
+  law: seon.db-test/transaction-report-datom-law (task 54a8f328a32e).
+- After-numbers on default need the root restart (RESET NEEDED is not required; `start --head` adoption suffices).
+  Re-measure: a new contracted defn as a branch agent, profile-counter diff of seon.db/validate-write-report and
+  seon.schema.datahike/vector-shaped-attr-in? (expect ~4,000 -> tens of calls; validation minus 143-177 ms).
