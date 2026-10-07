@@ -32,4 +32,9 @@
               seon.sci.forgive/next-form
               seon.sci.forgive/first-form-structural?},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "discard-consumes-prose-and-fence-boundaries",
+            :kind :function,
+            :intent
+            "A model reply's `#_` read its operand wherever the reader found one, across prose lines and fence lines: (seon.sci.forgive/segments \"#_ (+ 1 2)\\nDone.\\n(+ 3 4)\") ran Done. as code, and a `#_` alone before a closing fence discarded the fence line. A reader conditional selecting no :clj branch did the same. Correct: a no-value construct is skipped inside its region (the text between fence lines), and classification resumes after it. Proof: seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules (the no-value rows).",
+            :must-read #{seon.sci.forgive/step}}]

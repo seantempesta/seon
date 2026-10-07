@@ -800,7 +800,7 @@
   "The one reply, as data: what a Seon agent's next context reads and what the
   MCP tool encodes as JSON, identical but for transport. Each evaluation's
   shown text (the one print), its outcome, its facts error and notes; the
-  reading repairs; the settlement and the faults."
+  settlement and the faults."
   {:malli/schema [:=> [:cat :seon.batch/batch] :seon.batch/reply]}
   [batch]
   (merge
@@ -814,7 +814,7 @@
               (seq private) (assoc :seon.batch/private (mapv #(select-keys % [:seon.batch/sym :seon.batch/join :seon.batch/reason]) private))))
           (:seon.batch/entries batch))
     :seon.batch/diagnostics (mapv :seon.error/message (:seon.batch/diagnostics batch))}
-   (select-keys batch [:seon.batch/repairs :seon.batch/unread :seon.batch/faults])
+   (select-keys batch [:seon.batch/unread :seon.batch/faults])
    (when-let [c (:seon.batch/commit batch)]
      {:seon.batch/commit (cond-> (select-keys c [:seon.batch/applied :seon.batch/tx-count :seon.batch/storage-error])
                            (:seon.batch/writer-refusal c)
@@ -857,7 +857,7 @@
                      request)))
 
 (defn turn-request
-  "A product turn: the agent's reply read with forgiveness."
+  "A product turn: the agent's reply read by the reply line rules."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
   [request]
   (program-request (merge {:seon.batch/mode :reply} request)))
@@ -869,7 +869,9 @@
   (program-request (merge {:seon.batch/mode :code} request)))
 
 (defn- jvm-read-next
-  "One host `read+string` at the live `*ns*` after `forgive/skip-to`."
+  "One host `read+string` at the live `*ns*` after `seon.sci.forgive/skip-to`; a failed
+  read is that construct's read error (`seon.sci.forgive/failure-step`), and reading
+  continues after it."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
   [_ {v :seon.batch/version}]
   (let [text (:seon.batch/text v)
@@ -877,14 +879,14 @@
         rdr (clojure.lang.LineNumberingPushbackReader. (doto (java.io.StringReader. text) (.skip (long pos))))
         eof (Object.)
         [form s] (try (read+string {:eof eof :read-cond :allow} rdr)
-                      (catch Throwable t [::error (ex-message t)]))
+                      (catch Throwable t [::error t]))
         v' (fn [p] (assoc v :seon.batch/pos p))]
     (cond
-      (identical? eof form) {:seon.batch/eof true :seon.batch/version (v' pos) :seon.batch/repairs []}
-      (= ::error form) {:seon.batch/unread-from pos :seon.batch/reason s :seon.batch/version (v' pos) :seon.batch/repairs []}
+      (identical? eof form) {:seon.batch/eof true :seon.batch/version (v' pos)}
+      (= ::error form) (forgive/failure-step text pos s)
       :else (let [end (+ pos (count s))]
               {:seon.batch/form form :seon.batch/start pos :seon.batch/end end
-               :seon.batch/version (v' end) :seon.batch/repairs []}))))
+               :seon.batch/version (v' end)}))))
 
 (defn- jvm-show
   "A host evaluation's shown text through the same floor as every entrant
@@ -903,7 +905,10 @@
               db (assoc :seon.db/db db)
               ctx (assoc :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms (or limit 30000)
                          :seon.sci.admit/caps caps)
-              (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal))))
+              (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal)))
+              ;; The host form's own `set!` of *print-length* / *print-level*:
+              ;; the show stage runs inside its evaluation's bindings.
+              :always (assoc :seon.print/options {:seon.print/length *print-length* :seon.print/level *print-level*}))
         record {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0
                 :seon.eval/duration-ms (Math/round (double duration-ms)) :seon.eval/allocated-bytes (or allocated-bytes -1)
                 :seon.eval/outcome (if (contains? entry :seon.batch/error) :error :ok)}]
@@ -927,8 +932,7 @@
     ;; the host evaluates: no SCI write observer, no program facts
     (dissoc
      (merge {:seon.batch/basis database
-             :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
-                                               :seon.batch/repairs []})
+             :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
             :seon.batch/read-next jvm-read-next
             :seon.batch/evaluate (fn [_ form _] {:seon.batch/value (eval form)})
             :seon.batch/ns-name (fn [_] (ns-name *ns*))
@@ -950,13 +954,12 @@
   [{body :seon.batch/body world :seon.batch/world :as request}]
   (merge {:seon.batch/text "(body)"
           :seon.batch/basis (world/basis world)
-          :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
-                                             :seon.batch/repairs []})
+          :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
           :seon.batch/read-next (fn [_ {v :seon.batch/version}]
                                   (if (zero? (:seon.batch/pos v))
                                     {:seon.batch/form ::body :seon.batch/start 0 :seon.batch/end 6
-                                     :seon.batch/version (assoc v :seon.batch/pos 6) :seon.batch/repairs []}
-                                    {:seon.batch/eof true :seon.batch/version v :seon.batch/repairs []}))
+                                     :seon.batch/version (assoc v :seon.batch/pos 6)}
+                                    {:seon.batch/eof true :seon.batch/version v}))
           :seon.batch/evaluate (fn [_ _ _] {:seon.batch/value (body)})
           :seon.batch/ns-name (fn [_] 'user)
           :seon.batch/settle settle

@@ -1,32 +1,47 @@
 (ns seon.sci.forgive-test
-  "The forgiving read of a model reply: what it reads, and that its cost
-  follows the reply's length."
+  "The reader stage: what it reads from a model reply and from code, and that
+  its cost follows the text's length."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [are deftest is]]
             [seon.sci.forgive :as forgive]
             [seon.turn :as turn]))
 
 (deftest recorded-replies-read-into-the-same-segments
-  ;; Twelve recorded model replies: the linear read keeps every form, comment
-  ;; and unread rest the repairing read produced.
+  ;; Recorded model replies: every form, failed read and comment the line rules find.
   (doseq [{reply :text expected :segments} (edn/read-string (slurp "test/seon/sci/forgive_replies.edn"))]
     (is (= expected (forgive/segments reply)))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote}}
-  a-delimiter-repair-is-judged-on-the-forms-own-lines
-  (are [reply sources] (= sources (mapv :seon.batch/source (:seon.batch/segments (forgive/segments reply))))
-    ;; dispatch forms read structurally, so their form is repaired
-    "(meta #'x\n(+ 1 2)"                       ["(meta #'x)" "(+ 1 2)"]
-    "(map #(inc %) [1 2]\n(+ 1 2)"             ["(map #(inc %) [1 2])" "(+ 1 2)"]
-    "(let [a 1]\n  @a\n(+ 1 2)"                ["(let [a 1]\n  @a)" "(+ 1 2)"]
-    ;; prose after the form's lines no longer refuses its repair
-    "(defn f [x]\n  (inc x)\n\nNote: done."     ["(defn f [x]\n  (inc x))"]
-    ;; a balanced form continued at column 0 is not repaired
-    "(let [a 1]\n(+ a 1))"                     ["(let [a 1]\n(+ a 1))"]
-    ;; a string's column-0 line is inside the form's lines
-    "(defn f\n  \"doc\nmore\" [x]\n  (inc x)"  ["(defn f\n  \"doc\nmore\" [x]\n  (inc x))"]
-    ;; a stray closer is dropped only before a form
-    "(+ 1 2))\n(+ 3 4)"                       ["(+ 1 2)" "(+ 3 4)"]))
+(deftest ^{:seon/tasks #{'seon.sci.forgive/discard-consumes-prose-and-fence-boundaries}}
+  the-reader-reads-a-reply-by-its-line-rules
+  (are [mode text sources] (= sources (mapv :seon.batch/source (:seon.batch/segments (forgive/segments text mode))))
+    ;; a failed collection is one source; reading resumes after its closer
+    :reply "```clojure\n[1 bad: (+ 2 3)]\n(+ 4 5)\n```"          ["[1 bad: (+ 2 3)]" "(+ 4 5)"]
+    :reply "```clojure\n(defn f [x] (let [y #1] (inc y)))\n(+ 1 2)\n```" ["(defn f [x] (let [y #1] (inc y)))" "(+ 1 2)"]
+    :reply "```clojure\n(+ 1 2))\n(+ 3 4)\n```"                   ["(+ 1 2)" ")" "(+ 3 4)"]
+    :reply "```clj\n(foo]\n(+ 1 2)\n```"                          ["(foo]" "(+ 1 2)"]
+    :reply "{:a 1 :b}\n(+ 1 2)"                                     ["{:a 1 :b}" "(+ 1 2)"]
+    ;; no read crosses a fence line: an unclosed form is unfinished at its region's end
+    :reply "```clj\n(str \"abc\n```\n(+ 1 2)"                     ["(str \"abc" "(+ 1 2)"]
+    ;; a non-code fence is prose, its tagged lines included; a fence closes only on its match
+    :reply "```text\n(+ 1 2)\n```clj\n(+ 9 9)\n```\n```clj\n(+ 3 4)\n```" ["(+ 3 4)"]
+    :reply "````clojure\n```\n(+ 1 2)\n````\nDone."                ["```\n(+ 1 2)"]
+    ;; outside fences a line's first character decides
+    :reply "#inst \"2026-01-01\"\n#'x\n#:a{:b 1}\n@a\n^:m []\n'x"    ["#inst \"2026-01-01\"" "#'x" "#:a{:b 1}" "@a" "^:m []" "'x"]
+    :reply "# Heading\n## h2\n`reply-map` joins\nDone.\n  (+ 3 4)\n(+ 1 2)" ["(+ 1 2)"]
+    :reply "Done."                                                  []
+    ;; every form on a line that starts one runs, as in a REPL
+    :reply "(+ 1 2) (+ 3 4) ; sum\nDone."                          ["(+ 1 2)" "(+ 3 4)"]
+    :reply "[] [] [999]"                                            ["[]" "[]" "[999]"]
+    :reply "(+ 1 2) Done."                                          ["(+ 1 2)" "Done."]
+    :reply "#1 priority is (launch!)"                               ["#1 priority" "is" "(launch!)"]
+    ;; no-value constructs stay inside their region
+    :reply "#_ (+ 1 2)\nDone.\n(+ 3 4)"                             ["(+ 3 4)"]
+    :reply "```clj\n#_ (+ 1 2)\n```\nDone.\n(+ 3 4)"                ["(+ 3 4)"]
+    :reply "```clj\n#_\n```\nDone.\n(+ 3 4)"                        ["(+ 3 4)"]
+    :reply "#?(:cljs 1)\nDone.\n(+ 3 4)"                            ["(+ 3 4)"]
+    ;; code is read as written, and a failed read continues there too
+    :code  "(+ 1 1)\n(vector ::nope.alias/k)\n(+ 2 2)"              ["(+ 1 1)" "(vector ::nope.alias/k)" "(+ 2 2)"]
+    :code  "Done.\n:k\n[1 bad: 2]\n42"                             ["Done." ":k" "[1 bad: 2]" "42"]))
 
 (defn- allocated-reading
   "Bytes this thread allocates segmenting `reply` (-1 on a virtual thread,
@@ -41,8 +56,8 @@
 (deftest ^{:seon/tasks #{'seon.sci.forgive/a-prose-repair-replays-the-whole-reply
                          'seon.sci.forgive/structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote}}
   a-reply-reads-in-allocation-linear-in-its-length
-  ;; Prose words, prompt markers and dispatch forms each repaired the whole
-  ;; rest of the reply: four times the reply allocated about twenty times more.
+  ;; Prose words, prompt markers and dispatch forms once each re-read the
+  ;; whole rest of the reply: four times the reply allocated twenty times more.
   (let [unit (str "Note: the value is read here.\n```clojure\nuser=> (meta #'x)\n(map #(inc %) [1 2])\n"
                   "(re-find #\"a\" @a)\n```\n`reply-map` joins entries; turns left: 6 of 12\n")
         reply (apply str (repeat 40 unit))

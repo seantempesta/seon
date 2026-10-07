@@ -18,4 +18,9 @@
               seon.turn.batch/code-request
               seon.sci.batch/read-next},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "a-jvm-read-error-drops-the-form-and-every-later-form",
+            :kind :function,
+            :intent
+            "MCP eval_clj in jvm mode of \"(+ 1 1)\\n(vector ::nope.alias/k)\\n(+ 2 2)\" answered only 2: seon.turn.batch/jvm-read-next answered :seon.batch/unread-from on the host reader's failure, which ended the batch, so (+ 2 2) never ran and the read error was never shown. Correct: as in SCI mode, the failed construct is one read error (its span from the structural stepper, seon.sci.forgive/failure-step) and reading continues after it. Proof: seon.cluster.evaluate-source-test/code-evaluates-as-one-ordinary-run-of-its-agent (the read-error testing block, JVM rows).",
+            :must-read #{seon.turn.batch/jvm-request}}]

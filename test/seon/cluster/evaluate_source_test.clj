@@ -2,6 +2,7 @@
   "An outside agent's code evaluated as one ordinary run of an agent
   (`seon.cluster.agent/evaluate-source!`), segmented as code."
   (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
@@ -11,8 +12,12 @@
             [seon.eval.drive :as drive]
             [seon.flow :as flow]
             [seon.id :as id]
+            [seon.sci.admit :as admit]
+            [seon.batch :as batch]
             [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.turn :as turn]
+            [seon.turn.batch :as turn.batch]
+            [seon.turn.world :as world]))
 
 (defn- shown
   "Each settled evaluation's shown text; a result with no run is asserted, never read."
@@ -28,10 +33,10 @@
   [result]
   (turn/receipt-identity (:seon.turn/id result) 0))
 
-(deftest ^{:seon.test/long "Fourteen ordinary agent runs (three defining, one gated redefinition, a writing form, a renderer fault), each one Flow pass and its settlement commit, plus arming and one stopped run: green in under 20 s on a quiet JVM, 32.4 s measured under concurrent test load on default (b32060df4, 2026-09-26; settlement commits ~120-150 ms each there)."
-           :seon.test/long-ms 40000
-           :seon/tasks #{'seon.cluster.agent/a-trivial-form-waits-on-two-durable-commits 'seon.turn/a-turn-pass-derives-its-work-twice 'seon.sci.eval/agent-form-writes-name-an-unwritten-evaluation}}
-  code-evaluates-as-one-ordinary-run-of-its-agent
+(defn- with-armed-agent
+  "`f` called with a fresh armed agent's runs (`:code` evaluates text as one ordinary
+  MCP SCI run) on the execution's connection; the agent is disarmed after."
+  [f]
   (let [target (support/execution-handle nil)
         connection (:seon.db/connection target)
         cluster-name (:seon.cluster/name target)
@@ -58,6 +63,20 @@
         (support/transacted! connection (support/agent-tx @connection agent-id))
         (agent/arm! request)
         (try
+          (f {:connection connection :cluster-name cluster-name :agent-id agent-id :routing routing
+              :handle handle :request request :code code})
+          (finally
+            (agent/disarm! request)
+            (doseq [channel [faults (:seon.cluster.wake/channel handle)
+                             (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
+              (async/close! channel))))))))
+
+(deftest ^{:seon.test/long "Fourteen ordinary agent runs (three defining, one gated redefinition, a writing form, a renderer fault), each one Flow pass and its settlement commit, plus arming and one stopped run: green in under 20 s on a quiet JVM, 32.4 s measured under concurrent test load on default (b32060df4, 2026-09-26; settlement commits ~120-150 ms each there)."
+           :seon.test/long-ms 40000
+           :seon/tasks #{'seon.cluster.agent/a-trivial-form-waits-on-two-durable-commits 'seon.turn/a-turn-pass-derives-its-work-twice 'seon.sci.eval/agent-form-writes-name-an-unwritten-evaluation}}
+  code-evaluates-as-one-ordinary-run-of-its-agent
+  (with-armed-agent
+   (fn [{:keys [connection agent-id routing request code]}]
           (testing "every form of the code is one evaluation of the run, in order; nothing is read as prose"
             (let [result (code "1\n#?(:clj 2 :cljs 3)\n(str *ns*)")]
               (is (:seon.turn/id result))
@@ -240,9 +259,40 @@
                                     (not [?e :seon.eval/shown _]) (not [?e :seon.cluster.eval/error _])
                                     (not [?e :seon.cluster.eval/interrupted-at _])]
                                   database (:seon.turn/id submitted)))
-                    "and no evaluation without a terminal fact"))))
-          (finally
-            (agent/disarm! request)
-            (doseq [channel [faults (:seon.cluster.wake/channel handle)
-                             (:seon.render/context-channel handle) (:seon.turn.loop/completion handle)]]
-              (async/close! channel))))))))
+                    "and no evaluation without a terminal fact")))))))
+
+(deftest ^{:seon/tasks #{'seon.batch/an-error-recorded-while-showing-a-form-rides-the-next-form
+                         'seon.turn.batch/a-jvm-read-error-drops-the-form-and-every-later-form}}
+  a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
+  ;; A failed read and a reserved response map are each their form's read
+  ;; error; the forms around them run, and no error rides another form.
+  (with-armed-agent
+   (fn [{:keys [connection cluster-name agent-id code]}]
+     (let [result (code "(+ 1 2)\n#:seon.repl{:value 3}\n(* 2 3)\n[1 bad: (+ 2 3)]\n(+ 4 4)")
+           receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])
+           error (fn [r] (when (:seon.cluster.eval/error r) (edn/read-string (:seon.eval/shown r))))]
+       (is (= ["3" nil "6" nil "8"] (mapv #(when-not (:seon.cluster.eval/error %) (:seon.eval/shown %)) receipts)))
+       (is (= :seon.sci.reader/fabricated-response-error
+              (edn/read-string (first (shown connection (code (str "(:seon.error/type "
+                                                                   (admit/result-handle (turn/receipt-identity (:seon.turn/id result) 1))
+                                                                   ")"))))))
+           "the agent digs the reserved map's error value by its result handle")
+       (is (= [nil nil nil :seon.sci.reader/form nil] (mapv (comp :seon.error/member error) receipts)))
+       (is (empty? (db/q '[:find ?receipt :in $ ?id
+                           :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
+                           [?receipt :seon.cluster.eval/diagnostics _]]
+                         (:seon.db/db result) (:seon.turn/id result)))
+           "no form carries an error recorded while another was shown"))
+     (let [text "(+ 1 1)\n(vector ::nope.alias/k)\n(+ 2 2)"
+           sci (let [result (code text)] (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)]))
+           jvm (:seon.batch/entries
+                (batch/evaluate-batch
+                 (dissoc (turn.batch/jvm-request {:seon.batch/world (world/jvm-world cluster-name connection {:seon.agent/id agent-id})
+                                                  :seon.batch/text text})
+                         :seon.batch/settle :seon.batch/show)))]
+       (is (= [2 nil 4] (mapv #(when-not (:seon.cluster.eval/error %) (edn/read-string (:seon.eval/shown %))) sci))
+           "SCI: the forms around the failed read run")
+       (is (= :seon.sci.reader/form (:seon.error/member (edn/read-string (:seon.eval/shown (second sci))))))
+       (is (= [2 nil 4] (mapv :seon.batch/value jvm)) "JVM: the forms around the failed read run")
+       (is (= :seon.sci.reader/form
+              (:seon.error/member (:seon.batch/error-value (ex-data (:seon.batch/error (second jvm)))))))))))

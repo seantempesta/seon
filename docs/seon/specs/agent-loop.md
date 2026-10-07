@@ -182,20 +182,23 @@ If a case needs analysis before a later form, the design says so with its measur
     other than `#`, starts a form (so `#1 priority` is a read error the agent sees);
   - `#` followed by whitespace or `#` (a Markdown heading) and a leading backtick are prose;
   - while a form is open, following lines continue it whatever they start with;
+  - once a line starts a form, every form on that line runs, as at a REPL: the rest of the line is code, so
+    `(+ 1 2) Done.` also evaluates `Done.` (owner ruling 2026-10-08; prose is decided only at line starts);
   - all other lines are prose, so a lone word like `Done.` is prose;
-  - a lone symbol is code only inside a fence.
+  - a lone symbol is code only inside a fence or after a form on its line.
 - **Regions.** No read crosses a fence line: the text between fence lines is one region, and a read ends at its
   region's end.
 - **Read errors.** A form that fails to read is its own error, in every mode (model reply, MCP SCI and JVM), and
   reading continues after it:
-  - a collection open at the failure spans to its matching closer, so the forms inside it never run;
+  - a collection open at the failure spans to its matching closer (never short of where the reader stopped), so
+    the forms inside it never run;
   - any other failure (a token, a stray closer, an odd map) spans to where the reader stopped;
   - a collection that never closes is unfinished: it spans to its region's end.
 
   Nothing is repaired and nothing is re-read.
 - **No-value constructs.** `#_` and a reader conditional that selects nothing yield no value. They are skipped
-  within their region; classification resumes after them (outside fences, at the next line), so they never carry
-  prose or a fence line into a form.
+  within their region; outside fences the rest of their line is code like any form's line, and classification
+  resumes at the next line, so they never carry prose or a fence line into a form.
 - **Prose** is attached as the next form's comment. Trailing prose is kept on the last exchange. A prose-only
   reply records one exchange with the "no form" refusal and no evaluation.
 - **Imitations.**
@@ -204,7 +207,6 @@ If a case needs analysis before a later form, the design says so with its measur
   - A `;; =>` line or an `ns=>` line outside fences is prose. Reporting it once as an imitation is deferred to the
     exchange (S4/S6).
   - This is a syntax rule, not a truth detector.
-- **Same line:** after a top-level form closes, the rest of that line (outside a fence) is prose.
 - **Compatibility.** Outside fences, bare literals and indented forms are prose (a deliberate compatibility
   choice); `(help)` teaches fences.
 - **Reading.** The live read uses SCI's `parse-next` with the agent's live options. The structural span pass that

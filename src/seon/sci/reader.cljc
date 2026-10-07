@@ -6,7 +6,8 @@
                :cljs [cljs.tools.reader.reader-types :as rt])
             #?(:clj [clojure.spec.alpha :as s])
             #?(:clj [clojure.core.specs.alpha])
-            [sci.core :as sci]))
+            [sci.core :as sci]
+            #?(:clj [seon.error.refusal :as refusal])))
 
 (def ^:private eof ::eof)
 
@@ -488,6 +489,23 @@
               :else fence-end)))]
     (advance-to! source-reader text starts end)))
 
+(defn response-map?
+  "Whether `form` is the reserved response shape: a map naming a `:seon.repl` key."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [form]
+  (boolean (and (map? form) (some #(and (keyword? %) (= "seon.repl" (namespace %))) (keys form)))))
+
+#?(:clj
+   (defn response-error
+     "The read error of the reserved response map `form` read from `source`: it is never evaluated."
+     {:malli/schema [:=> [:cat :string :map] :seon.sci.reader/fabricated-response-error]}
+     [source form]
+     (refusal/error :seon.sci.reader/fabricated-response-error
+                    {:seon.error/operation `response-error
+                     :seon.error/message "Only the REPL writes responses: this form was not evaluated; send forms and wait for their results."
+                     :seon.error/offending source
+                     :seon.sci.reader/response-keys (into #{} (filter #(and (keyword? %) (= "seon.repl" (namespace %)))) (keys form))})))
+
 (defn- read-events
   "Read `text`'s forms from character offset `from` into events. Recovery
   resumes the same text at a later offset, so every event, form and nested
@@ -566,23 +584,17 @@
                   (select-keys state [::ns ::aliases ::refers ::publics])
                   source))
                 event
-                (cond-> event
-                  (and (map? form)
-                       (some #(and (keyword? %)
-                                   (= "seon.repl" (namespace %))) (keys form)))
-                  (assoc ::error
-                         (error-value
-                          ::response-keys
-                          "You wrote a response. Only the REPL writes responses; send forms and wait."
-                          {::text source ::line source-line
-                           ::column source-column ::phase "reply"}
-                          {::response-keys (into #{} (filter #(and (keyword? %) (= "seon.repl" (namespace %)))) (keys form))})))]
+                #?(:clj (cond-> event (response-map? form) (assoc ::error (response-error source form)))
+                   :cljs event)]
             (recur (next-reading-context state form)
                    (conj events event))))))))
 
 (declare cause-data)
 
-(defn- reader-error
+(defn reader-error
+  "The reader's error value for `text` whose read failed with `failure`."
+  {:malli/schema [:function [:=> [:cat :string :seon.error/throwable] :seon.sci.reader/failure]
+                  [:=> [:cat :string :seon.error/throwable [:maybe :map]] :seon.sci.reader/failure]]}
   ([text failure]
    (reader-error text failure nil))
   ([text failure classification]

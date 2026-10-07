@@ -1,6 +1,6 @@
 (ns seon.sci.batch
-  "The SCI stage values of the one REPL path: the live reader behind the
-  forgiving input stage, the current namespace, and the batch's namespace
+  "The SCI stage values of the one REPL path: the live read stage behind the
+  reader stepper (`seon.sci.forgive`), the current namespace, and the batch's namespace
   binding. Evaluation is `seon.sci.eval/evaluate`.
 
   Arming and the write observer are `seon.sci.arm` and `seon.sci.observe`.
@@ -20,17 +20,18 @@
       (dissoc :eof)
       (assoc :end-location true)))
 
+(defn read-stage
+  "The live read stage for `ctx`: SCI's `parse-next` under Seon's reader policy."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.batch/read-stage]}
+  [ctx]
+  (let [opts (parse-options ctx)]
+    {:seon.batch/read (fn [rdr eof] (sci/parse-next ctx rdr (assoc opts :eof eof)))}))
+
 (defn read-next
-  "One read step at the live cursor, through the forgiving input stage."
+  "One read step at the live cursor, through the reader stage's stepper."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world mode :seon.batch/mode} state]
-  (forgive/next-form ctx (parse-options ctx) mode state))
-
-(defn read-code
-  "One read step with no repair: acquisition and file entrants read code."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
-  [{{ctx :seon.sci.eval/ctx} :seon.batch/world} state]
-  (forgive/next-form ctx (parse-options ctx) :code state))
+  (forgive/next-form (read-stage ctx) mode state))
 
 (defn current-ns
   "The namespace the batch is in now."

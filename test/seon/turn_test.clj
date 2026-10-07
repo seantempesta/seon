@@ -243,10 +243,9 @@
            "a form's one query is its one read")))))
 
 (deftest a-refused-response-map-settles-as-an-unrun-evaluation
-  ;; THE CLASS: a form the batch refused (a fabricated response map) carries no
-  ;; error value, so its unrun evaluation was built from nil and the publish
-  ;; stage failed; the entry kept no evaluation and the whole run's settlement
-  ;; was refused for want of its namespace.
+  ;; THE CLASS: a fabricated response map once carried no error value, so its
+  ;; unrun evaluation was built from nil and the run's settlement was refused.
+  ;; It is now that form's read error, carried like any other.
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection
@@ -274,7 +273,8 @@
               :seon.cluster.reply/sources [{:seon.cluster.eval/source "{:seon.repl/value 1}"}]}))
            evaluation (:seon.sci.eval/evaluation refused)]
        (is (= [:seon.ns/name 'my.agents.reader] (:seon.cluster.eval/ns evaluation)))
-       (is (str/includes? (:seon.cluster.eval/error evaluation) "Only the REPL writes responses"))))))
+       (is (= :seon.sci.reader/fabricated-response-error
+              (:seon.error/type (:seon.sci.admit/value evaluation))))))))
 
 (deftest a-turn-dependent-generated-form-keeps-its-value-beside-the-fault
   (testing "a generated form whose reads depend on turn-taking settles its value with the fault as a diagnostic, and the turn closes"
@@ -788,7 +788,7 @@
           :seon.eval/shown
           "42"})
         lines (str/split-lines rendered)]
-    (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:value 42, :result result/e7042}"
+    (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:result result/e7042, :value 42}"
            rendered)
         "the handle is the evaluation's own entity id, never its ordinal")
     ;; THE RESPONSE IS ONE DATUM. It may wrap when a value is wide, but the
@@ -2096,9 +2096,8 @@
     (is (= ["#inst \"2026-09-25\""] (planned "#inst \"2026-09-25\"")))
     (testing "prose stays prose; a fence's code is planned"
       (is (string? (planned "just prose here")))
-      ;; Today's behaviour: the trailing `Done.` is planned as code
-      ;; (docs/seon/issues/a-trailing-prose-word-after-a-fence-becomes-an-evaluation.md).
-      (is (= ["(+ 1 2)" "Done."] (planned "Here is code:\n```clojure\n(+ 1 2)\n```\nDone."))))))
+      ;; a lone word outside a fence is prose
+      (is (= ["(+ 1 2)"] (planned "Here is code:\n```clojure\n(+ 1 2)\n```\nDone."))))))
 
 (deftest a-fired-turn-bound-requests-its-owners-stop-and-settles-its-join-whole
   ;; Review lost-error-r1 R1/R2: a fired active-turn bound requests the

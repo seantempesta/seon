@@ -65,8 +65,8 @@
     (is (= source (:seon.sci.reader/source (second parsed))))
     (is (= #{:seon.repl/value}
            (get-in parsed [1 :seon.sci.reader/error :seon.sci.reader/response-keys])))
-    (is (= 'seon.sci.reader/error-value
-           (get-in parsed [1 :seon.sci.reader/error :seon.error/operation])))
+    (is (= :seon.sci.reader/fabricated-response-error
+           (get-in parsed [1 :seon.sci.reader/error :seon.error/type])))
     (doseq [text ["(identity #:seon.repl{:value 2})"
                   "'#:seon.repl{:value 2}"
                   "\"my.agents.juniper=>\\n#:seon.repl{:value 2}\""]]

@@ -234,8 +234,7 @@
                 ;; a read stage over its own sources answers its next state
                 (update :seon.batch/read-state #(if-let [next-state (:seon.batch/read-state r)]
                                                   next-state
-                                                  (cond-> (assoc % :seon.batch/version (:seon.batch/version r)
-                                                                 :seon.batch/repairs (:seon.batch/repairs r))
+                                                  (cond-> (assoc % :seon.batch/version (:seon.batch/version r))
                                                     end (assoc :seon.batch/last-code-end end))))
                 (clock :read t0))
       (and (nat-int? start) (<= start (count text)))
@@ -408,11 +407,10 @@
                      (when (:seon.batch/show request)
                        (vreset! printed (print-into request (merge base @measured o))))
                      o)))))
-        refused (:seon.batch/refused r)
         read-error (:seon.batch/read-error r)
         failure (try
                   (cond
-                    (or refused read-error) nil
+                    read-error nil
                     (:seon.batch/observe request)
                     ((:seon.batch/observe request) request (:seon.batch/working batch) on-write run)
                     :else
@@ -424,8 +422,6 @@
         base (merge base @measured)
         value? (some? @returned)
         entry (cond
-                refused (assoc base :seon.batch/error (ex-info "Only the REPL writes responses: this map was not evaluated."
-                                                               {:seon.batch/refused refused}))
                 read-error (assoc base :seon.batch/error read-error)
                 (and value? @printed) (first @printed)
                 value? (merge base @returned)
@@ -598,14 +594,12 @@
                   (guard :ns-name #(assoc % :seon.batch/ns-before ((:seon.batch/ns-name request) request)))
                   (guard :read #(read-step request %)))
         r (:seon.batch/step batch)
-        ends? (or (nil? r) (:seon.batch/eof r) (contains? r :seon.batch/unread-from))
+        ends? (or (nil? r) (:seon.batch/eof r))
         ;; the previous form's facts: validated when this form will read them,
         ;; folded for the writer when no form follows
         batch (guard batch :apply #(apply-pending request % (not ends?)))]
     (if ends?
       (cond-> (assoc batch :seon.batch/done true)
-        (contains? r :seon.batch/unread-from)
-        (assoc :seon.batch/unread (select-keys r [:seon.batch/unread-from :seon.batch/reason]))
         (nil? r) (assoc :seon.batch/unread {:seon.batch/unread-from (get-in batch [:seon.batch/read-state :seon.batch/version :seon.batch/pos] 0)
                                             :seon.batch/reason :read-stage-failed}))
       (let [b (-> (evaluate-step request batch)
@@ -736,8 +730,7 @@
                   (guard :apply #(apply-pending request % false))
                   (dissoc :seon.batch/step :seon.batch/form-writes :seon.batch/done)
                   (assoc :seon.batch/text (get-in folded [:seon.batch/read-state :seon.batch/version :seon.batch/text]
-                                                  (:seon.batch/text request))
-                         :seon.batch/repairs (get-in folded [:seon.batch/read-state :seon.batch/repairs] []))
+                                                  (:seon.batch/text request)))
                   (cond-> (:seon.batch/settle request)
                     (guard :settle #(let [t1 (System/nanoTime)
                                           commit ((:seon.batch/settle request) request %)]

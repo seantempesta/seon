@@ -26,7 +26,8 @@ and order).
   `next-form`):
   - the reply is read region by region (the text between fence lines);
   - each region gets one reader that ends at the region's end;
-  - outside fences, a line's first character decides;
+  - outside fences, a line's first character decides, and once a line starts a form every form on it runs (owner
+    ruling 2026-10-08, which reverses v3's same-line rule: one rule fewer at the same speed);
   - a failed read is its own step, and reading continues after it, in every mode;
   - nothing is repaired, so the repairs machinery goes entirely.
 - The reserved `#:seon.repl` shape becomes an ordinary read error.
@@ -140,13 +141,15 @@ JVMs) reads:
           :else
           (let [ls (line-start text s)]
             (cond
-              (and code-end (<= ls code-end)) (recur v (inc (line-end text s)) code-end) ; rest of a form's line
+              (and code-end (<= ls code-end)) (recur v (inc (line-end text s)) code-end) ; v3 only: see below
               (and (= s ls) (form-start? text s))
               (let [r (read-at ctx opts v s)]
                 (if (find r ::skip) (recur (:seon.batch/version r) (or (::skip r) bound) (or (::skip r) bound)) r))
               :else (recur v (inc (line-end text s)) code-end))))))))
 ```
 
+- **Landed (2026-10-08):** the rest of a form's line is read like a code fence's line (a `;` skips to the line's
+  end, anything else is read), so the `code-end` clause joins the code-fence clause instead of skipping the line.
 - `region-end` scans lines from a line start with `.indexOf`. It calls `fence-line` only on a line whose first
   non-blank characters are backticks.
   - Outside a fence the region ends at the next fence line.
@@ -183,7 +186,8 @@ non-logging reader serves each region.)
 ```
 
 - **A no-value construct** is `#_` with its operand, or a preserved reader conditional selecting none of the
-  features. It is skipped: in a code fence reading continues after it; outside fences its line's rest is prose.
+  features. It is skipped: in a code fence reading continues after it; outside fences its line's rest is code,
+  like any form's line, and the next line is classified.
   - Probed: `#_ (+ 1 2)\nDone.\n(+ 3 4)` runs only `(+ 3 4)` (task `c98bb97a06a3`'s input).
   - Probed: `` ```clj\n#_ (+ 1 2)\n```\nDone.\n(+ 3 4) `` runs only `(+ 3 4)`.
   - Probed: `#?(:cljs 1)\nDone.\n(+ 3 4)` runs only `(+ 3 4)`.
@@ -331,7 +335,8 @@ None blocking. Two consequences to confirm on reading:
 | ```` ```text ```` / ```` ```clj ```` (inside a prose fence) | prose |
 | ```` ````clojure ```` with an inner ```` ``` ```` | the inner line is code (no match) |
 | `#inst "…"`, `#uuid`, `#'x`, `#:a{}` at column 0 | forms |
-| `#1 priority is (launch!)` | `#1 priority` is a read error; the rest of its line is prose |
+| `#1 priority is (launch!)` | `#1 priority` is a read error; `is` and `(launch!)` then run (the same-line reversal) |
+| `(+ 1 2) Done.` / `[] [] [999]` | every form on the line runs (`Done.` is an unresolved symbol) |
 | `# Heading`, `## h2` | prose |
 | `#_` alone before a closing fence | no source; the fence closes |
 
@@ -464,7 +469,7 @@ Options, priced:
 | refused map settles | `seon.turn-test/a-refused-response-map-settles-as-an-unrun-evaluation` (`turn_test.clj:245-277`): converts its message substring to the error type |
 | help trial | `seon.loop-proof-test` testing block at `:808`: converts (the query is prose; the map is a read error) |
 | `#inst`, trailing `Done.` | `seon.turn-test/a-reply-keeps-its-dispatch-macro-forms-as-code`: `#inst` stays a form under Q1, and `["(+ 1 2)" "Done."]` becomes `["(+ 1 2)"]` |
-| same line | `seon.repl-parity-test` C7: input moved into a fence |
+| same line | `seon.repl-parity-test` C7 keeps its expectation (`[] [] [999]` runs all three); the same row is in the forgive table |
 | run4 | `seon.ai-test/captured-run4-replies-stop-before-fabricated-responses` |
 | repair test of deleted machinery | `seon.cluster.turn-test/delimiter-repair-is-span-local-and-precedes-intent` → DELETED |
 | reply keys | `seon.run-test` (`run_test.clj:93`) asserts the reply's keys: `:seon.batch/repairs` leaves the set |

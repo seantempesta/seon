@@ -21,8 +21,8 @@
   (let [text (:seon.batch/text v) p (:seon.batch/pos v)]
     (if (< p (count text))
       {:seon.batch/form (symbol (subs text p (inc p))) :seon.batch/start p :seon.batch/end (inc p)
-       :seon.batch/version (assoc v :seon.batch/pos (min (count text) (+ p 2))) :seon.batch/repairs []}
-      {:seon.batch/eof true :seon.batch/version v :seon.batch/repairs []})))
+       :seon.batch/version (assoc v :seon.batch/pos (min (count text) (+ p 2)))}
+      {:seon.batch/eof true :seon.batch/version v})))
 
 (defn- run-with
   "The fold over \"a b\" from a database `basis`, the stages in `stages`
@@ -33,8 +33,7 @@
    (merge {:seon.batch/text "a b"
            :seon.batch/basis basis
            :seon.batch/world {:seon.boot/cluster-name "default" :seon.batch/sink (batch/sink)}
-           :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}
-                                              :seon.batch/repairs []})
+           :seon.batch/read-state (fn [text] {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
            :seon.batch/read-next read-symbols
            :seon.batch/evaluate (fn [_ form _] {:seon.batch/value form})
            :seon.batch/ns-name (fn [_] 'user)}
@@ -78,8 +77,8 @@
                 (fn [_ {v :seon.batch/version}]
                   (if (zero? (:seon.batch/pos v))
                     {:seon.batch/form 'a :seon.batch/start 0 :seon.batch/end 99
-                     :seon.batch/version (assoc v :seon.batch/pos 3) :seon.batch/repairs []}
-                    {:seon.batch/eof true :seon.batch/version v :seon.batch/repairs []}))})]
+                     :seon.batch/version (assoc v :seon.batch/pos 3)}
+                    {:seon.batch/eof true :seon.batch/version v}))})]
     (is (= '[a] (values b)) "the form is still evaluated")
     (is (= [:read] (mapv :seon.batch/stage (:seon.batch/diagnostics b))))
     (is (= 0 (:seon.batch/ordinal (first (:seon.batch/diagnostics b)))))))
@@ -90,7 +89,7 @@
                                                       {:seon.batch/value form}
                                                       {:seon.batch/error (ex-info "b failed" {})}))})
         reply (turn.batch/reply b)]
-    (is (= #{:seon.batch/evaluations :seon.batch/diagnostics :seon.batch/repairs} (set (keys reply))))
+    (is (= #{:seon.batch/evaluations :seon.batch/diagnostics} (set (keys reply))))
     (is (= [#{:seon.batch/ordinal :seon.batch/shown :seon.batch/duration-ms}
             #{:seon.batch/ordinal :seon.batch/shown :seon.batch/duration-ms :seon.batch/error?}]
            (mapv (comp set keys) (:seon.batch/evaluations reply))))))
@@ -205,8 +204,8 @@
             (if (and (< p (count text)) (Character/isWhitespace (.charAt text (int p)))) (recur (inc p)) p))]
     (if (< p (count text))
       {:seon.batch/form (symbol (subs text p (inc p))) :seon.batch/start p :seon.batch/end (inc p)
-       :seon.batch/version (assoc v :seon.batch/pos (inc p)) :seon.batch/repairs []}
-      {:seon.batch/eof true :seon.batch/version (assoc v :seon.batch/pos p) :seon.batch/repairs []})))
+       :seon.batch/version (assoc v :seon.batch/pos (inc p))}
+      {:seon.batch/eof true :seon.batch/version (assoc v :seon.batch/pos p)})))
 
 (defn- allocation
   "Bytes this thread allocates running `f` (-1 on a virtual thread, for which

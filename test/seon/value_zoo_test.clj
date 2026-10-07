@@ -19,8 +19,9 @@
 (def zoo
   "Each zoo value as one form: a database, a connection, a transaction report,
   host objects and references, an infinite and a throwing lazy sequence, large
-  and deep values, a cycle through an atom, and the odd scalars. Symbols are
-  wrapped in a call: a reply that is one bare word reads as prose."
+  and deep values, a cycle through an atom, and the odd scalars. Symbols and
+  `##` literals are wrapped in a call: outside a fence a reply line that is
+  one bare word, or starts `##`, reads as prose."
   ["(seon.db/db)" "(identity seon.db/*conn*)" "(seon.db/with (seon.db/db) [])"
    "(do (defrecord ZooR [a]) (->ZooR 1))" "(do (deftype ZooT [a]) (->ZooT 1))"
    "(atom {:a 1})" "(promise)" "(delay (+ 1 2))" "(future 42)" "(fn [x] x)"
@@ -28,7 +29,7 @@
    "(identity String)" "(range)" "(map (fn [_] (throw (ex-info \"boom when realized\" {}))) [1 2])"
    "(apply str (repeat 5000000 \"x\"))" "(vec (range 200000))"
    "(reduce (fn [m _] {:a m}) {} (range 1000))" "(let [a (atom nil)] (reset! a {:self a}) a)"
-   "(identity nil)" "##NaN" "(byte-array 16)" "(sorted-map 'a 1 'b 2)" "(transient [1 2])"
+   "(identity nil)" "(identity ##NaN)" "(byte-array 16)" "(sorted-map 'a 1 'b 2)" "(transient [1 2])"
    "(reduce (fn [v _] [v]) [] (range 10000))"])
 
 (deftest ^{:seon.test/long "One run of 26 forms per entrant (a 5M-character string and a 200k vector among them) plus arming: 54 single-form runs took 7.2 s on default at 1be0f7448."

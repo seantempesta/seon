@@ -48,9 +48,9 @@
 
 (schema.edn/load! {})
 
-;;; `planned-sources` is defined below its first caller; this is a forward
+;;; `code-sources` is defined below its first caller; this is a forward
 ;;; reference inside one namespace, not a load cycle.
-(declare planned-sources)
+(declare code-sources)
 
 ;;; LOAD-CYCLE BOUNDARIES. Each of these namespaces requires `seon.turn`
 ;;; transitively, so this namespace cannot require them back. One resolution
@@ -1768,7 +1768,7 @@
                         (assoc :seon.cluster.eval/read-evidence (:seon.render.call/read-evidence call)))}))
              (reduce
               (fn [sources block]
-                (let [parsed (planned-sources
+                (let [parsed (code-sources
                               (:seon.render/source block) namespace-name
                               (get-in handle [:seon.sci.admit/caps
                                               :seon.config.eval.result/max-source]))]
@@ -2979,25 +2979,24 @@
 
 
 (defn- segmented-sources
-  "`text`'s forms as a run's ordered sources, found structurally by the
-  forgiving stage in `mode` (`seon.sci.forgive/segments`): each form's one
-  semantic read happens when it is evaluated, after the forms before it ran.
-  An unreadable rest is one more source, whose read answers its error once;
-  text over `max-source` characters is read no further, as one source whose
-  read answers the reader's bound; text with no form is the no-forms refusal."
+  "`text`'s forms as a run's ordered sources, found structurally in `mode`
+  (`seon.sci.forgive/segments`).
+
+  Each form's one semantic read happens when it is evaluated, after the forms
+  before it ran; a failed read's span is one source whose read answers its
+  error once. Text over `max-source` characters is one source whose read
+  answers the reader's bound; text with no form is the no-forms refusal."
   {:malli/schema [:=> [:cat :seon.cluster.reply/text :seon.ns/name :seon.batch/mode
                        :seon.config.eval.result/max-source :string]
                   [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
   [text namespace-name mode max-source no-form-message]
-  (let [{segments :seon.batch/segments unread :seon.batch/unread}
-        (if (> (count text) max-source)
-          {:seon.batch/segments [] :seon.batch/unread text}
-          (forgive/segments text mode))
-        sources (cond-> (mapv (fn [{source :seon.batch/source c :seon.batch/comment}]
-                                (cond-> {:seon.cluster.eval/source source :seon.ns/name namespace-name}
-                                  c (assoc :seon.cluster.eval/comment c)))
-                              segments)
-                  unread (conj {:seon.cluster.eval/source unread :seon.ns/name namespace-name}))]
+  (let [segments (if (> (count text) max-source)
+                   [{:seon.batch/source text}]
+                   (:seon.batch/segments (forgive/segments text mode)))
+        sources (mapv (fn [{source :seon.batch/source c :seon.batch/comment}]
+                        (cond-> {:seon.cluster.eval/source source :seon.ns/name namespace-name}
+                          c (assoc :seon.cluster.eval/comment c)))
+                      segments)]
     (if (seq sources)
       sources
       (assoc {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
@@ -3006,9 +3005,10 @@
                   :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources} :seon.error/type :seon.cluster.reply/no-forms-error))))
 
 (defn planned-sources
-  "The ordered forms one ordinary source run executes from a model reply:
-  prose becomes each form's comment, prompt markers go, delimiters are
-  repaired where unambiguous (`segmented-sources` in `:reply` mode)."
+  "The ordered forms one ordinary source run executes from a model reply.
+
+  Read by the reply line rules (`segmented-sources` in `:reply` mode): prose
+  becomes each form's comment, and nothing is repaired."
   {:malli/schema
    [:=> [:catn
          [:text :seon.cluster.reply/text]
@@ -3022,9 +3022,11 @@
                        "Your reply had no form; only comments/prose. Send a form.")))
 
 (defn code-sources
-  "The ordered forms of code (an outside agent's evaluation, a file, a
-  generated form): every form is a form, nothing is prose (`segmented-sources`
-  in `:code` mode). The MCP bridge's segmenter."
+  "The ordered forms of code: an outside agent's evaluation, a file, a generated form.
+
+  Every construct is a form and nothing is prose (`segmented-sources` in
+  `:code` mode). The MCP bridge's segmenter, and the reader of generated
+  opening blocks and preview sources."
   {:malli/schema
    [:=> [:catn
          [:text :seon.cluster.reply/text]
@@ -4682,45 +4684,38 @@
   row's source with the live reader, once."
   {:malli/schema [:=> [:cat :seon.cluster.reply/sources] :seon.batch/read-state]}
   [rows]
-  {:seon.batch/rows (vec rows) :seon.batch/version {:seon.batch/text "" :seon.batch/pos 0}
-   :seon.batch/repairs []})
+  {:seon.batch/rows (vec rows) :seon.batch/version {:seon.batch/text "" :seon.batch/pos 0}})
 
 (defn- read-row
-  "One read step: the next row's source read once by the forgiving stage's
-  live reader as code, in the namespace the run is in now (so an alias a
-  prior form required resolves). A row whose read fails is that form's
-  reader error, answered once and never evaluated."
+  "One read step: the next row's source read once by the live read stage as
+  code, in the namespace the run is in now (so an alias a prior form required
+  resolves). A row whose read fails is that form's reader error, answered
+  once and never evaluated."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world current :seon.turn/namespace-cursor max-source :seon.turn/max-source}
    {[row & more] :seon.batch/rows :as state}]
   (if-not row
-    {:seon.batch/eof true :seon.batch/version (:seon.batch/version state) :seon.batch/repairs []}
+    {:seon.batch/eof true :seon.batch/version (:seon.batch/version state)}
     (let [text (:seon.cluster.eval/source row)
-          v (forgive/version text 0)
+          v {:seon.batch/text text :seon.batch/pos 0}
+          refused (fn [refusal]
+                    {:seon.batch/read-error (ex-info (:seon.error/message refusal) {:seon.batch/error-value refusal})
+                     :seon.batch/start 0 :seon.batch/end (count text) :seon.batch/version v})
           ;; a reply the segmenter found no form in is carried as one row with
           ;; its reader event: that refusal is the row's read, never its prose read as code
           carried (get-in row [:seon.sci.eval/event :seon.sci.reader/error])
+          unread (fn [message]
+                   (refused (#'reader/error-value :seon.sci.reader/form message {:seon.sci.reader/text text}
+                                                  {:seon.sci.reader/unreadable-member :seon.sci.reader/form})))
           r (cond
-              carried {:seon.batch/reason (:seon.error/message carried)}
+              carried (refused carried)
               (and max-source (> (count text) max-source))
-              {:seon.batch/reason (str "This form is " (count text) " characters; the reader's bound is " max-source ".")}
+              (unread (str "This form is " (count text) " characters; the reader's bound is " max-source "."))
               :else
-              (sci/binding [sci/ns (sci/create-ns @current)]
-                (forgive/next-form ctx (sci.batch/parse-options ctx) :code {:seon.batch/version v :seon.batch/repairs []})))
-          next-state (assoc state :seon.batch/rows (vec more))]
-      (if (contains? r :seon.batch/form)
-        (assoc r :seon.batch/read-state next-state)
-        (let [message (str (or (:seon.batch/reason r) "The row holds no form."))
-              ;; the reader's own refusal of this form's text
-              refusal (cond
-                        carried carried
-                        (:seon.batch/cause r) (#'reader/reader-error text (:seon.batch/cause r))
-                        :else
-                        (#'reader/error-value :seon.sci.reader/form message {:seon.sci.reader/text text}
-                                              {:seon.sci.reader/unreadable-member :seon.sci.reader/form}))]
-          {:seon.batch/read-error (ex-info message {:seon.batch/error-value refusal})
-           :seon.batch/start 0 :seon.batch/end (count text) :seon.batch/version v :seon.batch/repairs []
-           :seon.batch/read-state next-state})))))
+              (let [r (sci/binding [sci/ns (sci/create-ns @current)]
+                        (forgive/next-form (sci.batch/read-stage ctx) :code (forgive/read-state text)))]
+                (if (:seon.batch/eof r) (unread "The row holds no form.") r)))]
+      (assoc r :seon.batch/read-state (assoc state :seon.batch/rows (vec more))))))
 
 (defn- evaluate-row
   "The turn's evaluate stage: the evaluation frame (`seon.sci.eval/evaluate`
@@ -4758,10 +4753,12 @@
   [{{ctx :seon.sci.eval/ctx ordinal :seon.batch/ordinal} :seon.batch/world working :seon.batch/working
     frame :seon.turn/frame-request limit :seon.sci.eval/time-limit-ms}
    {:seon.batch/keys [value error evaluation form ns-before source] :as entry}]
-  (let [request (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
-                       :seon.cluster.eval/source (or source "")
-                       ;; the form's working value: its render reads what it read
-                       :seon.db/db working)
+  (let [request (cond-> (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
+                               :seon.cluster.eval/source (or source "")
+                               ;; the form's working value: its render reads what it read
+                               :seon.db/db working)
+                  ;; the form prints under its own evaluation's print options
+                  (:seon.print/options evaluation) (assoc :seon.print/options (:seon.print/options evaluation)))
         record (:seon.sci.admit/record evaluation)
         shown (kernel/with-arm
                ctx limit
@@ -4788,8 +4785,8 @@
   (let [projection (db/carried-projection working)
         ;; a form that never ran (its read failed) settles through the one
         ;; constructor of an unrun evaluation
-        ;; The failure is the read refusal's own value; a refused response map
-        ;; or a stage that threw carries none, so it is built from the throwable
+        ;; The failure is the read refusal's own value; a stage that threw
+        ;; carries none, so it is built from the throwable
         ;; (never nil: `unrun-evaluation` requires the value, and without one the
         ;; whole run's settlement is refused for want of this form's evaluation).
         evaluation (or (:seon.batch/evaluation entry)
@@ -5045,7 +5042,7 @@
                  :seon.db/db database
                  :seon.db/connection (:seon.db/connection cluster)
                  :seon.agent/id agent-id})]
-    (let [sources (planned-sources
+    (let [sources (code-sources
                      text namespace-name
                      (:seon.config.eval.result/max-source caps))]
         (if (:seon.cluster.reply/no-forms sources)

@@ -23,61 +23,48 @@
          [:seon.batch/settlement {:optional true} [:map [:seon.db/connection :seon.db/connection]]]
          [:seon.store/store {:optional true :description "The execution's store (its environment's): branch operations read its roster."} :seon.store/store]
          [:seon.agent/routing {:optional true :description "The execution's agent routing (its environment's): retiring a hosted agent reads it."} :seon.agent/routing]]
- :text [:string {:description "Exact text of a batch; after reading, its repaired text: what is evaluated, stored and rendered."}]
+ :text [:string {:description "Exact text of a batch: what is read, evaluated, stored and rendered."}]
  :start-ns :symbol
  :mode [:enum :reply :code]
- :segmented [:map {:description "A text's forms read structurally (seon.sci.forgive/segments): each form's source and the prose above it, and the unread rest."}
+ :segmented [:map {:description "A text's forms read structurally (seon.sci.forgive/segments): each construct's source, a failed read's span included, and the text above it as its comment."}
              [:seon.batch/segments [:vector [:map [:seon.batch/source :string]
-                                             [:seon.batch/comment {:optional true} :string]]]]
-             [:seon.batch/unread {:optional true} :string]]
+                                             [:seon.batch/comment {:optional true} :string]]]]]
  :pos nat-int?
- :reader [:any {:description "The live SCI source reader at the cursor (sci.core/source-reader); a host object, never stored."}]
+ :reader [:any {:description "The reader at the cursor (sci.core/reader over the region); a host object, never stored."}]
+ :bound [:int {:min 0 :description "The end of the region a reply's cursor is in: no read crosses it."}]
+ :fence [:enum {:description "The kind of fence the region is the body of: code is read, prose is skipped."} :code :prose]
+ :ticks [:int {:min 1 :description "The backtick count of the open fence's line; only an untagged line of at least as many closes it."}]
  :text-version [:map
                 [:seon.batch/text :seon.batch/text]
                 [:seon.batch/pos :seon.batch/pos]
-                [:seon.batch/reader {:optional true} :seon.batch/reader]]
- :repair-kind [:enum :prose :prompt-marker :delimiters]
- :prose :string
- :at nat-int?
- :through nat-int?
- :repair [:map
-          [:seon.batch/repair-kind :seon.batch/repair-kind]
-          [:seon.batch/prose {:optional true} :seon.batch/prose]
-          [:seon.batch/at {:optional true} :seon.batch/at]
-          [:seon.batch/through {:optional true} :seon.batch/through]]
- :repairs [:vector :seon.batch/repair]
- :structured? :boolean
+                [:seon.batch/reader {:optional true} :seon.batch/reader]
+                [:seon.batch/bound {:optional true} :seon.batch/bound]
+                [:seon.batch/fence {:optional true} :seon.batch/fence]
+                [:seon.batch/ticks {:optional true} :seon.batch/ticks]]
+ :read-stage [:map {:description "The read itself, supplied as a value: read one form from the reader, or answer the given eof sentinel; spans-only stages take a bare token's and a stray closer's span with no read."}
+              [:seon.batch/read [:=> [:cat :seon.batch/reader :any] :any]]
+              [:seon.batch/spans-only? {:optional true} :boolean]]
  :last-code-end nat-int?
  :line-cursor [:map {:description "Where the last read form began: its text, offset, line and column. The next form's position is scanned on from here (seon.batch/line-cursor), so a batch's positions cost its text once."}
                [:seon.batch/text :seon.batch/text] [:seon.batch/pos :seon.batch/pos]
                [:seon.batch/line pos-int?] [:seon.batch/column pos-int?]]
  :read-state [:map
               [:seon.batch/version :seon.batch/text-version]
-              [:seon.batch/repairs :seon.batch/repairs]
-              [:seon.batch/structured? {:optional true} :seon.batch/structured?]
               [:seon.batch/last-code-end {:optional true} :seon.batch/last-code-end]]
  :version :seon.batch/text-version
  :form [:any {:description "One read form, as the reader answered it."}]
  :start nat-int?
  :end nat-int?
- :refused [:enum :fabricated-response]
  :read-error [:any {:description "A form's read failure: the reader's error, answered once as that form's error, never evaluated."}]
  :eof [:= true]
  :unread-from nat-int?
  :reason [:or :keyword :string]
  :read-step [:or
              [:map [:seon.batch/form :seon.batch/form] [:seon.batch/start :seon.batch/start]
-              [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]
-              [:seon.batch/repairs :seon.batch/repairs]
-              [:seon.batch/refused {:optional true} :seon.batch/refused]]
+              [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]]
              [:map [:seon.batch/read-error :seon.batch/read-error] [:seon.batch/start :seon.batch/start]
-              [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]
-              [:seon.batch/repairs :seon.batch/repairs]]
-             [:map [:seon.batch/eof :seon.batch/eof] [:seon.batch/version :seon.batch/text-version]
-              [:seon.batch/repairs :seon.batch/repairs]]
-             [:map [:seon.batch/unread-from :seon.batch/unread-from] [:seon.batch/reason :seon.batch/reason]
-              [:seon.batch/version :seon.batch/text-version] [:seon.batch/repairs :seon.batch/repairs]
-              [:seon.batch/cause {:optional true :description "The live reader's own failure, kept for its reader error."} :seon.error/throwable]]]
+              [:seon.batch/end :seon.batch/end] [:seon.batch/version :seon.batch/text-version]]
+             [:map [:seon.batch/eof :seon.batch/eof] [:seon.batch/version :seon.batch/text-version]]]
  :op [:enum :bind :unmap :remove-ns :namespace :expansion]
  :sym :qualified-symbol
  :ns :symbol
@@ -218,7 +205,6 @@
          [:seon.batch/writes [:vector :seon.batch/write]]
          [:seon.batch/diagnostics [:vector :seon.batch/diagnostic]]
          [:seon.batch/text {:optional true} :seon.batch/text]
-         [:seon.batch/repairs {:optional true} :seon.batch/repairs]
          [:seon.batch/unread {:optional true} [:map [:seon.batch/unread-from :seon.batch/unread-from]
                                                [:seon.batch/reason :seon.batch/reason]]]
          [:seon.batch/program {:optional true} :map]
@@ -269,7 +255,6 @@
                                              [:seon.batch/notes {:optional true} [:vector :seon.batch/note]]
                                              [:seon.batch/private {:optional true} [:vector :map]]]]]
          [:seon.batch/diagnostics [:vector :string]]
-         [:seon.batch/repairs {:optional true} :seon.batch/repairs]
          [:seon.batch/unread {:optional true} :map]
          [:seon.batch/faults {:optional true} [:vector :any]]
          [:seon.batch/commit {:optional true} :map]]}
