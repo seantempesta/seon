@@ -1823,10 +1823,8 @@
                                  :seon.sci.admit/caps
                                  (assoc caps :seon.config.eval.result/max-nodes 1)))]
             (is (ok? through-sci))
-            (is (string? value))
-            (is
-              (re-find #":seon\.agent/id \"host-walker\"" value)
-              "the printed walk value names its root agent identity")
+            (is (= [:seon.agent/id "host-walker"] (:seon.render.walk/lookup value))
+                "the walk value is data naming its root agent identity")
             (is
               (not (contains? through-sci :seon.eval/missing))
               "the ordinary walk is stored whole, never missing")

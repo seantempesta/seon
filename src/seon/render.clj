@@ -1811,20 +1811,19 @@
     (body)))
 
 (defn- walk-error
-
-  {:malli/schema [:=> [:cat :string] :string]}
-  [message]
-  (pr-str
-   (let [observation
-         {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.render/render
-          :seon.error/operation 'seon.render/walk-error
-          :seon.error/message message
-          :seon.error/fix "Supply the expected member and repeat the requested operation."
-          :seon.render/walk-operation 'seon.render/walk-error
-          :seon.error/member :seon.render.walk/context
-          :seon.error/expected "available walk custody"}]
-     observation)))
+  "The walk's refusal: `message` is fixed text, the value it is about (if
+  any) is `offending`, shown by the value printer."
+  {:malli/schema [:function [:=> [:cat :string] :seon.error/base]
+                  [:=> [:cat :string :seon.schema/value] :seon.error/base]]}
+  ([message] (walk-error message nil))
+  ([message offending]
+   (seon.error.refusal/diagnostic
+    (java.util.Date.) :seon.render/render 'seon.render/walk
+    (cond-> {:seon.error/message message
+             :seon.error/fix "Supply the expected member and repeat the requested operation."
+             :seon.error/member :seon.render.walk/context
+             :seon.error/expected "available walk custody"}
+      (some? offending) (assoc :seon.error/offending offending)))))
 
 (defn- ambient-database-value
 
@@ -1862,7 +1861,7 @@
           units)))
 
 (defn walk
-  "Return the calling agent's labeled database walk as text.
+  "Return the calling agent's labeled database walk as data.
 
   With no arguments, root is the agent whose held run supplied this eval's
   custody, depth is 2, and the database value is dereferenced here from that
@@ -1870,10 +1869,10 @@
   database value and calls this same function. `:branch` is a labeled PATH
   from the output and restricts the result to that `get-in` subtree.
 
-  Failures are text the agent can inspect; this boundary never throws."
+  Failures are error values the agent can inspect; this boundary never throws."
   {:malli/schema
    [:function
-    [:=> [:cat] :string]
+    [:=> [:cat] [:or :map :seon.error/base]]
     [:=>
      [:cat
       [:map
@@ -1882,7 +1881,7 @@
        [:branch
         {:optional true}
         [:vector [:or :keyword :int]]]]]
-     :string]]}
+     [:or :map :seon.error/base]]]}
   ([]
    (walk {}))
   ([options]
@@ -1907,16 +1906,15 @@
                          (agent-render-profile effective))]
            (cond
              (:seon.error/at effective)
-             (pr-str effective)
+             effective
 
              (or (empty? caps) (some nil? (vals caps)))
              (walk-error
               (if cluster-name
-                (str "Cluster " (pr-str cluster-name)
-                     " has no complete render caps.")
-                (str "Agent " (pr-str agent-id)
-                     " has neither ambient render caps nor a context "
-                     "environment naming its cluster.")))
+                "The cluster (:seon.error/offending) has no complete render caps."
+                (str "The agent (:seon.error/offending) has neither ambient render caps nor a context "
+                     "environment naming its cluster."))
+              (or cluster-name agent-id))
 
              :else
              (let [root (get options :root
@@ -1946,17 +1944,15 @@
                       profile (assoc :seon.render/profile profile)))
                    selected (selected-walk-units units branch)]
                (if (and branch (empty? selected))
-                 (walk-error (str "No walk branch exists at "
-                                  (pr-str branch) "."))
-                 (pr-str
-                  (cond->
+                 (walk-error "No walk branch exists at the requested path (:seon.error/offending)." branch)
+                 (cond->
                    {:seon.render.walk/lookup root
                     :seon.render/distance depth
                     :seon.render.walk/units selected
                     :seon.render/value (repl-state db agent-id)}
                     branch
-                    (assoc :seon.render.walk/branch branch)))))))))
+                    (assoc :seon.render.walk/branch branch))))))))
      (catch Throwable failure
-       (walk-error (str "Walk failed: "
-                        (or (ex-message failure)
-                            (.getName (class failure)))))))))
+       (seon.error.refusal/diagnostic
+        (java.util.Date.) :seon.render/render 'seon.render/walk
+        {:seon.error/message "Walk failed." :seon.error/throwable failure})))))
