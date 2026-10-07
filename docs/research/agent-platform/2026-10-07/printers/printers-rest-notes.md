@@ -74,3 +74,15 @@ Classes: sort-by-print (28), ui-print (32), log (30), cli-print (4), from print-
   (cli-print 2) and -main 1888 (log 2).
 - heap-retained: cluster.store datahike-log! 468-478 (log 3).
 - error-frames: fs log-deletion! 205 (log 2): the whole deletion report printed into a warn line.
+
+## Later changes (2026-10-07)
+
+- render.web's emergency paths print no value: failure-response's fallback body is the error's
+  message; an unrecorded request fault's log line names its class only (the value printer's
+  text face needs a database, which may be what failed). Same open decision as fault
+  print-unrecorded!.
+- Every page helper passes the page's database: `:seon.render/unit` requires `:seon.db/db`, and
+  an armed `render.value/render-html` refused a unit without it (a 500 on every debug page and
+  422 body in the first candidate).
+- 81a768d1c: render.web's generator mult starts through seon.flow/call-with-root-bindings
+  (batch-C review). db.clj connection-generator is root's.
