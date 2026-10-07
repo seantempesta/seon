@@ -137,21 +137,13 @@ is fine) follow in order:
   reader and never run.
 - "Calls left", if shown, is one key on a final map, not prose.
 
-**One transaction per turn (owner, 2026-10-07): "We should only need one transaction to commit everything that's
-done in a single turn. A fresh DB value is pulled at the start of the turn and we write all changes efficiently at
-the end."**
-- The turn pulls ONE database value at its start.
-- Every database write a form makes (`transact!`, a `defn`'s program entity, a message, a task write) is collected
-  as tx-data. Later forms in the turn read a speculative value (Datahike `with` over the start value), so they see
-  the turn's own writes.
-- At the end, ONE transaction commits all of it: evaluations, program facts, the agent's writes, the provider call
-  row and the agent facts. The writer validates it against the start basis. A conflicting change since then refuses
-  the whole turn, and the refusal is shown to the agent as data.
-- A crash before the commit loses the turn and changes nothing.
-- Effects outside the database (files, shell, provider) happen when the form runs; they are recorded, not buffered.
-
-This replaces the old spec's "a form's write is durable when the form runs" (agent-loop.md §2). S4 designs it:
-which writers buffer, how `with` stays cheap across a long turn, and the measured cost of the one commit.
+**One machinery transaction per turn (owner, 2026-10-07).** The turn pulls one database value at its start, and
+the turn machinery writes ALL of its own record of the turn in ONE transaction at the end: evaluation rows, the
+program facts of the turn's `defn`s, the provider call row and the agent facts (current namespace, answered basis,
+ordinal). The agent's own writes (`transact!`, messages, task writes) are its actions: each commits when its form
+runs, as at a real REPL, and later forms read them normally. A turn whose forms write nothing therefore costs
+exactly one commit; each explicit agent write adds its own. A crash before the end loses the turn's record, never
+an agent write that already committed.
 
 **Nothing is re-executed (owner, 2026-10-07: "We don't want to keep re-executing forms so we need to cache
 intelligently").** The opening forms (`(help)`, the task's `doc`, each reference's `doc`/`source`) are evaluated
