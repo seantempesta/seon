@@ -153,10 +153,41 @@ the check JVM's own boot runs it.
 
 Stopping many hosts costs ~28 ms each (`release-children!`); not changed.
 
+## 3b. Installed proof (probe root replaced onto 050f43b80 with `start --head`, cluster `default` there)
+
+Machine load average 40-45 during these runs (other lanes' check JVMs), so wall times are inflated; allocation is
+not.
+
+| | before (4c9ccb3f7) | after (050f43b80) |
+|---|---|---|
+| `host!` | 560-940 ms, 1.23-1.35 GB | 90 ms profiled, 63-74 MB (wall 170-970 ms under load 44) |
+| first run | 105-185 ms, 196-244 MB | 149 ms, 127-155 MB |
+| plain run | 80-120 ms, 90-97 MB | 137 ms, 115 MB (under load) |
+| retained heap per idle host | ~54 MB | ~1.8 MB (4 hosts: used heap 366 -> 373 MB; histogram delta 7.3 MB) |
+| reset (`request!` `:reset`) | 8,397 ms, 5.98 GB (63 hosts) | 2,044 ms, 1.31 GB (14 hosts): stop 172, start 1,851 |
+
+After the fix, reset's armed inclusive time: `seed-cluster-facts!` 457 ms (config convergence of the new cluster:
+`config/apply-compiled!` 382, `reconcile/plan` 362), `derive-base-ctx` 388 ms (the new cluster's whole-program
+base, task `4a738d4f7138`), transactions 290 ms. `arm-host-program!` and the non-program lint no longer appear.
+
+Fail-before proofs: `a-branch-reads-the-index-nodes-its-store-already-holds` red at `:store-cache-size 1000`
+(check run 483c9cb7efa1, 2,357 restores); `a-later-database-value-of-the-same-program-keeps-every-wrapper` red with
+the parent's `instrument.clj` (check run d76d63deb3a7).
+
 ## 4. Findings
 
 - Plain hosted run of `(+ 1 2)` allocates 90-97 MB and takes 80-120 ms (45 queries, `seon.fn/runtime-analysis-batch`
   20-30 ms, settlement transaction ~30 ms). Over the 10 MB budget.
+- Reset still allocates 1.3 GB and spends ~400 ms deriving the new cluster's whole-program base and ~460 ms
+  converging its configuration; both are whole-population work per reset. The base is task `4a738d4f7138`
+  (incremental acquisition); the config convergence is recorded on the reset task.
+- `seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged` is red at HEAD
+  (check of d3653e987's candidate): it expects a defn's shown text `"#'my.agents.host-probe/host-probe"` but the
+  Var render's AI face is now data (`{:seon.render.var/symbol ...}`, since b32074469). A stale assertion, not this
+  lane's change; root to convert it.
+- The node cache size has thin margin for whole-index scans: a full `:aevt` scan of the probe store touched 8,101
+  nodes against 8,192. Hosting and acquisition touch ~3,000-3,800. A bigger store or a mixed workload can thrash
+  again; the storage `:reads` stat of a connection is the signal to watch.
 - Boot-adjacent base-context derivations: the first host/run after boot allocated 3.1-3.2 GB (one derivation per new
   program identity). Existing task `seon.sci.eval` acquisition (health top: `seon.sci.eval/acquire-program!`, task
   4a738d4f7138).
