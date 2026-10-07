@@ -64,4 +64,6 @@ tests) → `clj-kondo --lint src script test` over the working tree → `git add
 - Docs-only commit, before: 56 s check (42.6 s publication) + 17 s lint.
 - Task-file + script commit 1758624f4 (check runs): 64.6 s wall = check 62.5 s (published 48.8 s, adopted 9.0 s:
   default's drift again) with the 13.0 s lint concurrent, not after it (before: + 17 s serial).
-- Docs-only commit of this paragraph: see the lane's report (lint only, no check).
+- Docs-only commit 90fd4919e: 25.2 s wall, all of it the candidate lint (23.8 s under ten lanes' load), no check.
+  Before: ~56 s check + 17 s lint. A lint of a candidate whose src, script, test and .clj-kondo are HEAD's
+  repeats HEAD's lint, so a commit touching none of those roots now skips clj-kondo too (docs or task files only).

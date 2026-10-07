@@ -12,7 +12,8 @@
 # The candidate is HEAD plus exactly the committed paths (a tree written through a
 # temporary index; HEAD, the shared index and the working tree are untouched).
 # clj-kondo lints a `git archive` of that tree, never the working tree, so another
-# lane's half-finished edit refuses nobody else. `bin/seon check` (publication,
+# lane's half-finished edit refuses nobody else; a commit touching none of
+# those roots skips it (the candidate lints as HEAD). `bin/seon check` (publication,
 # adoption, --test) runs alongside it, except for a documentation-only commit
 # (every path under docs/, no --test): documentation is no program input.
 # The commit itself (staged-index check, new-file add, git commit, verification)
@@ -111,6 +112,15 @@ lint_candidate() {
   (cd "$directory" && clj-kondo --lint src script test --cache false --parallel)
 }
 
+# True when no path is a lint input: the candidate's src, script, test and
+# .clj-kondo are HEAD's, which every earlier commit linted.
+lints_unchanged() {
+  local path
+  for path in "$@"; do
+    case "$path" in src/*|script/*|test/*|.clj-kondo/*|src|script|test|.clj-kondo) return 1 ;; esac
+  done
+}
+
 # True when every path is documentation (docs/): no program input, nothing to publish.
 documentation_only() {
   local path
@@ -164,9 +174,14 @@ commit() {
   local tree began
   began=$SECONDS
   tree="$(candidate_tree "$scratch" "${paths[@]}")" || refuse "the candidate tree could not be written"
-  echo "== clj-kondo --lint src script test --cache false --parallel (candidate tree ${tree:0:12})"
-  lint_candidate "$tree" "$scratch/candidate" > "$scratch/lint.out" 2>&1 &
-  lint_pid=$!
+  if lints_unchanged "${paths[@]}"; then
+    echo "== no path under src script test .clj-kondo: the candidate lints as HEAD; clj-kondo not run"
+    echo "linting took 0ms, errors: 0, (unchanged)" > "$scratch/lint.out"
+  else
+    echo "== clj-kondo --lint src script test --cache false --parallel (candidate tree ${tree:0:12})"
+    lint_candidate "$tree" "$scratch/candidate" > "$scratch/lint.out" 2>&1 &
+    lint_pid=$!
+  fi
 
   if documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
     echo "== documentation only (docs/): no program input; bin/seon check not run"
@@ -174,8 +189,7 @@ commit() {
     echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
     bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
   fi
-  local lint_status=0
-  wait "$lint_pid" || lint_status=$?
+  [[ -n "$lint_pid" ]] && { wait "$lint_pid" || true; }
   lint_pid=""
   local summary
   summary="$(grep -E '^linting took' "$scratch/lint.out" | tail -1 || true)"
