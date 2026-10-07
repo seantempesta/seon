@@ -1,0 +1,12 @@
+Design review. Repo /Users/sean/src/seon. Read docs/research/agent-platform/2026-10-07/lane-rules.md first (especially "One happy path") and follow it. The design under review is named in the first line of your prompt (a design-notes.md under docs/research/agent-platform/2026-10-07/<lane>/). Owner: "Do not rush this. This is core shit. I want the designs to understand the existing code base and to simplify and improve it." "We have one parser one eval system, etc." "ONE HAPPY PATH THAT IS AGENT FOCUSED ON THIS LOOP. No fragile complex bloated shit."
+
+Verify the design against the code and the running system (MCP eval_clj on default; JVM mode for reads with (seon.cluster.boot/connection "default"); SCI probes as your own agent in a scratch namespace):
+1. Is "what exists" accurate? Check every file:line, caller and cost claim; find owners or callers it missed.
+2. Duplicates: are they real? Did it miss any second path in this area?
+3. Library seams: is there library code (reference-code/) that does more of this than the design uses? Is anything in the proposal a reinvention?
+4. Is the proposal the SMALLEST composition? What could be deleted instead of changed, or changed instead of added? Is any added piece speculative, or not needed by an agent turn?
+5. Does it keep ONE path (one parser, one eval, one record, one printer, one cache, one loop)? Does anything create a second?
+6. Risks and tests: what will break that it doesn't list?
+7. Cross-design conflicts: the other in-flight designs (loop-pass, reader-prose, repl-lookup, walk-delete) touch neighbouring code; flag overlaps or contradictions.
+
+Write docs/research/agent-platform/2026-10-07/<lane-under-review>/review-<your-lane>-notes.md: findings ranked by severity with evidence, concrete simplifications, and questions for the owner. Do NOT edit the design or any src/test file; this is a design review, and root reconciles. Commit only your notes (`bin/lane claim <your-lane> <path>`, then `bin/lane commit <your-lane> -m "..." <path>`, then release). No model/provider calls. Never stop or reset default; never load-file, intern or alter-var-root into default.
