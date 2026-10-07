@@ -35,3 +35,7 @@ Output: docs/research/agent-platform/2026-10-07/plan-research/<your-lane>-notes.
 `bin/lane claim <lane> <path>`, commit it with `bin/lane commit <lane> -m "..." <path>`, then release. Scratch goes
 only under your session scratchpad /<lane>/. Final message: the 10 most important findings with numbers, and the
 path.
+
+**No background machinery.** Do not start Monitor tasks, pollers, watcher loops or extra JVMs. Use only foreground
+REPL calls and short shell commands. Clean up any disposable agent branch you create
+(`my.agent/retire-branch!`), and list it in your notes.
