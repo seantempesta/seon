@@ -1,229 +1,191 @@
-# Live agents: one loop, deleted down to what an agent needs (root's plan, for owner approval)
+# Live agents: one pass, deleted down to what an agent needs (plan v2, for review)
 
-Status: PROPOSAL. Nothing in it is being implemented. Once the owner approves it, it replaces
-`docs/seon/specs/agent-loop.md` in place: no second plan, and lanes work only from it.
+Status: DRAFT v2, written from the five research notes in `../plan-research/`. It goes to a dual review, gets
+revised, and then goes to the owner. Once approved it replaces `docs/seon/specs/agent-loop.md` in place. Numbers
+below are measured on default unless marked otherwise; `r-*` names the research note that holds the evidence.
 
 ## 1. Principles (owner rulings, 2026-10-07)
 
-- **The agent is a REPL.** There is ONE path: a parser (read) → eval (SCI) → record (one transaction) → the value
-  printer. Never a second parser, evaluator, printer, store, cache or loop, and never a separate harness.
-- **Context is forms that ran.** It opens with `(help)`, the task's `doc` and the `doc`/`source` of each
-  reference, generated from the task's data, followed by every form the agent sent, appended with its real
-  result. It is rebuilt from the database on each call, and `seon.cache` makes the unchanged parts free; anything
-  that can be rendered is never stored. A system prompt, if it measurably helps, carries exactly `(help)` and
-  nothing else.
-- **Lookups use standard Clojure:** `doc`, `source`, `dir`, `apropos` and `find-doc`, returning data and built on
-  SCI's `clojure.repl`.
-- **The reader:** fenced code is code; a form that starts a line is code; everything else (prose, Markdown) becomes
-  a comment; text that imitates a result is never evaluated and is flagged back to the agent.
-- **No invented results.** Agents have written forms and then made up their results. The stop sequence and the
-  reader together prevent it, and the prevention is proven live.
-- **Done means proof tests are green.** `my.task/complete!` exists only to bail out, with a reason. A task needs its
-  proof tests before it is launched. Outside runs never enter an agent's history.
-- **Delete what is slated before adding anything.** Reuse libraries. Understand before designing. Work on one
-  happy path. Do not rush.
+1. **The agent is a REPL, and there is ONE path.** One read → eval (SCI) → record → the one value printer. One
+   cache (`seon.cache`) and one loop. No second parser, evaluator, printer, store, cache or harness.
+2. **Every entrant uses the same machinery.** Seon model agents, MCP `eval_clj` (root and lanes, SCI and JVM mode)
+   and test runs go through the same pass. They differ only in where the forms come from and the origin they
+   record. Lanes therefore exercise exactly the code Seon agents run.
+3. **Context is forms that ran, shown with their results.**
+   - The opening forms (`(help)`, the task's `doc`, each reference's `doc`/`source`) run ONCE, on the agent's
+     first pass for the task, as ordinary evaluations.
+   - Every later context is the agent's stored exchanges read back in order. Nothing is re-executed or
+     re-rendered.
+   - History goes in whole (the stored shown text exactly as the agent saw it), unclipped for now. Outside runs
+     are excluded.
+   - `result/<id>` is the live value, for the agent to dig into.
+   - Two presentations (REPL, DATA; §4.3) are compared by experiment and by asking the agents. A tie goes to
+     REPL.
+   - There are NO `;; =>` result comments anywhere (owner: "that sucks").
+4. **One pass per reply.** One read of the text and one clj-kondo analysis of the whole reply, joined to each form
+   by span. Everything downstream reads those two plus ONE batched query, never a query per value.
+5. **One machinery transaction per turn.** The turn pulls one database value at its start and writes its whole
+   record once at the end. The agent's own writes (`transact!`, messages, tasks) commit when its forms run, as at
+   a real REPL.
+6. **Lookups are standard Clojure:** `doc`, `source`, `dir`, `apropos` and `find-doc`, returning data, built on
+   SCI's `clojure.repl`. The database answers only what SCI cannot know: contracts, branch source, schema
+   keywords, tasks and test status.
+7. **The reader:** fenced code is code; a form that starts a line is code; everything else becomes a comment.
+   Imitated results are never evaluated and are flagged to the agent.
+8. **Done means proof tests are green.** `my.task/complete!` only bails, with a reason. A task needs its proof
+   tests before launch, `assign!` refuses tasks with no proof or already green, and outside runs never enter an
+   agent's history.
+9. **Budgets, measured every slice (§3).** No multi-second, multi-MB or GB Seon work. A number that gets worse
+   blocks the slice.
+10. **Delete what is slated before adding anything.** Reuse libraries. Understand the code before designing. Don't
+    rush. Use dual reviews. Owner approval comes before core code.
 
-## 2. The loop today (observed 2026-10-07, default on `722f110df`)
+## 2. The loop today (measured)
 
-The evidence: the one real model turn lane loop-pass captured
-(`loop-pass/runs/00-installed-turn-lp-add-2/`), the stored facts on that agent's branch `:agent-4512788dda3b`,
-and `src/seon/turn.clj` read from the driver down.
-
-**Driver.** `seon.turn/step` (turn.clj:5789) is the agent proc's Flow transform. It does all of this:
-- waits on a completion permit (`await-turn-permit!` :5600);
-- arms a backstop thread (`arm-turn-completion-backstop!` :5731);
-- counts consecutive refused writes and parks the agent at a bound (`write-refusal-bound` :5650,
-  `record-write-refusal-fault!` :5691);
-- derives work (`next-agent-work` :2833);
-- runs `turn` (:5450), which dispatches on a "situation": `:open`, `:call`, `:generate`, `:resume` or `:close`;
-- rewakes itself.
-
-**One model reply takes several passes and 5-6 commits.**
-
-| Turn | Commits | Time (provider included) |
+| What | Measured | Source |
 |---|---|---|
-| `76fb76c15e95` | 6: `open-call`, `plan-call`, 2 × `transact!`, `program-facts-call`, `error/commit-call` | 2.9 s |
-| `5908ecba9ec4` | 5 | 2.7 s |
+| A model turn, stub provider, warm | 2.1 s, 3.65 GB, ~400k checked calls, 0.94 MB written to the store, 6 machinery commits | r-turn |
+| the same turn with DeepSeek | 3.4 s, of which the provider took 1.4 s | r-turn |
+| its pre-turn system-turn "refresh" | ~80% of the turn: 1.3-2.3 s and 3-4 GB, mostly re-acquiring the agent's SCI context (`acquire-program!`) on every turn; 300-408 datoms written | r-turn, r-context |
+| the 6 machinery commits | refresh, `open-call`, context capture (the whole prompt again, so storage grows quadratically), attempt, `plan-call`, settlement (the close is inside it) | r-turn, r-record |
+| MCP SCI `(+ 1 2)` | already ONE commit (`submission-open-tx` + `with-submission`): 27 datoms, ~150 KB, 205-358 ms, 159-232 MB | r-record |
+| a `defn` | settlement 254 ms, 712-733 MB; a JVM-mode call right after it 1.3 s and 3.2 GB (context reload) | r-record |
+| the reply read | split, then a re-read per form, then a kondo parse per form (441 of 667 ms for 40 one-line forms). Splitting allocates roughly with the cube of the reply length: 76 KB took 4.1 s and 94 GB (lane `forgive-fix` is fixing this now) | r-read |
+| the system turn's `code-currency` | one `or`-plus-join query per value: 65-88 ms and ~150 MB each through Seon's query wrapper (raw Datahike 8 ms in total), 42 s for root | r-context |
+| reading 200 exchanges | raw index plus a narrow pull: ~8 ms and ~17 MB; `of-agent` 0.4-0.5 s and 0.8-0.95 GB; per-row text building 180-220 ms and 370 MB, against 3.3 ms for plain concatenation | r-context |
+| the per-commit store floor | ~130-150 KB, mostly Datahike's 26.7 KB index-root record written twice, plus ~4 KB per attribute touched | r-record |
+| profile measurement upserts | 51-78% of the datoms in larger settlements; read only by the health report | r-record |
 
-Each model turn is preceded by system-turn "refresh" runs of one commit each.
-1. `open-turn` (:4282) runs `system-turn` (:2030, `:write? true`): the generated opening reads ("changed since your
-   last turn": agent pull, steps, messages, settings, `dir`, runtime pull, `seon.error/for-agent` at 98,051 armed
-   calls). Then a separate `open-call` commit.
-2. `call-turn` (:4359):
-   - renders the prompt through the old multi-hop walk (`seon.cluster.prompt/prompt` :422 → `render/acquire-context!`)
-     and commits the context capture;
-   - calls `seon.ai/complete` with ONE prompt string and no system message;
-   - commits an attempt row, then an intent commit (`plan-tx`) holding the raw reply and result-less evaluation rows.
-3. `resume-turn`/`evaluate-sources` (:4857): the ONE fold `seon.batch/evaluate-batch`. Read (`read-row` :4663 via
-   `seon.sci.forgive`), eval (`evaluate-row` :4700 → `sci.eval/evaluate`), show (`show-row` :4728 → the value
-   printer), then the settlement commit.
-4. `close-turn` (:5238): a close commit.
+What the agent sees and does:
+- a transcript interleaved with ten "changed since your last turn" refresh units, outside setup runs, and a
+  1,241-token error list carrying a Seon core fault;
+- a reply full of fabrications, both `scratch.add2=> … #:seon.repl{…}` and `;; => 42` inside comments, with false
+  "verified" claims;
+- prompt markers stripped while their namespace is ignored, so a `defn` lands in `user`;
+- a prose-only reply that evaluates its first word.
 
-**What the agent saw.** A REPL transcript (`ns=> form`, then the real `#:seon.repl{…}`) interleaved with ten
-"changed since your last turn" refresh units:
-- root's setup runs made as the agent, including `seon.agent/settings!`;
-- a 1,241-token error list carrying a Seon core fault (`seon.sci.eval/shown-failure` got nil from
-  `seon.turn/show-row`);
-- "turns left".
+Origin is not one fact: `:seon.cluster.eval/author` lumps MCP runs and refreshes together as `:system`.
 
-**What the model did.** In its first reply it wrote `scratch.add2=> (defn …)` AND a fabricated `#:seon.repl{…}`
-result inside a code fence, then declared the task done. The reply reader strips prompt markers
-(`planned-sources` :3031, ":reply mode: prompt markers go"), so the defn ran in `user`, not `scratch.add2`. Its
-`clojure.test/run-test-var` could not resolve the test var from SCI. The shipped stop `user=>` would not have cut
-the fabrication, because the prompt is namespace-specific (`scratch.add2=>`). The old stop `#:seon.repl` would
-have.
+Broken now:
+- agent test runs are refused by a stale row on the cluster head (`user.sgprobe/fix`);
+- `of-agent` on root fails on stored read plans;
+- 17 open faults.
 
-**Related facts from today's lanes.**
-- Bare `source`, `apropos` and `find-doc` don't resolve.
-- `(dir ns)` costs 46-51 ms and about 9,000 armed calls to compute contracts that its render throws away.
-- Two readers of a reply (segments, then a re-read in `:reply` mode).
-- Two settlement writers (`seon.turn` and `turn.batch`).
-- A Seon core fault is shown to an agent as its own error.
+## 3. Budgets (owner)
 
-## 3. Phase 1: delete what is slated
+Measured on every slice with the S0 probe, before and after: wall ms, allocated bytes, checked calls, commits,
+store bytes and tokens shown.
 
-Each deletion converts every caller in the same commit and keeps HEAD bootable, with eval_clj/MCP and the tests
-working. The model pass keeps working throughout: deleting the old context and adding the forms context is one
-slice.
-
-| # | Delete | What replaces it |
+| Per pass, excluding the provider's own latency | Budget | Today |
 |---|---|---|
-| D1 | the old multi-hop context: `seon.cluster.prompt/prompt`'s walk, `render/acquire-context!`, `render.walk/history`, `render.web/derive-context!` and the debug context views, the context capture (`seon.context`), the system turn and its generated opening (`system-turn`, `declared-sources`, `generate-turn`, `append-generated-*`, `system-plan`), and the read evidence only the refresh read | `context`: the opening forms plus the agent's own evaluations, read from the database and cached (§4). The debug ledger reads `eval/of-agent`. |
-| D2 | run machinery: `open-call`/`open-turn`, `next-id`, `plan-call`/`plan-tx` (the intent commit), `close-turn`/`close-tx`, `recover-tx`/`recover-call`, `close-escaped-run!`, the situations dispatch | one pass: context → provider → fold → ONE settlement (§4) |
-| D3 | the completion permit and backstop (`await-turn-permit!`, `arm-turn-completion-backstop!`, `turn-completion-*`, `record-turn-backstop-fault!`), write-refusal parking (`write-refusal-*`), `agent-dial`, `episode-exhausted!`, turns-left/episodes, `opening-deferred?`, `unanswered-*`, `my.agent/done` disposition, `record-interruption!` | three bounds only: provider timeout, SCI time limit, model calls per wake. Disarm joins the transform under the caller's deadline. |
-| D4 | the second settlement writer (`turn.batch/settle`'s run-shaped `record-facts`) | the one settlement owner, used by MCP, JVM and test entrants too |
-| D5 | the second reply read (segments, then `:reply` re-read) | one read (§4) |
-| D6 | duplicate lookup machinery (`directory-value`, `program-documentation`, the second refer installer, `my.program/source`) | the standard lookups on SCI's `clojure.repl` |
+| Seon's total work | < 200 ms | 2.1 s |
+| allocation, beyond the agent's own forms | < 5 MB | 3.65 GB |
+| machinery commits | 1 | 6 |
+| context read at N = 200 exchanges | < 10 ms, < 5 MB | 8 ms, 17 MB (narrow read) |
+| store bytes per pass | < 50 KB | 0.94 MB |
 
-Spec §5's estimate: about 3,500 lines out, 550 in. Each slice reports its measured net.
+The store-bytes budget cannot be met by Seon alone: the ~130 KB per-commit floor is Datahike's index-root record.
+Section 6, decision 3 covers it.
 
-## 4. The loop after (one pass)
+Any non-agent, non-provider operation over 1 s or 10 MB is stop-and-fix at its producer.
+
+## 4. The design
+
+### 4.1 One pass, all entrants
 
 ```
-wake (an outside message, or the agent still working with calls left)
-  → context  = [(help)] [(doc 'the/task)] [(doc ref) / (source ref) …] [agent's own forms + their shown results]
-                every opening form run through the one path, values cached by definition digest; history read
-                from the agent's stored evaluations (origin :model; outside runs excluded)
-  → seon.ai/complete (system = (help)'s text only if experiments show it helps; stop = the result marker)
-  → read   ONE reader: fences are code, a form that starts a line is code, the rest are comments,
-           imitated results are flagged and never run
-  → eval   SCI, in the agent's world, in its current namespace (carried on the agent)
-  → record ONE transaction: evaluation rows + the provider call row + agent facts (answered-t, current-ns, ordinal)
-  → print  the value printer, per form; the shown text IS the history the next context appends
-  → completion: if the forms changed code the task's proof tests reach, run them (my.test/check); all green →
-           the task is complete and its creator is notified
+entrant (model wake | MCP eval_clj | test member)
+  → forms text   model: the provider reply to the context (4.3); MCP/test: the given code
+  → READ once    the one reader (4.2) → ordered forms with their spans and comments
+  → ANALYZE once ONE clj-kondo run over the whole text → definitions, calls, keywords, per form by span
+  → EVAL         SCI in the agent's world, in its current namespace (carried on the agent), forms in order;
+                 the agent's own writes commit as they run
+  → RECORD once  ONE transaction from the turn's start value plus what it observed: evaluation rows
+                 (source, shown text, origin, ordinal, ns), program facts of its definitions (from the
+                 analysis + one batched digest query), the provider call row, agent facts (current-ns,
+                 answered basis, ordinal); validated by the writer
+  → PRINT        the value printer per form; the shown text is the agent's next context and the MCP reply
 ```
 
-**One presentation: pure data (owner, 2026-10-07).** We control the context. It is ONE value, rebuilt each call:
-a vector of exchange maps, one per form, each holding its namespace, form, outcome and handle together. It is
-printed by the one value printer, with the same budget and dig forms as any value. There are no prompts, no
-`;; =>`, and no prose between exchanges. The opening forms are the first maps, and the agent's forms (multi-form
-is fine) follow in order:
+The existing one-commit MCP path (`submission-open-tx` + `with-submission`, r-turn §6) becomes the one owner;
+model and test entrants join it. The two settlement writers become one: today `turn.batch/settle` serves only
+JVM-mode MCP, and `seon.test.runner/record-tx` is a third (r-record).
 
-```clojure
-[#:seon.repl{:ns user, :form "(help)", :value {…the protocol as data…}, :result result/e0a1b2}
- #:seon.repl{:ns user, :form "(doc 'scratch.add2/add-one-returns-its-argument-plus-one)", :value {…task…}, …}
- #:seon.repl{:ns scratch.add2, :comment "I'll add and subtract.",
-             :form "(+ 1 1)", :value 2, :result result/e1a2b3, :ms 0}
- #:seon.repl{:ns scratch.add2, :form "(- 10 2)", :value 8, :result result/e4d5e6, :ms 0}
- #:seon.repl{:ns scratch.add2, :form "(foo 1)", :error {…the error map…}, :result result/e7f8a9}]
-```
+Origin becomes one enum on the evaluation: `:opening`, `:model`, `:outside` or `:test`. "Answered" is
+re-derived without the run's open-before-reply ordering, which one transaction removes (r-turn §5.9).
 
-- Each map is exactly the reply map MCP returns, plus `:form` and `:ns`, so there is one format everywhere.
-- The agent's prose before a form becomes that exchange's `:comment`.
-- The agent's own reply is plain code (fences, or forms that start a line; prose becomes comments), so it never
-  resembles the transcript.
-- A reply that writes an exchange-shaped map (`:value`/`:result` keys) as if it were a result is flagged by the
-  reader and never run.
-- "Calls left", if shown, is one key on a final map, not prose.
+Bounds: the provider timeout, the SCI time limit, and model calls per outside wake, with root's messages counting
+as wakes (r-turn finding 8).
 
-**One machinery transaction per turn (owner, 2026-10-07).** The turn pulls one database value at its start, and
-the turn machinery writes ALL of its own record of the turn in ONE transaction at the end: evaluation rows, the
-program facts of the turn's `defn`s, the provider call row and the agent facts (current namespace, answered basis,
-ordinal). The agent's own writes (`transact!`, messages, task writes) are its actions: each commits when its form
-runs, as at a real REPL, and later forms read them normally. A turn whose forms write nothing therefore costs
-exactly one commit; each explicit agent write adds its own. A crash before the end loses the turn's record, never
-an agent write that already committed.
+### 4.2 The reader
 
-**Nothing is re-executed (owner, 2026-10-07: "We don't want to keep re-executing forms so we need to cache
-intelligently").** The opening forms (`(help)`, the task's `doc`, each reference's `doc`/`source`) are evaluated
-ONCE, on the agent's first pass for its task, through the one path. They are recorded as ordinary evaluations with
-stored shown text. Every later call's context is the stored exchanges read back (the opening ones, then the agent's
-own) in order: one indexed read, nothing re-run or re-rendered. As in a real REPL session, earlier output does not
-change. The agent sees change through its own later forms, and re-runs `(doc x)` when it wants fresh documentation.
-`seon.cache` speeds up evaluation itself (`doc`/`source` keyed by definition digest, the printer's work) and is
-never a second store of context.
+- One read of the text. The single-read stage already exists (`turn.batch/code-request` + `sci.batch/read-next`,
+  used only by tests); production adopts it, and split-then-reread is deleted.
+- Rules:
+  - a fenced body is code, a bare symbol included;
+  - a form starting a line is code;
+  - prose and Markdown become `;;` comments kept with the next form, and trailing prose is kept;
+  - a prose-only reply gets the "no form" refusal.
+- `ns=>` prompt markers: either removed together with the REPL presentation, or honored with their namespace
+  (S6 decides; r-read finding 10).
+- Imitated results (result-shaped maps, or result claims in comments after a form) are never evaluated and are
+  reported to the agent as data.
+- The reader is a function value chosen per agent through settings, for experiments.
 
-**Two presentations, decided by evidence (owner, 2026-10-07).** "I'd prefer if it was closer to a normal REPL
-but I want to follow the evidence and ask the agents." Both are small context functions over the same stored
-exchanges, chosen per agent by a settings value. Neither is a second system.
-- **REPL**, closest to a real REPL. Each form is shown as `ns=> form` and followed immediately by what a REPL
-  prints: its value through the value printer, or its error. There is no `;; =>` and nothing interleaved. The
-  agent's prose comments sit above the form, as it wrote them.
-- **DATA**: the vector of exchange maps shown above.
+### 4.3 Context
 
-S6 runs the same micro-tasks under both and measures:
-- protocol followed;
-- invented results, counted;
-- forms that error;
-- calls to finish;
-- correctness.
+- **First pass of a task:** the opening forms evaluate through the pass with origin `:opening`.
+- **Every pass:** read the agent's `:opening` and `:model` exchanges in order with ONE narrow index read
+  (agent → ordinal → source + shown + comment), and concatenate. There is no per-row query and no value-printer
+  re-print of history (re-printing clips it: r-context finding 7).
+- **REPL presentation:** each form exactly as sent, then immediately its shown result, like a real REPL. The
+  agent's prose comments sit above the form. No result comments, no `;; =>`.
+- **DATA presentation:** each exchange as a map holding its stored strings (`:ns :form :shown`), concatenated, never
+  re-printed as one value.
+- Two small functions over the same read, picked by agent settings; S6 keeps one.
+- A system message only if S6 shows it helps, and then exactly `(help)`.
 
-After each run, a separate feedback turn asks the agent how the transcript read. If the evidence is a tie, REPL
-wins (owner preference). The loser's function is deleted.
+### 4.4 Lookups
 
-Targets: one commit per model reply; Seon's own work per pass under 200 ms beyond the provider; the context
-render with no reference changed under 10 ms warm.
-
-## 4b. Budgets: measured on every slice, never exceeded (owner, 2026-10-07)
-
-"Measure everything. DO NOT LET MULTI SECOND, MULTI MB OR GB ANYTHING happen. Period."
-
-The S0 probe measures each stage of one pass, and every slice reports the numbers before and after:
-- wall ms;
-- allocated bytes (`ThreadMXBean/getTotalThreadAllocatedBytes`, plus per-thread for the pass's own threads);
-- armed calls;
-- commits;
-- bytes written to the store;
-- tokens shown.
-
-| Per pass, excluding the provider's own latency | Budget |
-|---|---|
-| Seon's total work (context read, read, eval overhead, record, print) | < 200 ms |
-| allocation | < 5 MB plus what the agent's own forms allocate |
-| commits | 1 |
-| store bytes written | < 50 KB plus the agent's own data |
-| context read for N stored exchanges | O(N) on one indexed read, < 10 ms at N = 200 |
-
-Any operation over 1 s or over 10 MB that is not the agent's own work, or the provider's, is a STOP-AND-FIX
-finding: it is fixed at its producer before the slice lands, never scheduled. Today's baseline breaks these
-budgets: `(+ 1 2)` allocates about 150 MB, a one-line `defn` 0.3-0.8 GB, and a model turn makes 5-6 commits. The
-Datahike planner fix and S1/S4 exist to bring them inside. A slice that makes any number worse does not land.
+The repl-lookup design (`../repl-lookup/design-notes.md`), whose claims r-context verified. SCI's `clojure.repl`
+does names, apropos and find-doc; Seon adds `doc` for program functions (contracts), schema keywords, tasks and
+tests, and `source` from the branch. Duplicates are deleted. `(help)` is rewritten: the formatted protocol, no
+retired mechanics.
 
 ## 5. Order of work
 
-| Slice | What | Proof | Gate |
-|---|---|---|---|
-| S0 | **Baseline probe** committed as a test: one model turn with a fixture provider reply (`:seon.ai/send!` as a value), measuring commits, ms per stage and armed calls | test plus numbers in notes | root |
-| S1 | **D1 + the forms context** (help as data, the task's doc, references, own history), one slice so the model pass never breaks | the S0 probe: same forms evaluate, the context contains no walk unit, fewer commits | design note → dual review → owner |
-| S2 | **The reader (D5)**: one read with the line-start rule and imitated-results flag; the read stage as a swappable function value | table test over live-run replies | design → dual review → owner |
-| S3 | **Lookups (D6)**: the repl-lookup design (already written, under review) | table test, one row per kind | dual review → owner |
-| S4 | **D2 + D3 + D4**: one pass, one settlement, three bounds | S0 probe: 1 commit per reply, ms per stage | design → dual review → owner |
-| S5 | **Completion**: proof tests run after a pass, `complete!` for bailing, `assign!` refuses tasks with no proof or already green | tests on data | design → dual review |
-| S6 | **Live experiments on DeepSeek**, unlimited usage, through the real loop. Variants are swappable read and context functions picked by agent settings (data). Measured: protocol followed, invented results, calls to finish, correctness. A separate feedback turn after each run. Results stay in the database. | transcripts plus tables | owner reads the results |
+Each slice is preceded by understanding (traced) and a design note, followed by a dual review of the design, owner
+approval, code, a dual review of the diff, then root's restart. Every slice reports its S0 numbers.
 
-Datahike stability (fork fixes for wrong answers, then the gitlink bump) and the one approved reset run before S1,
-so the slices work on a stable store. The `dh-fix` work is preserved in `stopped-wip/dh-fix-fork.patch`.
+| # | Slice | Deletes | Adds | Gate |
+|---|---|---|---|---|
+| P0 | **Stability.** Land `forgive-fix` (cubic read). Bump the Datahike gitlink to the reviewed fork (wrong-answer and stale-plan fixes). Remove the stale `user.sgprobe/fix` row with `my.program/remove-ns!` so tests run, rather than resetting now. Retire leftover probe branches. | dead code (444 lines, r-delete) | — | diff reviews |
+| S0 | **Baseline probe.** One turn per entrant (model through a local HTTP fixture endpoint set in agent settings, which needs no code change, r-turn; MCP SCI; MCP JVM; test), recording every budget metric. | — | a test plus a probe form | root |
+| S1 | **Lookups** (repl-lookup design) and **help** rewrite | D6 (`directory-value`, …, ~133 lines) | thin layer on SCI | design → owner |
+| S2 | **The system turn.** Delete it and the generated opening seeded at agent creation; debug views read `of-agent` with an explicit selector. This is the biggest budget win (~80% of a turn). Re-measure `acquire-program!` after it. | D1 parts a-b (~1,970 lines) | — | design → owner |
+| S3 | **Context:** the opening as origin `:opening`, the narrow history read, REPL and DATA functions at the existing prompt seam. Delete the old prompt, walk and capture. | D1 part d (~850 lines) | context functions | design → owner |
+| S4 | **One pass:** one read, one kondo analysis, one batched digest query, one machinery transaction, the origin enum, re-derived answeredness, three bounds, all entrants. Delete the run machinery, permits, backstop, parking, episodes, the second and third settlement writers, split-then-reread, and the refresh-only attributes (read evidence, `executed`, `code-evidence`, …). | D2-D5 + D1 part c (~3,000 lines) | the one pass (target < 600 lines) | design → owner |
+| R | **The one reset**, after S4 retires the schema attributes. Runtime tasks persisted first (`persist-tasks`, uncommitted, re-checked). | — | — | owner approved |
+| S5 | **Completion:** proof tests run after a pass that changed reached code; `complete!` bails; `assign!` refuses. SCI test running fixed (`run-test-var` throws; r-read finding 7). | `my.agent/done`, turns-left | ~100 lines | design → owner |
+| S6 | **Live experiments on DeepSeek** (unlimited) through the real loop. REPL vs DATA; prompt-marker handling; system role vs first form; stop on vs off. Measured: protocol followed, invented results, calls to finish, correctness. A separate feedback turn after each run. | the losing variants | — | the owner reads the results |
 
-Every slice: understanding first (owners read and traced at the REPL), a design note before code, the smallest
-diff, a net-lines count, before/after numbers on the S0 probe, a dual review of the diff, then root restarts
-default.
+Net: about 5,700 lines are slated (r-delete). Adds are targeted under 1,000.
 
-## 6. Decisions for the owner
+Stop-and-fix items folded into the slices above, each with its owner:
+- `acquire-program!` re-acquisition per turn: S2, then measure;
+- the per-value query in `code-currency`: deleted with S2; the query shape itself (`seon.db/an-or-clause-joined-to-a-pattern-costs-a-scan-per-binding`) is fixed in `seon.db` within S4's batched digest query;
+- per-form kondo: S4;
+- `defn` at 700 MB: S4, measured;
+- profile measurement upserts: S4 writes them only when significant, or they move off the turn transaction;
+- the 17 MB narrow history read: S3.
 
-1. The guard against invented results, with the data transcript: the agent's reply is code and the transcript is
-   data, so the formats differ. The reader flags exchange-shaped maps. A stop sequence is likely unnecessary
-   (none shipped); S6 measures invented results on DeepSeek, and adds a stop only if they occur.
-2. History is "all of it, unclipped, for now". Confirm that this means each stored evaluation's shown text exactly
-   as the agent saw it (nothing re-rendered).
-3. Approve this plan as the replacement for `docs/seon/specs/agent-loop.md` and the order S0 → S6.
+## 6. Decisions for the owner (after review)
+
+1. **P0:** remove the stale row now and run the one reset after S4, which retires the schema, instead of resetting
+   now and again later.
+2. **Subtree counts** (dh-fix): store child counts in branch nodes (persistent-sorted-set format change; it also
+   ends whole-range counting). Alternatives: count at each split (up to 64 reads per split), or a recount job.
+3. **The store-bytes budget:** Datahike writes the index-root record twice per commit (~53 KB). Options: (a) accept
+   ~150 KB per pass for now, the commit-count cut (6 → 1) being the big win; (b) a Datahike change to write the
+   root once and make it smaller. Recommendation: (a) now, with (b) tasked.
+4. Approve this plan as the replacement for `docs/seon/specs/agent-loop.md`.
