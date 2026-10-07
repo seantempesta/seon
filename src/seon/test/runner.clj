@@ -856,7 +856,7 @@
           (recur (into (pop pending) (edges node)) (assoc! resolved item node))))
       (persistent! resolved))))
 
-(defn- reach-graph
+(defn- reached-graph
   "The nodes and schema nodes the requested tests reach. A node is cached
   under its declaration's whole reach row (digest and graph facts), never
   under the digest alone: calls derived from the declaration population are
@@ -879,6 +879,20 @@
         nodes (reach-fixed-point node-of ::out (set test-symbols))]
     {::nodes nodes
      ::schemas (reach-fixed-point schema-node-of ::keys (into #{} (mapcat ::keys) (keep val nodes)))}))
+
+(defn- reach-graph
+  "`reached-graph` of the requested tests; a committed value's graph is cached
+  under the revisions of the attributes it reads (`reach-revision-key`), so the
+  requests and recordings of one program share it."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                  [:map [::nodes [:map-of :seon.schema/value [:maybe :map]]]
+                   [::schemas [:map-of :seon.schema/value [:maybe :map]]]]]}
+  [database test-symbols]
+  (if-let [revisions (reach-revision-key database)]
+    (cache/lookup ::reach-graph [revisions (set test-symbols)]
+                  (fn [{::keys [nodes schemas]}] (* 64 (+ (count nodes) (count schemas))))
+                  #(reached-graph database test-symbols))
+    (reached-graph database test-symbols)))
 
 (defn- reach-successors
   "Each of `items`' successors as positions in `items`, one int array per item."
@@ -1066,13 +1080,7 @@
 (defn- reach-entries
   "The requested tests' reach index on this database value, committed or not,
   beside the reached nodes. The index is cached by the exact reached graph
-  content, so readers share one derivation across unrelated commits.
-
-  ## Costs
-
-  - Default 2026-10-07, all 2,365 tests, cold: the reached graph 119 ms and
-    194 MB with its nodes cached, [[reach-index]] 140 ms and 222 MB unarmed;
-    the per-test closures it replaced took 2,974 ms and 3.37 GB armed."
+  content, so readers share one derivation across unrelated commits."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
   [database test-symbols]
   (if (empty? test-symbols)
@@ -1210,6 +1218,13 @@
                        projection ::program-digest-read-attributes
                        #(program-digest-read-attributes projection)))]))))
 
+(defn program-revisions-digest
+  "The digest of `database`'s `program-revisions`, or nil for a value with no
+  committed context."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.test.run/program-revisions]]}
+  [database]
+  (some->> (program-revisions database) (id/digest 64)))
+
 (defn program-digest
   "The tested program's identity: the digest of the commit the tests read.
   Datahike derives the commit id from the committed value's content
@@ -1237,13 +1252,15 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.test.run/provenance :seon.test.run/unavailable-error]]}
   [database]
-  (let [digest (program-digest database)]
+  (let [digest (program-digest database)
+        revisions (program-revisions-digest database)]
     (if (seon.error.refusal/error? digest) digest
-        {:seon.test.run/id (id/id)
-   :seon.test.run/at (java.util.Date.)
-   :seon.test.run/program-digest digest
-   :seon.test.run/basis-t (db/basis-t database)
-   :seon.test.run/branch (get-in database [:config :branch])})))
+        (cond-> {:seon.test.run/id (id/id)
+                 :seon.test.run/at (java.util.Date.)
+                 :seon.test.run/program-digest digest
+                 :seon.test.run/basis-t (db/basis-t database)
+                 :seon.test.run/branch (get-in database [:config :branch])}
+          revisions (assoc :seon.test.run/program-revisions revisions)))))
 
 (def ^:private report-occurrence-attributes
   ;; The facts `failure-identity` leaves out of the captured signature, which

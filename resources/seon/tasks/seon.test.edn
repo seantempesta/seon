@@ -112,4 +112,8 @@
             "seon.test/recorded-result answers 'No admitted execution is recorded for this test.' for seon.db-overhead-test/query-preparation-has-bounded-armed-work on a fresh agent branch (agent context-mockups-probe, no definitions of its own), while the cluster head records it green (3 pass, run d53047e80b84). Evidence is read per branch, so every proof in a task brief rendered in the agent's world shows unrun until the agent reruns it (7.8 s for this one test). Done when a branch whose program reach digest equals the recorded member's reach-digest reuses that result, asserted on a forked branch.",
             :must-read #{seon.test/recorded-result},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name "selection-reads-the-whole-history-since-the-last-run",
+            :kind :function,
+            :intent "seon.test/changed-definition-symbols (in seon.test/select, every request, :named included) and seon.test.runner/program-written-since? (admission) query (db/since (db/history db) basis) with bound attributes, which costs in proportion to those attributes' whole history, not the datoms since basis: 41-660 ms per select on default (2026-10-07, my.test/check of one named test), program-written-since? 628 ms cold in a check JVM. Done when both compare Datahike attribute revisions (or read only the tx range since basis) and a one-test select costs tens of ms whatever the history.",
+            :must-read #{seon.test/select seon.test.runner/program-revisions}}]

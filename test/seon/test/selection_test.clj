@@ -533,3 +533,22 @@
             (is (not= changed (digest))))))
       (finally ((requiring-resolve 'seon.fs/delete-recursively!)
                 (.getCanonicalPath (io/file "tmp")) (.getCanonicalPath root))))))
+
+(deftest ^{:seon/tasks #{'seon.test/selection-reads-the-whole-history-since-the-last-run
+                         'seon.test.runner/admission-filters-the-whole-program-history}}
+  an-unchanged-program-is-selected-and-admitted-without-reading-its-history
+  ;; Equal program revisions between the last run and this value prove no
+  ;; program write: neither selection nor admission scans history since it.
+  (support/with-database
+   (fn [connection]
+     (let [scans #{'seon.test/changed-definition-symbols 'seon.test.runner/program-written-since?}
+           request #(sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/changed ['seon.id-test/identity-is-a-function-of-the-values-structure]})
+           [first-run first-scans] (support/armed-calls scans request)
+           [second-run second-scans] (support/armed-calls scans request)]
+       (is (true? (:seon.test/passed? first-run)))
+       (is (= 1 (:seon.test/reused-count second-run)) "the second request reuses the first's green")
+       (is (zero? (get first-scans 'seon.test.runner/program-written-since?)))
+       (is (= {'seon.test/changed-definition-symbols 0 'seon.test.runner/program-written-since? 0} second-scans))))))

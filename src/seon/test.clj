@@ -764,6 +764,7 @@
                      :seon.test.run/include-long? :seon.test.run/input-digest
                      :seon.test.run/loaded-commit-id
                      :seon.test.run/basis-t :seon.test.run/selection-tx
+                     :seon.test.run/program-revisions
                      :seon.test.run/namespaces :seon.test.run/identities
                      :seon.test.run/members :seon.test.run/covered-by
                      :seon.test.member/symbol :seon.test.member/reasons
@@ -820,12 +821,18 @@
             completed (filter #(and (seq (members %)) (every? complete? (members %))) runs)
             last-green (last (filter #(every? green? (members %)) completed))
             comparison (or supplied-basis (some-> (last completed) (one :seon.test.run/basis-t)))
-            removed-files (when comparison
+            ;; The last run's tested revisions equal this value's: no program
+            ;; attribute was written since its basis, so nothing changed.
+            unchanged? (and (nil? supplied-basis)
+                            (some-> (last completed) (one :seon.test.run/program-revisions)
+                                    (= (runner/program-revisions-digest database))))
+            changes-since (when-not unchanged? comparison)
+            removed-files (when changes-since
                             (selection-read!
                              (db/q '[:find [?path ...] :in $ $changes
                                      :where [$changes ?file :seon.fn.file/relative-path ?path _ false]
                                             (not-join [?file] [?file :seon.fn.file/relative-path])]
-                                   database (db/since (db/history database) comparison))))
+                                   database (db/since (db/history database) changes-since))))
             first-run? (and (= :incremental policy) (or (nil? last-green) (seq removed-files)))
             pending (reduce (fn [result run]
                               (reduce (fn [result member]
@@ -836,13 +843,13 @@
                                       result (members run)))
                             {} (if last-green (drop-while #(<= (one % :seon.test.run/selection-tx)
                                                                 (one last-green :seon.test.run/selection-tx)) runs) runs))
-            observed-changed (if comparison (changed-definition-symbols database comparison) #{})
+            observed-changed (if changes-since (changed-definition-symbols database changes-since) #{})
             requested-changed (selection-read! (selection-seeds database (vec (:seon.test/changed request))))
             changed (into observed-changed requested-changed)
-            schema-changes (when (and comparison (= :incremental policy) (not first-run?))
+            schema-changes (when (and changes-since (= :incremental policy) (not first-run?))
                              (selection-read!
                               (db/q '[:find [?e ...] :in $ [?attribute ...] :where [?e ?attribute]]
-                                    (db/since (db/history database) comparison)
+                                    (db/since (db/history database) changes-since)
                                     [:seon.schema/key :seon.schema/edn])))
             _ (when (seq schema-changes)
                 (refuse! :seon.test/coverage-unknown "Schema changes require proven bounded dependencies." (vec schema-changes)))
@@ -1201,7 +1208,11 @@
         branch (get-in (db/schema-database database) [:config :branch])
         ;; The writer's value has no commit id, so the digest memo cannot name it;
         ;; with no program write since the tested basis its digest is the tested one.
-        digest (if (or snapshot? (false? (runner/program-written-since? database (:seon.test.run/basis-t run))))
+        ;; The caller found the tested revisions unchanged at a basis; at that same
+        ;; basis nothing has been written since, else the history decides.
+        digest (if (or snapshot?
+                       (= (:seon.test.run/unchanged-through-t request) (db/basis-t database))
+                       (false? (runner/program-written-since? database (:seon.test.run/basis-t run))))
                  (:seon.test.run/program-digest run)
                  (runner/program-digest database))
         entity (-> (merge (select-keys request
@@ -1215,7 +1226,7 @@
                                     [:seon.test.run/id :seon.test.run/at :seon.test.run/git-sha
                                      :seon.test.run/published-base-digest :seon.test.run/overlay-input-digest
                                      :seon.test.run/program-digest :seon.test.run/basis-t
-                                     :seon.test.run/callers-at-head
+                                     :seon.test.run/program-revisions :seon.test.run/callers-at-head
                                      :seon.test.run/branch :seon.test.run/tested-branch]))
                 (cond-> cluster-id (assoc :seon.test.run/cluster cluster-id)
                   (:seon.source/commit-id cluster-entity)
@@ -2378,6 +2389,12 @@
                                      (and (zero? index) (seq exclusion-entities))
                                      (assoc :seon.test.run/exclusions exclusion-entities)
                                      (pos? index) (dissoc :seon.test.run/covered-by))
+                               ;; decided here on the committed head, checked at the writer by its basis
+                               head (db/db recording)
+                               entity (cond-> entity
+                                        (some-> (:seon.test.run/program-revisions batch-provenance)
+                                                (= (runner/program-revisions-digest head)))
+                                        (assoc :seon.test.run/unchanged-through-t (db/basis-t head)))
                                report (own-write! `admit-run (write! recording [[:db.fn/call admit-run entity]]))]
                            (if (:seon.error/at report)
                              report

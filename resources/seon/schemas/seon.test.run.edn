@@ -3,6 +3,8 @@
                 :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.test.run/run}],
                 :program-digest [:and {:seon.db/identity false} :seon.source/digest],
                 :basis-t :seon.db/basis-t,
+                :program-revisions [:and {:seon.db/identity false :description "Digest of the tested value's Datahike revisions of every program attribute, with its connection, generation and conservative revision (`seon.test.runner/program-revisions`). A later value of the same connection with the same digest has had no program attribute written since; another connection's value never has it."} :seon.source/digest],
+                :unchanged-through-t [:and {:description "The recording head's basis at which the admitting caller found the tested program revisions unchanged. The writer trusts it only at that same basis."} :seon.db/basis-t],
                 :published-base-digest [:and {:seon.db/identity false :description "Digest of the published base resolved before overlay admission. This identifies the base, not the overlaid program."} :seon.source/digest],
                 :overlay-input-digest [:and {:seon.db/identity false :description "Digest of the complete declared input inventory of the tested HEAD-plus-paths snapshot. Checkout bytes omitted from the snapshot never contribute."} :seon.source/digest],
                 :snapshot
@@ -47,6 +49,7 @@
                  [:seon.test.run/include-long? :seon.test.run/include-long?]
                  [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
                  [:seon.test.run/change-basis-t {:optional true} :seon.test.run/change-basis-t]
+                 [:seon.test.run/unchanged-through-t {:optional true} :seon.test.run/unchanged-through-t]
                  [:seon.test.run/namespaces {:optional true} :seon.test.run/namespaces]
                  [:seon.test.run/identities {:optional true} :seon.test.run/identities]
                  [:seon.test.run/exclusions {:optional true} [:vector :seon.test.selection/exclusion]]
@@ -98,6 +101,7 @@
                  [:seon.test.run/at :seon.test.run/at]
                  [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]
                  [:seon.test.run/program-digest :seon.test.run/program-digest]
+                 [:seon.test.run/program-revisions {:optional true} :seon.test.run/program-revisions]
                  [:seon.test.run/basis-t :seon.test.run/basis-t]
                  [:seon.test.run/branch :seon.test.run/branch]],
                 :destination [:map [:seon.test.run/branch :seon.test.run/branch]],
@@ -117,6 +121,7 @@
                  [:seon.test.run/git-sha {:optional true} :seon.test.run/git-sha]
                  [:seon.test.run/program-digest {:optional true} :seon.test.run/program-digest]
                  [:seon.test.run/basis-t {:optional true} :seon.test.run/basis-t]
+                 [:seon.test.run/program-revisions {:optional true} :seon.test.run/program-revisions]
                  [:seon.test.run/tested-branch {:optional true} :seon.test.run/tested-branch]
                  [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
                  [:seon.test.run/input-digest {:optional true} :seon.test.run/input-digest]

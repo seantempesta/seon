@@ -13,7 +13,8 @@
             [seon.test :as sut]
             [seon.render.test :as render.test]
             [seon.test.runner :as runner]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.turn.world :as world]))
 
 (defn- run-in-fixture
   "Request one indexed test on the fixture's branch through the one request owner."
@@ -184,7 +185,7 @@
 (deftest a-fresh-branch-with-unchanged-program-entities-derives-nothing
  ;; A nested request runs on a fresh branch that writes only non-program facts;
  ;; the digest is keyed by the closure content it reads, so it hits.
- (let [s 'seon.id-test/data-shape-and-explicit-length-determine-identity
+ (let [s 'seon.id-test/identity-is-a-function-of-the-values-structure
        read-reach (fn [write?]
               (support/with-database
                (fn [connection]
@@ -301,26 +302,12 @@
       (support/seed-cluster! connection "default")
       (let [namespace-name 'my.agents.reach-digest
             _ (support/transacted! connection [(support/namespace-entity (db/db connection) namespace-name)])
-            ctx (support/fork-cluster-ctx connection)
-            effective (seon.config/effective (db/db connection) "default")
             sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [entities] (apply max-key :seon.test/pass-count entities))"
                      "(clojure.test/deftest largest-customer-test (clojure.test/is (= {:seon.test/pass-count 9} (largest-customer [{:seon.test/pass-count 2} {:seon.test/pass-count 9}]))))"]]
-        (doseq [source sources]
-          (let [evaluation (support/evaluate
-                             {:seon.cluster.eval/source source
-                              :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                              :seon.sci.eval/ctx ctx
-                              :seon.sci.eval/time-limit-ms 10000
-                              :seon.sci.admit/caps (seon.config/result-caps effective)
-                              :seon.db/db (db/db connection) :seon.db/connection connection})
-                analysis (functions/analyze-forms (db/db connection)
-                           [{:seon.cluster.eval/source source
-                             :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                             :seon.program/row (:seon.program/row evaluation)}])
-                entity (when (vector? analysis) (second (first analysis)))]
-            (is (map? entity))
-            (when entity
-              (support/transacted! connection [(dissoc entity :seon.sci.eval/evaluated?)]))))
+        (support/define! (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                             :seon.sci.eval/base-ctx (seon.sci.eval/base-ctx (db/db connection))}
+                                            {:seon.agent/id "reach-digest"})
+                         namespace-name (str/join " " sources))
         (let [database (db/db connection)
               s 'my.agents.reach-digest/largest-customer-test
               f 'my.agents.reach-digest/largest-customer
