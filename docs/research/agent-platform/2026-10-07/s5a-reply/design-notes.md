@@ -176,3 +176,36 @@ held-equals-stored table above.
 - `my.program/callers` cannot see `seon.turn`'s `requiring-resolve` call to `form-problem` (the load-cycle delays hide
   the edge); this slice deletes that delay. Not filed separately: the delays are the known cycle workaround.
 - Default `:faulted` (task 3d2fb1b41dc8, linked by health).
+
+## v2 (after the dual review: `review-s5a-opus-notes.md`, `review-s5a-astra-notes.md`; root's rulings)
+
+(b) as written, plus the dangling references: `resources/seon/tasks/seon.turn.edn` must-read, `seon.db.edn`
+evidence, `seon.mcp.edn` must-read, `test/seon/schema/datahike_parity.edn` baseline, `sci/eval.clj` and `mcp.clj`
+docstrings, `turn.clj` `receipt-identity` docstring.
+
+(a) revised:
+- **One converter.** `seon.render.transcript/candidate-history`'s in-memory arm (`:seon.turn.loop/evaluated-sources`:
+  admitted form + evaluation + ordinal) is the one assembler for the page preview and the held reply. It is
+  generalized to: take the namespace from the evaluation's `[:seon.ns/name x]` when present (what the writer stores,
+  since the terminal assertion overrides the frozen row), else the form's; carry `:seon.cluster.eval/run [:seon.turn/id
+  id]` (the receipt's actual run, so the entity satisfies the installed `:seon.eval/entity` contract); and print a
+  receipt's `:seon.cluster.eval/faults` through the code extracted from `branch-errors` (one function over error refs,
+  same `floor-text` root via `entry-root`). `history-entries` renders in-memory entries with no database, so no
+  per-form query runs (EQUIVALENT for the preview: its ids are not stored yet).
+- **Source from the admitted form**, as that arm already does, so a `def` keeps its `:note`.
+- **Held = saved.** The SCI turn report gains optional `:seon.turn.loop/evaluated-sources`: each gated admitted form
+  with the receipt the settlement wrote as its evaluation. Batch success: the fault-windowed receipts the committed
+  transaction carried (read inside the commit phase, as today). Batch refusal and `settle!`'s refusal arm: receipts
+  only when the writer applied them (`open-run-tx-call` decides at the writer; applied iff the report's `:tx-data`
+  asserts this run's `:seon.turn/closed-tx`, which rides the same guarded block), else none. Refused-refusal: no
+  basis, answered as the refusal alone (today's behavior, unchanged). Every arm attaches it, including the
+  refused-but-recorded arm (`turn.clj` "refused-outcome" branch). `evaluate-source!` passes it through
+  (`:seon.agent/source-submission-result` gains the member). Faults are pulled on the settlement's `db-after`.
+- **JVM** input is `(:seon.batch/entries batch)` after `evaluate-batch` merged the settled state; one pure
+  `seon.turn.batch/entry-evaluation` (split out of `evaluation-record`, which keeps the run id and instant) maps an
+  entry to its evaluation for both the recording and the reply, so the reply holds exactly what was recorded.
+- The "changed since" marker is not touched (S4 deletes it); the JVM reply shows `:ms` because the held arm renders
+  without a database.
+- Regression table (data): ordinary, def `:note`, renderer, `in-ns` `:ns`, `set!` print-length, error,
+  not-admitted, completed disposition, faulted, refused settlement (held reply equals the stored response on the
+  basis), and JVM `:ms`.
