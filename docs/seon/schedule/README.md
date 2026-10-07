@@ -119,7 +119,6 @@ First classify the reds so slices can name whole namespaces, then S1b, then S2..
 - `seon.db/render-rejection-ai-fails-its-own-input-contract` [proof: no]
 - `seon.error/a-distance-zero-fault-render-omits-whether-it-is-open` [proof: no]
 - `seon.error/refusal-html-reads-as-fragments` [proof: no]
-- `seon.render.transcript/fault-problems-counts-occurrences-in-prose` [proof: unknown]
 
 ## Phase 3 — agent-loop prep slices (S1-S4; S1 may start beside errors S1-S2, spec Q8)
 

@@ -45,7 +45,6 @@ seon.repl	every-reply-repeats-open-faults	A	errors S6	no	file	occurrence attache
 seon.db	render-rejection-ai-fails-its-own-input-contract	A	errors S7	no	runtime->file	persisted; renders over the one map
 seon.error	a-distance-zero-fault-render-omits-whether-it-is-open	A	errors S7	no	file	fault render over the minimal model
 seon.error	refusal-html-reads-as-fragments	A	errors S7	no	file	render-html over the map and me/humanize
-seon.render.transcript	fault-problems-counts-occurrences-in-prose	A	errors S7	unknown	file	fault render over the map; count as data
 seon.cluster.prompt	a-later-wake-message-never-reaches-the-context	B	loop S1	no	file	live read: messages since :seon.agent/answered-t
 seon.cluster.prompt	an-agents-context-omits-the-faults-mcp-shows	B	loop S1	no	file	faults arrive as messages (errors S6) and context reads messages since answered-t
 seon.cluster.wake	wake-delivery-never-arrives-in-the-test-world	B	loop S1	unknown	runtime->file	persisted; loop/work's T1 tests need wake delivery in the test world
