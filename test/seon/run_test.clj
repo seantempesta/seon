@@ -120,7 +120,7 @@
         [diagnostic :as diagnostics] (:seon.batch/diagnostics b)]
     (is (= 1 (count diagnostics)))
     (is (= :observe (:seon.batch/stage diagnostic)))
-    (is (= 2 (count (get-in diagnostic [:seon.error/data :seon.batch/writes]))))
+    (is (= [42 nil] (:seon.error/offending diagnostic)) "the dropped values themselves, never printed copies")
     (is (= [(assoc good :seon.batch/ordinal 0)] (:seon.batch/writes b)) "only the good write is recorded")
     (is (= '[a] (values b)))))
 

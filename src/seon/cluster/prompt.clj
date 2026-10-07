@@ -20,7 +20,6 @@
             [seon.env :as env]
             [seon.print :as print]
             [seon.render :as render]
-            [seon.print.value :as print.value]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -158,12 +157,13 @@
                          agent-id))))
 
 (defn- refuse!
-  {:malli/schema [:=> [:cat :keyword :string] :nil]}
-  [rule message]
+  {:malli/schema [:=> [:cat :keyword :string [:maybe :seon.schema/value]] :nil]}
+  [rule message offending]
   (throw (ex-info message
-                  {:seon.error/message message
-                   ::rule rule
-                   :seon.cluster.prompt/refused rule})))
+                  (cond-> {:seon.error/message message
+                           ::rule rule
+                           :seon.cluster.prompt/refused rule}
+                    (some? offending) (assoc :seon.error/offending offending)))))
 
 (defn- missing-required-keys
   [explanation]
@@ -183,8 +183,9 @@
       (refuse!
        ::missing-input
        (if (seq missing)
-         (str "Prompt request is missing required input " (print.value/bounded-text missing) ".")
-         "Prompt request violates :seon.cluster.prompt/request.")))))
+         "Prompt request is missing required inputs; :seon.error/offending names them."
+         "Prompt request violates :seon.cluster.prompt/request.")
+       (when (seq missing) (vec missing))))))
 
 (defn- history-contributions
   "Price the exact retained entry segments whose concatenation is the prompt.
@@ -395,9 +396,8 @@
       (and (nil? (:seon.render.history/entries acquired))
            (seq (:seon.cluster.prompt/text acquired)))
       (refuse! ::missing-history-units
-               (str "Acquired context for agent "
-                    (pr-str (:seon.agent/id request))
-                    " carries prompt text with no history units to compose."))
+               "The agent's acquired context carries prompt text with no history units to compose."
+               (:seon.agent/id request))
 
       :else
       (let [selection (select (vec (:seon.render.history/entries acquired))

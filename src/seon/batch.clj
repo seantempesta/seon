@@ -417,7 +417,7 @@
                      (update :seon.batch/diagnostics conj
                              {:seon.error/message (str "observe: " (count bad) " observed writes are not writes and were dropped")
                               :seon.batch/stage :observe :seon.batch/ordinal n
-                              :seon.error/data {:seon.batch/writes (vec (take 3 (map #(if (= ::nil-write %) nil (print.value/bounded-text %)) bad)))}}))
+                              :seon.error/offending (mapv #(when-not (= ::nil-write %) %) bad)}))
                    (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) good)
                    (assoc :seon.batch/form-writes (vec good))))))))
 

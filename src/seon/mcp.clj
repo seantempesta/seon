@@ -16,7 +16,6 @@
             [clojure.data.json :as json]
             [clojure.string :as str]
             [malli.core :as m]
-            [malli.error :as me]
             [malli.json-schema :as json-schema]
             [my.agent]
             [seon.batch]
@@ -298,8 +297,13 @@
   [schema value]
   (let [value (or value {})]
     (if-let [explanation (m/explain schema value)]
-      (refused (str "Invalid arguments: " (print.value/bounded-text (me/humanize explanation)))
-               :seon.mcp/arguments (m/form schema) value)
+      (assoc (refused "Invalid arguments; :seon.error/problems names each failing path."
+                      :seon.mcp/arguments (m/form schema) value)
+             :seon.error/problems (mapv (fn [{:keys [in schema value]}]
+                                          {:seon.error/path in
+                                           :seon.error/expected (m/form schema)
+                                           :seon.error/offending value})
+                                        (:errors explanation)))
       value)))
 
 (defn- eval-clj
@@ -382,7 +386,7 @@
              (cond
                (:seon.error/at value) [[(printed value request nil nil)] true]
                (nil? schema)
-               [[(printed (refused (str "Unknown tool " (print.value/bounded-text tool) ".") :seon.mcp/name
+               [[(printed (refused "Unknown tool; :seon.error/expected names the tools." :seon.mcp/name
                                    (mapv :seon.mcp/name tool-table) tool)
                           request nil nil)] true]
                (:seon.error/at valid) [[(printed valid request nil nil)] true]
