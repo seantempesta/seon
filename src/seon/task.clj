@@ -164,11 +164,24 @@
                         :else [(by-id id)]))))
           (sort (into (set (keys stored)) (keys by-id))))))
 
+(defn- symbol-tx
+  "`[:db/add task :seon.task/sym ns/name]` for every stored task, file or runtime, that carries
+  no symbol yet: the symbol is derived from its ns and name like its handle."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
+  [database]
+  (if (contains? (:schema database) :seon.task/sym)
+    (let [unnamed (db/q '[:find ?e ?ns ?name :where [?e :seon.task/id] [?e :seon.task/ns ?ns] [?e :seon.task/name ?name]
+                          (not [?e :seon.task/sym])] database)]
+      (when (read-error unnamed) (throw (ex-info (:seon.error/message unnamed) unnamed)))
+      (mapv (fn [[e ns task-name]] [:db/add e :seon.task/sym (task-sym ns task-name)]) (sort unnamed)))
+    []))
+
 (defn tasks-tx
   "The writer's delta from stored tasks to the declared `files`, by handle. A touched
   task whose current declaration differs from the caller's `basis` refuses with base,
   current and proposed (7.16); unchanged input is empty; a removed entry retracts.
-  A runtime task (`:seon.task/created-by`) is outside every file's declaration."
+  A runtime task (`:seon.task/created-by`) is outside every file's declaration; every
+  stored task lacking its derived symbol gains it first (`symbol-tx`)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
   [database files basis]
   (let [projection (db/carried-projection database)
@@ -179,7 +192,7 @@
     (when-let [sym (some (fn [[sym n]] (when (< 1 n) sym)) (frequencies (map :seon.task/sym proposed)))]
       (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
     ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
-    (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))
+    (into (symbol-tx database) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis))))
 
 (defn task-revision
   "The reviewed revision of the task `handle` in `database`: seon.id/digest over its declaration; nil when absent."

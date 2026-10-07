@@ -5589,6 +5589,30 @@
               :seon.error.basis/t (dbi/-max-tx database)})
       (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] (attempted-transaction transaction))) :seon.error/type :seon.db.write/validation-refusal))
 
+(defn- dropped-definition-namespaces
+  "The namespaces of the function and test rows whose family-owned data `tx-data` retracts or purges
+  by operation (an attribute's replacement or retirement) without writing their digest, read on
+  `database`, the value before it; a row whose digest the transaction writes keeps the writer's check."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value [:sequential :any]] [:set :symbol]]}
+  [projection database tx-data]
+  (let [shapes (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+        owned (into #{} (mapcat #(get-in shapes [% :seon.program/owned-attributes])) [:seon.fn/sym :seon.test/sym])
+        dropped (into #{} (keep (fn [op] (when (and (vector? op) (#{:db/retract :db.purge/attribute} (first op))
+                                                    (int? (second op)) (owned (nth op 2 nil)))
+                                           (second op))))
+                      tx-data)
+        digested (into #{} (keep (fn [op] (cond (and (map? op) (find op :seon.program/definition-digest)) (:db/id op)
+                                                (and (vector? op) (= :seon.program/definition-digest (nth op 2 nil))) (second op))))
+                       tx-data)
+        schema (dbi/-schema database)]
+    (into #{}
+          (for [entity (remove digested dropped)
+                attribute [:seon.fn/ns :seon.test/ns]
+                :when (get schema attribute)
+                datom (d/datoms database :eavt entity attribute)
+                name-datom (d/datoms database :eavt (:v datom) :seon.ns/name)]
+            (:v name-datom)))))
+
 (defn- prepared-write
   "The request the writer applies for `transaction` on `database`: JDK
   integers as longs, the final-report validator in its metadata, values
@@ -5609,8 +5633,10 @@
                   (assoc-in (if (map? transaction) transaction {:tx-data transaction})
                             [:tx-meta :datahike/validate-report] #(validate-write-report projection %))))
         entity-maps (filter map? (:tx-data request))
-        ;; A namespace entity written here re-derives its declarations' digests in this transaction.
-        namespaces (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
+        ;; A namespace entity written here re-derives its declarations' digests in this transaction,
+        ;; as does the namespace of a declaration losing data its family owns (an attribute's replacement).
+        namespaces (into (into #{} (keep #(when (:seon.program/definition-digest %) (:seon.ns/name %))) entity-maps)
+                         (dropped-definition-namespaces projection database (:tx-data request)))
         written (into #{} (keep #(some (fn [a] (when-some [v (get % a)] [a v])) [:seon.fn/sym :seon.test/sym])) entity-maps)]
     (cond-> request
       ;; A transaction on a store without the bridge attributes may install

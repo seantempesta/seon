@@ -121,3 +121,37 @@ Mistake, corrected: a JVM-mode `spit` with relative paths wrote two task files i
 archive (`data/source/42e569d9d…/resources/seon/tasks/seon.operator.edn` and `seon.test.edn`): default's working
 directory is that archive, not the checkout. Both restored byte-for-byte from `git show 42e569d9d:<path>` and
 verified with `cmp`; only a publication or boot from that archive reads them, and none ran in between.
+
+## Fix forward: A could not adopt onto the live store
+
+`bin/seon start --head` on 0daf87818 failed and rolled default back to 42e569d9d: "The cluster population transaction
+was refused: The stored definition digest of [:seon.fn/sym my.background/poll] is not the one its definition
+produces." (`data/clusters/default/logs/operator-start-20261007T151519.398.edn`, `seon.cluster/accrete-schema-population!`).
+
+Cause (two producers, both found by reproducing the upgrade):
+1. `:seon.task/tasks` changed value type (string to symbol), so `seon.cluster/attribute-change-tx` replaces the
+   attribute and drops its data from every program row holding a tag. The writer (`seon.db/write-digest-error`)
+   then judged those rows: their stored digest still covered the dropped tags, so it refused. Nothing re-derived a
+   digest for data dropped by an attribute's replacement. Fix: the writer's `prepared-write` re-derives, in the same
+   transaction (the existing `namespace-digests-tx`), the digests of the namespaces whose function or test rows lose
+   family-owned data by operation (`:db/retract`, `:db.purge/attribute`) without the transaction writing their
+   digest (`seon.db/dropped-definition-namespaces`); a row whose digest the transaction writes keeps the check.
+   Regression: `seon.db-test/a-retraction-of-a-declarations-own-data-re-derives-its-digest`.
+2. Then task indexing refused `[48356 :seon.task/sym]` missing: stored tasks written before A carry no symbol, and
+   the task delta only rewrites changed declarations. Fix: `seon.task/tasks-tx` first derives the symbol of every
+   stored task (file or runtime) lacking one (`symbol-tx`), so the tags resolve and later writes validate.
+
+Reproduction and proof, both through the operator's own launch functions (scratchpad `upgrade.clj`): a disposable root
+boots the pre-A commit 58f2af834 (old schema, string tags), stops, then boots the new commit on the same store, as
+`start --head` does on default.
+
+| run | old → new | result |
+|---|---|---|
+| upgrade, HEAD 0daf87818 (no fix) | 58f2af834 → eabc94b59 | old ready 117 s; new refused: the same `my.background/poll` digest refusal as default |
+| upgrade, HEAD + fix 1 | 58f2af834 → aadd06f71 | schema population passes; task indexing refused `:seon.task/sym` missing |
+| upgrade, HEAD + fixes 1 and 2 | 58f2af834 → 5b367154f | old ready 88 s, new ready 84 s |
+| fresh throwaway 7ef77238e017 | HEAD + fixes | 22 tests, 100 pass, 1 fail: `seon.task-steps-test/steps-persist-across-a-compaction`, red on HEAD (task `seon.test/reds-on-head-9d6b392b6-in-task-reaching-tests`) |
+
+Verification limit: the upgraded throwaway keeps its program (its tests ran the pre-A test bodies, run 436eb7bb101c),
+so incremental adoption of the changed program rows onto an upgraded store is proven only by default's own
+`start --head`; the same rows adopt onto an empty store in the fresh throwaway.

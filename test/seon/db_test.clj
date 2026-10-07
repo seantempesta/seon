@@ -2382,6 +2382,29 @@
               (:seon.program/definition-digest (db/pull database [:seon.program/definition-digest]
                                                         [:seon.fn/sym 'sample.rederive/g]))))))))
 
+(deftest a-retraction-of-a-declarations-own-data-re-derives-its-digest
+  ;; CLASS: an attribute's replacement on adoption drops its data from the
+  ;; declarations holding it (a value-type change of `:seon.task/tasks`), and
+  ;; the writer refused their now-stale digests, so the live store could not
+  ;; adopt. A row losing family-owned data by operation, its digest unwritten,
+  ;; is re-derived in the same transaction.
+  (test-support/with-database
+   (fn [connection]
+     (let [namespace-entity (test-support/namespace-entity (db/db connection) 'sample.dropped)
+           entity (test-support/program-fn-entity (db/db connection) 'sample.dropped/f "(defn f [x] x)"
+                                                  {:seon.task/tasks #{'sample.dropped/a-task}})
+           _ (test-support/transacted! connection [namespace-entity entity])
+           eid (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn/sym 'sample.dropped/f]))
+           _ (test-support/transacted! connection [[:db/retract eid :seon.task/tasks 'sample.dropped/a-task]])
+           database (db/db connection)
+           stored (db/pull database [:seon.task/tasks :seon.program/definition-digest] [:seon.fn/sym 'sample.dropped/f])]
+       (is (nil? (:seon.task/tasks stored)))
+       (is (not= (:seon.program/definition-digest entity) (:seon.program/definition-digest stored)))
+       (is (= (db/definition-digest-of (db/carried-projection database) (dissoc entity :seon.task/tasks)
+                                       (@#'seon.db/declaration-value database (db/identity-attributes database)
+                                        (:db/id (db/pull database [:db/id] [:seon.ns/name 'sample.dropped]))))
+              (:seon.program/definition-digest stored)))))))
+
 (deftest render-declarations-require-their-final-function-entity
   (test-support/with-database
    (fn [connection]
