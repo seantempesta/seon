@@ -777,6 +777,15 @@
                     resolved-entity (assoc :seon.db/pattern-entity resolved-entity)
                     (keyword? attribute) (assoc :seon.db/pattern-attribute attribute)
                     (some? resolved-value) (assoc :seon.db/pattern-value resolved-value))])))
+            ;; Every leaf already bound at its entity or value names a narrow
+            ;; index range without the enclosing rows; a candidate row only
+            ;; adds an entity to such a pattern, so resolving the rows (a scan
+            ;; of the enclosing patterns per input binding) buys nothing.
+            (narrow? [clause bound]
+              (if (instance? Pattern clause)
+                (let [[e _ v] (:pattern clause)]
+                  (boolean (or (value-of bound e) (value-of bound v))))
+                (every? #(narrow? % bound) (:clauses clause))))
             (scope-patterns [clauses bound inherited]
               (let [positive (filterv #(instance? Pattern %) clauses)
                     candidates
@@ -793,8 +802,17 @@
                        bound))]
                 (mapcat
                  (fn [clause]
-                   (if (instance? Pattern clause)
+                   (cond
+                     (instance? Pattern clause)
                      (pattern clause bound inherited)
+
+                     (narrow? clause bound)
+                     (let [inherited (source-of clause inherited)]
+                       (if (instance? Or clause)
+                         (mapcat #(scope-patterns [%] bound inherited) (:clauses clause))
+                         (scope-patterns (:clauses clause) bound inherited)))
+
+                     :else
                      (mapcat
                       (fn [candidate]
                         (let [joined (cond

@@ -206,3 +206,29 @@
        (test-support/transacted! connection [[:db/add [:seon.message/id "m0"] :seon.message/content "changed"]])
        (is (false? (db/read-evidence-current? @connection collapsed)))
        (is (false? (db/read-evidence-current? @connection replayed)))))))
+
+(deftest a-disjunction-joined-to-a-pattern-keeps-evidence-proportional-to-its-inputs
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           symbols (vec (take 10 (sort (db/q '[:find [?s ...] :where [?e :seon.fn/sym ?s]
+                                                [?e :seon.program/definition-digest]]
+                                              database))))
+           join '[[?e :seon.program/definition-digest ?digest]]]
+       (is (= 10 (count symbols)) "the canonical program supplies the inputs")
+       (doseq [disjunction '[(or [?e :seon.fn/sym ?sym] [?e :seon.test/sym ?sym])
+                             (or-join [?e ?sym] [?e :seon.fn/sym ?sym] [?e :seon.test/sym ?sym])]
+               [in inputs] [['?sym (first symbols)] ['[?sym ...] symbols]]]
+         (let [captured (atom [])
+               result (binding [db/*read-evidence-sink* captured]
+                        (db/q {:find '[?sym ?digest] :in ['$ in] :where (into [disjunction] join)}
+                              database inputs))
+               patterns (set (mapcat :seon.db/read-index-patterns @captured))
+               subjects (if (symbol? inputs) [inputs] inputs)
+               expected (into #{{:seon.db/pattern-attribute :seon.program/definition-digest}}
+                              (for [subject subjects
+                                    attribute [:seon.fn/sym :seon.test/sym]]
+                                {:seon.db/pattern-attribute attribute :seon.db/pattern-value subject}))]
+           (is (= (count subjects) (count result)) "one digest per input symbol")
+           (is (= expected patterns)
+               "each input binds its disjuncts; no pattern per entity the join could reach")))))))
