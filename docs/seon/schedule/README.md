@@ -462,15 +462,21 @@ Tasks:
 - `my.examples/the-examples-test-reads-a-docstring-example-as-an-invalid-token` [proof: unknown]
 - `seon.id/identities-hash-structure-not-printed-text` [proof: no]
 - `seon.test/checks-write-into-live-custody`
-Decisions without a task:
-- Errors S2 re-slicing (tmp/errors/s1-s2-notes.md): S2a throwable-free sites only, S2b typing every producer, drop
+Decisions without a task (added 2026-10-07 evening; each blocks the named work):
+- Task handles vs structural hashing (blocks `structural-hash`, docs/research/agent-platform/2026-10-07/structural-hash/notes.md): A scripted old->new handle sweep; B handles minted once, uniqueness only; C keep printing for handles (against the one-printer law); root's proposal D: strip `:id` literals from task files, ingestion derives handles from ns+name+kind (tasks are referenced by ns/task-name).
+- Reach graph facts in a producer-written digest (a420a03e3 notes): today the new graph-facts read costs 52 ms per new commit and as-of databases 65 -> 370 ms per call; writing call edges into a producer-owned digest removes it but changes identity semantics.
+- `transaction-report-datom?` ~20 checks per datom (commit-validation notes): looser contracts on the writer's internal functions, or a platform change to how armed predicate checks run; <0.1 ms per trivial commit, not urgent.
+- Context render scope (context-examples README): spec §3 has no system message and a steps-only task view; the built producers are system-message + task-context; approve the full budgeted render shape.
+- `examples_test` deletion: RULED delete (2026-10-07); lane examples-world still holds the dirty file.
+- `my.edit`: RULED keep for non-Clojure files (refuse .clj edits); edit-hook budgets RULED warnings + review.
+- Errors S2 re-slicing (docs/research/agent-platform/2026-10-07/errors/s1-s2-notes.md): S2a throwable-free sites only, S2b typing every producer, drop
   `:at`/`:layer` with S6; and the type for functions whose output alternative is only `:seon.error/base` or a union of
   several errors (generic `:seon.error/base` type, or a named variant first).
 - `test/my/examples_test.clj`: lane examples-world holds it with uncommitted changes; owner wanted useless tests gone.
   Keep, shrink or delete (decides my.examples/* and my.examples-test/* tasks above).
 
 ## Owner actions (no task)
-- Rotate `DEEPSEEK_API_KEY`: a lane grep echoed the `.env` line into its transcript (tmp/deepseek/report.md §2).
+- Rotate `DEEPSEEK_API_KEY`: a lane grep echoed the `.env` line into its transcript (docs/research/agent-platform/2026-10-07/deepseek/findings.md).
 - "1/4 upper-left rendering at ~30 fps": the surface is unknown and the question is unanswered; say which page/app.
 - Commit 62646ee70 swept the owner's `.gitmodules`/CLM changes; owner checks what to restore (src-clm/ is untracked).
 - Foreign dirty files nobody claims: `tmp/test-data-assertions/proofs.edn`, `reference-code/http-kit`; also dirty
