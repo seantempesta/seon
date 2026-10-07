@@ -1,0 +1,54 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 00a9468f..e10c778d 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -68,6 +68,8 @@ When something is added, it's typically marked *Experimental*. When the API cont
+ 
+ ### Notable fixes
+ 
++- **Repeated variables also constrain lookup-ref and source-prefixed patterns** — a literal lookup-ref entity and the sequence produced by source normalization no longer bypass repeated-variable equality. ([#TODO])
++
+ - **A union of bound lookups is costed by its inputs** — an `or`/`or-join` was estimated at the sum of its branches' attribute extents, so a pattern joined to it (`(or [?e :fn/sym ?s] [?e :test/sym ?s]) [?e :digest ?d]` with `?s` bound) was scanned first over its whole attribute: about 1 KB per datom whatever the input count (11 MB at 60,000 digests). A branch's pattern now estimates what it reads given the bindings entering the union, the union runs first and the join probes per entity (0.13 MB, 7.7 → 0.7 ms; 126 → 16 store reads on the fixture). ([#TODO])
+ 
+ - **A repeated variable is a join, in both engines** — a variable named twice in one pattern (`[?a :friend ?a]`) or passed twice to a rule (`(reach ?a ?a)`) was bound from one position only and answered every entity with a friend; the later position now takes a fresh variable joined back by an equality predicate. In the base engine (the planner's fallback for nested temporal wrappers), a function whose output variable the inputs' relation already binds (`[?e :tags ?v] [?e :n ?n] [(str "tag" ?n) ?v]`) now joins it instead of answering a value stored nowhere. ([#TODO])
+diff --git a/src/datahike/query/analyze.cljc b/src/datahike/query/analyze.cljc
+index 1a8d33ab..75ca5072 100644
+--- a/src/datahike/query/analyze.cljc
++++ b/src/datahike/query/analyze.cljc
+@@ -52,8 +52,8 @@
+    each later position takes a fresh var, joined back by an [(= ?var ?fresh)]
+    predicate; nil when no var repeats."
+   [clause]
+-  (when (and (vector? clause) (not (sequential? (first clause))))
+-    (separate-repeats clause (if (and (symbol? (first clause)) (= \$ (first (name (first clause))))) 1 0))))
++  (when (and (sequential? clause) (not (seq? (first clause))))
++    (separate-repeats (vec clause) (if (and (symbol? (first clause)) (= \$ (first (name (first clause))))) 1 0))))
+ 
+ (defn separate-repeated-call-args
+   "A rule call passing one free var twice, as [call' equalities] like
+diff --git a/test/datahike/test/query_planner_temporal_test.clj b/test/datahike/test/query_planner_temporal_test.clj
+index 2d4673c0..d3ee1401 100644
+--- a/test/datahike/test/query_planner_temporal_test.clj
++++ b/test/datahike/test/query_planner_temporal_test.clj
+@@ -840,15 +840,19 @@
+ ;; answered every entity with a friend.
+ 
+ (deftest a-repeated-variable-joins-a-clause-with-itself
+-  (let [database (d/db-with (db/empty-db {:p/friend {:db/valueType :db.type/ref} :p/n {}})
++  (let [database (d/db-with (db/empty-db {:p/friend {:db/valueType :db.type/ref} :p/n {}
++                                        :p/id {:db/unique :db.unique/identity}})
+                             [{:db/id 1 :p/n 1} {:db/id 2 :p/friend 1 :p/n 2} {:db/id 3 :p/friend 2}
+-                             {:db/id 4 :p/friend 4 :p/n 4}])
++                             {:db/id 4 :p/id "self" :p/friend 4 :p/n 4}])
+         edge '[[(edge ?a ?b) [?a :p/friend ?b]]]
+         reach '[[(reach ?a ?b) [?a :p/friend ?b]] [(reach ?a ?b) [?a :p/friend ?x] (reach ?x ?b)]]]
+     (doseq [[label answer q-form args]
+             [["pattern" #{[4]} '[:find ?a :where [?a :p/friend ?a]] []]
+              ["pattern in an entity group" #{[4 4]} '[:find ?a ?n :where [?a :p/friend ?a] [?a :p/n ?n]] []]
+              ["merge in an entity group" #{[4 4]} '[:find ?a ?n :where [?a :p/n ?n] [?a :p/friend ?a]] []]
++             ["lookup entity" #{} '[:find ?v :where [[:p/id "self"] :p/n ?v ?v]] []]
++             ["source-prefixed lookup entity" #{} '[:find ?v :where [$ [:p/id "self"] :p/n ?v ?v]] []]
++             ["source-prefixed pattern" #{[4]} '[:find ?a :where [$ ?a :p/friend ?a]] []]
+              ["rule call" #{[4]} '[:find ?a :in $ % :where (edge ?a ?a)] [edge]]
+              ["recursive rule call" #{[4]} '[:find ?a :in $ % :where (reach ?a ?a)] [reach]]]
+             disable? [false true]]
