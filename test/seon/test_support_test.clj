@@ -17,8 +17,11 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.render.value :as value]
+            [seon.batch]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
-            [seon.test.runner :as runner]))
+            [seon.test.runner :as runner]
+            [seon.turn.world :as world]))
 
 (deftest environment-retains-the-database-projection
   (test-support/with-database
@@ -428,3 +431,14 @@
        (is (uuid? own) "the executing member's cluster names its adopted commit")
        (is (= own (:seon.source/commit-id seeded)))
        (is (= "seeded-source" (get-in seeded [:seon.cluster/config :seon.config/cluster])))))))
+
+(deftest a-code-request-batch-evaluates-each-form
+  (test-support/with-database
+   (fn [connection]
+     (let [world (world/agent-world {:seon.db/connection connection :seon.cluster/name "default"
+                                     :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                    {:seon.agent/id "code-request"})
+           batch (seon.batch/evaluate-batch
+                  (dissoc (test-support/code-request {:seon.batch/world world :seon.batch/text "(inc 1) (inc 2)"})
+                          :seon.batch/settle))]
+       (is (= [2 3] (mapv :seon.batch/value (:seon.batch/entries batch))))))))

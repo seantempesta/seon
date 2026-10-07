@@ -23,6 +23,7 @@
             [seon.schema :as schema]
             [seon.batch]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.observe :as observe]
             [seon.test]
             [seon.turn]
             [seon.turn.batch :as turn.batch])
@@ -350,7 +351,7 @@
   `seon.sci.eval/evaluate` runs each form) and its namespace cursor and frame
   request, drawn from the request's world. The request's own keys win."
   {:malli/schema [:=> [:cat :map] :seon.batch/request]}
-  [{world :seon.batch/world start :seon.batch/start-ns :as request}]
+  [{world :seon.batch/world start :seon.batch/start-ns text :seon.batch/text :as request}]
   (let [start (or start 'user)
         {ctx :seon.sci.eval/ctx limit :seon.sci.eval/time-limit-ms connection :seon.db/connection} world]
     (turn.batch/code-request
@@ -360,7 +361,8 @@
              :seon.turn/namespace-cursor (volatile! start)
              :seon.turn/frame-request
              (fn [_ordinal namespace-name]
-               {:seon.cluster.eval/source ""
+               ;; the run's text, as `evaluate`'s frame carries it
+               {:seon.cluster.eval/source text
                 :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                 :seon.sci.eval/ctx ctx
                 :seon.db/connection connection
@@ -434,6 +436,25 @@
     (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries)))
       (seq output) (assoc :seon.cluster.eval/output output)
       (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch)))))
+
+(defn define!
+  "The transaction report of `source` run as `world`'s agent in `namespace-name`
+  through the fold, its program facts (`seon.turn.batch/program-facts`) written
+  as one settlement writes them; throws at a form's error or refused facts."
+  {:malli/schema [:=> [:cat :seon.batch/world :symbol :string] :seon.db/transaction-report]}
+  [world namespace-name source]
+  (let [connection (:seon.db/connection world)
+        request (code-request {:seon.batch/world world :seon.batch/observe observe/observe
+                               :seon.batch/start-ns namespace-name :seon.batch/text source})
+        batch (seon.batch/evaluate-batch (dissoc request :seon.batch/settle))
+        failures (into [] (keep #(or (:seon.batch/error %) (:seon.batch/facts-error %)
+                                     (get-in % [:seon.batch/evaluation :seon.cluster.eval/error])))
+                       (:seon.batch/entries batch))
+        facts (when (empty? failures) (turn.batch/program-facts request (db/db connection) (:seon.batch/program batch)))]
+    (when (or (seq failures) (:seon.error/message facts) (empty? facts))
+      (throw (ex-info "The fixture definition did not derive program facts."
+                      {::failures failures ::facts facts ::unread (:seon.batch/unread batch)})))
+    (transacted! connection facts)))
 
 (defn agent-value
   "Evaluate `source` at the boundary an AGENT actually calls, and return the

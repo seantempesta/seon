@@ -13,38 +13,15 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.program :as program]
-            [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.turn.world :as world]))
 
 (def ^:private probe-ns 'seon.id)
 
 (def ^:private sentinel ::sentinel)
 
 (def ^:private victim 'seon.test.one-request-test/a-member-body-runs-on-its-own-listed-branch)
-
-(defn- admit!
-  "Evaluate one form as an agent does and write its canonical declaration entity."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] [:maybe :seon.db/transaction-report]]}
-  [handle source]
-  (let [connection (:seon.db/connection handle)
-        evaluation (support/await-event!
-                    (future
-                     (db/call-with-custody
-                      {:seon.db/connection connection}
-                      #(sci.eval/evaluate
-                        {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                         :seon.cluster.eval/source source
-                         :seon.cluster.eval/ns [:seon.ns/name probe-ns]
-                         :seon.sci.admit/caps (config/result-caps config/defaults)
-                         :seon.sci.eval/time-limit-ms 5000})))
-                    ::admitted)]
-    (is (nil? (:seon.cluster.eval/error evaluation)))
-    (when-let [entity (:seon.program/row evaluation)]
-      (support/transacted! connection [(program/declaration-row
-                                        (db/carried-projection (db/db connection))
-                                        entity :all :agent)]))))
 
 (deftest ^{:seon.test/long "Four agent definitions, one retraction and one nested request whose first checkpoint preparation measured 1.8 s (seon.config/apply-compiled!, issue test-world-preparation-spends-seconds-in-config-apply-and-unmemoized-reads): the request measured 7.1 s on default's JVM (root run 99a231f41221, 2026-09-24)."
            :seon.test/long-ms 15000}
@@ -55,18 +32,23 @@
      (let [handle (support/execution-handle connection)]
        (support/transacted! connection [{sentinel "operational"}])
        (support/transacted! connection [[:db/retractEntity [:seon.test/sym victim]]])
-       (admit! handle "(defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
-       (admit! handle "(defn overlay-caller {:malli/schema [:=> [:cat] :int]} [] (overlay-callee))")
-       (admit! handle "(defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 2)")
-       (admit! handle
-               (str "(clojure.test/deftest overlay-candidate-runs"
-                    " (clojure.test/is (= 2 (overlay-caller)))"
-                    ;; The candidate's attributes belong in its world (root
-                    ;; ruling); its branch's operational datum does not.
-                    " (clojure.test/is (nil? (seon.db/q '[:find ?v . :where [_ " sentinel " ?v]] (seon.db/db))))"
-                    " (clojure.test/is (empty? (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] (seon.db/db))))"
-                    " (clojure.test/is (nil? (seon.db/q '[:find ?e . :in $ ?s :where [?e :seon.test/sym ?s]]"
-                    " (seon.db/db) '" victim "))))"))
+       (support/define!
+        (world/agent-world {:seon.db/connection connection :seon.cluster/name (:seon.cluster/name handle)
+                            ;; the execution's own context: its environment holds the handle
+                            :seon.sci.eval/base-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))}
+                           {:seon.agent/id "overlay-candidate"})
+        probe-ns
+        (str "(defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 1)"
+             " (defn overlay-caller {:malli/schema [:=> [:cat] :int]} [] (overlay-callee))"
+             " (defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 2)"
+             " (clojure.test/deftest overlay-candidate-runs"
+             " (clojure.test/is (= 2 (overlay-caller)))"
+             ;; The candidate's attributes belong in its world (root
+             ;; ruling); its branch's operational datum does not.
+             " (clojure.test/is (nil? (seon.db/q '[:find ?v . :where [_ " sentinel " ?v]] (seon.db/db))))"
+             " (clojure.test/is (empty? (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] (seon.db/db))))"
+             " (clojure.test/is (nil? (seon.db/q '[:find ?e . :in $ ?s :where [?e :seon.test/sym ?s]]"
+             " (seon.db/db) '" victim "))))"))
        (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
                               :seon.test/recording-connection connection
                               :seon.test/policy :named

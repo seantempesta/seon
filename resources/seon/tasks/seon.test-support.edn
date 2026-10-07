@@ -3,13 +3,6 @@
              :intent "seon.test-support/refusal-data (test/seon/test_support.clj:739) recognizes a returned error only when it carries an inst :seon.error/at, a qualified :seon.error/layer and a qualified :seon.error/operation; 102 test sites call it. The errors spec drops :at and :layer from the produced map (errors.md §1, decision 6; slice S2 or with S6 per the S2 re-slicing in tmp/errors/s1-s2-notes.md), after which every returned error reads as committed and those tests silently assert the wrong branch. Done when refusal-data recognizes an error by :seon.error/type (the one error? predicate) in the same commit that drops :at/:layer, and a test-support test covers a typed error without :at. Proof: a new seon.test-support-test/refusal-data-recognizes-a-typed-error (to be written first) naming this task."
              :must-read #{seon.test-support/refusal-data}
              :evidence #{"docs/seon/specs/errors.md" "tmp/errors/s1-s2-notes.md"}}
- #:seon.task{:name
-            "code-request-frames-an-empty-source-every-form-is-refused",
-            :kind :function,
-            :intent
-            "seon.test-support/code-request's :seon.turn/frame-request frames every form with :seon.cluster.eval/source \"\", which :seon.sci.eval/request refuses (:seon.cluster.eval/source is [:string {:min 1}]), so every form a fixture batch runs fails with 'seon.sci.eval/evaluate refused argument 0 at [:seon.cluster.eval/source]' instead of evaluating. Evidence: throwaway candidate run 5e09c06784b2 on HEAD 0daf87818 + the error-delivery slice: a batch of \"(defn make-row [] ...) (make-row)\" answered that refusal at ordinals 0 and 1. It reds seon.error.attribution-test/a-definitions-failure-in-an-evaluation-is-its-fault-and-task on the store (latest member 1 pass, 5 fail, 1 error) and reaches 9 more callers in seon.fn-test, seon.run-test and seon.turn-test. Also: that internal contract refusal was delivered as the form's error but never recorded as a core fault (produced-failures records only errors naming a producer). Correct: the fixture frames each form with its own read text, as seon.turn's frame does from its rows. Proof: a code-request batch of (inc 1) answers 2.",
-            :must-read
-            #{seon.test-support/code-request seon.turn/evaluate-row}}
  #:seon.task{:name "evaluate-answers-nil-for-a-refused-form",
             :kind :function,
             :intent

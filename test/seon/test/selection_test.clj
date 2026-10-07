@@ -23,7 +23,9 @@
             [seon.fn :as functions]
             [seon.config :as config]
             [seon.program :as program]
-            [seon.test-support :as support])
+            [seon.sci.eval :as sci.eval]
+            [seon.test-support :as support]
+            [seon.turn.world :as world])
   (:import (java.nio.file Files)
            (java.nio.file.attribute FileAttribute)))
 
@@ -372,27 +374,22 @@
                     (apply str (repeat 64 "a")))
            _ (support/transacted! connection [{:seon.source/digest seal
                                                :seon.source/test-input-digest (apply str (repeat 64 "b"))}])
-           ctx (support/fork-cluster-ctx connection)
-           evaluation (support/evaluate
-                       {:seon.sci.eval/ctx ctx
-                        :seon.cluster.eval/source
-                        "(clojure.test/deftest fileless-selection (clojure.test/is (string? (seon.id/id))))"
-                        :seon.cluster.eval/ns [:seon.ns/name 'seon.test.selection-test]
-                        :seon.sci.admit/caps (config/result-caps config/defaults)
-                        :seon.sci.eval/time-limit-ms 10000})
-           _ (when-not (:seon.program/row evaluation)
-               (throw (ex-info "SCI test declaration did not produce a program entity." evaluation)))
-           declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
-       (is (nil? (:seon.cluster.eval/error evaluation)))
-       (support/transacted! connection [declaration])
+           world (world/agent-world {:seon.db/connection connection :seon.cluster/name "fileless-selection"
+                                     :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                    {:seon.agent/id "fileless-selection"})
+           test-symbol 'fileless.selection/fileless-selection
+           written (support/define! world 'fileless.selection
+                                    "(clojure.test/deftest fileless-selection (clojure.test/is (string? (seon.id/id))))")
+           declaration (db/pull (:db-after written) '[*] [:seon.test/sym test-symbol])]
+       (is (:db/id declaration) "the fold wrote the agent's test declaration")
        (is (not (:seon.fn/file declaration)))
        (let [request {:seon.db/db (db/db connection)
                       :seon.test.run/cluster [:seon.cluster/name "fileless-selection"]
-                      :seon.test/identities #{(symbol "seon.test.selection-test" "fileless-selection")}}
+                      :seon.test/identities #{test-symbol}}
              result (sut/selection-admission request)]
-         (is (some #(= (symbol "seon.test.selection-test" "fileless-selection") (:seon.test.member/symbol %))
+         (is (some #(= test-symbol (:seon.test.member/symbol %))
                    (:seon.test.run/members result)))
-         (is (some #{(symbol "seon.test.selection-test" "fileless-selection")}
+         (is (some #{test-symbol}
                    (sut/reaching {:seon.db/db (db/db connection) :seon.test/changed ['seon.id/id]}))))))))
 
 (deftest gate-inputs-no-call-edge-can-reach-widen
