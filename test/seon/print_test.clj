@@ -89,7 +89,8 @@
     (m/schema :seon.print/node {:registry registry})))
 
 (defn- lexical-hiccup-text
-  "Text tokens in an emitted hiccup result, excluding structural chrome."
+  "Text tokens in an emitted hiccup result, excluding structural chrome, each
+  string spelled as the text face spells it."
   [hiccup]
   (cond
     (string? hiccup) hiccup
@@ -97,10 +98,11 @@
     (let [[tag & body] hiccup
           attributes (when (map? (first body)) (first body))
           body (if attributes (next body) body)]
-      (if (or (= :summary tag)
-              (= "seon-print-visual" (:class attributes)))
-        ""
-        (apply str (map lexical-hiccup-text body))))
+      (cond
+        (or (= :summary tag) (#{"seon-print-visual" "seon-print-whole-text"} (:class attributes))) ""
+        ;; A string shows its own characters in HTML and its literal in text.
+        (= "seon-print-string" (:class attributes)) (print/string-literal (apply str (map lexical-hiccup-text body)))
+        :else (apply str (map lexical-hiccup-text body))))
     :else ""))
 
 (defn- normalize-whitespace
@@ -245,6 +247,7 @@
     (test-support/assert-check! check "P-TOTAL failed.")))
 
 ;; 200 trials: 42 ms on default (2026-09-26, fipp emitter).
+;; One op stream: the faces share every token; only a string's spelling differs.
 (deftest p-tee-generated-grammar-cannot-disagree
   (let [compiled (compiled-node-schema)
         generator (mg/generator compiled)
@@ -464,6 +467,32 @@
                                                   [{:seon.print/face :seon.print/keyword :seon.print/value :a}
                                                    {:seon.print/face :seon.print/number :seon.print/value 2}]]}
                             no-cuts)))))
+
+(deftest a-string-shows-its-characters-in-html-and-each-cut-continues
+  ;; HTML shows a string's own characters (its quotes are CSS); a character
+  ;; cut shows its shown characters and marker, links when it can continue and
+  ;; otherwise says why in its title. Render text's cut prints as written.
+  (let [hiccup #(print/emit-hiccup % no-cuts)
+        cut (fn [request] (print/elision (merge {:seon.render.data/path [:k] :seon.render.data/next-offset 3
+                                                 :seon.print/elision-unit :characters :seon.print/omitted 40
+                                                 :seon.print/prefix "a\"b\n"}
+                                                request)))]
+    (is (= [:span {:class "seon-print-string"} "a \"q\"\n<b>"]
+           (hiccup {:seon.print/face :seon.print/string :seon.print/value "a \"q\"\n<b>"})))
+    (let [[_ [_ _ prefix] [tag {:keys [href]} label] _ [_ whole]]
+          (hiccup (assoc (cut {:seon.print/requery-id 'result/e1}) :seon.print/href "/d?offset=3"
+                         :seon.print/text-href "/d?text=1"))]
+      (is (= "a\"b\n" prefix))
+      (is (= [:a "/d?offset=3" "…+40 (subs (get-in result/e1 [:k]) 3)"] [tag href label]))
+      (is (= "/d?text=1" (:href whole))))
+    (let [[_ _ [tag {:keys [title]}]] (hiccup (cut {:seon.print/requery-refusal "no handle"}))]
+      (is (= [:span "no handle"] [tag title])))
+    (is (= "a\"b\n…+40 (seon.print/full result/e1)"
+           (print/emit-text (assoc (cut {:seon.print/requery-id 'result/e1 :seon.print/raw? true
+                                         :seon.print/continuation '(seon.print/full result/e1)})
+                                   :seon.render.data/path [])
+                            no-cuts))
+        "render text's cut prints its prefix as written")))
 
 (deftest a-string-literal-keeps-its-line-breaks-and-reads-back
   ;; Escapes, carriage returns, tabs, empty and trailing lines and non-ASCII

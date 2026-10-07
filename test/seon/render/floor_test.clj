@@ -134,7 +134,7 @@
         text (render.value/text unit)
         html (render.value/html unit)]
     (is (str/includes? text ":probe/k"))
-    (is (= 1 (count (re-seq #"value printer refused the unit" text))) "one diagnostic")
+    (is (= 1 (count (re-seq #":seon.render.value/failure" text))) "one diagnostic")
     (is (= "seon-render-unavailable" (get-in html [2 1 :class])) "one diagnostic beside the core's HTML"))
   (testing "a failure with a huge message is shown under the core's budget"
     (let [unit {:seon.render/value 42

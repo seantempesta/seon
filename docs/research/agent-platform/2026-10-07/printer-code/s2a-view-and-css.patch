@@ -1,0 +1,105 @@
+diff -ru a/resources/public/css/input.css b/resources/public/css/input.css
+--- a/resources/public/css/input.css	2026-10-07 22:05:45.637392473 +0900
++++ b/resources/public/css/input.css	2026-10-07 22:05:45.657451268 +0900
+@@ -154,14 +154,20 @@
+ .seon-print-keyword { color: var(--color-info); }
+ .seon-print-string,
+ .seon-print-char { color: var(--color-success); }
+-/* A string literal keeps its line breaks: source and docstrings read as lines. */
++/* A string shows its own characters, its line breaks kept; the quotes are
++   CSS, so a selection copies the characters alone. */
+ .seon-print-string { white-space: pre-wrap; }
++.seon-print-string::before,
++.seon-print-string::after { content: '"'; }
++/* Render text is shown as written, line breaks included. */
++.seon-print-projected { white-space: pre-wrap; }
+ .seon-print-number,
+ .seon-print-boolean,
+ .seon-print-nil { color: var(--color-eval); }
+ .seon-print-symbol,
+ .seon-print-tag { color: var(--color-text-100); }
+ .seon-print-elision,
++.seon-print-whole-text,
+ .seon-print-prune { color: var(--color-warning); }
+ .seon-print-object,
+ .seon-print-projected { color: var(--color-text-300); }
+diff -ru a/src/seon/render/web.clj b/src/seon/render/web.clj
+--- a/src/seon/render/web.clj	2026-10-07 22:05:45.631890384 +0900
++++ b/src/seon/render/web.clj	2026-10-07 22:05:45.657199766 +0900
+@@ -3184,16 +3184,34 @@
+ 
+ 
+ 
++(defn- sent-context
++  "The agent's context as its next model call is sent it, derived at the
++  query's `basis` (else the head), and the value at the query's cursor."
++  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :map]}
++  [{connection :seon.store/connection-object :as service} agent-id query]
++  (let [head (db/db connection)
++        basis (or (some-> (get query "basis") parse-long) (db/basis-t head))
++        database (db/as-of head basis)
++        composed (dissoc ((requiring-resolve 'seon.cluster.prompt/prompt) database
++                          (debug-turn-request database connection agent-id (:seon.sci.admit/caps service)
++                                              (dissoc service :seon.turn/id)))
++                         :seon.db/db)
++        cursor (data/parse-cursor (get query "path") (get query "offset"))]
++    {::database database ::basis basis ::cursor cursor ::found (data/at composed cursor)}))
++
+ (defn- sent-context-html
+-  "The agent's context as its next model call is sent it, through the value printer's HTML face."
+-  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id] :seon.render/hiccup]}
+-  [{connection :seon.store/connection-object :as service} agent-id]
+-  (let [database (db/db connection)
+-        composed ((requiring-resolve 'seon.cluster.prompt/prompt) database
+-                  (debug-turn-request database connection agent-id (:seon.sci.admit/caps service) (dissoc service :seon.turn/id)))]
++  "The agent's context as its next model call is sent it, through the value
++  printer's HTML face; every cut pages it at the same basis."
++  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :map] :seon.render/hiccup]}
++  [service agent-id query]
++  (let [{::keys [database basis cursor found]} (sent-context service agent-id query)]
+     [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
+-     (value/html {:seon.render/value (dissoc composed :seon.db/db) :seon.db/db database
+-                  :seon.render.value/root [::context agent-id]})]))
++     (value/html {:seon.render/value (if (contains? found :seon.render.data/value) (:seon.render.data/value found) found)
++                  :seon.db/db database
++                  :seon.render.value/root [::context agent-id]
++                  :seon.render.data/cursor cursor
++                  :seon.render.value/route-base (route/path ::route/agent-debug {:id agent-id} {:sent "true"})
++                  :seon.render.value/basis basis})]))
+ 
+ 
+ (defn- debug-response
+@@ -3214,8 +3232,15 @@
+                 (vals (dissoc page stream-strip-id))))
+          {"datastar-mode" "replace"}))
+ 
++      ;; A string cut's whole text: the string itself, no printing step.
++      (and agent-id (= "true" (get query "sent")) (= "1" (get query "text")))
++      (let [{value :seon.render.data/value :as found} (::found (sent-context service agent-id query))]
++        (if (string? value)
++          (text-response 200 value)
++          (text-response 422 (or (:seon.error/message found) "The path does not name a string."))))
++
+       (and agent-id (= "true" (get query "sent")) datastar?)
+-      (html-response (hiccup/->string (sent-context-html service agent-id))
++      (html-response (hiccup/->string (sent-context-html service agent-id query))
+                      {"datastar-mode" "replace"})
+ 
+       (and agent-id (not (get query "subject")))
+diff -ru a/test/seon/render/web_test.clj b/test/seon/render/web_test.clj
+--- a/test/seon/render/web_test.clj	2026-10-07 22:15:21.835586584 +0900
++++ b/test/seon/render/web_test.clj	2026-10-07 22:15:21.865084294 +0900
+@@ -697,10 +697,10 @@
+         (is (= (:seon.schema.projection/fingerprint projection)
+                (:seon.schema.projection/fingerprint program-identity))
+             "the fingerprint comes from the handed SCI context projection")
++        ;; HTML shows a string's own characters (its quotes are CSS), so the labels are compared as shown.
+         (is (= {"indexed source digest" (:seon.source/digest program-identity)
+-                "schema projection fingerprint" (:seon.schema.projection/fingerprint program-identity)}
+-               (update-vals (select-keys (labelled header) ["indexed source digest" "schema projection fingerprint"])
+-                            edn/read-string))
++                "schema projection fingerprint" (str (:seon.schema.projection/fingerprint program-identity))}
++               (select-keys (labelled header) ["indexed source digest" "schema projection fingerprint"]))
+             "the header shows the indexed source digest and the context projection fingerprint")
+         (is (= {"HTML" "page" "AI" ""}
+                (into {} (map (fn [^Element link] [(.text link) (.attr link "aria-current")]))

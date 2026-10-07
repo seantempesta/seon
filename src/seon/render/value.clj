@@ -268,26 +268,36 @@
   [value]
   [:pre {:class "seon-data-panel seon-core-value"} (core-text value)])
 
-(defn- unavailable-line
-  "The one diagnostic beside a value whose unit the printer refused: fixed
-  prose, then the refusal's message or the thrown failure through the core,
-  so its size is the core's budget, never the failure's."
-  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
-  [refused]
-  (str ";; value printer refused the unit, value printed by the core: "
-       (core-text (if (map? refused) (or (:seon.error/message refused) "no message") refused))))
+(defn- diagnostics-shown
+  "The core's text of `entries` (`:seon.render.value/diagnostic`s), shown
+  beside the value they did not replace, and the same text as HTML in the
+  placeholder `seon.render.lint` counts."
+  {:malli/schema [:=> [:cat :seon.render.value/diagnostics] [:map [::text :string] [::html :seon.render/hiccup]]]}
+  [entries]
+  (let [shown (core-text {:seon.render.value/diagnostics entries})]
+    {::text shown
+     ::html [:div {:class "seon-render-unavailable"} [:pre {:class "seon-data-panel seon-core-value"} shown]]}))
+
+(defn- unavailable
+  "The diagnostic beside a value whose unit the printer refused or threw on:
+  the refusal or failure at the unit's cursor path, through the core."
+  {:malli/schema [:=> [:cat :map [:or :seon.error/throwable :seon.error/base]] [:map [::text :string] [::html :seon.render/hiccup]]]}
+  [unit refused]
+  ;; The cursor may be what failed: only a held vector is a path.
+  (let [path (get-in unit [:seon.render.data/cursor :seon.render.data/path])]
+    (diagnostics-shown [{:seon.render.data/path (if (vector? path) path [])
+                         :seon.render.value/failure refused}])))
 
 (defn text
   "The value printer's TOTAL text entry: `unit` through `render-ai`, or, when
-  that refuses or throws, the core's text of the value plus one diagnostic
-  line. Always a string (AGENTS.md: a failed render falls back to the value
+  that refuses or throws, the core's text of the value plus its diagnostic. Always a string (AGENTS.md: a failed render falls back to the value
   itself, printed, with one diagnostic)."
   {:malli/schema [:=> [:cat :map] :string]}
   [unit]
   (let [shown (try (render-ai unit) (catch Throwable failure failure))]
     (if (string? shown)
       shown
-      (str (core-text (:seon.render/value unit)) "\n" (unavailable-line shown)))))
+      (str (core-text (:seon.render/value unit)) "\n" (::text (unavailable unit shown))))))
 
 (defn html
   "The value printer's TOTAL HTML entry: `unit` through `render-html`, or,
@@ -298,8 +308,7 @@
   (let [shown (try (render-html unit) (catch Throwable failure failure))]
     (if (vector? shown)
       shown
-      [:div (core-html (:seon.render/value unit))
-       [:div {:class "seon-render-unavailable"} (unavailable-line shown)]])))
+      [:div (core-html (:seon.render/value unit)) (::html (unavailable unit shown))])))
 
 (defn transacted
   "Restore a pulled entity to its transaction shape.
@@ -476,10 +485,18 @@
   (java.net.URLEncoder/encode (str value) "UTF-8"))
 
 (defn- path-url
-  [unit path offset]
-  (when-let [base (:seon.render.value/route-base unit)]
-    (str base (if (str/includes? base "?") "&" "?")
-         "path=" (encoded (pr-str path)) "&offset=" offset)))
+  "The unit's route at `path` and `offset`, carrying the basis the value was
+  derived at; with `text?`, the whole string at `path` as text/plain. Nil
+  without a route base."
+  {:malli/schema [:function [:=> [:cat :map :seon.render.data/path :int] [:maybe :string]]
+                  [:=> [:cat :map :seon.render.data/path :int :boolean] [:maybe :string]]]}
+  ([unit path offset] (path-url unit path offset false))
+  ([unit path offset text?]
+   (when-let [base (:seon.render.value/route-base unit)]
+     (cond-> (str base (if (str/includes? base "?") "&" "?")
+                  "path=" (encoded (pr-str path)) "&offset=" offset)
+       (:seon.render.value/basis unit) (str "&basis=" (:seon.render.value/basis unit))
+       text? (str "&text=1")))))
 
 (defn- path-link
   [unit path offset label css-class]
@@ -537,6 +554,13 @@
       (let [c (.charAt s i)]
         (recur (inc i) (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))))
       width)))
+
+(defn- shown-width
+  "Characters chars [from, to) of string node `node` spend when shown: render
+  text (`:raw?`) as written, any other string as its escaped literal."
+  {:malli/schema [:=> [:cat :map :int :int] :int]}
+  [node from to]
+  (if (:raw? node) (- to from) (escaped-width (:value node) from to)))
 
 (defn- integer-digits
   "An upper bound on a BigInteger's decimal spelling, from its bit length."
@@ -764,7 +788,7 @@
              ;; The raw length bounds the escaped scan by the cut's cost.
              (let [cost (count (cut-text (assoc node :shown chunk)))]
                (and (<= (- (:total node) chunk) cost)
-                    (<= (escaped-width text chunk (:total node)) cost))))
+                    (<= (shown-width (assoc node :value text) chunk (:total node)) cost))))
       (:total node)
       chunk)))
 
@@ -772,7 +796,7 @@
   "A short sequential value whose every member is a scalar, a name or a string
   shown whole (`string-shown`), as one whole print node, else nil. Such a tuple
   (a frame, a lookup ref, a pair) is admitted whole or not at all."
-  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path [:maybe :qualified-symbol] :int] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path [:maybe :seon.print/requery-id] :int] [:maybe :map]]}
   [c identity-attributes path requery-id max-string]
   (when (and (= :coll (:kind c)) (#{::print/vector ::print/list} (:face c))
              (not (:pending? c)) (<= (:total c) tuple-bound)
@@ -809,7 +833,7 @@
     (+ 9 (count (::print/class node)) (if-some [rep (::print/rep node)] (inc (count rep)) 0))
     (and (pos? depth) (= ::print/projected (::print/face node))
          (= :seon.render/ai (:seon.render/output node)))
-    (count (pr-str (::print/value node)))
+    (count (print/string-literal (::print/value node)))
     :else (count (print/emit-text node {::print/width 0 ::print/length nil ::print/level nil
                                         ::print/namespace-maps? false}))))
 
@@ -817,9 +841,12 @@
   "The form a cut of `node` prints to read its rest (`seon.print/continuation`):
   from the next offset for a sequence or string; the whole collection for a
   map or set, whose shown order is not its iteration order, so `drop` would
-  not name the rest. Nil without a source, and for a long keyword or symbol."
+  not name the rest; render text's `(seon.print/full result/…)`. Nil without
+  a source, and for a long keyword or symbol."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.print/continuation]]}
   [node]
+  (if (:raw? node)
+    (:raw-continuation node)
   (when (and (:requery-id node) (not= :name (:kind node)))
     (print/continuation
      {::print/requery-id (:requery-id node)
@@ -829,7 +856,7 @@
       :seon.render.data/path (:path node)
       :seon.render.data/next-offset (cond (:indexed? node) 0
                                           (= :string (:kind node)) (+ (:base node 0) (:shown node))
-                                          :else (+ (:base node 0) (:n node)))})))
+                                          :else (+ (:base node 0) (:n node)))}))))
 
 (defn- cut-text
   "The cut's text after a node's shown part, as `seon.print/elided-text`
@@ -860,7 +887,9 @@
   [node]
   (case (:kind node)
     :leaf (:width node)
-    :string (+ 2 (:shown-width node) (if (more? node) (count (cut-text node)) 0))
+    ;; Render text has no quotes; its cut starts a line of its own.
+    :string (+ (if (:raw? node) 0 2) (:shown-width node)
+               (if (more? node) (+ (count (cut-text node)) (if (:raw? node) 1 0)) 0))
     :name (+ (:shown-width node) (if (more? node) (count (cut-text node)) 0))
     (:map :coll) (let [lines (+ (:n node) (if (more? node) 1 0))]
                    (+ (count (str (:prefix node) (:open node) (:close node))) (:sum node)
@@ -993,21 +1022,11 @@
           identity {:value value}))
       (catch Throwable failure {:diagnostic failure}))))
 
-(defn- diagnostic-line
-  "One line naming a presentation failure beside the value it did not replace:
-  the failure itself as bounded data (a Throwable as its class, message and
-  ex-data per link). What a failure means is its own render pair's to say."
-  {:malli/schema [:=> [:cat :seon.render.data/path [:or :seon.error/throwable :map] :int] :string]}
-  [path failure further]
-  (str ";; renderer failed at " (pr-str path) ", value printed as data: "
-       (bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
-       (when (pos? further) (str " (and " further " further renderer failures)"))))
-
 (defn- make-node
   "A node for `value` reached at `path`, classified, with its flat width."
   {:malli/schema [:=> [:cat :map :seon.schema/value :int :int :seon.render.data/path [:maybe :int] :map] :map]}
   [context value id depth path parent position]
-  (let [{:keys [unit output ceiling identity-attributes]} context
+  (let [{:keys [unit output identity-attributes]} context
         ;; RENDER OUTPUT GOES STRAIGHT TO THE VALUE PRINTER, WHICH NEVER
         ;; RE-DISPATCHES (AGENTS.md, renders return data): only the root is
         ;; offered to its render; every value beneath prints as data.
@@ -1031,22 +1050,23 @@
                ;; The source a cut's continuation form reads from.
                (and (not render-data?) (get-in context [:requery ::print/requery-id]))
                (assoc :requery-id (get-in context [:requery ::print/requery-id])))
-        node (if declared
-               (let [text (when (and (= ::print/projected (::print/face declared))
-                                     (= :seon.render/ai (:seon.render/output declared)))
-                            (::print/value declared))
-                     ;; A render's text past the value's budget keeps being the
-                     ;; render (its producer, printed as REPL text, not a quoted
-                     ;; string): its head, then `…+N`, within B characters and
-                     ;; charged like any other node, so no render escapes the
-                     ;; one budget. The value itself is read through its handle.
-                     kept (when (and text (> (count text) ceiling))
-                            (max 0 (- ceiling (count (str "…+" (count text))))))
-                     declared (if kept
-                                (assoc declared ::print/value
-                                       (str (subs text 0 kept) "…+" (- (count text) kept)))
-                                declared)]
-                 (assoc base :kind :leaf :node declared))
+        ;; A RENDER'S TEXT IS A STRING SHOWN AS WRITTEN (`:raw?`): selected,
+        ;; filled to a line end and cut like any long string, under the one
+        ;; budget; its cut reads the rest with `(seon.print/full result/…)`
+        ;; when the value can carry that mark.
+        raw-text (when (and (= ::print/projected (::print/face declared))
+                            (= :seon.render/ai (:seon.render/output declared)))
+                   (::print/value declared))
+        node (cond
+               raw-text
+               (let [node (cond-> (assoc base :kind :string :raw? true :node declared :value raw-text
+                                         :total (count raw-text))
+                            (and (symbol? (:requery-id base)) (instance? clojure.lang.IObj value))
+                            (assoc :raw-continuation (list 'seon.print/full (:requery-id base))))
+                     shown (string-shown node raw-text (:max-string context))]
+                 (assoc node :shown shown :shown-width (shown-width node 0 shown)))
+               declared (assoc base :kind :leaf :node declared)
+               :else
                (let [;; A root continuation pages from its absolute offset.
                      c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))
                      ;; A root paged from an offset keeps its members addressable.
@@ -1099,10 +1119,9 @@
   "`state` with string or name node `node` shown through character `to`."
   {:malli/schema [:=> [:cat :map :map :int :map] :map]}
   [state node to context]
-  (let [text (if (= :name (:kind node)) (:text node) (:value node))
-        grown (-> node (assoc :shown to)
+  (let [grown (-> node (assoc :shown to)
                   (update :shown-width + (if (= :name (:kind node)) (- to (:shown node))
-                                             (escaped-width text (:shown node) to))))]
+                                             (shown-width node (:shown node) to))))]
     (settle state (assoc-in state [:nodes (:id node)] grown) (:id node) (:width context))))
 
 (defn- complete-chunk
@@ -1249,8 +1268,9 @@
                 (recur admitted (inc ordinal))))))))))
 
 (defn- fill-end
-  "Where a cut string grown into `room` more characters of literal ends: at
-  most `room` wide, back to its last line end inside the growth when it has one."
+  "Where a cut string grown into `room` more characters of literal (render
+  text: of characters) ends: at most `room` wide, back to its last line end
+  inside the growth when it has one."
   {:malli/schema [:=> [:cat :map :int :int] :int]}
   [node room max-string]
   (let [^String text (:value node)
@@ -1259,7 +1279,7 @@
              (if (< i limit)
                ;; `escaped-width`'s rule, one character at a time.
                (let [c (.charAt text i)
-                     width (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))]
+                     width (+ width (if-let [e (when-not (or (:raw? node) (= \newline c)) (char-escape-string c))] (count e) 1))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
         line-end (inc (.lastIndexOf text "\n" (int (dec to))))]
@@ -1326,7 +1346,7 @@
                                 text (subs (text-key node) start)
                                 shown (min chunk-width (count text) (:max-string context))]
                             (assoc node text-key text :total (count text) :shown shown :base start
-                                   :shown-width (if (= :name (:kind node)) shown (escaped-width text 0 shown)))))
+                                   :shown-width (if (= :name (:kind node)) shown (shown-width (assoc node :value text) 0 shown)))))
                (and (pos? offset) (#{:map :coll} (:kind root)))
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
@@ -1363,9 +1383,17 @@
                     (>= (:depth node) (:max-depth context)) :seon.render.profile/max-depth
                     (>= (:n node) (:max-children context)) :seon.render.profile/max-children
                     :else :seon.render.profile/token-budget)
+        raw? (:raw? node)
         request (cond-> (merge (:requery context)
                                {:seon.render.profile/id (:seon.render.profile/id (:profile context))
                                 :seon.render.data/path (:path node)})
+                  raw? (assoc ::print/raw? true)
+                  ;; Render text is not at a path of the value: without its
+                  ;; `full` form a cut of it says why it has no dig form.
+                  (and raw? (not (:raw-continuation node)))
+                  (-> (dissoc ::print/requery-id)
+                      (assoc ::print/requery-refusal
+                             "render text: the value has no result handle or cannot carry seon.print/full's mark"))
                   (not (:pending? node))
                   (assoc ::print/bound-by (if (= bound :seon.render.profile/token-budget)
                                             (or (::print/bound-by (:profile context)) bound)
@@ -1384,9 +1412,11 @@
          (assoc request ::print/elision-unit :pending :seon.render.data/next-offset (+ (:base node 0) (:n node)))
          (assoc request ::print/omitted (- (:total node) (:base node 0) (:n node)) ::print/elision-unit :children
                 :seon.render.data/next-offset (+ (:base node 0) (:n node)) :seon.render.data/total (:total node)))))]
-    ;; The HTML expander is the same continuation, at the cut's coordinates.
-    (if-some [href (path-url (:unit context) (:path node) (:seon.render.data/next-offset cut))]
-      (assoc cut ::print/href href)
+    ;; The HTML expanders are the same continuation, at the cut's
+    ;; coordinates, and for a string the whole string at its path.
+    (if-some [href (when-not raw? (path-url (:unit context) (:path node) (:seon.render.data/next-offset cut)))]
+      (cond-> (assoc cut ::print/href href)
+        (= :string (:kind node)) (assoc ::print/text-href (path-url (:unit context) (:path node) 0 true)))
       cut)))
 
 (defn- fold-collapsed-tail
@@ -1430,10 +1460,16 @@
                 (case (:kind node)
                   :leaf (:node node)
                   :entry kids
-                  (:string :name) (if cut
-                                    (if (= :name (:kind node)) (assoc (:node node) ::print/text (str (::print/prefix cut) "…+" (::print/omitted cut))) cut)
-                                    (if (= :name (:kind node)) (assoc (:node node) ::print/text (:text node))
-                                        {::print/face ::print/string ::print/value (:value node)}))
+                  (:string :name) (cond
+                                    (= :name (:kind node))
+                                    (assoc (:node node) ::print/text (if cut (str (::print/prefix cut) "…+" (::print/omitted cut)) (:text node)))
+                                    ;; Render text keeps its producer beside its cut; whole, it is the render's own node.
+                                    (:raw? node) (if cut
+                                                   (merge cut (select-keys (:node node) [:seon.render.call/selected-producer
+                                                                                         :seon.render.call/source-output?]))
+                                                   (:node node))
+                                    cut cut
+                                    :else {::print/face ::print/string ::print/value (:value node)})
                   (:map :coll)
                   (let [children (cond-> kids cut (conj cut))
                         collection (cond-> {::print/face (if (= ::print/throwable (:face node)) ::print/map (:face node))}
@@ -1485,19 +1521,24 @@
 
 (defn- plain-projection
   "The value printer's last answer: `value` as plain bounded Clojure text, with
-  the one diagnostic naming the failure that stopped the structural selection."
+  the diagnostic naming the failure that stopped the structural selection,
+  both projection-free (`bounded-text`): this terminal never re-enters selection."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.error/throwable :seon.render.data/path]
                   :seon.render.value/projection]}
   [value failure path]
   (let [value-text (bounded-text value 8192)
-        text (str value-text "\n" (diagnostic-line path failure 0))]
+        diagnostic (bounded-text [{:seon.render.data/path path
+                                   :seon.render.value/failure (throwable-value failure)}])
+        text (str value-text "\n" diagnostic)]
     {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
      :seon.render.value/options (print/default-options)
      :seon.render.value/truncated? true
      :seon.render.value/text text
      :seon.render.value/value-text value-text
-     :seon.render.value/html [:div {:class "seon-data-panel"} [:pre text]]
-     :seon.render.value/diagnostics [failure]}))
+     :seon.render.value/html [:div {:class "seon-data-panel"} [:pre value-text]
+                              [:div {:class "seon-render-unavailable"}
+                               [:pre {:class "seon-data-panel seon-core-value"} diagnostic]]]
+     :seon.render.value/diagnostics [{:seon.render.data/path path :seon.render.value/failure failure}]}))
 
 (defn prepare
   "Select the value under its render profile (design one-render-path §3) and
@@ -1534,6 +1575,12 @@
                                     :seon.print/level nil)
                        (= :single-line (:seon.render.profile/composition profile))
                        (assoc :seon.print/width 0))
+             ;; The session's own `*print-length*` / `*print-level*` (its
+             ;; `set!`, carried as print options) bound the selection as
+             ;; Clojure's printer would; absent, the profile's bounds stand.
+             {length :seon.print/length level :seon.print/level}
+             (merge (select-keys (:seon.render.value/options unit) [:seon.print/length :seon.print/level])
+                    (select-keys (:seon.print/options unit) [:seon.print/length :seon.print/level]))
              database (:seon.db/db unit)
              ;; Nested selection reads the one profile this value prints
              ;; under and the one viewer, derived here once per value.
@@ -1546,19 +1593,18 @@
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
                       :width (:seon.print/width options)
                       :budget (tokens/estimate-chars (:seon.render.profile/token-budget profile))
-                      :max-children (:seon.render.profile/max-children profile)
-                      :max-depth (:seon.render.profile/max-depth profile)
+                      :max-children (cond-> (:seon.render.profile/max-children profile)
+                                      (int? length) (min (max 1 length)))
+                      :max-depth (cond-> (:seon.render.profile/max-depth profile)
+                                   (int? level) (min (max 1 level)))
                       :max-string (or (:seon.render.profile/max-string-length profile) Long/MAX_VALUE)
                       :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
-                      :root-path path
-                      ;; A declared render's text follows the same budget: no
-                      ;; separate ceiling (owner 2026-09-27).
-                      :ceiling (tokens/estimate-chars (:seon.render.profile/token-budget profile))}
+                      :root-path path}
              ;; THE EXPLICIT OPT-IN (`seon.print/full`): this one value prints
              ;; whole, with no budget and no member, depth or string bound.
              full? (true? (::print/full (meta (:seon.render/value unit))))
              context (cond-> context
-                       full? (assoc :budget Long/MAX_VALUE :ceiling Long/MAX_VALUE
+                       full? (assoc :budget Long/MAX_VALUE
                                     :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
                                     :max-string Long/MAX_VALUE))
              state (select-nodes (:seon.render/value unit) context)]
@@ -1578,9 +1624,12 @@
              ;; reads its rest, which says what `…N` means at every cut.
              text (:seon.print/text emitted)
              limit (charge state)
-             ;; Shown once, beside the value and outside its budget.
-             diagnostic (when-let [node (first failed)]
-                          (diagnostic-line (:path node) (:diagnostic node) (dec (count failed))))]
+             ;; Shown once, beside the value and outside its budget, each
+             ;; failure with its path as data.
+             diagnostics (mapv (fn [node] {:seon.render.data/path (:path node)
+                                           :seon.render.value/failure (:diagnostic node)})
+                               failed)
+             shown-diagnostics (when (seq diagnostics) (diagnostics-shown diagnostics))]
          ;; The charge is the laid-out length (design §3d), declared render
          ;; text included; a longer text is the allocator's defect, never a
          ;; second attempt.
@@ -1597,15 +1646,15 @@
                   :seon.render.value/elisions (count (filter more? (vals (:nodes state))))
                   :seon.render.value/whole-characters
                   (+ (count (:seon.print/text emitted)) (omitted-characters (:nodes state)))
-                  :seon.render.value/text (cond-> text diagnostic (str "\n" diagnostic))
+                  :seon.render.value/text (cond-> text shown-diagnostics (str "\n" (::text shown-diagnostics)))
                   :seon.render.value/html
-                  [:div {:id id :class "seon-data-panel"}
-                   (breadcrumbs unit path)
-                   (:seon.print/hiccup emitted)
-                   (when diagnostic [:div {:class "seon-render-unavailable"} diagnostic])]}
+                  (cond-> [:div {:id id :class "seon-data-panel"}
+                           (breadcrumbs unit path)
+                           (:seon.print/hiccup emitted)]
+                    shown-diagnostics (conj (::html shown-diagnostics)))}
            full? (assoc :seon.render.value/full? true)
            (seq failed)
-           (assoc :seon.render.value/diagnostics (mapv :diagnostic failed)
+           (assoc :seon.render.value/diagnostics diagnostics
                   :seon.render.value/value-text text)
            (:seon.render.call/selected-producer selected)
            (assoc :seon.render.call/selected-producer
@@ -1623,7 +1672,7 @@
            (let [projection (prepare (assoc-in unit [:seon.render.value/options
                                                      :seon.render.value/structural?] true)
                                      output)
-                 line (diagnostic-line path failure 0)]
+                 entry {:seon.render.data/path path :seon.render.value/failure failure}]
              ;; A structural projection carries diagnostics only when the
              ;; value printer itself failed (it runs no declared render): print plain
              ;; text once, with the value printer's own distinct failures recorded.
@@ -1631,14 +1680,16 @@
                      (seq (:seon.render.value/diagnostics projection)))
                (update (plain-projection (:seon.render/value unit) failure path)
                        :seon.render.value/diagnostics into
-                       (remove #(= (ex-message %) (ex-message failure)))
+                       (remove #(= (ex-message (:seon.render.value/failure %)) (ex-message failure)))
                        (:seon.render.value/diagnostics projection))
-               (-> projection
-                   (assoc :seon.render.value/value-text
-                          (or (:seon.render.value/value-text projection)
-                              (:seon.render.value/text projection)))
-                   (update :seon.render.value/text str "\n" line)
-                   (update :seon.render.value/diagnostics (fnil conj []) failure))))))))))
+               (let [{shown-text ::text shown-html ::html} (diagnostics-shown [entry])]
+                 (-> projection
+                     (assoc :seon.render.value/value-text
+                            (or (:seon.render.value/value-text projection)
+                                (:seon.render.value/text projection)))
+                     (update :seon.render.value/text str "\n" shown-text)
+                     (update :seon.render.value/html conj shown-html)
+                     (update :seon.render.value/diagnostics (fnil conj []) entry)))))))))))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."

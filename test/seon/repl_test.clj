@@ -236,12 +236,19 @@
                                      :seon.cluster.eval/diagnostics "[{:seon.error/message \"renderer refused\"}]"})]
         (is (= {:audit/value 42} (:seon.repl/value response)))
         (is (= "renderer refused" (get-in response [:seon.repl/diagnostics 0 :seon.error/message])))))
-    (testing "text that is not data is one readable string, never an invented location"
+    (testing "an unshown failure's prose is one readable string, its line breaks kept"
       (is (= "No such namespace: missing.function"
              (:seon.repl/error (read-response {:seon.cluster.eval/error "No such namespace: missing.function"}))))
+      (is (= "facts not proposed:\nthe writer refused"
+             (:seon.repl/error (read-response {:seon.cluster.eval/error "facts not proposed:\nthe writer refused"}))))
+      (is (str/includes? (repl/response {:seon.cluster.eval/error "facts not proposed:\nthe writer refused"})
+                         "proposed:\nthe")
+          "a line break stays a line break, never an escape"))
+    (testing "a shown failure is the printer's text, spliced unchanged"
       (is (= "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"
-             (:seon.repl/error (read-response {:seon.cluster.eval/error "Divide by zero"
-                                               :seon.eval/shown "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"})))))))
+             (:seon.repl/error (into {} (#'repl/response-entries
+                                         {:seon.cluster.eval/error "Divide by zero"
+                                          :seon.eval/shown "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"}))))))))
 
 (deftest a-unit-that-is-not-an-evaluation-refuses-instead-of-throwing
   ;; RENDERS NEVER THROW (law 2.4, audit F5). `entity-emission`'s declared
@@ -294,7 +301,7 @@
                             (java.util.Date. 1785500000000)
                             :seon.eval/duration-ms 30000})]
     (is (= {:seon.repl/interrupted (java.util.Date. 1785500000000) :seon.repl/ms 30000}
-           (select-keys (support/reply (last (str/split-lines emitted)))
+           (select-keys (support/reply (subs emitted (str/index-of emitted "#:seon.repl{")))
                         [:seon.repl/interrupted :seon.repl/ms]))
         "an interrupted evaluation says so with its instant as data")))
 
@@ -362,18 +369,21 @@
         (is (= handle (:seon.repl/result reply)))
         (is (= 711 (:seon.repl/ms reply)))))
     (testing "a comment-ended text still leaves the map readable"
-      (let [reply (one-map (repl/response {:seon.cluster.eval/source "x" :seon.repl/handle handle
-                                           :seon.eval/shown "[1 2]\n;; a trailing diagnostic line"
-                                           :seon.eval/duration-ms 1}))]
-        (is (= [1 2] (:seon.repl/value reply)))
-        (is (= 1 (:seon.repl/ms reply)))))
-    (testing "a declared renderer's text is the :value, not text before the map"
-      (let [reply (one-map (repl/response {:seon.cluster.eval/source "(my.task/steps {})"
-                                           :seon.eval/renderer 'my.task/steps
-                                           :seon.repl/handle handle
-                                           :seon.eval/duration-ms 12
-                                           :seon.eval/shown ";; The plan has two steps.\n(my.task/steps {})"}))]
-        (is (= ";; The plan has two steps.\n(my.task/steps {})" (:seon.repl/value reply)) "prose renders are one string")
+      (doseq [[shown value] [["[1 2]\n;; a trailing diagnostic line" [1 2]]
+                             ["[\"a;b\"]" ["a;b"]]]]
+        (let [reply (one-map (repl/response {:seon.cluster.eval/source "x" :seon.repl/handle handle
+                                             :seon.eval/shown shown :seon.eval/duration-ms 1}))]
+          (is (= value (:seon.repl/value reply)))
+          (is (= 1 (:seon.repl/ms reply))))))
+    (testing "a declared renderer's text is the :value as shown, and the keys after it read as data"
+      (let [emission {:seon.cluster.eval/source "(my.task/steps {})"
+                      :seon.eval/renderer 'my.task/steps
+                      :seon.repl/handle handle
+                      :seon.eval/duration-ms 12
+                      :seon.eval/shown ";; The plan has two steps.\n(my.task/steps {})"}
+            entries (into {} (#'repl/response-entries emission))
+            reply (one-map (repl/response emission))]
+        (is (= ";; The plan has two steps.\n(my.task/steps {})" (:seon.repl/value entries)))
         (is (= handle (:seon.repl/result reply)))
         (is (= 12 (:seon.repl/ms reply))))
       (let [reply (one-map (repl/response {:seon.cluster.eval/source "(dir x)"
@@ -382,6 +392,15 @@
                                            :seon.eval/duration-ms 3}))]
         (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))
             "a render that is EDN is data")))))
+
+(deftest ^{:seon/tasks #{'seon.repl/a-selected-render-arrives-as-an-escaped-string}} a-rendered-value-with-cuts-is-spliced-verbatim
+  ;; A render's shown text, its cut and dig form included, is the printer's
+  ;; output: the reply holds it once, as shown, never quoted again.
+  (let [shown "{:seon.ns/name seon.render,\n :seon.ns/doc \"Renders \\\"values\\\".\"}\nline two\n…+40 (seon.print/full result/e7b3)"
+        emission {:seon.cluster.eval/source "(pull ns)" :seon.eval/renderer 'seon.render.ns/render-ai
+                  :seon.repl/handle (admit/result-handle "e7b3") :seon.eval/duration-ms 3 :seon.eval/shown shown}]
+    (is (= shown (:seon.repl/value (into {} (#'repl/response-entries emission)))))
+    (is (str/includes? (repl/response emission) shown))))
 
 (deftest an-error-in-the-printers-grammar-is-a-map-not-a-string
   ;; An error holding a host object, a Var (every `[:fn #'pred]` contract) or a

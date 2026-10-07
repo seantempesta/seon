@@ -233,6 +233,8 @@
                  {:optional true}
                  :seon.print/requery-id]
                 [:seon.print/href {:optional true} :seon.print/href]
+                [:seon.print/text-href {:optional true} :seon.print/text-href]
+                [:seon.print/raw? {:optional true} :seon.print/raw?]
                 [:seon.print/requery-refusal
                  {:optional true}
                  :seon.print/requery-refusal]
@@ -314,6 +316,9 @@
               [:sequential :seon.schema/value]],
              ; A cut's expander: the continuation URL at its path and next offset.
              :href [:string {:min 1}],
+             ; A string cut's second expander: the whole string at its path, as text/plain.
+             :text-href [:string {:min 1}],
+             :raw? [:= {:description "The cut string is render text: its prefix prints as written, not as a string literal."} true],
              :bound-by :qualified-keyword,
              :text :string,
              :prefix :string,
@@ -324,6 +329,7 @@
                {:optional true}
                :seon.print/elision-unit]
               [:seon.print/prefix {:optional true} :seon.print/prefix]
+              [:seon.print/raw? {:optional true} :seon.print/raw?]
               [:seon.print/bound-by {:optional true} :seon.print/bound-by]
               [:seon.print/requery-form {:optional true} :seon.print/requery-form]
               [:seon.print/continuation {:optional true} :seon.print/continuation]

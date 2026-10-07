@@ -2,8 +2,8 @@
   "The ONE generator of REPL bytes: one evaluation, as the session it was.
 
   The prompt precedes everything the agent typed, including its comments.
-  Declared AI renderer output is the response itself; ordinary data uses the
-  reply map. Historical entries preserve the evaluation's saved shown text.
+  Every value, declared AI renderer output included, is the reply map's
+  `:value` as the value printer showed it. Historical entries preserve the evaluation's saved shown text.
 
       my.agents.juniper=> ;; I should check the sum.
       (+ 1 1)
@@ -15,6 +15,7 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
+            [seon.print :as print]
             [seon.render.value :as value]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
@@ -91,21 +92,6 @@
           value shown)))
     (catch Exception _ shown)))
 
-(defn- one-form?
-  "True when `text` reads, without evaluation, as exactly one Clojure form
-  that is not a string: the value printer's grammar (`#'v`, `#\"re\"`, and
-  `#object[…]` as a tagged literal) is Clojure's, not EDN's."
-  {:malli/schema [:=> [:cat :string] :boolean]}
-  [text]
-  (try
-    (binding [*read-eval* false *default-data-reader-fn* tagged-literal]
-      (with-open [reader (java.io.PushbackReader. (java.io.StringReader. text))]
-        (let [end (Object.)
-              form (read {:eof end} reader)]
-          (and (not (identical? end form)) (not (string? form))
-               (identical? end (read {:eof end} reader))))))
-    (catch Exception _ false)))
-
 (defn shown-value
   "Read a complete shown EDN value; preserve terminal prose as its string."
   {:malli/schema [:=> [:cat :string] :seon.schema/value]}
@@ -173,28 +159,16 @@
   [emission]
   (or (:seon.eval/shown emission) (:seon.repl/value emission)))
 
-(declare syntax-tokens)
-
-(defn- data-text
-  "Saved text as it enters the reply map: floor-printed data verbatim, any
-  other text (an unrun evaluation's message, a receipt saved before its error
-  was data, a render's REPL entries with their `;;` prose) as one readable
-  string, so no comment ever lands inside the reply map."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [text]
-  (if (or (not (one-form? text))
-          (some #(= "comment" (first %)) (syntax-tokens text)))
-    (pr-str text)
-    text))
-
 (declare findings)
 
 (defn- response-entries
   "The response's present keys, in declared order, each already text.
 
-  ONE MAP, DATA ONLY (owner 2026-09-27: \"return data, not comments\"). A
-  declared renderer's text is the `:value` (read back as data when it is EDN,
-  else one string), a failure is `:error`, and the declared bounds' findings
+  ONE MAP (owner 2026-09-27: \"return data, not comments\"). Shown text is
+  the value printer's and is spliced as it was shown: the `:value` (a
+  declared render's text included), the `:error` when the failure was shown,
+  and `:diagnostics`. Only an unshown failure's prose `:seon.cluster.eval/error`
+  is quoted, by the printer's `string-literal`. The declared bounds' findings
   are `:findings`; nothing is printed above or around the map."
   [{output :seon.cluster.eval/output
     source :seon.cluster.eval/source
@@ -211,15 +185,15 @@
         ;; Diagnostics are a later stage's, beside a value that stands.
         diagnostics (:seon.cluster.eval/diagnostics emission)
         failed? (and (:seon.cluster.eval/error emission) (not diagnostics))
-        rendered? (some? (:seon.eval/renderer emission))
         found (findings emission)
-        by-key {:seon.repl/value (when (and (not failed?) (some? value))
-                                   (if rendered? (data-text value) value))
+        by-key {:seon.repl/value (when-not failed? value)
+                ;; Where the text came from decides, never parsing: shown
+                ;; text is the printer's; the prose error string is quoted.
                 :seon.repl/error (when failed?
-                                   (data-text (or value (:seon.cluster.eval/error emission))))
+                                   (or value (print/string-literal (:seon.cluster.eval/error emission))))
                 :seon.repl/findings (when (seq found)
                                       (binding [*print-namespace-maps* true] (pr-str found)))
-                :seon.repl/diagnostics (some-> diagnostics data-text)
+                :seon.repl/diagnostics diagnostics
                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
                 ;; for an interrupted evaluation carried `:ms` alone and read
                 ;; exactly like one still running — absence of signal read as
@@ -253,7 +227,8 @@
                 :seon.repl/calls (when (pos-int? call-count) (str call-count))
                 :seon.repl/repeated (when (and (seq repeated)
                                               (some (comp #{:slow} :seon.repl/finding) found))
-                                      (value/core-text (vec (sort-by (comp - second) repeated))))}]
+                                      ;; Ties by name, so the text is a function of the calls, not of the set's iteration order.
+                                      (value/core-text (vec (sort-by (juxt (comp - second) first) repeated))))}]
     (into []
           (keep (fn [response-key]
                   (when-some [text (get by-key response-key)]
@@ -261,18 +236,17 @@
           response-order)))
 
 (defn- ends-in-comment?
-  "True when `text`'s last token is a line comment (the floor's elision legend,
-  a diagnostic line): anything written after it on the same line would be
-  read as part of the comment, so the reply map must end that line first."
+  "True when `text`'s last line could hold a line comment, so the reply map
+  must end that line before the next key; a `;` inside a string on that line
+  costs only a newline."
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [text]
-  (= "comment" (first (peek (into [] (remove (comp #{"space"} first))
-                                   (syntax-tokens text))))))
+  [^String text]
+  (not= -1 (.indexOf text ";" (inc (.lastIndexOf text "\n")))))
 
 (defn- reply-map
-  "The entries as one `#:seon.repl{…}` map that reads back as data: entries
-  join with `, ` on one line, and a line an entry's text ends in a comment is
-  ended before the next key or the closing brace."
+  "The entries as one `#:seon.repl{…}` map: entries join with `, ` on one
+  line, and an entry whose last line may end in a comment (`ends-in-comment?`)
+  is ended before the next key or the closing brace."
   {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
   [entries]
   (when (seq entries)
@@ -357,7 +331,8 @@
           (:errors (explainer measured)))))
 
 (defn response
-  "The reply: exactly one `#:seon.repl{…}` map that reads back as data.
+  "The reply: exactly one `#:seon.repl{…}` map of the evaluation's entries,
+  its shown text as shown (`response-entries`).
 
   Returns nil when the evaluation has settled nothing — a running form has
   not printed a result, and inventing an empty map would say it had."

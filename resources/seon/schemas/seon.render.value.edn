@@ -54,9 +54,14 @@
                     :elisions [:int {:min 0 :description "How many cuts the selection made: each node that shows less than it holds."}],
                     :whole-characters [:int {:min 0 :description "Estimated characters of the whole value: the shown text plus each cut's omitted part (seon.render.value/omitted-characters), never a second print; a lower bound when a lazy tail is pending."}],
                     :full? [:boolean {:description "The value opted into printing whole (seon.print/full): no budget and no structural bound applied."}],
-                    :value-text [:string {:description "The value's own text without the diagnostic line :seon.render.value/text appends: what a caller that records the diagnostics beside the value (seon.sci.eval/shown-result) saves as the shown text. Present exactly when diagnostics are."}],
+                    :value-text [:string {:description "The value's own text without the diagnostics :seon.render.value/text appends: what a caller that records the diagnostics beside the value (seon.sci.eval/shown-result) saves as the shown text. Present exactly when diagnostics are."}],
                     :diagnostics [:vector {:min 1 :description "Presentation failures shown once beside the value they did not replace; the caller records each as a core fault."}
-                                  [:or :seon.error/throwable :seon.error/base]],
+                                  :seon.render.value/diagnostic],
+                    :diagnostic [:map {:description "One presentation failure and the path of the value it happened at."}
+                                 [:seon.render.data/path :seon.render.data/path]
+                                 [:seon.render.value/failure :seon.render.value/failure]],
+                    :failure [:or :seon.error/throwable :seon.error/base],
+                    :basis [:int {:min 0 :description "The basis-t a re-derived value was derived at: its continuation links carry it, so every page of one sequence reads the same view."}],
                     :text :string,
                     :tree :seon.print/node,
                     :truncated? :boolean,

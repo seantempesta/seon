@@ -43,8 +43,6 @@
         expected "my.agents.juniper=> ;; I should inspect the entities.\n;; Then I can choose.\n(->> entities\n     (map :total))\n#:seon.repl{:value [40 60]}"
         html (repl/render-html emission)]
     (is (= expected (repl/text emission)))
-    (is (= 128
-           (alength (.getBytes (repl/text emission) "UTF-8"))))
     ;; The HTML pair gives the agent's comment its own block (`input-text`).
     (is (= ";; I should inspect the entities.\n;; Then I can choose." (get-in html [2 2])))
     (is (= "my.agents.juniper=> (->> entities\n     (map :total))"

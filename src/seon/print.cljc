@@ -16,7 +16,7 @@
             *print-length* nil *print-level* nil *print-meta* false]
     (pr-str value)))
 
-(defn- string-literal
+(defn string-literal
   "`s` as a readable string literal whose newlines stay line breaks, so a
   multi-line string (a function's source) reads as its lines."
   {:malli/schema [:=> [:cat :string] :string]}
@@ -344,13 +344,18 @@
 
 (defn elided-text
   "The one text of a cut: `…N` after shown members, `\"prefix\"…+N`
-  after a string's shown characters, `…?` for a pending tail, each followed by
+  after a string's shown characters (render text's prefix as written, then
+  `…+N` on its own line), `…?` for a pending tail, each followed by
   its continuation form when the cut has a source. The value printer's allocator
   measures cuts with this same function."
   {:malli/schema [:=> [:cat :map] :string]}
   [node]
-  (let [text (case (::elision-unit node)
-               :characters (str (string-literal (or (::prefix node) "")) "…+" (::omitted node))
+  (let [prefix (or (::prefix node) "")
+        text (case (::elision-unit node)
+               :characters (if (::raw? node)
+                             ;; Render text is shown as written, its cut on a line of its own.
+                             (str prefix (when-not (str/ends-with? prefix "\n") "\n") "…+" (::omitted node))
+                             (str (string-literal prefix) "…+" (::omitted node)))
                :pending "…?"
                (str "…" (::omitted node "?")))]
     (if-some [form (::continuation node)]
@@ -395,9 +400,11 @@
 ;;; operation maps (`reference-code/fipp/src/fipp/engine.cljc:12–65`), so
 ;;; depth never uses the call stack. Text is fipp's own three stages over that
 ;;; stream (`engine.cljc:68–223`); hiccup is a fold over the same stream, so
-;;; the two outputs cannot disagree about a token. A `:text` op carries its
-;;; CSS class and, for a terminal projection, the hiccup it stands for; a
-;;; structural `:begin`/`:end` carries the node it opens.
+;;; the two outputs share every token boundary. A `:text` op carries its CSS
+;;; class and, where the faces spell a token differently, the hiccup it stands
+;;; for: a string shows its own characters in HTML (its quotes are CSS) and
+;;; its readable literal in text. A structural `:begin`/`:end` carries the
+;;; node it opens.
 
 (def ^:private scalar-kinds
   #{::nil ::boolean ::number ::keyword ::symbol ::char ::string
@@ -439,6 +446,28 @@
                                      ::node-keys (vec (sort-by str (keys node)))}}
                   extra)))
 
+(defn- elided-hiccup
+  "A cut as HTML: a string cut's shown characters, then its marker and
+  continuation form, as the text face prints them. The marker links to the
+  continuation page when the cut has `::href`; a cut with no continuation
+  names why in its title; a string cut with `::text-href` also links to the
+  whole text."
+  {:malli/schema [:=> [:cat :map :string] :seon.render/hiccup]}
+  [node text]
+  (let [prefix (or (::prefix node) "")
+        shown (cond (not= :characters (::elision-unit node)) nil
+                    (::raw? node) (subs text 0 (str/index-of text "…+" (count prefix)))
+                    :else prefix)
+        label (if shown (subs text (if (::raw? node) (count shown) (count (string-literal prefix)))) text)
+        ;; The label already shows the continuation form; a cut without one says why.
+        reason (when-not (::continuation node) (::requery-refusal node))
+        attributes (cond-> {:class (css-class ::elision)} reason (assoc :title reason))
+        marker (if-some [href (::href node)] [:a (assoc attributes :href href) label] [:span attributes label])]
+    (if shown
+      (cond-> [:span [:span {:class (css-class (if (::raw? node) ::projected ::string))} shown] marker]
+        (::text-href node) (conj " " [:a {:class "seon-print-whole-text" :href (::text-href node)} "whole text"]))
+      marker)))
+
 (defn- leaf-ops
   "The text ops of one leaf print node at `depth`; a malformed or unknown node
   is one diagnostic op."
@@ -451,7 +480,8 @@
       ::nil [(text-op ::nil "nil")]
       (::boolean ::number ::keyword ::symbol ::char)
       [(text-op (::face node) (or (::text node) (literal value)))]
-      ::string [(text-op ::string (or (::text node) (string-literal value)))]
+      ::string [(text-op ::string (or (::text node) (string-literal value))
+                         [:span {:class (css-class ::string)} (or (::text node) value)])]
       (::inst ::uuid) [(text-op ::tag (or (::text node) (literal value)))]
       ::var [(text-op ::symbol (str "#'" (::name node)))]
       (::type ::class) [(text-op ::symbol (::name node))]
@@ -461,23 +491,22 @@
                                 (when-some [rep (::rep node)] (str " " rep)) "]")
                            ;; An empty `#object[]` would read as content.
                            (diagnostic-text "The object print node names no class." node)))]
-      ::truncated-string [(text-op ::string (string-literal (str value "…")))]
+      ::truncated-string [(text-op ::string (string-literal (str value "…"))
+                                   [:span {:class (css-class ::string)} (str value "…")])]
       ::failed [(text-op ::object (str "#object[" (::class node) " "
                                        (literal (str "projection failed: " (::message node))) "]"))]
       ;; ONE CUT FACE (design §3e): `…N` after shown members, `"prefix"…+N`
       ;; after a string's shown characters, `…?` for a pending tail. The cut's
       ;; coordinates stay on the node for HTML and continuation.
       ;; A cut with an expander (`::href`, the continuation at its path and
-      ;; next offset) is a link in HTML; the text face is the same.
+      ;; next offset) is a link in HTML (`elided-hiccup`).
       ::elided (let [text (elided-text node)]
-                 [(if-some [href (::href node)]
-                    (text-op ::elision text [:a {:class (css-class ::elision) :href href} text])
-                    (text-op ::elision text))])
+                 [(text-op ::elision text (elided-hiccup node text))])
       ::pruned [(text-op ::prune "#")]
       ::projected (let [output (:seon.render/output node)]
                     (cond
                       (and (pos? depth) (= :seon.render/ai output))
-                      [(text-op ::string (string-literal value))]
+                      [(text-op ::string (string-literal value) [:span {:class (css-class ::string)} value])]
                       (= :seon.render/ai output)
                       [(text-op ::projected value [:span {:class (css-class ::projected)} value])]
                       :else [(text-op ::projected (literal value) value)]))
@@ -784,7 +813,7 @@
   ordinary EDN. Missing coordinates remain absent. A node without a requery
   identity retains the reason internally and prints no invented requery."
   {:malli/schema [:=> [:cat :seon.print/elision-request] :seon.print/node]}
-  [{::keys [requery-id requery-refusal omitted elision-unit prefix bound-by]
+  [{::keys [requery-id requery-refusal omitted elision-unit prefix bound-by raw?]
     supplied ::continuation
     profile-id :seon.render.profile/id
     path :seon.render.data/path
@@ -800,6 +829,7 @@
     (some? total) (assoc :seon.render.data/total (long total))
     (some? prefix) (assoc ::prefix prefix)
     (some? bound-by) (assoc ::bound-by bound-by)
+    raw? (assoc ::raw? true)
     (some? requery-id) (assoc ::requery-id requery-id)
     (requery-form requery-id (or path []))
     (assoc ::requery-form (requery-form requery-id (or path [])))

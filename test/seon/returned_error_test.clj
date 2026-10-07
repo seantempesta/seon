@@ -1,6 +1,5 @@
 (ns seon.returned-error-test
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
@@ -13,9 +12,8 @@
    (fn [connection]
      (config/apply! {:seon.db/connection connection
                     :seon.boot/cluster-name "returned-error"})
-     (let [setup (db/transact! connection
-                               [[:db/add "cluster" :seon.cluster/name "returned-error"]
-                                (support/task-row "erroritem000" "Verify")])
+     (support/seed-cluster! connection "returned-error")
+     (let [setup (db/transact! connection [(support/task-row "erroritem000" "Verify")])
            _ (is (:db-after setup))
            ctx (support/fork-cluster-ctx connection "returned-error")
            configuration (support/effective-config)
@@ -30,9 +28,6 @@
            shown (:seon.eval/shown result)
            response (repl/response result)
            diagnostic (:seon.sci.admit/value result)]
-       (println "RETURNED-ERROR"
-                (pr-str {:shown shown :bytes (alength (.getBytes shown "UTF-8"))
-                         :response response}))
        (is (string? (:seon.db.write.attempt/request-id diagnostic)))
        (is (:seon.schema/form diagnostic))
        (is (= 42 (:seon.db/offending diagnostic)))
@@ -46,7 +41,8 @@
        (is (str/includes? shown "expected a string"))
        (is (str/includes? shown "42"))
        (is (< (tokens/estimate shown) 200))
-       (is (= shown response))
+       (is (= shown (:seon.repl/value (into {} (#'repl/response-entries result))))
+           "the reply's :value is the shown text")
        (is (= 'seon.db/render-rejection-ai (:seon.eval/renderer result)))
        (is (= before (db/basis-t @connection)))
        (is (= "Verify" (:seon.task/intent
@@ -54,8 +50,8 @@
                                  [:seon.task/id "erroritem000"]))))
        (is (= response
               (repl/response (dissoc result :seon.sci.admit/value :seon.sci.eval/ctx))))
+       ;; Saved shown prose is the printer's text: the reply splices it unchanged.
        (is (= "Expected: saved schema\nGot: saved value"
               (:seon.repl/error
-               (edn/read-string
-                (repl/response {:seon.cluster.eval/error "saved refusal"
-                                :seon.eval/shown "Expected: saved schema\nGot: saved value"})))))))))
+               (into {} (#'repl/response-entries {:seon.cluster.eval/error "saved refusal"
+                                                  :seon.eval/shown "Expected: saved schema\nGot: saved value"})))))))))

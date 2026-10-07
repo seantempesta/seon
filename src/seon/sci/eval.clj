@@ -3538,9 +3538,13 @@
         ;; A refused profile is a diagnostic; the value prints under the
         ;; floor's defaults, never under the refusal read as a profile.
         failures (cond-> [] (:seon.render/refused-member profile) (conj profile))
-        request (if (:seon.render/refused-member profile)
-                  (dissoc request :seon.render/profile)
-                  (assoc request :seon.render/profile profile))
+        request (cond-> (if (:seon.render/refused-member profile)
+                          (dissoc request :seon.render/profile)
+                          (assoc request :seon.render/profile profile))
+                  ;; A REPL prints under the session's `*print-length*` and
+                  ;; `*print-level*` (its `set!`s), held by the agent's fork.
+                  (and (not (contains? request :seon.print/options)) (some-> ctx ::print-session deref seq))
+                  (assoc :seon.print/options @(::print-session ctx)))
         ;; The render's forms read the value by its handle.
         _ (when (and ctx handle) (bind-result! ctx handle value))
         ;; A preparation or print the render stage refuses (a unit it cannot
@@ -3562,8 +3566,9 @@
                  (or (:seon.render.value/value-text projection)
                      (render.value/render-ai-data projection)))])
           (catch Throwable failure
-            [{:seon.render.value/diagnostics [failure]} (render.value/core-text value)]))
-        failures (into failures (:seon.render.value/diagnostics projection))
+            [{:seon.render.value/diagnostics [{:seon.render.data/path [] :seon.render.value/failure failure}]}
+             (render.value/core-text value)]))
+        failures (into failures (map :seon.render.value/failure) (:seon.render.value/diagnostics projection))
         ;; a refusal of the root's description is data: the value printer bounds it
         shown (if (string? shown) shown (render.value/core-text shown))]
     ;; THE VALUE'S SIZE IS RECORDED BESIDE ITS SHOWN TEXT: the whole value's

@@ -262,10 +262,13 @@
     (string? form) form
     (sequential? form)
     (let [[tag & body] form
+          {css :class} (when (map? (first body)) (first body))
           body (if (map? (first body)) (next body) body)]
-      (if (contains? #{:summary :nav} tag)
-        ""
-        (apply str (map lexical-hiccup-text body))))
+      (cond
+        (or (contains? #{:summary :nav} tag) (= "seon-print-whole-text" css)) ""
+        ;; A string shows its own characters in HTML and its literal in text.
+        (= "seon-print-string" css) (print/string-literal (apply str (map lexical-hiccup-text body)))
+        :else (apply str (map lexical-hiccup-text body))))
     :else ""))
 
 (deftest ordinary-values-use-one-readable-structural-printer
@@ -529,8 +532,9 @@
         projection (value/prepare (unit (poison)))
         text (:seon.render.value/text projection)]
     (is (string? (value/render-ai (unit (poison)))))
-    (is (= ["poison"] (map ex-message (:seon.render.value/diagnostics projection))))
-    (is (= 1 (count (re-seq #"renderer failed" text))))
+    (is (= ["poison"] (map (comp ex-message :seon.render.value/failure) (:seon.render.value/diagnostics projection))))
+    (is (= [[]] (map :seon.render.data/path (:seon.render.value/diagnostics projection))))
+    (is (= 1 (count (re-seq #":seon.render.value/failure" text))))
     (is (str/includes? text "poison"))))
 
 (def ^:private probe-profile
@@ -952,21 +956,118 @@
    (fn [connection]
      (let [boom (fn [_] (throw (ex-info "boom" {})))
            prepared (value/prepare (render-request connection {:seon.render/ai boom :a 1 :b {:c 2}}))
-           shown (:seon.render.value/text prepared)
-           {diagnostics true value-lines false}
-           (group-by #(str/starts-with? % ";; renderer failed") (str/split-lines shown))
            ;; Where the value breaks depends on its compiled fn class name's
            ;; width; the value printed as data is what matters, not its layout.
-           value-text (str/replace (str/join " " value-lines) #"\s+" " ")
+           value-text (str/replace (:seon.render.value/value-text prepared) #"\s+" " ")
            nested (value/prepare (render-request connection [{:seon.render/ai boom :a 1}]))]
        (is (str/includes? value-text ":a 1"))
        (is (str/includes? value-text ":b {:c 2}"))
        (is (str/includes? value-text ":seon.render/ai #object["))
-       (is (= 1 (count diagnostics)))
-       (is (str/starts-with? (first diagnostics) ";; renderer failed at []"))
-       (is (= 1 (count (:seon.render.value/diagnostics prepared))))
+       (is (= [[]] (mapv :seon.render.data/path (:seon.render.value/diagnostics prepared)))
+           "one failure, at the root, its path as data")
+       (is (str/starts-with? (:seon.render.value/text prepared) (:seon.render.value/value-text prepared))
+           "the diagnostic follows the value it did not replace")
        (is (nil? (:seon.render.value/diagnostics nested))
            "a nested render is never invoked, so it cannot fail")))))
+
+(defn- hiccup-elements
+  "Every element of `hiccup` whose tag is `tag`."
+  [tag hiccup]
+  (filter #(and (vector? %) (= tag (first %))) (tree-seq vector? seq hiccup)))
+
+(deftest a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form
+  ;; Render text is a string shown as written and cut like one: at a line end
+  ;; when one fits, counted, and read whole with `seon.print/full` on the handle.
+  (support/with-database
+   (fn [connection]
+     (let [lines (apply str (repeat 400 "line \"q\" \\ <b>&amp;\n"))
+           crlf (apply str (repeat 400 "a windows line\r\n"))
+           long-line (str (apply str (repeat 10000 "x")) "\nmore")
+           prepared (fn [raw root]
+                      (value/prepare (assoc (render-request connection raw) :seon.render/profile probe-profile
+                                            :seon.render.value/root root)))]
+       (doseq [[row raw root line-end? full?]
+               [[:own-text {:seon.render/ai lines} 'result/e0123456789ab true true]
+                [:producer-text {:seon.render/ai (fn [_] lines)} 'result/e0123456789ab true true]
+                [:crlf {:seon.render/ai crlf} 'result/e0123456789ab true true]
+                [:first-line-past-the-budget {:seon.render/ai long-line} 'result/e0123456789ab false true]
+                [:no-result-handle {:seon.render/ai lines} [:seon.render.value-test/registered :text] true false]]]
+         (let [projection (prepared raw root)
+               [cut & more] (tree-cuts projection)
+               text (:seon.render.value/text projection)]
+           (is (nil? (:seon.render.value/diagnostics projection)) (str row))
+           (is (and cut (empty? more)) (str row ": one cut"))
+           (is (true? (:seon.print/raw? cut)) (str row))
+           (is (true? (:seon.render.value/truncated? projection)) (str row))
+           (is (= 1 (:seon.render.value/elisions projection)) (str row))
+           (is (= (count (:seon.print/prefix cut)) (:seon.render.data/next-offset cut)) (str row))
+           (is (> (:seon.render.value/whole-characters projection) (count text)) (str row ": the whole is counted"))
+           (is (str/starts-with? text (:seon.print/prefix cut)) (str row ": shown as written"))
+           (is (= line-end? (str/ends-with? (:seon.print/prefix cut) "\n")) (str row))
+           (if full?
+             (is (= '(seon.print/full result/e0123456789ab) (:seon.print/continuation cut)) (str row))
+             (is (string? (:seon.print/requery-refusal cut)) (str row)))
+           (is (some #(and (= {:class "seon-print-projected"} (second %))
+                           (str/starts-with? (nth % 2) (:seon.print/prefix cut)))
+                     (hiccup-elements :span (:seon.render.value/html projection)))
+               (str row ": HTML shows the characters as written"))))))))
+
+(deftest an-html-cut-of-a-long-string-shows-text-and-continues
+  ;; A string shows its characters in HTML; each cut links to its page when the
+  ;; unit has a route, with the basis the value was derived at, and a string
+  ;; cut also to the whole string.
+  (let [body (apply str (repeat 2000 "a \"q\" <b>\n"))
+        html (fn [raw extra] (value/render-html (merge (probe-unit raw) extra)))
+        links #(map second (hiccup-elements :a %))]
+    (doseq [[row raw extra hrefs whole?]
+            [[:no-route {:body body} {} [] false]
+             [:route {:body body} {:seon.render.value/route-base "/d?id=x"} ["/d?id=x&path=%5B%3Abody%5D&offset="] true]
+             [:basis {:body body} {:seon.render.value/route-base "/d" :seon.render.value/basis 42} ["&basis=42"] true]
+             [:collection (vec (range 3000)) {:seon.render.value/route-base "/d"} ["/d?path=%5B%5D&offset=3"] false]]]
+      (let [hiccup (html raw extra)
+            anchors (links hiccup)]
+        (is (every? (fn [part] (some #(str/includes? (:href %) part) anchors)) hrefs) (str row))
+        (is (= whole? (boolean (some #(str/includes? (:href %) "text=1") anchors))) (str row))
+        (when (= :no-route row)
+          (is (empty? anchors))
+          (is (some #(and (= {:class "seon-print-string"} (second %)) (str/starts-with? body (nth % 2))
+                          (str/includes? (nth % 2) "a \"q\" <b>\n"))
+                    (hiccup-elements :span hiccup))
+              "the string's characters, unescaped")
+          (is (some #(and (= "seon-print-elision" (:class (second %)))
+                          (str/includes? (nth % 2) "(subs (get-in result/e0123456789ab [:body])"))
+                    (hiccup-elements :span hiccup))
+              "a cut with no route shows its continuation"))))))
+
+(deftest a-session-print-length-bounds-the-shown-members
+  ;; As at Clojure's REPL, a form's `set!` of *print-length* / *print-level*
+  ;; bounds how the session's later values print; the cut reads the rest.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (:seon.sci.eval/ctx
+                (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                                           :seon.db/db (db/db connection)
+                                           :seon.agent/id "root"}))
+           shown #(:seon.eval/shown (support/evaluate {:seon.cluster.eval/source % :seon.sci.eval/ctx ctx
+                                                       :seon.db/db (db/db connection) :seon.sci.admit/caps caps
+                                                       :seon.sci.eval/time-limit-ms 5000}))]
+       (is (= "(0 1 2 3 4)" (shown "(range 5)")) "the profile's bounds when the session set none")
+       (let [text (shown "(set! *print-length* 2) (range 5)")
+             members (edn/read-string (str/replace text #" ….*\)$" ")"))]
+         (is (= '(0 1) members) "two members shown")
+         (is (str/includes? text "…") "a cut follows them"))
+       (is (= 2 (count (edn/read-string (str/replace (shown "(vec (range 9))") #" ….*\]$" "]"))))
+           "a later form keeps the session's length")))))
+
+(deftest a-terminal-structural-failure-does-not-reenter-selection
+  ;; The core's last resort is projection-free: a value whose realization
+  ;; always throws ends in one diagnostic, never a nested selection.
+  (let [poison (map (fn [_] (throw (ex-info "poison" {}))) [1])
+        structural (value/prepare (assoc (unit poison) :seon.render.value/options {:seon.render.value/structural? true}))]
+    (is (string? (value/text (unit poison))))
+    (is (string? (value/core-text poison)))
+    (is (= 1 (count (:seon.render.value/diagnostics structural))))
+    (is (= [] (:seon.render.data/path (first (:seon.render.value/diagnostics structural)))))))
 
 (deftest selection-is-one-rule-at-every-depth
   ;; Render-specificity audit slice 2 (owner 2026-09-26: "No specific 'if
@@ -1252,7 +1353,7 @@
                          " (subs result/e0123456789ab "))
       (let [text (value/render-ai (probe-unit (into (sorted-map) (map (fn [i] [i i])) (range 10))))]
         (is (str/includes? text "…7 result/e0123456789ab}"))
-        (is (not (str/includes? text "renderer failed")))))
+        (is (not (str/includes? text ":seon.render.value/failure")))))
     (clojure.test/testing "seon.print/full prints the value whole and says so"
       (let [whole (value/prepare (probe-unit (print/full raw)))]
         (is (:seon.render.value/full? whole))
