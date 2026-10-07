@@ -156,6 +156,9 @@ JVMs) reads:
 
 ### 4.2 One read and its span (`read-one`, `read-at`)
 
+(§9.1 amends this: the read stage is a value, structural token and stray-closer spans take no read, and one
+non-logging reader serves each region.)
+
 - `read-one` keeps today's end computation (line and column deltas from the read's start) and adds the failure
   span:
   - **opener present:** the end is `(or (closer-end text opener) (count text))`;
@@ -254,7 +257,7 @@ resolver, so its span ends at its `)`.
   `read-at`, `enter`, `reply-step`, `code-step`, `step`, `construct-end`.
 - **`comment-of`** derives the comment from the text between two forms: prose lines → `; line`, the agent's `;`
   lines kept, blank and fence lines dropped. So no repair edits are needed and the text read is the text sent.
-- **Size:** prototype `forgive2.clj` is 293 lines, about 315 with `next-form` and `construct-end`, against 480 today (about −165). The `seon.batch.edn` and consumer
+- **Size:** prototype v3 `forgive3.clj` is 361 lines, about 380 with `next-form` and `construct-end`, against 480 today (about −100). The `seon.batch.edn` and consumer
   sweep is net negative.
 
 ### 4.6 Why no owner or library already does it
@@ -332,48 +335,122 @@ None blocking. Two consequences to confirm on reading:
 | `# Heading`, `## h2` | prose |
 | `#_` alone before a closing fence | no source; the fence closes |
 
-## 9. Cost (throwaway JVM on the checkout classpath; armed = `seon.instrument/apply!` over every contracted Var of both namespaces, 47 Vars, packaged projection, counts from a `seon.batch/sink`; median of 5 after 3 warm runs; `rr` = live 01, 05-08 and loop 1-2 joined)
+## 9. Cost
+
+**Method.** Throwaway JVM on the checkout classpath.
+- Armed = `seon.instrument/apply!` over every contracted Var of both namespaces (51 Vars), with the packaged
+  projection; counts come from a `seon.batch/sink`.
+- Median of 5 runs after 3 warm runs.
+- `rr` = live 01, 05-08 and loop 1-2 joined.
+- The prototype is v3 (scratchpad `s2b1-reader/src/s2b1/forgive3.clj`, 361 lines), with §9.1's changes.
 
 | Input | chars | installed `:reply` armed | new `:reply` armed | new unarmed |
 |---|---|---|---|---|
-| rr ×1 | 9,557 | 19.0 ms, 5.03 MB, 2,119 calls | 3.9 ms, 1.52 MB, 1,181 calls | 2.7 ms, 1.13 MB |
-| rr ×3 | 28,671 | 12.8 ms, 15.02 MB, 6,307 calls | **2.7 ms, 4.94 MB, 3,733 calls** | 2.9 ms, 3.55 MB |
-| rr ×8 | 76,456 | 34.3 ms, 39.68 MB, 16,777 calls | 6.9 ms, 13.38 MB, 10,113 calls | 6.2 ms, 9.50 MB |
-| 400 prose/form pairs | 8,400 | 33.1 ms, 28.97 MB, 12,410 calls | 2.8 ms, 5.92 MB, 5,609 calls | 1.9 ms, 3.95 MB |
-| 1,000 prose lines | 56,000 | 6.6 ms, 6.20 MB (reads ~65 lines, then stops¹) | 0.6 ms, 1.32 MB, 4,009 calls | 0.1 ms, 0.10 MB |
-| 100 fences each holding an unclosed form | 3,300 | 11.9 ms, 9.74 MB | 7.2 ms, 6.95 MB | 3.8 ms, 4.03 MB |
-| 1,000 stray `)` in a fence | 9,011 | 45.5 ms, 66.06 MB (drops them silently) | **65.1 ms**, 61.49 MB, 2,000 sources² | 29.5 ms, 36.11 MB |
-| run4 7b254915ca94 | 12,176 | 3.2 ms, 3.58 MB | 2.3 ms, 1.84 MB | 1.4 ms, 1.60 MB |
+| rr ×1 | 9,557 | 15.2 ms, 5.10 MB, 2,119 calls | 1.6 ms, 1.10 MB, 1,132 calls | — |
+| rr ×3 | 28,671 | 14.1 ms, 15.15 MB, 6,307 calls | **4.5 ms, 3.45 MB, 3,606 calls** | 2.0 ms, 2.01 MB |
+| rr ×8 | 76,456 | 39.3 ms, 40.01 MB, 16,777 calls | 5.8 ms, 9.09 MB, 9,791 calls | — |
+| 400 prose/form pairs | 8,400 | 41.1 ms, 29.16 MB, 12,410 calls | 2.8 ms, 4.15 MB, 6,406 calls | — |
+| 1,000 prose lines | 56,000 | 7.7 ms, 6.21 MB (reads ~65 lines, then stops¹) | 1.0 ms, 1.32 MB, 4,007 calls | 0.2 ms, 0.22 MB |
+| 100 fences each holding an unclosed form | 3,300 | 14.0 ms, 9.83 MB | 6.4 ms, 4.22 MB | — |
+| 1,000 stray `)` in a fence | 9,011 | 51.2 ms, 66.52 MB (drops them silently) | 8.1 ms, 10.72 MB, 2,000 sources | 1.5 ms, 4.33 MB |
+| run4 7b254915ca94 | 12,176 | 4.5 ms, 3.56 MB | 1.3 ms, 1.05 MB | — |
 
 `:code` (MCP), armed:
 
-| Input | installed | new |
-|---|---|---|
-| rr ×3 | 1.65 ms, 2.91 MB (stops at the first prose word) | 3.50 ms, 4.41 MB, 234 sources |
-| 1,000 prose lines | 0.34 ms, 0.42 MB (stops) | **163 ms, 188 MB**, 10,000 sources³ |
+| Input | installed | new (v2) | new (v3) | v3 unarmed |
+|---|---|---|---|---|
+| rr ×3 | 2.75 ms, 2.95 MB (stops at the first prose word) | 3.50 ms, 4.41 MB | 3.56 ms, 1.42 MB, 234 sources | 2.2 ms, 0.83 MB |
+| 1,000 prose lines | 0.38 ms, 0.42 MB (stops) | 163 ms, 188 MB | **27.2 ms, 43.8 MB**, 10,000 sources, 83,000 calls | **6.2 ms, 12.7 MB** |
+| 1,000 stray `)` in a fence | 0.23 ms, 0.18 MB (stops) | — | 6.9 ms, 10.5 MB | 1.6 ms, 4.3 MB |
 
-¹ The installed guard stops after 64 repairs. The new number covers the whole input, so it is not like-for-like
-(Opus F7, Codex).
+¹ The installed guard stops after 64 repairs. The new number covers the whole input, so it is not like-for-like.
 
-² **Worse in ms.** Each stray closer is now its own error (one thrown read, ~30 KB) where Parinfer used to drop it
-silently. It is linear; no real reply has more than one.
-
-³ **The price of ruling 3 for MCP prose.** 56 KB of prose sent as code becomes 10,000 symbol or error sources at
-~19 KB each, SCI's per-form read cost. It is linear. MCP code is code, so this input is not realistic, but the
-number is reported.
-
-- **Budget:** the realistic reply mix is under 5 MB armed at 28.7 KB (4.94 MB) and linear (×3 → 3.2×, ×8 → 8.8× of
-  ×1).
-- **The margin is thin.** Arming adds ~0.4 KB per armed call: 3,733 calls is about 21 per form plus about 1 per
-  prose line. Cutting further means fewer contracted helper calls per form (`step` → `reply-step` → `read-at` →
-  `read-one` → `advance`), task `seon.instrument/hot-internals-pay-armed-validation` (`ee57516cbaef`).
-- **The live second read** (`read-row`, one `next-form` per row) is unchanged in kind. An error value is built only
-  for a failed row.
+- **Budget:** the realistic reply mix is now 3.45 MB armed at 28.7 KB (was 4.94 MB in v2), and linear.
 - **Not measured:**
   - the armed `next-form` live read;
   - the JVM path (only the structural span is probed);
-  - the S0 probe (a model fixture pass is dominated by the refresh; the read is milliseconds).
+  - the S0 probe.
 - **Store:** the read writes nothing.
+
+### 9.1 What a failed read cost, and the fix (root's follow-up on the 188 MB row)
+
+**Measured in throwaway JVMs, per read, by stack depth** (the MCP and evaluation paths run about 190-200 frames
+deep):
+
+| One read | depth 10 | depth 200 |
+|---|---|---|
+| `(ex-info "x" {})` alone | 6.0 KB | **62.2 KB** |
+| SCI `parse-next`, failing token `Note:` (edamame's ex-info plus SCI's rewrap) | 21.5 KB | **134.9 KB** |
+| edamame `parse-next`, same failure (one ex-info) | 9.2 KB | 65.7 KB |
+| SCI `parse-next`, successful symbol `here` | 5.4 KB | 5.3 KB |
+| edamame `parse-next` with options normalized once, same symbol | 0.9 KB | 0.9 KB |
+| `sci/source-reader` construction | 1.5 KB | 1.5 KB |
+
+**Causes, in order:**
+1. **Every failed read throws twice.** edamame's `throw-reader` (`impl/parser.cljc:44-60`) throws an ex-info, and
+   SCI rewraps it (sci `impl/parser.cljc:180-189`). An ex-info's stack-trace capture costs about 0.3 KB per frame on
+   this JDK, so a failure at depth 200 is 135 KB. The prose line has 3 failing tokens (`Note:`, `left:`, `6.`-like),
+   about 400 MB at depth 200 for 1,000 lines.
+2. **Every successful read assembles SCI's options per call** (sci `impl/parser.cljc:150-169`: `assoc` of six keys,
+   three closures, `merge`): 4.5 KB per form on top of edamame's 0.9 KB.
+3. **The source-logging reader** (`sci/source-reader`) appends every character read to a buffer, so advancing over a
+   span allocates; the structural pass needs no source log.
+4. **Location metadata** (`:location?`, `:end-location`) is attached to every form the structural pass reads and
+   then drops.
+
+None of these is a stack-trace or message problem in Seon's own error value: the structural pass builds no error
+value (ruling 5), so the cost is the reads themselves.
+
+**Fix: a failed read is no more expensive than a successful one.** These are changes to §4.2 and §4.3, measured as
+v3.
+
+- **The read stage is a value.** The stepper calls `(:seon.batch/read opts)`.
+  - The live read (`next-form` from `read-row` and `sci.batch/read-next`) passes SCI `parse-next` with the agent's
+    live options, as today.
+  - `segments`' structural pass passes edamame `parse-next` with options normalized once in a `def`: any alias, tags
+    unread, `:read-cond :preserve`, no location metadata.
+  - This follows the law that an entrant supplies its read stage as a value (AGENTS.md "There is one REPL path"). The
+    structural pass is not the live read and is deleted in S6. Spec §4.3's "Reading" line is amended to say so.
+- **Spans that need no read take none.** In the structural pass, a bare token's span is the reader's own token rule:
+  to the next whitespace, comma or terminating character (`" ; @ ^ ` ~ ( ) [ ] { } \`).
+  - A stray closer at top level is one character.
+  - No read is done, so nothing is thrown. The live read of that row reports its error once, as before.
+  - Collections, strings, characters and dispatch or quote forms are still read, so their spans and failure
+    containers stay exact.
+- **One reader per region, never rebuilt, never logging.** Built with `sci/reader` (edamame's indexing reader) over
+  a `java.io.CharArrayReader` window `[start, bound)` of the text's one character array, with no copy per region.
+  It is advanced past tokens and gaps instead of being rebuilt.
+- **`skip-to` is one primitive scan** (whitespace, commas, `;` comments, fence lines), with no line strings.
+- **`comment-of` runs only when** the text between two forms holds something other than whitespace and commas.
+
+**Results** (v3 against v2, the same corpus and §8 cases, both modes):
+- Sources are identical except:
+  - `:code` reads `1:` as one token where v2 read `1` then `:` (the reader's token rule);
+  - v2's spurious `; ,` comments in `:code` are gone (v2 called a lone comma prose).
+- 56 KB of prose through `:code`:
+  - **unarmed:** 319 MB → **12.7 MB** at depth 200 (≈1.3 KB per source, the same as a successful token; linear);
+  - **armed:** 188 MB → **43.8 MB**.
+- 1,000 stray closers: 141 MB → 4.3 MB unarmed, 10.5 MB armed.
+
+**Not met: under 10 MB for 56 KB, armed.** 56 KB of one-word lines is 10,000 sources.
+- The segment map and source string alone are about 0.5 KB each.
+- Each source makes about 8 armed calls (`step`, `code-step`, `skip-to`, `read-at`, `token-end`, `at`, `advance`,
+  and `skip-blank` in `segments`) at about 0.4 KB each.
+
+Options, priced:
+- **(a)** Fold the per-token helpers into `read-at`'s loop (no contracted helper per token): about 3 calls per source,
+  an estimated 25-30 MB armed. Fewer named functions.
+- **(b)** Task `seon.instrument/hot-internals-pay-armed-validation` (`ee57516cbaef`): about 13 MB armed with no code
+  change here.
+- **(c) Recommended: accept 12.7 MB unarmed, 43.8 MB armed** for this adversarial row, because the read is not what
+  makes it expensive. The same 56 KB through MCP today already evaluates every valid word as a form, and a pass costs
+  5-11 MB and 3-4 ms per form. Measured on default with `seon.pass-probe/mcp!`, agent `s2b1-reader-v3`:
+  - 100 unresolved words: 417 ms, 633 MB;
+  - 400 unresolved words: 1,481 ms, 2.37 GB;
+  - 100 `(+ n 1)`: 469 ms, 1.15 GB.
+  - So 10,000 forms is tens of GB whatever the reader does. Filed as task `seon.turn/each-form-of-a-pass-costs-megabytes`
+    (`38a047eb9495`; `seon.db/with-declarations` 863 calls / 514 ms and `seon.db/q` about 3 per form). That is
+    where the multi-hundred-MB rule bites for pasted prose, and it belongs to S5/S6's single settlement.
 
 ## 10. Tests
 
@@ -435,6 +512,8 @@ armed probe of §9 repeated on the installed landing.
   `retire-branch!` retired `:agent-be6bc235ecd9`.
 - **v1 incident**, kept for the record: a JVM-mode prototype looped in default's JVM, and root restarted it. Every
   probe since ran in throwaway JVMs.
+- **New task `38a047eb9495`** (`seon.turn/each-form-of-a-pass-costs-megabytes`): see §9.1. Agent
+  `s2b1-reader-v3` was retired by root's `retire-branch!` (`:agent-37c293d91581`).
 - **Task `fd7455e6e6ed`** (selected error map prints "Error evidence is unavailable."): open, outside this slice.
 - **`81773872798e`** (trailing prose dropped): still TARGET S4.
 - **`c9f69d5aaa31`** (marker stripped): closed by this slice.

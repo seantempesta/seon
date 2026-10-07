@@ -207,7 +207,11 @@ If a case needs analysis before a later form, the design says so with its measur
 - **Same line:** after a top-level form closes, the rest of that line (outside a fence) is prose.
 - **Compatibility.** Outside fences, bare literals and indented forms are prose (a deliberate compatibility
   choice); `(help)` teaches fences.
-- **Reading** uses SCI's `parse-next` with the agent's live options, not bare edamame.
+- **Reading.** The live read uses SCI's `parse-next` with the agent's live options. The structural span pass that
+  S2b-1 keeps until S6 is an entrant-supplied read stage:
+  - edamame `parse-next` with options normalized once (any alias, tags unread, no location metadata);
+  - a bare token's span by the reader's token rule, and a stray closer as one character, with no read;
+  - so a failed read costs what a successful one does.
 - **MCP** code is read as one code fence: every line is code (so `result/e…`, `*1`, `:k` and literals evaluate).
   Code that Seon generates or a page authors (opening blocks, preview sources) is read the same way.
 - **Slicing.**
