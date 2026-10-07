@@ -1,6 +1,6 @@
 # Live agents: one pass for every entrant (plan v4.1)
 
-Status: v4.1, ready for the owner. v4's third-round reviews (`review-plan4-opus-notes.md`, `plan-v4-review-notes.md`)
+Status: APPROVED by the owner (2026-10-07). v4.1. v4's third-round reviews (`review-plan4-opus-notes.md`, `plan-v4-review-notes.md`)
 asked for wording-level corrections, which are applied here. v2 and v3 were each dual-reviewed: `review-plan-opus-notes.md` and `plan-v2-review-notes.md`, then
 `review-plan3-opus-notes.md` and `plan-v3-review-notes.md`, all beside this file. Every finding is either decided
 here or listed in §7 as an owner decision. After the owner approves, this replaces `docs/seon/specs/agent-loop.md`
@@ -342,22 +342,18 @@ After the reset: retire only owned or unclaimed branches (`reset-leak` makes sto
 
 Each schema retirement is adopted on a branch of the live store BEFORE its slice lands.
 
-## 7. Owner decisions
+## 7. Owner decisions (2026-10-07)
 
-1. **Continuation:** call the model again after a pass that evaluated ≥1 form while calls are left
-   (recommended), vs only on new outside wakes.
-2. **Profile measurement upserts** (51-78% of settlement datoms; read by health regressions):
-   - (a) stop storing them; health reads the live profile since boot (recommended; loses cross-restart
-     regressions);
-   - (b) keep them, filtered, in the pass transaction.
-3. **Proof-test runs:** the body is agent work; runner setup, selection, recording and cleanup are Seon work inside
-   §3 (recommended).
-4. **The two reversed rulings in §4.9** (capture-before-call, the intent commit): approve.
-5. **Subtree counts** (dh-fix; independent of this plan):
-   - child counts in branch nodes (format change; old nodes stay unknown until rewritten);
-   - counting at each split (I/O, no format change);
-   - a recount job (temporary).
-6. **Allocation exceptions:** a one-line definition pass < 30 MB and a one-test check < 20 MB, above the 10 MB
-   stop-and-fix line, as interim targets (recommended, with stop-and-fix still applying above them), vs holding
-   both to 10 MB now.
-7. Approve the plan as the replacement for agent-loop.md.
+Decided:
+1. **Continuation:** after a model pass that evaluated ≥1 form, with no bail and calls left, the model is called
+   again.
+2. **Profile measurement upserts:** no longer stored. Health reads the live profile since boot.
+3. **Proof-test runs:** the test body is agent work; runner setup, selection, recording and cleanup are Seon work.
+4. **Reversed rulings:** capture-before-call and the intent commit are dropped.
+5. **Allocation:** a one-line definition pass < 30 MB and a one-test check < 20 MB are interim targets.
+   Stop-and-fix still applies above them; tighten them with evidence after S5/S6.
+6. **Approved** as the replacement for agent-loop.md. Work starts: P0, then S0.
+
+Open:
+- **Subtree counts** (dh-fix, independent of this plan): child counts in branch nodes, counting at each split, or a
+  recount job.
