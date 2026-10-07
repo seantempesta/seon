@@ -1,0 +1,197 @@
+;; Prototype of seon.id's structural digest (lane structural-hash). Evaluated
+;; in a scratch namespace on default for measurement; not installed.
+(ns tmp.structural-hash.digest
+  (:import [java.security MessageDigest]
+           [java.util ArrayDeque ArrayList]))
+
+(set! *warn-on-reflection* true)
+
+
+(def ^:private ^:const t-nil 0) (def ^:private ^:const t-false 1) (def ^:private ^:const t-true 2)
+(def ^:private ^:const t-long 3) (def ^:private ^:const t-bigint 4) (def ^:private ^:const t-double 5)
+(def ^:private ^:const t-ratio 6) (def ^:private ^:const t-decimal 7) (def ^:private ^:const t-string 8)
+(def ^:private ^:const t-keyword 9) (def ^:private ^:const t-symbol 10) (def ^:private ^:const t-char 11)
+(def ^:private ^:const t-uuid 12) (def ^:private ^:const t-date 13) (def ^:private ^:const t-instant 14)
+(def ^:private ^:const t-pattern 15) (def ^:private ^:const t-tagged 16) (def ^:private ^:const t-vector 17)
+(def ^:private ^:const t-seq 18) (def ^:private ^:const t-end 19) (def ^:private ^:const t-map 20)
+(def ^:private ^:const t-record 21) (def ^:private ^:const t-set 22)
+
+(defn- unhashable [x]
+  (ex-info "seon.id cannot hash a host object without a value encoding."
+           {:seon.error/type :seon.id/unhashable-error
+            :seon.error/operation 'seon.id/id
+            :seon.error/message "seon.id cannot hash a host object without a value encoding."
+            :seon.id/class (.getName (class x))
+            :seon.error/fix "Hash the object's data (its id, name or EDN fields), not the object."}))
+
+;; sink: [buf pos-int-array digesters level-int-array]
+(defn- digester ^MessageDigest [^objects s]
+  (.get ^ArrayList (aget s 2) (aget ^ints (aget s 3) 0)))
+
+(defn- flush! [^objects s]
+  (let [^ints pos (aget s 1) p (aget pos 0)]
+    (when (pos? p)
+      (.update (digester s) ^bytes (aget s 0) 0 p)
+      (aset pos 0 (int 0)))))
+
+(defn- byte! [^objects s ^long b]
+  (let [^ints pos (aget s 1) p (aget pos 0)]
+    (if (< p 8192)
+      (do (aset ^bytes (aget s 0) p (unchecked-byte b)) (aset pos 0 (unchecked-inc-int p)))
+      (do (flush! s) (recur s b)))))
+
+(defn- long! [^objects s ^long v]
+  (let [^ints pos (aget s 1) p (aget pos 0)]
+    (if (<= (+ p 8) 8192)
+      (let [^bytes buf (aget s 0)]
+        (aset buf p (unchecked-byte (bit-shift-right v 56))) (aset buf (+ p 1) (unchecked-byte (bit-shift-right v 48)))
+        (aset buf (+ p 2) (unchecked-byte (bit-shift-right v 40))) (aset buf (+ p 3) (unchecked-byte (bit-shift-right v 32)))
+        (aset buf (+ p 4) (unchecked-byte (bit-shift-right v 24))) (aset buf (+ p 5) (unchecked-byte (bit-shift-right v 16)))
+        (aset buf (+ p 6) (unchecked-byte (bit-shift-right v 8))) (aset buf (+ p 7) (unchecked-byte v))
+        (aset pos 0 (unchecked-int (+ p 8))))
+      (do (flush! s) (recur s v)))))
+
+(defn- bytes! [^objects s ^bytes bs]
+  (long! s (alength bs)) (flush! s) (.update (digester s) bs))
+
+(defn- utf8-length ^long [^String s]
+  (let [n (.length s)]
+    (loop [i 0 len 0]
+      (if (< i n)
+        (let [c (int (.charAt s i))]
+          (cond (< c 0x80) (recur (inc i) (inc len))
+                (< c 0x800) (recur (inc i) (+ len 2))
+                (and (Character/isHighSurrogate (char c)) (< (inc i) n)
+                     (Character/isLowSurrogate (.charAt s (inc i))))
+                (recur (+ i 2) (+ len 4))
+                :else (recur (inc i) (+ len 3))))
+        len))))
+
+(defn- string! [^objects s ^String x]
+  (long! s (utf8-length x))
+  (let [n (.length x)]
+    (loop [i 0]
+      (when (< i n)
+        (let [c (long (int (.charAt x i)))]
+          (cond (< c 0x80) (do (byte! s c) (recur (inc i)))
+                (< c 0x800) (do (byte! s (bit-or 0xc0 (bit-shift-right c 6)))
+                                (byte! s (bit-or 0x80 (bit-and c 0x3f))) (recur (inc i)))
+                (and (Character/isHighSurrogate (char c)) (< (inc i) n)
+                     (Character/isLowSurrogate (.charAt x (inc i))))
+                (let [cp (long (Character/toCodePoint (char c) (.charAt x (inc i))))]
+                  (byte! s (bit-or 0xf0 (bit-shift-right cp 18)))
+                  (byte! s (bit-or 0x80 (bit-and (bit-shift-right cp 12) 0x3f)))
+                  (byte! s (bit-or 0x80 (bit-and (bit-shift-right cp 6) 0x3f)))
+                  (byte! s (bit-or 0x80 (bit-and cp 0x3f))) (recur (+ i 2)))
+                :else (do (byte! s (bit-or 0xe0 (bit-shift-right c 12)))
+                          (byte! s (bit-or 0x80 (bit-and (bit-shift-right c 6) 0x3f)))
+                          (byte! s (bit-or 0x80 (bit-and c 0x3f))) (recur (inc i)))))))))
+
+(defn- name! [^objects s ^long tag x]
+  (byte! s tag)
+  (if-some [n (namespace x)] (do (byte! s 1) (string! s n)) (byte! s 0))
+  (string! s (name x)))
+
+(defn- big! [^objects s ^java.math.BigInteger b]
+  (if (< (.bitLength b) 64) (do (byte! s t-long) (long! s (.longValue b)))
+      (do (byte! s t-bigint) (bytes! s (.toByteArray b)))))
+
+(defn- enter! [^objects s]
+  (flush! s)
+  (let [^ints level (aget s 3) ^ArrayList ds (aget s 2) l (inc (aget level 0))]
+    (when (= l (.size ds)) (.add ds (MessageDigest/getInstance "SHA-256")))
+    (aset level 0 (int l))))
+
+(defn- leave! [^objects s ^longs acc]
+  (flush! s)
+  (let [d (.digest (digester s)) ^ints level (aget s 3)
+        bb (java.nio.ByteBuffer/wrap d)]
+    (aset level 0 (unchecked-dec-int (aget level 0)))
+    (loop [i 3 carry 0]
+      (when (>= i 0)
+        (let [w (.getLong bb (int (* i 8)))
+              a (aget acc i)
+              s1 (unchecked-add a w)
+              c1 (if (neg? (Long/compareUnsigned s1 a)) 1 0)
+              s2 (unchecked-add s1 carry)
+              c2 (if (and (== carry 1) (zero? s2)) 1 0)]
+          (aset acc i s2)
+          (recur (dec i) (bit-or c1 c2)))))))
+
+(defn- scalar!
+  "Encode a scalar; return the frame to push for a collection."
+  [^objects s x]
+  (cond
+    (instance? clojure.lang.Keyword x) (do (name! s t-keyword x) nil)
+    (string? x) (do (byte! s t-string) (string! s x) nil)
+    (instance? Long x) (do (byte! s t-long) (long! s (.longValue ^Long x)) nil)
+    (nil? x) (do (byte! s t-nil) nil)
+    (symbol? x) (do (name! s t-symbol x) nil)
+    (instance? Boolean x) (do (byte! s (if x t-true t-false)) nil)
+    (vector? x) (do (byte! s t-vector) (object-array [:vector x (long-array 1)]))
+    (or (map? x) (set? x)) (object-array [:unordered (seq x) (long-array 4) x])
+    (or (seq? x) (instance? clojure.lang.Sequential x)) (do (byte! s t-seq) (object-array [:ordered (seq x)]))
+    (or (instance? Integer x) (instance? Short x) (instance? Byte x)) (do (byte! s t-long) (long! s (long x)) nil)
+    (or (instance? Double x) (instance? Float x))
+    (let [d (double x)] (byte! s t-double) (long! s (Double/doubleToLongBits (if (== d 0.0) 0.0 d))) nil)
+    (instance? clojure.lang.BigInt x) (do (big! s (.toBigInteger ^clojure.lang.BigInt x)) nil)
+    (instance? java.math.BigInteger x) (do (big! s x) nil)
+    (ratio? x) (do (byte! s t-ratio) (bytes! s (.toByteArray ^java.math.BigInteger (numerator x)))
+                   (bytes! s (.toByteArray ^java.math.BigInteger (denominator x))) nil)
+    (decimal? x) (let [d (.stripTrailingZeros ^java.math.BigDecimal x)]
+                   (byte! s t-decimal) (long! s (.scale d)) (bytes! s (.toByteArray (.unscaledValue d))) nil)
+    (char? x) (do (byte! s t-char) (long! s (long (int (.charValue ^Character x)))) nil)
+    (uuid? x) (do (byte! s t-uuid) (long! s (.getMostSignificantBits ^java.util.UUID x))
+                  (long! s (.getLeastSignificantBits ^java.util.UUID x)) nil)
+    (instance? java.util.Date x) (do (byte! s t-date) (long! s (.getTime ^java.util.Date x)) nil)
+    (instance? java.time.Instant x) (do (byte! s t-instant) (long! s (.getEpochSecond ^java.time.Instant x))
+                                        (long! s (.getNano ^java.time.Instant x)) nil)
+    (instance? java.util.regex.Pattern x) (do (byte! s t-pattern) (string! s (.pattern ^java.util.regex.Pattern x))
+                                              (long! s (.flags ^java.util.regex.Pattern x)) nil)
+    (instance? clojure.lang.TaggedLiteral x) (do (byte! s t-tagged) (name! s t-symbol (:tag x))
+                                                 (object-array [:bare (list (:form x))]))
+    :else (throw (unhashable x))))
+
+(defn structural-digest
+  "SHA-256 bytes of `data`'s structure."
+  ^bytes [data]
+  (let [ds (ArrayList.)
+        _ (.add ds (MessageDigest/getInstance "SHA-256"))
+        s (object-array [(byte-array 8192) (int-array 1) ds (int-array 1)])
+        stack (ArrayDeque.)]
+    (loop [x data visit? true]
+      (if visit?
+        (do (when-some [frame (scalar! s x)] (.push stack frame)) (recur nil false))
+        (when-some [^objects top (.peek stack)]
+          (case (aget top 0)
+            :vector (let [^clojure.lang.IPersistentVector v (aget top 1) i (aget ^longs (aget top 2) 0)]
+                      (if (< i (.count v))
+                        (do (aset ^longs (aget top 2) 0 (inc i)) (recur (.nth v i) true))
+                        (do (byte! s t-end) (.pop stack) (recur nil false))))
+            (:ordered :bare)
+            (if-some [items (aget top 1)]
+              (do (aset top 1 (next items)) (recur (first items) true))
+              (do (when (= :ordered (aget top 0)) (byte! s t-end)) (.pop stack) (recur nil false)))
+            :unordered
+            (if-some [items (aget top 1)]
+              (let [item (first items)]
+                (aset top 1 (next items))
+                (enter! s)
+                (.push stack (object-array [:leave nil (aget top 2)]))
+                (if (map? (aget top 3))
+                  (do (.push stack (object-array [:bare (list (key item) (val item))])) (recur nil false))
+                  (recur item true)))
+              (let [x (aget top 3) ^longs acc (aget top 2)]
+                (.pop stack)
+                (if (record? x)
+                  (do (byte! s t-record) (string! s (.getName (class x))))
+                  (byte! s (if (map? x) t-map t-set)))
+                (long! s (count x))
+                (dotimes [i 4] (long! s (aget acc i)))
+                (recur nil false)))
+            :leave (do (.pop stack) (leave! s (aget top 2)) (recur nil false))))))
+    (flush! s)
+    (.digest ^MessageDigest (.get ds 0))))
+
+(defn hex ^String [^bytes bs]
+  (let [sb (StringBuilder.)] (doseq [b bs] (.append sb (format "%02x" (bit-and b 0xff)))) (str sb)))
