@@ -5,7 +5,6 @@
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
-            [clojure.walk :as walk]
             [clojure.test :as test]
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
@@ -26,9 +25,7 @@
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn])
-  (:import (java.nio.charset StandardCharsets)
-           (java.security MessageDigest)
-           (java.util HexFormat)))
+  (:import (java.nio.charset StandardCharsets)))
 
 (defn var-reference?
   "True for a host or SCI Var reference."
@@ -219,15 +216,13 @@
   differently, and costing the render bound, never the values' printed size."
   {:malli/schema [:=> [:cat :map :qualified-symbol :map :seon.test.failure/report] [:string {:min 64 :max 64}]]}
   [options test-symbol event report]
-  (schema/sha-256
-   [(.getBytes
-     (pr-str [test-symbol
-              (:type event)
-              (when (some? (:message event)) (message-text options (:message event)))
-              (:seon.test.failure/expected report)
-              (:seon.test.failure/actual report)
-              (event-signature event)])
-     StandardCharsets/UTF_8)]))
+  (id/id [test-symbol
+          (:type event)
+          (when (some? (:message event)) (message-text options (:message event)))
+          (:seon.test.failure/expected report)
+          (:seon.test.failure/actual report)
+          (event-signature event)]
+         64))
 
 (defn- failure-identity
   "Content identity for one failing assertion event (`report-identity`)."
@@ -763,14 +758,6 @@
   [form]
   (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
 
-(defn- reach-canonical
-  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
-  [value]
-  (walk/postwalk (fn [v] (cond
-                           (map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
-                           (set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
-                           :else v)) value))
-
 (defn- reach-node
   "One declaration's contribution to reach: its leaf (the producer's
   `:seon.program/definition-digest`), the names it reaches (calls, references,
@@ -788,7 +775,7 @@
   {:malli/schema [:=> [:cat :keyword :string] :map]}
   [schema-key form]
   (let [value (edn/read-string form)]
-    {::leaf (id/digest 64 [schema-key (reach-canonical value)]) ::keys (reach-keywords value)}))
+    {::leaf (id/digest 64 [schema-key value]) ::keys (reach-keywords value)}))
 
 (defn- reach-weight
   "A node's estimated retained bytes, from the counts it already has."
@@ -941,57 +928,42 @@
 
 (defn- reach-component-digests
   "Each component's digest, in `components`' order (every component after
-  those it reaches): SHA-256 over its members' `item TAB leaf` lines, a blank
-  line, the distinct digests of the other components its members reach, a
-  blank line, and the distinct digests `extra-of` names for its members, each
-  set sorted. Items hold no tab or newline and leaves and digests are hex, so
-  the text is unambiguous; nothing is printed. A digest is therefore a function
-  of every leaf, edge and extra digest its closure holds (a Merkle hash).
+  those it reaches): the structural identity of its members' `[item leaf]`
+  pairs, the sorted distinct digests of the other components its members
+  reach, and the sorted distinct digests `extra-of` names for its members. A
+  digest is therefore a function of every leaf, edge and extra digest its
+  closure holds (a Merkle hash).
 
   ## Costs
 
-  - One SHA-256 pass per component over its members and its condensed edges,
-    each component's distinct edge digests sorted: the graph's size times a
-    log factor, never tests times closure."
+  - One structural hash per component over its members and its condensed
+    edges, each component's distinct edge digests sorted: the graph's size
+    times a log factor, never tests times closure."
   {:malli/schema [:=> [:cat [:vector :seon.schema/value] [:fn clojure.core/ifn?] [:vector [:fn clojure.core/some?]]
                        [:vector [:vector :int]] [:fn clojure.core/some?] [:fn clojure.core/ifn?]]
                   [:vector [:string {:min 64 :max 64}]]]}
   [items leaf-of successors components ^ints component-of extra-of]
-  (let [hex (HexFormat/of)]
-    (persistent!
-     (reduce
-      (fn [digests c]
-        (let [members (nth components c)
-              digester (MessageDigest/getInstance "SHA-256")
-              put! (fn [x] (.update digester (.getBytes (str x) StandardCharsets/UTF_8)))
-              block! (fn [xs]
-                       (doseq [x (sort (distinct xs))] (put! x) (.update digester (byte 10)))
-                       (.update digester (byte 10)))]
-          (doseq [v members]
-            (put! (nth items v))
-            (.update digester (byte 9))
-            (put! (let [leaf (leaf-of (nth items v))] (if (nil? leaf) "nil" leaf)))
-            (.update digester (byte 10)))
-          (.update digester (byte 10))
-          (block! (for [v members
-                        w (nth successors v)
-                        :let [d (aget component-of (int w))]
-                        :when (not= d c)]
-                    (nth digests d)))
-          (block! (mapcat #(extra-of (nth items %)) members))
-          (conj! digests (.formatHex hex (.digest digester)))))
-      (transient []) (range (count components))))))
+  (persistent!
+   (reduce
+    (fn [digests c]
+      (let [members (nth components c)]
+        (conj! digests
+               (id/id [(mapv (fn [v] [(nth items v) (leaf-of (nth items v))]) members)
+                       (vec (sort (distinct (for [v members
+                                                  w (nth successors v)
+                                                  :let [d (aget component-of (int w))]
+                                                  :when (not= d c)]
+                                              (nth digests d)))))
+                       (vec (sort (distinct (mapcat #(extra-of (nth items %)) members))))]
+                      64))))
+    (transient []) (range (count components)))))
 
 (defn- test-reach-digest
-  "SHA-256 hex of a test's name and its closure's component digest (the empty
+  "The identity of a test's name and its closure's component digest (the empty
   string for a test with no program entity)."
   {:malli/schema [:=> [:cat :seon.test/sym :string] [:string {:min 64 :max 64}]]}
   [test-symbol component-digest]
-  (let [digester (MessageDigest/getInstance "SHA-256")]
-    (.update digester (.getBytes (str test-symbol) StandardCharsets/UTF_8))
-    (.update digester (byte 10))
-    (.update digester (.getBytes (str component-digest) StandardCharsets/UTF_8))
-    (.formatHex (HexFormat/of) (.digest digester))))
+  (id/id [test-symbol component-digest] 64))
 
 (defn- reach-index
   "Every requested test's reach digest on the reached `graph`: the digest of

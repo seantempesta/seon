@@ -122,6 +122,16 @@
        (is (= :misplaced-file (refusal #(task/index-tasks! {:seon.db/connection connection :seon.task/files {"tmp/tq.a.edn" "[]"}}))))
        (is (= before (db/basis-t @connection)) "no refusal writes")))))
 
+(deftest a-task-whose-handle-changes-keeps-its-symbol
+  ;; A changed kind (or hash) gives the same ns/name a new handle: the old row
+  ;; must leave before the new one claims the unique symbol, in one transaction.
+  (test-support/with-database
+   (fn [connection]
+     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :kind :function :intent \"i\"}]")))
+     (is (:seon.task/changed? (ingest! connection "[#:seon.task{:name \"prove-ingestion\" :kind :namespace :intent \"i\"}]")))
+     (is (= {:seon.task/kind :namespace :seon.task/id (task/task-handle 'tq.a "prove-ingestion" :namespace)}
+            (db/pull @connection [:seon.task/kind :seon.task/id] [:seon.task/sym tag]))))))
+
 (deftest annotation-placement-is-positional-and-body-usage-stays-legal
   (let [head "(ns tq.a (:require [clojure.test :refer [deftest is]] [tq.b :as-alias b]))\n"]
     (is (= :metadata-after-test-name (refusal #(entities-of (str head "(deftest t {:seon/tasks #{\"x\"}} (is true))\n")))))

@@ -848,63 +848,6 @@
           :seon.schema/definitions {schema-key definition}
           :seon.error/throwable failure})))))
 
-(declare canonical-data-string)
-
-(defn- framed [tag payload]
-  (str tag (count payload) ":" payload))
-
-(defn- canonical-value-string
-  "The canonical encoding of `value`. It recurses through a local function, so
-  the armed wrapper runs once per value, never once per node."
-  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
-  [value]
-  (letfn [(coll [tag values]
-            (framed tag (apply str (map encode values))))
-          (encode [value]
-            (cond
-              (nil? value) "n"
-              (true? value) "b1"
-              (false? value) "b0"
-              (keyword? value) (framed "k" (str value))
-              (symbol? value) (framed "y" (str value))
-              (string? value) (framed "s" value)
-              (number? value) (framed "d" (str value))
-              (vector? value) (coll "v" value)
-              (set? value) (coll "t" (sort (map encode value)))
-              (map? value)
-              (coll "m" (sort (map (fn [[k v]] (str (encode k) (encode v))) value)))
-              (sequential? value) (coll "q" value)
-              ; EDN literals `seon.db/stable-value` admits as stable read data
-              ; (`src/seon/db.clj:422-424`). Rejecting them made every read result
-              ; carrying a `:db/instant` or a commit id undigestable, so the agent
-              ; history's retained read could never prove itself current and ANY
-              ; commit re-walked it (2026-09-16). Their tags are new, so no
-              ; fingerprint that encoded before this change encodes differently.
-              (instance? java.util.Date value)
-              (framed "i" (str (.getTime ^java.util.Date value)))
-              (instance? java.time.Instant value)
-              (framed "i" (str (.toEpochMilli ^java.time.Instant value)))
-              (uuid? value) (framed "u" (str value))
-              (char? value) (framed "c" (str value))
-              :else
-              (throw (ex-info "Schema projection fingerprint contains non-EDN data."
-                              {:seon.schema/error
-                               :seon.schema/noncanonical-projection-data
-                               :seon.schema/value value
-                               :seon.schema/noncanonical-projection-data true}))))]
-    (encode value)))
-
-
-(defn canonical-data-string
-  "Canonical byte-comparison string for ordinary projection data.
-
-   This is the portable content oracle used by projection fingerprints and by
-   the preprocessed-base composition proof. It encodes every EDN literal,
-   including instants, uuids and characters; runtime objects are rejected."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
-  [value]
-  (canonical-value-string value))
-
 (defn byte-array?
   "True when `value` is a platform byte array."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -919,9 +862,10 @@
   (id/sha-256 byte-arrays))
 
 (defn- entry-fingerprint
-  "One `section` entry's hash: `String.hashCode` of its canonical encoding."
+  "One `section` entry's 32-bit hash: the head of its structural identity."
+  {:malli/schema [:=> [:cat :keyword :seon.schema/value :seon.schema/value] :int]}
   [section identity value]
-  (.hashCode ^String (canonical-data-string [section identity value])))
+  (unchecked-int (Long/parseLong (id/id [section identity value] 8) 16)))
 
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
@@ -942,7 +886,7 @@
              values))]
     (reduce
      bit-xor
-     (.hashCode "seon.schema.projection/fingerprint-v3")
+     (.hashCode "seon.schema.projection/fingerprint-v4")
      [(map-fingerprint :forms forms)
       (map-fingerprint :function-contracts function-contracts)
       (map-fingerprint :schema-admissions schema-admissions)
@@ -950,7 +894,7 @@
       (set-fingerprint :artifact-exports artifact-exports)
       (set-fingerprint :pure-predicate-symbols pure-predicate-symbols)])))
 
-(def ^:private projection-fingerprint-version 3)
+(def ^:private projection-fingerprint-version 4)
 
 (defn direct-references
   "Canonical schema keys directly referenced by `form` in `projection`.

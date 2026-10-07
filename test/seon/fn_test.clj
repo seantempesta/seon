@@ -2987,7 +2987,7 @@
         (is (pos? (get census false 0)))
         (is (true? (:seon.fn/host-bound?
                     (db/pull database [:seon.fn/host-bound?]
-                             [:seon.fn/sym 'seon.id/printed-digest])))
+                             [:seon.fn/sym 'seon.cluster/candidate-resources])))
             "a proxy is an operation SCI cannot interpret")
         (is (false? (:seon.fn/host-bound?
                      (db/pull database [:seon.fn/host-bound?]

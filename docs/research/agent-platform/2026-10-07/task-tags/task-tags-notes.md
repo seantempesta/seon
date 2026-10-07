@@ -183,3 +183,107 @@ under another id), then the same `:init` development adoption `move-to-head!` se
 | clone boot + adoption + tests, run 54eeecb2f3dc | 27 tests, 105 pass, 1 fail = `seon.task-steps-test/steps-persist-across-a-compaction` (red on HEAD) |
 
 The store-id override exists only in the proof commit (`git commit-tree`, never on a branch); it is not landed.
+
+## Slice B: `seon.id/id` hashes value structure
+
+What existed: `seon.id/id` printed the value under fixed bindings (iterative printer) and streamed the text into
+SHA-256; a second text hash, `seon.schema/canonical-data-string` (framed text, members sorted by encoding), fed
+definition digests, schema map-entry key fingerprints, the schema declaration digest, the projection fingerprint and
+read-result digests; `pr-str` fed `seon.test.runner/report-identity`, `seon.test.cache/input-evidence-digest` and the
+reach schema leaves (after a `pr-str`-comparator sort, `reach-canonical`); the reach component digests hashed
+`(str item)` lines.
+
+Change (BEHAVIOR CHANGE: every stored identity re-derives):
+
+- `seon.id/id` = SHA-256 of a tagged structural encoding (`structural-digest`): one tag byte per value; longs and
+  every integer that fits a long as 8 bytes (so `1` = `1N`, `(int 5)` = `5`); doubles by bits with -0.0 folded;
+  BigDecimal with trailing zeros stripped; ratio, char, UUID, Date, Instant, Pattern, tagged literal; strings as
+  int length + one byte per character when ASCII, else UTF-16 units under their own tag (exact, no replacement
+  character, so `"\uD800"` ≠ `"?"`); keywords and symbols as namespace and name; vectors and other sequentials
+  ordered with distinct tags (a vector ≠ a list, as code identity needs); maps, sets and records as the sum mod 2^256
+  of their members' own digests (order-independent, no sort, no cancellation), with count and, for a record, its
+  class. Metadata is ignored. Anything else throws `:seon.id/unhashable-error` (registered in `seon.id.edn`;
+  hand-built map, because `seon.error.refusal` requires `seon.id`). Iterative over an explicit stack: depth costs
+  heap. Loads and agrees in babashka.
+- Converted to `id/id`: `seon.program/definition-digest`, `typed-key-facts` key fingerprint,
+  `seon.schema.edn/declaration-digest`, `seon.schema/entry-fingerprint` (32-bit head of the id; projection
+  fingerprint version 4), `seon.db/read-result-digest` (an unhashable value answers nil as before),
+  `seon.test.runner/report-identity`, `reach-component-digests`, `test-reach-digest`, the reach schema leaf
+  (`reach-canonical` deleted), `seon.test.cache/input-evidence-digest`.
+- Deleted: `seon.id/printed-digest` and its proxy sink; `seon.schema/canonical-data-string`,
+  `canonical-value-string`, `framed`; `test/seon/schema_encoding_test.clj` and
+  `seon.schema-test/canonical-encoding-remains-byte-identical-after-dispatch-reorder` with its legacy encoder (tests
+  of deleted machinery). Its generators moved into the new law property in `seon.id-test`.
+- `seon.id/printed` stays: it is stored text (schema storage, admitted values, turn source), not identity.
+- Task handles all change with the hash; a changed handle keeps its symbol, so `seon.task/task-delta` now orders
+  retractions first (else the new row claims the unique symbol before the old row frees it: the clone upgrade
+  refused "a unique :seon.task/sym value is already held"). Regression
+  `seon.task-ingestion-test/a-task-whose-handle-changes-keeps-its-symbol`.
+- Closed `seon.id/identities-hash-structure-not-printed-text` (task file removed). Not converted, recorded as
+  `seon.operator/build-cache-keys-hash-printed-text`: the dependency-class cache key (`script/seon/dev/dependency_digest.clj`,
+  loaded by path on tools.deps' tool classpath, which lacks `src/`) and the operator's program-classes key. The
+  `pr-str` comparators that order values are task `seon.program/values-printed-to-order-or-compare`
+  (`seon.schema.datahike/storage-compare` among them). `seon.error`'s occurrence identity still builds a
+  `sorted-map` before hashing (harmless now; `src/seon/error.clj` is lane error-delivery's).
+
+### Measurements
+
+Same inputs both sides, in one standalone JVM (`clojure -M scratchpad/task-tags/bench.clj`, HEAD's `seon.id` loaded
+as `seon.id-old`): every test's reach input as the old reach digest printed it, `[test [[name leaf] ...]]` over its
+closure, from default's reach graph of 2026-10-07 (2,398 tests, 9,232 nodes; 5,479,722 closure entries; 457,056,962
+characters printed). Median of 3 after one warm call, thread-allocated bytes; the machine was loaded (load average
+10 to 28), so times vary by run:
+
+| run | printed into SHA-256 (HEAD) | structural (B) |
+|---|---|---|
+| 1 | 5,780 ms, 2,762.6 MB | 3,672 ms, 332.1 MB |
+| 2 | 7,252 ms, 2,762.5 MB | 4,437 ms, 332.1 MB |
+
+Allocation is 8.3 times lower and now proportional to the number of collections (56 bytes per vector frame), never
+to the text; time is bound by SHA-256 over about the same number of bytes. Per element (100,000-element vectors):
+strings, symbols and longs 0.1 B, two-element vectors 56 B, one-entry maps 420 B (a frame per member and a digest
+finalization). Laws: the 24-row table and the 500-trial order property in `seon.id-test` hold standalone and in
+the throwaway run.
+
+### Proof
+
+- clj-kondo `--lint src script test --cache false` on the candidate's `git archive`: 0 errors.
+- Fresh throwaway on the candidate, run 4b2dacbf61e4 (230 tests: id, task ingestion, runner, db, schema, program,
+  related, walk-graph, queue): 11,797 pass, 28 fail, 4 error; every red is red on HEAD 178aa24e0 (baseline run
+  8c1ff443a361 over the same tests: `seon.db-test` 2, `seon.program-test` 6, `seon.schema-test` 4 to 5) or the
+  fixture declaration test fixed by 8d9791b32. Task `seon.test/reds-on-head-178aa24e0-in-db-program-schema-tests` (below).
+- Clone of default's live store (APFS, 36 s), booted from a proof-only commit (candidate + store-id override), then
+  the operator's `:init` development adoption and `:reset`, as root will run them: ready 84 s, adoption 66 s (every
+  digest and handle re-derives once), reset 7.3 s, then tests run cbb608149713 (id, task ingestion, queue, related):
+  141 pass, 0 fail.
+- Final candidate (task files and notes included), lint of its archive 0 errors; fresh throwaway run 96f31923081b
+  (id, task ingestion, the digest regression, host-binding facts): 134 pass, 0 fail.
+
+The adoption's 66 s is over the ten-second bound: it is the one-time re-derivation of every stored identity
+(every program row and task row is rewritten once); the next adoption converges as before.
+
+## RESET NEEDED
+
+After root commits B: `bin/seon start --head` (boots B on the live store; the first development adoption rewrites
+every program and task row, about 66 s on the clone), then `bin/seon reset default --force` (the running JVM unlinks
+`:cluster-default` and forks a fresh branch from the program entities, keeping caches; 7.3 s on the clone). Effect:
+every stored identity is the structural one (definition digests, evaluation, turn, error and test-run ids, task
+handles, source and schema digests, projection fingerprints); runtime tasks, agents' turns and evaluations on the
+cluster branch are gone (the 56 runtime tasks worth keeping were persisted to task files earlier).
+
+## Correction for `.agents/skills/clojure-testing/SKILL.md` §4 Example 1 (lane final-revision's file)
+
+Its table states the printed-text behavior. The landed test is `seon.id-test/identity-is-a-function-of-the-values-structure`:
+
+```clojure
+(deftest identity-is-a-function-of-the-values-structure
+  (are [a b same?] (= same? (= (id/id a) (id/id b)))
+    {:a 1 :b 2} {:b 2 :a 1} true
+    1           1N          true
+    1           1.0         false
+    [1 2]       '(1 2)      false
+    nil         false       false
+    'abc        "abc"       false)
+  (is (= "ebc54726b35b" (id/id 'abc)) "the encoding is fixed: every stored identity was derived under it")
+  (is (= "ebc54726" (id/id 'abc 8))))
+```

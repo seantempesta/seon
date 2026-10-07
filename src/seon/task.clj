@@ -144,8 +144,9 @@
     (or (read-error stored) (update-vals stored #(declared (db/carried-projection database) %)))))
 
 (defn- task-delta
-  "The writer's delta from `stored` to `by-id` tasks, by handle; a handle whose stored
-  declaration differs from the caller's `basis` refuses with base, current and proposed."
+  "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
+  whose handle changed frees its unique symbol before its new row claims it; a handle whose
+  stored declaration differs from the caller's `basis` refuses with base, current and proposed."
   {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :seon.task/handle :map] [:map-of :seon.task/handle :map]
                        :seon.task/basis] [:vector :seon.schema/value]]}
   [projection stored by-id basis]
@@ -162,7 +163,7 @@
                         (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
                         current (replacement-tx (stored id) (by-id id) owned)
                         :else [(by-id id)]))))
-          (sort (into (set (keys stored)) (keys by-id))))))
+          (sort-by (juxt #(contains? by-id %) identity) (into (set (keys stored)) (keys by-id))))))
 
 (defn- symbol-tx
   "`[:db/add task :seon.task/sym ns/name]` for every stored task, file or runtime, that carries

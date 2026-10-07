@@ -689,8 +689,7 @@
   [[stable? value]]
   (when stable?
     (try
-      (schema/sha-256
-       [(.getBytes ^String (schema/canonical-data-string value) "UTF-8")])
+      (id/id value 64)
       (catch clojure.lang.ExceptionInfo cause
         (if (= :seon.schema/noncanonical-projection-data
                (:seon.schema/error (ex-data cause)))

@@ -5,7 +5,8 @@
             [hasch.core :as hasch]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [seon.cluster.process :as process])
+            [seon.cluster.process :as process]
+            [seon.id :as id])
   (:import [java.io File]
            [java.nio.file Files]))
 
@@ -234,7 +235,7 @@
   "Digest an already selected, sorted external-input inventory."
   {:malli/schema [:=> [:cat [:map-of :string :string]] :seon.source/digest]}
   [inputs]
-  (hasch/hash->str (hasch/sha256 (.getBytes (pr-str (into (sorted-map) inputs)) "UTF-8"))))
+  (id/id inputs 64))
 
 (defn test-input-digest
   "Digest the sorted inventory of gate inputs without indexed declarations,

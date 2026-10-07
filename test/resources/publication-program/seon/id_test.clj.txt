@@ -3,8 +3,8 @@
             [seon.id :as id]))
 
 (deftest data-shape-and-explicit-length-determine-identity
-  (is (= "ba7816bf8f01" (id/id 'abc)))
-  (is (= "ba7816bf" (id/id 'abc 8)))
+  (is (= "ebc54726b35b" (id/id 'abc)))
+  (is (= "ebc54726" (id/id 'abc 8)))
   (is (not= (id/id 'abc) (id/id "abc")))
   (is (= (id/id ["turn" 2]) (id/evaluation "turn" 2)))
   (is (= (id/id ["turn" 2] 8) (id/digest 8 ["turn" 2])))

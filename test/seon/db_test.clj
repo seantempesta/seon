@@ -1090,7 +1090,7 @@
                                                          (/ (- (System/nanoTime) started) 1e6))))
                                   2))
            walk (median-ms #(stabilize result))
-           encoding (median-ms #(schema/canonical-data-string result))]
+           encoding (median-ms #(id/id result 64))]
        (is (= [true result] (stabilize result)))
        (is (< walk encoding)
            "the walk costs no more than encoding the same value")

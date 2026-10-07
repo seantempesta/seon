@@ -486,7 +486,7 @@
            resolver-context
            (assoc :seon.program/resolver-context
                   (used-resolver-context entity resolver-context)))]
-     (id/digest 64 [(schema/canonical-data-string parts)]))))
+     (id/id parts 64))))
 
 #?(:clj
    (defn digest-map-refusal
@@ -889,10 +889,7 @@
   [value]
   (let [kind (key-kind value)
         base {:seon.schema.map-entry/key-kind kind
-              :seon.schema.map-entry/key-fingerprint
-              #?(:clj (schema/sha-256 [(.getBytes ^String (schema/canonical-data-string value)
-                                                  java.nio.charset.StandardCharsets/UTF_8)])
-                 :cljs (id/digest 64 [(schema/canonical-data-string value)]))
+              :seon.schema.map-entry/key-fingerprint (id/id value 64)
               :seon.schema.map-entry/key-edn (pr-str value)}]
     (case kind
       :keyword (assoc base :seon.schema.map-entry/key-keyword value)

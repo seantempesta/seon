@@ -14,6 +14,7 @@
   reads classpath and in-memory data only; database installation belongs
   to cluster population."
   (:require [seon.cache]
+            [seon.id :as id]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -414,10 +415,7 @@
   "Stable digest of the merged schema declaration set."
   {:malli/schema [:=> [:cat] :seon.source/digest]}
   []
-  (schema/sha-256
-   [(.getBytes (schema/canonical-data-string
-                (::declared-forms (packaged-population)))
-               "UTF-8")]))
+  (id/id (::declared-forms (packaged-population)) 64))
 
 (defn packaged-forms
   "Canonical schema forms declared by Seon's bootstrap and schema resources."

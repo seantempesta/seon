@@ -1,17 +1,78 @@
 (ns seon.id-test
-  (:require [clojure.test :refer [deftest is]]
-            [seon.id :as id]))
+  (:require [clojure.test :refer [are deftest is]]
+            [clojure.test.check :as tc]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [clojure.walk :as walk]
+            [seon.id :as id]
+            [seon.test-support :as test-support]))
 
-(deftest data-shape-and-explicit-length-determine-identity
-  (is (= "ba7816bf8f01" (id/id 'abc)))
-  (is (= "ba7816bf" (id/id 'abc 8)))
-  (is (not= (id/id 'abc) (id/id "abc")))
+(defrecord ^:private Point [a])
+
+(deftest identity-is-a-function-of-the-values-structure
+  ;; Equal values (Clojure `=`) share an id whatever their map or set order;
+  ;; a vector and a list differ, since code identity needs it.
+  (are [a b same?] (= same? (= (id/id a) (id/id b)))
+    [:a 1]                [:a 1]              true
+    [:a 1]                [:a 2]              false
+    {:a 1 :b 2}           {:b 2 :a 1}         true
+    (sorted-map :a 1 :b 2) {:b 2 :a 1}        true
+    #{1 2}                (sorted-set 2 1)    true
+    {:x #{1 2} :y [{:z 1 :w 2}]} {:y [{:w 2 :z 1}] :x #{2 1}} true
+    {:a 1 :b 2}           {:a 2 :b 1}         false
+    1                     1N                  true
+    (int 5)               5                   true
+    1                     1.0                 false
+    0.0                   -0.0                true
+    1.0M                  1.00M               true
+    [1 2]                 '(1 2)              false
+    '(1 2)                (range 1 3)         true
+    (with-meta [1] {:x 1}) [1]                true
+    nil                   false               false
+    'abc                  "abc"               false
+    :a/b                  'a/b                false
+    [1 [2]]               [[1] 2]             false
+    {:a nil}              {}                  false
+    #{}                   {}                  false
+    \a                    97                  false
+    "\uD800"              "?"                 false
+    (->Point 1)           {:a 1}              false)
+  (is (= "ebc54726b35b" (id/id 'abc)) "the encoding is fixed: every stored identity was derived under it")
+  (is (= "ebc54726" (id/id 'abc 8)))
   (is (= (id/id ["turn" 2]) (id/evaluation "turn" 2)))
   (is (= (id/id ["turn" 2] 8) (id/digest 8 ["turn" 2])))
   (let [a (id/id) b (id/id)]
     (is (id/valid? id/default-length a))
-    (is (id/valid? id/default-length b))
     (is (not= a b))))
+
+;; EDN-shaped values, nested; bounded so every seed finishes.
+(def ^:private scalar-generator
+  (gen/one-of
+   [(gen/return nil) gen/boolean gen/small-integer gen/ratio gen/string-alphanumeric gen/keyword gen/symbol gen/char
+    (gen/fmap #(java.util.Date. (long %)) gen/small-integer)
+    (gen/fmap #(java.time.Instant/ofEpochMilli (long %)) gen/small-integer)
+    (gen/fmap #(java.util.UUID/nameUUIDFromBytes (.getBytes ^String % "UTF-8")) gen/string-alphanumeric)]))
+
+(def ^:private value-generator
+  (gen/recursive-gen
+   (fn [child]
+     (gen/one-of [(gen/vector child 0 8) (gen/fmap #(apply list %) (gen/vector child 0 8))
+                  (gen/set child {:max-elements 8}) (gen/map child child {:max-elements 5})]))
+   scalar-generator))
+
+(deftest map-and-set-order-never-changes-an-identity
+  (test-support/assert-check!
+   (tc/quick-check
+    500
+    (prop/for-all [value value-generator]
+      (= (id/id value)
+         (id/id (walk/postwalk #(cond (map? %) (into {} (reverse %)) (set? %) (into #{} (reverse %)) :else %) value))))
+    :seed 2026100701)
+   "An identity changed with entry order:"))
+
+(deftest a-host-object-has-no-identity
+  (is (= :seon.id/unhashable-error
+         (try (id/id (Object.)) (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))))
 
 (deftest an-evaluation-id-is-stable-short-and-a-symbol
   ;; THE CLASS: every stable identifier comes from the one derivation.
@@ -28,19 +89,6 @@
            (read-string (str (id/symbol-in "result" \e a))))
         "the handle survives the reader")))
 
-(deftest printed-identity-ignores-the-callers-print-bindings
-  ;; THE CLASS: an identity is a function of the value, never of the thread's
-  ;; print bindings. The literal is the REPL-bound identity stored ids carry.
-  (let [parts [{:a/b 1 :a/c 2} [1 2 3] (with-meta 'x {:line 1}) "s"]
-        expected (id/digest 12 parts)]
-    (is (= "15564fc125fc" (id/digest 12 [{:a/b 1 :a/c 2}])))
-    (doseq [hostile [{#'*print-length* 1} {#'*print-level* 1} {#'*print-meta* true}
-                     {#'*print-namespace-maps* false} {#'*print-namespace-maps* true}
-                     {#'*print-readably* false} {#'*print-dup* true}]]
-      (with-bindings hostile
-        (is (= expected (id/digest 12 parts)))
-        (is (= "15564fc125fc" (id/digest 12 [{:a/b 1 :a/c 2}])))))))
-
 (deftest canonical-print-is-prs-text-at-any-depth
   ;; THE CLASS: the one canonical print is iterative, so a value of any depth
   ;; prints (and hashes) instead of overflowing the stack, and its text is
@@ -53,4 +101,5 @@
     (is (= text (id/printed value))))
   (is (= (str (apply str (repeat 10001 "[")) (apply str (repeat 10001 "]")))
          (id/printed (reduce (fn [v _] [v]) [] (range 10000)))))
+  (is (= 12 (count (id/id (reduce (fn [v _] [v]) [] (range 10000))))))
   (is (= 12 (count (id/id (reduce (fn [m _] {:a/b m}) {} (range 10000)))))))

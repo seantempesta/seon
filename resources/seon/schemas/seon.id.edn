@@ -1,1 +1,4 @@
-{:seon.id/character char?}
+{:seon.id/character char?
+ :seon.id/class [:string {:min 1 :description "The class of a value seon.id/id has no structural encoding for."}]
+ :seon.id/unhashable-error [:and {:description "seon.id/id was handed a host object: hash its data (id, name or EDN fields) instead."}
+                            :seon.error/base [:map [:seon.id/class :seon.id/class]]]}
