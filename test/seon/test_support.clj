@@ -3,6 +3,7 @@
   (:require [seon.error.refusal]
             [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.impl]
+            [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.test :as test]
             [datahike.api :as d]
@@ -14,7 +15,9 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.flow :as flow]
             [seon.fs :as fs]
+            [seon.id :as id]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [seon.operator.runtime :as operator.runtime]
@@ -27,7 +30,9 @@
             [seon.test]
             [seon.turn]
             [seon.turn.batch :as turn.batch])
-  (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
+  (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
+           [java.net InetSocketAddress]
+           [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
 (set! *warn-on-reflection* true)
@@ -374,7 +379,7 @@
   "`:seon.cluster.eval/source` evaluated through the one REPL path (the fold,
   with the turn's evaluate and show stages) in the request's context: the
   last form's evaluation map — value, shown text, error, record, ending
-  namespace — with every form's printed output, and `:seon.batch/unread`
+  namespace, the reads it recorded — with every form's printed output, and `:seon.batch/unread`
   when the text stops being readable. Nothing settles: the forms' program
   facts are not proposed.
 
@@ -433,7 +438,8 @@
                            :seon.batch/fold :seon.batch/observe)))
         entries (:seon.batch/entries batch)
         output (apply str (keep #(get-in % [:seon.batch/evaluation :seon.cluster.eval/output]) entries))]
-    (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries)))
+    (cond-> (merge (:seon.batch/evaluation (peek entries)) (:seon.batch/shown-map (peek entries))
+                   (select-keys (peek entries) [:seon.batch/reads]))
       (seq output) (assoc :seon.cluster.eval/output output)
       (:seon.batch/unread batch) (assoc :seon.batch/unread (:seon.batch/unread batch)))))
 
@@ -1184,3 +1190,120 @@
     (close [_] (release! value))
     clojure.lang.IDeref
     (deref [_] value)))
+
+(defn with-running-agent
+  "Run `body` with `(running agent-id connection)`: an armed agent on the member's
+  branch, its cluster handle registered in `running-instances` under a key of
+  its own (the member's cluster name is shared), released afterwards."
+  {:malli/schema [:=> [:cat [:=> [:cat :string :seon.agent/id :seon.db/connection] :seon.schema/value]]
+                  :seon.schema/value]}
+  [body]
+  (let [target (execution-handle nil)
+        connection (:seon.db/connection target)
+        cluster-name (:seon.cluster/name target)
+        agent-id (str "running-agent-" (id/id))
+        running (str "running-agent-" (id/id))
+        world-environment (environment cluster-name connection)
+        ctx (fork-cluster-ctx connection cluster-name)
+        routing (attempt-routing connection)]
+    (with-open [^java.io.Closeable launcher (closeable
+                          (flow/start-work-launcher!
+                           {:seon.env/environment world-environment
+                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
+                                                                  flow/flow-workload-attributes)})
+                          flow/stop-work-launcher!)]
+      (let [handle (cluster-handle
+                    {:seon.env/environment world-environment :seon.db/connection connection :seon.cluster/name cluster-name
+                     :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
+                     :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                     :seon.db.process/id cluster/boot-process-identity})
+            request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
+        (transacted! connection (agent-tx @connection agent-id))
+        (swap! operator.runtime/running-instances assoc running
+               {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)
+                :seon.store/store (:seon.store/store target)
+                :seon.boot/ready-ms 0})
+        (try
+          (body running agent-id connection)
+          (finally
+            (swap! operator.runtime/running-instances dissoc running)
+            (agent/disarm! request)
+            (doseq [channel [(:seon.cluster.wake/channel handle) (:seon.render/context-channel handle)
+                             (:seon.turn.loop/completion handle)]]
+              (when channel (async/close! channel)))))))))
+
+(defn reply-queue
+  "A provider reply function answering `texts` in order, one per request; past
+  the last it throws, which the provider answers as a 500."
+  {:malli/schema [:=> [:cat [:vector :string]] [:=> [:cat :map] :string]]}
+  [texts]
+  (let [remaining (atom texts)]
+    (fn [_document]
+      (let [[taken] (swap-vals! remaining #(if (seq %) (subvec % 1) %))]
+        (or (first taken)
+            (throw (ex-info "The provider fixture has no reply left." {::replies (count texts)})))))))
+
+(defn- provider-send!
+  "Answer `exchange` with `status`, `content-type` and `body`."
+  {:malli/schema [:=> [:cat [:fn some?] :int :string :string] :nil]}
+  [^HttpExchange exchange status content-type ^String body]
+  (let [payload (.getBytes body "UTF-8")]
+    (.add (.getResponseHeaders exchange) "Content-Type" content-type)
+    (.sendResponseHeaders exchange status (alength payload))
+    (with-open [out (.getResponseBody exchange)]
+      (.write out payload))
+    nil))
+
+(defn- provider-server!
+  "Start a local OpenAI-compatible provider, so `seon.ai/complete` runs as
+  installed. `ledger` gets each request document; `answer` returns its text, or
+  throws: 500. `timings`, when given, gets `[received-ns responded-ns]` per request."
+  {:malli/schema [:=> [:cat [:fn some?] [:fn ifn?] [:maybe [:fn some?]]] [:fn some?]]}
+  [ledger answer timings]
+  (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)]
+    (.createContext
+     server "/chat"
+     (reify HttpHandler
+       (handle [_ exchange]
+         (let [received (System/nanoTime)]
+           (try
+             (let [request (json/read-str (slurp (.getRequestBody exchange)))
+                   _ (swap! ledger conj request)
+                   text (answer request)
+                   event #(str "data: " (json/write-str {"choices" [%]}) "\n\n")]
+               (if (get request "stream")
+                 (provider-send! exchange 200 "text/event-stream"
+                                 (str (event {"delta" {"content" text}})
+                                      (event {"delta" {"content" ""} "finish_reason" "stop"})
+                                      "data: [DONE]\n\n"))
+                 (provider-send! exchange 200 "application/json"
+                                 (json/write-str {"choices" [{"message" {"content" text}
+                                                              "finish_reason" "stop"}]}))))
+             (catch Throwable failure
+               (provider-send! exchange 500 "application/json"
+                               (json/write-str {"error" {"message" (ex-message failure)}})))
+             (finally
+               (.close ^HttpExchange exchange)
+               (when timings (swap! timings conj [received (System/nanoTime)]))))))))
+    (.start server)
+    server))
+
+(defn with-provider
+  "Call `(body server)` with a started local provider (`provider-server!`);
+  stop it however `body` exits."
+  {:malli/schema [:function
+                  [:=> [:cat [:fn some?] [:fn ifn?] [:fn ifn?]] :seon.schema/value]
+                  [:=> [:cat [:fn some?] [:fn ifn?] [:maybe [:fn some?]] [:fn ifn?]] :seon.schema/value]]}
+  ([ledger answer body] (with-provider ledger answer nil body))
+  ([ledger answer timings body]
+   (let [server (provider-server! ledger answer timings)]
+     (try (body server) (finally (.stop ^HttpServer server 0))))))
+
+(defn provider-config
+  "Dials selecting `server` as the provider. The model id has no descriptor
+  row, so `seon.ai/targets` keeps this endpoint and no-auth."
+  {:malli/schema [:=> [:cat [:fn some?]] :map]}
+  [^HttpServer server]
+  {:seon.config.ai/endpoint (str "http://127.0.0.1:" (.getPort (.getAddress server)) "/chat")
+   :seon.config.ai/no-auth true
+   :seon.config.ai/model "fixture-provider"})

@@ -46,6 +46,12 @@
   [:seon.profile/throw-counts :seon.profile/throw-counts]
   [:seon.profile/entered :seon.profile/entered]
   [:seon.profile/measured :seon.profile/measured]]
+ :seon.profile/held-cell
+ [:map {:description "A live roster member as a read answers it. seon.profile/cell, the roster's only writer, checked its counters when it made the cell, so a read checks the cell's identity only."}
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/digest {:optional true} :seon.profile/digest]
+  [:seon.profile/scope :seon.profile/scope]
+  [:seon.profile/context {:optional true} :seon.profile/context]]
  :seon.profile/calls [:int {:min 0 :description "Completed outermost calls per thread (a re-entry through the same wrapper is inside its caller's): returns and throws both count."}]
  :seon.profile/total-ms [:int {:min 0 :description "Inclusive wall milliseconds."}]
  :seon.profile/mean-us [:int {:min 0}]
@@ -145,10 +151,13 @@
  :seon.profile/elapsed-ms [:int {:min 0}]
  :seon.profile/growths [:vector :seon.profile/growth]
  :seon.profile/lines [:vector :string]
+ :seon.profile/by-calls [:vector {:description "Every definition entered in the window, most calls first, under the explanation's limit."} :seon.profile/growth]
  :seon.profile/explanation
  [:map
   [:seon.profile/elapsed-ms :seon.profile/elapsed-ms]
   [:seon.profile/growths :seon.profile/growths]
+  [:seon.profile/by-calls :seon.profile/by-calls]
+  [:seon.profile/calls :seon.profile/calls]
   [:seon.profile/lines :seon.profile/lines]]
  :seon.profile/over-second-count [:int {:min 0}]
  :seon.profile/by-total-lines [:vector :string]

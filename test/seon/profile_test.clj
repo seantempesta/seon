@@ -262,3 +262,26 @@
       (is (= #{(conj (key-of inner-cell) heavy)} (:seon.db.transaction/repeated observed)))
       (is (nat-int? (:seon.db.transaction/ms observed)))
       (is (= {} (profile/transaction-observation world)) "the next observation holds only work done since"))))
+
+(deftest ^{:seon/tasks #{'seon.profile/reading-the-profile-validates-every-cell
+                         'seon.profile/begin-validates-every-cell-with-armed-predicates}}
+  reading-the-profile-checks-no-cell-again
+  ;; The counters are read directly: the per-cell predicates' own cells are
+  ;; the observation, and none of them may move while the profile is read.
+  (let [predicates '#{seon.profile/adder? seon.profile/accumulator? seon.profile/histogram?
+                      seon.profile/thread-local? seon.profile/throw-counts? seon.profile/measured-mark?}
+        entered (fn [] (reduce (fn [found cell]
+                                 (if (contains? predicates (:seon.profile/sym cell))
+                                   (update found (:seon.profile/sym cell) (fnil + 0)
+                                           (.sum ^LongAdder (:seon.profile/entry-counter cell)))
+                                   found))
+                               {} (profile/cells)))
+        before (entered)
+        mark (profile/begin)
+        explanation (profile/explain mark 10000)
+        after (entered)
+        own (filter #(= "seon.profile" (namespace (:seon.profile/sym %))) (:seon.profile/by-calls explanation))]
+    (is (= predicates (set (keys before))) "every per-cell predicate is armed, so a zero is a reading")
+    (is (= before after) "reading, marking and explaining call no per-cell predicate")
+    (is (<= (reduce + 0 (map :seon.profile/calls own)) 3)
+        "an empty mark grows only explain's entry and the two checks of the mark")))

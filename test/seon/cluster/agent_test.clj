@@ -10,7 +10,6 @@
   evaluation. The shipped evaluator runs unreplaced: no fixture redefines
   `seon.sci.eval/evaluate`."
   (:require [clojure.core.async :as async]
-            [clojure.data.json :as json]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
@@ -37,9 +36,7 @@
             [seon.id :as id]
             [seon.render.web :as web]
             [seon.test-support :as test-support])
-  (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
-           [java.net InetSocketAddress]
-           [java.util Date]
+  (:import [java.util Date]
            [java.util.concurrent CountDownLatch]))
 
 (def ^:private test-environment
@@ -328,57 +325,10 @@
     (swap! ledger conj request)
     {:seon.ai/text (text-fn request)}))
 
-(defn- provider-server!
-  "Start a local OpenAI-compatible provider, so `ai/complete` runs as installed.
-  `ledger` gets each request document; `reply` returns its text, or throws: 500."
-  [ledger reply]
-  (let [server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)
-        send! (fn [^HttpExchange exchange status content-type ^String body]
-                (let [payload (.getBytes body "UTF-8")]
-                  (.add (.getResponseHeaders exchange) "Content-Type" content-type)
-                  (.sendResponseHeaders exchange status (alength payload))
-                  (with-open [out (.getResponseBody exchange)]
-                    (.write out payload))))]
-    (.createContext
-     server "/chat"
-     (reify HttpHandler
-       (handle [_ exchange]
-         (try
-           (let [request (json/read-str (slurp (.getRequestBody exchange)))
-                 _ (swap! ledger conj request)
-                 text (reply request)
-                 event #(str "data: " (json/write-str {"choices" [%]}) "\n\n")]
-             (if (get request "stream")
-               (send! exchange 200 "text/event-stream"
-                      (str (event {"delta" {"content" text}})
-                           (event {"delta" {"content" ""} "finish_reason" "stop"})
-                           "data: [DONE]\n\n"))
-               (send! exchange 200 "application/json"
-                      (json/write-str
-                       {"choices" [{"message" {"content" text}
-                                    "finish_reason" "stop"}]}))))
-           (catch Throwable failure
-             (send! exchange 500 "application/json"
-                    (json/write-str {"error" {"message" (str failure)}})))
-           (finally (.close ^HttpExchange exchange))))))
-    (.start server)
-    server))
-
-(defn- with-provider
-  "Call `body` with a started local provider; stop it however `body` exits."
-  [ledger reply body]
-  (let [server (provider-server! ledger reply)]
-    (try (body server) (finally (.stop ^HttpServer server 0)))))
-
 (defn- provider-config
-  "Cluster dials selecting `server` as the provider. The model id has no
-  descriptor row, so `ai/targets` keeps this endpoint and no-auth."
-  [^HttpServer server]
-  {:seon.config.ai/endpoint
-   (str "http://127.0.0.1:" (.getPort (.getAddress server)) "/chat")
-   :seon.config.ai/no-auth true
-   :seon.config.ai/model "agent-test-provider"
-   :seon.config.ai/no-provider :seon.config/absent})
+  "Cluster dials selecting the fixture provider `server`, with no-provider removed."
+  [server]
+  (assoc (test-support/provider-config server) :seon.config.ai/no-provider :seon.config/absent))
 
 (defn- outside-trigger!
   [connection agent-id message-id content]
@@ -707,7 +657,7 @@
             routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
             ledger (atom [])]
-        (with-provider ledger (constantly "(seon.run/complete \"done\")")
+        (test-support/with-provider ledger (constantly "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
                                     (into [(config-entity
@@ -1395,7 +1345,7 @@
     (fn [connection ctx]
       (let [routing (armory connection)
             ledger (atom [])]
-        (with-provider ledger (constantly "(seon.run/complete \"done\")")
+        (test-support/with-provider ledger (constantly "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
                                     [(agent-entity connection "parked")
@@ -1441,7 +1391,7 @@
             release-provider (CountDownLatch. 1)
             provider-entered (CountDownLatch. 1)
             events (database-events connection)]
-        (with-provider ledger
+        (test-support/with-provider ledger
                        (fn [_request]
                          (.countDown provider-entered)
                          (test-support/await-event! release-provider ::release-provider)
@@ -1717,7 +1667,7 @@
             routing (armory connection)
             ledger (atom [])
 ]
-        (with-provider ledger (constantly "(seon.run/complete \"done\")")
+        (test-support/with-provider ledger (constantly "(seon.run/complete \"done\")")
           (fn [provider]
             (test-support/transacted! connection
                                     [(agent-entity connection "midfold")
@@ -1888,7 +1838,7 @@
   ([operations reply]
    (with-connection
      (fn [connection ctx]
-       (with-provider (atom []) reply
+       (test-support/with-provider (atom []) reply
          (fn [provider]
           (test-support/seed-cluster! connection "route-trial")
           ;; The local provider is this trial's provider; its dials also retract
@@ -2081,7 +2031,7 @@
     (fn [connection ctx]
       (let [routing (armory connection)
             ledger (atom [])]
-        (with-provider ledger (constantly "(seon.run/wait \"need input\")")
+        (test-support/with-provider ledger (constantly "(seon.run/wait \"need input\")")
           (fn [provider]
             (test-support/transacted! connection
                                     [(agent-entity connection "waiter")

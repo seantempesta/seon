@@ -13,7 +13,7 @@
             [seon.config :as config]
             [seon.operator.runtime :as operator.runtime]
             [seon.render.transcript :as transcript])
-  (:import [java.util Date UUID]))
+  (:import [java.util UUID]))
 
 (def ^:private default-run-cap 6)
 
@@ -48,7 +48,12 @@
     (cond (db/read-refusal? closed-at) closed-at
           closed-at {:seon.turn/id run-id :seon.turn/closed-tx closed-at})))
 
-(defn- await-fact!
+(defn await-fact!
+  "The first truthy value `probe` answers for `connection`'s database, from its
+  current value or a commit after it; throws when none arrives within
+  `timeout-ms`. The listener is registered before the first read, so no
+  commit between them is missed."
+  {:malli/schema [:=> [:cat :seon.db/connection pos-int? :string [:fn clojure.core/ifn?]] :seon.schema/value]}
   [connection timeout-ms label probe]
   (let [events (async/promise-chan)
         listener-key (keyword "seon.eval.drive" (uuid-text))]
@@ -69,7 +74,8 @@
       (finally
         (d/unlisten connection listener-key)))))
 
-(defn- inbound!
+(defn inbound!
+  "Write one outside message to `agent-id` on `connection` and return its id."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name
                        :seon.db.process/id :seon.agent/id :string]
                   :seon.message/id]}

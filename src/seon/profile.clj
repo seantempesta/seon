@@ -326,7 +326,8 @@
 
 (defn cells
   "Every live cell, host and context."
-  {:malli/schema [:=> [:cat] [:vector :seon.profile/cell]]}
+  {:seon/tasks #{'seon.profile/reading-the-profile-validates-every-cell}
+   :malli/schema [:=> [:cat] [:vector :seon.profile/held-cell]]}
   []
   ;; a synchronized set's toArray holds its own lock
   (into [] (mapcat (fn [^java.util.Set members] (.toArray members)))
@@ -421,7 +422,7 @@
   The top `limit` definitions by each measure, and every definition whose
   maximum exceeds one second."
   {:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}
-   :malli/schema [:=> [:cat [:vector :seon.profile/cell] [:int {:min 1}]] :seon.profile/report]}
+   :malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/report]}
   [population limit]
   (let [observed (into [] (comp (map observation) (filter (comp pos? :seon.profile/calls))) population)
         ranked (fn [k] (into [] (take limit) (sort-by k > observed)))]
@@ -517,20 +518,13 @@
                 (vector? (::cells value))
                 (some-> (::sums value) class .isArray))))
 
-(defn- entries
-  "A cell's outermost entries so far: one counter, where a window needs calls
-  cheaply (an entered call not yet returned is included)."
-  {:malli/schema [:=> [:cat :seon.profile/cell] nat-int?]}
-  [held]
-  (.sum ^LongAdder (:seon.profile/entry-counter held)))
-
 (defn begin
   "Mark the start of an operation: its clock and every cell's entries and total.
 
-  One pass over the live cells, calling no other armed function, fills one
-  primitive array beside the vector of cells it read: its cost is proportional
-  to the number of cells, with two longs each and no per-cell allocation."
-  {:malli/schema [:=> [:cat] :seon.profile/mark]}
+  One read of the live cells, then one pass over them reading their counters
+  directly into one primitive array: no armed call per cell, two longs each."
+  {:seon/tasks #{'seon.profile/begin-validates-every-cell-with-armed-predicates}
+   :malli/schema [:=> [:cat] :seon.profile/mark]}
   []
   (let [held (cells)
         sums (long-array (* 2 (count held)))]
@@ -553,40 +547,44 @@
   "What the armed definitions did during the operation `mark` began.
 
   The growth is every cell's inclusive counter increase in this JVM during the
-  window, largest first: nested calls appear in both caller and callee, and
-  concurrent work on other threads is included. Calls are the outermost
-  entries in the window, an entered call not yet returned included. No growth
-  means the time was spent in unarmed code or waiting."
+  window: the ranked growths (at least a millisecond, largest first), every
+  entered definition by calls, and the calls in all. Nested calls appear in
+  both caller and callee, and concurrent work on other threads is included.
+  Calls are the outermost entries in the window, an entered call not yet
+  returned included (this call's own entry and its contract's check of `mark`
+  among them). No growth means the time was spent in unarmed code or waiting."
   {:malli/schema [:=> [:cat :seon.profile/mark [:int {:min 1}]] :seon.profile/explanation]}
   [{started :seon.profile/started-ns {held ::cells ^longs sums ::sums} :seon.profile/snapshot} limit]
   (let [elapsed-ms (quot (- (System/nanoTime) started) 1000000)
+        ;; a local function, not an armed one: a read of the counters calls
+        ;; no armed definition per cell
+        growth (fn [member calls0 total0]
+                 (let [calls (- (.sum ^LongAdder (:seon.profile/entry-counter member)) (long calls0))]
+                   (when (pos? calls)
+                     (merge (select-keys member [:seon.profile/sym :seon.profile/digest
+                                                 :seon.profile/scope :seon.profile/context])
+                            {:seon.profile/calls calls
+                             :seon.profile/total-ms (quot (- (.sum ^LongAdder (:seon.profile/total-counter member))
+                                                             (long total0))
+                                                          1000000)}))))
+        ;; the held cells are read before anything else is called, so the
+        ;; read of the live cells below is outside the window
+        old (into [] (keep (fn [i] (growth (nth held i) (aget sums (* 2 (long i))) (aget sums (inc (* 2 (long i)))))))
+                  (range (count held)))
         ;; Cells are matched by identity (a LongAdder is a Number, which a
         ;; Clojure map would compare by value); a cell installed after
         ;; `begin` starts from zero.
-        position (let [index (IdentityHashMap.)]
-                   (dotimes [i (count held)]
-                     (.put index (:seon.profile/entry-counter (nth held i)) i))
-                   index)
-        prior (fn [member offset]
-                (if-let [i (.get position (:seon.profile/entry-counter member))]
-                  (aget sums (+ (* 2 (long i)) (long offset)))
-                  0))
-        growth (into []
-                     (comp
-                      (keep (fn [member]
-                              (let [calls (- (long (entries member)) (long (prior member 0)))
-                                    total (- (.sum ^LongAdder (:seon.profile/total-counter member))
-                                             (long (prior member 1)))]
-                                (when (pos? calls)
-                                  (merge (select-keys member [:seon.profile/sym :seon.profile/digest
-                                                              :seon.profile/scope :seon.profile/context])
-                                         {:seon.profile/calls calls
-                                          :seon.profile/total-ms (quot total 1000000)})))))
-                      (filter (comp pos? :seon.profile/total-ms)))
-                     (cells))
-        ranked (into [] (take limit) (sort-by :seon.profile/total-ms > growth))]
+        known (let [index (Collections/newSetFromMap (IdentityHashMap.))]
+                (run! #(.add index (:seon.profile/entry-counter %)) held)
+                index)
+        grown (into old (keep #(when-not (.contains known (:seon.profile/entry-counter %)) (growth % 0 0)))
+                    (cells))
+        ranked (into [] (comp (filter (comp pos? :seon.profile/total-ms)) (take limit))
+                     (sort-by :seon.profile/total-ms > grown))]
     {:seon.profile/elapsed-ms elapsed-ms
      :seon.profile/growths ranked
+     :seon.profile/by-calls (into [] (take limit) (sort-by :seon.profile/calls > grown))
+     :seon.profile/calls (transduce (map :seon.profile/calls) + 0 grown)
      :seon.profile/lines
      (into [(str elapsed-ms " ms elapsed.")]
            (if (seq ranked)
@@ -630,7 +628,7 @@
 
   Over-second lines are bounded by `limit` too; the count says how many
   definitions exceeded one second in all."
-  {:malli/schema [:=> [:cat [:vector :seon.profile/cell] [:int {:min 1}]] :seon.profile/summary]}
+  {:malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/summary]}
   [population limit]
   (let [{by-total :seon.profile/by-total by-max :seon.profile/by-max
          over :seon.profile/over-second observed :seon.profile/observed}

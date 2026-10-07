@@ -8,9 +8,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
-            [seon.config :as config]
             [seon.db :as db]
-            [seon.flow :as flow]
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.operator.runtime :refer [running-instances]]
@@ -22,46 +20,6 @@
   {:malli/schema [:=> [:cat :string [:map-of :string :seon.schema/value]] [:map-of :string :seon.schema/value]]}
   [tool arguments]
   (json/read-str (mcp/call (json/write-str {"name" tool "arguments" arguments}))))
-
-(defn- with-running-agent
-  "Run `body` with `(running agent-id connection)`: an armed agent on the member's
-  branch, its cluster handle registered in `running-instances` under a key of
-  its own (the member's cluster name is shared), released afterwards."
-  {:malli/schema [:=> [:cat [:=> [:cat :string :seon.agent/id :seon.db/connection] :seon.schema/value]]
-                  :seon.schema/value]}
-  [body]
-  (let [target (support/execution-handle nil)
-        connection (:seon.db/connection target)
-        cluster-name (:seon.cluster/name target)
-        agent-id (str "mcp-entrance-" (id/id))
-        running (str "mcp-entrance-" (id/id))
-        environment (support/environment cluster-name connection)
-        ctx (support/fork-cluster-ctx connection cluster-name)
-        routing (support/attempt-routing connection)]
-    (with-open [launcher (support/closeable
-                          (flow/start-work-launcher!
-                           {:seon.env/environment environment
-                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
-                                                                  flow/flow-workload-attributes)})
-                          flow/stop-work-launcher!)]
-      (let [handle (support/cluster-handle
-                    {:seon.env/environment environment :seon.db/connection connection :seon.cluster/name cluster-name
-                     :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
-                     :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                     :seon.db.process/id cluster/boot-process-identity})
-            request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
-        (support/transacted! connection (support/agent-tx @connection agent-id))
-        (swap! running-instances assoc running {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)
-                                                  :seon.store/store (:seon.store/store target)
-                                                  :seon.boot/ready-ms 0})
-        (try
-          (body running agent-id connection)
-          (finally
-            (swap! running-instances dissoc running)
-            (agent/disarm! request)
-            (doseq [channel [(:seon.cluster.wake/channel handle) (:seon.render/context-channel handle)
-                             (:seon.turn.loop/completion handle)]]
-              (when channel (async/close! channel)))))))))
 
 (defn- latest-run-in
   "The agent's newest run id in `database` (the latest transaction naming one)."
@@ -94,7 +52,7 @@
   (is (true? (get (json/read-str (mcp/call "{not json")) "isError"))))
 
 (deftest ^{:seon.test/subject "seon.mcp/sci-run"} an-sci-call-answers-what-the-agents-next-context-reads
-  (with-running-agent
+  (support/with-running-agent
    (fn [running agent-id connection]
      (let [result (answer "eval_clj" {"code" "(+ 1 2) (str \"a\" \"b\")" "agent" agent-id "cluster" running})
            run (latest-run-in (db/db connection) agent-id)]
@@ -106,7 +64,7 @@
            "one text per evaluation, exactly the agent's own response")))))
 
 (deftest ^{:seon.test/subject "seon.mcp/jvm-run"} a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle
-  (with-running-agent
+  (support/with-running-agent
    (fn [running agent-id connection]
      (let [jvm (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
            jvm-run (latest-run-in (db/db connection) agent-id)
@@ -139,7 +97,7 @@
   an-agent-runs-its-own-test-on-its-own-branch
   ;; Before 06fd3a4d5, every such request refused: its member branched in the
   ;; agent's file store, not the request's overlay that holds the commit.
-  (with-running-agent
+  (support/with-running-agent
    (fn [running _ connection]
      (let [agent-id (str "mcp-own-tests-" (id/id))
            namespace-name (symbol (str "my.own" (id/id)))
@@ -164,7 +122,7 @@
            (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))))))))
 
 (deftest a-retired-agent-refuses-by-name
-  (with-running-agent
+  (support/with-running-agent
    (fn [running agent-id connection]
      (support/transacted! connection [[:db/add [:seon.agent/id agent-id] :seon.agent/admission-closed-tx "datomic.tx"]])
      (is (true? (get (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running}) "isError"))))))
@@ -192,7 +150,7 @@
   ;; census on default (2026-09-28) leaves 62-89 datoms besides profile measurements,
   ;; which ride the commit by design and scale with the definitions whose
   ;; timing moved (5-27 on default, every executed one in a fresh store).
-  (with-running-agent
+  (support/with-running-agent
    (fn [running agent-id connection]
      (let [namespace-name (symbol (str "settle.probe" (id/id)))
            result (answer "eval_clj" {"code" (str "(ns " namespace-name ")"

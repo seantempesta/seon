@@ -35,19 +35,18 @@
                 (into (test-support/agents-tx @connection ["juniper" "root"])
                   [{:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message"}])))))
      (let [ctx (test-support/fork-cluster-ctx connection)
-           captured (atom [])
            evaluation
-           (binding [db/*read-evidence-sink* captured]
-             (test-support/evaluate
-              {:seon.sci.eval/ctx ctx
-               :seon.db/connection connection
-               :seon.db/db @connection
-               :seon.agent/id "juniper"
-               :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/from])])"
-               :seon.cluster.eval/ns [:seon.ns/name 'user]
-               :seon.sci.admit/caps (config/result-caps config/defaults)
-               :seon.sci.eval/time-limit-ms 5000}))
-           evidence (db/read-evidence @captured)
+           (test-support/evaluate
+             {:seon.sci.eval/ctx ctx
+              :seon.db/connection connection
+              :seon.db/db @connection
+              :seon.agent/id "juniper"
+              :seon.cluster.eval/source "(seon.db/q '[:find [(pull ?m [:seon.message/content]) ...] :where [?m :seon.message/to [:seon.agent/id \"juniper\"]] (not [?m :seon.message/from])])"
+              :seon.cluster.eval/ns [:seon.ns/name 'user]
+              :seon.sci.admit/caps (config/result-caps config/defaults)
+              :seon.sci.eval/time-limit-ms 5000})
+           ;; the reads the one path recorded for the form
+           evidence (db/read-evidence (:seon.batch/reads evaluation))
            patterns (mapcat :seon.db/read-index-patterns
                             (mapcat #(get-in % [:datahike.read/dependency-plan
                                                :datahike.query.dependency/sources])
