@@ -4794,7 +4794,7 @@
                       :db/id (:e datom)}))))
               removed)]
     (when (seq breaks)
-      (let [breaks (vec (sort-by pr-str breaks))]
+      (let [breaks (vec (sort print/compare-values breaks))]
         ;; The producer declares what it refused; `write-observation` carries
         ;; that identity as `:seon.db.write/validator-schema`.
         (assoc (diagnostic

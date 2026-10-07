@@ -5,6 +5,7 @@
             [seon.error.refusal :as error]
             [seon.fn.signature :as signature]
             [seon.id :as id]
+            [seon.print :as print]
             [seon.schema :as schema]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
@@ -68,13 +69,64 @@
             (mapcat #(keys (project projection %)) (keys forms))))
         :cljs []))))))
 
+(defn- edn-symbol-text?
+  "Whether `s` reads with clojure's EDN reader as one symbol token
+  (EdnReader `read`, `readToken`, `interpretToken`, `matchSymbol` and its
+  pattern `([\\D&&[^/]].*/)?(/|[\\D&&[^/]][^/]*)`).
+
+  ## Edge cases
+
+  - `\"a//\"` reads (name `/`); `\"a/b/\"`, `\"/x\"`, `\"a/1\"`, `\"+1\"`,
+    `\"nil\"`, `\"a:\"`, `\"a::b\"` and `\"#a\"` do not."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String s]
+  (let [n (.length s)
+        last-slash (.lastIndexOf s "/")
+        ;; the pattern's greedy namespace group ends at the separating slash;
+        ;; a trailing `//` leaves the name `/`
+        sep (if (and (> n 1) (== last-slash (dec n))) (dec last-slash) last-slash)
+        line-break (.indexOf s "\u0085" 1)]
+    (boolean
+     (and (pos? n)
+          ;; every character continues a token: no whitespace, comma,
+          ;; terminating macro or non-constituent (`readToken`); inline,
+          ;; since this runs per character of every edge name
+          (loop [i 0]
+            (or (== i n)
+                (let [c (.charAt s i)]
+                  (case c
+                    (\" \; \^ \( \) \[ \] \{ \} \\ \@ \` \~ \,) false
+                    (and (not #?(:clj (Character/isWhitespace c) :cljs (re-matches #"\s" c)))
+                         (recur (inc i)))))))
+          ;; not a number, dispatch or keyword start (`read`)
+          (let [c0 (.charAt s 0)
+                digit? #?(:clj #(Character/isDigit (char %)) :cljs #(re-matches #"[0-9]" %))]
+            (not (or (digit? c0) (= \# c0) (= \: c0)
+                     (and (or (= \+ c0) (= \- c0)) (> n 1) (digit? (.charAt s 1))))))
+          (not (or (= "nil" s) (= "true" s) (= "false" s)))
+          (or (neg? last-slash)
+              (= "/" s)
+              (and (pos? sep)
+                   (= \/ (.charAt s sep))
+                   (let [c (.charAt s (inc sep))] (not (and (<= (int \0) (int c)) (<= (int c) (int \9)))))
+                   (not= \: (.charAt s (dec sep)))
+                   (or (neg? line-break) (>= line-break sep))))
+          (or (= "/" s) (not= \: (.charAt s (dec n))))
+          (neg? (.indexOf s "::" 1))))))
+
 (defn edn-round-trip-symbol?
   "Whether `value` is a symbol whose printed EDN reads back as that symbol.
 
   This total predicate is the storage boundary for program-graph edge names.
   It rejects symbols whose namespace begins with `:`, including symbols made
-  from clj-kondo's `:clj-kondo/unknown-namespace` sentinel: `pr-str` prints
-  those as keywords, so an EDN boundary changes their type."
+  from clj-kondo's `:clj-kondo/unknown-namespace` sentinel: they print as
+  keywords, so an EDN boundary changes their type. It checks the symbol's
+  text against the EDN reader's symbol grammar without printing or reading.
+
+  ## Costs
+
+  Unarmed, about 0.3 µs for an ordinary qualified symbol, against 1.7 µs for
+  the print-and-read round trip it replaced (JVM probe, 2026-10-07)."
   {:malli/schema
    [:=>
     [:cat
@@ -86,14 +138,14 @@
        :gen/elements [nil false 0 "" :k 'plain 'qualified/name]}]]
     :boolean]}
   [value]
-  (and (symbol? value)
-       (try
-         (= value (#?(:clj edn/read-string :cljs reader/read-string)
-                   (pr-str value)))
-         ;; The reader's declared "not readable" failure only: clojure.edn's
-         ;; RuntimeException (EdnReader.java:130, :174-177); cljs.reader's
-         ;; ex-info. Everything else propagates.
-         (catch #?(:clj RuntimeException :cljs ExceptionInfo) _ false))))
+  (boolean
+   (and (symbol? value)
+        (let [s (str value) ns (namespace value) slash (.indexOf ^String s "/")]
+          (and (edn-symbol-text? s)
+               ;; the reader splits at the first slash (Symbol/intern)
+               (if ns
+                 (and (pos? (count ns)) (= slash (count ns)))
+                 (or (neg? slash) (= "/" s))))))))
 
 #?(:clj
    (defn overrides
@@ -797,10 +849,10 @@
            :seon.fn.binding.entry/local-binding
            (shorthand-binding binding-symbol)})]
     (->> (concat explicit shorthand)
-         (sort-by (juxt (comp schema/canonical-data-string
-                             :seon.fn.binding.entry/source-key)
-                        (comp str :seon.fn.binding.entry/spelling)
-                        (comp pr-str :seon.fn.binding.entry/local-binding)))
+         (sort-by (juxt :seon.fn.binding.entry/source-key
+                        :seon.fn.binding.entry/spelling
+                        :seon.fn.binding.entry/local-binding)
+                  print/compare-values)
          (map-indexed
           (fn [order entry]
             (let [local-binding (:seon.fn.binding.entry/local-binding entry)]

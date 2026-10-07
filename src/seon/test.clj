@@ -2,6 +2,7 @@
   "One test request on the agent execution lifecycle, and the recorded evidence it reads."
   (:require
             [clojure.core.cache.wrapped :as cache]
+            [seon.print :as print]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
@@ -1806,7 +1807,7 @@
                             :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
                           candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))
         changed (when (sequential? declaring)
-                  (vec (sort-by pr-str (filter (fn [[a v]] (or (not= :seon.ns/name a) (some #{v} declaring)))
+                  (vec (sort print/compare-values (filter (fn [[a v]] (or (not= :seon.ns/name a) (some #{v} declaring)))
                                                identities))))]
     (cond (:seon.error/at differences) differences
           (not (sequential? declaring)) declaring

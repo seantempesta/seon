@@ -1,6 +1,7 @@
 (ns seon.program-test
   "Recurring proof for the one build/runtime declaration contract."
   (:require [seon.schema.internal] [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
@@ -28,6 +29,27 @@
 (def ^:private digest-a (apply str (repeat 64 "a")))
 (def ^:private digest-b (apply str (repeat 64 "b")))
 (def ^:private digest-c (apply str (repeat 64 "c")))
+
+(defn- reads-back?
+  "The oracle: `sym`'s text read by clojure's EDN reader is `sym`."
+  [sym]
+  (try (= sym (edn/read-string (str sym))) (catch RuntimeException _ false)))
+
+(deftest edn-round-trip-symbol-agrees-with-the-edn-reader
+  (testing "edge cases of the reader's symbol grammar"
+    (doseq [sym ['a 'a/b '/ (symbol "a" "/") (symbol "1a") (symbol ":a") (symbol "a" "b/c")
+                 (symbol nil "a/b") (symbol "" "x") (symbol "a" "") (symbol "") (symbol "+1")
+                 (symbol "-") (symbol "a" "1") (symbol "a:" "b") (symbol "a" "b::c") (symbol "nil")
+                 (symbol "#a") (symbol "a b") (symbol "a\u0085b" "c") (symbol "a" "\u0085")
+                 (symbol ":clj-kondo/unknown-namespace" "f")]]
+      (is (= (reads-back? sym) (program/edn-round-trip-symbol? sym)) "the predicate is the reader's answer")))
+  (testing "generated symbols over the grammar's delimiting characters"
+    (let [part (gen/fmap str/join (gen/vector (gen/elements (vec "ab1:/#'+-.,; \"@~`^()٠\u0085\n\\é?{")) 0 5))
+          sym (gen/one-of [(gen/fmap symbol part) (gen/fmap (partial apply symbol) (gen/tuple part part))])
+          result (tc/quick-check 3000 (prop/for-all [s sym] (= (reads-back? s) (program/edn-round-trip-symbol? s)))
+                                 :seed 20261007)]
+      (is (:pass? result) "every generated symbol agrees with the EDN reader")))
+  (is (false? (program/edn-round-trip-symbol? "a")) "a string is not a symbol"))
 
 (deftest three-way-classifies-complete-generated-digest-maps
   (let [result

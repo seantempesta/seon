@@ -5,7 +5,8 @@
    database bridge — registered attribute forms in, ordinary Datahike
    schema maps out. Pure derivation: no connection, no session, no
   transaction. The store owner transacts the returned declarations."
-  (:require [clojure.edn :as edn]
+  (:require [seon.print :as print]
+            [clojure.edn :as edn]
             [clojure.walk :as walk]
             [malli.core :as m]
             [malli.registry :as mr]
@@ -522,10 +523,16 @@
      (symbol namespace-name local-name))})
 
 (defn- storage-compare
-  {:seon/tasks #{"befc26639ad0"}}
+  "Canonical storage order: the values' structure (`seon.print/compare-values`);
+  only leaves that order cannot tell apart (same class, not Comparable, such as
+  a tagged literal) fall back to their printed forms, so distinct members are
+  never merged."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :int]}
   [left right]
-  (compare (id/printed left)
-           (id/printed right)))
+  (let [order (print/compare-values left right)]
+    (if (zero? order)
+      (compare (id/printed left) (id/printed right))
+      order)))
 
 (defn- reader-round-trips?
   [value]

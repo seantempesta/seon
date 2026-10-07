@@ -4,7 +4,8 @@
   Open means no closed-tx. Boot closes unfinished work; execution never
   resumes across a JVM restart. The agent graph advances open, call,
   evaluations, and close from database facts and rewakes only for more work."
-  (:require [seon.error.refusal]
+  (:require [seon.print :as print]
+            [seon.error.refusal]
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
@@ -3741,7 +3742,7 @@
                                      (keep program/row-identity))
                            changes)]
         (->> (group-by :seon.program/identity (:seon.program/referrers refusal))
-             (sort-by (comp pr-str key))
+             (sort-by key print/compare-values)
              (mapv (fn [[identity referrers]]
                      (let [ordinals (get deleting identity)]
                        (cond

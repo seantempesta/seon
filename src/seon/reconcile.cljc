@@ -33,7 +33,8 @@
   Crash walk: `plan` is pure; `reconcile!` is ONE atomic transaction —
   a kill leaves it fully applied or absent, and re-apply converges
   either way."
-  (:require [clojure.set :as set]
+  (:require [seon.print :as print]
+            [clojure.set :as set]
             [seon.db :as seon.db]
             [seon.schema :as schema]))
 
@@ -405,7 +406,7 @@
                     entity
                     (some->> (get managed-by-identity identity)
                              (get entities)))))
-                (sort-by (comp pr-str first)
+                (sort-by first print/compare-values
                          (map vector identities desired)))
           stale-eids
           (->> managed-eids
