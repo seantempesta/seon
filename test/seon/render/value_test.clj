@@ -415,6 +415,14 @@
     (is (= (:seon.sci.admit/edn admitted)
            (admit/canonical-edn (:seon.sci.admit/print-node restored))))))
 
+(deftest an-unreadable-artifact-names-the-readers-failure
+  ;; THE CLASS: stored content the reader recovers from as an error event is
+  ;; refused as unreadable, never misreported as another kind of blob.
+  (is (str/starts-with?
+       (:seon.render.value/unreadable-artifact
+        (value/read-artifact "{:seon.sci.admit/print-node [1 2 3x]}"))
+       "The stored content does not read")))
+
 (deftest rendering-live-values-does-not-apply-a-storage-bound
   (let [raw (vec (range 100))
         request (assoc (unit raw) :seon.sci.admit/caps

@@ -510,6 +510,18 @@
            ["(broken [\n{:a 1}" [:error]]]]
     (is (= expected (read-kinds (events source))))))
 
+(deftest a-failure-inside-a-collection-skips-the-whole-form
+  ;; THE CLASS: recovery from a failure nested in a collection resumes at the
+  ;; next top-level anchor, so the collection's elements never become forms
+  ;; and a deep malformed value is read once, not once per level (200 nested
+  ;; maps missing one value made 199 events in 6.7 s).
+  (is (= [:error :form] (read-kinds (events "[1 2 3x 4]\n(+ 1 2)"))))
+  (is (= [:error :form] (read-kinds (events "{:a {:a 1 :b}}\n(+ 1 2)"))))
+  (is (= :odd-map (get-in (first-read-error (events "{:a {:a 1 :b}}"))
+                          [:seon.error/data :seon.sci.reader/error-kind])))
+  (is (= [:error] (read-kinds (events (str (apply str (repeat 200 "{:a "))
+                                           (apply str (repeat 199 "}"))))))))
+
 (deftest recovery-never-hides-a-real-failure
   (let [broken (events "(+ 1 3x)")
         eof (events "(db/transact! :seon [{:a 1}")]

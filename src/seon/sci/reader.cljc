@@ -632,6 +632,7 @@
   Edamame currently throws a bare IllegalArgumentException for invalid
   metadata values. That dependency hole is retained as `:other`; recovery
   never guesses a class from exception prose."
+  {:malli/schema [:=> [:cat :string [:int {:min 0}] :seon.error/throwable] :map]}
   [text failure-start failure]
   (let [data (or (cause-data failure) (ex-data failure))
         starts (line-starts text)
@@ -660,9 +661,8 @@
           (:edamame/token data) :invalid-token
           unclosed? :unclosed
           (or (= "" opened) mismatched-closer) :stray-closer
-          (and (map? data)
-               (= failure-offset failure-start)
-               (= \{ (get text failure-start))) :odd-map
+          ;; Edamame locates an odd map at its own `{`, nested or not.
+          (and (map? data) (= \{ at-offset)) :odd-map
           (and (cause-data failure)
                (> failure-offset failure-start)) :invalid-token
           #?(:clj (some #(instance? IllegalArgumentException %)
@@ -673,6 +673,7 @@
      ::error-kind detail
      ::prose-span? (and (= :symbol (:edamame/token-kind data))
                         (empty? (:edamame/containers data)))
+     ::nested? (boolean (seq (:edamame/containers data)))
      ::failure-offset failure-offset}))
 
 (defn- line-start-anchor
@@ -710,11 +711,17 @@
         (recur (inc offset))))))
 
 (defn- recovery-point
-  [text failure-start {::keys [recovery-kind error-kind prose-span?]}]
+  "Where reading resumes after a failed form. Only a top-level invalid token
+  is skipped by itself; a failure nested in a collection skips the whole form
+  to the next column-zero anchor, so a malformed `[...]` or `{...}` neither
+  leaks its inner elements as forms nor is re-read once per nesting level
+  (which made recovery cubic in depth: 200 levels took 6.7 s)."
+  {:malli/schema [:=> [:cat :string [:int {:min 0}] :map] [:int {:min 0}]]}
+  [text failure-start {::keys [recovery-kind error-kind prose-span? nested?]}]
   (let [text-length (count text)
         point
         (cond
-          (and (= :invalid-token error-kind) (not prose-span?)
+          (and (= :invalid-token error-kind) (not prose-span?) (not nested?)
                (not= \( (get text failure-start)))
           (token-end text failure-start)
 

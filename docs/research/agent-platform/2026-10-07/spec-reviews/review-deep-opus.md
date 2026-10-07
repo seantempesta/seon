@@ -5,7 +5,7 @@ Scope narrowed mid-review by owner ruling: hashing leaves printed text (lane `st
 
 All probes ran in jvm mode on default (pid running pre-77c9f5459 code, so the new printer was evaluated
 as a local `fn` read from the source file, never interned) plus one throwaway `java -cp clojure-1.12.5`
-JVM for timing. Probe files: scratchpad `probe1.clj`..`probe4.clj`, `bench.clj`, `variant.clj`.
+JVM for timing. Probe files (session scratchpad, not kept): `probe1.clj`..`probe4.clj`, `bench.clj`, `variant.clj`.
 
 ## seon.id (77c9f5459) — for root / structural-hash
 
@@ -54,3 +54,21 @@ for a non-vector failure, so it reported "not a value artifact". It now reports 
 `seon.render.value-test/an-unreadable-artifact-names-the-readers-failure`. The reader's recursion itself
 (edamame) is a task in `resources/seon/tasks/seon.sci.reader.edn`
 ("a value deeper than the reader's stack cannot be read back").
+
+## Astra's review (review-deep-review-astra-deep.md) — verification
+
+All four of Astra's findings concern `src/seon/id.clj`, owned by lane structural-hash; sent to root, not edited.
+
+- **P1 babashka divergence: VERIFIED** (bb, committed id.clj): `(printed (tagged-literal 'foo {:a/b [1 2]}))`
+  -> `#foo {:a/b [1 2]}` where bb's `pr` gives `#foo #:a{:b [1 2]}`; `(printed (with-meta {:x/y 1} {:type :r/u}))`
+  -> `{:x/y 1}`. Direct `print-method` skips SCI's print-binding bridge. On the JVM both match `pr`.
+- **P1 recursive fallback: VERIFIED** independently (my item 2 above, same wrapper classes).
+- **P2 captured "standard" method / P3 memory and bound wording:** agreed as stated; not separately probed.
+
+## Commit proof notes
+
+`bin/seon check` on this slice: seon.sci.reader-test all green; seon.render.value-test has two reds foreign
+to this slice (value-printer layout and `render-directory-ai` returning data):
+`a-value-s-own-inline-function-renders-it` (value_test.clj:944) and
+`dir-of-a-large-namespace-is-its-declared-renderer-text` (:857-863). The commit therefore names only the new
+value-test regression by NS/NAME.

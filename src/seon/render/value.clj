@@ -1433,9 +1433,12 @@
                   [:or :seon.render.value/artifact :seon.render.value/unreadable-artifact-error]]}
   [content]
   (let [events (reader/read {::reader/text content :seon.config.eval.result/max-source (count content)})
+        failure (if (vector? events) (some ::reader/error events) events)
         form (when (and (vector? events) (= 1 (count events))) (::reader/form (first events)))
         reason (cond
-                 (not (vector? events)) (str "The stored content does not read: " (:seon.error/message events))
+                 ;; a recovered read answers events, one of them an error
+                 ;; event: report the reader's failure, not the shape
+                 failure (str "The stored content does not read: " (:seon.error/message failure))
                  (not= 1 (count events)) (str "The stored content holds " (count events) " forms, not one artifact.")
                  (not (and (map? form) (print/node? (:seon.sci.admit/print-node form))))
                  "The stored content is not a value artifact (no :seon.sci.admit/print-node); this digest names another kind of blob.")]
