@@ -340,9 +340,12 @@
                   ::described described
                   ::child (:seon.schema/identity-value @identity-projection)}})
 
+      ;; A THROWABLE IS ITS CAUSE CHAIN (`seon.error.refusal/chain`): class,
+      ;; message, referenced ex-data and the first-party frames that locate
+      ;; it per link, never `Throwable->map`'s whole root trace.
       (instance? Throwable value)
       (do (write! state "#:seon.print{:face :seon.print/throwable, :value ")
-          {::frame {::kind ::throwable ::child (Throwable->map value)}})
+          {::frame {::kind ::throwable ::child (error/chain value)}})
 
       ;; A VAR IS ITS NAME, in either world. sci's Vars and the host's are
       ;; the same fact to a reader, and admitting the host's as a bare

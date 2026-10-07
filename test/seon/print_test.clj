@@ -408,8 +408,10 @@
                          (ex-info "root" {:root 42}))
         text (print/emit-text (admitted-node failure) no-cuts)]
     (is (str/starts-with? text "#error "))
-    (is (= (Throwable->map failure)
-           (edn/read-string {:readers {'error identity}} text)))))
+    (is (= [["clojure.lang.ExceptionInfo" "outer" {:outer true}] ["clojure.lang.ExceptionInfo" "root" {:root 42}]]
+           (mapv (juxt :seon.error/throwable-class :seon.error/message :seon.error/data)
+                 (edn/read-string {:readers {'error identity}} text)))
+        "its cause chain, read back as data, never a trace")))
 
 (deftest an-object-node-never-renders-as-empty-brackets
   ;; THE CLASS THE NODE CARRIES IS THE ONLY CONTENT AN OBJECT FACE HAS. An

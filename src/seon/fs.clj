@@ -2,6 +2,7 @@
   "Filesystem operations whose safety depends on path ownership."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [seon.error.refusal :as refusal]
             [taoensso.timbre :as log])
   (:import [java.nio.file Files LinkOption NoSuchFileException Path CopyOption StandardCopyOption]
            [java.nio.file.attribute BasicFileAttributes]
@@ -158,20 +159,23 @@
       resolved)))
 
 (defn- caller-frame
+  "The first-party frame that asked for a deletion, as `class.method(file:line)`."
+  {:malli/schema [:=> [:cat] :string]}
   []
   ;; the deletion owners are not the caller, and neither is the plumbing
   ;; between them (contract wrappers, apply, the JDK): the first FIRST-PARTY
   ;; frame outside the owners is who asked for this deletion
+  ;; walked from here outward, stopping at the answer; only that frame is named
   (let [owners ["seon.cluster.store" "seon.fs" "seon.instrument"]
-        frames (map str (.getStackTrace (Thread/currentThread)))
-        outside (remove (fn [frame]
-                          (some #(str/starts-with? frame %) owners))
-                        frames)]
-    (or (first (filter #(str/starts-with? % "seon.") outside))
-        (first (remove (fn [frame]
-                         (some #(str/starts-with? frame %)
-                               ["clojure." "malli." "java." "jdk."]))
-                       outside))
+        named (fn [prefixes]
+                (refusal/first-frame-answer
+                 (fn [[class-name method file line]]
+                   (let [class-name (str class-name)]
+                     (when (and (not (some #(str/starts-with? class-name %) owners))
+                                (prefixes class-name))
+                       (str class-name "." method "(" file ":" line ")"))))))]
+    (or (named #(str/starts-with? % "seon."))
+        (named (fn [class-name] (not (some #(str/starts-with? class-name %) ["clojure." "malli." "java." "jdk."]))))
         "unknown")))
 
 (defn log-deletion!

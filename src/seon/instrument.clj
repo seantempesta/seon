@@ -144,30 +144,29 @@
                                (< (count prefix) (count frame-fn))
                                (every? #(Character/isDigit ^char %)
                                        (subs frame-fn (count prefix)))))]
-    (reduce (fn [_ ^StackTraceElement frame]
-              (let [class-name (.getClassName frame)
-                    [^String frame-ns ^String frame-fn]
-                    (.split (clojure.lang.Compiler/demunge class-name) "/")]
-                (cond
-                  (or (= frame-ns "seon.instrument")
-                      (.startsWith class-name ^String preparing-wrapper-class-prefix)
-                      (some #(.startsWith frame-ns ^String %)
-                            non-caller-namespace-prefixes))
-                  nil
+    ;; walked lazily from this frame outward, stopping at the first answer
+    (refusal/first-frame-answer
+     (fn [[class-name _ file line]]
+       (let [class-name (str class-name)
+             [^String frame-ns ^String frame-fn]
+             (.split (clojure.lang.Compiler/demunge class-name) "/")]
+         (cond
+           (or (= frame-ns "seon.instrument")
+               (.startsWith class-name ^String preparing-wrapper-class-prefix)
+               (some #(.startsWith frame-ns ^String %)
+                     non-caller-namespace-prefixes))
+           nil
 
-                  (.startsWith frame-ns "sci.")
-                  (reduced nil)
+           (.startsWith frame-ns "sci.")
+           false
 
-                  :else
-                  (reduced
-                   (str (if (and frame-fn
-                                 (not (compiler-named? frame-fn "fn--"))
-                                 (not (compiler-named? frame-fn "eval")))
-                          (str frame-ns "/" frame-fn)
-                          frame-ns)
-                        " (" (.getFileName frame) ":" (.getLineNumber frame) ")")))))
-            nil
-            (.getStackTrace (Thread/currentThread)))))
+           :else
+           (str (if (and frame-fn
+                         (not (compiler-named? frame-fn "fn--"))
+                         (not (compiler-named? frame-fn "eval")))
+                  (str frame-ns "/" frame-fn)
+                  frame-ns)
+                " (" file ":" line ")")))))))
 
 (defn- problem-path
   "One Malli problem's path INTO THE ARGUMENT, as ordinary data.
@@ -735,7 +734,7 @@
         ;; only): the compiled caller and each definition's digest from its
         ;; armed Var's profile cell, the version that ran. An interpreted
         ;; caller is SCI's to name (`seon.error.refusal/producer`).
-        caller (refusal/calling-definition (refusal/current-frames))
+        caller (refusal/calling-definition)
         caller-digest (some-> caller refusal/var-digest)
         digest (or (::digest data) (refusal/var-digest function))
         own? (#{:malli.core/invalid-output :malli.core/invalid-guard} kind)

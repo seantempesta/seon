@@ -581,3 +581,14 @@
          (is (= "sci.impl.opts.Ctx"
                 (->> (tree-seq coll? seq (:seon.sci.admit/print-node (:admitted (peek runs))))
                      (keep :seon.print/class) (some #{"sci.impl.opts.Ctx"})))))))))
+
+(deftest an-admitted-throwable-is-its-cause-chain-never-a-trace
+  ;; print-sites audit 2026-10-07 (class stack-trace): a throwable value was
+  ;; admitted as `Throwable->map`, every root frame stored. It is its cause
+  ;; chain: class, message, data and the first-party frames that locate it.
+  (let [thrown (ex-info "boom" {:a 1} (IllegalStateException. "root"))
+        admitted (admit/admit (request thrown))
+        chain (admit/semantic-value (:seon.sci.admit/print-node admitted))]
+    (is (= [["clojure.lang.ExceptionInfo" "boom" {:a 1}] ["java.lang.IllegalStateException" "root" nil]]
+           (mapv (juxt :seon.error/throwable-class :seon.error/message :seon.error/data) chain)))
+    (is (not-any? #(contains? % :trace) chain))))

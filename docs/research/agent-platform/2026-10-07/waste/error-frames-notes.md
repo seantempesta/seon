@@ -51,3 +51,20 @@ O(distinct frames) kept.
 - Not done here (other owners / spec slice): second-clipper deletion (`bounded-cost`, `chain` vs
   `recorded-chain`, `:seon.error/bounded-chain`) needs src/seon/error.clj (held by printers-errors) and the
   schema EDN; stack-trace sites in schema.clj, operator.clj (printers-errors), test/runner.clj (reach-review).
+
+## Slice 2: stack-trace audit class (print-sites.tsv, class stack-trace)
+- `refusal/current-frames` (converted the whole thread stack per refusal) is deleted; `calling-definition` and
+  instrument's and fs's `caller-frame` walk through one `refusal/first-frame-answer`: frames are built only as
+  the walk reaches them and it stops at the answer. StackWalker was the target, but babashka (which loads
+  seon.error.refusal and seon.fs for the operator) has no StackWalker (`bb -e '(StackWalker/getInstance)'`:
+  unable to resolve), so the JVM's own trace array is still captured; no frame past the answer is converted.
+- `seon.sci.admit` admits a throwable value as its cause chain (`refusal/chain`: class, message, referenced
+  data, first-party frames per link), not `Throwable->map` with the whole root trace.
+- `kernel/execution-error-text`: `triage-input` replaces `Throwable->map` (slice 1).
+- Remaining stack-trace rows, not in this lane's files: script/seon/operator.clj:373,429 and
+  src/seon/schema.clj:1105 (held by printers-errors), src/seon/test/runner.clj:2099 (held by reach-review),
+  script/seon/operator_outcome_test.clj:25 (fixture of operator.clj's shape; moves with it).
+- Second-clipper rows in refusal.clj (`bounded-cost`, `bounded-data`, `within-evidence-bound?`,
+  `:seon.error/bounded-chain`): errors.md §1 point 3 decides "nothing is clipped" (the recorder stores the whole
+  referenced map by content); deleting it merges `chain` and `recorded-chain`, whose caller
+  src/seon/error.clj:345 is held by printers-errors, and changes `seon.error.edn`. Not done here.

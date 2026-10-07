@@ -595,32 +595,45 @@
       (when (var? target)
         (some-> ^clojure.lang.Var target .getRawRoot meta :seon.instrument/cell :seon.profile/digest)))))
 
-(defn current-frames
-  "The calling thread's complete stack frames as `[class method file line]`,
-  innermost first: what a refusal is built on, read once on the failure path."
-  {:malli/schema [:=> [:cat] [:vector :seon.error/frame]]}
-  []
-  (into []
-        (keep (fn [^StackTraceElement frame]
-                (when-let [file (.getFileName frame)]
-                  [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
-                   file (long (.getLineNumber frame))])))
-        (.getStackTrace (Thread/currentThread))))
+(defn first-frame-answer
+  "The first non-nil `(pick frame)` over the calling thread's frames,
+  innermost first, each `[class method file line]` built only as the walk
+  reaches it; a `false` answer ends the walk with nil. A caller lookup
+  touches the frames up to its answer, never converts the whole stack.
+  (`StackWalker` would not capture the array either, but babashka, which
+  loads this namespace for the operator, has no StackWalker.)"
+  {:malli/schema [:=> [:cat :seon.instrument/callable] [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The answer is whatever the caller's pick returns for a frame.", :gen/elements [nil "x"]}]]}
+  [pick]
+  (let [^"[Ljava.lang.StackTraceElement;" trace (.getStackTrace (Thread/currentThread))
+        ;; the walk begins past this function's own frames
+        own? (fn [i] (.startsWith (.getClassName ^StackTraceElement (aget trace i)) "seon.error.refusal$first_frame_answer"))
+        start (or (some #(when (own? %) (loop [j %] (if (and (< (inc j) (alength trace)) (own? (inc j))) (recur (inc j)) (inc j))))
+                        (range (min 4 (alength trace))))
+                  0)]
+    (loop [i start]
+      (when (< i (alength trace))
+        (let [^StackTraceElement frame (aget trace i)
+              answer (pick [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
+                            (.getFileName frame) (long (.getLineNumber frame))])]
+          (cond (false? answer) nil
+                (some? answer) answer
+                :else (recur (inc i))))))))
 
 (defn calling-definition
-  "The authored definition a compiled call came from: the first of `frames`
-  (innermost first) in code an agent or Seon wrote, outside the fault and
-  contract machinery ([[first-party-frame?]]), named as the Var it belongs to
-  ([[frame-function]]). Nil when that frame names no Var (an evaluated form:
-  `user$eval123`) or when SCI's interpreter is reached first: then the caller
-  is interpreted and its SCI frames name it."
-  {:malli/schema [:=> [:cat [:sequential :seon.error/frame]] [:maybe :qualified-symbol]]}
-  [frames]
-  (reduce (fn [_ [class-name :as frame]]
-            (cond
-              (.startsWith (str class-name) "sci.") (reduced nil)
-              (first-party-frame? frame) (reduced (frame-function class-name))))
-          nil frames))
+  "The authored definition a compiled call came from: the first frame of the
+  calling thread (innermost first) in code an agent or Seon wrote, outside
+  the fault and contract machinery ([[first-party-frame?]]), named as the Var
+  it belongs to ([[frame-function]]). Nil when that frame names no Var (an
+  evaluated form: `user$eval123`) or when SCI's interpreter is reached first:
+  then the caller is interpreted and its SCI frames name it."
+  {:malli/schema [:=> [:cat] [:maybe :qualified-symbol]]}
+  []
+  (first-frame-answer
+   (fn [[class-name _ file :as frame]]
+     (cond
+       (nil? file) nil
+       (.startsWith (str class-name) "sci.") false
+       (first-party-frame? frame) (or (frame-function class-name) false)))))
 
 (defn- contract-refusal
   "The armed wrapper's refusal `error` is or carries: itself, else the deepest
