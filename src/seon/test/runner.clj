@@ -754,10 +754,11 @@
 
 ;;; Reach: what a test's reach digest covers, read from the tested database value.
 ;;; A declaration's node (its leaf, the names it reaches, the keywords it names)
-;;; is a function of its content and lives in the central cache under that
-;;; content, and so does each test's digest, under its closure's fingerprint.
-;;; No index is held between calls: a call reads the declarations' identities
-;;; once and derives every requested test's closure together.
+;;; is a function of its graph facts and lives in the central cache under them;
+;;; the requested tests' digests are cached together under the reached graph's
+;;; content, edges included. A call reads the declarations' graph facts once
+;;; (cached per commit) and hashes the reached graph's components once, never a
+;;; closure per test.
 
 (defn- reach-read!
   "`value`, or a throw carrying the read refusal it is; [[reach-entries]]
@@ -778,17 +779,6 @@
                            (map? v) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) v)
                            (set? v) (into (sorted-set-by #(compare (pr-str %1) (pr-str %2))) v)
                            :else v)) value))
-
-(defn- reach-row
-  "The reach facts of one declaration, from its EAVT range."
-  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:map-of :qualified-keyword :seon.schema/value]]}
-  [database entity]
-  (reduce (fn [row {:keys [a v]}]
-            (case a
-              (:seon.fn/calls :seon.fn/references :seon.fn/keywords) (update row a (fnil conj #{}) v)
-              (:seon.fn/spec :seon.test/subject :seon.program/definition-digest) (assoc row a v)
-              row))
-          {} (reach-read! (db/datoms database :eavt entity))))
 
 (defn- reach-node
   "One declaration's contribution to reach: its leaf (the producer's
@@ -815,12 +805,30 @@
   [node]
   (* 48 (+ 8 (count (::out node)) (count (::keys node)))))
 
+(defn- reach-facts
+  "Each reach attribute's values by entity: calls, references and keywords as
+  sets, contract source and test subject as values. Read whole, never
+  inferred from the definition digest: a declaration-population retarget
+  changes an invoker's calls under an unchanged digest."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:map-of :qualified-keyword [:map-of :int :seon.schema/value]]]}
+  [database]
+  (into {}
+        (map (fn [[attribute many?]]
+               [attribute
+                (persistent!
+                 (reduce (fn [by-entity {:keys [e v]}]
+                           (assoc! by-entity e (if many? (conj (get by-entity e #{}) v) v)))
+                         (transient {}) (reach-read! (db/datoms database :aevt attribute))))]))
+        [[:seon.fn/calls true] [:seon.fn/references true] [:seon.fn/keywords true]
+         [:seon.fn/spec false] [:seon.test/subject false]]))
+
 (defn- reach-declarations
   "Every function, test and schema declaration on `database`: symbol to row,
-  row to definition digest, schema key to form. Five attribute reads, about
-  15 ms on default whatever the request (2026-09-27), where resolving a hub's
-  3,568 reached names frontier by frontier took 79 ms; a committed value's
-  answer is cached under its commit."
+  row to definition digest and to its reach facts ([[reach-facts]]), schema
+  key to form. Ten attribute reads, about 70 ms on default whatever the
+  request (unarmed, 2026-10-07); a committed value's answer is cached under
+  its commit."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :keyword :map]]}
   [database]
   (let [pairs (fn [attribute k v] (into {} (map (juxt k v)) (reach-read! (db/datoms database :aevt attribute))))
@@ -828,10 +836,14 @@
         #(let [schema-keys (pairs :seon.schema/key :e :v)]
            {::rows (merge (pairs :seon.fn/sym :v :e) (pairs :seon.test/sym :v :e))
             ::digests (pairs :seon.program/definition-digest :e :v)
+            ::facts (reach-facts database)
             ::forms (into {} (keep (fn [[e form]] (when-let [k (schema-keys e)] [k form])))
                           (pairs :seon.schema/form :e :v))})]
     (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
-      (cache/lookup ::reach-declarations commit #(* 96 (+ (count (::rows %)) (count (::digests %)) (count (::forms %))))
+      (cache/lookup ::reach-declarations commit
+                    (fn [{::keys [rows digests forms facts]}]
+                      (* 96 (+ (count rows) (count digests) (count forms)
+                               (transduce (comp (mapcat vals) (map #(if (set? %) (count %) 1))) + 0 (vals facts)))))
                     derive-declarations)
       (derive-declarations))))
 
@@ -850,20 +862,22 @@
       (persistent! resolved))))
 
 (defn- reach-graph
-  "The nodes and schema nodes the requested tests reach. Calls, references and
-  keywords are the analysis of what the definition digest hashes (source and
-  resolver context, `seon.program/definition-digest`), so a node is cached
-  under that digest and read only on a miss; an undigested row is read every
-  time. A schema node is cached under its form."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]] :map]}
+  "The nodes and schema nodes the requested tests reach. A node is cached
+  under its declaration's whole reach row (digest and graph facts), never
+  under the digest alone: calls derived from the declaration population are
+  not part of the definition digest. A schema node is cached under its form."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
+                  [:map [::nodes [:map-of :seon.schema/value [:maybe :map]]]
+                   [::schemas [:map-of :seon.schema/value [:maybe :map]]]]]}
   [database test-symbols]
-  (let [{::keys [rows digests forms]} (reach-declarations database)
+  (let [{::keys [rows digests facts forms]} (reach-declarations database)
         node-of (fn [s]
                   (when-let [e (get rows s)]
-                    (let [derive-node #(reach-node (reach-row database e))]
-                      (if-let [digest (get digests e)]
-                        (cache/lookup ::reach-node digest reach-weight derive-node)
-                        (derive-node)))))
+                    (let [row (into (if-let [digest (get digests e)] {:seon.program/definition-digest digest} {})
+                                    (keep (fn [[attribute by-entity]]
+                                            (when-some [v (get by-entity e)] [attribute v])))
+                                    facts)]
+                      (cache/lookup ::reach-node row reach-weight #(reach-node row)))))
         schema-node-of (fn [k]
                          (when-let [form (get forms k)]
                            (cache/lookup ::reach-schema-node [k form] reach-weight #(reach-schema-node k form))))
@@ -886,8 +900,8 @@
 
   ## Costs
 
-  - Linear in vertices plus edges: default's 9,165 names and 104,761 edges
-    once per derivation."
+  - Vertices plus edges, plus sorting each component's members: default's
+    9,165 names and 104,761 edges once per derivation."
   {:malli/schema [:=> [:cat [:vector [:fn clojure.core/some?]]]
                   [:tuple [:vector [:vector :int]] [:fn clojure.core/some?]]]}
   [successors]
@@ -945,8 +959,9 @@
 
   ## Costs
 
-  - One SHA-256 pass per component over its members and its condensed edges:
-    linear in the graph, never in tests times closure."
+  - One SHA-256 pass per component over its members and its condensed edges,
+    each component's distinct edge digests sorted: the graph's size times a
+    log factor, never tests times closure."
   {:malli/schema [:=> [:cat [:vector :seon.schema/value] [:fn clojure.core/ifn?] [:vector [:fn clojure.core/some?]]
                        [:vector [:vector :int]] [:fn clojure.core/some?] [:fn clojure.core/ifn?]]
                   [:vector [:string {:min 64 :max 64}]]]}
@@ -977,9 +992,9 @@
       (transient []) (range (count components))))))
 
 (defn- test-reach-digest
-  "SHA-256 hex of a test's name and its closure's component digest (empty for
-  a test with no program entity)."
-  {:malli/schema [:=> [:cat :seon.test/sym [:maybe [:string {:min 64 :max 64}]]] [:string {:min 64 :max 64}]]}
+  "SHA-256 hex of a test's name and its closure's component digest (the empty
+  string for a test with no program entity)."
+  {:malli/schema [:=> [:cat :seon.test/sym :string] [:string {:min 64 :max 64}]]}
   [test-symbol component-digest]
   (let [digester (MessageDigest/getInstance "SHA-256")]
     (.update digester (.getBytes (str test-symbol) StandardCharsets/UTF_8))
@@ -998,9 +1013,14 @@
 
   ## Costs
 
-  - Linear in the reached graph: all 2,365 tests on default (9,165 names,
-    104,761 edges, 6,834 schema keys) in one pass, O(1) more per test."
-  {:malli/schema [:=> [:cat :map [:vector :seon.test/sym]] :map]}
+  - The reached graph once, names and schema keys sorted: all 2,365 tests on
+    default (9,165 names, 104,761 edges, 6,834 schema keys) in one pass, O(1)
+    more per test."
+  {:malli/schema [:=> [:cat [:map [::nodes [:map-of :seon.schema/value [:maybe :map]]]
+                              [::schemas [:map-of :seon.schema/value [:maybe :map]]]]
+                       [:vector :seon.test/sym]]
+                  [:map [::digests [:map-of :seon.test/sym [:string {:min 64 :max 64}]]]
+                   [::undigested [:vector :seon.test/sym]]]]}
   [{::keys [nodes schemas]} test-symbols]
   (let [schema-keys (vec (sort (keys schemas)))
         key-index (zipmap schema-keys (range))
@@ -1033,14 +1053,16 @@
               (let [c (when (get nodes s) (aget component-of (int (name-index s))))]
                 (if (and c (nth undigested? c))
                   (update index ::undigested conj s)
-                  (assoc-in index [::digests s] (test-reach-digest s (some->> c (nth digests)))))))
+                  (assoc-in index [::digests s] (test-reach-digest s (if c (nth digests c) ""))))))
             {::digests {} ::undigested []} test-symbols)))
 
 (defn- reach-names
-  "Every name `start`'s closure in `nodes` holds, `start` included."
-  {:malli/schema [:=> [:cat [:map-of :seon.schema/value [:maybe :map]] :seon.schema/value] [:set :seon.schema/value]]}
-  [nodes start]
-  (loop [pending [start] seen (transient #{})]
+  "Every name the closures of `starts` in `nodes` hold, `starts` included: one
+  walk however many starts share their reach."
+  {:malli/schema [:=> [:cat [:map-of :seon.schema/value [:maybe :map]] [:sequential :seon.schema/value]]
+                  [:set :seon.schema/value]]}
+  [nodes starts]
+  (loop [pending (vec starts) seen (transient #{})]
     (if-let [n (peek pending)]
       (if (contains? seen n)
         (recur (pop pending) seen)
@@ -1048,12 +1070,12 @@
       (persistent! seen))))
 
 (defn- reach-unavailable
-  "The unknown-error a failed reach read answers for `test-symbols`."
-  {:malli/schema [:=> [:cat [:fn clojure.core/some?] [:vector :seon.test/sym]] :seon.test/unknown-error]}
-  [^Exception failure test-symbols]
+  "The unknown-error a failed reach read answers `operation` for `test-symbols`."
+  {:malli/schema [:=> [:cat :qualified-symbol [:fn clojure.core/some?] [:vector :seon.test/sym]] :seon.test/unknown-error]}
+  [operation ^Exception failure test-symbols]
   (seon.error.refusal/error :seon.test/unknown-error
    {:seon.error/layer :seon.test/recording
-    :seon.error/operation `reach-entries
+    :seon.error/operation operation
     :seon.error/message (str "Reach digest unavailable: " (ex-message failure))
     :seon.test/unknown "reach digest"
     :seon.error/member :seon.test/reach-digests
@@ -1078,13 +1100,13 @@
     (try
       (let [{::keys [nodes schemas] :as graph} (reach-graph database test-symbols)]
         (assoc (cache/lookup
-                ::reach-index [(set test-symbols)
-                               (update-vals nodes #(or (::leaf %) %))
-                               (update-vals schemas ::leaf)]
+                ;; The nodes whole: their edges, not only their leaves, are
+                ;; what the index derives from.
+                ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
                 (fn [_] (+ (* 128 (+ (count nodes) (count schemas))) (* 160 (count test-symbols))))
                 #(reach-index graph test-symbols))
                ::nodes nodes))
-      (catch Exception failure (reach-unavailable failure test-symbols)))))
+      (catch Exception failure (reach-unavailable `reach-entries failure test-symbols)))))
 
 (defn reach-digests
   "Each test's reach digest: the content of its static closure on `database`."
@@ -1101,23 +1123,24 @@
               :seon.error/operation 'seon.test.runner/reach-digests))
       ;; Unknown evidence never keys reuse: equal unknown leaves would match.
       (seq (::undigested entries))
+      ;; One walk from every undigested test: a closure per test is tests
+      ;; times closure (one undigested hub reached by 2,111 of default's tests
+      ;; took 5.9 s, 2026-10-07).
       (let [nodes (::nodes entries)
-            undigested (into (sorted-map)
-                             (map (fn [s] [s (filterv #(when-let [node (get nodes %)] (not (string? (::leaf node))))
-                                                      (sort (reach-names nodes s)))]))
-                             (::undigested entries))]
+            tests (vec (sort (::undigested entries)))
+            declarations (into (sorted-set)
+                               (filter #(when-let [node (get nodes %)] (not (string? (::leaf node)))))
+                               (reach-names nodes tests))]
         (seon.error.refusal/error
          :seon.test/unknown-error
          {:seon.error/layer :seon.test/reach
           :seon.error/operation 'seon.test.runner/reach-digests
-          :seon.error/message (let [declarations (vec (distinct (mapcat val undigested)))]
-                                (str "Reach digest unknown: " (count declarations) " declarations have no stored "
-                                     ":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
-                                     "; reached by " (count undigested) " tests, first "
-                                     (pr-str (vec (take 10 (keys undigested)))) "."))
+          :seon.error/message (str "Reach digest unknown: " (count declarations) " declarations have no stored "
+                                   ":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
+                                   "; reached by " (count tests) " tests, first " (pr-str (vec (take 10 tests))) ".")
           :seon.test/unknown "reach digest"
           :seon.error/member :seon.program/definition-digest
-          :seon.error/offending (vec (keys undigested))}))
+          :seon.error/offending tests}))
       :else (::digests entries))))
 
 (defn reach-memberships
@@ -1133,8 +1156,8 @@
   [database test-symbols]
   (try
     (let [{::keys [nodes]} (when (seq test-symbols) (reach-graph database test-symbols))]
-      (into {} (keep (fn [s] (when (get nodes s) [s (disj (reach-names nodes s) s)]))) test-symbols))
-    (catch Exception failure (reach-unavailable failure test-symbols))))
+      (into {} (keep (fn [s] (when (get nodes s) [s (disj (reach-names nodes [s]) s)]))) test-symbols))
+    (catch Exception failure (reach-unavailable `reach-memberships failure test-symbols))))
 
 (defn tests-reaching
   "The tests among `test-symbols` whose closure holds `target` (a test never
@@ -1161,7 +1184,7 @@
                          (recur (into (pop pending) (get callers n)) (conj! seen n)))
                        (persistent! seen)))]
       (into #{} (filter #(and (get nodes %) (not= % target) (contains? reaching %))) test-symbols))
-    (catch Exception failure (reach-unavailable failure test-symbols))))
+    (catch Exception failure (reach-unavailable `tests-reaching failure test-symbols))))
 
 (defn- program-digest-read-attributes
   "Every attribute the digest reads: the source seal and the program rows' own

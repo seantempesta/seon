@@ -100,6 +100,55 @@
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
      (is (= derived (derived-digests #{ta tb})) "equal reached content derives nothing"))))))
 
+(deftest a-reach-digest-is-its-closures-alone-across-cycles
+ ;; Digests compose per call-graph component (Merkle over strongly connected
+ ;; components): a test's digest is a function of its closure only, the same
+ ;; asked alone or beside other tests, and a change to any member of a cycle
+ ;; it reaches changes it.
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (support/transacted! connection [(support/namespace-entity (db/db connection) 'reach.cycle)])
+   (define! connection '[:seon.fn/sym reach.cycle/d] "(defn d {:malli/schema [:=> [:cat :int] :int]} [n] n)")
+   (define! connection '[:seon.fn/sym reach.cycle/c]
+            "(defn c {:malli/schema [:=> [:cat :int] :int]} [n] (if (pos? n) (d (dec n)) n))")
+   (define! connection
+            '[:seon.fn/sym reach.cycle/d] "(defn d {:malli/schema [:=> [:cat :int] :int]} [n] (c n))"
+            '[:seon.test/sym reach.cycle/c-test] "(deftest c-test (is (= 0 (c 1))))")
+   (let [tc 'reach.cycle/c-test ta 'reach.fixture/a-test
+         together (runner/reach-digests (db/db connection) [tc ta])]
+    (is (contains? (get (runner/reach-memberships (db/db connection) [tc]) tc) 'reach.cycle/d)
+        "c and d call each other")
+    (is (= (get together tc) (get (runner/reach-digests (db/db connection) [tc]) tc)) "asked alone")
+    (is (= (get together ta) (get (runner/reach-digests (db/db connection) [ta]) ta)) "asked alone")
+    (define! connection '[:seon.fn/sym reach.cycle/d]
+             "(defn d {:malli/schema [:=> [:cat :int] :int]} [n] (c (identity n)))")
+    (let [after (runner/reach-digests (db/db connection) [tc ta])]
+     (is (not= (get together tc) (get after tc)) "a change inside the cycle")
+     (is (= (get together ta) (get after ta)) "a test outside the cycle keeps its digest"))))))
+
+(deftest a-call-edge-changed-under-an-unchanged-definition-digest-changes-the-reach
+ ;; Calls derived from the declaration population (an invoker retargeted to
+ ;; another handler) are not part of the definition digest, so a reach node
+ ;; cached under that digest kept the old edges and the old reach digest.
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (let [ta 'reach.fixture/a-test
+         digest-of-a #(:seon.program/definition-digest
+                       (db/pull (db/db connection) [:seon.program/definition-digest] [:seon.fn/sym 'reach.fixture/a]))
+         before (runner/reach-digests (db/db connection) [ta])
+         a-digest (digest-of-a)]
+    (is (= before (runner/reach-digests (db/db connection) [ta])) "warm")
+    (support/transacted! connection [[:db/add [:seon.fn/sym 'reach.fixture/a] :seon.fn/calls 'reach.fixture/b]])
+    (is (= a-digest (digest-of-a)) "the definition digest is unchanged")
+    (is (contains? (get (runner/reach-memberships (db/db connection) [ta]) ta) 'reach.fixture/b))
+    (let [retargeted (runner/reach-digests (db/db connection) [ta])]
+     (is (not= (get before ta) (get retargeted ta)) "the new edge changes the reach")
+     (define! connection '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (identity x))")
+     (is (not= (get retargeted ta) (get (runner/reach-digests (db/db connection) [ta]) ta))
+         "a change to the newly reached function changes the reach"))))))
+
 (deftest concurrent-reach-reads-of-one-value-derive-once
  ;; A digest is cached under its closure's content: equal values share one
  ;; derivation, a changed closure derives again.
