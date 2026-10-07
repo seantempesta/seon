@@ -58,4 +58,9 @@
             :intent
             "source-display/printer-notes.md reports my.program/source returns the docstring both inside source and separately as doc. Return source plus only useful nonduplicated data or improve its declared render; keep value printer schema-agnostic. Regression at my.program/source/render's data boundary.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+ #:seon.task{:name "alias-and-require-as-retarget-silently"
+  :kind :function
+  :intent "In SCI, (require '[clojure.set :as x]) after x -> clojure.string returns nil and retargets the alias; so does (alias 'x 'clojure.walk) (sci-alias is a bare assoc-in, namespaces.cljc:478-486). Clojure refuses a different target (Namespace.java:257-258, \"Alias x already exists in namespace .., aliasing ..\"). The silent retarget makes stored definitions position-dependent and is the source of the digest refusals in the alias design probes. Correct: alias and require :as with a different target refuse as Clojure does, ns-unalias! being the guarded path (the existing native-call-refusal already intercepts ns-unalias); a refer replacement stays legal (a warning in Clojure). Related issue docs/seon/issues/reload-refuses-an-alias-retargeted-by-the-new-source.md. Proof: evaluating (alias 'x 'clojure.set) after x -> clojure.string answers a refusal error and leaves the alias unchanged."
+  :must-read #{my.program/native-call-refusal}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md" "docs/seon/issues/reload-refuses-an-alias-retargeted-by-the-new-source.md"}}]

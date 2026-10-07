@@ -21,4 +21,9 @@
             "Over the 392 tasks installed on default: :seon.task/must-read names 41 symbols that resolve to no function, test or namespace (e.g. seon.print.value/bounded-text, seon.cluster/mcp-get-value, my.program/overrides); intents name 44 qualified symbols, 42 qualified keywords and about 34 namespaces that resolve to nothing (e.g. :seon.issue/id, :seon.task/done-when, my.plan). seon.task/task-findings checks only :seon/tasks tags. A task brief built from references shows a dangling reference as a hole. Done when task ingestion reports dangling must-read symbols per task (the program gate refusing new ones) and intent references are resolved by the same reference index, with counts in the notes.",
             :must-read #{seon.task/task-findings},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name "a-runtime-created-task-is-never-written-back"
+  :kind :function
+  :intent "A task made by seon.task/create! exists only in the database: a deftest tagged :seon/tasks with its ns/name is refused at publication as a dangling id, and a reset loses it. Lanes hand-copied 8+ tasks into resources/seon/tasks on 2026-10-08. CLAUDE.md: \"Files are the write-back of accepted entities.\" Correct: the task's home write-back stages the accepted task into resources/seon/tasks/<ns>.edn like any accepted entity, and ingesting that file entry over the runtime row yields one task (see a-file-task-is-refused-while-a-runtime-task-holds-its-symbol). Proof: create! then write-back produces the EDN entry, and a deftest tagged with the new task publishes without a dangling-id refusal."
+  :must-read #{seon.task/create! seon.task/index-tasks!}
+  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]

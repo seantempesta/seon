@@ -17,4 +17,9 @@
             :kind :function,
             :intent
             "MCP SCI eval_clj of \"(+ 1 2)\\n#:seon.repl{:value 3}\\n(* 2 3)\": the reserved map was refused through :seon.batch/refused, a carrier with no :seon.batch/error-value, so seon.turn/show-row passed nil to seon.sci.eval/shown-failure; that failure was recorded while form 2 was shown and delivered as an error on form 3, whose value 6 was correct. Correct: a refused form is its own read error carrying its error value, and an error recorded while showing one form is delivered on that form. Proof: seon.cluster.evaluate-source-test/code-evaluates-as-one-ordinary-run-of-its-agent (the read-error testing block: no receipt carries a diagnostic).",
-            :must-read #{seon.batch/evaluate-batch seon.turn/show-row}}]
+            :must-read #{seon.batch/evaluate-batch seon.turn/show-row}}
+ #:seon.task{:name "a-deftest-fixture-observation-is-dropped-by-the-runtime-batch"
+  :kind :function
+  :intent "seon.fn-test/fixture-observations-survive-static-admission-and-the-fold (fn_test.clj:1656) is red on HEAD and on default: the runtime batch entity for a deftest carrying ^{:seon.test/fixture-observation ...} has no :seon.test/fixture-observation (line 1671 asserts it). Found while fixing the check JVM's dependency analysis (410 pass / 2 fail / 8 error, then 494 / 1 / 0). Correct: the metadata reaches the stored test entity. Done when that deftest is green."
+  :must-read #{seon.batch/evaluate-batch}
+  :evidence #{"docs/research/agent-platform/2026-10-07/check-analysis/analysis-notes.md"}}]

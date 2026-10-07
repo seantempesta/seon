@@ -108,4 +108,14 @@
             "CLAUDE.md says a backticked fully qualified symbol or keyword in a docstring is a reference the index resolves into the subject's context, one resolving to nothing a problem on that var. No producer exists: seon.fn indexes :seon/tasks, :seon/must-read and :seon/see-also metadata (task-links) and analyzer :seon.fn/references, never docstring spans. Done when docstring backtick spans are indexed as reference edges with dangling ones reported, or the law is corrected.",
             :must-read #{seon.fn/task-links},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name "batched-analysis-uses-one-namespace-row-per-run"
+  :kind :function
+  :intent "seon.fn/runtime-analysis-batch builds one ns form from the first row of a run of consecutive requests (partition-by on namespace name, fn.clj:1013), so later requests with a different row are analyzed under the first. Probe (JVM, default's database value): two requests in namespace probe.a, row 1 x -> clojure.string, row 2 x -> clojure.set, forms (x/upper-case \"a\") and (x/union #{1} #{2}). Batched: usages [clojure.string upper-case] and [clojure.string union] (the second is wrong); analyzed one by one: [clojure.string upper-case] and [clojure.set union]. Correct: a run splits where the namespace row changes (not only the name). Proof: seon.fn-test with those two requests asserts [clojure.string upper-case] and [clojure.set union]."
+  :must-read #{seon.fn/runtime-analysis-batch}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}
+ #:seon.task{:name "a-renamed-refer-drops-its-call-edge"
+  :kind :function
+  :intent "runtime-require-specs (fn.clj:814) emits :refer [target-name] only and drops the local name of a :rename, so a renamed refer is invisible to analysis. Probe (probe.alias7): (require '[clojure.set :refer [union] :rename {union upper-case}]) then (defn r2 [] (upper-case ...)) stores calls [defn] with no edge to clojure.set/union. Correct: the analysis ns form carries :rename so the call resolves to clojure.set/union. Proof: that pair of forms stores clojure.set/union in r2's calls."
+  :must-read #{seon.fn/runtime-require-specs}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}]

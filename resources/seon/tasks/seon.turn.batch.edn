@@ -23,4 +23,14 @@
             :kind :function,
             :intent
             "MCP eval_clj in jvm mode of \"(+ 1 1)\\n(vector ::nope.alias/k)\\n(+ 2 2)\" answered only 2: seon.turn.batch/jvm-read-next answered :seon.batch/unread-from on the host reader's failure, which ended the batch, so (+ 2 2) never ran and the read error was never shown. Correct: as in SCI mode, the failed construct is one read error (its span from the structural stepper, seon.sci.forgive/failure-step) and reading continues after it. Proof: seon.cluster.evaluate-source-test/code-evaluates-as-one-ordinary-run-of-its-agent (the read-error testing block, JVM rows).",
-            :must-read #{seon.turn.batch/jvm-request}}]
+            :must-read #{seon.turn.batch/jvm-request}}
+ #:seon.task{:name "a-declared-var-call-stores-no-edge"
+  :kind :function
+  :intent "A call to a Var that is declared but has no definition entity stores no call edge. Reproduce (MCP eval_clj sci, one pass): (declare zz) then (defn calls-zz [] (zz)) stores calls [clojure.core/defn] with no edge to scratch.macro/zz, although derive-form adds the declared Vars to the analysis prelude so that a call to one is an edge. Cause unverified (suspect the edge is dropped because no entity exists for zz). Correct: the stored call edge names the declared Var, and resolves to its entity when that is defined. Proof: a test through the agent entrance running (declare zz) and (defn calls-zz [] (zz)) in one pass asserts calls-zz's :seon.fn/calls contains the zz symbol."
+  :must-read #{seon.turn.batch/derive-form}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/macro-design.md"}}
+ #:seon.task{:name "analysis-uses-the-namespace-row-after-the-form"
+  :kind :function
+  :intent "derive-form analyzes a defining form with the namespace row left after the form, not the row the definition ran under. Reproduce (MCP eval_clj sci, namespace probe.alias5, x -> clojure.string): (do (defn h [] (x/upper-case \"a\")) (alias 'x 'clojure.set)) answers nil and h is ADMITTED with calls [defn clojure.set/upper-case], an edge to a Var that does not exist; SCI resolved x/upper-case to clojure.string/upper-case when it evaluated the defn. Correct: each form is analyzed under the namespace row in force when it was evaluated. Proof: that form stores calls [defn clojure.string/upper-case] or is refused, never the false edge."
+  :must-read #{seon.turn.batch/derive-form seon.fn/runtime-analysis-batch}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}]

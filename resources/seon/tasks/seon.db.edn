@@ -198,4 +198,19 @@
             "rule-arguments-resolve-lookup-shaped-data-as-entities",
             :kind :function,
             :intent
-            "Datahike 84790323/6f3b61f6 resolves every lookup-ref-shaped rule argument before inspecting its use. On {:u/id {:db/unique :db.unique/identity}}, entity 2 :u/id 2, (d/q '[:find ?x :in $ % ?v :where (same ?v ?x)] db '[[(same ?v ?x) [(identity ?v) ?x]]] [:u/id 2]) planned returns #{[2]} but base engine returns #{[[:u/id 2]]}; current/history/as-of, 20 and 320 entities. Preserve data arguments; resolve only at a database pattern's entity/ref position. Proof: datahike.test.query-planner-temporal-test/rule-arguments-preserve-lookup-shaped-data. Full evidence: docs/research/agent-platform/2026-10-07/dh-fix/dh-audit-notes.md."}]
+            "Datahike 84790323/6f3b61f6 resolves every lookup-ref-shaped rule argument before inspecting its use. On {:u/id {:db/unique :db.unique/identity}}, entity 2 :u/id 2, (d/q '[:find ?x :in $ % ?v :where (same ?v ?x)] db '[[(same ?v ?x) [(identity ?v) ?x]]] [:u/id 2]) planned returns #{[2]} but base engine returns #{[[:u/id 2]]}; current/history/as-of, 20 and 320 entities. Preserve data arguments; resolve only at a database pattern's entity/ref position. Proof: datahike.test.query-planner-temporal-test/rule-arguments-preserve-lookup-shaped-data. Full evidence: docs/research/agent-platform/2026-10-07/dh-fix/dh-audit-notes.md."}
+ #:seon.task{:name "a-cross-pass-alias-retarget-leaves-dependant-digests-stale"
+  :kind :function
+  :intent "After pass 1 defines f1 (x -> clojure.string) and pass 2 runs (alias 'x 'clojure.set), the namespace row holds x -> clojure.set while f1 keeps calls [.. clojure.string/upper-case] and its old digest a5e1d27b...; (db/definition-digest-of projection f1 stored-ns-map) is 701a836c.... Nothing refuses or re-derives it. namespace-digests-tx re-derives dependants only when the written namespace map carries :seon.program/definition-digest (db.clj:5648), which a batch's namespace row does not. Correct: a namespace row whose used resolver context changed re-derives or refuses its dependants. Proof: probe 6 of alias-design.md, then assert the stored digest equals definition-digest-of under the stored row."
+  :must-read #{seon.db/prepared-write seon.db/namespace-digests-tx}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}
+ #:seon.task{:name "the-digest-refusal-names-no-cause"
+  :kind :function
+  :intent "The writer's refusal for a definition whose used alias or refer was retargeted later in the pass says only \"The stored definition digest of [:seon.fn/sym probe.alias/f1] is not the one its definition produces\" (error member :seon.program/definition-digest). It does not say that alias x changed from clojure.string to clojure.set, though the batch knows the retargeted names. Seen in alias-design probes 1, 5 and 6. Correct: the refusal carries :seon.batch/reason :resolver-retargeted and the names of the retargeted aliases or refers as data. Proof: probe 1 answers a refusal whose data names x."
+  :must-read #{seon.db/prepared-write}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}
+ #:seon.task{:name "transact-call-takes-five-seconds-at-its-maximum"
+  :kind :function
+  :intent "On default's health, the profile cell for seon.db/transact-call reports a maximum of 5.3 s (runtime_status, 2026-10-08). An ordinary write is expected under 100 ms (settlement) and every operation over one second must name the armed function responsible. Correct: find the call shape that produces the maximum (caller, transaction size, contention), measure it, and fix the producer; related fault-write-bound-is-wall-clock-under-contention. Proof: a profiled probe of that shape stays sub-second."
+  :must-read #{seon.db/transact-call}
+  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]
