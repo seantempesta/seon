@@ -334,6 +334,38 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.host/hosting-an-agent-costs-seconds-and-a-hundred-megabytes}}
+  a-branch-reads-the-index-nodes-its-store-already-holds
+  ;; Each connection builds its own index tree over shared node addresses:
+  ;; unless the store's node cache holds a whole-program read, every new
+  ;; branch (each hosted agent) restores and keeps those nodes again.
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened (store/open-store! {:seon.store/dir dir})
+            main (:seon.store/connection-object opened)
+            restored (fn [connection] (:reads @(:stats (:storage (:store @connection)))))
+            scan (fn [connection] (reduce + (map #(count (d/datoms @connection %)) [:eavt :aevt :avet])))]
+        (try
+          (test-support/transacted! main probe-schema)
+          ;; about 2,400 index nodes: more than Datahike's default cache holds
+          (d/transact main (mapv (fn [i] {:seon.store.test/marker (str "m" i) :seon.store.test/measurement i})
+                                  (range 30000)))
+          (d/branch! main :db :first)
+          (d/branch! main :db :second)
+          (let [first-branch (store/open-branch! opened :first)
+                second-branch (store/open-branch! opened :second)]
+            (try
+              (is (= (scan first-branch) (scan second-branch)))
+              (is (zero? (restored second-branch))
+                  "the second branch restores no node the store already holds")
+              (finally
+                (d/release first-branch)
+                (d/release second-branch))))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
 (deftest a-branch-writer-never-keeps-the-opening-evaluations-bindings
   ;; A branch opened inside an evaluation once ran every later transaction
   ;; function under that evaluation's read-evidence sink: 26 entries, each

@@ -2297,6 +2297,16 @@
                 [(get-else $ ?function :seon.fn/private? false) ?private]]
               db)))
 
+(defn- loaded-function-rows
+  "`function-rows` of a loaded program, once per store and commit, as
+  `loaded-digests` reads its digests: a fresh materialization of the commit
+  answers the whole-program join cold."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :qualified-symbol :string :symbol :keyword :boolean]]]}
+  [loaded]
+  (seon.cache/lookup ::loaded-function-rows [(store-identity loaded) (db/commit-id loaded)]
+                     #(reduce (fn [bytes [_ source]] (+ bytes 128 (* 2 (count source)))) 0 %)
+                     #(function-rows loaded)))
+
 (defn- host-function-rows
   "The rows whose compiled Vars bind: the branch's own, plus the loaded program's
   rows the branch lacks. A branch forked before a reload holds no row for a
@@ -2306,7 +2316,7 @@
   (if (or (nil? loaded) (identical? loaded db))
     branch-rows
     (let [known (into #{} (map first) branch-rows)]
-      (into branch-rows (remove (comp known first)) (function-rows loaded)))))
+      (into branch-rows (remove (comp known first)) (loaded-function-rows loaded)))))
 
 (defn- acquire-program!
   "Acquire definitions against the JVM's loaded program value.
@@ -2384,24 +2394,22 @@
                (map first))
               namespace-assertions)
         all-namespace-rows
-        (into
-         []
-         (map (fn [namespace-name]
+        (mapv (fn [namespace-name row]
                 (let [[source admission]
                       (get namespace-source-by-name namespace-name)]
-                  (assoc
-                   (db/pull db
+                  (assoc row
+                         ::namespace-source source
+                         ::namespace-admission admission
+                         ::agent-authored?
+                         (boolean (and admission
+                                       (agent-authored? admission))))))
+              all-namespace-names
+              (db/pull-many db
                             '[* :seon.ns/requires
                                 {:seon.ns/aliases [*]}
                                 {:seon.ns/imports [*]}
                                 {:seon.ns/refers [*]}]
-                            [:seon.ns/name namespace-name])
-                   ::namespace-source source
-                   ::namespace-admission admission
-                   ::agent-authored?
-                   (boolean (and admission
-                                 (agent-authored? admission)))))))
-         all-namespace-names)
+                            (mapv #(vector :seon.ns/name %) all-namespace-names)))
         all-namespace-row-by-name
         (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
         namespace-rows

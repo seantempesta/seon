@@ -36,6 +36,7 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.batch]
+            [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.cluster :as cluster]
             [seon.fault :as fault]
@@ -877,6 +878,32 @@
                (is (thrown? Exception (wrapped "not an integer")))))
          (finally
            (doseq [name names] (ns-unmap 'seon.instrument-test name))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.boot/reset-takes-over-six-seconds}}
+  a-later-database-value-of-the-same-program-keeps-every-wrapper
+  ;; A cluster restarted in the same JVM re-arms its program at a newer value:
+  ;; the snapshot's database position is no input of the wrapper.
+  (test-support/with-database
+   (fn [connection]
+     (let [var-name (gensym "position-")
+           candidate (intern 'seon.instrument-test var-name identity)
+           function-symbol (symbol "seon.instrument-test" (str var-name))
+           contract [:=> [:cat :int] :int]
+           projection (schema/projection-with-function-contract
+                       (schema/handed-projection) function-symbol contract
+                       {:seon.schema.admission/source :core})
+           [caps policy] (default-policy)
+           policy-at (fn [database]
+                       (assoc policy :seon.call-preparation/snapshot
+                              (call-preparation/snapshot database projection)))]
+       (try
+         (alter-meta! candidate assoc :malli/schema contract)
+         (arm-with! candidate contract projection caps (policy-at (db/db connection)))
+         (let [armed @candidate]
+           (test-support/transacted! connection (test-support/agent-tx @connection "position-owner" (quote user)))
+           (arm-with! candidate contract projection caps (policy-at (db/db connection)))
+           (is (identical? armed @candidate)))
+         (finally (ns-unmap 'seon.instrument-test var-name)))))))
 
 (deftest applying-twice-is-applying-once
   (let [candidates [#'doubled #'integer-inspector]

@@ -963,9 +963,12 @@
   (let [metadata (meta current)
         contract (get (:seon.schema.projection/function-contracts projection)
                       (var-symbol candidate) authored)
-        definitions (:seon.instrument/definitions metadata)]
+        definitions (:seon.instrument/definitions metadata)
+        ;; A snapshot's `checked-through-t` names the database value it was read
+        ;; at, which no wrapper reads: a later value of the same program arms nothing.
+        program-policy #(update % :seon.call-preparation/snapshot dissoc :seon.call-preparation/checked-through-t)]
     (and (identical? candidate (:seon.instrument/var metadata))
-         (= policy (::policy metadata))
+         (= (some-> policy program-policy) (some-> (::policy metadata) program-policy))
          (= authored (:seon.instrument/authored metadata))
          (= contract (:seon.instrument/contract metadata))
          (map? definitions)

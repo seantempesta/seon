@@ -371,6 +371,18 @@
 
 (declare delete-tree!)
 
+(defn- roots-stamp
+  "An id of the Clojure files under `roots` as their paths, sizes and
+  modification times: it changes when a file there does."
+  {:malli/schema [:=> [:cat [:vector :string]] :string]}
+  [roots]
+  (id/digest 64 (sort (for [root roots
+                            ^java.io.File file (file-seq (io/file root))
+                            :let [path (.getPath file)]
+                            :when (and (.isFile file)
+                                       (or (str/ends-with? path ".clj") (str/ends-with? path ".cljc")))]
+                        [path (.length file) (.lastModified file)]))))
+
 (defn ensure-dependency-analysis!
   "At boot, fill the current dependency-set directory if incomplete and mark it
   used. Another dependency set's directory is deleted only once unused for a
@@ -395,9 +407,14 @@
                                 (map #(.getPath ^java.io.File %))
                                 (filter #(or (str/ends-with? % ".clj") (str/ends-with? % ".cljc"))))
                           (.listFiles (io/file ".")))]
+    ;; Linted once per state of those files: a restart or reset over unchanged
+    ;; scripts finds its marker.
     (when (seq other-roots)
-      (clj-kondo/run! {:lint other-roots :cache-dir cache-directory
-                       :config-dir config-directory :config analysis-config}))
+      (let [marker (io/file current (str "roots-" (roots-stamp other-roots)))]
+        (when-not (.isFile marker)
+          (clj-kondo/run! {:lint other-roots :cache-dir cache-directory
+                           :config-dir config-directory :config analysis-config})
+          (spit marker ""))))
     filled))
 
 (defn forget-namespaces!

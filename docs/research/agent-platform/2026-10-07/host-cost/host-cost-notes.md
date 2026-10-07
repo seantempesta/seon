@@ -89,8 +89,27 @@ So a new agent's first call (host + first run) is now ~200-240 ms, 215-230 MB al
 ~100 ms and 95 MB: about 120 ms over a plain call (target 300 ms). The plain run's own ~95 MB per `(+ 1 2)` is out of
 this slice (section 5).
 
-Regression: `seon.cluster.host-test/a-second-hosted-branch-restores-no-index-node-from-storage` (names the task):
-two hosts each run one form; the second branch connection's storage `:reads` is zero.
+Regression: `seon.cluster.store-test/a-branch-reads-the-index-nodes-its-store-already-holds` (names the task): a
+file store with 30,000 entities (about 2,400 index nodes), two branches each scanned whole; the second restores no
+node from storage. Red with `:store-cache-size 1000` (check run 483c9cb7efa1: 2,357 restores), green at 8,192. The
+first regression I committed (`seon.cluster.host-test/a-second-hosted-branch-restores-no-index-node-from-storage`,
+in d3653e987) was vacuous: it passed at 1,000 too (check run 47ee810a2be8), because a test world's hosting working
+set stays under 1,000 nodes; it is deleted in the next slice.
+
+### 2b. The same producer: a join on a freshly materialized commit (task `fb221de3aaf7`, from lane defn-cost)
+
+`d/commit-as-db` (`datahike/versioning.cljc:473`, pinned d9121bbb) builds the commit's tree over the connection's
+own store, so it shares the same node cache; nothing is detached. Its first whole-program join walked ~3,000 nodes
+the 1,000-node cache had evicted. Measured on the probe (`mat.clj`, `seon.sci.eval/function-rows` of the loaded
+commit, fresh materialization each run): cache 1,000: 393-681 ms, 978-995 MB, 2,903-2,995 storage restores;
+cache 8,192 warm: 24 ms, 50 MB, 0 restores. No fork change is needed.
+
+A whole base-context derivation (`derive.clj`, `derive-base-ctx` uncached, the loaded program): defn-cost measured
+~933 ms / 2.35 GB on default; on the probe with the cache fix 150-207 ms / 289-380 MB; with defn-cost's
+`eval-acquisition.patch` applied as well (rows of the loaded commit through `seon.cache` by store and commit, one
+`pull-many` for the namespace rows) 106-153 ms / 196-247 MB. The patch holds and is applied in the second slice.
+The remaining ~200 MB per derivation is the whole-program rebuild itself (task `4a738d4f7138`, incremental
+acquisition): not done here.
 
 Which step of the one loop it serves: eval (the agent's world acquisition and its first form). Nothing new is added:
 the dependency's own shared cache is sized for the work, and a query leaves the per-acquisition path. Deletes the
@@ -98,7 +117,41 @@ per-acquisition namespace query.
 
 ## 3. Reset
 
-See below (in progress at this writing).
+`bin/seon reset` → `seon.cluster.boot/request!` `:reset`: `stop!`, `registry/retire-branch!` of the cluster
+branch, then `start!` again in the same JVM. Profiled through the probe's prepl (`reset.clj`, 63 hosts alive, HEAD
+4c9ccb3f7 plus the slice-1 changes installed in that JVM): total 8,397 ms, 5.98 GB allocated; stop 1,775 ms
+(`host/release-children!` of 63 hosts 1,742), unlink 10 ms, start 6,610 ms. Layers (ms since start): store 109,
+source/current 1,575, branch 2,579, config 2,880, SCI ctx 5,438, graph 6,607. Armed inclusive time:
+
+| work | ms | what it is proportional to |
+|---|---|---|
+| `seon.cluster/arm-host-program!` → `instrument/apply!` | 2,230 | every contracted Var (2,584 `arm-var!`, 1,888 ms in `contract-definitions`) although the JVM already armed them all for this commit |
+| `seon.fn.analyzer/ensure-dependency-analysis!` | 1,192 | clj-kondo over the checkout's non-program roots, every start |
+| `arm!` → `acquire!` → `derive-base-ctx` | 1,145 | the whole program, on cold index nodes (section 2b) |
+| `registry/retire-unclaimed!` | 707 | the 63 orphaned host branches (`retire-branch!` x64) |
+| `changed-source-paths` | 266 | every source file's digest |
+
+Why everything re-armed: `seon.instrument/current-wrapper?` compares the arming policy, whose
+`:seon.call-preparation/snapshot` carries `:seon.call-preparation/checked-through-t`, the basis of the database it
+was read at (`seon.call-preparation/snapshot`: "names one database value, not the program"). No wrapper reads it
+(`call-preparation/arm-plan` and `preparing` read the rows, validators and refusals), but any later database value
+made every wrapper stale. Probe: repeating `arm-host-program!` on the same program 2,095 ms; with the comparison
+ignoring that member 79 ms (`arm.clj`, `cw.clj`).
+
+Fix (BEHAVIOR CHANGE only in what is re-armed; EQUIVALENT wrappers): `current-wrapper?` compares the policy without
+the snapshot's `checked-through-t`. Regression
+`seon.instrument-test/a-later-database-value-of-the-same-program-keeps-every-wrapper` (names the reset task): a
+Var armed at one value keeps its identical wrapper when re-armed at a later value of the same program.
+
+Second fix: `seon.fn.analyzer/ensure-dependency-analysis!` linted the non-program roots (`bench`, `script`,
+`resources`, top-level files) with clj-kondo on every start, a reset included, to keep script dependencies current
+(task `seon.fn.analyzer/local-root-dependency-analysis-goes-stale`). It now writes a marker in the dependency-set
+cache directory named by an id of those Clojure files' paths, sizes and modification times (`roots-stamp`) and
+lints only when no marker matches. Probe: 871 ms, then 3 ms on the unchanged files. A changed script changes the
+id, so it is linted as before. No regression test: whether clj-kondo ran is not observable without redefining it;
+the check JVM's own boot runs it.
+
+Stopping many hosts costs ~28 ms each (`release-children!`); not changed.
 
 ## 4. Findings
 
