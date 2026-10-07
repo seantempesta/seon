@@ -1101,7 +1101,7 @@
   ;; adoption-entities red). The analyzer now decides by ownership: only the
   ;; checkout's own declared source reads or writes the checkout's cache.
   (let [root (fixture-root)
-        entry (io/file ".clj-kondo/.cache/v1/clj/seon.error.transit.json")
+        entry (io/file analyzer/cache-directory "v1/clj/seon.error.transit.json")
         unresolved (fn [findings]
                      (filterv #(= :unresolved-var
                                   (:seon.fn.analyzer/type %))
@@ -2396,11 +2396,11 @@
                     "(defn- helper [] (write! nil))\n")
         file (write-source! root "indexed/sample.clj" source)
         path (.getCanonicalPath file)
-        ;; The analysis publication runs: it reads the checkout's clj-kondo
-        ;; cache, so seon.db is analyzed rather than unknown (a9449b7c3).
-        analysis (analyzer/analyze {::analyzer/paths [path]
-                                    ::analyzer/cache-root
-                                    (str (io/file analyzer/config-directory ".cache"))})
+        ;; The analysis publication runs: a scratch analysis reads the checkout's
+        ;; clj-kondo cache, so seon.db is analyzed rather than unknown (a9449b7c3).
+        scratch (analyzer/analyze {::analyzer/paths [path]})
+        analysis (#'seon.fn/with-dependency-analysis
+                  scratch (#'seon.fn/shared-dependency-analysis (::analyzer/unanalyzed-namespaces scratch)))
         contexts (#'seon.fn/source-contexts [file])
         first-party (#'seon.fn/first-party-function-symbols analysis)
         emitted (get (#'seon.fn/analysis-entities-by-file
