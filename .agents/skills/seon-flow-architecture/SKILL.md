@@ -69,7 +69,7 @@ diff and the kernel mirrors carried on a context leave; private objects are
 carried by not being replaced.
 
 SCI exposes reusable `init`, `fork`, and `intern` operations
-(`reference-code/sci/src/sci/core.cljc:331`, `:345`, `:260`).
+(`reference-code/sci/src/sci/core.cljc:320` (`init`), `:334` (`fork`), `:260` (`intern`)).
 These are the dependency mechanisms to reuse.
 
 Private objects remain with the agent's live context and disappear on
