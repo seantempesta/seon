@@ -92,7 +92,7 @@
             (:seon.config.ai/chars-per-token-prior @dials)
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
             :seon.ai/thinking :disabled
-            :seon.ai/stop ["#:seon.repl"]
+            :seon.ai/stop (:seon.config.ai/stop @dials)
             :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
            (:seon.ai/primary targets))
         "the primary retains every effective AI dial without reshaping it")
@@ -399,6 +399,25 @@
         (is (true? (:result check))
             "JSON round-trip failed")))))
 
+;; Task `seon.config/no-provider-cannot-be-lifted-per-agent`.
+(deftest an-agent-lifts-no-provider-for-itself-only
+  (let [cluster (assoc (test-support/effective-config) :seon.config.ai/no-provider true)
+        lifted (ai/settings cluster {:seon.config.ai/no-provider false})]
+    (is (false? (:seon.config.ai/no-provider lifted)))
+    (is (true? (:seon.config.ai/no-provider (ai/settings cluster {}))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.config/effective) lifted))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.config/agent-overlay)
+         {:seon.config.ai/no-provider false}))))
+
+;; Task `seon.ai/deepseek-model-rows-and-dial-classification-are-stale`.
+(deftest the-shipped-prompt-budget-and-output-fit-the-model-window
+  (let [model (some #(when (= (:seon.config.ai/model @dials) (:seon.ai.model/id %)) %)
+                    (config/default-population))]
+    (is ((schema/projection-validator (schema/handed-projection) :seon.ai.model/entity) model))
+    (is (<= (+ (:seon.config.ai/prompt-token-budget @dials) (:seon.config.ai/max-tokens @dials))
+            (:seon.ai.model/context-window-tokens model)))
+    (is (<= (:seon.config.ai/max-tokens @dials) (:seon.ai.model/max-output-tokens model)))))
+
 (deftest the-request-body-carries-the-model-and-the-messages
   (let [body (ai/request-body (seon.schema/handed-projection) (assoc base :seon.ai/system "be brief"))]
     (is (map? body))
@@ -446,9 +465,10 @@
             "thinking" {"type" "enabled"}
             "reasoning_effort" "high"
             "stop" ["END"]
+            "top_p" 0.8
             "response_format" {"type" "json_object"}}
            sent))
-    (is (= #{:seon.config.ai/temperature :seon.config.ai/top-p} inert))
+    (is (= #{:seon.config.ai/temperature} inert))
     (is (not (contains? (ai/request-body (seon.schema/handed-projection) request) "temperature")))))
 
 (deftest stop-is-effective-per-agent-and-recorded-with-the-attempt
@@ -464,7 +484,7 @@
                  [{:seon.config/agent [:seon.agent/id "stop-agent"]
                    :seon.config.ai/stop ["END"]}]]]
        (test-support/transacted! connection tx))
-     (doseq [[ordinal agent-id expected] [[0 "absent" ["#:seon.repl"]]
+     (doseq [[ordinal agent-id expected] [[0 "absent" (:seon.config.ai/stop @dials)]
                                          [1 "stop-agent" ["END"]]]]
        (let [settings (ai/settings (config/effective @connection "default")
                                    (ai/agent-overlay @connection agent-id))
@@ -489,7 +509,7 @@
    (fn [connection]
      (let [ctx (test-support/fork-cluster-ctx connection)
            captures (:run4/turns (edn/read-string (slurp "test/seon/run4_replies.edn")))
-           stop (first (:seon.config.ai/stop @dials))
+           stop "#:seon.repl"
            fabricated (filter #(str/includes? (second %) stop) captures)
            evaluated (atom 0)]
        (is (seq fabricated) "The replay must include actual fabricated replies.")

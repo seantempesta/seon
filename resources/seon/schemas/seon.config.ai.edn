@@ -62,14 +62,13 @@
                    :seon.ai/request-attribute :seon.config.ai/no-auth}
                   true],
                  :no-provider
-                 [:=
+                 [:boolean
                   {:seon.config/display-label "No provider" :seon.config/optional true,
                    :seon.config/per-agent true,
                    :description
-                   "Use virtual turns with a no-op reply instead of provider attempts. This per-agent setting lives on the settings component; no credential lookup, provider request, or token usage occurs.",
+                   "True: virtual turns with a no-op reply instead of provider attempts. False on an agent's settings lifts a cluster's true for that agent. This per-agent setting lives on the settings component; no credential lookup, provider request, or token usage occurs.",
                    :seon.config/dial true,
-                   :seon.ai/request-attribute :seon.ai/no-provider}
-                  true],
+                   :seon.ai/request-attribute :seon.ai/no-provider}],
                  :presence-penalty
                  [:double
                   {:seon.config/display-label "Presence penalty" :min -2.0,
@@ -154,5 +153,4 @@
                    :seon.config/per-agent true,
                    :seon.ai/wire [["top_p" clojure.core/identity]],
                    :seon.config/dial true,
-                   :seon.ai/request-attribute :seon.ai/top-p,
-                   :seon.ai/inert-when-thinking true}]}
+                   :seon.ai/request-attribute :seon.ai/top-p}]}

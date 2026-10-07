@@ -396,9 +396,9 @@
 
  ; Unit: the provider's own model name. Provenance: owner ruling
  ; 2026-09-10 — deepseek-flash (DeepSeek-V4.1-Flash) is the default for every
- ; agent; the provider's /models endpoint on 2026-09-10 lists exactly
- ; "deepseek-flash" and "deepseek-v4-pro" — "deepseek-v4-flash" no longer
- ; resolves. This row is the model selection only.
+ ; agent; the provider lists "deepseek-flash" and "deepseek-v4-pro", and still
+ ; accepts "deepseek-v4-flash" as a deprecated name routed to Flash.
+ ; This row is the model selection only.
  :seon.config.ai/model "deepseek-flash"
 
  ; Unit: maximum provider completion tokens, including reasoning tokens.
@@ -409,11 +409,9 @@
  :seon.config.ai/max-tokens 65536
 
  ; Unit: estimated input tokens (`seon.ai.tokens/estimate`). Provenance:
- ; the 2026-08-06 live drive observed unbounded 34k/44k-token prompts;
- ; 32,768 is the first power-of-two boundary below both observations, so
- ; either a lower-distance walk fits or prompt derivation refuses before
- ; opening an unbounded provider request.
- :seon.config.ai/prompt-token-budget 1000000
+ ; the model's 1,048,576-token window minus the 65,536-token completion
+ ; budget, so a full prompt plus a full reply fits the window.
+ :seon.config.ai/prompt-token-budget 983040
 
  ; Unit: characters per provider prompt token before this cluster has its own
  ; attempt facts. Provenance: 17 recorded DeepSeek prompt samples across the
@@ -437,8 +435,10 @@
  :seon.config.ai/top-p :seon.config/absent
  :seon.config.ai/frequency-penalty :seon.config/absent
  :seon.config.ai/presence-penalty :seon.config/absent
- ; The REPL owns response text. Stop the provider reply before a fabricated response.
- :seon.config.ai/stop ["#:seon.repl"]
+ ; The REPL owns response text: the context introduces each REPL result with
+ ; this marker, which real code never contains, so a reply that starts writing
+ ; a result is stopped before it fabricates one.
+ :seon.config.ai/stop ["user=>"]
  :seon.config.ai/response-format :seon.config/absent
  :seon.config.ai/extra-body-edn :seon.config/absent
 
@@ -529,15 +529,15 @@
    :seon.ai.model/thinking-dials #{:disabled :low :high :max}}
 
   ; Current DeepSeek prices and active peak/off-peak schedule retrieved
-  ; 2026-09-10: DeepSeek-V4.1-Flash official off-peak USD/Mtok.
+  ; 2026-10-07: official off-peak USD/Mtok for both rows.
   ; Peak is 2x, weekdays 01:00–04:00 and 06:00–10:00 UTC.
   ; The old daily-window refs cannot represent weekends; omit them here.
   ; Source: https://api-docs.deepseek.com/quick_start/pricing/
   ; Evidence: docs/prds/context-generation/research/trial-rerun-landing-2026-09-10.md.
   {:seon.ai.model/id "deepseek-flash"
    :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]
-   :seon.ai.model/context-window-tokens 1000000
-   :seon.ai.model/max-output-tokens 384000
+   :seon.ai.model/context-window-tokens 1048576
+   :seon.ai.model/max-output-tokens 393216
    :seon.ai.model/input-usd-per-mtok 0.15
    :seon.ai.model/cached-input-usd-per-mtok 0.003
    :seon.ai.model/output-usd-per-mtok 0.6
@@ -547,36 +547,14 @@
 
   {:seon.ai.model/id "deepseek-v4-pro"
    :seon.ai.model/provider [:seon.ai.model/provider-id "deepseek"]
-   :seon.ai.model/context-window-tokens 1000000
-   :seon.ai.model/max-output-tokens 384000
-   :seon.ai.model/input-usd-per-mtok 0.435
-   :seon.ai.model/cached-input-usd-per-mtok 0.003625
-   :seon.ai.model/output-usd-per-mtok 0.87
+   :seon.ai.model/context-window-tokens 1048576
+   :seon.ai.model/max-output-tokens 393216
+   :seon.ai.model/input-usd-per-mtok 0.66
+   :seon.ai.model/cached-input-usd-per-mtok 0.022
+   :seon.ai.model/output-usd-per-mtok 1.98
    :seon.ai.model/input-modalities #{:text}
    :seon.ai.model/thinking-dials #{:disabled :low :high :max}
-   :seon.ai.model/deepseek-pricing-schedule-status :announced
-   :seon.ai.model/deepseek-off-peak-windows
-   #{[:seon.ai.model/deepseek-window-id "deepseek-off-peak-00-01"]
-     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-04-06"]
-     [:seon.ai.model/deepseek-window-id "deepseek-off-peak-10-24"]}}
-
-  {:seon.ai.model/deepseek-window-id "deepseek-off-peak-00-01"
-   :seon.ai.model/deepseek-utc-start "00:00"
-   :seon.ai.model/deepseek-utc-end "01:00"
-   :seon.ai.model/deepseek-regular-price-factor 1.0
-   :seon.ai.model/deepseek-peak-price-factor 0.5}
-
-  {:seon.ai.model/deepseek-window-id "deepseek-off-peak-04-06"
-   :seon.ai.model/deepseek-utc-start "04:00"
-   :seon.ai.model/deepseek-utc-end "06:00"
-   :seon.ai.model/deepseek-regular-price-factor 1.0
-   :seon.ai.model/deepseek-peak-price-factor 0.5}
-
-  {:seon.ai.model/deepseek-window-id "deepseek-off-peak-10-24"
-   :seon.ai.model/deepseek-utc-start "10:00"
-   :seon.ai.model/deepseek-utc-end "24:00"
-   :seon.ai.model/deepseek-regular-price-factor 1.0
-   :seon.ai.model/deepseek-peak-price-factor 0.5}
+   :seon.ai.model/deepseek-pricing-schedule-status :active}
 
   ; Kimi K3 always thinks; its descriptor therefore admits only its three
   ; supported efforts and owns the provider's preferred output-budget field.

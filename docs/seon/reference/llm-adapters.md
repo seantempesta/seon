@@ -74,7 +74,7 @@ The current `config/default.edn` decisions are:
 
 ```clojure
 {:seon.config.ai/endpoint "https://api.deepseek.com/chat/completions"
- :seon.config.ai/model "deepseek-v4-flash"
+ :seon.config.ai/model "deepseek-flash"
  :seon.config.ai/max-tokens 65536
  :seon.config.ai/thinking :disabled
  :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY"
@@ -116,8 +116,9 @@ does not mutate a turn already in flight or require a graph rebuild.
 `messages`, `stream`, and the schema-derived wire settings. Streaming also
 sends `stream_options.include_usage`. Thinking maps to the OpenAI-compatible
 `thinking` document and `reasoning_effort`; `:disabled` omits
-`reasoning_effort`. For DeepSeek, configured temperature, top-p, frequency
-penalty, and presence penalty are treated as inert while thinking is enabled.
+`reasoning_effort`. For DeepSeek, configured temperature, frequency penalty, and
+presence penalty are treated as inert while thinking is enabled; top-p is
+honoured only while thinking is enabled and is sent as configured.
 
 `seon.ai/complete` performs exactly one HTTP attempt. It does not retry or
 fail over. The run loop is the sole owner that may make another attempt, and
