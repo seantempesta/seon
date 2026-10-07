@@ -137,6 +137,15 @@ is fine) follow in order:
   reader and never run.
 - "Calls left", if shown, is one key on a final map, not prose.
 
+**Nothing is re-executed (owner, 2026-10-07: "We don't want to keep re-executing forms so we need to cache
+intelligently").** The opening forms (`(help)`, the task's `doc`, each reference's `doc`/`source`) are evaluated
+ONCE, on the agent's first pass for its task, through the one path. They are recorded as ordinary evaluations with
+stored shown text. Every later call's context is the stored exchanges read back (the opening ones, then the agent's
+own) in order: one indexed read, nothing re-run or re-rendered. As in a real REPL session, earlier output does not
+change. The agent sees change through its own later forms, and re-runs `(doc x)` when it wants fresh documentation.
+`seon.cache` speeds up evaluation itself (`doc`/`source` keyed by definition digest, the printer's work) and is
+never a second store of context.
+
 **Two presentations, decided by evidence (owner, 2026-10-07).** "I'd prefer if it was closer to a normal REPL
 but I want to follow the evidence and ask the agents." Both are small context functions over the same stored
 exchanges, chosen per agent by a settings value. Neither is a second system.
