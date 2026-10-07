@@ -226,6 +226,11 @@
          [:seon.batch/faults {:optional true} [:vector :any]]
          [:seon.batch/timings {:optional true} [:map-of :keyword number?]]
          [:seon.batch/total-ms {:optional true} number?]]
+ :folding [:map {:description "The batch while the fold builds it, as each step reads and answers it. Its entries and writes are validated once each, where they are published or replaced (seon.batch/with-entry, seon.batch/with-writes), never re-walked per step; evaluate-batch answers the whole :seon.batch/batch."}
+           [:seon.batch/entries vector?]
+           [:seon.batch/writes vector?]
+           [:seon.batch/diagnostics vector?]
+           [:seon.batch/timings {:optional true} [:map-of :keyword number?]]]
  :request [:map {:description "One batch request: text, basis, and every stage as a value. An entrant is a choice of stage values."}
            [:seon.batch/text :seon.batch/text]
            [:seon.batch/world :seon.batch/world]

@@ -252,3 +252,19 @@
                   (mapv #(find % :seon.batch/allocated-bytes) (:seon.batch/entries @batch))))]
        (is (= [nil nil] (on (Thread/ofVirtual))))
        (is (every? (comp pos? val) (on (Thread/ofPlatform))))))))
+
+(deftest ^{:seon/tasks #{'seon.batch/each-fold-step-validates-every-entry-so-far}}
+  each-form-adds-the-same-validation-whatever-came-before
+  ;; A fold step validates the entry it publishes or replaces, never the
+  ;; entries before it: the owned-work predicate every entry's validation
+  ;; calls grows by the same count per added form.
+  (support/with-database
+   (fn [connection]
+     (let [owned (fn [n] (get (second (support/armed-calls
+                                       '#{seon.batch/owned?}
+                                       #(run-with (db/db connection)
+                                                  {:seon.batch/text (apply str (interpose " " (repeat n "a")))})))
+                              'seon.batch/owned?))
+           [c10 c20 c30] (mapv owned [10 20 30])]
+       (is (pos? c10) "each entry's validation is counted")
+       (is (= (- c30 c20) (- c20 c10)) "ten more forms cost the same validations after twenty as after ten")))))

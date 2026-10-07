@@ -165,8 +165,8 @@
 
 (defn- guard
   "(f batch), or batch with one diagnostic naming `stage` when f throws."
-  {:malli/schema [:=> [:cat :seon.batch/batch :keyword [:=> [:cat :seon.batch/batch] :seon.batch/batch]]
-                  :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/folding :keyword [:=> [:cat :seon.batch/folding] :seon.batch/folding]]
+                  :seon.batch/folding]}
   [batch stage f]
   (try (f batch)
        (catch Throwable t
@@ -174,14 +174,31 @@
                  (diagnostic stage (:seon.batch/ordinal batch) t)))))
 
 (defn- clock
-  {:malli/schema [:=> [:cat :seon.batch/batch :keyword :int] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/folding :keyword :int] :seon.batch/folding]}
   [batch k t0]
   (update-in batch [:seon.batch/timings k] (fnil + 0.0) (ms-since t0)))
 
+(defn- with-entry
+  "`batch` with `entry` last: it replaces the last entry when their ordinals
+  are the same, else it is published after it. The one place an entry is
+  validated, once per change, so a step costs its own entry, never the batch's."
+  {:malli/schema [:=> [:cat :seon.batch/folding :seon.batch/entry] :seon.batch/folding]}
+  [batch entry]
+  (update batch :seon.batch/entries
+          (fn [es] (if (= (:seon.batch/ordinal entry) (:seon.batch/ordinal (peek es))) (conj (pop es) entry) (conj es entry)))))
+
 (defn- last-entry
-  {:malli/schema [:=> [:cat :seon.batch/batch [:=> [:cat :seon.batch/entry] :seon.batch/entry]] :seon.batch/batch]}
+  "`batch` with its last entry replaced by `(f entry)`."
+  {:malli/schema [:=> [:cat :seon.batch/folding [:=> [:cat :seon.batch/entry] :seon.batch/entry]] :seon.batch/folding]}
   [batch f]
-  (update batch :seon.batch/entries (fn [es] (conj (pop es) (f (peek es))))))
+  (with-entry batch (f (peek (:seon.batch/entries batch)))))
+
+(defn- with-writes
+  "`batch` with one form's observed writes after its earlier ones, each
+  validated here, once."
+  {:malli/schema [:=> [:cat :seon.batch/folding [:vector :seon.batch/write]] :seon.batch/folding]}
+  [batch writes]
+  (update batch :seon.batch/writes into writes))
 
 (defn- line-cursor
   "The line and column of offset `start` in `text`: scanned on from `cursor`
@@ -204,7 +221,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- read-step
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [t0 (System/nanoTime)
         r ((:seon.batch/read-next request) request (:seon.batch/read-state batch))
@@ -349,7 +366,7 @@
   after completion is refused to its writer. A write that is not a map is a
   diagnostic. The form's world stays on the batch until its evidence is
   frozen (`freeze-step`)."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [r (:seon.batch/step batch)
         n (:seon.batch/ordinal batch)
@@ -419,7 +436,7 @@
         ;; published before any observation is normalized: a malformed
         ;; observation is a diagnostic beside the value, never its loss
         published (-> batch
-                      (update :seon.batch/entries conj (assoc entry :seon.batch/total-ms (ms-since t0)))
+                      (with-entry (assoc entry :seon.batch/total-ms (ms-since t0)))
                       (update :seon.batch/diagnostics into
                               (cond-> []
                                 (and value? failure) (conj (diagnostic :observe n failure))
@@ -438,7 +455,7 @@
                              {:seon.error/message (str "observe: " (count bad) " observed writes are not writes and were dropped")
                               :seon.batch/stage :observe :seon.batch/ordinal n
                               :seon.error/offending (mapv #(when-not (= ::nil-write %) %) bad)}))
-                   (update :seon.batch/writes into (map #(assoc % :seon.batch/ordinal n)) good)
+                   (with-writes (mapv #(assoc % :seon.batch/ordinal n) good))
                    (assoc :seon.batch/form-writes (vec good))))))))
 
 (defn- publish-step
@@ -448,7 +465,7 @@
   the refused value beside its refusal) and ends reading when it answers stop.
   A throw or an answer that is not an entry of the same ordinal is a
   diagnostic; the published entry stands."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [entry (peek (:seon.batch/entries batch))
         n (:seon.batch/ordinal entry)
@@ -470,7 +487,7 @@
   owns is still in flight. In flight is :pending, never complete: the value is
   published and nothing waits for the future. The form's counts join the
   batch world's sink."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [{s :seon.batch/form-sink reads :seon.batch/reads ^java.util.concurrent.atomic.AtomicLong owned :seon.batch/in-flight}
         (:seon.batch/form-world batch)
@@ -491,7 +508,7 @@
 
 (defn- place-step
   "The namespace the published entry ran in and ended in."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [ns-after ((:seon.batch/ns-name request) request)]
     (last-entry batch #(assoc % :seon.batch/ns-before (:seon.batch/ns-before batch)
@@ -504,14 +521,19 @@
   when no form follows, folded as it is: the one settlement validates it at
   the writer, and a refusal there is answered form by form. A change is
   validated here only when a later form can read it."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch :boolean] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding :boolean] :seon.batch/folding]}
   [request batch validate?]
   (if-let [{n :seon.batch/ordinal tx :seon.batch/tx change :seon.batch/change} (:seon.batch/pending batch)]
     (let [t0 (System/nanoTime)
           working (:seon.batch/working batch)
           {after :seon.batch/working refusal :seon.batch/refusal}
           (if validate? ((:seon.batch/apply request) request working tx change) {:seon.batch/working working})
-          mark (fn [b f] (update b :seon.batch/entries (partial mapv #(if (= n (:seon.batch/ordinal %)) (f %) %))))]
+          ;; the pending change is the last published entry's: derive-step
+          ;; leaves it after that entry, and it is applied before another
+          mark (fn [b f] (if (= n (:seon.batch/ordinal (peek (:seon.batch/entries b))))
+                           (last-entry b f)
+                           (throw (ex-info "The pending change is not the last published entry's."
+                                           {:seon.batch/ordinal n}))))]
       (-> batch
           (dissoc :seon.batch/pending)
           (cond-> (not refusal)
@@ -525,7 +547,7 @@
 (defn- derive-step
   "The form's program change from its observed writes, and its facts on the
   working value, pending until the next form reads them (`apply-pending`)."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (if-let [refused (:seon.batch/facts-refused (peek (:seon.batch/entries batch)))]
     ;; an execution the entrant does not trust (the loaded program changed
@@ -569,7 +591,7 @@
 (defn- form-step
   "Read, evaluate and record one form. Answers the batch with :seon.batch/done
   when reading ended."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (let [batch (-> batch
                   (dissoc :seon.batch/step :seon.batch/form-writes)
@@ -636,7 +658,7 @@
   "Each diagnostic, and each form's failure a definition produced
   ([[produced-failures]]), recorded through the fault stage. Its own failure
   is one more diagnostic, never recorded again."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch] :seon.batch/batch]}
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding] :seon.batch/folding]}
   [request batch]
   (if-let [fault (:seon.batch/fault request)]
     (reduce (fn [b d]

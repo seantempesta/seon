@@ -14,7 +14,6 @@
   value printer, and a thrown one is recorded as a fault here."
   (:require [clojure.core.async :as async]
             [clojure.data.json :as json]
-            [clojure.string :as str]
             [malli.core :as m]
             [malli.json-schema :as json-schema]
             [my.agent]
@@ -362,6 +361,13 @@
       value
       (refused "The request must be a JSON object." :seon.mcp/request :seon.mcp/json value))))
 
+(defn call-failure
+  "The error value of a call that threw: its failure and the whole request,
+  as data the value printer shows."
+  {:malli/schema [:=> [:cat :string :seon.error/throwable] :seon.error/base]}
+  [request failure]
+  (refusal/diagnostic (Date.) :seon.mcp/call `call {:seon.error/throwable failure :seon.mcp/request request}))
+
 (defn call
   "Answer one MCP tool call, JSON in and JSON out.
 
@@ -393,10 +399,8 @@
                :else (answer valid))))
     (catch Throwable failure
       (let [found (try (instance @runtime/running-instances nil) (catch Throwable _ nil))
-            receipt (fault-receipt failure found)
-            source (str/trim (subs request 0 (min 200 (count request))))]
+            receipt (fault-receipt failure found)]
         ;; the receipt rides the reply beside the error it records
-        (result (cond-> [(printed (refusal/diagnostic (Date.) :seon.mcp/call `call {:seon.error/throwable failure})
-                                  source nil nil)]
-                  receipt (conj (printed receipt source nil nil)))
+        (result (cond-> [(printed (call-failure request failure) request nil nil)]
+                  receipt (conj (printed receipt request nil nil)))
                 true)))))

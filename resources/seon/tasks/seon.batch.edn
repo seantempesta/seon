@@ -7,4 +7,9 @@
             :kind :function,
             :intent
             "produced-failures records a form's failure as a core fault when its producer is a compiled host Var this batch has not redefined. An agent that redefined a host function (e.g. my.fs/read) in an EARLIER batch and whose interpreted version then fails is still recorded as a core fault, and root is notified, although the failing code is the agent's. Correct: compare the definition digest that ran (interpreted on the branch) with the compiled Var's; a branch-only version is the agent's own mistake, delivered only. Proof: defn a host function's replacement in one evaluation, call it failing in the next, assert no signature is recorded.",
-            :must-read #{seon.batch/produced-failures}}]
+            :must-read #{seon.batch/produced-failures}}
+ #:seon.task{:name "each-fold-step-validates-every-entry-so-far",
+            :kind :function,
+            :intent
+            "The fold's armed private steps (seon.batch/form-step, evaluate-step, read-step, guard, clock, last-entry, the place, publish, freeze and derive steps) each took and returned the whole :seon.batch/batch, whose entries are [:vector :seon.batch/entry], so every armed call re-validated every entry published so far: about 53 whole-batch validations per form, quadratic in the form count. Measured on default by MCP eval_clj (SCI, (+ 1 1) per form): 1 form 55 seon.batch/owned? calls, 10 forms 2,935, 40 forms 43,540, 100 forms 267,850 and 2,977 ms. Correct: a step validates what it owns, once: entries and writes are validated where they are published or replaced, the batch once at evaluate-batch's output; never weaken a contract to fit. Proof: seon.run-test/each-form-adds-the-same-validation-whatever-came-before.",
+            :must-read #{seon.batch/evaluate-batch seon.batch/form-step}}]

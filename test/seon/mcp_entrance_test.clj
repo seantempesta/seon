@@ -212,3 +212,11 @@
        (is (empty? (:seon.cluster.eval/read-evidence stored)) "a form that binds a Var stores no read evidence")
        (is (empty? (:seon.cluster.eval/executed stored)) "nor its executed set")
        (is (< settled 110) "the settlement is proportional to one ns form and one defn")))))
+
+(deftest ^{:seon/tasks #{'seon.mcp/a-thrown-call-clips-its-request-text}}
+  a-thrown-call-carries-its-whole-request
+  ;; The value printer shows the request; nothing before it clips the text.
+  (let [request (json/write-str {"name" "eval_clj" "arguments" {"code" (apply str (repeat 500 "(+ 1 2) "))}})
+        failure (mcp/call-failure request (ex-info "boom" {}))]
+    (is (= request (:seon.mcp/request failure)))
+    (is (= 'seon.mcp/call (:seon.error/operation failure)))))

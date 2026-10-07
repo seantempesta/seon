@@ -4761,7 +4761,7 @@
   before the last row is replaced by its refusal, the refused value kept
   beside it), the one bind of the final value under its handle, and whether
   reading stops (a disposition ends the reply)."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/batch :seon.batch/entry]
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/folding :seon.batch/entry]
                   [:map [:seon.batch/entry :seon.batch/entry] [:seon.batch/stop? :boolean]]]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world working :seon.batch/working frame :seon.turn/frame-request handles :seon.turn/handles}
    batch {:seon.batch/keys [ordinal form value ns-before] :as entry}]
@@ -4848,16 +4848,17 @@
     (seq repeated) (assoc :seon.cluster.eval/repeated-calls (set repeated))))
 
 (defn- entry-bindings
-  "The Vars a form bound, as the installation reads them: symbol -> its value and metadata.
-  The form's own result handle is not one: publication interns it in the `result`
-  namespace (`sci.eval/bind-result!`), which the write observer also reports."
-  {:malli/schema [:=> [:cat :seon.batch/batch :seon.cluster.eval/ordinal] :seon.sci.eval/bindings]}
-  [batch ordinal]
-  (into {} (keep (fn [{op :seon.batch/op sym :seon.batch/sym the-var :seon.batch/var kind :seon.batch/kind n :seon.batch/ordinal}]
-                   (when (and (= :bind op) (= :root kind) sym (= n ordinal)
-                              (not= "result" (namespace sym)))
-                     [sym {:seon.sci.eval/value @the-var :seon.sci.eval/metadata (meta the-var)}])))
-        (:seon.batch/writes batch)))
+  "The Vars each form bound, as the installation reads them: ordinal -> symbol
+  -> its value and metadata, from one walk of the batch's writes. A form's own
+  result handle is not one: publication interns it in the `result` namespace
+  (`sci.eval/bind-result!`), which the write observer also reports."
+  {:malli/schema [:=> [:cat :seon.batch/batch] [:map-of :seon.cluster.eval/ordinal :seon.sci.eval/bindings]]}
+  [batch]
+  (reduce (fn [by {op :seon.batch/op sym :seon.batch/sym the-var :seon.batch/var kind :seon.batch/kind n :seon.batch/ordinal}]
+            (if (and (= :bind op) (= :root kind) sym (not= "result" (namespace sym)))
+              (assoc-in by [n sym] {:seon.sci.eval/value @the-var :seon.sci.eval/metadata (meta the-var)})
+              by))
+          {} (:seon.batch/writes batch)))
 
 (defn evaluate-sources
   "Evaluate a run's ordered rows through the one REPL path
@@ -4952,7 +4953,8 @@
                       :seon.sci.eval/time-limit-ms limit})
                     (dissoc :seon.batch/settle))
         batch (seon.batch/evaluate-batch request)
-        registered? (boolean (seq (schema/changed-keys (:seon.sci.batch/delta request))))]
+        registered? (boolean (seq (schema/changed-keys (:seon.sci.batch/delta request))))
+        bound (entry-bindings batch)]
     {:seon.turn.loop/evaluated-sources
      (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before reads facts-error change] :as entry}]
              (let [row (get rows (- ordinal first-ordinal))
@@ -4966,14 +4968,14 @@
                                 ;; (`system-plan`), which re-runs only read-only evaluations
                                 ;; (`read-only-evaluation?`): a form that bound a Var declared,
                                 ;; so its reads are never consumed and are not stored.
-                                (empty? (entry-bindings batch ordinal))
+                                (empty? (get bound ordinal))
                                 (assoc :seon.cluster.eval/read-evidence (db/read-evidence reads))
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
-                                (seq (entry-bindings batch ordinal)) (assoc :seon.sci.eval/bindings (entry-bindings batch ordinal))
+                                (seq (get bound ordinal)) (assoc :seon.sci.eval/bindings (get bound ordinal))
                                 ;; only a form that declares has something to admit: a Var bound,
                                 ;; or a schema registered by this run (a plain call whose namespace
                                 ;; map SCI touched proposes nothing to refuse)
-                                (and facts-error (or (seq (entry-bindings batch ordinal)) registered?))
+                                (and facts-error (or (seq (get bound ordinal)) registered?))
                                 (not-admitted facts-error))
                    ;; A generated read whose reads now depend on the agent's own
                    ;; turn-taking (`generated-read-fault`) keeps its value: the

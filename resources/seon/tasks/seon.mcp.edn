@@ -17,4 +17,9 @@
             :kind :function,
             :intent
             "MCP eval_clj in JVM mode answers errors with no :ms, no :calls and no source location: (throw (ex-info \"jvm boom\" {})) and (Integer/parseInt \"nope\") answered only :error and :result, while the same forms in SCI mode carry :ms and :seon.sci.eval/stacktrace. Correct: both modes answer the same reply keys (time, armed calls, the form's location). Proof: a JVM-mode failing form's reply carries :seon.repl/ms.",
+            :must-read #{seon.mcp/call}}
+ #:seon.task{:name "a-thrown-call-clips-its-request-text",
+            :kind :function,
+            :intent
+            "seon.mcp/call's catch built the shown source as (str/trim (subs request 0 (min 200 (count request)))): a second clip of the request text outside the value printer (CLAUDE.md: exactly one printer, nothing else clips). Correct: carry the request whole as data on the call's error value and let the value printer bound it. Proof: seon.mcp-entrance-test/a-thrown-call-carries-its-whole-request.",
             :must-read #{seon.mcp/call}}]
