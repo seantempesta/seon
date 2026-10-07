@@ -756,12 +756,15 @@
 
 (defn- string-shown
   "Characters a string node shows when admitted: whole when its cut at the
-  first chunk would cost at least the characters it hides, else that chunk."
-  {:malli/schema [:=> [:cat :map :int] :int]}
-  [node max-string]
+  first chunk would cost at least the escaped literal it hides, else that chunk."
+  {:malli/schema [:=> [:cat :map :string :int] :int]}
+  [node text max-string]
   (let [chunk (min chunk-width (:total node) max-string)]
     (if (and (< chunk (:total node)) (<= (:total node) max-string)
-             (<= (- (:total node) chunk) (count (cut-text (assoc node :shown chunk)))))
+             ;; The raw length bounds the escaped scan by the cut's cost.
+             (let [cost (count (cut-text (assoc node :shown chunk)))]
+               (and (<= (- (:total node) chunk) cost)
+                    (<= (escaped-width text chunk (:total node)) cost))))
       (:total node)
       chunk)))
 
@@ -785,7 +788,7 @@
                                 :name (assoc (:node x) ::print/text (:text x))
                                 :string (when (= (:total x) (string-shown {:kind :string :total (:total x) :path (conj path i)
                                                                             :requery-id requery-id}
-                                                                           max-string))
+                                                                           (:value x) max-string))
                                           {::print/face ::print/string ::print/value (:value x)})
                                 nil)]
                      (some-> node (assoc :seon.render.data/path (conj path i)))))
@@ -1057,7 +1060,7 @@
                            (assoc base :kind :name :node (:node c) :text (:text c) :total (count (:text c))
                                   :shown chunk-width :shown-width chunk-width))
                    :string (let [node (assoc base :kind :string :value (:value c) :total (:total c))
-                                 shown (string-shown node (:max-string context))]
+                                 shown (string-shown node (:value c) (:max-string context))]
                              (assoc node :shown shown :shown-width (escaped-width (:value c) 0 shown)))
                    (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :lookup? :entity?])
                           {:pending (:members c) :outside (:prefix c)}))))
@@ -1254,7 +1257,9 @@
         limit (min (:total node) max-string)
         to (loop [i (long (:shown node)) width 0]
              (if (< i limit)
-               (let [width (+ width (escaped-width text i (inc i)))]
+               ;; `escaped-width`'s rule, one character at a time.
+               (let [c (.charAt text i)
+                     width (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))]
                  (if (<= width room) (recur (inc i) width) i))
                i))
         line-end (inc (.lastIndexOf text "\n" (int (dec to))))]
@@ -1388,8 +1393,9 @@
   "The selected nodes with each sequence's trailing members that show nothing
   but their own cut (collapsed, not one member admitted) folded into the
   sequence's tail cut, which already names their count and reads them: a
-  row with no identity says less than the count. The text only shrinks, so
-  the charge still bounds it."
+  row with no identity says less than the count. Folded only when the tail
+  cut costs no more than the members it replaces, so the charge still bounds
+  the text."
   {:malli/schema [:=> [:cat [:map-of :int :map]] [:map-of :int :map]]}
   [nodes]
   (reduce-kv
@@ -1399,10 +1405,13 @@
                     (take-while #(let [kid (get nodes %)]
                                    (and (#{:map :coll} (:kind kid)) (zero? (:n kid)) (more? kid)))
                                 (rseq kids)))
-           kept (- (count kids) (count folded))]
-       (if (and (seq folded) (pos? kept))
-         (-> (apply dissoc nodes folded)
-             (assoc id (assoc node :kids (subvec kids 0 kept) :n kept)))
+           kept (- (count kids) (count folded))
+           shrunk (assoc node :kids (subvec kids 0 kept) :n kept)
+           ;; Each member and the cut carry one separator.
+           before (+ (transduce (map #(inc (:flat (get nodes %)))) + 0 folded)
+                     (if (more? node) (inc (count (cut-text node))) 0))]
+       (if (and (seq folded) (pos? kept) (<= (inc (count (cut-text shrunk))) before))
+         (-> (apply dissoc nodes folded) (assoc id shrunk))
          nodes)))
    nodes nodes))
 

@@ -464,3 +464,13 @@
                                                   [{:seon.print/face :seon.print/keyword :seon.print/value :a}
                                                    {:seon.print/face :seon.print/number :seon.print/value 2}]]}
                             no-cuts)))))
+
+(deftest a-string-literal-keeps-its-line-breaks-and-reads-back
+  ;; Escapes, carriage returns, tabs, empty and trailing lines and non-ASCII
+  ;; text: each newline stays a line break and the literal reads back whole.
+  (doseq [s ["a\nb" "ends with a newline\n" "\n" "a\n\nb" "tab\there \"quoted\" back\\slash\nnext"
+             "crlf\r\nline\r\n" "ü 日本 😀\nz" "\\n is two characters\nreal"]]
+    (let [text (print/emit-text (admitted-node s) no-cuts)]
+      (is (= s (edn/read-string text)) "the literal reads back as the string")
+      (is (= (count (filter #{\newline} s)) (count (filter #{\newline} text)))
+          "each newline is one line break and nothing else breaks"))))

@@ -440,6 +440,9 @@
                   extra)))
 
 (defn- leaf-ops
+  "The text ops of one leaf print node at `depth`; a malformed or unknown node
+  is one diagnostic op."
+  {:malli/schema [:=> [:cat :map :int] [:vector :map]]}
   [node depth]
   (let [value (::value node)]
     (case (::face node)

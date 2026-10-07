@@ -105,8 +105,8 @@
  ; structural, and its blob threshold reuses the storage decision above.
  ; Unit: estimated tokens (`seon.ai.tokens/estimate`). Provenance (owner
  ; 2026-09-27): 15,000 per value was far too big — a value this large usually
- ; means a query or function returns more than it should. 1,000 is tuned from
- ; data: every evaluation records its elisions and the whole value's estimated
+ ; means a query or function returns more than it should. The bound is tuned
+ ; from data: every evaluation records its elisions and the whole value's estimated
  ; tokens, so "elides too often" is a query, and the bound moves if it is.
  ; Raised to 1,500 (owner 2026-10-07: functions are data, printed whole as
  ; code): 97.7% of default's function sources fit whole at 1,500, 95.1% at

@@ -1480,6 +1480,9 @@ details.seon-print-node {
 .seon-print-string, .seon-print-char {
   color: var(--color-success);
 }
+.seon-print-string {
+  white-space: pre-wrap;
+}
 .seon-print-number, .seon-print-boolean, .seon-print-nil {
   color: var(--color-eval);
 }
