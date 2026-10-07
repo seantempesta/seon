@@ -6,8 +6,10 @@
   (:require [clojure.test :refer [deftest is]]
             [seon.batch :as batch]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]
+            [seon.turn]
             [seon.turn.batch :as turn.batch]
             [seon.turn.world :as world]))
 
@@ -177,3 +179,18 @@
                       :seon.batch/text "(defn d8-f {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"})
             entry (first (:seon.batch/entries (batch/evaluate-batch (dissoc request :seon.batch/settle))))]
         (is (= 'user/d8-f (get-in entry [:seon.batch/change :seon.batch/entities 0 :seon.fn/sym])))))))
+
+(deftest a-settlement-inside-another-custody-records-on-its-own-branch
+  ;; A JVM run started from inside another branch's custody (an agent's JVM form
+  ;; calling `seon.mcp/call` for a second agent) settles on its own world's
+  ;; branch; the writer refused it as a foreign-branch write before.
+  (let [handle (support/execution-handle nil)
+        connection (:seon.db/connection handle)
+        agent-id (str "settle-custody-" (id/id))
+        _ (support/transacted! connection (support/agent-tx @connection agent-id))
+        world (world/jvm-world (:seon.cluster/name handle) connection {:seon.agent/id agent-id :seon.turn/id (id/id)})
+        batch (support/with-database
+               (fn [_] (batch/evaluate-batch
+                        (turn.batch/jvm-request {:seon.batch/world world :seon.batch/text "(+ 1 2)"
+                                                 :seon.turn.batch/record-call #'seon.turn/record-evaluated-call}))))]
+    (is (true? (:seon.batch/applied (:seon.batch/commit batch))))))

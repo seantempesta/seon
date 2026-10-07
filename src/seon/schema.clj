@@ -2878,16 +2878,32 @@
   longer defines it. Those rows stay readable: each such predicate compiles
   to a callable that refuses by name when a value is validated against it,
   and its namespace is never reloaded to look for it. A predicate of an
-  unloaded namespace keeps the ordinary resolution."
-  {:malli/schema [:=> [:cat :map :map] [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
-  [forms function-contracts]
-  (into {}
-        (comp (filter #(and (vector? %) (= :fn (first %))))
-              (map #(get % (if (map? (second %)) 2 1)))
-              (filter qualified-symbol?)
+  unloaded namespace keeps the ordinary resolution. With a `base` projection,
+  only the predicates it binds and those the definitions not identical to its
+  own name are examined; the whole population is walked only when one of them
+  is deleted."
+  {:malli/schema [:=> [:cat :map :map :map] [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
+  [forms function-contracts base]
+  (let [named (comp (filter #(and (vector? %) (= :fn (first %))))
+                    (map #(get % (if (map? (second %)) 2 1)))
+                    (filter qualified-symbol?))
+        deleted? #(and (find-ns (symbol (namespace %))) (nil? (loaded-predicate-var %)))
+        changed (fn [definitions prior]
+                  (keep (fn [[k v]] (when-not (identical? v (get prior k)) v)) definitions))
+        ;; `base` binds every predicate its own definitions name, and an
+        ;; unchanged definition is `base`'s own object.
+        candidates (when (seq base)
+                     (into (set (keys (predicate-functions-in base))) named
+                           (tree-seq coll? seq
+                                     [(changed forms (:seon.schema.projection/forms base))
+                                      (changed function-contracts
+                                               (:seon.schema.projection/function-contracts base))])))]
+    (if (and candidates (not-any? deleted? candidates))
+      {}
+      (into {}
+        (comp named
               (distinct)
-              (filter #(and (find-ns (symbol (namespace %)))
-                            (nil? (loaded-predicate-var %))))
+              (filter deleted?)
               (map (fn [predicate]
                      [predicate
                       (fn [value]
@@ -2902,7 +2918,7 @@
                                    :seon.schema/error :seon.schema/unresolved-predicate
                                    :seon.schema/unresolved-predicate predicate
                                    :seon.error/offending value})))])))
-        (tree-seq coll? seq [(vals forms) (vals function-contracts)])))
+        (tree-seq coll? seq [(vals forms) (vals function-contracts)])))))
 
 (defn projection-from-entities
   "Build one complete projection from committed schema and contract rows.
@@ -3074,7 +3090,7 @@
               :seon.schema/artifact-exports artifact-exports
               :seon.schema/pure-predicate-symbols pure-predicate-symbols
               :seon.schema/predicate-functions
-              (deleted-predicate-functions forms function-contracts)
+              (deleted-predicate-functions forms function-contracts reusable-projection)
               ;; Reading committed entities re-admits nothing: completeness and
               ;; renderer coherence were judged when the entities were written
               ;; (`projection-with-schema` and the other replacements,

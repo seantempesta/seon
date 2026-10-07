@@ -696,7 +696,10 @@
                    head (into #{} (mapcat (comp keys :seon.batch/executed)) (:seon.batch/entries batch)))
         ;; a measuring failure rides the answer as a diagnostic; the commit proceeds without it
         measured (if (:seon.error/at measuring) [] measuring)
-        commit! (fn [tx] (let [r (writer conn tx)]
+        ;; under the settlement connection's own custody, never the calling
+        ;; thread's: an entrant called from inside another evaluation records
+        ;; on its own world's branch
+        commit! (fn [tx] (let [r (db/call-with-custody {:seon.db/connection conn} #(writer conn tx))]
                            (if (and (map? r) (:seon.error/message r)) r (:db-after r))))
         attempt (fn [b]
                   (let [tx (try (let [tx (into (vec (record-facts request b)) (program-facts request head (:seon.batch/program b)))]

@@ -1626,16 +1626,28 @@
   ;; entities; a contract there may name a predicate the loaded files deleted
   ;; (ec1b53b38 deleted seon.db/projection-value-key?). It compiles to a
   ;; callable that refuses by name, never a projection that refuses to build.
+  ;; With a base projection only its bindings and the changed definitions are
+  ;; examined; every row answers what the whole-population walk answers.
   (let [deleted @#'seon.schema/deleted-predicate-functions
-        found (deleted {:probe/stale [:fn 'seon.schema/no-such-deleted-predicate?]
-                        :probe/live [:fn 'clojure.core/int?]
-                        :probe/unloaded [:fn 'no.such.namespace/predicate?]}
-                       {})
-        refusal (try ((get found 'seon.schema/no-such-deleted-predicate?) 1)
-                     (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
-    (is (= ['seon.schema/no-such-deleted-predicate?] (vec (keys found))))
-    (is (= 'seon.schema/no-such-deleted-predicate?
-           (:seon.schema/unresolved-predicate refusal)))))
+        stale [:fn 'seon.schema/no-such-deleted-predicate?]
+        forms {:probe/stale stale
+               :probe/live [:fn 'clojure.core/int?]
+               :probe/unloaded [:fn 'no.such.namespace/predicate?]}
+        live (dissoc forms :probe/stale)
+        base (schema/with-predicate-functions {:seon.schema.projection/forms live} {'clojure.core/int? #'int?})]
+    (doseq [[label forms base expected]
+            [[:no-base forms {} ['seon.schema/no-such-deleted-predicate?]]
+             [:changed-definition-names-it forms base ['seon.schema/no-such-deleted-predicate?]]
+             [:base-binds-it live (schema/with-predicate-functions base {'seon.schema/no-such-deleted-predicate? #'int?})
+              []]
+             [:nothing-deleted live base []]]]
+      (let [found (deleted forms {} base)]
+        (is (= expected (vec (keys found))) (name label))
+        (when-let [refusing (get found 'seon.schema/no-such-deleted-predicate?)]
+          (is (= 'seon.schema/no-such-deleted-predicate?
+                 (:seon.schema/unresolved-predicate
+                  (try (refusing 1) (catch clojure.lang.ExceptionInfo failure (ex-data failure)))))
+              (name label)))))))
 
 (deftest a-predicate-namespace-that-fails-to-load-is-not-an-unresolved-predicate
   ;; CLASS: `runtime-predicate` caught every Throwable as nil, so a predicate
