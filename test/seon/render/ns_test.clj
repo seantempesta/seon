@@ -75,10 +75,10 @@
           (is (= 'seon.flow (:seon.ns/name flow))))
         (testing "distance one is its requires and dir's columns and rows"
           (is (= (sort (:seon.ns/requires (namespace-unit db 'seon.flow 1 100000))) (:seon.ns/requires flow)))
-          (is (= [:sym :arglists :doc :in :out] (:seon.repl/columns flow)))
+          (is (= [:sym :arglists :summary] (:seon.repl/columns flow)))
           (is (contains? names 'seon.flow/start-work-launcher!))
           (is (not-any? #(= "work-launcher-step" (name %)) names) "private functions are not listed")
-          (is (every? #(= 5 (count %)) (:seon.repl/rows flow)) "one row per function, no member source"))
+          (is (every? #(= 3 (count %)) (:seon.repl/rows flow)) "one row per function, no member source"))
         (testing "HTML is the same node: a namespace link, requires and function names"
           (is (str/includes? html "href=\"/ns/seon.flow\""))
           (is (str/includes? html "<code>start-work-launcher!</code>"))
@@ -87,6 +87,20 @@
           (is (= [] (:seon.repl/rows fresh)))
           (is (= '(dir (quote my.agents.fresh)) (sut/namespace-form {:seon.ns/name 'my.agents.fresh}))
               "the form face is the dir that reads it again"))))))
+
+(deftest a-namespace-directory-resolves-aliased-keywords-and-omits-private-functions
+  (support/with-database
+    (fn [connection]
+      (let [database @connection
+            ns-entity (assoc (support/namespace-entity database 'my.dir.sample)
+                             :seon.ns/aliases #{{:seon.ns.alias/local 'str :seon.ns.alias/target-ns 'clojure.string}})
+            _ (support/transacted! connection [ns-entity])
+            database @connection
+            functions [(support/program-fn-entity database 'my.dir.sample/shown "(defn shown \"Shown.\" [{id ::str/id}] id)")
+                       (support/program-fn-entity database 'my.dir.sample/hidden "(defn- hidden [x] x)")]
+            _ (support/transacted! connection functions)
+            rows (:seon.repl/rows (sut/render-ai (namespace-unit @connection 'my.dir.sample 1 100000)))]
+        (is (= [['my.dir.sample/shown '([{id :clojure.string/id}]) "Shown."]] rows))))))
 
 (deftest namespace-bindings-render-in-clojures-own-words
   (testing "an alias names its target namespace, a refer names its Var"

@@ -8,6 +8,7 @@
             [seon.error.refusal]
             [seon.db :as db]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.reader :as reader]
             [seon.task :as task]
             [seon.render.route :as route]))
 
@@ -191,8 +192,7 @@
 
 (defn function-ai
   "A function node as data: its name and doc line; beyond distance zero its
-  authored source as its lines (text the printer shows unescaped, layout
-  kept) and its contract where the source does not carry it. What it calls
+  authored source as its lines and its contract where the source does not carry it. What it calls
   and what calls it are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.ns/function-view]}
   [unit]
@@ -216,39 +216,54 @@
      (when-let [line (first-doc-line doc)] [:p line])
      (when (and source (pos? (node-distance unit))) [:pre [:code source]])]))
 
+(def ^:private directory-selector
+  [:seon.ns/name
+   {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
+   {[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private? :seon.fn/doc :seon.fn/arglists]}])
+
 (defn- public-functions
-  "The public functions a namespace declares, by name: one reverse pull from
-  the namespace row, unlimited, so a large namespace is read whole. A query joining every function row
-  exceeded the read budget even for an empty namespace (0.2 ms here, measured
-  on default 2026-09-26)."
-  {:malli/schema [:=> [:cat :seon.render/unit :symbol] [:or [:vector :symbol] :seon.db/invalid-read-error]]}
+  "The namespace row pulled once, unlimited, with each function's name,
+  visibility, doc and arglists and the namespace's aliases; a refused read
+  returns its refusal."
+  {:malli/schema [:=> [:cat :seon.render/unit :symbol] [:or :map :seon.db/invalid-read-error]]}
   [unit namespace-name]
-  (let [found (db/pull (:seon.db/db unit)
-                       [{[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private?]}]
-                       [:seon.ns/name namespace-name])]
-    (if (db/read-refusal? found)
-      found
-      (into [] (comp (filter #(false? (:seon.fn/private? %)))
-                     (map (comp symbol name :seon.fn/sym)))
-            (:seon.fn/_ns found)))))
+  (let [found (db/pull (:seon.db/db unit) directory-selector [:seon.ns/name namespace-name])]
+    (if (db/read-refusal? found) found (or found {}))))
+
+(defn- public-rows
+  "The held pull's public function rows, sorted by name."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [pulled]
+  (->> (:seon.fn/_ns pulled)
+       (filter #(false? (:seon.fn/private? %)))
+       (sort-by :seon.fn/sym)
+       vec))
+
+(defn- read-arglists
+  "One arglists text read in the namespace's own aliases; a failed read stays its returned data."
+  {:malli/schema [:=> [:cat :symbol :map :string] :any]}
+  [namespace-name aliases text]
+  (let [read (reader/read {::reader/text text ::reader/ns namespace-name ::reader/aliases aliases
+                           :seon.config.eval.result/max-source (count text)})]
+    (if (vector? read) (::reader/form (first read)) read)))
 
 (defn- directory
-  "The namespace's public functions as `dir` reads them, as columns and rows:
-  name, arglists, doc line and contract."
-  {:malli/schema [:=> [:cat :seon.render/unit :symbol]
-                  [:or [:map [:seon.repl/columns [:vector :keyword]] [:seon.repl/rows [:vector [:vector :seon.schema/value]]]]
-                   :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
-  [unit namespace-name]
-  (let [found (sci.eval/directory-value (:seon.db/db unit) namespace-name true)
-        columns [:sym :arglists :doc :in :out]]
-    (if (:functions found)
-      {:seon.repl/columns columns
-       :seon.repl/rows (mapv #(mapv % columns) (:functions found))}
-      found)))
+  "The held pull's public functions as columns and rows: name, arglists and
+  doc summary."
+  {:malli/schema [:=> [:cat :map :symbol]
+                  [:map [:seon.repl/columns [:vector :keyword]] [:seon.repl/rows [:vector [:vector :seon.schema/value]]]]]}
+  [pulled namespace-name]
+  (let [aliases (into {} (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns)) (:seon.ns/aliases pulled))]
+    {:seon.repl/columns [:sym :arglists :summary]
+     :seon.repl/rows (mapv (fn [{function-name :seon.fn/sym arglists :seon.fn/arglists doc :seon.fn/doc}]
+                             [function-name
+                              (when arglists (read-arglists namespace-name aliases arglists))
+                              (when doc (:summary (sci.eval/docstring-parts doc)))])
+                           (public-rows pulled))}))
 
 (defn render-ai
   "A namespace node as data: its name and doc line; beyond distance zero its
-  requires and its public functions with their contracts, as `dir` reads them."
+  requires and its public functions as name, arglists and doc summary rows."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render.ns/namespace-view :seon.db/error-result
                    :seon.sci.eval/documentation-unavailable-error]]}
@@ -257,10 +272,11 @@
         (or (:seon.render/value unit) unit)
         named (cond-> {:seon.ns/name namespace-name}
                 (first-doc-line doc) (assoc :seon.ns/doc (first-doc-line doc)))
-        listed (when (pos? (node-distance unit)) (directory unit namespace-name))]
+        pulled (when (pos? (node-distance unit)) (public-functions unit namespace-name))
+        listed (when pulled (if (db/read-refusal? pulled) pulled (directory pulled namespace-name)))]
     (cond
       (nil? listed) named
-      (:seon.error/at listed) listed
+      (db/read-refusal? listed) listed
       :else (merge named {:seon.ns/requires (vec (sort requires))} listed))))
 
 (defn- agent-namespace-ref
@@ -324,7 +340,8 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
   [unit]
   (let [{namespace-name :seon.ns/name doc :seon.ns/doc requires :seon.ns/requires} (or (:seon.render/value unit) unit)
-        members (when (pos? (node-distance unit)) (public-functions unit namespace-name))
+        pulled (when (pos? (node-distance unit)) (public-functions unit namespace-name))
+        members (if (db/read-refusal? pulled) pulled (some->> pulled public-rows (map (comp symbol name :seon.fn/sym))))
         link #(vector :a {:href (route/path ::route/namespace {:namespace (str %)})} [:code (str %)])
         entity (fn [label items] [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li %)) items) "None")]])]
     (if (db/read-refusal? members)

@@ -5,7 +5,7 @@
   [:seon.ns/requires [:vector :symbol]]
   [:seon.render.ns/definition-count [:int {:min 0}]]]
  :seon.render.ns/namespace-view
- [:map {:description "A namespace node as its AI face shows it: named, and beyond distance zero its requires and its public functions with their contracts as `dir` reads them."}
+ [:map {:description "A namespace node as its AI face shows it: named, and beyond distance zero its requires and its public functions as name, arglists and doc summary rows."}
   [:seon.ns/name :seon.ns/name]
   [:seon.ns/doc {:optional true} :seon.ns/doc]
   [:seon.ns/requires {:optional true} [:vector :symbol]]
