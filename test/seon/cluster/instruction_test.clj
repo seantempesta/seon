@@ -78,7 +78,6 @@
         db cluster-name)))
 
 (deftest source-has-one-owner-editable-getting-started-entity
-  (is (re-find #"seon\.render/walk" instruction/getting-started-text))
   (is (= 1 (count (re-seq #"```clojure" instruction/getting-started-text))))
   (is (= [{:seon.cluster.instruction/id :getting-started
            :seon.cluster.instruction/text instruction/getting-started-text}]

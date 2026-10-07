@@ -11,9 +11,7 @@
 
 (def getting-started-text
   "The owner-editable starting instruction installed in new source branches."
-  (str "This is a live Clojure REPL. Everything above is the output of "
-       "`(seon.render/walk)` — run it yourself with `:depth`/`:root` to "
-       "see more. Your reply is read as forms and evaluated in your "
+  (str "This is a live Clojure REPL. Your reply is read as forms and evaluated in your "
        "namespace. A `defn` with `:malli/schema` becomes permanent; "
        "anything else is scratch. Talk to other agents with "
        "`(my.message/send {:my.message/to \"agent-id\" :my.message/content \"message\"})`. Prose lines are kept "

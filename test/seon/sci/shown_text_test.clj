@@ -3,7 +3,6 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
-            [seon.render :as render]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
             [seon.test-support :as support]))
@@ -32,8 +31,7 @@
                     :seon.db/connection connection
                     :seon.sci.admit/caps (config/result-caps config/defaults)
                     :seon.sci.eval/time-limit-ms 2000}
-           result (render/call-with-walk-context
-                   request #(support/evaluate request))
+           result (support/evaluate request)
            shown (repl/value-text result)]
        (is (nil? (:seon.cluster.eval/error result)))
        (is (= "Render this plan clearly"

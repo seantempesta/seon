@@ -1,6 +1,5 @@
 #:seon.render.walk{:attribute :qualified-keyword,
                    :back-reference? :boolean,
-                   :branch :seon.render.walk/path,
                    :connection
                    [:map
                     [:seon.render.walk/attribute
@@ -73,9 +72,6 @@
                     [:seon.render.walk/attribute
                      {:optional true}
                      :seon.render.walk/attribute]
-                    [:seon.render.walk/branch
-                     {:optional true}
-                     :seon.render.walk/branch]
                     [:seon.render/output
                      {:optional true}
                      :seon.render/rendered]

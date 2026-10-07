@@ -1756,7 +1756,7 @@
               "an uncustodied ctx never inherits the caller's binding")))))))
 
 (deftest
-  public-walk-is-callable-through-an-agent-sci-eval
+  root-acquisition-and-the-web-share-one-pull-plan
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "host-walk")
@@ -1805,16 +1805,8 @@
                    (swap! compilation-count inc))
                  (compile-plan selector-or-plan))
              ([database selector-or-plan] (compile-plan database selector-or-plan)))]
-          (let [evaluate-walk #(render/call-with-walk-context
-                                request
-                                (fn [] (run-in ctx "(seon.render/walk)" 5000)))
-                through-sci (evaluate-walk)
-                direct (render.walk/root-acquisition request)
+          (let [direct (render.walk/root-acquisition request)
                 web (#'render.web/acquire-root request :seon.sci.eval-test/root)
-                value (:seon.sci.admit/value through-sci)
-                allocations (mapv
-                              #(get-in % [:seon.sci.admit/record :seon.eval/allocated-bytes])
-                              [through-sci])
                 bounded-plan (render.walk/root-pull-plan
                                (assoc
                                  request
@@ -1822,20 +1814,11 @@
                                  0
                                  :seon.sci.admit/caps
                                  (assoc caps :seon.config.eval.result/max-nodes 1)))]
-            (is (ok? through-sci))
-            (is (= [:seon.agent/id "host-walker"] (:seon.render.walk/lookup value))
-                "the walk value is data naming its root agent identity")
-            (is
-              (not (contains? through-sci :seon.eval/missing))
-              "the ordinary walk is stored whole, never missing")
             (is (map? direct))
             (is (= 2 (count web)))
             (is
               (and (seq @root-selectors) (<= @compilation-count 1))
-              "direct, web, and through-SCI reuse a plan, including an already warm plan")
-            (is
-              (every? #(and (int? %) (< % (* 1024 1024 1024))) allocations)
-              "through-SCI allocations must stay below 1 GiB")
+              "direct and web reuse a plan, including an already warm plan")
             (is (identical? (:datahike.pull/plan direct) (:datahike.pull/plan bounded-plan)))
             (is (= 0 (:seon.render/distance bounded-plan)))
             (is
