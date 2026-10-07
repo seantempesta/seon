@@ -155,6 +155,8 @@
             ::checked-calls (:seon.profile/calls explanation)
             ::top-calls (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/total-ms])
                               (take 10 (:seon.profile/by-calls explanation)))
+            ::top-ms (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/total-ms])
+                           (take 15 (:seon.profile/growths explanation)))
             ::attempts (get-in (grown explanation '#{seon.db/transact-call}) ['seon.db/transact-call :seon.profile/calls] 0)
             ::stages (grown explanation (or stages #{}))
             ::tokens (tokens/estimate (str/join "\n" (::shown result)))
