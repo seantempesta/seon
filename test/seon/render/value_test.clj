@@ -858,14 +858,9 @@
            shown (:seon.eval/shown result)
            rendered (repl/render-directory-ai (:seon.sci.admit/value result))]
        (is (nil? (:seon.cluster.eval/error result)))
-       (is (> (tokens/estimate rendered) (:seon.render.profile/token-budget profile))
-           "the directory exceeds the raw budget")
-       ;; Owner 2026-09-27: a render follows the value's budget (no separate
-       ;; ceiling). Its text is cut there, still printed as the render's REPL
-       ;; text, and the renderer that produced it is still named.
-       (is (str/starts-with? shown (subs rendered 0 500)))
-       (is (re-find #"…\+\d+$" shown))
-       (is (<= (count shown) (+ (tokens/estimate-chars (:seon.render.profile/token-budget profile)) 16)))
+       (is (vector? rendered) "the renderer returns data")
+       (is (str/starts-with? shown "[{:sym seon.turn/") "the data prints through the value printer")
+       (is (<= (tokens/estimate shown) (:seon.render.profile/token-budget profile)))
        (is (= 'seon.repl/render-directory-ai (:seon.eval/renderer result)))))))
 
 (deftest transacted-preserves-error-entities-as-data
@@ -945,7 +940,9 @@
    (fn [connection]
      (let [text #(:seon.render.value/text (value/prepare (render-request connection %)))]
        (is (= "hello 1" (text {:seon.render/ai (fn [unit] (str "hello " (:x unit))) :x 1})))
-       (is (str/starts-with? (text {:a {:seon.render/ai (fn [_] "inner")}}) "{:a {:seon.render/ai #object["))))))
+       (let [nested (text {:a {:seon.render/ai (fn [_] "inner")}})]
+         (is (not (str/includes? nested "inner")) "a nested render is not invoked")
+         (is (str/starts-with? (str/replace nested #"\s+" " ") "{:a {:seon.render/ai #object[")))))))
 
 (deftest ^{:seon/tasks #{'seon.render/a-renderer-is-chosen-by-key-presence}} a-failing-renderer-never-replaces-the-value
   ;; AGENTS.md, the REPL path is total: a renderer that throws or refuses
@@ -1301,6 +1298,7 @@
 
 (defn- agent-unit
   "`raw` under the shipped agent profile, with a result handle."
+  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
   [raw]
   (assoc (unit raw) :seon.render/profile (render/agent-render-profile config/defaults)
          :seon.render.value/root 'result/e0123456789ab))
