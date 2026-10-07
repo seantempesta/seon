@@ -60,6 +60,13 @@
   ([state _input _message]
    [state nil]))
 
+(deftest a-go-loop-started-with-root-bindings-keeps-none-of-the-callers
+  (let [sink (atom [])]
+    (is (= {:sink nil :caller-sink-after sink}
+           (binding [db/*read-evidence-sink* sink]
+             {:sink (async/<!! (sut/call-with-root-bindings #(async/go db/*read-evidence-sink*)))
+              :caller-sink-after db/*read-evidence-sink*})))))
+
 (deftest graph-construction-joins-every-declared-tap-before-resume
   (let [{::sut/keys [graph joins]}
         (sut/start-graph!

@@ -334,6 +334,33 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
+(deftest a-branch-writer-never-keeps-the-opening-evaluations-bindings
+  ;; A branch opened inside an evaluation once ran every later transaction
+  ;; function under that evaluation's read-evidence sink: 26 entries, each
+  ;; holding a database value, per (+ 1 2) run, never released.
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened (store/open-store! {:seon.store/dir dir})
+            main (:seon.store/connection-object opened)
+            branch :writer-frame-test
+            sink (atom [])]
+        (try
+          (d/branch! main :db branch)
+          (let [connection (binding [db/*read-evidence-sink* sink]
+                             (store/open-branch! opened branch))
+                seen (CompletableFuture.)]
+            (try
+              (d/transact connection
+                          [[:db.fn/call (fn [_] (.complete seen {:sink db/*read-evidence-sink*}) [])]])
+              (is (= {:sink nil} (.get seen 5 TimeUnit/SECONDS)))
+              (is (= [] @sink))
+              (finally
+                (d/release connection))))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
+
 (deftest transact-normalizes-only-jdk-integers
   (let [dir (fresh-dir)]
     (try

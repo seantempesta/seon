@@ -39,16 +39,28 @@ the root connection as `*conn*`, which `seon.db` and supply would read.
 
 ## Fix (smallest correct)
 
-One function `seon.flow/call-with-root-bindings`: run a thunk on a fresh virtual
-thread (whose binding frame is Clojure's root: `Var.dvals` is a plain ThreadLocal)
-and return its value or rethrow its cause. Long-lived machinery that conveys the
-caller's frame is started through it:
+One function `seon.flow/call-with-root-bindings`: call a thunk with the calling
+thread's binding frame reset to Clojure's root frame (captured once from a fresh
+virtual thread, where `Var.dvals` starts at its root) and restored in `finally`.
+No new thread, no rethrow: the thunk's own throws pass through unchanged.
+Long-lived machinery that conveys the caller's frame is started through it:
 - `seon.cluster.store/open-branch!` and `open-overlay!` around `d/connect`;
 - `seon.flow/start-graph!` around create/start/joins/resume.
 
-Cost: one virtual thread start + join per connection open or graph start
-(microseconds); per run nothing. Retention after: no evaluation frame reaches a
-writer or a graph.
+Cost: two ThreadLocal sets per connection open or graph start; per run nothing.
+After: no evaluation frame reaches a writer or a graph.
+
+Regressions: `seon.cluster.store-test/a-branch-writer-never-keeps-the-opening-evaluations-bindings`
+(a branch opened inside a sink binding; the writer's transaction function sees no
+sink and the sink stays empty) and
+`seon.flow-test/a-go-loop-started-with-root-bindings-keeps-none-of-the-callers`.
+
+Evidence: `heap-retained-A0/A1` (80 runs, branch opened inside an evaluation),
+`B1` (80 runs, branch opened from root bindings), `idle` (20 s, no probe runs: other
+lanes' drift); class histograms trimmed to the top 300 classes. No heap dump was
+taken: default's live heap was 3.4 GB, over the 2 GB dump bound; the holder was
+found by a reflective walk from Var roots and every thread's ThreadLocals (Unsafe
+field reads for java.* objects), then confirmed by reading the writer's go state.
 
 Not doing: `open-store!` at boot (its writer conveys only the boot projection
 state; changing boot needs a restart proof, outside this slice); no cache, no

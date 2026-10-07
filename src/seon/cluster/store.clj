@@ -650,7 +650,8 @@
                                             :overlay overlay
                                             :backend-config (:store shared)})]
     (assoc store
-           :seon.store/connection-object (d/connect configuration)
+           ;; a writer started in the caller's frame would keep its evaluation
+           :seon.store/connection-object (flow/call-with-root-bindings #(d/connect configuration))
            :seon.store/overlay overlay
            :seon.store/overlay-configuration configuration
            :seon.store/created? false)))
@@ -686,7 +687,8 @@
                       " already has a connection in this process")
                  {::dir (:seon.store/dir store)
                   ::branch branch}))
-      (d/connect configuration))))
+      ;; the writer's go-loops keep the frame they start in: never an evaluation's
+      (flow/call-with-root-bindings #(d/connect configuration)))))
 
 (defn release-branch!
   "Release one proof branch connection before its roster branch is retired.
