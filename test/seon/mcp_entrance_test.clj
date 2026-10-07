@@ -131,6 +131,12 @@
                  "each evaluation's reply is its saved response")
              (is (contains? (support/reply (nth texts (dec (count saved)))) about)
                  "the row's evaluation answers the key it is about"))))
+       (testing "a form's set! of *print-length* is saved with its receipts"
+         (answer "eval_clj" {"code" "(set! *print-length* 2)\n(range 5)" "agent" agent-id "cluster" running})
+         (is (= #{2} (set (db/q '[:find [?length ...] :in $ ?id
+                                  :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
+                                  [?receipt :seon.print/length ?length]]
+                                (db/db connection) (latest-run-in (db/db connection) agent-id))))))
        (testing "a settlement the writer refused saved no receipt: the reply is its refusal alone"
          ;; the form closes its own open run, so the settlement's receipts
          ;; refuse and the refusal's guarded receipts are skipped at the writer
@@ -148,14 +154,20 @@
 
 (deftest a-jvm-reply-keeps-its-duration-after-an-earlier-run
   (support/with-running-agent
-   (fn [running agent-id _]
+   (fn [running agent-id connection]
      (answer "eval_clj" {"code" "(+ 1 1)" "agent" agent-id "cluster" running "mode" "jvm"})
      (let [result (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
-           data (support/reply (get-in result ["content" 0 "text"]))]
+           text (get-in result ["content" 0 "text"])
+           data (support/reply text)
+           run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get result "isError")))
        (is (= 3 (:seon.repl/value data)))
        (is (contains? data :seon.repl/ms)
-           "a second JVM run's reply carries its time, as the first one's does")))))
+           "a second JVM run's reply carries its time, as the first one's does")
+       (is (= :call (:seon.turn.work/situation (db/pull (db/db connection) [:seon.turn.work/situation] [:seon.turn/id run])))
+           "a JVM run is recorded with the call situation an SCI run carries")
+       (is (= [text] (stored-responses connection agent-id run))
+           "the JVM reply is what the agent's next context reads")))))
 
 (deftest only-a-run-that-changed-loaded-code-signals-pages
   (let [signal (fn [body]

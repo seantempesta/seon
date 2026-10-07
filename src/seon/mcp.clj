@@ -217,7 +217,7 @@
   text per held form with the receipt its settlement saved (its response,
   else its shown text or error), printed on the settlement's `database`, and
   whether any evaluation failed."
-  {:malli/schema [:=> [:cat [:maybe :seon.turn.loop/evaluated-sources] :seon.turn/id :seon.db/database-value
+  {:malli/schema [:=> [:cat :seon.turn.loop/evaluated-sources :seon.turn/id :seon.db/database-value
                        :seon.agent/id :string]
                   [:tuple [:vector :string] :boolean]]}
   [sources run-id database agent-id cluster-name]
@@ -242,7 +242,7 @@
                   namespace-name (assoc :seon.turn/starting-ns [:seon.ns/name namespace-name])))
         database (:seon.db/db answer)]
     (if (and database (not (:seon.error/at answer)))
-      (cond-> (observed (:seon.turn.loop/evaluated-sources answer) (:seon.turn/id answer) database
+      (cond-> (observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) database
                         (:seon.agent/id custody) cluster-name)
         (:seon.turn.loop/refusal answer)
         (-> (update 0 conj (printed (:seon.turn.loop/refusal answer) code database cluster-name))

@@ -302,8 +302,7 @@
    connection
    (into (into (support/agent-tx @connection agent-id 'my.agents.transcript)
                (support/agent-tx @connection peer-id))
-    [{:seon.problems/id "problem-transcript"}
-    {:seon.turn/id "run-result" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+    [{:seon.turn/id "run-result" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.turn/id "run-wait" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
   (let [instants
@@ -354,7 +353,6 @@
                                    :seon.error/chain [{:seon.error/throwable-class "java.lang.ArithmeticException"
                                                        :seon.error/message "Divide by zero"}]})
          :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/stored-evaluations-are-terminal-transcript-values :seon.render/refused-member :seon.render/output
-         :seon.problems/id "problem-eval-error"
          :seon.cluster.eval/interrupted-at (between decline self)
          :seon.cluster.eval/source "(missing.function/call)"}]))))
 
@@ -865,7 +863,6 @@
                 (pr-str {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/the-history-query-bounds-what-the-transcript-pulls :seon.render/refused-member :seon.render/output})
                 :seon.cluster.eval/error content
                 :seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.transcript-test/fixture :seon.error/operation 'seon.render.transcript-test/the-history-query-bounds-what-the-transcript-pulls :seon.render/refused-member :seon.render/output
-                :seon.problems/id (str "problem-" id)
                 :seon.cluster.eval/interrupted-at event-at
                 :seon.cluster.eval/output content))])))
 

@@ -208,6 +208,18 @@
        (is (not (str/includes? (.body inspection) "Context now")))
        (is (not (str/includes? (.body inspection) "debug-ai-")))))))
 
+(deftest an-agent-whose-prompt-refuses-still-shows-the-refusal-in-its-context-view
+  ;; The view prints the prompt's value, refusal included, through the value printer.
+  (#'web-test/with-server
+   (fn [connection server _context]
+     (support/transacted! connection [[:db/retractEntity [:seon.cluster/name "web-test"]]
+                                      [:db/retractEntity [:seon.config/cluster "web-test"]]])
+     (let [opened (#'web-test/fetch server "/agent/root/debug?sent=true" {"datastar-request" "true"})]
+       (is (= 200 (.statusCode opened)))
+       (is (some? (web-test/element (.body opened) ".seon-data-panel")))
+       (is (str/includes? (.body opened) "missing-config")
+           "the refusal is what the view shows")))))
+
 (deftest a-new-message-does-not-reinvoke-the-identity-pair
   (#'web-test/with-server
    (fn [connection server context]

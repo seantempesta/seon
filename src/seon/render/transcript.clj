@@ -56,7 +56,6 @@
    :seon.print/level
    :seon.eval/duration-ms
    :seon.sci.eval/ending-ns
-   :seon.problems/id
    :seon.error/at :seon.error/layer :seon.error/operation :seon.error/data-edn
    {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
    {:seon.cluster.eval/run
@@ -602,6 +601,7 @@
 (defn- candidate-history
   "The shared source of transcript entries: the evaluations the caller holds
   (`held-entry`), else stored history."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.agent/id unit)

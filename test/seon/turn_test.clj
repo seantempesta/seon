@@ -2442,3 +2442,16 @@
            refused (turn.batch/program-facts request (db/db connection) (:seon.batch/program batch))]
        (is (= [[:seon.schema/key :stale.schema/label]] (:seon.error/offending refused))
            "the writer refuses a schema key another writer changed since the basis")))))
+
+(deftest a-submitted-form-is-held-for-the-reply-under-its-namespace-lookup-ref
+  ;; The phase-failure arm of `resume-turn` holds each planned form for the
+  ;; reply by `fold-source`; `with-saved` refuses a namespace map with no
+  ;; `:db/id`, so the arm's own failure replaced the saved refusal.
+  (let [planned {:seon.cluster.eval/ordinal 0 :seon.cluster.eval/source "(+ 1 1)"
+                 :seon.cluster.eval/ns {:seon.ns/name 'user}}
+        report {:seon.agent/id "held-form" :seon.turn.work/situation :call
+                :seon.turn.loop/forms-run 1 :seon.turn.loop/outcome :error}
+        held (#'turn/fold-source planned)]
+    (is (= [:seon.ns/name 'user] (:seon.cluster.eval/ns held)))
+    (is (= report (#'turn/with-saved report {0 held} []))
+        "the contract admits the held form; a settlement that saved none adds nothing")))

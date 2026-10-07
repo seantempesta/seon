@@ -44,7 +44,6 @@
                   ;; ONE ENTITY PER (run, ordinal): the frozen source and the terminal
                   ;; facts are the same evaluation.
                   [{:seon.cluster.eval/id "resume-receipt-0"
-                    :seon.problems/id "resume-problem-0"
                     :seon.cluster.eval/run [:seon.turn/id run-id]
                     :seon.cluster.eval/ordinal 0
                     :seon.cluster.eval/source "(def prefix-def 1)"
@@ -52,7 +51,6 @@
                     :seon.cluster.eval/at now
                     :seon.cluster.eval/interrupted-at now}
                    {:seon.cluster.eval/id "resume-receipt-1"
-                    :seon.problems/id "resume-problem-1"
                     :seon.cluster.eval/run [:seon.turn/id run-id]
                     :seon.cluster.eval/ordinal 1
                     :seon.cluster.eval/source "prefix-def"

@@ -351,7 +351,7 @@ the cut. Tested on values (T3, T9) and at the REPL on the lane's own SCI branch.
 attribution; the row writer, signature, row schema (`:seon.error/signature`'s row-schema `:seon.error/error` rewritten
 to §6's members), task/message opening, receipts carried through the shared settlement owner (agent-loop P1),
 resolution; every reader of recorded-error associations converted to carried signatures, including
-`seon.render.transcript` and the MCP run observation (`seon.cluster.agent/run-observation`), keeping their run grouping;
+`seon.render.transcript` and the MCP reply (`seon.mcp/observed`, over the receipts the settlement saved), keeping their run grouping;
 `turn.batch/reply` carries error maps with their receipts and handles, not their messages; render selection by type.
 Root resets default once after it lands: recorded errors are not migrated. Test: T1-T12 plus the kept list of §8.
 References: all of P1-P4.

@@ -22,7 +22,7 @@
                                              :seon.turn/agent [:seon.agent/id "feedback"]
                                              :seon.turn/opened-tx "datomic.tx"}))
      (let [accepted (db/transact! connection
-                                 [{:seon.problems/id "x"}
+                                 [{:seon.source/digest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
                                   [:db/add "reverse-turn" :seon.turn/id "reverse-turn"]
                                   {:seon.ai.attempt/id "reverse-attempt"
                                    :seon.ai.attempt/ordinal 0
@@ -32,25 +32,25 @@
                                    :seon.ai.attempt/settings-edn "{}"
                                    :seon.turn/_attempts [:seon.turn/id "reverse-turn"]}])]
        (is (some? (:db-after accepted)))
-       (is (= "x" (:seon.problems/id
-                    (db/pull @connection [:seon.problems/id] [:seon.problems/id "x"]))))
+       (is (= "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" (:seon.source/digest
+                    (db/pull @connection [:seon.source/digest] [:seon.source/digest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]))))
        (is (= "reverse-attempt"
               (db/q '[:find ?id . :where
                       [?turn :seon.turn/id "reverse-turn"]
                       [?turn :seon.turn/attempts ?attempt]
                       [?attempt :seon.ai.attempt/id ?id]] @connection))))
      (let [accepted (db/transact! connection
-                                 [{:db/id [:seon.problems/id "x"]
+                                 [{:db/id [:seon.source/digest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
                                    :seon.task/intent "attribute-only"}])]
        (is (some? (:db-after accepted)))
        (is (= "attribute-only"
               (:seon.task/intent (db/pull @connection [:seon.task/intent]
-                                           [:seon.problems/id "x"])))))
+                                           [:seon.source/digest "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"])))))
      (let [before (:t @connection)
            refused (db/transact! connection [{:seon.cluster.eval/id "incomplete"}])
            wrong (db/transact! connection [{:seon.task/intent 42}])
            nested (db/transact! connection
-                                [{:seon.problems/id "nested"
+                                [{:seon.source/digest "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
                                   :seon.turn/_attempts [{:seon.turn/id 42}]}])]
        (is (string? (:seon.db.write.attempt/request-id refused)))
        (is (= [:seon.cluster.eval/run] (vec (rest (:seon.db/path refused)))))
@@ -189,16 +189,16 @@
          (try
            (let [installed
                  (db/transact! connection
-                               [{:db/ident :seon.problems/id
+                               [{:db/ident :seon.source/digest
                                  :db/valueType :db.type/string
                                  :db/cardinality :db.cardinality/one
                                  :db/unique :db.unique/identity}])
                  written (db/transact! connection
-                                       [{:seon.problems/id "non-temporal"}])]
+                                       [{:seon.source/digest "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}])]
              (is (some? (:db-after installed)))
              (is (some? (:db-after written)))
-             (is (= "non-temporal"
-                    (db/q '[:find ?id . :where [_ :seon.problems/id ?id]]
+             (is (= "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                    (db/q '[:find ?id . :where [_ :seon.source/digest ?id]]
                           @connection))))
            (finally
              (d/release connection)

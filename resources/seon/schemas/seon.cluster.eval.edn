@@ -109,9 +109,6 @@
                      [:seon.cluster.eval/interrupted-at
                       {:optional true}
                       :seon.cluster.eval/interrupted-at]
-                     [:seon.problems/id
-                      {:optional true}
-                      :seon.problems/id]
                      [:seon.cluster.eval/output
                       {:optional true}
                       :seon.cluster.eval/output]

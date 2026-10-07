@@ -51,8 +51,7 @@
   [ordinal terminal]
   (merge
    (form-entity ordinal)
-   {:seon.problems/id (str "problem-" ordinal)
-    :seon.cluster.eval/at now}
+   {:seon.cluster.eval/at now}
    terminal))
 
 (defn- deliver!
