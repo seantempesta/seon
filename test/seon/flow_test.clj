@@ -246,8 +246,8 @@
 ;;; An unstored panic prints bounded text: the class regression for the
 ;;; 3.18 GB stderr lines of pid 68592 (issue
 ;;; unstored-panic-prints-whole-throwable-map-to-stderr). Each cause prints
-;;; through `print.value/throwable-text` (at most 8192 chars + ellipsis); the whole
-;;; value stays on the failure's ex-data.
+;;; through the value printer's core (`seon.render.value/core-text`, its fixed
+;;; budget); the whole value stays on the failure's ex-data.
 (deftest an-unstored-panic-prints-bounded-text-and-keeps-the-whole-cause
   (test-support/with-database
     (fn [connection]

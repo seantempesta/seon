@@ -5516,6 +5516,8 @@
           {:seon.db/attribute (first key)
            :seon.db/entity (or (:seon.db/entity prior) (:seon.db/entity current))
            :seon.db/removed-values (set/union removed erased)
+           ;; the removed tests' identities as the write saw them before it
+           :seon.db/value-identities (select-keys (:seon.db/value-identities prior) (set/union removed erased))
            :seon.db/user actor :seon.db/creator creator}}))))
    (set/union (set (keys before)) (set (keys after)))))
 

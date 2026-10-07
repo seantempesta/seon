@@ -132,7 +132,8 @@
   (loop [link throwable seen []]
     (if (or (nil? link) (= (:links text-limits) (count seen)) (some #(identical? link %) seen))
       seen
-      (recur (.getCause ^Throwable link) (conj seen link)))))
+      ;; a `getCause` that throws ends the chain at that link
+      (recur (try (.getCause ^Throwable link) (catch Throwable _ nil)) (conj seen link)))))
 
 (defn- host-class?
   "Whether a frame's class is the JVM's or Clojure's own runtime (`java.*`, `jdk.*`,
@@ -198,30 +199,68 @@
 
 (declare render-ai render-html)
 
+(defn- opaque
+  "How the core names a value nothing else could print: its class and
+  identity, read without calling any of its methods."
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
+  [value]
+  (str "#object[" (.getName (class value)) " 0x" (Integer/toHexString (System/identityHashCode value)) "]"))
+
+(defn- shown-chain
+  "`throwable` as the core shows it: per link (at most `:links`, each once)
+  its class, message, ex-data as held (never entered: the selection bounds
+  what is shown) and nearest non-host frames (at most `:frames`, each
+  `[class method file line]` as `seon.error.refusal` holds frames). A link
+  whose accessors throw is its class and the accessor's failure."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :map]]}
+  [throwable]
+  (mapv (fn [^Throwable link]
+          (try
+            (let [message (ex-message link) data (ex-data link)
+                  frames (into [] (comp (remove #(host-class? (.getClassName ^StackTraceElement %)))
+                                        (take (:frames text-limits))
+                                        (map (fn [^StackTraceElement f]
+                                               [(symbol (.getClassName f)) (symbol (.getMethodName f))
+                                                (.getFileName f) (.getLineNumber f)])))
+                               (.getStackTrace link))]
+              (cond-> {:seon.error/throwable-class (.getName (class link))}
+                message (assoc :seon.error/message message)
+                data (assoc :seon.error/data data)
+                (seq frames) (assoc :seon.error/frames frames)))
+            (catch Throwable failure
+              {:seon.error/throwable-class (.getName (class link))
+               :seon.error/message (str "#unprintable[" (.getName (class failure)) "]")})))
+        (causes throwable)))
+
 (defn core-text
   "`value` printed by the value printer's core: its structural selection under
   a fixed budget, with no render, database or config. A Throwable is shown as
-  its cause chain (`seon.error.refusal/chain`: per link class, message,
-  ex-data and first-party frames). Total: if the selection itself fails, the
-  projection-free text of the value.
+  its cause chain (`shown-chain`). Total: if the selection itself fails, the
+  projection-free text of the value, and if that fails, its class and
+  identity.
 
   ## Edge cases
 
-  - With no world to supply a database, the selection is refused and the
-    projection-free text answers."
+  - The value's own `seon.print/full` opt-in is not honored: the core's
+    budget is fixed.
+  - A Throwable whose `getCause`, `getMessage` or `getStackTrace` throws
+    prints its class and the failure, never the throw."
   {:malli/schema [:=> [:cat :seon.schema/value] :string]}
   [value]
-  (try
-    (let [shown (if (instance? Throwable value) (refusal/chain value nil) value)
-          text (render-ai {:seon.render/value shown
-                           :seon.render.value/root 'seon.render.value/core
-                           :seon.render/profile core-profile
-                           :seon.render.value/options {:seon.render.value/structural? true}})]
-      (if (string? text)
-        text
-        (if (instance? Throwable value) (throwable-text value) (bounded-text value))))
-    (catch Throwable _
-      (if (instance? Throwable value) (throwable-text value) (bounded-text value)))))
+  (let [throwable? (instance? Throwable value)
+        last-resort #(try (if throwable? (throwable-text value) (bounded-text value))
+                          (catch Throwable _ (opaque value)))]
+    (try
+      (let [shown (cond throwable? (shown-chain value)
+                        (and (instance? clojure.lang.IObj value) (::print/full (meta value)))
+                        (vary-meta value dissoc ::print/full)
+                        :else value)
+            text (render-ai {:seon.render/value shown
+                             :seon.render.value/root 'seon.render.value/core
+                             :seon.render/profile core-profile
+                             :seon.render.value/options {:seon.render.value/structural? true}})]
+        (if (string? text) text (last-resort)))
+      (catch Throwable _ (last-resort)))))
 
 (defn core-html
   "`value` printed by the core (`core-text`) as preformatted hiccup."
@@ -230,11 +269,13 @@
   [:pre {:class "seon-data-panel seon-core-value"} (core-text value)])
 
 (defn- unavailable-line
-  "The one diagnostic line beside a value whose unit the printer refused."
-  {:malli/schema [:=> [:cat :map] :string]}
+  "The one diagnostic beside a value whose unit the printer refused: fixed
+  prose, then the refusal's message or the thrown failure through the core,
+  so its size is the core's budget, never the failure's."
+  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
   [refused]
   (str ";; value printer refused the unit, value printed by the core: "
-       (or (:seon.error/message refused) "no message")))
+       (core-text (if (map? refused) (or (:seon.error/message refused) "no message") refused))))
 
 (defn text
   "The value printer's TOTAL text entry: `unit` through `render-ai`, or, when
@@ -243,7 +284,7 @@
   itself, printed, with one diagnostic)."
   {:malli/schema [:=> [:cat :map] :string]}
   [unit]
-  (let [shown (try (render-ai unit) (catch Throwable failure {:seon.error/message (str (.getName (class failure)) ": " (ex-message failure))}))]
+  (let [shown (try (render-ai unit) (catch Throwable failure failure))]
     (if (string? shown)
       shown
       (str (core-text (:seon.render/value unit)) "\n" (unavailable-line shown)))))
@@ -254,7 +295,7 @@
   diagnostic. Always hiccup."
   {:malli/schema [:=> [:cat :map] :seon.render/hiccup]}
   [unit]
-  (let [shown (try (render-html unit) (catch Throwable failure {:seon.error/message (str (.getName (class failure)) ": " (ex-message failure))}))]
+  (let [shown (try (render-html unit) (catch Throwable failure failure))]
     (if (vector? shown)
       shown
       [:div (core-html (:seon.render/value unit))

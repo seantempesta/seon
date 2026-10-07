@@ -105,12 +105,40 @@
       "a Throwable is its cause chain")
   (is (= :pre (first (render.value/core-html [1 2 3])))))
 
+(deftest the-core-budget-is-fixed-whatever-the-value
+  (testing "a value's own full-print opt-in does not lift the core's budget"
+    (is (< (count (render.value/core-text (with-meta (vec (range 100000)) {:seon.print/full true}))) 8300)))
+  (testing "a Throwable's ex-data is shown under the budget, never walked whole first"
+    (let [payload (vec (range 1000000))
+          start (System/nanoTime)
+          text (render.value/core-text (ex-info "big" {:probe/payload payload}))
+          ms (/ (- (System/nanoTime) start) 1e6)]
+      (is (str/includes? text ":probe/payload"))
+      (is (< (count text) 8300))
+      (is (< ms 100) "the cost is the shown part's, not the payload's"))))
+
+(deftest the-core-and-total-entries-answer-a-hostile-throwable
+  (let [hostile (proxy [RuntimeException] []
+                  (getCause [] (throw (IllegalStateException. "hostile cause")))
+                  (getMessage [] (throw (IllegalStateException. "hostile message")))
+                  (getStackTrace [] (throw (IllegalStateException. "hostile frames"))))]
+    (is (str/includes? (render.value/core-text hostile) "RuntimeException"))
+    (is (= :pre (first (render.value/core-html hostile))))
+    (is (string? (render.value/text {:seon.render/value hostile})))
+    (is (vector? (render.value/html {:seon.render/value hostile})))))
+
 (deftest the-total-entries-always-answer
   ;; root ruling 2026-10-07: one total text and HTML entry; a unit the printer
   ;; refuses (here, no root address) answers the core's print plus one diagnostic.
   (let [unit {:seon.render/value {:probe/k 1}}
         text (render.value/text unit)
         html (render.value/html unit)]
-    (is (string? text))
     (is (str/includes? text ":probe/k"))
-    (is (vector? html))))
+    (is (= 1 (count (re-seq #"value printer refused the unit" text))) "one diagnostic")
+    (is (= "seon-render-unavailable" (get-in html [2 1 :class])) "one diagnostic beside the core's HTML"))
+  (testing "a failure with a huge message is shown under the core's budget"
+    (let [unit {:seon.render/value 42
+                :seon.render.data/cursor
+                {:seon.render.data/path (lazy-seq (throw (ex-info (apply str (repeat 100000 \x)) {})))}}]
+      (is (< (count (render.value/text unit)) 8300))
+      (is (< (count (pr-str (render.value/html unit))) 9000)))))
