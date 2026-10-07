@@ -1,212 +1,316 @@
 ---
 name: clojure-testing
-description: "Write and run Seon behavior regressions with canonical fixtures, real SCI and armed contracts. Use for test design, fixture diagnosis, bounds, selection and interpreting recorded evidence."
+description: "When to write a Seon test and how, in library style: public entrance, data in and data out, tables, small setup, properties only for laws, errors asserted as data, no Var redefinition. Also the test deletion and conversion policy, three complete minimal Seon tests and the harness facts that hold today. Use for test design, fixture choice, deletion and reading results."
 ---
 
-# Test the behavior through the installed authority
+# Fewer, better tests
 
-[Root instructions](../../../AGENTS.md) and the
-[agent-platform plan §6](../../../docs/prds/agent-platform/plan/README.md#6-implementation-proof-and-recovery)
-own the cut cadence. This skill owns test construction and current harness limits.
-B4 describes a replacement runner; it is not permission to assume that runner exists.
+The laws are in [CLAUDE.md](../../../CLAUDE.md), under "Proof and performance". This skill covers how a test looks,
+when not to add one, and when an existing one is deleted or converted. The owner's goal is fewer, better tests: one
+test per observable behavior, through its owning entrance, asserting data. Examples cite the pinned `reference-code/`
+checkouts listed in the [data-oriented-clojure skill](../data-oriented-clojure/SKILL.md); Seon examples are named by
+test or function (find them with `rg`). A citation says what the source does; whether a test is green is a run's
+evidence, not this skill's.
 
-## Choose the smallest honest proof
+## 1. When not to add a test
 
-Name the behavior and the real boundary before writing the test. Keep one regression
-per failure class, with cases that exercise its meaningful variations. Assert public
-outcomes independently of the implementation; do not preserve obsolete machinery by
-repairing its tests. Remove those tests with the mechanism and supply replacement
-behavior coverage by the end of the cut. Ordinary tests must not publish all of `src/`
-to set up a small change; publication tests use a small complete fixture program.
+Add none when one of these holds:
 
-Prove the subject exists before testing its disappearance or refusal. Assert the
-specific diagnostic and unchanged relevant state, not merely a throw/nonzero exit.
-A missing entity, wrong branch name or failed fixture write must make the test fail.
-An empty set is not proof that the right set was queried. Use the writer's returned
-identity, then positively establish the before-state and independently read the after-state.
+1. **The test would only re-express a schema's shape.** Tighten the producer's Malli schema instead. A schema does
+   not prove the production behavior around it, so keep (or write) one regression through the real entrance for each
+   refusal that matters: that the entrance is armed, that the writer refuses the final owning value, that state is
+   unchanged after the refusal, and that the right variant reaches the reply. `m/explain` is a schema probe, not that
+   proof.
+2. **The behavior belongs to a dependency** (Datahike, Malli, SCI, core.async) and Seon only calls it. Seon's
+   integration with it (supplied worlds, maintained-fork hooks, our report function) is Seon's behavior and is tested.
+3. **The only thing to assert is printed text or ordering no consumer reads.**
+4. **The change is a refactor with unchanged behavior.** The existing tests prove it.
+5. **The case is a new row in an existing table** (§2.4).
+6. **The check is a census** (every X compiles, carries a message, has a render pair) that boot arming, the edit hook
+   or lint already performs. Name the installed check before relying on it.
+7. **The claim is a wall-clock time.** Profile it and record the number as evidence; the runner holds the bound.
+   Deterministic work counts (cache misses, recomputations, query counts) are different: when the spec states them,
+   test them (agent-loop T4 requires zero `::eval-unit` misses on a repeated context).
 
-## What the machinery enforces today
+Otherwise, if an agent or a user would notice the break, write one test through the entrance, asserting data.
 
-These are source-verified boundaries, not a claim that the entire platform is green.
-Recheck the named owners when changing them; update this table in the same slice.
+A task names its success tests before it is assigned (§2.12): new behavior gets the test that fails until the task is
+done; a refactor names the existing tests that reach it.
 
-| Rule | Installed enforcement | Author responsibility / limit |
-|---|---|---|
-| Exceeding the declared test duration fails | **Enforced on reported completion:** `duration-failures`, `src/seon/test/runner.clj:338`, emits an assertion failure at `:end-test-var`. A nonblank `:seon.test/long` reason AND positive `:seon.test/long-ms` are required to raise the ordinary bound. | Measure the operation, put the reason beside the number, and distinguish cold/warm work. The runner cannot validate the measurement's honesty. This elapsed-body check is not a hard kill or a complete accounting of namespace fixtures/child cleanup. |
-| An in-process request cannot wait forever | **Bounded observation with actual exit:** `bounded-result`, `src/seon/test.clj:220`, joins the body thread under the request remainder of `:seon.test/check-time-limit-ms`; a body still live is recorded unfinished and keeps its branch, and a watcher releases the branch only after the thread exits. `seon.test/run` (`:2205`) admits no further body after one. | SCI interrupts interpreted bodies at the per-test bound; a host call is not interruptible, so a live body can hold its branch until it returns. |
-| A refused fixture write stops setup | **Enforced when using `transacted!`:** `test/seon/test_support.clj:215` checks the real writer report and throws if no successful `:db-after` exists. `apply-config!` and `seed-cluster!` also check their production writer results (`:884`, `:897`). | Use these helpers. Calling `db/transact!` and discarding its returned refusal bypasses this setup check. Assert the subject-specific populated state too. |
-| Tests enter with production contracts | **Enforced at boot:** members run in the cluster's JVM, whose boot calls `seon.cluster/arm-host-program!` (`src/seon/cluster.clj:2633`): it loads the program namespaces, arms them through `seon.instrument/apply!` (`src/seon/instrument.clj:799`) and refuses the boot on a registration error or zero wrappers. | A later reload removes wrappers. `seon.test/run` is not an automatic arming operation; after reload, use the installed arming owner with the correct carried projection and positively verify relevant entering wrappers. Never hand-pick a smaller fake program. |
-| Tests leave instrumentation intact | **Partially enforced:** `run-vars!` compares entering/exiting global state and adds errors (`src/seon/test/runner.clj:364`); `ambient-drift` checks wrapper membership, registrations, live clusters and SCI sizes (`:678`). | A before/after set cannot prove entry was already correct, same-cardinality changes are not the re-arm count's proof, and unchanged SCI size is not unchanged contents. Restore deliberate mutations with the canonical scope. Automatic repair does not excuse leakage. |
-| No hand-written production fixture maps | **Author rule, partially supported by validation:** the real writer checks schema validity. `program-fn-entity` reads actual indexed artifacts or analyzes supplied source (`test/seon/test_support.clj:856`). | There is no general detector for a map's hand-written origin or semantic fidelity. Use canonical declaration/config/cluster helpers. A schema-valid invented entity may still model the wrong world. Synthetic data is legitimate only when the subject needs it. |
-| No assertionless green | **Enforced:** `assertionless-failure`, `src/seon/test/runner.clj:321`, rejects executed tests with zero assertion evidence. `assert-check!`, `test/seon/test_support.clj:577`, requires a true property result and positive trial count. | One vacuous assertion can still pass. Prove meaningful inputs, subject presence and coverage. A reused recorded green is different from executing an assertionless test. |
+## 2. How to write one
 
-## Canonical fixtures and custody
+**2.1 Test through the entrance the agent uses, with data in and data out.** Prefer the public function or the REPL
+path over internal stages. (Libraries do sometimes reach private Vars, e.g. `malli/test/malli/core_test.cljc:2836`
+dereferences `#'m/-function-schemas*`; Seon prefers the entrance because its agents call only that.)
 
-A test is an isolated agent for one body. `seon.test/run` (`src/seon/test.clj:2205`)
-acquires each member's own branch off the request's world through
-`seon.cluster.agent/acquire-context!` and releases (unlinks) it through
-`release-context!` after the body exits (`member-result`). A cluster's request
-world is its adopted published commit (program entities only) plus boot's config and
-cluster facts (`seon.cluster/seed-cluster-facts!`): no agent (root included), turn,
-message or error of the cluster, so a member holds only the agents its body
-creates. An isolated execution's request still branches from its own value until
-base plus overlay lands (`clean-request-handle`, `src/seon/test.clj`). An agent (SCI)
-test's elided `seon.db` arities reach that branch; a host test body inherits no
-custody, and its fixtures find the member through the SCI arm governing its thread.
+GOOD: `edamame/test/edamame/core_test.cljc:28-30`, `(is (= 'foo (e/parse-string "foo")))`. For REPL-path behavior use
+`seon.test-support/agent-value` (the value the agent reads) or `evaluate` (the whole evaluation map).
 
-`seon.test-support/with-database` (`test/seon/test_support.clj:676`) acquires a fresh
-branch off the commit the executing handle was acquired at, through the same
-entrance, runs the body under that branch's custody and releases it
-(`with-branched-database`, `:660`). It never copies a store or indexes source. Outside
-a `seon.test/run` member it refuses by name (`execution-handle`, `:269`).
-`fork-cluster-ctx` (`:312`) forks the executing handle's context onto a fixture
-connection. `:seon.test-support/fresh-store?` opens an empty in-memory store with the
-installed attribute schema for store-global subjects (`with-fresh-database`, `:624`).
-A fixture branch inherits the executing member's data: that member's clean world and cluster entity.
+**2.2 Compare the whole value, or the narrowest key the behavior is about.**
 
-Use `program-fn-entity` for program declarations (actual source symbol, or database +
-symbol + synthetic source), `apply-config!` for a complete config overlay, and
-`seed-cluster!` for the cluster/config path. `apply-config!` replaces the whole overlay;
-it is not an incremental map merge (`test/seon/test_support.clj:884`). Fixture
-transactions go through `transacted!`. Use `:seon.test-support/extra-schema` only
-for genuinely synthetic declarations. Never hand-roster the production schema.
+GOOD: `edamame/test/edamame/core_test.cljc:21-26` asserts the message and `{:row 1 :col 1}`, the data a caller uses.
 
-Pass projection, environment, declared proc inputs and fixed render profiles as
-production does. Use real SCI evaluation for SCI semantics; calling the same JVM
-function does not prove context isolation or interpreted caller behavior. Stop an
-agent graph before retracting facts it may still settle.
+```clojure
+(is (thrown-with-data?
+     #"The map literal starting with :a contains 3 form\(s\). Map literals must contain an even number of forms."
+     {:row 1 :col 1}
+     (e/parse-string "{:a :b :c}")))
+```
 
-A branch isolates its datoms, connection and history. It does not isolate store-wide
-blob keys, GC, filesystem locks, loaded JVM Vars/classes or shared SCI objects.
-Store-global subjects use the existing `:seon.test-support/fresh-store?` route
-(`test/seon/test_support.clj:624`); file/process subjects use the file-backed
-publication helpers (`:97`, `:115`), which publish the checkout into their own root, and
-declare `:seon.test/fixture-observation` explaining why a branch is insufficient: that
-declaration makes them platform-host members (`seon.test/isolated-members`,
-`src/seon/test.clj:2087`). Do not fabricate a manifest to get a green.
+**2.3 Pick the smallest world the behavior reads, and keep setup short.** Setup that needs many lines usually means a
+missing support function or a subject with too many inputs; fix that rather than copy a fixture. Never remove
+required custody, render profiles or writer provenance to shorten setup.
 
-For pure derivation properties, immutable Datahike `with` values are admissible
-only with the same final-report validator in transaction metadata as the writer.
-See `test/seon/turn_work_cost_test.clj` and the shared transaction evaluator's `validate-report`
-(`reference-code/datahike/src/datahike/db/transaction.cljc:1224`, invoked at `:1295`). This does not prove
-durable publication, live boot, adoption or browser paint.
+- **A plain value**: a pure transform needs no world. A render that reads the database receives an immutable database
+  value and a fixed render profile.
+- **A database branch**: `support/with-database`, writes through `support/transacted!` or the owner's writer.
+- **An agent evaluation**: `support/fork-cluster-ctx` plus `support/agent-value` or `support/evaluate`.
 
-## Bounds, events and process tests
+Only process, store, boot and concurrency subjects need full cluster fixtures.
 
-The ordinary duration bound is five seconds (`resources/seon/schemas/seon.test.edn:27`).
-A longer bound declares both numeric `:seon.test/long-ms` and explanatory
-`:seon.test/long` beside the test. Derive it from the measured operation, including
-which work was timed and why any margin is needed. Store exact timings in the owning
-landing evidence. No blanket multiplier or fifteen-minute escape substitutes for
-measurement. Raising a bound cannot turn a prior timeout into a pass; diagnose and
-rerun the actual proof. Work over ten seconds needs owner authorization already
-covering that operation. Cold boot/index authorization is not permission for unrelated
-slow tests or repeated full-suite runs.
+GOOD: `datahike/test/datahike/test/lookup_refs_test.cljc:11-26` builds its world with one `d/db-with` form.
 
-`await-event!` (`test/seon/test_support.clj:435`) waits on the required event under a
-declared bound and reports what failed to arrive. It installs watches before reading
-current state. A future timeout requests cancellation, which is not proof of exit.
-Avoid sleeps, quiescence guesses and infinite waits. A fixture hold that waits for a
-cold competitor must cover that declared operation; positively assert the winner
-remains paused until the competitor has returned the expected refusal.
+**2.4 Put cases of one behavior in a table.** Use `are` when one expression states the assertion; use `doseq` over
+named cases when each case has several independent observations (`are` would hide which one failed). Keep tests
+separate when their boundary, setup, failure class or resource lifetime differs, even if their names share a prefix.
 
-Concurrency regressions use the same contested identity/path as production. OS lock
-exclusion needs an actual second process; `.isValid` in one JVM alone proves too little.
-Assert the specific losing operation, unchanged winner state, and actual child exit
-with its exit code where relevant. Wait for stdout/stderr completion separately;
-a diagnostic stream is not automatically an EDN result. A connection closing is not
-proof of process exit. Use the retained `(pid, start-instant)` and `ProcessHandle.onExit`.
-See the eight real examples in `test/seon/cluster/boot_test.clj`.
+GOOD: `datahike/test/datahike/test/lookup_refs_test.cljc:16-26` has two tables: four lookups, and three that throw.
+`malli/test/malli/core_test.cljc:382-389` labels each row with the branch it takes. `clojure/test/clojure/test_clojure/string.clj:90-104`
+is one row per function for one failure class (it asserts exception classes, not error data).
 
-Acquire resources in nested `with-open` scopes, using `test-support/closeable`
-(`test/seon/test_support.clj:965`) for separate release functions. Setup and cleanup
-failures must still attempt every earlier release. Preserve the primary failure and
-cleanup diagnostics. Do not delete a root while a child or database release is unknown.
-Plant an external symlink sentinel in recursive-cleanup tests; verify it survives.
+```clojure
+(are [eid res] (= (tdc/entity-map db eid) res)
+  [:name "Ivan"]   {:db/id 1 :name "Ivan" :email "@1" :age 35}
+  [:name "Sergey"] nil)
+```
 
-## Properties and global state
+**2.5 Use a property for a law: a round trip, idempotence, injectivity, or two paths that must agree.** Bound the
+generators, fix the seed, and assert with `support/assert-check!`, which requires a positive trial count.
 
-Generate reproducible inputs from a fixed seed. Do not mint uncontrolled IDs or read
-wall time inside a property whose replay depends on that seed. Mutating trials get
-isolated fixtures; pure trials may share an immutable database value. Validate generated
-values and meaningful domain coverage separately from the property; generator overrides
-do not prove validity (`reference-code/malli/src/malli/generator.cljc:466`).
-Use `assert-check!` to preserve shrink evidence and require positive trials.
+GOOD: `editscript/test/editscript/core_test.cljc:196-205` (dependency pattern, abridged here: one law over 2,000
+trials). SEON: `cluster-branch-is-one-injective-derivation` states injectivity and repeatability with a fixed seed; that
+is a law, correctly a property.
 
-Own no incidental JVM-global state. Deliberate instrumentation changes use
-`preserving-instrumentation-state` (`test/seon/test_support.clj:922`); it restores
-through `seon.instrument/restore!` even after exceptions and leaves definitions replaced
-by reload alone. Restoring an old callable over new protocols/classes is not safe.
-Use the separate `preserving-schema-registry` (`:938`) when that is the subject.
-Do not weaken contracts, fake SCI, or restore an obsolete schema to make a test pass.
+**2.6 Assert an error as data: its `:seon.error/type`, then the one member the behavior is about.** A returned error
+is a value, so compare it. A thrown one is `(ex-data e)`, read once. One test per failure class per producer,
+as a table of input to type. Today's example: `seon.fs.jvm-test/an-absent-path-answers-the-not-found-error-type`
+asserts `(= :my.fs/not-found-error (:seon.error/type result))`. `support/refusal-data` still recognizes an error by the
+pre-cut `:seon.error/at` and `:seon.error/layer` (it will misread errors after the errors cut drops them); read `:seon.error/type`
+directly.
 
-## Execute and report the right proof
+**2.7 Never redefine a Var.** No `with-redefs`, `alter-var-root`, `intern` or stand-in functions over production
+Vars. Inject the external effect as a world value: a fixture `:seon.ai/send!`, a provider reply, a clock.
 
-During a cut use the installed focused authority, not a suite per commit:
+GOOD (Seon): `seon.ai/complete` reads its HTTP leaf from the request (`:seon.ai/send!`, default `send-request`), so
+`seon.ai-test` supplies a local reply without redefining a Var and asserts what the leaf received:
 
-- `seon.test/run` (`src/seon/test.clj:2205`) is one request:
-  `{:seon.test/execution <agent context source or execution handle>
-  :seon.test/recording-connection <connection holding that branch>
-  :seon.test/policy :named|:incremental|:platform|:all}` plus optional
-  `:seon.test/identities`, `:seon.test/namespaces`, `:seon.test/changed`,
-  `:seon.test/include-long?`, `:seon.test/check-time-limit-ms`. It selects, admits,
-  runs every member on its own branch, records, and returns `:seon.test/passed?`,
-  results, reuse, exclusions, pending/unfinished and per-member `:seon.test/timings`.
-  Admission and release go in batches of at most `seon.test/batch-limit` members.
-  `seon.test/tally` (`:2574`) renders it. On a live cluster from the MCP eval tool:
-  `(let [h (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "NAME"))]
-  (seon.test/tally (seon.test/run {:seon.test/execution h
-  :seon.test/recording-connection (:seon.db/connection h) :seon.test/policy :named
-  :seon.test/namespaces #{'my.ns-test}})))`. Agents use `(my.test/run)` and
-  `(my.test/check {:seon.test/changed [...]})` (`src/my/test.clj`).
-- `bin/test-check [--root PATH] [CLUSTER] --test NS/TEST | --ns NS | --changed SYM`
-  sends that request over the cluster's prepl; exit 0 only when `passed?`.
-- `bin/test [CLUSTER] [options]` is `bin/test-check` (`bin/test:19`). `bin/test
-  --platform` (`bin/test:29-42`) boots the committed HEAD under a fresh operator root
-  (`bin/seon --root R nuke --force`; a HEAD that does not boot fails the nuke) and runs `bin/test-check --isolated`: one request
-  naming `seon.test/isolated-members` (`src/seon/test.clj:2087`: declared platform entities,
-  members reaching a `:seon.fn/destroys` owner, file-backed fixtures), bounded by
-  `seon.test/declared-bound-ms` (`:2112`). It keeps the root as evidence when red.
-  There are no worker JVMs, slots or published test bases. Lanes never run
-  `--platform`. On a development root those members are excluded with that command
-  (`host-exclusions`, `:1927`); declared-long members are excluded unless the request
-  opts in, and an exclusion is never green.
+```clojure
+(ai/complete (seon.schema/handed-projection)
+             (assoc target :seon.ai/prompt "hello"
+                           :seon.ai/send! (fn [request-data]
+                                            (swap! requests conj request-data)
+                                            {:seon.ai/text "local reply"})))
+```
 
-### Will it boot? Before every commit
+To convert a stand-in test, find or add the input through which the production function already takes the effect
+(a declared request key, a world member supplied by schema name), then pass the fixture value there.
 
-A boot publishes the files that differ from the published program and default
-adopts them; either refusing stops the boot (a `:seon/tasks` tag naming a task no
-file declares, a task file that is not one vector, a schema resource the population
-refuses). Lint and the contract compile check cannot see these. Before committing
-source, test, schema or task files, run the same publication and adoption in the
-running JVM on disposable branches (`seon.cluster/rehearse-source!`, `src/seon/cluster.clj`;
-`current-src`, default's branch and the shared analyzer cache are untouched):
+SEON: `disarm-interrupts-an-in-flight-turn-and-records-it-interrupted` uses `with-redefs` over `prompt/prompt`. It is a
+concurrency test (discuss with root, §3), converted when its subject's injected-world entrance exists.
 
-- `bin/seon check PATH...` rehearses HEAD plus those working-tree files; no paths rehearses
-  HEAD. It answers the rehearsal commit id, adopted identity count and phase times, or the
-  refusal boot would stop on.
-- `bin/seon check PATH... --test NS [--test NS/test]...` then boots a throwaway JVM from the
-  candidate archive on a disposable store and runs the named tests through the one runner:
-  the only proof that covers host code (a changed boot, publication, evaluation or render
-  function), which the running JVM cannot reload. Any red, boot failure or refusal exits
-  non-zero.
-- Lanes commit through `bin/lane commit LANE -m MSG --test NS... PATHS`, which runs both plus
-  `clj-kondo --lint src script test --cache false` and commits exactly PATHS.
+**2.8 Assert printed text only in the value printer's own tests and in declared golden transcripts.** Elsewhere read
+a reply back as data with `support/reply` and assert its keys. Inside the printer's tests, assert a diagnostic as
+data even when the reply text is the subject (`a-renderer-that-throws-still-prints-through-the-floor-and-says-large-value`
+asserts its diagnostics with regex counts over `(str diagnostics)`; that part converts).
 
-Measured 2026-09-28: HEAD 1.6-6 s, one changed file 4-5 s; a change to any function the
-analyzer reaches re-derives every program file (~30 s) until that is fixed.
+**2.9 One behavior per test, with a short behavior name and at most one line of why.** History goes to Git and the
+spec. An assertion message is prose that says what should hold; it never restates the assertion or prints a value.
 
-Record actual program identity, arming precondition, execution/reuse counts,
-assertions, failures, errors and refusal/timeout categories. Zero executions with
-valid recorded green evidence is reuse, not a fresh proof. Fixture-excluded or
-unconfirmed work is not green. A standalone `clojure.test` call bypassing canonical
-admission/recording is diagnostic only. Distinguish hot reload, in-place adoption,
-new fork and cold boot; observe the real user-facing result separately.
+**2.10 Never copy a fixture into a second file.** A shared world goes in `seon.test-support` or in the subject's
+namespace, with explicit inputs and cleanup.
 
-Turn/context regressions follow the current
-[turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-and [B2](../../../docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md): use virtual
-provider replies through real procs, without paid model calls; test ordered durable
-source/results, interruption without replay, private-context isolation, changed-read
-refresh without replaying effects, unchanged historical shown text and loss of live
-objects on restart. A target is an acceptance condition, not proof it is installed.
+GOOD: `konserve/test/konserve/memory_test.cljc:22-23`: every backend calls the one `compliance-test`
+(`konserve/src/konserve/compliance_test.cljc:14`), whose assertions live in the helper. SEON: `with-render-context-proc`
+appears in three test files and `with-cluster` in four; check that their responsibilities and lifetimes match before
+merging them.
+
+**2.11 A docstring example is documentation, not a test.** The owner ruled `test/my/examples_test.clj`, which executed
+public `my.*` examples, deleted (lane task-tags removes it). A public `my.*` behavior at risk gets one focused test
+through its entrance; an example that no longer runs is a docstring defect fixed where it is touched.
+
+**2.12 A test that proves a task names it.** `(deftest ^{:seon/tasks #{…}} a-refused-settlement-is-the-forms-refusal
+…)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`), the task cannot be assigned
+without them, and after a pass that changes code they reach, all green completes the task (agent-loop spec §4). Metadata
+placed after the test name is refused (`:metadata-after-test-name`). Today the set holds the task's derived handle
+(`seon.task/task-handle` of namespace, name and kind; never hand-type it); TARGET (lane task-tags): it holds the
+`ns/task-name` symbol. A success test fails before the work and passes after it: a task whose tests are already green
+is done or mis-specified, not open work.
+
+## 3. Delete or convert
+
+Classify the behavior before touching its test. Then:
+
+**Delete** a test only when:
+
+1. its behavior is retired in the same change (the mechanism and its test leave in one commit, per the owning spec's
+   per-test triage in the errors and agent-loop specs' test sections); or
+2. another current test proves the same behavior through the same entrance (name it; move any extra inputs into its
+   table); or
+3. it re-asserts a schema's shape and one regression through the real entrance still covers refusal, delivery and
+   unchanged state (§1.1); or
+4. it is vacuous: no assertion event can fail on a regression. Count assertion events, including those inside
+   helpers (`support/assert-check!`, a shared compliance function); a body with no literal `is` is not vacuous by
+   itself. The runner counts events (`seon.test.runner/assertionless-failure`).
+
+Delete the helpers the deletion orphans in the same commit. An owner-approved future deletion is not a present one,
+and a rename alone retires no behavior.
+
+**Convert** every other problem test in the change that touches it, so the behavior keeps its proof:
+
+| Problem | Conversion |
+|---|---|
+| Private reach (`#'ns/private`, an intermediate map no outside caller reads) | an entrance test asserting the public data the private step produces |
+| Var stand-in (`with-redefs`, `alter-var-root`) | an injected world value at the entrance |
+| Text assertions (`str/includes?`, `re-find`) outside printer and golden tests | assertions on the reply or error data |
+| Timing or revision assertions | profile evidence; keep deterministic work-count assertions the spec requires |
+| A schema-shape re-test | one entrance regression for refusal, delivery and unchanged state; then delete the rest |
+
+Never replace the only proof of a behavior with a task to write one later: the replacement lands with the cut.
+When a conversion is larger than about 15 minutes, file the task and keep the old test until it lands.
+
+**Discuss with root** before deleting or converting tests of concurrency, crash recovery, the store lock, GC and
+reclamation, boot and adoption; the value printer's own tests; golden transcripts; and any test that is the only one reaching a `my.*`
+function.
+
+## 4. Three minimal Seon tests
+
+Each is source-verified against `test/seon/test_support.clj` and the subject's source (2026-10-07); none was run for
+this skill. Each runs as a member of `seon.test/run`, which supplies the execution handle `with-database` needs.
+
+**Example 1: a pure value table (no world).** TARGET-dependent: this states today's identity, a function of the
+printed data. When lane task-tags lands structural hashing, equal maps in different entry order and `1`/`1N` hash
+equal, so those rows flip; root replaces this example with that lane's deftest. The shape (one `are` table, no setup)
+is the lesson. This is the table form of `seon.id-test/data-shape-and-explicit-length-determine-identity`'s first
+assertions plus edge rows probed at the REPL. Add it to the existing `seon.id-test`; do not copy its `ns` form over
+that namespace.
+
+```clojure
+(ns seon.id-test
+  (:require [clojure.test :refer [deftest is are]]
+            [seon.id :as id]))
+
+(deftest identity-is-a-function-of-printed-data
+  (are [a b same?] (= same? (= (id/id a) (id/id b)))
+    [:a 1]      [:a 1]      true
+    [:a 1]      [:a 2]      false
+    {:a 1 :b 2} {:b 2 :a 1} false
+    nil         false       false
+    1           1N          false
+    'abc        "abc"       false)
+  (is (= "ba7816bf8f01" (id/id 'abc)))
+  (is (= "ba7816bf" (id/id 'abc 8))))
+```
+
+No setup and no teardown: the subject reads nothing.
+
+**Example 2: a refused write leaves the basis unchanged (a database branch).** The behavior: the writer refuses
+retracting a required analysis fact, answers a write-attempt identity, and commits nothing. Shape of
+`seon.reset-edges-test/analysis-is-a-required-positive-fact`, reduced to one attribute.
+
+```clojure
+(ns seon.analysis-fact-test
+  (:require [clojure.test :refer [deftest is]]
+            [seon.db :as db]
+            [seon.test-support :as support]))
+
+(deftest a-required-analysis-fact-refuses-retraction
+  (support/with-database
+   (fn [connection]
+     (let [target [:seon.fn/sym 'seon.id/id]
+           database (db/db connection)
+           basis (db/basis-t database)]
+       (is (= 64 (count (:seon.program/analyzed-source-digest
+                         (db/pull database [:seon.program/analyzed-source-digest] target)))))
+       (let [refusal (db/transact! connection
+                                   [[:db.fn/retractAttribute target :seon.program/analyzed-source-digest]])]
+         (is (string? (:seon.db.write.attempt/request-id refusal)))
+         (is (= basis (db/basis-t (db/db connection)))))))))
+```
+
+The first `is` is positive proof that the fact existed, so the refusal is not read from silence. `with-database`
+acquires its own branch and releases it in `finally`. `db/transact!` returns its refusal today; when the errors cut lands,
+also assert the variant: `(is (= <the writer's variant> (:seon.error/type refusal)))` (TARGET: read the declared
+alternative from `seon.db/transact!`'s contract then; do not guess its name now).
+
+**Example 3: an agent evaluation that answers an error map (an agent world).** The behavior: an invalid call made
+from an agent's REPL comes back as an error value, not a thrown exception. Shape of
+`seon.sci.admit-test/an-absent-storage-bound-refuses-and-names-the-key-it-wanted`.
+
+```clojure
+(ns seon.invalid-call-test
+  (:require [clojure.test :refer [deftest is]]
+            [seon.test-support :as support]))
+
+(deftest an-invalid-call-answers-a-contract-error
+  (support/with-database
+   (fn [connection]
+     (let [refusal (support/agent-value
+                    (support/fork-cluster-ctx connection)
+                    "(seon.sci.admit/admit {:seon.sci.admit/value [1 2 3] :seon.sci.admit/caps {} :seon.sci.admit/interrupt-fn (fn [])})")]
+       (is (= :input (:seon.instrument/check refusal)))
+       (is (= 'seon.sci.admit/admit (:seon.instrument/fn refusal)))))))
+```
+
+`agent-value` runs the source through the one REPL path with the shipped caps and time limit and returns
+`:seon.sci.admit/value`. TARGET (the errors cut, instrumentation from Malli's report): assert instead
+`(= :malli.core/invalid-input (:seon.error/type refusal))` and `(= 'seon.sci.admit/admit (:seon.error/operation refusal))`;
+the errors spec's instrumentation example adds the misspelling problem at `[0 :my.fs/pth]` for `my.fs/read`.
+
+## 5. The harness today
+
+Each fact was checked against `test/seon/test_support.clj`, `src/seon/test.clj` and `src/seon/test/runner.clj` by
+symbol name. Re-check a symbol before relying on it.
+
+- **A test is an isolated agent.** `seon.test/run` takes `{:seon.test/execution … :seon.test/recording-connection …
+  :seon.test/policy :named|:incremental|:platform|:all}` plus optional `:seon.test/identities`, `:seon.test/namespaces`,
+  `:seon.test/changed`, `:seon.test/include-long?` and `:seon.test/check-time-limit-ms`. It runs each member on its own
+  branch, records the result, and returns `:seon.test/passed?`. Agents call `(my.test/run)` and
+  `(my.test/check {:seon.test/changed [...]})`; from an agent's SCI context `clojure.test/run-test-var` cannot see
+  test Vars (live run 1), so a named test runs through `my.test/check`.
+- **Worlds.** `support/with-database` runs its body on a fresh branch of the executing member's commit and releases
+  it afterwards; outside a `seon.test/run` member it refuses by name (`execution-handle`).
+  `{:seon.test-support/fresh-store? true}` gives an empty in-memory store with the installed attributes, for
+  store-global subjects such as blob keys. `:seon.test-support/extra-schema` is only for synthetic declarations.
+  `fork-cluster-ctx` forks the member's SCI context onto a fixture connection.
+- **Writes.** `support/transacted!` is the one fixture write: it throws at a refused write and names the offending
+  row. `program-fn-entity` returns an indexed or analyzed declaration; `agent-tx` creates a fixture agent through
+  `seon.cluster.agent/creation-tx`. `apply-config!` sets dials through `config/apply!`; a later manifest changes only
+  its own keys. `seed-cluster!` seeds the cluster/config path. Never hand-build a production entity or write a literal
+  tx id.
+- **Evaluation.** `support/evaluate` runs source through the one REPL path (fold, evaluate and show stages) and
+  settles nothing; it needs `:seon.sci.admit/caps` and reads the member's database when none is given.
+  `support/agent-value` returns what the agent reads.
+- **Waiting and resources.** `support/await-event!` waits on a channel, latch, future or reference under a bound
+  (default `event-backstop-seconds`, 20) and names what did not arrive. No sleeps. `support/closeable` adapts a
+  release function to `with-open`.
+- **Concurrency and processes.** Contend on the same identity or path production does. Lock exclusion needs a real
+  second OS process. Wait for exit with `ProcessHandle.onExit` on the retained `(pid, start-instant)`; a closed
+  connection is not an exit. `test/seon/cluster/boot_test.clj` has working examples.
+- **Global state.** Ordinary tests never mutate JVM-global state; a test arms only its own Vars. Branch fixtures do
+  not isolate JVM Vars, classes or live-cluster projections. `preserving-instrumentation-state` and
+  `preserving-schema-registry` are cleanup for the existing host-bound harness, not permission to mutate another
+  owner's state or restore roots across a reload; a subject that needs such effects uses the declared isolated
+  platform path.
+- **Bounds and exit.** The default body bound is 5,000 ms (`:seon.test/time-limit-ms` in
+  `resources/seon/schemas/seon.test.edn`); raising it requires `:seon.test/long` (the reason, naming the measured
+  operation) and `:seon.test/long-ms`. `seon.test.runner/duration-failures` reports an overrun when a body completes.
+  The SCI arm interrupts interpreted work at the bound but cannot stop a host call; `seon.test/bounded-result` watches
+  the body's actual exit and keeps its branch and resources until then. A timeout is not a kill or proof of cleanup.
+- **Assertions.** `seon.test.runner/assertionless-failure` fails a test that reported no assertion events.
+- **Pure derivations** may use a Datahike `with` value only when it carries the writer's final-report validator
+  (`reference-code/datahike/src/datahike/db/transaction.cljc:1225-1234`, invoked at `:1296`). That proves the
+  derivation; it does not prove durable publication, boot or adoption.
+- **Proving a slice.** `bin/seon check PATH... --test NS` publishes and adopts the candidate on disposable branches,
+  then boots a throwaway JVM and runs the named tests. Lanes commit through
+  `bin/lane commit LANE -m MSG --test NS... PATHS`, which also lints. Name the tests that reach the change; root runs
+  the broad tiers.

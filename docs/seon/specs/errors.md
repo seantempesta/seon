@@ -2,303 +2,418 @@
 type: spec
 status: reviewed
 created: 2026-10-07
-tags: [spec, errors, malli, faults]
+revised: 2026-10-07
+tags: [spec, errors, malli]
 ---
-# Errors: one map, two carriers, one boundary (reviewed 2026-10-07)
+# Errors: one map, two carriers, one boundary
 
-What exists: five constructors, a metadata type stamp, value-to-exception round trips at every read, a bespoke
-re-description of Malli reports and a 4,778-line error area (`error.clj` 2837, `error/refusal.clj` 830, `fault.clj` 453,
-`problems.clj` 658). Data flow after this spec: a producer builds ONE error map with ONE constructor; it returns it when
-answering is its job, else throws it as `ex-info` data; the entrant boundary takes it back once with `ex-data`, the
-recorder upserts one fault per signature, and the reply carries the map as data. Principal approach: Malli's own shapes
-(`:multi` on a type key, the instrument report, `m/explain`, `malli.error`) and Clojure's (`ex-info`, `Throwable->map`).
+What exists: five constructors, value-to-exception round trips at every read, a bespoke re-description of Malli
+reports, a separate "fault" vocabulary for Seon's own failures and a 4,770-line error area (`error.clj` 2838,
+`error/refusal.clj` 787, `fault.clj` 453, `problems.clj` 657). S1 (`33fb994f2`) installed the optional
+`:seon.error/type` key and removed the metadata stamp from `src`; `seon.error.refusal/chain` already walks cause and
+suppressed edges cycle-safely and keeps each link's data whole. Data flow after this spec: a producer builds ONE error
+map with ONE validating constructor; it returns the map when answering is its job, else throws it as `ex-info` data;
+the entrant boundary takes it back once; Seon's own errors are recorded once per signature at the task home with a
+count, a task and one notification to root; every occurrence rides the evaluation or call where it happened and
+reaches the agent that caused it in that reply. There is no separate fault concept. Principal approach: Malli's own
+shapes (`:multi` on a type key, the instrument report, cached explainers, `malli.error`) and Clojure's (`ex-info`).
 
-Owner rulings implemented (2026-10-07): one map with `:multi` variations on its type key, no metadata stamps; one
-constructor; two carriers of the same map; error alternatives only in contracts of functions that return errors;
-instrumentation everywhere, reporting from Malli's report; errors always reach the agent as data.
-
-Verification legend: **[V]** read or probed today; **[U]** unverified, to be proven in the named slice.
+Rulings: §9. **[V]** read or probed 2026-10-07 (HEAD `42e569d9d`, default running it); **[U]** proven in the named
+slice. Functions are cited by name: line numbers drift.
 
 ## 1. The error map
 
 ```clojure
 {:seon.error/type      :my.fs/not-found-error      ; required: the variant (= its schema key); the :multi dispatch
- :seon.error/operation 'my.fs/read                 ; required: who refused; producer default and signature member
- :seon.error/message   "No such file. Path: x.md"  ; required: ex-info needs it; the first thing the agent reads
+ :seon.error/operation 'my.fs/read                 ; required: who refused; signature member
+ :seon.error/message   "No such file."             ; required: ex-info's message; short, no printed values
  ;; optional base members
  :seon.error/fix       "Check the path with my.fs/glob."
- :seon.error/problems  [...]                       ; Malli explain errors (§5), only for validation failures
- :seon.error/chain     [...]                       ; Throwable->map :via, data referenced (boundary only)
- :seon.error/frame     [ns fn file line]           ; root cause's first first-party frame (boundary only)
- :seon.error/caller    'my.ns/f                    ; who made a refused call (instrumentation only)
- :seon.error/world     {:seon.agent/id .. :seon.turn/id ..}  ; references, attached by the boundary
- ;; variant members, fully namespaced
- :my.fs/path "x.md"}
+ :seon.error/problems  [...]                       ; Malli explain errors (§5), validation failures only
+ :seon.error/chain     [...]                       ; refusal/chain's links, boundary only
+ :seon.error/frame     [cls method file line]      ; first authored frame, boundary only
+ :seon.error/caller    'my.ns/f                    ; the blamed caller of a refused call (instrumentation)
+ :seon.error/digest    "…64…"                      ; the blamed producer's armed digest at the report (instrumentation)
+ :seon.error/world     {:seon.agent/id .. :seon.agent/branch .. :seon.cluster.eval/id ..}
+ :seon.error/recorded  {...}                       ; the recorder's receipt, boundary only (§6)
+ :my.fs/path "x.md"}                               ; variant members, fully namespaced
 ```
 
-Required keys and why each survives:
+The type selects the variant schema, the render pair and the signature, and survives `merge`/`into` (optional since S1
+[V]); the operation is the refusing definition (required today); the message is `ex-info`'s (optional today [V]).
+`:seon.error/at` and `:seon.error/layer` leave the map at the cut (§7): the recorder stamps occurrence time; a returned
+error rides an evaluation that has its time; the type's namespace names the layer. They are load-bearing until then:
+the recorder's signature reads layer (`seon.error/signature`), the recorded-error facts require both
+(`seon.error.edn`), and `seon.error.refusal/error?` plus about 20 readers test `(:seon.error/at x)` as "is an error"
+[V]; all move in the same cut.
 
-| Key | Why | Today |
-|---|---|---|
-| `:seon.error/type` | Selects the variant schema, the render pair and the signature. Replaces the `vary-meta :seon.error/declared-schema` stamp (99 lines in `src` mention it [V]), which `merge`/`into`/`assoc` across a boundary silently drop. | absent; `refusal.clj:787` stamps meta |
-| `:seon.error/operation` | The refusing definition: the blame default (`refusal.clj:631`), the fault signature member. | required (`seon.error.edn` base) |
-| `:seon.error/message` | `ex-info`'s message and the agent's first line; no carrier exists without one. | optional today |
+`:seon.error/world` holds references only. `world-reference` derives the evaluation id with the two-argument
+`(id/evaluation run-id ordinal)` today [V]; after the loop cut the run id is the pass id and the ordinal the position in
+the pass (agent-loop §1), so the formula is unchanged.
 
-Dropped from required: `:seon.error/at` (442 lines mention it [V]; the recorder stamps the occurrence time, a returned
-error rides an evaluation that already has its time) and `:seon.error/layer` (273 lines [V]; the type's namespace says
-it). See Q6.
-
-**Variations.** Each variant is the base plus its own members, declared in its owner's schema EDN. Seon's registry has
-no `:merge` (probe: `(mr/schema r :merge)` is nil, `:multi` present [V]), so a variant is an `:and`:
+**Variations.** Each variant is the base plus its own members, in its owner's schema EDN. Seon's registry has no
+`:merge` (`(mr/schema r :merge)` nil, `:multi` present [V]), so a variant is an `:and`; a function that RETURNS errors
+lists exactly its alternatives as one `:multi`:
 
 ```clojure
-:my.fs/not-found-error [:and :seon.error/base [:map [:my.fs/path :my.fs/path]]]
-
-;; a function that RETURNS errors lists exactly its alternatives as one :multi
-:my.fs/tool-error
-[:multi {:dispatch :seon.error/type}
- [:my.fs/not-found-error :my.fs/not-found-error]
- [:my.fs/path-refused-error :my.fs/path-refused-error]
- ...]
-my.fs/read  [:=> [:cat :my.fs/read-request] [:or :my.fs/read-result :my.fs/tool-error]]
+:my.fs/not-found-error [:and :seon.error/base [:map :my.fs/path]]
+:my.fs/tool-error [:multi {:dispatch :seon.error/type}
+                   [:my.fs/not-found-error :my.fs/not-found-error]
+                   [:my.fs/path-refused-error :my.fs/path-refused-error] ...]
+my.fs/read [:=> [:cat :my.fs/read-request] [:or :my.fs/read-result :my.fs/tool-error]]
 ```
 
-Probed in a scratch JVM (malli at the pinned `reference-code/malli` 43c6dca8): the `:multi` validates a variant,
-explains a missing variant member as `{:my.fs/path ["missing required key"]}`, and sits inside `[:or result multi]` [V].
-An undeclared type is `::m/invalid-dispatch-value`, which `me/with-spell-checking` already turns into a misspelled-value
-suggestion for keyword dispatch (`malli/error.cljc:343-349` [V]). 204 registry keys end in `-error` today [V]; each
-gains the `:and :seon.error/base` wrapper by script. The generic `:seon.error/base` is the `::m/default` child where a
-boundary must accept any error (Q3).
+At pinned malli `43c6dca8` the `:multi` validates a variant inside `[:or result multi]`; an undeclared type is
+`::m/invalid-dispatch-value`, spell-checked as a misspelled value (`malli/error.cljc:343-349`) [V]. A success alternative
+must not accept an error map (closed against `:seon.error/type` or disjoint by required keys) [U: each family slice
+checks the `[:or …]` it types]. Generic boundaries accept `:seon.error/base`. Today the installed variant member is
+`:my.fs/not-found` and `:my.fs/tool-error` is an `[:or …]` that also admits `:seon.effect/boundary-error` [V]; moving
+to `:my.fs/path` and a `:multi` is that family's BEHAVIOR CHANGE.
 
-**Cause chain.** Only the boundary reads a Throwable: `(:via (Throwable->map t))`
-(`reference-code/clojure/src/clj/clojure/core_print.clj:473-482`) gives `{:type :message :data :at}` per link, outermost
-first [V, probed]. Each link's `:data` passes through `refusal/references`; `:trace` is filtered once with
-`first-party-frame?` (`refusal.clj:173`) for `:seon.error/frame`. Suppressed throwables are not in `Throwable->map`;
-today `walk-links` follows them (`refusal.clj:441-463`). Keep one line appending the root's `.getSuppressed` links only
-if a test needs it [U].
+**Cause chain.** `seon.error.refusal/chain` stays the one walk: cause and suppressed edges, an identity seen-set, the
+installed `:seon.error/link` (class, message, whole referenced `ex-data`, first-party frames, `:seon.error/suppressed-by`,
+`:seon.error/cause-of`) [V]. `Throwable->map` is never used as the traversal: it follows `.getCause` with no seen-set
+and ignores suppressed throwables (`clojure/core_print.clj:484-501`); its `:via` shape is what each link resembles.
+`:seon.error/frame` is `root-frame`: the root cause's first authored frame, else each enclosing link's outward.
 
-**References replace copies.** The one piece with no library equivalent stays: `refusal/references` and its walker
-(`refusal.clj:249-406`): a database is its commit id, a connection or SCI context its identity, a large value its
-class and size. It runs once inside the constructor over the variant members (nothing else in the map can hold a world)
-and once per chain link at the boundary. The whole referenced map larger than `:seon.config.error/max-evidence-bytes` is
-stored once as a blob by the recorder (§6), never clipped here.
+**References and evidence.** Three separate concerns:
+
+1. *Live value*: the map as built, held in memory and returned or thrown. `refusal/references` turns a database into
+   its commit id, a connection or SCI context into its identity and a place (atom, delay, promise) into class and
+   identity. It does not bound size.
+2. *Stored evidence*: the recorder stores the first occurrence as the value printer's shown text of the final assembled
+   map, nothing else (owner ruling, round 6). The printer already handles laziness, cycles, opaque objects and budget,
+   so no second walk decides what is safe to store [U: cut asserts a nested opaque value and an unrealized sequence
+   print by class without being realized].
+3. *Display*: the value printer, at the edge, once.
 
 ## 2. The constructor and the two carriers
 
-`seon.error.refusal/error` is replaced in place (it already claims to be "THE one constructor", `refusal.clj:745`):
+`seon.error.refusal/error` stays the one constructor. Its installed arity is `[alternative members]` (validates, still
+stamps at/layer) [V]. The new arities are added to the SAME defn (prep slice P2) and become the only ones in the cut:
 
 ```clojure
 (defn error
-  "The one error map. `type` names its variant schema; `data` holds its members."
-  {:malli/schema [:=> [:cat :qualified-keyword :qualified-symbol :string [:? :map]] :seon.error/base]}
-  ([type operation message] (error type operation message nil))
+  "The one error map: `type` names its variant; `data` holds its members. Validated against the variant."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword :qualified-symbol :string] :seon.error/base]
+                            [:=> [:cat :qualified-keyword :qualified-symbol :string :map] :seon.error/base]]}
+  ([type operation message] (error type operation message {}))
   ([type operation message data]
-   (assoc (references (operation-projection) data)
-          :seon.error/type type :seon.error/operation operation :seon.error/message message)))
+   (let [e (assoc (references (operation-projection) data)
+                  :seon.error/type type :seon.error/operation operation :seon.error/message message)]
+     (or (malformed e) e))))
 
 (defn fail!
   "Throw the error map as ex-info data: the carrier for functions whose job is not to answer."
-  [type operation message & [data]]
-  (throw (ex-info message (error type operation message data))))
+  ([type operation message] (fail! type operation message {}))
+  ([type operation message data] (throw (ex-info message (error type operation message data)))))
 ```
 
-No validation in the constructor: the producer's output contract (armed on every function) checks the variant on the
-returning carrier, and the boundary's reply contract checks the thrown one. That deletes `construction-refusal`,
-`checking-projection` and the explainer seam (`refusal.clj:215-248, 726-792`). `fail!` is the constructor plus `throw`,
-as Malli pairs `-exception` with `-fail!` (`malli/core.cljc:203-207` [V]).
+`malformed` validates `e` against the schema named by `type` in the operation's projection with Malli's cached
+explainer (`m/explainer`, cached on the schema object, `core.cljc:353-361,2690-2712`); valid costs one cached validator
+call. On failure it returns `:seon.error/malformed-error` holding `:seon.error/attempted` (the referenced map) and the
+explain `problems`. Both carriers pass through it, so a malformed `(fail! :my.fs/not-found-error 'example/f "m")` is
+refused at construction, not at a base-only boundary (Malli validates outputs only after `(apply f args)` returns,
+`core.cljc:2236-2240` [V]). The malformed error and every error built while the registry itself fails are assembled as
+literals without validation or explanation: building an error never recurses into explaining one. This is today's
+`refusal/error` behavior (cached explainer, packaged-projection fallback) kept; `construction-refusal` and
+`checking-projection` fold into `malformed` in the cut.
 
-**Rule.** Return the map when answering is the function's job: agent tools (`my.*`), validators and checks whose
-result IS the verdict (merge checks, gates, write-back digests). Throw it everywhere else. A returning tool whose
-failure is detected deep inside catches its own throws once at its top with `(or (error-of e) (throw e))`, where
-`error-of` is `(let [d (ex-data e)] (when (:seon.error/type d) d))`. No other layer catches to convert or rethrow.
+**Rule.** Return the map when answering is the function's job: agent tools (`my.*`), validators and checks whose result
+IS the verdict (merge checks, gates, write-back digests). Throw it everywhere else. Deep helpers of a returning tool
+`fail!`; the tool catches once at its top and answers only its own declared variants:
+
+```clojure
+(catch clojure.lang.ExceptionInfo e
+  (let [d (ex-data e)] (if (tool-error? d) d (throw e))))   ; tool-error? = the cached validator of its :multi
+(catch java.io.IOException e (error :my.fs/read-failed-error 'my.fs/read "The file read failed." {:my.fs/path p}))
+```
+
+A contract refusal or core defect is not in the tool's union and propagates. A deliberate translation names its own
+type and keeps the cause (`fail!` inside the catch, the original as `ex-info` cause). No other layer catches to convert.
 
 | # | Before | After |
 |---|---|---|
-| 1 | `my/program.clj:111-142` `caller-data`: five `(let [r (db/pull ...)] (if (:seon.db/invalid-read r) (throw (ex-info (:seon.error/message r) r)) r))` blocks; 119 such rethrows in `src` (28 in `my/program.clj`) [V] | `(db/pull database selector e)`. `db/q` no longer catches Datahike's `ex-info` (`db.clj:2840-2844` → `dependency-error`); it propagates to the boundary with Datahike's own `:error` data in the chain. |
-| 2 | `db.clj:2794` `(refused-read query-or-database 'seon.db/q)`: an error value accepted as a database input (`db.clj:2790` admits `:seon.error/value`) and passed on | Deleted: the armed input contract refuses a non-database at the call. `read-refusal?`, `refused-read`, `schema-refusal`, `dependency-error`, `error-value`, `diagnostic` (`db.clj:173-256`) go. |
-| 3 | `fs/jvm.clj:55-59` `refuse!` throws `flat-error` (`:41-53`, which itself calls the validating constructor), then `fs/jvm.clj:501` catches every Throwable and rebuilds a value through `error-value` (`:61`) | `my.fs/read` answers: detection sites (`fs/jvm.clj:109,165,172,182`) return `(error :my.fs/path-refused-error 'my.fs/read "The path is outside every declared filesystem root." {:my.fs/path path})`; the catch at `:501` keeps only host IO exceptions. |
-| 4 | `turn.clj:5107` `(fault/fault! env (ex-info (:seon.error/message unbound) unbound) {...})`: a value wrapped in an exception only to be recorded (also `turn.clj:5432, 5719, 5868`, `render/web.clj:2280`) | `(fault/record! env unbound)`: the recorder takes the map. |
-| 5 | `instrument.clj:926-931` report: `(throw (ex-info (:seon.error/message value) (with-meta value {:seon.error/declared-schema declared-schema})))` after `boundary-refusal` + `refusal?` validator + `minimal` fallback (`:844-924`) | `:report (fn [kind data] (throw (ex-info msg (contract-error sym kind data))))` (§5). |
-| 6 | `sci/kernel.clj:826-827` reads the deepest structural ex-data (`refusal/refusal`, `refusal.clj:804-830`) and tests three keys by hand, then `:828-883` re-attributes and re-chains it | `(error/caught t)` (§3); the SCI stacktrace member is added by the kernel's one call. |
+| 1 | `my.program/caller-data`: five `(if (:seon.db/invalid-read r) (throw (ex-info …)) r)` blocks; about 119 such rethrows in `src` [V] | the bare read; it throws to the boundary. Removed per read family only after that family's producer throws (S-reads). |
+| 2 | `seon.db/q` returns refusals from argument shape, alignment, nil inputs, malformed patterns and query-value types, converts Datahike's `ex-info` through `dependency-error` and appends read evidence in its catch [V] | each refusal branch `fail!`s its named variant; Datahike's `ex-info` propagates with its `:error` data in the chain; the evidence append stays in the one catch, which rethrows. |
+| 3 | `seon.fs.jvm/refuse!` throws `flat-error`; `parent-access` refuses then continues; `read-window` catches every Throwable into `error-value` [V] | `parent-access` calls `fail!`; `my.fs/read` catches once as above. |
+| 4 | `seon.turn` and `seon.render.web` wrap a map in `ex-info` only to record it; `seon.instrument/boundary-refusal` reports; `seon.sci.kernel` re-chains structural ex-data | the recorder called with the map; `contract-error` (§5); `(caught t)` plus the SCI location |
 
-Call-site sweep: `refusal/diagnostic` has 225 call sites and builds `{:seon.error/at (Date.) :seon.error/layer ..}`
-literals [V]; a script rewrites each to `(error type operation message data)` taking the type from the declared output
-alternative (the 99 `declared-schema` stamps name it today).
+**Typing producers.** Functions declaring only `:seon.error/base`, `:seon.db/error-result` or several alternatives
+exist, and there are about 120 hand literals and 52 throwable-bearing `diagnostic` calls beside about 225 `diagnostic`
+sites [V, lane notes]. Each family slice (P3) types every detection site by its actual failure branch: each failure
+class gets a named variant in its owner's EDN; a base-only contract gains its variants; throwable-bearing sites move to
+`caught` or to a deliberate translation. Base is never stamped as a producer's type.
 
 ## 3. The boundary
 
-The one function, `seon.error.refusal/caught` (~20 lines), turns any Throwable into the error map:
+`seon.error.refusal/caught` (~20 lines) turns any Throwable into the error map:
 
 ```clojure
 (defn caught [^Throwable t]
-  (let [{:keys [via trace]} (Throwable->map t)
-        own (some #(when (:seon.error/type (:data %)) (:data %)) (rseq via))  ; deepest declared error wins
-        frame (first (filter first-party-frame? trace))]
-    (cond-> (or own (error :seon.error/exception (or (some-> frame frame-function) 'seon.error/unknown)
-                           (or (:message (peek via)) (.getName (class t)))))
-      true  (assoc :seon.error/chain (mapv #(update % :data references*) via))
-      frame (assoc :seon.error/frame frame)
-      true  (merge-absent (producer own t) (world-reference (current-world))))))
+  (let [links (chain t)                                              ; §1, unchanged
+        own   (some #(let [d (ex-data %)] (when (:seon.error/type d) d)) (cause-links t))  ; primary path only
+        frame (root-frame t)
+        e     (or own (error :seon.error/exception (or (some-> frame first frame-function) 'seon.error/unknown)
+                             (or (ex-message t) (.getName (class t)))
+                             {:seon.error/exception-class (symbol (.getName (class (peek (cause-links t)))))}))]
+    (-> e
+        (assoc :seon.error/chain links)
+        (cond-> frame (assoc :seon.error/frame frame))
+        (merge-absent (producer e t) (world-reference (current-world))))))
 ```
 
-`producer`, `world-reference` and `attributed` stay (`refusal.clj:595-675`) as the blame rule. Entrants that call it,
-each in exactly one catch [V for location; the rewrite is per slice]:
+- The outermost declared error along the PRIMARY cause path wins: it is the producer's deliberate decision. A typed
+  error that was only suppressed (a cleanup refusal) stays evidence in the chain and never retypes the primary.
+- `producer` receives the chosen map, never nil. `producer`, `attributed` and `world-reference` stay as the blame rule;
+  their inputs move to the new report fields in the cut (§5).
+- An error already recorded in this propagation keeps its receipt in its link's data and is not recounted.
 
-| Entrant | Today |
-|---|---|
-| One REPL path, evaluate stage | `batch.clj:363` catch → `sci/kernel.clj:787-883` `failure-value`; stage guards `batch.clj:173, 623, 669, 689` |
-| MCP | `mcp.clj:390` top catch, `fault-receipt` `:337-347` |
-| Flow procs | `flow.clj:197-230` `proc-failed!`, `:845-858` `fault-handed-off!` |
-| Boot / operator | `cluster/boot.clj:792-815` `request!`, `:70` boot recording |
-| Web | `render/web.clj:2236-2250` `entrance-fault!`, `:2280` |
-| Test runner | `test.clj:2346` `core-fault!` |
-| Agent graphs | `cluster/agent.clj:1190, 1442, 1639` |
-
-`kernel/failure-value` shrinks to `caught` plus the SCI location (`kernel.clj:763-786` stays). A fault already recorded
-in this propagation keeps its receipt in the chain (`fault.clj:316-340`) and is not recounted.
+Entrants, each with exactly one catch [V for location]: the one REPL path (`seon.batch` stage guards, `seon.sci.kernel`);
+MCP (`seon.mcp`); Flow procs (`seon.flow`); boot (`seon.cluster.boot`); web (`seon.render.web` handler); the test runner
+(`seon.test`); agent graphs (`seon.cluster.agent`). The loop pass is an entrant from the loop cut on (agent-loop §2).
 
 ## 4. Contracts
 
-Only functions that return errors list error alternatives: the `my.*` tools, validators, checks and the boundary
-functions themselves (`caught`, `record!`). Every reader's `[:or value :seon.db/error-result]` (151 references to
-`:seon.db/error-result` in `src`+`resources` [V]) narrows to `value`. `error?` becomes `(contains? v :seon.error/type)`;
-`let-ok` (`refusal.clj:793`, 2 uses [V]) goes with the round trips.
+Only functions that return errors list error alternatives: `my.*` tools, validators, checks and the boundary functions
+(`caught`, the recorder). Each reader's `[:or value :seon.db/error-result]` (about 150 references [V]) narrows to
+`value` with its family in S-reads. `error?` becomes total on the type: `(and (map? v) (contains? v :seon.error/type))`.
+`let-ok` goes with the round trips.
 
 ## 5. Instrumentation
 
-Arming stays on every function (`instrument.clj` `apply!`, `arm-var!`, `wrap-interpreted`, call preparation). The
-report becomes one function over Malli's report (`malli/core.cljc:2232-2244` [V]: `::invalid-input {:input :args
-:schema}`, `::invalid-output {:output :value :args :schema}`, `::invalid-arity {:arity :arities :args}`,
-`::invalid-guard`, the fork's `::invalid-schema-at-call {:arm :exception}`):
+Arming stays on every function (`seon.instrument` `apply!`, `arm-var!`, `wrap-interpreted`, call preparation). The
+report becomes one adapter over Malli's five report kinds (`core.cljc:2219-2240` [V]):
 
 ```clojure
-(defn- contract-error [sym kind {:keys [input output args value] :as data}]
-  (let [[schema checked] (if (= kind ::m/invalid-output) [output value] [input args])
-        problems (some-> (explained schema checked) me/with-spell-checking me/with-error-messages :errors)]
-    (error kind sym (str sym " " (name kind) ": " (pr-str (me/humanize {:value checked :errors problems})))
-           (cond-> {:seon.error/problems (mapv #(-> (select-keys % [:in :value :type :message ::me/likely-misspelling-of])
-                                                    (assoc :schema (m/form (:schema %)))) problems)}
-             (= kind ::m/invalid-arity) (assoc :seon.error/arities (:arities data))
-             (caller-frame) (assoc :seon.error/caller (caller-frame))))))
+(defn- checked [kind {:keys [input output guard args value]}]
+  (case kind
+    ::m/invalid-input  [input args]
+    ::m/invalid-output [output value]
+    ::m/invalid-guard  [guard [args value]]
+    (::m/invalid-arity ::m/invalid-schema-at-call) nil))      ; never explained
+
+(defn- contract-error [{:keys [sym digest]} kind data]
+  (let [[schema value] (checked kind data)
+        problems (some-> schema (explained value) me/with-spell-checking me/with-error-messages :errors)
+        caller? (#{::m/invalid-input ::m/invalid-arity} kind)
+        caller (when caller? (calling-definition))]                  ; as boundary-refusal reads it today
+    (error kind sym (str sym ": " (name kind))
+           (cond-> {:seon.error/digest (if caller? (some-> caller var-digest) digest)}
+             caller? (assoc :seon.error/caller caller)
+             problems (assoc :seon.error/problems (mapv problem problems))
+             (= kind ::m/invalid-arity) (assoc :seon.error/arities (:arities data) :seon.error/arity (:arity data))
+             (= kind ::m/invalid-schema-at-call) (assoc :seon.error/arm (:arm data))))))
+
+:report (fn [kind data] (throw (ex-info (str sym ": " (name kind)) (contract-error armed kind data) (:exception data))))
 ```
 
-Spell checking needs a closed map (probe: on Seon's open `:my.fs/read-request` the misspelled key yields only
-`missing required key` [V]). `explained` therefore explains the refusal path against `mu/closed-schema` and drops
-`::m/extra-key` errors that carry no suggestion, so open maps stay open (Q4). Refusal path only; probe cost of
-spell-check plus messages on the real schema: 207 µs per refusal, unarmed, default JVM 2026-10-07 [V].
+- **Blame** is captured at the report: input and arity blame the caller, with the caller's digest as it ran
+  (`refusal/calling-definition` and `refusal/var-digest`, as `boundary-refusal` captures both today [V]); output and
+  guard blame the callee by its armed digest. Nothing is re-read after a reload. SCI branch
+  attribution is kept.
+- **Schema-at-call**: its original exception is the `ex-info` cause, so `caught` keeps it in the chain; the failing
+  schema is never re-explained. An evaluation interrupt that Malli reported this way is rethrown untouched as the bound.
+- **Reporter failure**: if explaining or spell-checking throws, the reporter's exception becomes the primary error
+  (`:seon.error/exception`, blamed on the reporter), carrying the original report kind and the raw report data as
+  members; it is never relabeled as the contract error (`a-reporter-failure-is-not-relabelled-as-a-contract-violation`).
+  An interrupt propagates unchanged.
+- **No printing in producers**: the message names the function and kind; `problem` keeps `:in :value :type :message
+  ::me/likely-misspelling-of` and `(m/form schema)`; the value printer shows them at the edge. A message says why: a
+  failed `[:string {:min 1}]` on `""` reads "should be at least 1 character", never "expected a string, got a string"
+  (live run 1, defect 3).
 
-The error an agent sees for `(my.fs/read {:my.fs/pth "AGENTS.md" :my.fs/max-bytes 0})`, assembled from the real
-report and explain output probed on default today (`result/e8eb290e7fccc`):
+Spell checking needs a closed map (on Seon's open `:my.fs/read-request` the misspelled key yields only `missing required
+key` [V]): `explained` explains the refusal path against `mu/closed-schema` and drops `::m/extra-key` errors that carry
+no suggestion, so open maps stay open. Refusal path only: 207 µs per refusal, unarmed, default [V].
+
+`(my.fs/read {:my.fs/pth "AGENTS.md" :my.fs/max-bytes 0})`, from the real report and explain output on default:
 
 ```clojure
-{:seon.error/type      :malli.core/invalid-input
- :seon.error/operation my.fs/read
- :seon.error/message   "my.fs/read invalid-input: [{:my.fs/max-bytes [\"should be at least 1\"], :my.fs/pth [\"should be spelled :my.fs/path\"]}]"
- :seon.error/caller    user/...
+{:seon.error/type :malli.core/invalid-input :seon.error/operation my.fs/read
+ :seon.error/message "my.fs/read: invalid-input" :seon.error/caller user/...
  :seon.error/problems
  [{:in [0 :my.fs/max-bytes] :value 0 :schema [:int {:min 1}] :message "should be at least 1"}
   {:in [0 :my.fs/pth] :value "AGENTS.md" :type :malli.error/misspelled-key
    :message "should be spelled :my.fs/path" :malli.error/likely-misspelling-of [[0 :my.fs/path]]}]}
 ```
 
-Today the same call throws a 2,157-character map (about 540 estimated tokens) with 21 keys whose message names the
-missing `:my.fs/path` but never the misspelling, and carries `:seon.error/declared-schema` as metadata [V, probed].
+Today the same call throws about 540 estimated tokens in 21 keys, never naming the misspelling [V]. Deleted from
+`seon.instrument`: `problem-path`, `failure-cause`, arglist re-derivation, `supplied-entry-problems` through
+`violation`, `problem-location`, `boundary-refusal`, `minimal`, `refusal?` and the inner `refusal` (interrupt handling
+moves into the report); about 590 lines out, 50 in. From `seon.error`: `schema-expectation` through `scalar-text`,
+`evidence-path` through `call-lines` (the hand Levenshtein; Malli's is `error.cljc:245-280`).
 
-Deleted from `instrument.clj` (spans by top-level form [V]): `problem-path`, `failure-cause` `:172-197`; arglist
-re-derivation `:198-273` (Malli reports `:arities`); `supplied-entry-problems` through `violation` `:274-600`;
-`problem-location`, `boundary-refusal` `:701-777`; `minimal`, `refusal?`, `refusal` inside `compiled-wrapper`
-`:844-924`. About 590 lines out, about 40 in. Kept: `caller-frame` `:130-171`, the arming and restore machinery.
-From `error.clj`: `schema-expectation` through `scalar-text` `:865-1023`, `evidence-path` through `call-lines`
-`:1867-2010` (including the hand Levenshtein `:1949-1961`; Malli's is `error.cljc:245-280`).
+## 6. Recording and delivery
 
-## 6. Fault recording and delivery
-
-A fault is an error the boundary could not hand to an agent that caused it: anything thrown that is not a declared
-agent mistake. Minimal model, one upsert per signature:
+Seon's own failures are errors like any other. An error that reaches an entrant boundary is delivered as data in the
+reply of the agent whose evaluation or call it happened in, and recorded once per signature at the task home
+(`seon.task/home`, root's home branch, where tasks and messages to root live [V]) by one `:db.fn/call` at the writer,
+which receives the in-transaction database (`datahike/db/transaction.cljc:1172-1173` [V]); no counter, lock or
+occurrence queue:
 
 ```clojure
-{:seon.error/signature  (id/id [type operation producer (-> problems first :in) (frame-site frame)])
- :seon.error/type .. :seon.error/operation .. :seon.error/producer .. :seon.error/producer-digest ..
- :seon.error.occurrence/count n            ; noHistory, as today
- :seon.error.occurrence/last-at t
- :seon.error/data-blob digest              ; the first occurrence's whole referenced map, once by content
- :seon.error/agent [:seon.agent/id a]}     ; who it happened to; its reverse is the agent's fault list
+{:seon.error/signature (id/id [type operation producer problem-shape exception-class (frame-site frame)] 64)
+ :seon.error/type .. :seon.error/operation .. :seon.error/producer ..
+ :seon.error/occurrence-count n            ; incremented at the writer
+ :seon.error/shown "…"                     ; the first occurrence's shown text (value printer), stored once
+ :seon.error/latest-digest d               ; the producer digest of the latest occurrence
+ :seon.error/latest-at t
+ :seon.error/opened-at t}                  ; when the current opening began
 ```
 
-Delivery: when the upsert opens the signature (first time, or first since its resolution), the same transaction adds
-one message to the agent of the failing world, else root, its content the value printer's text of the map (as
-`message-tx`, `error.clj:1251-1267`, does now). The next context and the MCP reply both read that message and the
-receipt. Storage failure keeps today's one rule: the owner's stop request runs and the fault prints through
-`print-unrecorded!` (`fault.clj:341-358`). Increment is read-then-write in one `db.fn/call` at the writer [U: confirm
-Datahike's `:db.fn/call` on the pinned fork in slice S6].
+`problem-shape` is the sorted set of `[:in :type]` over the problems; `exception-class` is the root link's class for
+`:seon.error/exception`, else absent. So two contract refusals with different failure types, or two host exceptions of
+different classes at one frame, are different rows. Member names reuse installed keys where the meaning is the same
+(`:seon.error/occurrence-count`, `:seon.error/shown`) [U: P1 registry search].
 
-Goes: `prepare` and the bounded-admission stack `error.clj:183-805`, `commit-call`/`recording`/`occurred-since`
-`:1086-1774` (12 existence reads per repeat, `:1366-1388` [V]), the `-valid?` predicates and generators `:2607-2837`,
-`fault.clj` folding and cluster copy `:26-315` (Q5). `resolution` (`:1162-1220`) stays if Q5 keeps openings.
+**Opening.** The writer function reads the row on the in-transaction database. It OPENS when the row is absent or
+resolved (below). An opening, in the same home transaction: creates or links the producer's task through the canonical
+task writer (`seon.task/adopt-tasks-tx` on the in-transaction database; one task per producer, its aspect as
+`seon.error/producer-task` mints it today), linking the row from the task (`:seon.task/errors`, replacing
+`:seon.task/faults`); and writes ONE message to root, its content the error's message, referring to the row
+(`:seon.message/error`, new, so the message renders the recorded error as data). Root's home branch is the task home,
+so this is one transaction. A repeat increments the count and updates `latest-digest`/`latest-at`; it sends nothing.
 
-## 7. Deletion, conversion and slices
+**Every occurrence is attached and delivered.** The recorder returns a receipt `{signature count opened?}` for repeats
+too; the boundary assocs it as `:seon.error/recorded`. The settlement stores the signature on the evaluation or provider
+call where the failure surfaced (`:seon.cluster.eval/error-signatures`, `:seon.ai.attempt/error-signatures`, values,
+since the row lives at the home; agent-loop §2.1). The causing agent reads the error in that reply and in its history;
+an agent on another branch needs no copy. Every error in a reply's `:errors` and `:diagnostics` carries its result
+handle, so the agent can dig into it (`result/e…`); results are runtime only, so after a restart the handle answers
+that the live value is gone while the shown text and facts remain. This replaces the temporal fault window and its
+folded repeats.
 
-| File | Lines today [V] | After (estimate) |
-|---|---|---|
-| `src/seon/error.clj` | 2837 | ~450 (renders over `me/humanize`, finding, resolution) |
-| `src/seon/error/refusal.clj` | 830 | ~300 (`references` walker, `producer`, `error`, `fail!`, `caught`) |
-| `src/seon/fault.clj` | 453 | ~120 |
-| `src/seon/instrument.clj` | 1327 | ~780 |
-| `src/seon/db.clj` error helpers and read catches | ~150 | 0 |
-| 119 rethrows, 111 `read-refusal?` lines, 225 `diagnostic` literals | ~1,100 | ~250 |
-| `resources/seon/schemas/seon.error.edn` | 456 | ~120 |
+**Resolution** (rewritten): a recorded error is resolved
 
-About 5,000 lines out, about 1,900 in; `problems.clj` follows in a later spec. Estimates, not measurements.
+- when its producer is deleted (no definition carries its symbol on the task home's program), or
+- when its producer's current digest on the task home differs from `latest-digest` AND every success test naming its
+  task has a green run recorded on the task home after `latest-at` (`seon.task/task-edges` proofs,
+  `seon.test/verified?` with the time checked explicitly). A digest change alone never resolves a surviving producer.
 
-Slices; each lands through `bin/lane commit --test`, HEAD boots after each, and each is proven by publishing and adopting
-its schema change on a branch of the live store:
+Both are judged on the task home's program: a fix on a branch resolves when root merges it and its tests run green
+there. `seon.task/task-resolution` reads this through `seon.error/resolution` (rewritten in place).
 
-1. **S1 Type key.** Add optional `:seon.error/type` to the base; `refusal/error` stamps it from the alternative instead
-   of metadata; `fault.clj:420-427` and render selection read the key. Delete every `vary-meta ... declared-schema`.
-   Test: T1, T5.
-2. **S2 Constructor sweep.** New `error`/`fail!` signature; script the 225 `diagnostic` and 14 `error` call sites; make
-   type, operation, message required; drop `:at`/`:layer` from the base. Test: T1, T7.
-3. **S3 Boundary.** `caught` with `Throwable->map`; convert the entrants in §3; delete `walk-links`, frame
-   classification `refusal.clj:8-214` beyond `first-party-frame?`/`frame-function`, and `refusal/refusal`. Test: T2, T4.
-4. **S4 Reads throw.** Delete `db.clj:173-256` and the read catches (`db.clj:320, 1163, 2640, 2844, 2998, 3223, 3280,
-   3317, 3330`); script the 119 rethrows and 111 `read-refusal?` lines; narrow the 151 `:seon.db/error-result` unions.
-   Test: T2 plus the reaching tests of `my.program`.
-5. **S5 Instrumentation.** `contract-error` replaces §5's spans. Test: T3.
-6. **S6 Faults.** One upsert per signature; delete §6's spans. Test: T5, T6.
-7. **S7 Renders.** `render-ai`/`render-html` over the map and `me/humanize`; delete prose `error.clj:2505-2606`. Golden
-   transcripts regenerated once and compared in estimated tokens.
+An unknown or refused recording write runs the owner's stop request and prints through `print-unrecorded!`, never
+retried. Goes: `prepare` and the admission stack, `commit-call`/`recording`/`occurred-since` (12 existence reads per
+repeat), the `-valid?` predicates and generators, `seon.fault` folding, steward escalation and cluster copy; the
+`seon.fault` namespace keeps only what the recorder needs, renamed into `seon.error` in S-delete. The fault vocabulary
+(`seon.fault`, `:seon.fault/*`, `:seon.error.fault/*`, `:seon.cluster.eval/faults`, `:seon.task/faults`,
+`:seon.problems/open-fault`, "open-fault") retires; old rows are not migrated (§9.6).
+
+## 7. Slices
+
+Preparatory slices are invisible unless labeled; each lands through `bin/lane commit --test`, HEAD boots after each, and
+each is dual-reviewed. Then ONE dependency-complete cut, proven by publishing and adopting on a branch of the live store
+before it lands.
+
+**S1 (landed `33fb994f2`).** Optional type key; producer stamps and render/recording readers moved.
+
+**S1b Repair (a correction, not invisible).** (1) `seon.error/prepare` retypes the converted observation to its final
+declared schema (`:seon.db.write/error`, `:seon.schema/error`) before revalidation and before returning it as the
+source the writer stores; (2) convert the missed metadata reader and stamps: `test/seon/error/declared_identity_test.clj`,
+`test/seon/cluster/turn_test.clj` (four sites), `test/seon/turn_loop_test.clj` [V at `33fb994f2`; re-grep]; (3) stronger
+assertions: the immediate return, stored occurrence and `latest-fact` name the stored variant and validate against it
+(`schema-refusals-are-admitted-at-the-recorder`, `complete-error-children-validate-through-the-writer`), and the
+provider-failure, phase and opening fixtures assert the recorded variant. References:
+`malli/src/malli/core.cljc:1861-1905`.
+
+**P1 Accrete schemas.** Variant wrappers by script, `:seon.error/malformed-error`, `:seon.error/exception`, the five
+Malli report variants with their render pairs, `:seon.error/digest`/`caller`/`arm`/`arities`, the row members of §6,
+`:seon.task/errors`, `:seon.message/error`. The eval/call `error-signatures` are loop P0's. Nothing reads them; the
+active base is not tightened. Proven by publish+adopt on a live-store branch. References:
+`malli/src/malli/registry.cljc:17-96`; `malli/docs/reusable-schemas.md:116-120`.
+
+**P2 Constructor arities.** `[type operation message]` and `[type operation message data]` on the existing `error`,
+still producing at/layer; `fail!`. Invisible: no caller uses them yet. Test: T8, T12 (they reach the arity directly).
+
+**P3 Type producers, by owner family (BEHAVIOR CHANGE, declared per family).** Each family converts its sites to the
+new arities with named variants. Typing changes which render pair is chosen and the recorded signature, so each family
+slice states its render and signature change and lands with its regression. Test: T1 on `my.fs/read`; per-family `are`
+rows of input to type. References: `malli/src/malli/core.cljc:203-207`; `datahike/src/datahike/db/transaction.cljc:27-32`;
+`clj-reload/src/clj_reload/core.clj:367-381`.
+
+**P4 Pure calculations, unwired.** Dependency-independent functions with explicit arguments: `checked`/`contract-error`,
+the signature, the row-writer's transaction calculation. The active `resolution`, recorder and report stay wired until
+the cut. Tested on values (T3, T9) and at the REPL on the lane's own SCI branch. References:
+`malli/src/malli/core.cljc:2210-2240,3166-3187`; `malli/src/malli/error.cljc:332-390`; `malli/src/malli/util.cljc:128`;
+`datahike/src/datahike/db/transaction.cljc:1172-1173`.
+
+**Cut.** Together: the two-argument arity goes with every caller; base requires type, operation, message and drops
+`at`/`layer`; `error?` and every `(:seon.error/at x)` predicate; `caught` at every entrant of §3; the report adapter and
+attribution; the row writer, signature, row schema (`:seon.error/signature`'s row-schema `:seon.error/error` rewritten
+to §6's members), task/message opening, receipts carried through the shared settlement owner (agent-loop P1),
+resolution; every reader of recorded-error associations converted to carried signatures, including
+`seon.render.transcript` and the MCP run observation (`seon.cluster.agent/run-observation`), keeping their run grouping;
+`turn.batch/reply` carries error maps with their receipts and handles, not their messages; render selection by type.
+Root resets default once after it lands: recorded errors are not migrated. Test: T1-T12 plus the kept list of §8.
+References: all of P1-P4.
+
+**After the cut** (each a declared change where output differs): **S-reads**, one read family at a time, its refusal
+branches `fail!`, its rethrows and `[:or … :seon.db/error-result]` narrow, contracts and callers in one commit
+(References: `datahike/src/datahike/api/impl.cljc:30-42`; `datahike/src/datahike/pull_api.cljc:541-555`). This also
+ends error maps consumed as data by seq functions (live run 1: a refused `seon.db/q` became map entries under
+`sort-by`). **S-renders**: `render-ai`/`render-html` over the map, prose renderers in `seon.error` deleted, golden
+transcripts compared in estimated tokens (References: `clerk/src/nextjournal/clerk/viewer.cljc:1470-1497`;
+`fipp/src/fipp/engine.cljc:10-46`). **S-delete**: §5/§6 spans and their tests; `seon.fault`'s remainder folds into
+`seon.error`. The constructor moves into `seon.error` once its load-cycle consumers take it as an argument.
+
+Estimated sizes after: `error.clj` 2838 → ~450; `error/refusal.clj` 787 → ~330; `fault.clj` 453 → 0 (recorder ~140 in
+`seon.error`); `instrument.clj` 1326 → ~790; rethrows and literals ~1,100 → ~250; `seon.error.edn` 458 → ~140. About
+5,000 lines out, 2,000 in.
 
 ## 8. Tests
 
-One behavior per test, asserted on data:
+One behavior each, asserted on data:
 
-- **T1 returned error**: `my.fs/read` of an absent path returns a map whose `:seon.error/type` is
-  `:my.fs/not-found-error` and validates `:my.fs/tool-error`; nothing is thrown.
-- **T2 thrown error reaches the reply**: an SCI evaluation calling a function that `fail!`s gives a reply error `=` to
-  the thrown `ex-data` on type, operation and message, with a chain.
-- **T3 instrumentation**: the §5 call gives `:malli.core/invalid-input`, operation `my.fs/read`, and a problem at
-  `[0 :my.fs/pth]` whose `likely-misspelling-of` is `[[0 :my.fs/path]]`.
-- **T4 references**: an error whose data holds a connection carries its identity, not the object.
-- **T5 fault upsert**: the same failure twice gives one signature, count 2, one message to its agent.
-- **T6 unrecordable fault**: a refused write runs the stop request and prints (keep `fault_test.clj`'s case).
-- **T7 undeclared variant**: a returning function answering a type outside its `:multi` is an output refusal naming
-  the type (`::m/invalid-dispatch-value`).
+- **T1 returned error**: `my.fs/read` of an absent path returns `:my.fs/not-found-error`, valid as `:my.fs/tool-error`.
+- **T2 thrown error reaches the reply**: an SCI form calling a function that `fail!`s gives a reply error equal on type,
+  operation and message to the thrown `ex-data`, with a chain and a result handle.
+- **T3 report kinds**: an `are` table over input, output, guard, arity and schema-at-call giving the kind, the blamed
+  member and digest (caller for input/arity, callee for output/guard) and, for input, a problem at `[0 :my.fs/pth]`
+  suggesting `[[0 :my.fs/path]]`; schema-at-call keeps its exception in the chain; a reporter failure is
+  `:seon.error/exception` carrying the original kind.
+- **T4 references**: an error whose data holds a connection carries its identity, not the object; its stored shown
+  text prints an opaque value and an unrealized sequence by class without realizing it.
+- **T5 recording**: the same failure twice gives one row, count 2, one task, one message to root; both evaluations
+  carry the signature.
+- **T6 unrecordable**: a refused recording write runs the stop request and prints (`fault_test.clj`'s case, renamed).
+- **T7 undeclared variant**: a returning function answering a type outside its `:multi` is an output refusal naming the
+  type.
+- **T8 malformed thrown variant**: `(fail! :my.fs/not-found-error 'example/f "m")` throws `:seon.error/malformed-error`
+  whose problems name `:my.fs/path`.
+- **T9 chain and primary**: a two-link cause cycle terminates; a plain exception with a suppressed typed cleanup error
+  stays `:seon.error/exception` with the cleanup error in its chain.
+- **T10 resolution**: a new digest without a green run stays open; a green run after it resolves; deleting the producer
+  resolves.
+- **T11 recurrence**: a failure after resolution opens one new message and links the same task.
+- **T12 registry failure**: an error built while schema lookup throws is a literal, with no recursive explain.
 
-Deleted with the machinery they test (per-test triage in each slice): most of `test/seon/error_test.clj` (59
-deftests, 1702 lines: normalization, capping, fitting, notice prose, projection keys), `test/seon/error/refusal_test.clj`
-(17, frame classification and construction refusals), `test/seon/refusal_grammar_test.clj` (4), the violation-sentence
-tests in `test/seon/instrument_test.clj` (57 deftests; arming tests stay), `test/seon/db_error_test.clj` (2) and
-`test/seon/error_result_test.clj` (4). Kept and narrowed: `fault_test.clj`, `error/resolution_test.clj`,
-`error/attribution_test.clj`.
+Kept, adapted: `refusal-test` (cleanup failure beside the primary, worlds referenced, wrapped cause recorded whole);
+`instrument-test` (guard armed in JVM and SCI, deadline reported as the bound, reporter failure not relabeled, output
+refusal names its function); `attribution-test` (blame follows the producer, batch failure names the visible
+definition); `fault-test/an-unknown-write-outcome-stops-and-throws-without-retry`;
+`error-test/a-fault-site-survives-recompilation-and-moved-lines`. Concurrent repeats are a concurrency test: root decides
+its form. Deleted with their machinery (triage in S-delete): most of `error_test.clj`, the frame and
+construction-refusal cases of `refusal_test.clj`, `refusal_grammar_test.clj`, violation sentences in
+`instrument_test.clj`, `db_error_test.clj`, `error_result_test.clj`.
 
 ## 9. Owner decisions (2026-10-07)
 
-1. Type key: `:seon.error/type`.
-2. Instrumentation types: Malli's own keywords (`:malli.core/invalid-input` and friends), registered as variants.
-3. Variants: each returning function's `:multi` lists its own; boundaries accept `:seon.error/base`.
-4. Spelling suggestions: on the refusal path only, explain against `mu/closed-schema` and keep extra-key errors that
-   carry a suggestion; valid calls pay nothing.
-5. Faults: one upsert per signature with count, first occurrence blob, one message per opening and resolution by
-   digest plus a green run; steward, escalation, folding and the branch-to-cluster copy go.
-6. No `:seon.error/at` on the map; the recorder stamps the occurrence, a returned error rides its evaluation's time.
-7. The constructor lives in `seon.error.refusal` now and merges with `seon.error` after S6.
+1. One map: type (`:seon.error/type`), operation, message; Malli's own keywords type instrumentation errors.
+2. Errors are validated in the ONE constructor against their named variant with Malli's cached explainer, covering
+   both carriers; returning functions' `:multi` output contracts restrict allowed variants; generic boundaries accept
+   `:seon.error/base`. An error stays buildable when the registry fails: no recursive explain while reporting.
+3. Returned when answering is the job, else thrown in `ex-info`; taken back once at the boundary.
+4. Instrumentation from Malli's report; refusal-path spelling suggestions against `mu/closed-schema`.
+5. No fault concept: Seon's own failures are errors, recorded once per signature (64 characters) at the task home with a
+   count, the first occurrence's shown text, the latest producer digest and time, a task and one notification. Every
+   occurrence is attached to the evaluation or call where it happened. A deleted producer's error resolves on deletion;
+   otherwise resolution = the producer changed AND the task's success tests have a green run since. No escalation,
+   stewards, folding or branch-to-cluster copy.
+6. No `:seon.error/at` on the map. Recorded errors are not migrated: default is reset after each cut that changes them.
+7. Work is cut as preparatory slices, then one dependency-complete cut proven by publish+adopt on a live-store branch.
+   Loop P0-P1 (schema, shared settlement owner) land before this cut, which moves the settlement's error duty from the
+   temporal window to carried receipts; this cut lands before the loop cut.
+8. Results are runtime only: an error's stored form is its shown text and ids; every error in a reply has a result
+   handle while its live value exists.

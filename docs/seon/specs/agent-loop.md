@@ -2,286 +2,464 @@
 type: spec
 status: reviewed
 created: 2026-10-07
-tags: [spec, agent, loop, context, cache]
+revised: 2026-10-07
+tags: [spec, agent, loop, context, cache, task]
 ---
-# The agent loop: one pass, facts on the agent (reviewed 2026-10-07)
+# The agent loop: one pass, facts on the agent
 
 What exists: a model reply takes three Flow passes and two turn entities (system turn + `:call` turn), an intent commit,
-a capture, four bounds and boot recovery (`tmp/agent-loop/map.md` §0-1; `src/seon/turn.clj` 6055 lines). After: ONE
-Flow transform per pass reads one database value, asks "is there work?" of the agent's own facts, renders its context
-live through `seon.cache`, calls the provider, evaluates the reply through the one fold and writes ONE settlement
-transaction (evaluations, program facts, the call, the agent's facts, deliveries). Principal approach: no turn or run
-entity; evaluations and provider calls are their own entities referring to the agent; nothing is ever "open".
+a capture, four bounds and boot recovery (`docs/research/agent-platform/2026-10-07/agent-loop/map.md`;
+`src/seon/turn.clj` 6037 lines). Live run 1 (`docs/research/agent-platform/2026-10-07/live-run/report.md`) shows the
+existing loop runs a real DeepSeek agent end to end; what failed it was context and protocol, not turn machinery: no
+system message, no way to run its proof, a shipped stop string cutting its replies, Markdown read as code.
 
-Owner rulings implemented (2026-10-07): agent information on the agent; evaluations ref the agent plus an ordinal and
-the call that produced them; origin distinguishes model / outside / test; context rendered live at call time, cached
-by content and read evidence, never stored; the call stores its basis; no system turns in the new loop (the old
-selection code stays, unused and untested); crash loses the in-flight reply; exactly three bounds; MCP uses the same
-evaluate-and-store path without a provider call.
+After: ONE Flow transform per pass reads one database value, asks "is there work?" of the agent's own facts, builds a
+provider request from a SYSTEM MESSAGE and a TASK-GENERATED context rendered live through `seon.cache`, calls the
+provider, evaluates the reply through the one fold, hands everything to the ONE shared settlement owner (one
+transaction), and, when the pass changed code its task's success tests reach, runs those tests: all green completes
+the task. Principal approach: no turn or run entity; a pass is an id minted before evaluation; evaluations and provider
+calls are entities referring to the agent; completion is test evidence recorded through the task writer.
 
-Legend: **[V]** read or probed today at HEAD `a5a21fd58`; **[U]** unverified, proven in the named slice.
+Rulings: §8. **[V]** read or probed 2026-10-07 (HEAD `42e569d9d`, default running it); **[U]** proven in the named
+slice. Functions are cited by name: line numbers drift.
 
 ## 1. The agent entity after
 
 Existing members stay: `id`, `branch`, `cluster`, `namespace`, `settings` (component), `archived-tx`,
-`admission-closed-tx` (`resources/seon/schemas/seon.agent.edn:1-60` [V]). `runtime` stays for `listens` only.
-Added (accretion, all optional so adoption is incremental):
+`admission-closed-tx` (`seon.agent.edn` [V]); `runtime` stays for `listens` only. Added (accretion, all optional,
+all declared `:seon.wake/context-inert true` so the old loop's generated reads never re-derive them), written on the
+agent's row on its HOME branch in the same transaction as its evaluations (`home-call` keeps the cluster row for
+routing; status and root read the home row):
 
 | Attribute | Schema | Writer | Readers |
 |---|---|---|---|
-| `:seon.agent/last-ordinal` | `[:int {:min 0}]` | settlement's `record-call`, at the writer | `record-call` (next ordinal); context (history range) |
-| `:seon.agent/current-ns` | `:seon.db/ref` to `:seon.ns/name` | every settlement (model, outside, test): the last form's ending namespace | next pass's starting namespace (replaces `fold-namespace` turn.clj:4261, `previous-ending-namespace` :563); context frame |
-| `:seon.agent/answered-t` | `:seon.db/basis-t` | model-pass settlement whose call returned text: the context's basis | `work`; context (messages "new since") |
-| `:seon.agent/disposition` | `[:enum :working :wait :completed]` | model-pass settlement: the disposing form's value, else `:working` | `work`; context frame; status |
+| `:seon.agent/last-ordinal` | `[:int {:min 0}]` | settlement's `record-call` at the writer | `record-call` |
+| `:seon.agent/current-ns` | `:seon.db/ref` to `:seon.ns/name` | every settlement: the last form's ending namespace | the next pass's starting namespace (replaces `fold-namespace`, `previous-ending-namespace`); context frame |
+| `:seon.agent/answered-t` | `:seon.db/basis-t` | model-pass settlement whose call returned text: the context's basis | `work`; the inbox read |
+| `:seon.agent/disposition` | `[:enum :working :wait :completed :returned]` | model-pass settlement and completion (§4) | `work`; context frame; status |
 
-Evaluation (`:seon.cluster.eval/receipt`, `seon.cluster.eval.edn:49` [V]) gains `:seon.cluster.eval/agent` (ref,
-indexed), `:seon.cluster.eval/call` (optional ref to the provider call) and `:seon.cluster.eval/origin`
-(`[:enum :model :outside :test]`, replacing `:author`, Q1); `:seon.cluster.eval/run` becomes optional. `ordinal` is
-per agent, monotonic, assigned at the writer.
+**Evaluation identity.** A pass mints its id before evaluation (`seon.id/id`, a fresh event identity). Each form's
+evaluation id is the installed two-argument `(id/evaluation pass-id position)`, position 0, 1, … within the pass; every
+current minter already uses this arity with the run id [V], so the old loop passing its run id as the pass id keeps
+every id and handle unchanged. Result handles `result/e<id>` are minted during evaluation and never change.
+`:seon.cluster.eval/ordinal` keeps its meaning, the position. The agent-wide order is a separate value assigned at the
+writer inside the settlement: `:seon.cluster.eval/agent-ordinal` = `last-ordinal + 1 + position`. Evaluation
+(`:seon.cluster.eval/receipt` [V]) gains `agent` (ref, indexed), `agent-ordinal`, `pass`, `call` (optional ref),
+`origin` and `error-signatures` (errors §6); `run` becomes optional on the receipt and on `:seon.eval/entity`.
 
-Provider call: the existing `:seon.ai/attempt` entity (`seon.ai.attempt.edn` [V], all 12 attributes installed on
-default [V, probe]) gains `:seon.ai.attempt/agent` (ref), `:seon.ai.attempt/basis-t` (the context's basis; rebuild =
-the context render over `(d/as-of db basis-t)`, exact while the render code is unchanged) and
-`:seon.ai.attempt/characters` (prompt length; `model-calibration`, prompt.clj:85, joins on the call itself instead of
-the capture).
+**Origin.** `:seon.cluster.eval/origin` is `[:enum :model :outside :test]`. It replaces `:author` and the old
+`:seon.eval/origin` string (the generating entity of system-turn bookkeeping; installed, `:db.type/string` [V]): the
+producers, receipt schemas and readers convert together in the loop cut; the two never coexist as current facts.
+
+**Provider call.** The existing `:seon.ai/attempt` entity [V] gains `agent` (ref), `basis-t`, `characters` (prompt
+length) and `error-signatures`.
 
 **Is there work?** Derived from one database value; nothing stored for it:
 
 ```clojure
-(defn work [db agent-id cap]                ; cap = :seon.config.run/max-episode-runs (Q6)
-  (let [a        (db/pull db [:db/id :seon.agent/answered-t :seon.agent/disposition] [:seon.agent/id agent-id])
-        [wake-t outside-t] (wake-ts db (:db/id a))   ; ONE walk of wake/agent-wake-datoms (wake.clj), newest first:
-                                                     ; newest listened wake, newest OUTSIDE wake (outside-wake-t turn.clj:2627)
-        calls    (or (db/q '[:find (count ?c) . :in $ ?a ?since
-                             :where [?c :seon.ai.attempt/agent ?a]
-                                    [?c :seon.ai.attempt/basis-t ?b] [(>= ?b ?since)]]
-                           db (:db/id a) outside-t) 0)]
-    (when (< calls cap)
-      (cond (> wake-t (or (:seon.agent/answered-t a) 0)) :answer      ; a wake the model has not seen
-            (= :working (:seon.agent/disposition a))      :continue))))
+(defn work [db agent-id {:keys [cap provider?]}]   ; provider? = no-provider is off, or a fixture :seon.ai/send! is supplied
+  (let [a (db/pull db [:db/id :seon.agent/answered-t :seon.agent/disposition] [:seon.agent/id agent-id])
+        {:keys [opening anchor]} (wake-ts db (:db/id a))     ; one fold over every candidate wake datom
+        calls (or (db/q '[:find (count ?c) . :in $ ?a ?since
+                          :where [?c :seon.ai.attempt/agent ?a] [?c :seon.ai.attempt/basis-t ?b] [(>= ?b ?since)]]
+                        db (:db/id a) anchor) 0)]
+    (when (and provider? (< calls cap))
+      (cond (> opening (:seon.agent/answered-t a 0))  :answer
+            (= :working (:seon.agent/disposition a)) :continue))))
 ```
 
-An inside wake (agent-sent message) makes work but never refills the cap; a failed call counts against the cap and does
-not advance `answered-t`, so retries stop at the cap (Q3). Cost: one pull, one wake walk (O(the agent's wakes) index
-seeks, measured 0.163 ms anchored, turn.clj:2640 docstring [V]), one count over the agent's calls since the anchor.
+`wake-ts` is today's `seon.turn/outside-wake-t` fold moved to `seon.cluster.wake` and widened to two maxima in one pass
+over `wake/agent-wake-datoms` on `(db/history db)`:
+
+- `opening`: the MAXIMUM transaction of a wake on a call-opening attribute (`wake/turn-opening-attributes`,
+  `:seon.wake/opens-turn? true`), default 0. A schedule firing (`opens-turn? false` [V]) never opens a call.
+- `anchor`: the MAXIMUM transaction of a listened wake from OUTSIDE the agent (`wake/inside-wake?`), default 0. A firing
+  refills the cap; an inside wake (agent-sent message, own effect) never does.
+
+Both are maxima over all candidates: `agent-wake-datoms` concatenates AVET slices ordered by entity, not transaction
+[V], so no early exit. A failed call counts against the cap and does not advance `answered-t`: retries stop at the cap.
+With no provider (`:seon.config.ai/no-provider`, true on default [V], enforced today only in the old loop, while
+`ai/complete` never reads it [V]) a model pass is never admitted: no call, no spin. Cost: one pull, one fold over the
+agent's lifetime wake datoms (O(wakes), by design), one count over its calls since the anchor.
 
 ## 2. The pass
 
-`seon.agent.loop/pass` replaces `seon.turn/step` (turn.clj:5807-6055) as the `:seon.agent/turn` proc's transform in
-`graph-definition` (cluster/agent.clj:563); the mailbox and schedule procs stay.
+`seon.agent.loop/pass` replaces `seon.turn/step` as the turn proc's transform in `seon.cluster.agent/graph-definition`;
+mailbox and schedule procs stay; `turn-step`'s publish-thread and clear-interrupt protocol stays around it.
 
 ```clojure
-(defn pass [{:keys [cluster agent-id wake] :as state} in msg]   ; Flow transform
-  (let [conn  (:seon.db/connection cluster)
-        db    (db/db conn)
-        sub   (when (= in :seon.agent/request) msg)                       ; MCP eval_clj / test / fixture
-        work  (when-not sub (work db agent-id (cap db agent-id)))]
-    (if-not (or sub work)
-      [state nil]                                                          ; idle: writes nothing
-      (let [ctx    (when work (context db agent-id))                       ; §3, through seon.cache
-            {:seon.ai/keys [primary settings]} (when work (provider-targets db cluster agent-id)) ; turn.clj:4064, moved
-            reply  (when work (ai/complete (db/carried-projection db)      ; ai.clj:1269, bounded by timeout-ms
-                                           (assoc primary :seon.ai/prompt (:text ctx))))
-            text   (or (:seon.cluster.reply/text sub)
-                       (when-not (failed? reply) (ai/completion-text reply)))     ; ai.clj:833
-            sources (when text ((if sub code-sources planned-sources) text))     ; turn.clj:3060 / 3047
-            batch  (when (seq sources)
-                     (turn/evaluate-sources                                 ; turn.clj:4875 -> batch/evaluate-batch :650
-                      {:seon.turn.loop/cluster cluster :seon.db/db db :seon.agent/id agent-id
-                       :seon.cluster.reply/sources sources
-                       :seon.ns/name (current-ns db agent-id)}))            ; in memory; writes nothing
-            tx     (settlement {:db db :agent-id agent-id :batch batch
-                                :origin (cond sub (:origin sub :outside) :else :model)
-                                :call (when work (call-tx agent-id ctx settings reply))
-                                :answered (when (and work text) (db/basis-t db))})
-            commit (settle! conn tx)]                       ; ONE transaction through turn.batch/settle (turn/batch.clj:683), §2.1
-        (some-> (:seon.agent/reply sub) (async/put! (turn.batch/reply commit)))
-        (when work (async/offer! wake :seon.agent/wake))                    ; rewake: re-derive, maybe idle
-        [state nil]))))
+(defn pass [{:keys [cluster agent-id wake] :as state} in msg]            ; Flow transform
+  (let [sub   (when (= in :seon.agent/request) msg)                     ; MCP eval_clj (SCI or JVM) / test
+        reply (:seon.agent/reply sub)]                                   ; bound before anything can throw
+    (try
+      (let [conn (:seon.db/connection cluster)
+            db   (db/db conn)
+            work (when-not sub (work db agent-id (admission db cluster agent-id)))]
+        (when (or sub work)
+          (let [pass-id (id/id)
+                call    (when work (provider-call db cluster agent-id pass-id))  ; §3 context + ai/complete; any throw is the call row's error
+                text    (or (:seon.cluster.reply/text sub) (call-text call))
+                sources (when text ((if sub code-sources planned-sources) text))
+                batch   (when (seq sources)
+                          (turn/evaluate-sources                          ; -> batch/evaluate-batch, the one fold
+                           {:seon.agent/pass {:id pass-id :agent agent-id :origin (if sub (:origin sub :outside) :model)}
+                            :seon.batch/evaluate (:seon.batch/evaluate sub)   ; JVM stage for jvm-run; SCI by default
+                            :seon.sci/context (sci.eval/acquire-pass-context cluster agent-id)  ; context + unbound-result diagnostic
+                            :seon.ns/name (current-ns db agent-id) :seon.db/db db :seon.turn.loop/cluster cluster
+                            :seon.cluster.reply/sources sources}))
+                settled (turn/settle-pass! cluster {:pass-id pass-id :agent-id agent-id :batch batch :call call
+                                                    :answered (when (and work text) (db/basis-t db))})]  ; §2.1, total
+            (when reply (async/put! reply (turn.batch/reply (:batch settled))))
+            (when (= :committed (:outcome settled))
+              (complete-if-proven! cluster agent-id settled)                ; §4
+              (when work (async/offer! wake :seon.agent/wake))))))
+      (catch Throwable t
+        (let [e (error/caught t)]                                        ; errors §3: recorded, receipt attached
+          (when reply (async/offer! reply {:seon.agent/error e}))
+          (throw t)))                                                    ; Flow's error route; the supervisor decides
+      (finally (some-> reply async/close!)))
+    [state nil]))
 ```
 
-Reused unchanged: the fold (`seon.batch/evaluate-batch` batch.clj:650 via `evaluate-sources`, which already sets
-`:seon.batch/observe` so derive sees writes, run.md D8), `planned-sources`/`code-sources`, `ai/complete`,
-`ai/completion-text`, `ai/model-observation-tx` (ai.clj:878), `turn.batch/program-facts-call` (turn/batch.clj:601),
-`turn.batch/revalidate` (:650) and the settle retry, `evaluation-facts` (turn.clj:97), `message/reply` (message.clj:86)
-and `message/delivery` (:179), `problems/form-problem`, `measurement/significant-tx`, `sci.eval/install-evaluated-rows!`
-(sci/eval.clj:1524) after commit. `evaluate-sources` takes a `:seon.turn/id`; the pass supplies the call id (model) or
-a fresh id (outside) as a value only, no entity [U: S1 confirms nothing inside the fold pulls it].
+- `admission` reads the effective settings once: the cap `:seon.config.run/max-episode-runs` and `provider?`. A test or
+  fixture supplies `:seon.ai/send!` as a request value; nothing is redefined.
+- `provider-call` gives the call an identity before the context is built, then renders the context (§3) and calls
+  `ai/complete` bounded by its timeout. A context that throws, cannot be rendered or exceeds the budget, and a provider
+  failure, are the call row's error (recorded, with its receipt) and no evaluation: the call counts against the cap, so
+  it cannot spin. It is `provider-targets` plus `ai/complete`, producing the pure call row (`call-tx`, today's attempt
+  row inside `record-attempt!`, made pure) with `agent`, `basis-t`, `characters`, usage, error and
+  `ai/model-observation-tx`.
+- A model pass has no reply port; only submissions answer. One request owns one reply: every terminal path (settled,
+  refused, thrown, stopped) answers it or closes it.
+- `settle-pass!` is total, as `settle-evaluated!` is today [V]: an installation, recording or settlement failure after
+  evaluation returns the held batch with the failure beside it as a recorded error, never replacing evaluated values.
+- The request's evaluate stage is a value: the SCI fold by default, the JVM stage for MCP `jvm-run`, so JVM mode stays
+  JVM mode through the same pipeline (nREPL's `::read-fn`/`::eval-fn` seam,
+  `nrepl/src/clojure/nrepl/middleware/interruptible_eval.clj:72-125`).
+- The provider request carries no stop sequence: `config/default.edn` ships `:seon.config.ai/stop ["#:seon.repl"]` [V],
+  which cut 5 of 11 replies in live run 1 because the task's own code contained it (task
+  `seon.ai/the-shipped-stop-sequence-cuts-replies-that-contain-it`). A reply the provider cut for any reason other than
+  its natural end is an error value on the call that the agent reads.
+- The reply segmenter reads only forms: prose, Markdown headings and backticked spans become comments
+  (task `seon.turn/a-markdown-heading-in-a-reply-is-read-as-code`: `planned-sources` keeps `## What` as source [V]).
 
-### 2.1 The one settlement transaction
+### 2.1 The one settlement owner
 
-1. `[:db.fn/call seon.agent.loop/record-call {...}]` at the writer: reads `:seon.agent/last-ordinal` on the writer's
-   basis, assigns `n+1…n+k`, writes one evaluation per entry (`evaluation-facts`) with `agent`, `ordinal`, `origin`,
-   `call`; asserts `last-ordinal` and `current-ns`. Ordinals decided at the authority, so the MCP thread's JVM run and
-   the agent's proc never collide.
-2. Program facts: `turn.batch/program-facts-call` with the batch's folded program.
-3. The call (model passes): `call-tx` = the attempt row now built inline in `record-attempt!` (turn.clj:~4160-4224)
-   made pure, plus `agent`, `basis-t`, `characters`, its error fact, `ai/model-observation-tx`. No `:seon.turn/attempts`.
-4. Agent facts (model passes): `answered-t` when the call returned text; `disposition` from the publish stage's
-   `:my.turn/value` (`my.turn.edn` `:wait`/`:completed`), else `:working`.
-5. Deliveries: a `:completed` value replies to the sender of the newest wake message at the basis (`message/reply`);
-   a red form of an owned namespace routes its problem assignment (today's `evaluation-terminal-data` turn.clj:3330,
-   rewritten without turn queries, ~40 lines).
-6. Measurement rows and staged blobs as `turn.batch/settle` (turn/batch.clj:683) already commits them.
+The existing settlement writer (`seon.turn/settle-evaluated!` → `settle-batch!` [V]) is generalized IN PLACE into
+`settle-pass!`, taking a pass instead of a turn; it is also the `:seon.batch/settle` stage of the JVM and test entrants,
+replacing `turn.batch/settle`'s run-shaped `record-facts` [V]. One owner, no copied private helpers. One transaction
+holds:
 
-A failed call with no forms is the same transaction minus 1-2 and 5. A settlement the writer refuses after the one
-revalidate retry keeps every value; the boundary records it as a fault (errors.md §3) and writes the call alone so the
-cap still counts it. Nothing is written before the settlement: a crash or stop mid-pass loses that reply only;
-`answered-t` did not move, so the next arm re-derives `:answer`.
+1. `[:db.fn/call seon.turn/record-call {...}]` at the writer: reads `last-ordinal` on the in-transaction database,
+   assigns each row's `agent-ordinal`, asserts `last-ordinal` and `current-ns`; the MCP thread and the agent's proc
+   never collide.
+2. Complete evaluation rows: attributes derived from the `:seon.cluster.eval/receipt` schema (today's
+   `receipt-terminal-attributes`), namespace upserts placed before the rows that ref them (`evaluated-namespaces`),
+   read-evidence component rows (`receipt-read-evidence-tx`), `agent`, `pass`, `origin`, `call`, and each evaluation's
+   `error-signatures` from the receipts its batch entry carried (errors §6). Shown text is stored; result values never
+   are (results are runtime only).
+3. Program facts: `turn.batch/program-facts-call`.
+4. The call row (model passes) with its `error-signatures`; a tempid the evaluation rows ref.
+5. Agent facts (model passes): `answered-t` when the call returned text; `disposition` (§4).
+6. Deliveries: a red form of an owned namespace routes its problem assignment (`evaluation-terminal-data`, rewritten
+   without turn queries).
+7. Measurement rows (`measurement/significant-tx`).
 
-### 2.2 Bounds (exactly three)
+Staged blobs publish around the commit (`blob/with-publication!` [V]): today the run's reply text above the blob
+threshold and recorded-error evidence; after the loop cut the raw reply is not stored and recorded errors store shown
+text (errors §6), so only shown text above the threshold remains staged. Committed definitions install after the commit
+(`sci.eval/install-evaluated-rows!`).
+
+**Preparation keeps the old duties.** Until the loop cut the old loop calls `settle-pass!` with an explicit mapping:
+its run id as the pass id, its turn and run rows, run closing, old completion delivery and disposition, and (until the
+errors cut) the folded-fault drain are written exactly as today; each leaves at its own cut. Test-world custody
+(`turn/world.clj`) is preserved [U: P1].
+
+**Outcomes.** `settle-pass!` answers `{:outcome :committed|:refused|:unknown :batch settled-batch}`:
+
+- *Committed*: the batch carries committed evaluation ids; the caller replies from it.
+- *Definitely refused* (the writer rejected it): revalidate per form and retry once without the refused program facts,
+  on a freshly acquired head (`turn.batch/revalidate`; today it rebases on the head captured before the refusal); forms
+  are never re-evaluated. A second refusal records the error and writes the call row alone, under its original
+  identity, so the cap counts it.
+- *Unknown* (`:seon.db/transaction-outcome-unknown` [V]): no retry and no call-alone write; the write may still commit.
+  The agent stays unavailable until the writer reports that transaction's terminal outcome, then derives work from the
+  resulting facts; it never re-arms against a head the outstanding write may still change [U: name the `seon.db`
+  owner that holds the outstanding transaction; if it cannot report the outcome, the agent stays unavailable with a
+  diagnostic]. Storage failing stops the graph: the supervising owner (`seon.cluster.agent`) disarms it.
+
+**Effects.** Forms run with the agent's real connection: a message sent, a task written, a file edited or a remote
+request made is durable when the form runs, before the settlement. The loop writes no intent, capture or attempt before
+the settlement. A crash or stop mid-pass loses the loop's bookkeeping of that pass (evaluation rows, call row,
+`answered-t`), never a completed effect; the next pass re-derives `:answer` and may repeat an effect unless that
+effect's owner is idempotent.
+
+### 2.2 Bounds (exactly three policy dials)
 
 | Bound | Owner | Fires as |
 |---|---|---|
-| Provider timeout `:seon.config.ai/timeout-ms` (180000 on default [V]) | `ai/complete` | `::timeout` error on the call record |
-| SCI evaluation time limit per form | `seon.sci.eval` (`:seon.sci.eval/time-limit-ms`, exists) | the form's error value |
+| Provider timeout `:seon.config.ai/timeout-ms` (180000 on default [V]) | `ai/complete` | `::timeout` error on the call row |
+| SCI evaluation time limit per form (dial `:seon.config.eval/time-limit-ms`, world member `:seon.sci.eval/time-limit-ms`) | `seon.sci.eval` | the form's error value |
 | Model calls per outside wake `:seon.config.run/max-episode-runs` (100 on default [V]) | `work` | no work; the frame shows `calls left: 0 of N` |
 
-The MCP await (`evaluate-source!`, cluster/agent.clj:781) waits on its reply port with no dial of its own: the pass it
-waits for is bounded by the three above. A stop (`disarm!` agent.clj:1492) still interrupts and joins the transform;
-it writes nothing (`record-interruption!` :1462 goes).
+Not dials, and kept: the terminal answer or close of every request (§2); stop. `disarm!` stops the Flow graph,
+interrupts the transform and joins its executor under a deadline every lifecycle caller supplies
+(`:seon.await/deadline-nanos`, which it already accepts; `release-context!` and re-arm, which pass none today [V], pass
+the deadline they hold) instead of `turn-completion-backstop-ms`; while exit is unknown it keeps ownership of the
+execution and the agent stays unavailable; then it closes queued requests and their replies. SCI interrupts
+interpreted code, not host calls (`sci/doc/interrupt.md:52,63-87`): JVM-mode evaluation and host calls that ignore
+interruption have no finite bound, and an MCP caller awaiting such a pass waits until it exits or the agent is
+disarmed. The completion permit, backstop and `record-interruption!` go.
 
-## 3. Context through the one cache
+## 3. Context: a system message and task-generated context
 
-`seon.agent.loop/context` is the agent's AI render (Q5) and the only prompt producer:
+The provider request is two messages (`ai/request-body` already sends `:seon.ai/system` as a system message and
+`:seon.ai/prompt` as the user message [V]; nothing produces a system message today):
+
+- **System message**: `seon.agent.loop/system-message` [V, installed, unwired]: the REPL protocol `(help)` answers
+  (forms only, Markdown is read as code, run named tests with `my.test/check`, find with `clojure.repl/apropos` and
+  `my.program/source`; target: give back a broken task with `my.task/complete!`, §4), then each toolkit namespace's
+  own documentation. The same text on every call of one agent, so the provider caches it. Measured on default: 15,676
+  characters (about 3.9k estimated tokens), 446 ms per build [V], so it is a `seon.cache` kind keyed by the toolkit's
+  program identity, built once per program change, not per pass.
+- **Task context**: `seon.agent.loop/task-context` [V, installed, unwired]: units `{why form value}` generated from the
+  task the agent holds: the task, its edges, each proof test's recorded result, failing assertions and source, each
+  must-read function's doc and source, the schemas its contracts name, other tasks naming the same functions, recorded
+  errors raised by them. Each form is a requery the agent can run; `context-text` prints each value whole through the
+  value printer. Measured: 3.7k-7.5k estimated tokens for three real tasks, 13-27 ms [V, context-examples].
+- **Inbox**: wakes since `answered-t`: messages and task notifications for this agent, each shown once.
+- **History**: this agent's own model evaluations (origin `:model`), selected newest-first under the remaining budget,
+  shown oldest-to-newest. Outside runs under the agent's id (an observer's MCP setup) are not history: live run 1 spent
+  27-42% of every prompt on them.
+- **Frame**: identity, current namespace, disposition, `calls left: n of N`.
 
 ```clojure
-(defn context [db agent-id]
-  (let [a       (db/pull db agent-pull [:seon.agent/id agent-id])
-        live    [(derived db [::task agent-id]  #(task/steps-view % agent-id))           ; task.clj:510: intent + current step
-                 (derived db [::inbox agent-id] #(messages-since % agent-id (:seon.agent/answered-t a)))]
-        ords    (db/q '[:find ?o ?id :in $ ?a :where [?e :seon.cluster.eval/agent ?a]
-                        [?e :seon.cluster.eval/ordinal ?o] [?e :seon.cluster.eval/id ?id]] db (:db/id a))
-        units   (mapv (fn [[_ id]] (seon.cache/lookup ::eval-unit [id @sci.eval/loaded-identity profile-id] weigh
-                                                       #(repl/render-ai (db/pull db eval-pull [:seon.cluster.eval/id id]))))
-                      (sort-by first ords))
-        history (prompt/select units budget calibration agent-id profile)]                ; prompt.clj:302, pure
-    {:text (str (render-live live) (prompt/compose history) (frame a calls-left))
-     :basis-t (db/basis-t db) :characters ...}))
+(defn context [db home-db agent-id]
+  (let [a      (db/pull db agent-pull [:seon.agent/id agent-id])
+        cal    (prompt/model-calibration db model prior agent-id)
+        system (cache/lookup ::system (toolkit-identity db) weigh #(system-message db agent-id))
+        task   (derived home-db [::task agent-id] #(task-context % (held-task % agent-id)))   ; tasks live at the home
+        inbox  (derived db [::inbox agent-id (:seon.agent/answered-t a)] #(inbox % agent-id))
+        fixed  (price [system task inbox (frame a calls-left)] cal)]                       ; separators included
+    (if (> fixed budget)
+      (error :seon.agent.loop/unsendable-context-error `context "The required context exceeds the budget." {...})
+      (let [sel (prompt/select (history-units db (:db/id a) profile) (- budget fixed) cal agent-id profile)]
+        {:system system :prompt (compose task inbox sel frame) :basis-t (db/basis-t db) :characters ...}))))
 ```
 
-- **Evaluation units** are keyed by `[eval-id loaded-identity profile-id]` in kind `::eval-unit`. An evaluation is
-  written once by its settlement and never changed (the system turn's evidence refresh, turn.clj:2164-2181, is what
-  mutated them; it is not on this path), so the key never goes stale and nothing invalidates it. `repl/render-ai`
-  reads only the entity, its namespace name and renderer symbol (repl.clj:487-575 [V]) once the `changed?` query on
-  turns (:525-539) goes in S4. Loaded identity in the key re-renders after a reload changes the printer.
-- **Live reads** (task + current step, messages since `answered-t`) use `seon.health/derived` (health.clj:113 [V]):
-  `seon.cache` keyed by the revisions of the attributes the derivation actually read, so a commit touching none of them
-  is a hit. Faults reach the agent as messages (errors.md §6), so they arrive through the inbox read.
-- **Not used**: `render.web/derive-context!` (web.clj:2461) and its per-context atom (`render/shared-cache`,
-  render.clj:~1690), `render.walk/history` (walk.clj:841), the system turn. They stay loadable for the open context
-  design; the new loop calls none of them and they get no new tests.
+- **Budget.** One total budget, `:seon.config.ai/prompt-token-budget`, covers the system message, mandatory units,
+  frame and separators, priced first; if they exceed it the context is the `unsendable-context-error`, recorded on the
+  call (§2); nothing is clipped. `prompt/select` gets a `[:int {:min 0}]` remainder (its contract takes the dial schema,
+  minimum 1, today [V]) and may keep zero units: the keep-the-newest exception goes, and the elision's own text is
+  priced. Budget 1,000,000 on default [V] must not exceed the configured model's window [U: P4].
+- **Tasks are read at the home.** Tasks, assignments and steps live at the task home (`seon.task/agent-task`,
+  `my.task` reads through `task/home-connection` [V]); a branch agent's context reads its task from
+  `(db/db (task/home-connection conn))`, its inbox and history from its own branch.
+- **History units.** `history-units` reads the agent's `[agent-ordinal id]` pairs with origin `:model` (one indexed
+  query) and, per evaluation, `seon.cache/lookup` kind `::eval-unit` keyed by `[eval-id profile-digest
+  renderer-symbol printer-digest]`. A miss pulls the unit's stored scalar fields (source, comment, ns name, shown,
+  error, output, the stored renderer SYMBOL, timing), declared once as `:seon.cluster.eval/history-unit`, and renders
+  them with `repl/render-ai` over that value; the render resolves no refs (today `repl/entity-emission` resolves the ns
+  and renderer refs and runs a turn query [V]; both go). Pending code evidence is not in the unit. An unrelated reload
+  reuses every unit; only a change to the printer or that renderer misses.
+- **Live reads** use `seon.health/derived`, keyed by the derivation name plus the revisions of the attributes it read;
+  every non-database input is in the name (the inbox key carries `answered-t`).
+- **Not used**: `render.web/derive-context!`, `render/shared-cache`, `render.walk/history`, the system turn. They stay
+  loadable with their dependency closure (§5); the new loop calls none of them and they get no new tests.
 
-Cost per pass, unchanged agent: one pull, one ordinal query (O(agent's evaluations), ids only), N cache hits at
-~150-220 ns (cache.clj docstring [V]), two `derived` hits at ~0.03 ms (health.clj:105 [V]), `select` over priced
-units. After a pass, misses = the forms that pass settled. Target < 10 ms warm for 600 evaluations [U: measured in S1;
-history today costs 3.6 s cold, `call-reach-key` docstring in render.clj].
+Cost per pass, unchanged agent with N evaluations: one pull, one ordinal query (O(N) ids), `sort` O(N log N), N cache
+hits at ~150-220 ns, the system message and two `derived` hits, pricing and composition linear in the selected text.
+Target < 10 ms warm at N = 600 [U: P4; history costs 3.6 s cold today].
 
-Budget: `:seon.config.ai/prompt-token-budget` is 1,000,000 on default [V]; it must not exceed the configured model's
-window (the DeepSeek lane verifies both) [U].
+**Reconstruction.** The call stores `basis-t` and `characters`, never the prompt. `context` over `(d/as-of db basis-t)`
+rebuilds the sent text exactly only while render code, profile, settings, calibration and selection policy are
+unchanged and history retains the basis; T5 compares full text in a fixture.
 
-## 4. Deleted, kept unused, converted
+**The owner reads examples first.** Before anything is sent to an agent, complete example outputs of the system message
+and task context, produced by the installed functions, are written to files and read by the owner
+(`docs/research/agent-platform/2026-10-07/context-examples/`, regenerated after each change to a producer).
 
-Deleted (estimates from extents, turn.clj [V for starts]):
+## 4. Completion is test-based
 
-| Span | ~Lines | What |
-|---|---|---|
-| turn.clj:385-545, 615-860 | 390 | `open-for-agent`, `open-call`, `close-call`, `next-id`, `plan-call`/`source-rows`/`plan-tx`, `system-run-*`, submission open |
-| turn.clj:1492-1540 | 50 | `recover-tx`/`recover-call` |
-| turn.clj:2627-3023 | 360 | `next-agent-work`, episode/turns-left, `opening-deferred?`, `unanswered-*`, `latest-answering-turn-t`, `continuing-reply?` (`outside-wake-t` moves, ~40 kept) |
-| turn.clj:3330-3790, 3786-3898 | 560 | `evaluation-terminal-data` (rewritten ~40), fault windows, `settle-batch!`, `settle-evaluated!`, `settle-batch-refusal!` |
-| turn.clj:3965-4300 | 290 | attempt helpers, `record-attempt!` (pure row kept ~60), `fold-*`, `evaluation-request` |
-| turn.clj:4300-4672 | 370 | `open-turn`, `await-turn-part!`, `call-turn` |
-| turn.clj:5072-5277, 5400-6055 | 860 | `resume-turn`, `close-turn`, `episode-exhausted!`, `close-escaped-run!`, `turn`, completion backstop, permit, `agent-dial`, write-refusal park, `step` |
-| context.clj capture + contributions | ~250 | `capture-tx` and rows (context.clj:336-420) |
-| prompt.clj | ~120 | `capture-mismatch` (:336), `history-contributions`, turn-joined calibration |
-| cluster/agent.clj | ~250 [U] | completion permit channel, `turn-thread` backstop parts, `record-interruption!`, armer's `turn/more-agent-work?` (now `loop/work`) |
-| repl.clj:56-79, 525-539 | 40 | `frame`'s episode read (now from `work`), the turn `changed?` query |
+A task's success is its tests. The mechanism on the existing task API (`seon.task`, `my.task`, `seon.task.edn` [V]):
 
-About 3,500 out, about 450 in (`seon.agent.loop` ~300 with contracts, `record-call` ~60, `evaluation-terminal-data`
-rewrite ~40, `call-tx` ~50). Kept loadable, unused and untested until the context design closes: `system-turn`,
-`declared-sources`, `latest-evaluations`, `system-plan`, `generated-read-fault`, `record-evaluated-*`, `generate-turn`,
-`compact!` (~1,150 lines, map §5), `render.walk/history`, `render.web/derive-context!`.
+- **Admission.** A task names its success tests before it is assigned or launched: `seon.task/assign!` refuses a task
+  whose proofs (deftests naming it with `:seon/tasks`; `seon.task/task-edges` `:proofs`, the union of home and branch
+  edges) are empty (`:no-proofs`, already a refusal value [V]). Today `assign!` does not check this [V].
+- **Running the proofs.** After a committed pass whose program facts changed a definition the task's proofs reach
+  (`seon.test` reach selection over the changed definitions), the loop runs those proofs on the agent's branch for its
+  current program (`seon.test/run` `:named`, origin `:test`), the check `my.program/propose-merge!` runs today,
+  extracted once into `seon.task/proven`. A pass that changed nothing they reach runs nothing.
+- **All green is completion.** Through the task writer, at the task home: a completion row naming the assignment, the
+  tested branch and commit, the run id, the program and the proofs that passed; `seon.task/task-resolution` derives
+  closed (`:seon.task/closed-by :completion`) from it, so the ordinary task view shows the task done. In the same home
+  transaction one message to the assigner (root assigns; root's home is the task home). Disposition `:completed`. The
+  assignment basis is validated at the writer: a completion against a superseded assignment or a changed task refuses.
+- **Bail.** `my.task/complete!` is ONLY the agent's explicit way to give back a task that is broken or impossible: it
+  takes a required reason, ends the assignment, records the reason and sends one message to the assigner. It records no
+  success. Disposition `:returned`.
+- **Disposition** otherwise: `:working` by default; `:wait` when a form returns `my.turn/wait`'s value, until the next
+  opening wake. A new opening wake answers again whatever the disposition. `my.turn/complete` and its reply delivery
+  retire at the cut. Merge proposals stay root's separate flow.
+- **Evidence from the live run**: task 18c37812b5bc's proof was green on HEAD while the task stayed open, and none of
+  the bucket-D tasks examined had a red proof; open tasks whose proofs are all green are a finding (task
+  `seon.task/open-tasks-with-all-proofs-green-are-not-flagged`).
 
-Converted callers (one commit each with their slice; counts are `:seon.turn/` mentions in `src` [V]):
+## 5. Deleted, kept unused, converted
 
-| File | Mentions | Conversion |
-|---|---|---|
-| `render/transcript.clj` | 154 | group by `:seon.cluster.eval/call` then ordinal; runtime trigger render goes |
-| `cluster/agent.clj` | 36 | graph transform, armer, `submit-source!`/`evaluate-source!` reply without `:seon.turn/id`, `virtual-turn!` = a request with a fixture `:seon.ai/send!` |
-| `eval/drive.clj` | 29 | dispositions from `:seon.agent/disposition`, results from the reply message |
-| `render/web.clj` | 21 | debug context page shows `loop/context`; context actions (system turn, virtual turn) go or call the pass |
-| `bootstrap.clj` | 21 | `generated-run-tx` seed becomes a message to root (a wake) [U: root's first task wording] |
-| `cluster/status.clj`, `context.clj`, `sci/eval.clj`, `error.clj`, `cluster.clj` (boot `recover-tx` :2966), `problems.clj`, `repl.clj`, `render.clj`, `mcp.clj`, `effect.clj`, `prompt.clj`, `message.clj`, `test.clj`, `my/program.clj`, `turn/world.clj`, `walk.clj`, `fault.clj`, `wake.clj`, `eval.clj` | 2-15 each | agent ref + ordinal instead of run; `eval/of-agent` (eval.clj:17) orders by `[agent ordinal]`; MCP `observed` reads the reply's evaluation ids |
+Deleted after the cut: turn run opening/closing, `next-id`, `plan-call`/`source-rows`/`plan-tx`, submission open;
+`recover-tx`/`recover-call`; `next-agent-work`, episode/turns-left, `opening-deferred?`, `unanswered-*`,
+`latest-answering-turn-t`, `continuing-reply?` (`outside-wake-t` moves); fault windows, `settle-batch-refusal!`; attempt
+helpers, `fold-*`, `evaluation-request`; `open-turn`, `await-turn-permit!`, `call-turn`; `resume-turn`, `close-turn`,
+`episode-exhausted!`, `close-escaped-run!`, `turn`, completion backstop, permit, `agent-dial`, write-refusal park,
+`step`; context capture and contributions (`seon.context`); `capture-mismatch` and turn-joined calibration
+(`seon.cluster.prompt`); permit, backstop and `record-interruption!` (`seon.cluster.agent`); the turn `changed?` query
+(`seon.repl`). About 3,500 lines out, 550 in.
 
-Schema: S1 adds the attributes of §1 (accretion; `run` made optional). Retired in S5: `:seon.turn.work/situation`,
-`:seon.turn/trigger`, `handled`, `attempts`, `disposition`, `result`, `reply*`, `:seon.runtime/trigger`,
-`:seon.context.capture/*`, `:seon.context.contribution/*`, `:seon.cluster.eval/author`,
-`:seon.config.agent/turn-completion-backstop-ms` (also `seon.await.edn:35`, `seon.flow.edn:67`). `:seon.turn/id`,
-`agent`, `opened-tx`, `closed-tx` and `:seon.cluster.eval/run`, `executed`, `code-evidence` stay installed while the
-kept system-turn code references them; they go with it. Each change is published and adopted on a branch of the live
-store through `bin/seon check` (adoption onto the existing store, never a fresh boot). The 595 stored evaluations carry
-`run` but no `agent` (Q2).
+Kept loadable, unused and untested until the context design closes, WITH their transitive dependency closure:
+`system-turn` (it calls `open-for-agent` in its writer admission, so `open-for-agent` stays), `declared-sources`,
+`latest-evaluations`, `system-plan`, `generated-read-fault`, `record-evaluated-*`, `generate-turn` (with
+`append-generated-*`), `compact!`, `render.walk/history`, `render.web/derive-context!`. The deletion slice computes the
+closure from clj-kondo analysis; the schema keys it reads stay installed. `seon.eval.drive` has a production caller
+(`seon.cluster.agent/run-observation` resolves `run-receipts` [V]) and two test callers: the cut converts the MCP
+observation to the reply's evaluation ids; drive's remainder is a deletion candidate.
 
-## 5. Slices
+Converted callers in the cut: `render/transcript.clj` (group by `pass`, order by `agent-ordinal`); `cluster/agent.clj`
+(transform, armer, `submit-source!`/`evaluate-source!` reply without `:seon.turn/id`, `virtual-turn!` = a request with
+a fixture `:seon.ai/send!`); `eval/drive.clj`; `render/web.clj` (debug context page shows `loop/context`);
+`bootstrap.clj` (the generated opening becomes a message to root); and `cluster/status.clj`, `context.clj`,
+`sci/eval.clj`, `error.clj`, `cluster.clj` (boot `recover-tx` goes), `problems.clj`, `repl.clj`, `render.clj`, `mcp.clj`,
+`effect.clj`, `prompt.clj`, `message.clj`, `test.clj`, `my/program.clj`, `turn/world.clj`, `walk.clj`, `fault.clj`,
+`wake.clj`, `eval.clj` (`eval/of-agent` orders by `[agent agent-ordinal]`).
 
-Each lands through `bin/lane commit LANE -m … --test NS… PATHS`; HEAD boots after each.
+## 6. Slices
 
-1. **S1 One real pass.** New `src/seon/agent/loop.clj` (`work`, `context`, `call-tx`, `record-call`, `settlement`,
-   `pass!` = the pass body callable once from the REPL), §1 schema accretion, `outside-wake-t` moved to
-   `cluster/wake.clj`. Not yet wired into the graph. Proof on a disposable branch agent: overlay `no-provider false`
-   and the verified DeepSeek flash model id (`:seon.config.ai/model "deepseek-flash"`, endpoint
-   `https://api.deepseek.com/chat/completions`, `no-provider true` on default [V]); send it a message with a small
-   task; `(seon.agent.loop/pass! cluster agent-id)`; check the call (basis, usage, characters), the evaluations
-   (agent, ordinal, origin `:model`, call), `answered-t`, `disposition`, and that `context` rebuilt as-of the basis
-   equals the sent text's length. The first-turn risk the map named (contribution attributes absent) is refuted
-   today: they are installed [V, probe]; S1 writes no capture, and its proof publishes and adopts exactly the
-   attributes `settlement` writes. The paid run is one call, owner-authorized. Tests T1-T5 with a fixture `send!`.
-2. **S2 The proc.** `graph-definition`'s turn proc → `loop/pass`; armer `agents-to-arm` (agent.clj:1586) → `loop/work`;
-   permit channel and backstop removed from `arm!`. Live: two DeepSeek passes continuing to `:completed`. T7.
-3. **S3 Outside agents and tests.** MCP SCI (`mcp.clj:227` `sci-run` → `evaluate-source!` → request port → pass) and
-   JVM (`jvm-run` :255, `record-call` swapped) and the test harness entrant record origin `:outside`/`:test`;
-   `evaluate-source!` awaits without the backstop dial. T6.
-4. **S4 Readers.** The conversion table of §4; the `changed?` turn query in `repl/entity-emission` goes.
-5. **S5 Deletion.** The deleted spans of §4, the boot recovery loop (cluster.clj:2966-2972), the dial; tests below.
-6. **Later, not this spec:** when the context design closes, the system-turn/walk selection and the turn schema go.
+Preparatory slices are invisible unless labeled; each lands through `bin/lane commit LANE -m … --test NS… PATHS`, HEAD
+boots after each, and each is dual-reviewed. Then ONE dependency-complete cut, proven by publishing and adopting it on a
+branch of the live store before it lands. Order with errors: §8.9.
 
-## 6. Tests
+- **P0 Schema accretion.** §1's agent, evaluation and call attributes (context-inert), `run` optional on the receipt and
+  `:seon.eval/entity`, the origin enum, the completion row, `:seon.agent.loop/unsendable-context-error`; published and
+  adopted on a live-store branch. References: `malli/src/malli/registry.cljc:17-96`;
+  `datahike/src/datahike/db/transaction.cljc:1225-1234`.
+- **P1 Shared settlement owner.** First extract the schema-derived row, namespace and read-evidence calculations
+  without changing the old writer; then generalize `settle-pass!` and `record-call` and convert every settle-stage
+  caller in one loadable slice, keeping the old duties (§2.1). The old loop also writes `agent`, `agent-ordinal`,
+  `pass`, `origin` (unread until P6). Tests: `turn-test/a-settlement-that-throws-still-shows-each-evaluated-value`,
+  `…/a-definition-changed-since-the-run-read-it-is-refused-at-the-writer`, `run-test/item-16-the-reply-is-one-key-set`,
+  `cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged`, the MCP run observation
+  unchanged, plus T11, T16. References: `datahike/src/datahike/api/impl.cljc:30-42`;
+  `datahike/src/datahike/db/transaction.cljc:1172-1173`.
+- **P2 Pass identity.** `evaluate-sources` takes a pass (id, agent, origin), the acquired context with its diagnostic,
+  and an evaluate stage value; the old loop's pass id is its run id, so ids and handles are unchanged. Lands after the
+  errors cut (it touches `refusal/world-reference`, errors-owned until then). Test: existing handles unchanged.
+  References: `sci/src/sci/core.cljc:260-271,334-340`; `nrepl/src/clojure/nrepl/middleware/interruptible_eval.clj:72-125`.
+- **P3 Calls.** `call-tx` pure; `record-attempt!` writes `agent`, `basis-t`, `characters`; one parameterized
+  calibration calculation extracted. The active calibration acquisition stays until the cut (no backfill of old
+  attempts); the new query runs only on new-pass data. References: `langchain4clj/src/langchain4clj/core.clj:249-262`.
+- **P4 The loop namespace, unwired, in three sequential steps in `seon.agent.loop`.** (a) `work`, `admission`,
+  `outside-wake-t` → `wake/wake-ts` with its caller converted (T1, T9); (b) `context` over the installed
+  `system-message`/`task-context`, cache, budget, inbox and history (T4, T5, T13, T21); (c) `pass` and `pass!`, the body
+  callable once from the REPL (T3, T10, T15, T19, T20). Depends on the errors cut (`caught`, the constructor, receipts).
+  Then root's one owner-authorized paid pass on a disposable branch agent (overlay `no-provider false`; the agent
+  overlay cannot lift it today, task `seon.config/no-provider-cannot-be-lifted-per-agent`; model `deepseek-flash` as
+  configured on default, endpoint verified from config before the call): check the call, the evaluations,
+  `answered-t`, `disposition`, and exact rebuilt text. References: `core.async/src/main/clojure/clojure/core/async/flow.clj:165-200,291-305`.
+- **P5 Task completion (additive feature).** Admission `:no-proofs` in `assign!`; `seon.task/proven` extracted from
+  `propose-merge!`; the completion row through the task writer and its `task-resolution` consumer; `my.task/complete!`
+  as bail. The old loop's `my.turn/complete` still works. Tests: T7, T17, T18. References:
+  `kaocha/src/kaocha/testable.clj:105-137`; `clojure/src/clj/clojure/test.clj:708-736`.
+- **P6 Readers switch.** Transcript (group by `pass`), `eval/of-agent`, status and the MCP observation read the new
+  attributes the old loop already writes (P1). Invisible: same data. Proven by the existing transcript and MCP tests.
+- **P7 Dial rename.** `max-episode-runs` → `:seon.config.agent/max-calls-per-wake`, with its defaults, stored facts and
+  consumers; the shipped stop string removed. Published and adopted on a live-store branch.
+- **Cut.** Together: the proc transform → `loop/pass`; armer `agents-to-arm` → `loop/work` (schedule-only arming
+  kept); permit and backstop out of `arm!`, every `disarm!` caller passes its deadline; MCP SCI (`sci-run`) and JVM
+  (`jvm-run`) and the test harness submit passes with origin `:outside`/`:test` (the direct JVM path's access to the
+  agent's private SCI context is serialized through the same request port); bootstrap's opening becomes a message to
+  root; every reader of §5; the agent schema's `:seon.render/ai` = `loop/context`; disposition from §4 and
+  `my.turn/complete` retired; `:seon.eval/origin` retired. Proven by publish+adopt on a live-store branch and T1-T22.
+  Then root resets default once: evaluations and recorded errors are not migrated. References: all of P0-P7;
+  `clerk/src/nextjournal/clerk/viewer.cljc:1470-1497`.
+- **After the cut**: deletion of §5's spans minus the kept closure, with their tests, triaged by the commit that changed
+  each behavior; the turn schema keys not in the closure retire.
 
-New, in `test/seon/agent/loop_test.clj`, one behavior each, asserted on data, through injected worlds and a fixture
-`:seon.ai/send!` value (no paid call):
+## 7. Tests
 
-- **T1 work** — a wake after `answered-t` is `:answer`; `:completed` with no newer wake is nil; at the cap a fresh wake
-  is nil; an inside wake is `:answer` but does not reset the cap's anchor.
-- **T2 one pass** — reply `"(+ 1 2)"` gives one evaluation `{agent, ordinal n+1, origin :model, call}`, a call with
-  `basis-t`, `answered-t` = that basis, all asserted in one transaction (one `:t`).
-- **T3 failed call** — a fixture timeout records the call with its error, no evaluation, `answered-t` unchanged, and
-  `work` stays `:answer` until the cap.
-- **T4 cache** — two `context` calls with no write between: zero `::eval-unit` misses (`seon.cache/status`); after a
-  pass, misses equal the forms it settled.
-- **T5 rebuild** — `context` over `(d/as-of db basis-t)` has the call's `characters`.
-- **T6 outside** — an MCP SCI run writes evaluations with origin `:outside`, no call, moves `current-ns`, not
-  `answered-t`.
-- **T7 disposition** — a `(my.turn/complete …)` form stores `:completed`, delivers one reply message to the sender, and
-  `work` is nil.
-- **T8 crash** — a pass interrupted before settlement leaves the database value unchanged and `work` still `:answer`.
+New, in `test/seon/agent/loop_test.clj` (which already holds the two context-producer tests), one behavior each,
+asserted on data, through injected worlds and a fixture `:seon.ai/send!` value (no paid call):
 
-Deleted rather than kept green (machinery deleted): `turn_loop_test` (15 deftests), `turn_work_test` (12),
-`turn_work_cost_test` (1), `turn_backstop_test` (3), `turn_boot_test` (2), `turn_continue_test` (2),
-`turn_disposition_test` (1, replaced by T7), `context_capture_test` (1), `context_capture_history_test` (1),
-`loop_proof_test` (3, 883 lines), the turn-entity, episode, recovery and system-turn deftests in `turn_test` (43) and
-`cluster/turn_test` (50), and `cluster/prompt_test` cases on capture and calibration (16 total). Fold behaviors listed
-in run.md §2 are kept; tests that observe them through a turn move to `run_test`. Per-test triage in S5 by the commit
-that changed the behavior [U: exact keep/delete list].
+- **T1 work** (`are` table): an opening wake after `answered-t` is `:answer`; a schedule firing is not, but refills the
+  cap; at the cap a fresh INSIDE wake gives nil and a fresh OUTSIDE wake gives `:answer`; with no outside wake the anchor
+  is 0; an older entity with a newer transaction sets the anchor; `:completed`, `:returned` or `:wait` with no newer
+  opening wake is nil.
+- **T2 one pass**: reply `"(+ 1 2)"` gives one evaluation `{agent, agent-ordinal n+1, pass, origin :model, call}`, a call
+  with `basis-t`, `answered-t` = that basis, all at one `:t`.
+- **T3 failed call**: a fixture timeout records the call with its error, no evaluation, `answered-t` unchanged.
+- **T4 cache**: two `context` calls with no write between miss no `::eval-unit`; after a pass, misses equal its forms; a
+  write of `answered-t` alone changes the inbox; a profile change misses; an unrelated reload misses nothing; an
+  evicted unit re-renders to the same text.
+- **T5 rebuild**: `context` over `(d/as-of db basis-t)` equals the sent text in full.
+- **T6 outside**: an MCP SCI run writes evaluations with origin `:outside`, no call, moves `current-ns`, not `answered-t`.
+- **T7 completion**: a pass that changes code a red proof reaches runs it; red leaves the task open; a pass making it
+  green records the completion, the ordinary task query shows it closed, root gets one message, the pass stores
+  `:completed`.
+- **T8 effects survive**: a pass interrupted after a form sent a message keeps the message and writes no evaluation rows;
+  `work` is still `:answer`.
+- **T9 no provider**: with no-provider set and no fixture, `work` is nil and the send leaf is never entered.
+- **T10 terminal reply**: a request whose pass throws answers the error map; a stopped graph closes queued replies.
+- **T11 unknown outcome**: a settlement answering outcome-unknown is not retried, writes no call-alone row and the agent
+  is not re-armed before the outcome is known.
+- **T12 repeated error**: a repeated failure puts its signature on the second evaluation with no new message.
+- **T13 budget**: the whole request fits the budget; zero remainder keeps no history unit; an oversized newest unit is
+  dropped with a priced elision; oversize mandatory parts are the unsendable error.
+- **T14 completion target**: a message arriving mid-work does not change whom the completion notifies.
+- **T15 context failure**: a context that throws records a call with its error and counts against the cap.
+- **T16 handles**: handles minted during evaluation equal the ids stored after concurrent outside and model settlements
+  assign agent ordinals.
+- **T17 admission**: assigning a task with no proofs refuses `:no-proofs`.
+- **T18 bail**: `my.task/complete!` with a reason ends the assignment, records the reason, messages the assigner and
+  records no completion.
+- **T19 model pass**: a model pass with no reply port settles and rewakes.
+- **T20 post-evaluation failure**: an installation failure after evaluation keeps every evaluated value beside the
+  recorded error.
+- **T21 history**: outside runs under the agent's id are not history units.
+- **T22 no stop cut**: a reply containing `#:seon.repl` reaches the segmenter whole.
 
-## 7. Owner decisions (2026-10-07)
+Kept and rehomed (assertions on turn shape converted): `turn-test/a-call-omitting-its-database-sees-the-forms-own-write`,
+`cluster.host-test/an-unsettled-host-run-keeps-ownership-until-it-exits`, `cluster.turn-test/a-red-form-routes-to-its-
+namespace-owner-and-the-fold-continues`, `mcp-entrance-test/an-sci-call-answers-what-the-agents-next-context-reads`,
+`mcp-entrance-test/a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle`, `cluster.agent-test/disarm-drops-
+the-route-before-closing-it`, `cluster.prompt-test/calibration-uses-the-agents-recent-attempts-and-config-prior`,
+`run-test/item-18-…`, `item-19-…`. Deleted with their machinery after the cut: `turn_loop_test`, `turn_work_test`,
+`turn_work_cost_test`, `turn_backstop_test`, `turn_boot_test`, `turn_continue_test`, `turn_disposition_test` (replaced
+by T7), `context_capture_test`, `context_capture_history_test`, `loop_proof_test`, the turn-entity, episode, recovery and
+system-turn deftests in `turn_test` and `cluster/turn_test`, and capture cases in `cluster/prompt_test`; per-test triage
+by the commit that changed the behavior [U: exact list].
 
-1. Origin: a new `:seon.cluster.eval/origin` enum `:model :outside :test`; `:author` retires.
-2. The stored evaluations without an agent ref: reset default after S4 (data is disposable); no backfill, no second reader.
-3. A failed call does not advance `answered-t`; the cap bounds retries.
-4. Live reads: the task with its current step, and messages since `answered-t` (faults arrive as messages).
-5. The context is the agent schema's own `:seon.render/ai`; identity becomes its first lines.
-6. The cap reuses `:seon.config.run/max-episode-runs`, renamed `:seon.config.agent/max-calls-per-wake` in S5.
-7. The raw reply is not stored: segmentation keeps prose as comments beside each form's source.
-8. Sequencing: S1 starts while errors S1-S2 run, claiming only its new namespace, its test and the schema files it
-   accretes; it builds error maps with the errors S2 constructor once that lands.
+## 8. Owner decisions (2026-10-07)
+
+1. No turn or run entities. Agent information on the agent; evaluations ref the agent and the call that produced them;
+   `:seon.cluster.eval/origin` `[:enum :model :outside :test]` replaces `:author` and the old `:seon.eval/origin` string.
+2. Evaluation identity = (pass id, position in that pass), minted BEFORE evaluation with the installed two-argument
+   `id/evaluation`; handles never change. The agent-wide ordinal is assigned separately at the writer.
+3. The existing settlement writer is generalized in place into one shared settlement owner taking a pass. The old loop
+   uses it until the cut, with its old duties kept. No second writer.
+4. Errors reach the agent as errors §6 rules: every occurrence on the evaluation or call where it happened, in the
+   reply of the agent that caused it; the opening's one message goes to root. The temporal fault window goes.
+5. Completion is test-based: a task names its success tests before assignment; after a pass that changed code they
+   reach, the loop runs them; all green completes the task, the only success. `my.task/complete!` is only the agent's
+   way to give back a broken or impossible task, with a reason.
+6. Invisible preparatory slices, then ONE dependency-complete cut proven by publish+adopt on a live-store branch.
+   Default is reset once at the cut; evaluations and recorded errors are not migrated.
+7. Context = a system message (protocol and tools) + task-generated context, plus inbox and history, rendered live
+   through `seon.cache` under ONE total budget; the call stores its basis, not the prompt; the raw reply is not stored
+   (prose stays as comments beside each form). Results are runtime only. The owner reads complete example outputs from
+   the installed producers before anything is sent to an agent.
+8. Crash loses the in-flight pass's bookkeeping, not completed effects. A failed call does not advance `answered-t`; the
+   cap bounds retries. Exactly three policy bounds (provider timeout, SCI evaluation limit, calls per outside wake); the
+   terminal answer of every MCP request and interrupt+join ownership are kept, not dials. Old context-selection code
+   stays loadable with its dependency closure, untested.
+9. Sequencing: loop P0-P1 → errors S1b, P1-P4 → errors cut → loop P2-P7 → loop cut → deletion; files are claimed per
+   slice through `bin/lane`.
+10. Live runs use DeepSeek's flash model as configured on default; paid calls are deliberate and owner-approved.
