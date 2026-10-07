@@ -2805,8 +2805,8 @@
 
 (defn fork-for-turn
   "Fork the current base and reapply the agent's in-memory private layer.
-  A fresh fork (no carried agent context: a restart) binds the agent's
-  settled cut values under their handles again."
+  A fresh fork (no carried agent context: a restart) binds each of the agent's
+  settled handles to a marker naming its value's class; values are never stored."
   {:malli/schema [:=> [:cat :seon.sci.eval/defs-fork-request]
                   :seon.sci.eval/defs-fork-result]}
   [{base-ctx :seon.sci.eval/ctx

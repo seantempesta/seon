@@ -169,4 +169,9 @@
              :kind :function
              :intent "clojure.repl/find-doc in an agent's REPL prints about 5,600 tokens of every matching docstring to :out, outside the value printer and its budget. Lookup tools must return values the value printer shows (matching symbols with one doc line each, dig forms for the rest), never print. Done when a regression asserts an agent's (find-doc \"task\") returns a value whose shown reply stays within the reply budget and :out is empty."
              :must-read #{seon.sci.eval/build-base-ctx}
-             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
+ #:seon.task{:name "a fresh context's result handles have no regression"
+             :kind :function
+             :intent "Since c08e2c766 an evaluation's value is never stored: a fork without a carried agent context (a restart) binds each settled handle result/eN to a marker {:seon.eval/unstored :live-only, :seon.eval/value-class <class when recorded>} (seon.sci.eval/bind-settled-results!), and a refused read of the handles rides the fork as :seon.sci.eval/unbound-results. No test reaches either. Done when one entrance-level regression settles evaluations of a cut vector, nil and a host object through the ordinary path, checks the carried context still holds the original value by identity, forks fresh and reads each handle's marker, and checks no value blob was staged."
+             :must-read #{seon.sci.eval/bind-settled-results! seon.sci.eval/fork-for-turn seon.turn/settlement-projection}
+             :evidence #{"docs/research/agent-platform/2026-10-07/spec-reviews/review-batch-a-opus.md" "docs/research/agent-platform/2026-10-07/spec-reviews/review-batch-a-review-astra-batch-a.md"}}]

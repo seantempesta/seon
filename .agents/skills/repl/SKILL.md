@@ -27,10 +27,10 @@ show the additive context and since-query diff.
   expression proves nothing about it. SCI itself provides reusable contexts,
   isolated forks, and interning:
   `reference-code/sci/src/sci/core.cljc:331`, `:345`, `:260`.
-- MCP JVM mode evaluates on the host prepl, not through a turn.
-  Read the complete returned envelope and report that surface explicitly.
-  Clojure's prepl owners are `prepl` and `io-prepl`
-  (`reference-code/clojure/src/clj/clojure/core/server.clj:194`, `:275`).
+- MCP JVM mode evaluates with the host reader at the live `*ns*` and host
+  `eval`: no SCI observation and no program facts, but its forms are recorded
+  as an ordinary run of the named agent (`seon.turn.batch/jvm-request`). Read
+  the complete returned envelope and report that surface explicitly.
 - A raw JVM REPL has Clojure's ordinary reader and evaluation behavior:
   `reference-code/clojure/src/clj/clojure/main.clj:368`.
 
@@ -126,15 +126,14 @@ prove neither those behaviors nor browser repaint.
 Verified at default's REPL on 2026-09-23. Forms and timings are in
 [the landing note](../../../docs/prds/agent-platform/landing/lane-branch-repl-2026-09-23.md).
 
-1. **Name your branch.** Call the MCP `branch` tool with `action create` and a
-   `name`. It branches off the cluster head's commit through
-   `seon.cluster.registry/branch!` (`src/seon/cluster/registry.clj:192`) and is
-   built in `script/seon/dev/mcp.clj:486` (`branch-form`). There is no default
-   name. These refuse as `:seon.error` values: the cluster's own branch, and a
-   name that already exists.
-2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and
-   `branch <name>`. The form runs as an ordinary agent run of the branch's
-   hosted agent `mcp/<name>` (`run-form`, `script/seon/dev/mcp.clj:395-438`).
+1. **Name your agent; it gets a branch.** Call `eval_clj` with an `agent` id
+   that is new: it gets its own branch off the cluster head on first use,
+   recorded as its `:seon.agent/branch`. `my.agent/create-branch!`,
+   `my.agent/branches` and `my.agent/retire-branch!` (`src/my/agent.clj`)
+   manage lane branches by name; the cluster's own branch and an existing name
+   refuse as `:seon.error` values.
+2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and that
+   `agent`. The forms run as an ordinary run of that agent on its branch.
 3. **What the branch context is not, today.**
    - Entities are written only by a turn's settlement
      (`analyze-settlement`, `src/seon/turn.clj:1017`; `gate-function-install`,

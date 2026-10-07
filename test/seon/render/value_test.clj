@@ -22,6 +22,7 @@
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as evaluation]
+            [seon.sci.reader :as reader]
             [seon.test-support :as support]))
 
 (def ^:private caps
@@ -418,10 +419,12 @@
 (deftest an-unreadable-artifact-names-the-readers-failure
   ;; THE CLASS: stored content the reader recovers from as an error event is
   ;; refused as unreadable, never misreported as another kind of blob.
-  (is (str/starts-with?
-       (:seon.render.value/unreadable-artifact
-        (value/read-artifact "{:seon.sci.admit/print-node [1 2 3x]}"))
-       "The stored content does not read")))
+  (let [content "{:seon.sci.admit/print-node [1 2 3x]}"
+        failure (some ::reader/error (reader/read {::reader/text content
+                                                   :seon.config.eval.result/max-source (count content)}))]
+    (is (some? failure))
+    (is (= (str "The stored content does not read: " (:seon.error/message failure))
+           (:seon.render.value/unreadable-artifact (value/read-artifact content))))))
 
 (deftest rendering-live-values-does-not-apply-a-storage-bound
   (let [raw (vec (range 100))

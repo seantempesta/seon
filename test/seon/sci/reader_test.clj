@@ -530,10 +530,13 @@
           [["[1 2 3x 4]\nmy-var" "[1 2 3x 4]"]
            ["[1 2 3x 4] (+ 1 2)" "[1 2 3x 4]"]
            ["{:a {:a 1 :b}}\n[5 6]" "{:a {:a 1 :b}}"]
-           ["(f \"]\" \\) ; ]\n 3x)\n:k" "(f \"]\" \\) ; ]\n 3x)"]]]
+           ["(f \"]\" \\) ; ]\n 3x)\n:k" "(f \"]\" \\) ; ]\n 3x)"]
+           ["[1 3x] 42" "[1 3x]"]
+           ["[1 3x\n(+ 40 2)]\n(+ 1 2)" "[1 3x\n(+ 40 2)]"]]]
     (let [result (events source)]
       (is (= [:error :form] (read-kinds result)))
-      (is (= expected-source (:seon.sci.reader/source (first result)))))))
+      (is (= expected-source (:seon.sci.reader/source (first result))))))
+  (is (= [:error :error] (read-kinds (events "[1 3x]\n[2 4x]")))))
 
 (deftest recovery-never-hides-a-real-failure
   (let [broken (events "(+ 1 3x)")

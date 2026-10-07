@@ -58,11 +58,12 @@ map's `{` too (probe: `"[1 {:a 1 :a 2}]"` -> row 1 col 4, same as `"[1 {:a 1 :b}
 reports `::error-kind :odd-map` (top-level ones already did). Only the kind is wrong; the message is Edamame's and
 recovery is identical. Edamame gives no structured fact separating the two and recovery never reads prose; left.
 
-### 6. LOW (noted) — no regression for the restart marker
+### 6. LOW (task filed) — no regression for the restart marker
 
 `seon.sci.eval/bind-settled-results!` now binds every settled handle to `{:seon.eval/unstored :live-only ...}`; no
 test exercises it (none did before for the stored path either). A fork from a database holding an evaluation with
-`:seon.eval/value-class` should bind `result/eN` to the marker naming that class.
+`:seon.eval/value-class` should bind `result/eN` to the marker naming that class. Filed as task
+`seon.sci.eval/a fresh context's result handles have no regression` (Astra P2, same gap).
 
 ## Verified, no finding
 
@@ -80,3 +81,26 @@ test exercises it (none did before for the stored path either). A fork from a da
   a few cache lookups per cell, not worth a change.
 - 69e7b56fe `read-artifact`: any error event now reports the reader's message; contract of `parse-classification`
   uses the registered `:seon.error/throwable`.
+
+## Astra's review (`review-batch-a-review-astra-batch-a.md`), verified
+
+- **P1 reader recovery — agreed, fixed in a37d96149 plus its rows.** All five of Astra's inputs are covered:
+  `[1 3x] 42`, `[1 3x] (+ 1 2)`, `[1 3x]\n[42]` (same class as `[5 6]`), `[1 3x]\n[2 4x]` (two errors), and
+  `[1 3x\n(+ 40 2)]\n(+ 1 2)` (the inherited leak: `balanced-end` from the outer `[` ends after `]`, so the inner
+  call is never a form). Astra proposed reusing Edamame's `parse-to-delimiter`; that needs a fork of the pinned
+  dependency for a delimiter balance a 20-line scan in the reader owner gives, so not taken. Unclosed source keeps
+  its own path, as Astra asks.
+- **P2 settlement/fresh-context regression — agreed, task filed** (finding 6). A verification gap, no failure.
+- **P3 task edge — agreed, fixed** (finding 2). `fork-for-turn`'s docstring still said a fresh fork binds "settled
+  cut values": corrected. **Partly rejected:** retiring `:seon.eval/value-digest`/`:unstored` from
+  `seon.cluster.eval.edn:78-79` and `seon.eval.edn` is the schema migration c08e2c766 names as separate; it changes
+  installed attributes that default's store holds datoms for, so it needs publication and adoption on a branch of
+  the live store (root). `:seon.eval/unstored` must stay declared: the live marker uses it. The lane note's wording is
+  in a file held by lane printed-copy.
+- **REPL skill stale — agreed, fixed.** `.agents/skills/repl/SKILL.md` said JVM mode is a host prepl outside a turn;
+  it is a recorded run of the named agent (`seon.turn.batch/jvm-request`). Steps 1-2 named an MCP `branch` tool and
+  an `eval_clj` `branch` argument that do not exist; they now name `eval_clj`'s `agent` (a new id gets its own
+  branch) and `my.agent/create-branch!`/`branches`/`retire-branch!`.
+- **read-artifact regression too weak — agreed, fixed.** `an-unreadable-artifact-names-the-readers-failure` now
+  asserts equality with the reader's own error message.
+- 649829332: Astra found no defect; agreed (its 218.5 ms vs 0.225 ms probe matches mine).
