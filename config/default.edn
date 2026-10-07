@@ -108,11 +108,14 @@
  ; means a query or function returns more than it should. 1,000 is tuned from
  ; data: every evaluation records its elisions and the whole value's estimated
  ; tokens, so "elides too often" is a query, and the bound moves if it is.
+ ; Raised to 1,500 (owner 2026-10-07: functions are data, printed whole as
+ ; code): 97.7% of default's function sources fit whole at 1,500, 95.1% at
+ ; 1,000; only the largest few are cut, with their dig form.
  ; A declared AI render function's text is cut at this same budget (no
  ; separate ceiling). Reading more is plain Clojure on result/eN (each cut
  ; prints its continuation form), or (seon.print/full result/eN) opts one
  ; evaluation into printing the value whole.
- :seon.config.render.agent/token-budget 1000
+ :seon.config.render.agent/token-budget 1500
  ; Unit: nested structural nodes retained in the visible face.
  :seon.config.render.agent/max-depth 8
  ; Unit: children retained per collection node.

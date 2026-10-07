@@ -16,6 +16,14 @@
             *print-length* nil *print-level* nil *print-meta* false]
     (pr-str value)))
 
+(defn- string-literal
+  "`s` as a readable string literal whose newlines stay line breaks, so a
+  multi-line string (a function's source) reads as its lines."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [s]
+  #?(:clj (str "\"" (str/escape s #(when-not (= \newline %) (char-escape-string %))) "\"")
+     :cljs (literal s)))
+
 (defn print-number?
   "True for a number with a stock Clojure printed form."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -342,7 +350,7 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [node]
   (let [text (case (::elision-unit node)
-               :characters (str (literal (or (::prefix node) "")) "…+" (::omitted node))
+               :characters (str (string-literal (or (::prefix node) "")) "…+" (::omitted node))
                :pending "…?"
                (str "…" (::omitted node "?")))]
     (if-some [form (::continuation node)]
@@ -438,8 +446,9 @@
       ;; A scalar the value printer selected carries its classified spelling in
       ;; `::text`, made from the value's own fields, never through `pr-str`.
       ::nil [(text-op ::nil "nil")]
-      (::boolean ::number ::keyword ::symbol ::char ::string)
+      (::boolean ::number ::keyword ::symbol ::char)
       [(text-op (::face node) (or (::text node) (literal value)))]
+      ::string [(text-op ::string (or (::text node) (string-literal value)))]
       (::inst ::uuid) [(text-op ::tag (or (::text node) (literal value)))]
       ::var [(text-op ::symbol (str "#'" (::name node)))]
       (::type ::class) [(text-op ::symbol (::name node))]
@@ -449,7 +458,7 @@
                                 (when-some [rep (::rep node)] (str " " rep)) "]")
                            ;; An empty `#object[]` would read as content.
                            (diagnostic-text "The object print node names no class." node)))]
-      ::truncated-string [(text-op ::string (literal (str value "…")))]
+      ::truncated-string [(text-op ::string (string-literal (str value "…")))]
       ::failed [(text-op ::object (str "#object[" (::class node) " "
                                        (literal (str "projection failed: " (::message node))) "]"))]
       ;; ONE CUT FACE (design §3e): `…N` after shown members, `"prefix"…+N`
@@ -465,7 +474,7 @@
       ::projected (let [output (:seon.render/output node)]
                     (cond
                       (and (pos? depth) (= :seon.render/ai output))
-                      [(text-op ::string (literal value))]
+                      [(text-op ::string (string-literal value))]
                       (= :seon.render/ai output)
                       [(text-op ::projected value [:span {:class (css-class ::projected)} value])]
                       :else [(text-op ::projected (literal value) value)]))

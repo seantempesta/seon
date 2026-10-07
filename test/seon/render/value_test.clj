@@ -639,8 +639,8 @@
         request (probe-unit {:payload/text large})
         node (-> (value/prepare request) :seon.render.value/tree
                  :seon.print/entries first second)]
-    (is (= (pr-str raw) text))
-    (is (not (str/includes? text "\n")))
+    (is (= raw (edn/read-string text)) "the literal reads back as the string")
+    (is (= 2 (count (str/split-lines text))) "a newline stays a line break")
     (is (= [:payload/text] (:seon.render.data/path node)))
     (is (= '(seon.print/value-at result/e0123456789ab [:payload/text])
            (:seon.print/requery-form node)))
@@ -734,7 +734,8 @@
 
 (deftest caller-print-bindings-do-not-change-string-bytes
   (let [raw "quoted \"line\"\nnext\t\\"
-        expected (pr-str raw)]
+        expected (value/render-ai (probe-unit raw))]
+    (is (= raw (edn/read-string expected)) "the literal reads back as the string")
     (binding [*print-readably* false *print-length* 1 *print-level* 1]
       (is (= expected (value/render-ai (probe-unit raw)))))))
 
@@ -1297,3 +1298,40 @@
        (is (str/starts-with? reply "#:seon.repl{") "the reply is one map, nothing above it")
        (is (= :large-value
               (get-in (binding [*read-eval* false *default-data-reader-fn* tagged-literal] (read-string reply)) [:seon.repl/findings 0 :seon.repl/finding])))))))
+
+(defn- agent-unit
+  "`raw` under the shipped agent profile, with a result handle."
+  [raw]
+  (assoc (unit raw) :seon.render/profile (render/agent-render-profile config/defaults)
+         :seon.render.value/root 'result/e0123456789ab))
+
+(def ^:private forty-line-source
+  (str/join "\n" (cons "(defn example" (for [i (range 39)] (str "  (let [x (inc " i ")] (str \"line \" x))")))))
+
+(deftest ordinary-values-print-whole-at-the-agent-budget
+  ;; Values seen cut on 2026-10-07: strings of 40-60 characters cut at 32 with a
+  ;; dig form each, and a number cut out of its pair, while most of the budget
+  ;; was unspent.
+  (doseq [[label value]
+          [["pairs of a name and a number"
+            (vec (for [i (range 32)] [(str "seon.profile/some-function-name-" i "-with-a-longer-tail") (* i 1000)]))]
+           ["identifiers nested three deep"
+            [[(vec (for [i (range 30)] (str "seon.render.value/identifier-" i "-abcdefghij")))]]]
+           ["finding maps"
+            (vec (for [i (range 9)] {:row i :level :warning :message "Unresolved var"
+                                     :filename (str "/Users/sean/src/seon/src/seon/render/value" i ".clj")}))]
+           ["a forty-line source" forty-line-source]]]
+    (let [projection (value/prepare (agent-unit value))]
+      (is (empty? (tree-cuts projection)) label)
+      (is (= value (edn/read-string (:seon.render.value/text projection))) label))))
+
+(deftest a-long-string-fills-the-budget-and-is-cut-at-a-line-end
+  (let [source (str/join "\n" (for [i (range 400)] (str "  (line " i " (with \"text\" and more))")))
+        projection (value/prepare (agent-unit source))
+        [cut :as cuts] (tree-cuts projection)
+        budget (tokens/estimate-chars (:seon.render.profile/token-budget (render/agent-render-profile config/defaults)))]
+    (is (= 1 (count cuts)))
+    (is (str/ends-with? (:seon.print/prefix cut) "\n") "the cut falls after a whole line")
+    (is (> (count (:seon.render.value/text projection)) (* 0.9 budget)) "the budget left is spent on the string")
+    (is (= source (str (:seon.print/prefix cut) (subs source (:seon.render.data/next-offset cut))))
+        "the dig offset continues exactly where the shown text stops")))

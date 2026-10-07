@@ -528,12 +528,14 @@
 (def ^:private tuple-bound 8)
 
 (defn- escaped-width
-  "Characters `pr-str` spends on chars [from, to) of `s`: `.length`, `.charAt`."
+  "Characters the string literal spends on chars [from, to) of `s`; a newline
+  stays a line break (`seon.print/string-literal`)."
   {:malli/schema [:=> [:cat :string :int :int] :int]}
   [^String s from to]
   (loop [i (long from) width 0]
     (if (< i to)
-      (recur (inc i) (+ width (if-let [e (char-escape-string (.charAt s i))] (count e) 1)))
+      (let [c (.charAt s i)]
+        (recur (inc i) (+ width (if-let [e (when-not (= \newline c) (char-escape-string c))] (count e) 1))))
       width)))
 
 (defn- integer-digits
@@ -750,13 +752,25 @@
                             ::print/class (clojure.lang.Compiler/demunge (.getName c))
                             ::print/rep (str "0x" (Integer/toHexString (System/identityHashCode x)))}})))
 
+(declare cut-text)
+
+(defn- string-shown
+  "Characters a string node shows when admitted: whole when its cut at the
+  first chunk would cost at least the characters it hides, else that chunk."
+  {:malli/schema [:=> [:cat :map :int] :int]}
+  [node max-string]
+  (let [chunk (min chunk-width (:total node) max-string)]
+    (if (and (< chunk (:total node)) (<= (:total node) max-string)
+             (<= (- (:total node) chunk) (count (cut-text (assoc node :shown chunk)))))
+      (:total node)
+      chunk)))
+
 (defn- tuple-node
-  "A short sequential value whose every member is a scalar, a name or a short
-  string, as one whole print node, else nil. Such a tuple (a frame
-  `[class method file line]`, a lookup ref) is admitted whole or not at all:
-  a cut inside it would cost more to name than the members it hides."
-  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path] [:maybe :map]]}
-  [c identity-attributes path]
+  "A short sequential value whose every member is a scalar, a name or a string
+  shown whole (`string-shown`), as one whole print node, else nil. Such a tuple
+  (a frame, a lookup ref, a pair) is admitted whole or not at all."
+  {:malli/schema [:=> [:cat :map [:set :qualified-keyword] :seon.render.data/path [:maybe :qualified-symbol] :int] [:maybe :map]]}
+  [c identity-attributes path requery-id max-string]
   (when (and (= :coll (:kind c)) (#{::print/vector ::print/list} (:face c))
              (not (:pending? c)) (<= (:total c) tuple-bound)
              ;; every member reached: a seq stepped short of its count is no tuple
@@ -769,7 +783,9 @@
                          node (case (:kind x)
                                 :scalar (:node x)
                                 :name (assoc (:node x) ::print/text (:text x))
-                                :string (when (<= (:total x) scalar-bound)
+                                :string (when (= (:total x) (string-shown {:kind :string :total (:total x) :path (conj path i)
+                                                                            :requery-id requery-id}
+                                                                           max-string))
                                           {::print/face ::print/string ::print/value (:value x)})
                                 nil)]
                      (some-> node (assoc :seon.render.data/path (conj path i)))))
@@ -1031,7 +1047,8 @@
                (let [;; A root continuation pages from its absolute offset.
                      c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))
                      ;; A root paged from an offset keeps its members addressable.
-                     tuple (when (or (pos? id) (zero? (:offset context 0))) (tuple-node c identity-attributes path))]
+                     tuple (when (or (pos? id) (zero? (:offset context 0)))
+                             (tuple-node c identity-attributes path (:requery-id base) (:max-string context)))]
                  (case (if tuple :tuple (:kind c))
                    :tuple (assoc base :kind :leaf :node tuple)
                    :scalar (assoc base :kind :leaf :node (:node c))
@@ -1039,9 +1056,9 @@
                            (assoc base :kind :leaf :node (assoc (:node c) ::print/text (:text c)))
                            (assoc base :kind :name :node (:node c) :text (:text c) :total (count (:text c))
                                   :shown chunk-width :shown-width chunk-width))
-                   :string (let [shown (min chunk-width (:total c) (:max-string context))]
-                             (assoc base :kind :string :value (:value c) :total (:total c)
-                                    :shown shown :shown-width (escaped-width (:value c) 0 shown)))
+                   :string (let [node (assoc base :kind :string :value (:value c) :total (:total c))
+                                 shown (string-shown node (:max-string context))]
+                             (assoc node :shown shown :shown-width (escaped-width (:value c) 0 shown)))
                    (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :lookup? :entity?])
                           {:pending (:members c) :outside (:prefix c)}))))
         node (if (= :leaf (:kind node)) (assoc node :width (leaf-width (:node node) depth)) node)]
@@ -1228,14 +1245,42 @@
                          (<= (- (charge admitted) (if (more? grown) (count (cut-text grown)) 0)) before))
                 (recur admitted (inc ordinal))))))))))
 
-(defn- budget-refused?
-  "True when `work` was refused for the budget, not for a member or string bound."
-  {:malli/schema [:=> [:cat :map :map :map] :boolean]}
-  [state work context]
-  (if (= :chunk (:op work))
-    (let [node (get-in state [:nodes (:id work)])]
-      (< (:shown node) (min (:total node) (:max-string context))))
-    (<= (:ord work) (:max-children context))))
+(defn- fill-end
+  "Where a cut string grown into `room` more characters of literal ends: at
+  most `room` wide, back to its last line end inside the growth when it has one."
+  {:malli/schema [:=> [:cat :map :int :int] :int]}
+  [node room max-string]
+  (let [^String text (:value node)
+        limit (min (:total node) max-string)
+        to (loop [i (long (:shown node)) width 0]
+             (if (< i limit)
+               (let [width (+ width (escaped-width text i (inc i)))]
+                 (if (<= width room) (recur (inc i) width) i))
+               i))
+        line-end (inc (.lastIndexOf text "\n" (int (dec to))))]
+    (if (and (< to limit) (> line-end (:shown node))) line-end to)))
+
+(defn- fill-string
+  "`state` with cut string `node` grown into the budget left (`fill-end`),
+  shrinking past what the regrown cut costs; nil when nothing more fits."
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
+  [state node context]
+  (loop [room (- (:budget context) (charge state))]
+    (when (pos? room)
+      (let [to (fill-end node room (:max-string context))]
+        (when (> to (:shown node))
+          (let [grown (grown-to state node to context)
+                over (- (charge grown) (:budget context))]
+            (if (pos? over) (recur (- room over)) grown)))))))
+
+(defn- fill-strings
+  "`state` with the budget left after selection spent on its cut strings,
+  shallowest and earliest first: a long source shows as many lines as fit."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [state context]
+  (reduce (fn [state id] (or (fill-string state (get-in state [:nodes id]) context) state))
+          state
+          (map :id (sort-by (juxt :level :id) (filter #(and (= :string (:kind %)) (more? %)) (vals (:nodes state)))))))
 
 (defn- insufficient-budget
   "The declared refusal when B cannot show the root, or a page's first member
@@ -1288,20 +1333,17 @@
       (insufficient-budget context root-charge)
       (let [state (loop [state (schedule state (get-in state [:nodes 0]) context)]
                     (let [[key work] (first (:queue state))]
-                      ;; The first level the budget refused is the last one
-                      ;; tried: nothing deeper fills in around it.
-                      (if (and work (<= (first key) (:refused-level state Long/MAX_VALUE)))
+                      ;; Every queued refinement is tried in level order, so a
+                      ;; budget refusal at one level leaves the rest to what fits.
+                      (if work
                         (let [state (update state :queue dissoc key)
                               admitted (case (:op work)
                                          :chunk (or (admit-chunk state work context)
                                                     (complete-chunk state work context))
                                          :member (or (admit-member state work context)
                                                      (complete-tail state work context)))]
-                          (recur (or admitted
-                                     (cond-> state
-                                       (budget-refused? state work context)
-                                       (update :refused-level (fnil min Long/MAX_VALUE) (first key))))))
-                        state)))]
+                          (recur (or admitted state)))
+                        (fill-strings state context))))]
         (if (and (:first-refused state) (zero? (get-in state [:nodes 0 :n])))
           (insufficient-budget context (:first-refused state))
           (assoc state :requery (:requery context)))))))
