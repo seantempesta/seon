@@ -245,7 +245,7 @@ Dependency authority: target pins Malli **43c6dca8d2d8df3162b13725939954807be4a4
 projection and Malli function-schema compilation. That seam checks shape; it cannot guarantee a caller constructs the
 shape it declares.
 
-Target Datahike pin: **e5453d967b749794944dbdfe64b751519983ba59**. Its transaction report and atomic transaction failure, composed through Seon's writer,
+Target `reference-code/datahike` pin: **e5453d967b749794944dbdfe64b751519983ba59**. Its transaction report and atomic transaction failure, composed through Seon's writer,
 are the authority for the guarded close/receipt decision; no speculative reread is needed.
 
 ## Verification, foreign boundaries, and landing
