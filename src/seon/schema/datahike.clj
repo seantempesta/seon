@@ -80,7 +80,7 @@
       node)))
 
 (defn- compiled-storage
-  "Fold compiled value nodes; reference identity precedes logical dereference."
+  "Storage facts retained by the compiled schema; reference identity precedes dereference."
   {:malli/schema [:=> [:cat [:fn malli.core/schema?]] :map]}
   [compiled]
   (letfn [(fold [compiled active]
@@ -151,7 +151,7 @@
              (= 'inst? t) {::value-type :db.type/instant}
              :else {::value-type (malli-type->datahike-type t)})]
        (merge {::cardinality :db.cardinality/one ::properties properties} result))))) ]
-    (fold compiled #{})))
+    (m/-cached compiled ::compiled-storage #(fold % #{}))))
 
 (defn attribute-declaration
   "Derive a native declaration from the supplied generation's retained root,

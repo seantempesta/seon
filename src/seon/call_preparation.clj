@@ -158,16 +158,13 @@
         (range) (m/-function-schema-arities compiled)))
 
 (defn- contract-arities
-  "`{sym arities}` for every function contract `projection` compiled. Malli's
-  registry retains the compiled schemas (`mr/schema`); this reads them once per
-  projection, held by the projection itself (`schema/projection-cache-value`)."
-  {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-symbol [:vector :map]]]}
-  [projection]
+  "The requested function's arities, retained by its projection; nil without a contract."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol] [:maybe [:vector :map]]]}
+  [projection sym]
   (schema/projection-cache-value
-   projection ::contract-arities
-   #(let [registry (:seon.schema.projection/registry projection)]
-      (into {} (keep (fn [sym] (some->> (mr/schema registry sym) arity-facts (vector sym))))
-            (keys (:seon.schema.projection/function-contracts projection))))))
+   projection [::contract-arities sym]
+   #(when (contains? (:seon.schema.projection/function-contracts projection) sym)
+      (some-> (mr/schema (:seon.schema.projection/registry projection) sym) arity-facts))))
 
 (defn- incoherent
   {:malli/schema [:=> [:cat :seon.call-preparation/supplied-default :string :map]
@@ -298,7 +295,11 @@
     (if (db/read-refusal? entities)
 
       entities
-      (let [contracts (contract-arities (db/carried-projection database))
+      (let [program (db/carried-projection database)
+            contracts (into {} (keep (fn [[_ _ supplier]]
+                                      (let [sym (symbol supplier)]
+                                        (when-let [arities (contract-arities program sym)]
+                                          [sym arities])))) entities)
             ;; debt: seon.db supplied-database-value and supplied-connection still declare :seon.error/value.
             error-keys (conj (set (@error-declared-schema-keys projection)) :seon.error/value)
             candidates
@@ -626,7 +627,7 @@
                   [:maybe :seon.call-preparation/arity-plans]]}
   [projection current sym]
   (let [index (supply-index current)]
-    (some->> (get (contract-arities projection) sym)
+    (some->> (contract-arities projection sym)
              (mapv #(arity-plan index %)))))
 
 (defn supplied-map-entries

@@ -2124,13 +2124,13 @@
                         (map #(vector :db/add caller :seon.fn/call-arities ['seon.id/id (+ 1000 %)])) (range n))
                report (d/with database tx)
                [comparison calls] (test-support/armed-calls
-                                   '#{seon.db/storage-q-in}
+                                   '#{seon.db/pull-many}
                                    #(#'db/report-arity-comparison projection report))]
            (is (= (+ existing n) (::db/edges comparison))
                "only the written caller's edges are compared")
            (is (= n (count (::db/candidates comparison))))
-           (is (= 3 (get calls 'seon.db/storage-q-in))
-               "two caller-family reads and one bound read serve the whole write")))))))
+           (is (= 2 (get calls 'seon.db/pull-many))
+               "one caller batch and one bound batch serve the whole write")))))))
 
 ;; CLASS: a silent empty from an index the attribute does not have. Datahike
 ;; answers an AVET read of an unindexed attribute with no datoms, which every
@@ -2988,7 +2988,7 @@
                                     :seon.fn/doc "An unrelated declaration observation."]])]
        (doseq [n [1 10 100]]
          (let [[comparisons calls] (test-support/armed-calls
-                                    '#{seon.db/call-edges seon.db/storage-q-in}
+                                    '#{seon.db/call-edges seon.db/pull-many}
                                     #(mapv (fn [_] (#'db/report-arity-comparison projection report)) (range n)))]
            (is (every? #(= {::db/candidates #{} ::db/checked 0 ::db/edges 0 ::db/bounds {}} %) comparisons))
            (is (every? zero? (vals calls)) "unrelated writes read no program edges or bounds")))))))

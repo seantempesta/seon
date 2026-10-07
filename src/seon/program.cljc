@@ -342,27 +342,15 @@
 (def shape-bytes-per-family 40600)
 
 (defn- authored-shapes
-  "The shapes the AUTHORED declaration resources currently define.
-
-  The program row families are this program's own structure, so the authority
-  is the declaration resources and not whichever projection happens to be
-  active: a cluster whose stored schema predates a declaration must still index
-  by it — the exact scope the literal table this replaced had.
-
-  THE CACHE KEY IS THE PACKAGED POPULATION ITSELF, never the process. A
-  process-lifetime snapshot made an attribute declared after this JVM started
-  invisible to `canonical-row`
-  (`program-shapes-cache-strips-attributes-declared-after-the-jvm-started`);
-  a different population is a MISS BY CONSTRUCTION, and a hit hashes the one
-  map `packaged-forms` answers per archive once. Only a SUCCESS is
-  remembered: a refusal throws out of the derivation."
+  "Program shapes from the current authored declarations, retained by their content."
+  {:malli/schema [:=> [:cat] :seon.program/shapes]}
   []
   #?(:clj
      (let [forms (schema.edn/packaged-forms)]
        (seon.cache/lookup ::authored-shapes forms
                           #(* shape-bytes-per-family (count %))
-                          #(shapes-in (schema/build-projection forms))))
-     :cljs (shapes-in (schema/build-projection (schema/registered-schemas)))))
+                          #(shapes-in (schema/declaration-projection forms))))
+     :cljs (shapes-in (schema/declaration-projection (schema/registered-schemas)))))
 
 (defn shapes
   "Program-row shapes keyed by their database identity attribute.

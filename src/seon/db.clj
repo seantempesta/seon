@@ -1484,19 +1484,8 @@
                         schema/projection-attributes))))
 
 (defn- declaration-content-key
-  "The complete input `schema/load-projection` reads: every datom of
-  `schema/projection-attributes`, with its transaction.
-
-  Two values holding these datoms derive the same projection whatever their
-  connection, branch or committed identity, so this key hits across a new
-  connection at an equal commit, an in-transaction value that wrote a
-  declaration (its fresh revision names no cached entry) and an as-of view
-  with its own rows. Datom equality ignores the
-  transaction (`datahike/datom.cljc:106`), so each attribute's transactions
-  ride beside its datoms. Unchanged datoms are the index's own objects, so
-  equality is mostly `identical?`; the cost is one pass over these
-  attributes (about 40k datoms, ~5 ms, in default on 2026-09-22; an as-of
-  view adds its sort, 17-21 ms)."
+  "The loader's declaration datoms and transactions in AEVT order.
+  Native database indexes already have that order; temporal views are sorted."
   {:malli/schema
    ;; The shape of each attribute's entry, not each of its ~30k datoms, which
    ;; the index produced: validating every datom cost 148 ms per armed key
@@ -1506,13 +1495,11 @@
   [database]
   (let [installed (dbi/-schema (schema-database database))]
     (mapv (fn [attribute]
-            ;; Datahike's own AEVT order: an as-of view yields the equal
-            ;; datoms in another order and must key the equal content. Sorting
-            ;; already-ordered input costs ~nothing (regression-bisect,
-            ;; 2026-09-23: 1.42 vs 1.49 ms over 30,387 datoms).
             (let [datoms (if (get installed attribute)
-                           (vec (sort datahike.datom/cmp-datoms-aevt-quick
-                                      (d/datoms database :aevt attribute)))
+                           (let [ordered (d/datoms database :aevt attribute)]
+                             (vec (if (instance? DB database)
+                                    ordered
+                                    (sort datahike.datom/cmp-datoms-aevt-quick ordered))))
                            [])]
               [attribute datoms (into [] (map :tx) datoms)]))
           schema/projection-attributes)))
@@ -4417,21 +4404,6 @@
                          :else datom))))
              tx-data)))))
 
-(defn- storage-q-in
-  "Datalog for the writer's own questions over logical attributes: `query`
-   lowered by `projection`, then Datahike's `q`. A vector attribute's pattern
-   is membership through its cells. The writer passes the projection it judges
-   the write by, so a value holding no declaration rows yet (a first
-   population's `:db-before`) is read by the declarations being installed."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/query :seon.db/database-value [:* :seon.schema/value]]
-                  :seon.schema/value]}
-  [projection query database & inputs]
-  (let [[request] (lowered-query-request projection
-                                         {:query query :args (into [database] inputs)}
-                                         (query/memoized-parse-query query))]
-    (apply d/q (:query request) (:args request))))
-
-
 (defn logical-missing?
   "Datalog predicate, the lowering of `[(missing? $ e a)]`: true when `e`
    holds no value of `a`. A vector attribute is missing only without its
@@ -4522,11 +4494,8 @@
 (defn- report-arity-comparison
   "Check only final call edges whose caller or callee this write changes.
 
-  EAVT reads written callers; the calls AVET index finds callers of changed
-  callees. Schema/default changes follow reverse schema references to the
-  arities using them. Bounds are read only for the reached callees. No
-  whole-program base or cache key is retained; coverage names this write."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] :map]}
+  Pull only affected callers and their targets; coverage names this write."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:map [::candidates [:set :seon.schema/value]] [::checked :int] [::edges :int] [::bounds [:map-of :qualified-symbol [:set [:map :seon.fn.arity/min [:seon.fn.arity/max {:optional true}]]]]]]]}
   [projection report]
   (let [before (:db-before report) after (:db-after report)
         tx-data (logical-datoms projection report)
@@ -4561,23 +4530,35 @@
         callers (into written-symbols
                       (values after (mapcat #(holders after :seon.fn/calls %) callees)
                               [:seon.fn/sym :seon.test/sym]))
-        storage-q (partial storage-q-in projection)
+        caller-rows (when (seq callers)
+                      (pull-many after [:seon.fn/sym :seon.test/sym :seon.fn/call-arities]
+                                 (into [] (mapcat (fn [sym] [[:seon.fn/sym sym] [:seon.test/sym sym]])) callers)))
+        _ (when (read-refusal? caller-rows)
+            (throw (ex-info (:seon.error/message caller-rows) caller-rows)))
         edges (if (seq callers)
                 (into #{} (filter (fn [[caller [callee _]]]
                                     (or (written-symbols caller) (callees callee))))
-                      (call-edges storage-q after callers))
+                      (for [row caller-rows
+                            caller (keep #(get row %) [:seon.fn/sym :seon.test/sym])
+                            call (:seon.fn/call-arities row)]
+                        [caller call]))
                 #{})
         targets (into #{} (map (comp first second)) edges)
+        target-rows (when (seq targets)
+                      (pull-many after [:seon.fn/sym {:seon.fn/arities [:seon.fn.arity/min :seon.fn.arity/max]}]
+                                 (mapv #(vector :seon.fn/sym %) targets)))
+        _ (when (read-refusal? target-rows)
+            (throw (ex-info (:seon.error/message target-rows) target-rows)))
         bounds (if (seq targets)
                  (reduce (fn [out [sym minimum maximum]]
                            (update out sym (fnil conj #{})
                                    (cond-> {:seon.fn.arity/min minimum}
                                      (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
                          {}
-                         (storage-q '[:find ?sym ?minimum ?maximum :in $ [?sym ...]
-                                      :where [?f :seon.fn/sym ?sym] [?f :seon.fn/arities ?a]
-                                             [?a :seon.fn.arity/min ?minimum]
-                                             [(get-else $ ?a :seon.fn.arity/max -1) ?maximum]] after targets))
+                         (for [{sym :seon.fn/sym arities :seon.fn/arities} target-rows
+                               {minimum :seon.fn.arity/min maximum :seon.fn.arity/max} arities
+                               :when (some? minimum)]
+                           [sym minimum maximum]))
                  {})]
     (assoc (arity-comparison edges bounds) ::bounds bounds)))
 

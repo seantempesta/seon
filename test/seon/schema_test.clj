@@ -1173,7 +1173,8 @@
                        (config/result-caps configuration)
                        (select-keys configuration [:seon.config.error/max-evidence-bytes]))))))
        (testing "call preparation's argument validators compile"
-         (let [arities (#'call-preparation/contract-arities bare)
+         (let [arities (into {} (map (fn [sym] [sym (#'call-preparation/contract-arities bare sym)]))
+                            (keys (:seon.schema.projection/function-contracts bare)))
                arguments (for [[_ function-arities] arities
                                arity function-arities
                                argument (:seon.call-preparation/arity-arguments arity)]
