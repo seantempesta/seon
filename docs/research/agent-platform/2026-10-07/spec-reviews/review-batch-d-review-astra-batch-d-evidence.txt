@@ -1,0 +1,38 @@
+Candidate 910b70717ed71d4b156945ca7802b9df7720c77b; installed 108dd1c3e20dfbf3488c69ed80e2dafefabec86d
+Lint: linting took 7221ms, errors: 0, warnings: 1488
+First-party contracts: 38 touched Clojure paths, packaged projection, no baselines.
+Installed probe: identical-data? true; items 10000; chain ms 2.538042; installed-core? false.
+Candidate scratch JVM; corrected timer encloses operation:
+WARNING: Using incubator modules: jdk.incubator.vector
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+{:probe :core-no-world, :ms 61.729917, :value {:tokens-estimate 28.75, :config-realized? false}}
+{:probe :full-bypasses-fixed-core-budget, :ms 81.65675, :value {:tokens-estimate 2254.0}}
+{:probe :core-text, :throws "java.lang.IllegalStateException", :message "hostile cause"}
+{:probe :core-html, :throws "java.lang.IllegalStateException", :message "hostile cause"}
+{:probe :total-text, :throws "java.lang.IllegalStateException", :message "hostile cause"}
+{:probe :total-html, :throws "java.lang.IllegalStateException", :message "hostile cause"}
+{:probe :reference-traversal, :n 1000, :visits 1002, :identical? true, :ms 1.544792}
+{:probe :reference-traversal, :n 10000, :visits 10002, :identical? true, :ms 8.94975}
+{:probe :reference-traversal, :n 100000, :visits 100002, :identical? true, :ms 58.218125}
+{:probe [:require seon.sci.branch-execution-test], :ms 7788.61525, :value :loaded}
+Performance warning, seon/cluster/agent_test.clj:1216:29 - case has int tests, but tested expression is not primitive.
+Reflection warning, seon/cluster/agent_test.clj:2178:5 - reference to field close can't be resolved.
+{:probe [:require seon.cluster.agent-test], :ms 209.227458, :value :loaded}
+{:probe [:require seon.render.floor-test], :ms 16.919542, :value :loaded}
+{:probe [:require seon.test.runner], :ms 0.035833, :value :loaded}
+{:probe [:require seon.turn.batch], :ms 0.007958, :value :loaded}
+{:probe [:require seon.render.walk], :ms 0.005666, :value :loaded}
+{:probe [:require seon.render.web], :ms 0.004833, :value :loaded}
+{:probe [:require seon.cluster.boot], :ms 29.402709, :value :loaded}
+{:probe [:require seon.fault], :ms 0.023708, :value :loaded}
+{:probe [:require seon.test.accretion], :ms 0.008458, :value :loaded}
+{:probe [:require my.background], :ms 0.006208, :value :loaded}
+{:probe :contracts, :ms 2223.874875, :value {:findings [], :count 0}}
+{:probe :diagnostic-text, :ms 1.994625, :value {:diagnostic-tokens-estimate 40.5}}
+{:probe :diagnostic-html, :ms 1.438333, :value {:diagnostic-tokens-estimate 39.75}}
+{:probe :memory, :heap-used 484989104, :heap-max 2147483648}
+Lazy cursor diagnostic reproduction:
+WARNING: Using incubator modules: jdk.incubator.vector
+Warning: environ value /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home for key :java-home has been overwritten with /opt/homebrew/Cellar/openjdk/26.0.1/libexec/openjdk.jdk/Contents/Home
+{:probe :text, :diagnostic-tokens-estimate 25023.25, :ms 51.495167}
+{:probe :html, :diagnostic-tokens-estimate 25022.5, :ms 0.506667}
