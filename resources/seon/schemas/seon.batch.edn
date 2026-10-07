@@ -160,7 +160,7 @@
          [:seon.batch/value {:optional true} :seon.batch/value]
          [:seon.batch/error {:optional true} :seon.batch/error]
          [:seon.batch/duration-ms {:description "Evaluation alone, to the value's return."} number?]
-         [:seon.batch/allocated-bytes {:optional true :description "Bytes the evaluating thread allocated during the evaluation (HotSpot ThreadMXBean)."} :int]
+         [:seon.batch/allocated-bytes {:optional true :description "Bytes the evaluating thread allocated during the evaluation (HotSpot ThreadMXBean); absent when it ran on a virtual thread, for which HotSpot keeps no count."} nat-int?]
          [:seon.batch/total-ms {:optional true :description "Evaluation, observation and the one print."} number?]
          [:seon.batch/source {:optional true} :string]
          [:seon.batch/line {:optional true} pos-int?]

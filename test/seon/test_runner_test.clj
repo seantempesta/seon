@@ -452,6 +452,7 @@
         [first-report second-report] (:seon.test.failure/reports
                                       (first (#'runner/captured-results @capture)))]
     (is (< elapsed-ms 1000) "capturing and reporting the failure stays within its bound")
+    (is (pos? allocated) "the body's thread counts its allocation")
     (is (< allocated (* 256 1024 1024))
         "the failure allocates far less than one whole print (over 400 MB)")
     (is (< (count output) bound) "the gate log printout stays bounded")

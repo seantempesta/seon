@@ -286,7 +286,10 @@
                                       (or (:seon.test/long-ms
                                            (program/test-markers (meta test-var) (meta (:ns (meta test-var)))))
                                           5000))))))))))))))
-            thread (.unstarted (Thread/ofVirtual) task)
+            ;; a platform thread: HotSpot counts a platform thread's
+            ;; allocation and none of a virtual thread's, so a body's
+            ;; allocation bounds measure it
+            thread (-> (Thread/ofPlatform) (.daemon true) (.name "seon-test-body") (.unstarted task))
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol
                       :seon.test.member/began? false

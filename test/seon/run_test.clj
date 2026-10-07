@@ -208,21 +208,15 @@
        :seon.batch/version (assoc v :seon.batch/pos (inc p)) :seon.batch/repairs []}
       {:seon.batch/eof true :seon.batch/version (assoc v :seon.batch/pos p) :seon.batch/repairs []})))
 
-(defn- platform-allocation
-  "The bytes `f` allocates, run on a joined platform thread with this thread's
-  bindings: HotSpot counts no allocation for a virtual thread, where test
-  bodies run (`seon.batch/allocation-is-unmeasured-on-a-virtual-thread`)."
+(defn- allocation
+  "Bytes this thread allocates running `f` (-1 on a virtual thread, for which
+  HotSpot keeps no count)."
   {:malli/schema [:=> [:cat [:=> [:cat] :any]] :int]}
   [f]
   (let [threads ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
-        allocated (volatile! -1)
-        thread (Thread. ^Runnable (bound-fn [] (let [before (.getCurrentThreadAllocatedBytes threads)]
-                                                 (f)
-                                                 (vreset! allocated (- (.getCurrentThreadAllocatedBytes threads) before)))))]
-    ;; the join is the exit: the volatile is read after it
-    (.start thread)
-    (.join thread)
-    @allocated))
+        before (.getCurrentThreadAllocatedBytes threads)]
+    (f)
+    (if (neg? before) -1 (- (.getCurrentThreadAllocatedBytes threads) before))))
 
 (deftest a-forms-position-costs-the-text-once
   ;; Each form's line and column are scanned on from the previous form's, so
@@ -233,11 +227,28 @@
      (let [forms 40
            text (fn [gap] (apply str (repeat forms (str "a" (apply str (repeat gap \newline))))))
            fold #(run-with (db/db connection) {:seon.batch/text (text %) :seon.batch/read-next read-spaced})
-           allocation (fn [gap] (fold gap) (platform-allocation #(fold gap)))
-           short-text (allocation 250)
-           long-text (allocation 2000)]
+           allocated (fn [gap] (fold gap) (allocation #(fold gap)))
+           short-text (allocated 250)
+           long-text (allocated 2000)]
        (is (= (mapv (fn [k] [(inc (* k 2000)) 1]) (range forms))
               (mapv (juxt :seon.batch/line :seon.batch/column) (:seon.batch/entries (fold 2000)))))
-       (is (pos? short-text) "the platform thread's allocation counter measures the fold")
+       (is (pos? short-text) "the body's thread counts its allocation")
        (is (< (- long-text short-text) (* 4 1024 1024))
            "70,000 more characters of text cost the fold their length, not 40 times it")))))
+
+(deftest an-entrys-allocation-is-measured-or-absent-never-zero
+  ;; HotSpot counts a platform thread's allocation and none of a virtual
+  ;; thread's: an entry evaluated on a virtual thread carries no allocation.
+  (support/with-database
+   (fn [connection]
+     (let [basis (db/db connection)
+           on (fn [builder]
+                (let [batch (volatile! nil)
+                      thread (.unstarted ^java.lang.Thread$Builder builder
+                                         ^Runnable (bound-fn [] (vreset! batch (run-with basis {:seon.batch/evaluate (fn [_ form _] {:seon.batch/value (vec (repeat 1000 form))})}))))]
+                  ;; the join is the exit: the volatile is read after it
+                  (.start thread)
+                  (.join thread)
+                  (mapv #(find % :seon.batch/allocated-bytes) (:seon.batch/entries @batch))))]
+       (is (= [nil nil] (on (Thread/ofVirtual))))
+       (is (every? (comp pos? val) (on (Thread/ofPlatform))))))))

@@ -161,6 +161,7 @@
                                    before)]
                   (is (= (count ids) (count entities)))
                   (is (every? :seon.fn/sym entities))
+                  (is (pos? allocated) "the body's thread counts its allocation")
                   (is (< allocated 10000000))
                   (is (< elapsed 20000000))))))))
        (is (= "" (str warnings)))))))

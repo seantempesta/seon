@@ -569,6 +569,7 @@
            offending (get-in (:admitted (peek runs)) [:seon.sci.admit/value :seon.error/offending])]
        ;; the owner's bound: 5 ms and 5 MB (measured 2.4 ms / 1.1 MB unarmed on default)
        (is (< (apply min (map :ms runs)) 5.0))
+       (is (every? (comp pos? :bytes) runs) "the body's thread counts its allocation")
        (is (< (apply min (map :bytes runs)) 5000000))
        (is (< (count (:seon.sci.admit/edn (:admitted (peek runs)))) 20000))
        (testing "each world object is its typed identity"

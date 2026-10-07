@@ -810,6 +810,7 @@
             received (first (:seon.error/offending instrument-data))]
         (is (identical? registry received)
             "the seam retains the actual object; presentation alone elides it")
+        (is (pos? allocated) "the body's thread counts its allocation")
         (is (< allocated allocation-ceiling)
             "construction allocation stays below the issue baseline of 150,063,304 bytes")
         (is (= 1 (:seon.instrument/problem-count instrument-data)))

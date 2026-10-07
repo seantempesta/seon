@@ -967,6 +967,9 @@
           (is (= :ok
                  (get-in function-evaluation
                          [:seon.sci.admit/record :seon.eval/outcome])))
+          (is (every? #(pos? (get-in % [:seon.sci.admit/record :seon.eval/allocated-bytes]))
+                      [schema-evaluation function-evaluation])
+              "the evaluating thread counts its allocation")
           (is (< (get-in schema-evaluation
                          [:seon.sci.admit/record :seon.eval/allocated-bytes])
                  allocation-limit)
@@ -2577,6 +2580,7 @@
       (is (= "clojure.lang.PersistentVector" (:seon.eval/value-class large)))
       (is (= "java.lang.String" (:seon.eval/value-class string))))
     (testing "the show's work is independent of the value's length"
+      (is (pos? small-bytes) "the body's thread counts its allocation")
       (is (< large-bytes (+ small-bytes (* 16 1024 1024))) "a million elements cost what a thousand do")
       (is (< string-bytes (* 16 1024 1024)) "a 1 MB string is not copied for storage"))
     (testing "an infinite lazy seq is realized only as far as it is shown"

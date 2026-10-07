@@ -193,6 +193,7 @@
           (is (= payload-size (:seon.blob/size result)))
           (is (= binary-threshold
                  (alength ^bytes (:seon.blob/inline-prefix result))))
+          (is (every? pos? [write-allocation read-allocation]) "the body's thread counts its allocation")
           (is (< write-allocation (* 8 1024 1024))
               "32 MiB staged write allocated bytes")
           (is (= 4096 (alength ^bytes range-bytes)))

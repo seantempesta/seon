@@ -1,7 +1,7 @@
 ---
 title: line-column — a form's position costs the text once; allocation measured where it is defined
 type: landing
-status: slice 1 landed; slice 2 needs an owner decision (options below)
+status: slices 1-2 landed; agent evaluations' allocation needs an owner decision (options below)
 date: 2026-10-07
 ---
 
@@ -94,3 +94,77 @@ read stage keeps answering only its span. Awkward: the read stages already know 
 `source-reader`, the host `LineNumberingPushbackReader`), but count them from where each reader started (a version
 after a delimiter repair, `.skip`), so reusing them would make each stage answer absolute positions; a cursor in
 the fold is one place instead of four.
+
+## Cause 2, confirmed at the REPL
+
+HotSpot keeps no allocation count for a virtual thread: `getCurrentThreadAllocatedBytes` answers -1 there (JDK
+26.0.1, default). An MCP `sci` run's form runs on a virtual thread (`(.isVirtual (Thread/currentThread))` true;
+its stack ends in `seon.flow/graph-executor`'s virtual thread per proc task, the agent graph's turn proc); a JVM
+`jvm` run's on a platform thread; a test body on the runner's `(Thread/ofVirtual)` in `seon.test`. So:
+
+- `seon.batch/allocated-bytes` deltas were -1 - -1 = 0: every SCI form recorded `:seon.batch/allocated-bytes 0`, a
+  false measurement. `seon.sci.kernel` already answered its typed unknown (-1, `::measurable false`).
+- Every allocation bound in a test body read 0 or -1 and passed without measuring. Proven: with a positive-reading
+  assertion added, all eight measured tests went red under the HEAD runner (check run `e2a6f95e77bc`): the
+  measurements were vacuous.
+
+| Test (all vacuous before) | Bound | Real measurement on a platform thread |
+|---|---|---|
+| `seon.instrument-test/registry-sized-contract-evidence-retains-the-offending-object` | 16 MiB | 45,429,240 B: RED, task `40c4f9b9c655` |
+| `seon.sci.eval-test/schema-and-contract-declarations-have-bounded-allocation` | 64 MiB | schema 230,233,672 B: RED, task `f994a23477f7` (its line 962 is red on HEAD too, same task) |
+| `seon.test-runner-test/a-failure-over-huge-values-reports-and-identifies-within-the-render-bound` | 256 MiB | within |
+| `seon.sci.kernel-test/a-failures-cost-follows-its-distinct-frames-not-its-depth` | 50 MiB | within |
+| `seon.sci.admit-test/a-value-carrying-its-world-admits-references-not-copies` | 5 MB | within |
+| `seon.db-test/supplied-database-pulls-carry-the-projection-across-unbound-reads` | 10 MB | within |
+| `seon.blob-test/large-binary-write-and-small-chunk-have-bounded-allocation` | 8 MiB, 1 MiB | within |
+| `seon.sci.eval-test/showing-a-value-realizes-and-stores-only-what-is-shown` | +16 MiB | within |
+
+(The real measurements came from a disposable probe test, never committed, that ran the eight tests on a joined
+platform thread with their events collected: check run `9cee7a4e1c37`.)
+
+## Fix 2 (`src/seon/test.clj`, `src/seon/batch.clj`, `src/seon/turn/batch.clj`, the eight tests)
+
+The simplest correct choice for each place, with its limit:
+
+- Test bodies run on a platform thread (`seon.test`, one line: `(-> (Thread/ofPlatform) (.daemon true) ...)`):
+  HotSpot's per-thread count is exact there, so every existing bound measures what it states. Limit: allocation
+  on other threads the body starts (futures, `seon.cache` derivations on virtual threads) is not the body's, as
+  before; the kernel adds futures it carries the arm to. A body that outlives its bound holds a platform thread
+  until it exits, as it held a virtual one.
+- Every allocation bound first asserts its reading is positive, so a return to an unmeasured thread fails loudly
+  instead of passing (`(is (pos? allocated) ...)`).
+- `seon.batch/allocated-bytes` answers nil on a virtual thread and the entry then carries no
+  `:seon.batch/allocated-bytes` (absence, never 0); `seon.turn.batch/jvm-show` passes the record's own unknown
+  (-1). Regression `seon.run-test/an-entrys-allocation-is-measured-or-absent-never-zero`.
+- The two private measuring helpers (`seon.sci.forgive-test`, `seon.run-test`) measure on the body's own thread.
+
+Rejected: JVM-wide `getTotalThreadAllocatedBytes` around a form (every concurrent agent, writer and test is
+counted: an upper bound that fails bounds under load); per-carrier accounting (a virtual thread that parks resumes
+on another carrier, and the carrier is not public API); JFR `jdk.ObjectAllocationSample` (sampled and throttled,
+an estimate delivered asynchronously).
+
+## STOP: agent evaluations stay unmeasured (owner decision)
+
+Agents' and MCP SCI forms run in their graph's turn proc on a virtual thread, so their allocation is now honestly
+unknown (absent / -1), not measured. Measured in default: 13 graphs hold 27 virtual proc threads; a parked thread
+costs 1.8 KB RSS virtual vs 41-117 KB platform (500 parked threads, throwaway JVM, `parked.clj`). Options:
+
+1. **Platform threads for every graph's proc loops** (`seon.flow/graph-executor`, one line; simplest): exact
+   per-form allocation for every agent evaluation; costs about 40-117 KB per parked proc (27 procs: 1-3 MB; 100
+   agents x 3 procs: 12-35 MB), against the flow decision's 8.5 KB per idle graph.
+2. **The turn proc alone on a platform thread** (recommended): the one proc that evaluates forms is measured,
+   mailbox and schedule procs stay virtual: about 40-117 KB per agent. Flow chooses a proc loop's executor only by
+   its workload (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:245-262`: `:mixed`
+   -> `:mixed-exec`, else `:io-exec`; a `:compute` step runs on the compute pool under a 5 s `.get` timeout), so
+   this means the turn proc declared `:mixed` with a per-graph platform `:mixed-exec`, reversing the flow skill's
+   "refuse mixed at construction".
+3. **Keep virtual; measure the evaluation on a platform thread** (a thread hop at the fold): idle costs nothing,
+   but the hop must carry SCI binding frames, the kernel's thread-local arm and interruption; it changes the one
+   REPL path's semantics and costs a thread start per run.
+
+## Design check (slice 2)
+
+The design held for tests (one runner line makes every existing measurement real, and the guards keep it so).
+Wrong in the old design: two measuring layers (`seon.batch`, `seon.sci.kernel`) disagreed on unknown (0 vs -1);
+the batch now answers absence, and the kernel's -1 stays its record's declared unknown. Awkward: the production
+side cannot be made exact without choosing a thread for the turn proc, which is the flow owner's decision above.

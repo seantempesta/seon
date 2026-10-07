@@ -877,7 +877,7 @@
                          :seon.sci.admit/caps (:seon.sci.admit/caps (#'eval/instrumentation-config db)))
               (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal))))
         record {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0
-                :seon.eval/duration-ms (Math/round (double duration-ms)) :seon.eval/allocated-bytes allocated-bytes
+                :seon.eval/duration-ms (Math/round (double duration-ms)) :seon.eval/allocated-bytes (or allocated-bytes -1)
                 :seon.eval/outcome (if (contains? entry :seon.batch/error) :error :ok)}]
     (printed
      (if (contains? entry :seon.batch/error)

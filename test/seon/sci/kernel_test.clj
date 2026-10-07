@@ -183,6 +183,7 @@
             allocated (- (.getThreadAllocatedBytes bean thread) before)
             elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
         (is (= 1000 (count (:seon.error/chain value))))
+        (is (pos? allocated) "the body's thread counts its allocation")
         (is (< allocated (* 50 1024 1024)) "was 757 MB before the frames-in-common rule")
         (is (< elapsed-ms 100) "was 187 ms")))))
 

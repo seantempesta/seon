@@ -29,19 +29,14 @@
     "(+ 1 2))\n(+ 3 4)"                       ["(+ 1 2)" "(+ 3 4)"]))
 
 (defn- allocated-reading
-  "Bytes a platform thread allocates segmenting `reply`: a virtual thread's
-  allocation counter answers -1."
+  "Bytes this thread allocates segmenting `reply` (-1 on a virtual thread,
+  for which HotSpot keeps no count)."
   {:malli/schema [:=> [:cat :string] :int]}
   [reply]
-  (let [allocated (volatile! -1)
-        threads ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)]
-    ;; joined, so its write is visible here
-    (doto (Thread. ^Runnable (fn [] (let [before (.getCurrentThreadAllocatedBytes threads)]
-                                      (forgive/segments reply)
-                                      (vreset! allocated (- (.getCurrentThreadAllocatedBytes threads) before)))))
-      (.start)
-      (.join 5000))
-    @allocated))
+  (let [threads ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+        before (.getCurrentThreadAllocatedBytes threads)]
+    (forgive/segments reply)
+    (if (neg? before) -1 (- (.getCurrentThreadAllocatedBytes threads) before))))
 
 (deftest ^{:seon/tasks #{'seon.sci.forgive/a-prose-repair-replays-the-whole-reply
                          'seon.sci.forgive/structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote}}

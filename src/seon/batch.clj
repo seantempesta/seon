@@ -250,11 +250,14 @@
         {:seon.batch/source source :seon.batch/line l :seon.batch/column c}))))
 
 (defn- allocated-bytes
-  "The calling thread's allocated bytes so far (HotSpot's ThreadMXBean)."
-  {:malli/schema [:=> [:cat] :int]}
+  "The calling thread's allocated bytes so far (HotSpot's ThreadMXBean), nil
+  on a virtual thread, for which HotSpot keeps no count
+  (`seon.batch/allocation-is-unmeasured-on-a-virtual-thread`)."
+  {:malli/schema [:=> [:cat] [:maybe nat-int?]]}
   []
-  (.getCurrentThreadAllocatedBytes
-   ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)))
+  (let [allocated (.getCurrentThreadAllocatedBytes
+                   ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean))]
+    (when-not (neg? allocated) allocated)))
 
 (defn- unprintable
   "The minimal shown text of an entry whose print failed; total, nil included."
@@ -366,8 +369,10 @@
         printed (volatile! nil)
         bytes0 (allocated-bytes)
         measured (volatile! nil)
-        measure! (fn [] (vreset! measured {:seon.batch/duration-ms (ms-since t0)
-                                           :seon.batch/allocated-bytes (- (allocated-bytes) bytes0)}))
+        ;; an unmeasured allocation is no key, never 0
+        measure! (fn [] (vreset! measured (let [bytes1 (allocated-bytes)]
+                                            (cond-> {:seon.batch/duration-ms (ms-since t0)}
+                                              (and bytes0 bytes1) (assoc :seon.batch/allocated-bytes (- bytes1 bytes0))))))
         run (fn run
               ([] (run {}))
               ([scope]
