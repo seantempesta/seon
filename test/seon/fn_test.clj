@@ -2663,6 +2663,22 @@
            (is (= 1 (get calls 'seon.fn/shared-dependency-analysis 0)))
            (is (= 1 (get calls 'seon.fn/with-dependency-analysis 0)))))))))
 
+(deftest a-submitted-batch-holds-the-analysis-of-the-vendored-dependencies-it-calls
+  ;; The REPL batch reads `runtime-analysis-batch` directly: its dependency join
+  ;; is the batch's own, never a caller's.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection {:tx-data [(test-support/namespace-entity @connection 'sample.vendored-calls)]})
+     (let [request (fn [form-source] {:namespace-name 'sample.vendored-calls :form-source form-source})
+           analysis (:seon.fn/analysis
+                     (#'seon.fn/runtime-analysis-batch
+                      @connection
+                      [(request "(require '[datahike.api :as d] '[malli.core :as m])")
+                       (request "(defn probe [db] [(d/datoms db :eavt) (m/validate :int 1)])")]))]
+       (is (some #{'datahike.api/datoms} (map #(symbol (str (::analyzer/to %)) (str (::analyzer/name %)))
+                                              (::analyzer/var-usages analysis))))
+       (is (empty? (filter '#{datahike.api malli.core} (::analyzer/unanalyzed-namespaces analysis))))))))
+
 (deftest invocation-metadata-survives-admission-and-exact-replacement
   (test-support/with-database
    (fn [connection]

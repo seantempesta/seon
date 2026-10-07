@@ -948,6 +948,31 @@
                 :where [_ :seon.ns/name ?name]]
               database (vec named))))
 
+(defn- shared-dependency-analysis
+  "The checkout's clj-kondo dependency analysis of `namespaces`, read and never
+  written: a submitted form is analyzed without a cache, because kondo writes
+  every namespace it lints into the cache it reads (clj_kondo/impl/cache.clj:165).
+  Each entry is kondo's own cached namespace (`from-cache-1`, :23), absent when unanalyzed."
+  {:malli/schema [:=> [:cat [:set :symbol]] [:map-of :symbol :map]]}
+  [namespaces]
+  (let [root (kondo.core/resolve-cache-dir analyzer/config-directory true analyzer/cache-directory)]
+    (into {} (keep (fn [namespace-name]
+                     (some->> (some #(kondo.cache/from-cache-1 root % namespace-name) [:clj :cljc])
+                              (vector namespace-name))))
+          namespaces)))
+
+(defn- with-dependency-analysis
+  "Resolve the usages a cacheless analysis left unanalyzed against `dependencies`:
+  a supplied namespace is analyzed, and its cached `:macro` marks each usage."
+  {:malli/schema [:=> [:cat :map [:map-of :symbol :map]] :map]}
+  [analysis dependencies]
+  (-> analysis
+      (update ::analyzer/unanalyzed-namespaces #(into (sorted-set) (remove (set (keys dependencies))) %))
+      (update ::analyzer/var-usages
+              (partial mapv #(cond-> %
+                               (get-in dependencies [(::analyzer/to %) (::analyzer/name %) :macro])
+                               (assoc ::analyzer/macro true))))))
+
 (defn- runtime-analysis-batch
   "Run the analyzer once for an ordered batch of submitted forms.
 
@@ -957,9 +982,14 @@
   shared usage projection instead of being remapped to the calling namespace.
   A request's observed macro expansions (`:seon.batch/expansions`, in the
   form's own coordinates) become the analyzer's hooks at that form's first
-  row, so a generated definition is analyzed at its call."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]] :map]}
-  [database requests]
+  row, so a generated definition is analyzed at its call. The analysis holds
+  the dependency analysis of the namespaces it used (`dependencies`, default
+  the checkout's cache), so no caller classifies a host call without it."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value [:vector :map]] :map]
+                  [:=> [:cat :seon.db/database-value [:vector :map] [:maybe [:map-of :symbol :map]]] :map]]}
+  ([database requests] (runtime-analysis-batch database requests nil))
+  ([database requests dependencies]
   (let [namespace-names (vec (distinct (map :namespace-name requests)))
         available-functions
         (db/q '[:find [(pull ?f [:seon.fn/sym :seon.fn/arglists :seon.fn/private?]) ...]
@@ -1023,12 +1053,15 @@
                       (map vector requests spans))
         analysis
         (with-in-str source
-          (analyzer/analyze (cond-> {::analyzer/paths ["-"]} hooks (assoc ::analyzer/hooks hooks))))]
+          (analyzer/analyze (cond-> {::analyzer/paths ["-"]} hooks (assoc ::analyzer/hooks hooks))))
+        analysis (with-dependency-analysis
+                   analysis
+                   (or dependencies (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis))))]
     {:seon.fn/analysis analysis
      :seon.fn/source source
      :seon.fn/source-spans spans
      :seon.fn/function-rows
-     (resolvable-runtime-function-entities database analysis requests)}))
+     (resolvable-runtime-function-entities database analysis requests)})))
 
 (declare source-span)
 
@@ -1199,31 +1232,6 @@
     ;; analysis facts (receipts assert no program attribute).
     [{} merged-entity]))
 
-(defn- shared-dependency-analysis
-  "The checkout's clj-kondo dependency analysis of `namespaces`, read and never
-  written: a submitted form is analyzed without a cache, because kondo writes
-  every namespace it lints into the cache it reads (clj_kondo/impl/cache.clj:165).
-  Each entry is kondo's own cached namespace (`from-cache-1`, :23), absent when unanalyzed."
-  {:malli/schema [:=> [:cat [:set :symbol]] [:map-of :symbol :map]]}
-  [namespaces]
-  (let [root (kondo.core/resolve-cache-dir analyzer/config-directory true analyzer/cache-directory)]
-    (into {} (keep (fn [namespace-name]
-                     (some->> (some #(kondo.cache/from-cache-1 root % namespace-name) [:clj :cljc])
-                              (vector namespace-name))))
-          namespaces)))
-
-(defn- with-dependency-analysis
-  "Resolve the usages a cacheless analysis left unanalyzed against `dependencies`:
-  a supplied namespace is analyzed, and its cached `:macro` marks each usage."
-  {:malli/schema [:=> [:cat :map [:map-of :symbol :map]] :map]}
-  [analysis dependencies]
-  (-> analysis
-      (update ::analyzer/unanalyzed-namespaces #(into (sorted-set) (remove (set (keys dependencies))) %))
-      (update ::analyzer/var-usages
-              (partial mapv #(cond-> %
-                               (get-in dependencies [(::analyzer/to %) (::analyzer/name %) :macro])
-                               (assoc ::analyzer/macro true))))))
-
 (defn analyze-forms
   "Analyze submitted forms in one kondo batch, returning form-local facts.
 
@@ -1286,11 +1294,7 @@
              spans :seon.fn/source-spans
              analyzed-source :seon.fn/source
              function-entities :seon.fn/function-rows}
-            (runtime-analysis-batch database resolved)
-            analysis (with-dependency-analysis
-                      analysis
-                      (or dependencies
-                          (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis))))
+            (runtime-analysis-batch database resolved dependencies)
             projection (or (db/carried-projection database)
                            (schema/projection-from-database database))]
         (mapv (fn [request [first-row last-row]]
@@ -1584,9 +1588,6 @@
                     :form-source source
                     :seon.fn/namespace-row namespace-entity
                     :seon.fn/declared declared}])
-        analysis (with-dependency-analysis
-                  analysis
-                  (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis)))
         [first-row last-row] (first spans)
         context (text-context text)
         ;; The submitted form starts its own line after the prelude.
