@@ -97,7 +97,7 @@
                      [?agent :seon.agent/branch ?branch]
                      [?turn :seon.turn/agent ?agent]
                      [?evaluation :seon.cluster.eval/run ?turn]
-                     [?evaluation :seon.cluster.eval/author :agent]
+                     [?evaluation :seon.cluster.eval/origin :model]
                      [?turn :seon.turn/id _ ?turn-t]
                      [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
                    database (get-in database [:config :branch]))]
@@ -962,7 +962,7 @@
                        [?schema :seon.schema/form _ ?schema-tx]
                        [?receipt :seon.cluster.eval/ordinal 1]
                        [?receipt :seon.eval/shown _ ?receipt-tx]
-                       [?receipt :seon.cluster.eval/author :agent]]
+                       [?receipt :seon.cluster.eval/origin :model]]
                      db persistent-key)]
             (is (= "[:int {:min 0, :seon.db/index true}]"
                    (:seon.schema/form persistent-entity))
@@ -1212,7 +1212,7 @@
                             [?turn :seon.turn/agent ?agent]
                             [?evaluation :seon.cluster.eval/run ?turn]
                             [?evaluation :seon.eval/shown ?result]
-                            [?evaluation :seon.cluster.eval/author :agent]]
+                            [?evaluation :seon.cluster.eval/origin :model]]
                           @connection))
               "the existing peer evaluates the accepted first-party definition")
           ;; RESTORE THE INDEXED CORE ROW EXACTLY: an upsert of the pulled
@@ -2057,7 +2057,7 @@
               settlement-tx
               (db/q '[:find ?tx .
                       :where
-                      [?evaluation :seon.cluster.eval/author :agent]
+                      [?evaluation :seon.cluster.eval/origin :model]
                       [?evaluation :seon.eval/shown ":sent" ?tx]] database)]
           (is (= 3 (count @requests)))
           (is (= #{["please count the widgets" "agent-b" "agent-a"]
@@ -2433,7 +2433,7 @@
                                :seon.cluster.eval/at now
                                :seon.cluster.eval/source "(identity :phase-probe)"
                                :seon.cluster.eval/ns [:seon.ns/name 'my.agents.agent-a]
-                               :seon.cluster.eval/author :agent})))
+                               :seon.cluster.eval/origin :model})))
               (let [settled
                     (turn/settle!
                      (cond-> {:seon.turn.loop/cluster cluster

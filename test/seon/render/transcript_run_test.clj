@@ -29,21 +29,21 @@
                 {:seon.cluster.eval/id "eval-a"
                  :seon.cluster.eval/run [:seon.turn/id "run-a"]
                  :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/author :agent
+                 :seon.cluster.eval/origin :model
                  :seon.cluster.eval/source "(+ 1 1)"
                  :seon.cluster.eval/at #inst "2026-09-06T00:00:01.000-00:00"
                  :seon.eval/shown "2"}
                 {:seon.cluster.eval/id "form-a-pending"
                  :seon.cluster.eval/run [:seon.turn/id "run-a"]
                  :seon.cluster.eval/ordinal 1
-                 :seon.cluster.eval/author :agent
+                 :seon.cluster.eval/origin :model
                  ;; Frozen and never started still has a freeze instant.
                  :seon.cluster.eval/at #inst "2026-09-06T00:00:02.000-00:00"
                  :seon.cluster.eval/source "pending-form"}
                 {:seon.cluster.eval/id "eval-b"
                  :seon.cluster.eval/run [:seon.turn/id "run-b"]
                  :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/author :agent
+                 :seon.cluster.eval/origin :model
                  :seon.cluster.eval/source "(* 9 9)"
                  :seon.cluster.eval/at #inst "2026-09-06T00:01:01.000-00:00"
                  :seon.eval/shown "81"}]))

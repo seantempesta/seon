@@ -482,11 +482,6 @@
   (let [run (current-run database run-id)]
     (if (and run (open? run)) (vec tx-data) [])))
 
-(defn- plan-tx-for-author
-  [author request]
-  [[:db.fn/call #'plan-call
-    (assoc request :seon.cluster.eval/author author)]])
-
 (defn plan-tx
   "Transaction data freezing one agent-authored form plan on the open turn."
   {:malli/schema [:=> [:cat [:map
@@ -502,7 +497,8 @@
                              [::sources :seon.cluster.reply/sources]]]
                   :seon.store/transaction-data]}
   [request]
-  (plan-tx-for-author :agent request))
+  [[:db.fn/call #'plan-call
+    (assoc request :seon.cluster.eval/origin :model)]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one identity a (run, ordinal) pair mints
@@ -597,12 +593,12 @@
 (defn- source-rows
   "The shared namespace rows and the ordered evaluation entities of one plan.
 
-  ONE ENTITY PER (run, ordinal): the frozen source, its author, its
+  ONE ENTITY PER (run, ordinal): the frozen source, its origin, its
   namespace and its comment are asserted here with NO terminal fact, and
   settlement accretes the terminal facts onto the same entity. The
   identity fence is the one `receipt-start-call` keeps — an ordinal that
   ever had an evaluation refuses forever, so nothing re-executes."
-  [db id run-eid first-ordinal starting-namespace author at sources]
+  [db id run-eid first-ordinal starting-namespace origin at sources]
   (let [namespaces (namespace-rows starting-namespace sources)
           evaluations
           (into []
@@ -619,10 +615,11 @@
                       run-eid
                       (cond-> {::id id
                                :seon.cluster.eval/ordinal ordinal
-                               :seon.cluster.eval/at at
-                               :seon.cluster.eval/author author
+                               :seon.cluster.eval/origin origin
                                :seon.cluster.eval/source
                                (:seon.cluster.eval/source form)}
+                        at
+                        (assoc :seon.cluster.eval/at at)
                         namespace-name
                         (assoc :seon.cluster.eval/ns
                                (str "namespace:" namespace-name))
@@ -644,15 +641,15 @@
                         [::reply-blob {:optional true} ::reply-blob]
                         [::reply-size {:optional true} ::reply-size]
                         [::starting-ns {:optional true} ::starting-ns]
-                        [:seon.cluster.eval/author
-                         :seon.cluster.eval/author]
+                        [:seon.cluster.eval/origin
+                         :seon.cluster.eval/origin]
                         [:seon.cluster.eval/at {:optional true}
                          :seon.cluster.eval/at]
                         [::sources :seon.cluster.reply/sources]]]
                   :seon.store/transaction-data]}
   [db request]
   (let [{::keys [id reply reply-blob reply-size sources starting-ns]
-         author :seon.cluster.eval/author} request
+         origin :seon.cluster.eval/origin} request
         ;; DERIVE AT THE AUTHORITY: the freeze instant is the instant this
         ;; transaction is committing at, which only the transaction knows.
         at (or (:seon.cluster.eval/at request)
@@ -692,7 +689,7 @@
             reply-blob (conj [:db/add run-eid ::reply-blob reply-blob])
 )
           (source-rows db id run-eid existing-form-count starting-namespace
-                       author at sources))))
+                       origin at sources))))
 
 (defn open-tx
   "Transaction data opening one run for an agent."
@@ -745,7 +742,7 @@
                    {::starting-ns (str "namespace:" namespace-name)
                     ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})]
            (concat (rest open-rows) (source-rows database id (:db/id opened) 0 namespace-name
-                        :system (current-transaction-instant database) sources)))}))
+                        :outside (current-transaction-instant database) sources)))}))
 
 (defn system-run-call
   "Open a system-authored turn and freeze its sources at the writer."
@@ -824,7 +821,6 @@
      (cond-> {::id id
               :seon.cluster.eval/ordinal ordinal
               :seon.cluster.eval/at receipt-at
-              :seon.cluster.eval/author :system
               :seon.cluster.eval/source source
               :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
        (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
@@ -886,8 +882,8 @@
                 :seon.cluster.eval/source]
                [:seon.cluster.eval/comment {:optional true}
                 :seon.cluster.eval/comment]
-               [:seon.cluster.eval/author {:optional true}
-                :seon.cluster.eval/author]
+               [:seon.cluster.eval/origin {:optional true}
+                :seon.cluster.eval/origin]
                [:seon.cluster.eval/ns {:optional true}
                 :seon.cluster.eval/ns]]]
     :seon.store/transaction-data]}
@@ -895,25 +891,47 @@
   [[:db.fn/call #'receipt-start-call request]])
 
 (defn- receipt-row
+  "The frozen receipt row of one request, on run `run-eid`: the facts an
+  evaluation has before it settles."
+  {:malli/schema
+   [:=> [:cat :seon.db/ref
+         [:map
+          [::id ::id]
+          [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+          [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
+          [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
+          [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
+          [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
+          [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]]]
+    [:map
+     [:db/id :seon.cluster.eval/id]
+     [:seon.cluster.eval/id :seon.cluster.eval/id]
+     [:seon.cluster.eval/run :seon.db/ref]
+     [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+     [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
+     [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
+     [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
+     [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
+     [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]]]}
   [run-eid request]
   (let [{::keys [id]
-         :seon.cluster.eval/keys [ordinal at source ns comment author]} request
+         :seon.cluster.eval/keys [ordinal at source ns comment origin]} request
         receipt-id (receipt-identity id ordinal)]
     (cond-> {:db/id receipt-id
              :seon.cluster.eval/id receipt-id
              :seon.cluster.eval/run run-eid
-             :seon.cluster.eval/ordinal ordinal
-             :seon.cluster.eval/at at}
+             :seon.cluster.eval/ordinal ordinal}
+      ;; absent on the plan the pass asks of a database value, which has no
+      ;; transaction instant yet; the writer's own plan always has one
+      at (assoc :seon.cluster.eval/at at)
       source (assoc :seon.cluster.eval/source source)
       (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
       ;; The agent's prose is its own fact beside the source it introduces,
       ;; so a prompt line holds exactly the one form it prompts for.
       comment (assoc :seon.cluster.eval/comment comment)
-      ;; WHO WROTE THIS FORM. Every site that starts an evaluation already
-      ;; knows — a model reply freeze is `:agent`, a system run and a
-      ;; generated append are `:system` — and each one dropped the fact on
-      ;; the floor, so the attribute was declared and never written.
-      author (assoc :seon.cluster.eval/author author)
+      ;; WHICH ENTRANT'S PASS RECORDED THIS FORM: a model reply freeze is
+      ;; `:model`, a submitted run `:outside`; generated appends write none.
+      origin (assoc :seon.cluster.eval/origin origin)
       ns (assoc :seon.cluster.eval/ns ns))))
 
 (defn receipt-start-call
@@ -931,8 +949,8 @@
            :seon.cluster.eval/source]
           [:seon.cluster.eval/comment {:optional true}
            :seon.cluster.eval/comment]
-          [:seon.cluster.eval/author {:optional true}
-           :seon.cluster.eval/author]
+          [:seon.cluster.eval/origin {:optional true}
+           :seon.cluster.eval/origin]
           [:seon.cluster.eval/ns {:optional true}
            :seon.cluster.eval/ns]]]
     :seon.store/transaction-data]}
@@ -1236,13 +1254,28 @@
 (defn- recorded-evaluation
   "The immutable evaluation fields shared by saving and duplicate comparison.
 
-  ONE ENTITY: the frozen source and author are compared here too, because
+  ONE ENTITY: the frozen source and origin are compared here too, because
   the twin form entity that used to carry them is gone."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.cluster.eval/id :seon.cluster.eval/id]
+               [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+               [:seon.cluster.eval/at :seon.cluster.eval/at]
+               [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
+               [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
+               [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]]]
+    [:map
+     [:seon.cluster.eval/id :seon.cluster.eval/id]
+     [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
+     [:seon.cluster.eval/at :seon.cluster.eval/at]
+     [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
+     [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
+     [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]]]}
   [request]
   (cond-> (select-keys request
                        (into [:seon.cluster.eval/id :seon.cluster.eval/ordinal
                               :seon.cluster.eval/at :seon.cluster.eval/source
-                              :seon.cluster.eval/author
+                              :seon.cluster.eval/origin
                               :seon.cluster.eval/comment]
                              receipt-terminal-attributes))
     (seq (:seon.cluster.eval/read-evidence request))
@@ -1312,8 +1345,7 @@
         (mapv (fn [ordinal source evaluation]
                 (cond-> (assoc evaluation
                                :seon.cluster.eval/id
-                               (receipt-identity id ordinal)
-                               :seon.cluster.eval/author :system)
+                               (receipt-identity id ordinal))
                   (nil? (:seon.cluster.eval/source evaluation))
                   (assoc :seon.cluster.eval/source
                          (:seon.cluster.eval/source source))))
@@ -1806,7 +1838,7 @@
                  shown (repl/shown-value (:seon.eval/shown evaluation ""))
                  previous (get latest (source-key source))
                  shown (if (and previous (map? shown) (:seon.repl/changes shown)
-                                (= :system (:seon.cluster.eval/author evaluation))
+                                (not= :model (:seon.cluster.eval/origin evaluation))
                                 (not= :call (get-in evaluation [:seon.cluster.eval/run
                                                               :seon.turn.work/situation])))
                          (db/apply-diff (:seon.repl/shown-value previous)
@@ -3312,7 +3344,7 @@
                               [?run :seon.turn/id ?run-id]
                               [?form :seon.cluster.eval/run ?run]
                               [?form :seon.cluster.eval/ordinal ?ordinal]
-                              [?form :seon.cluster.eval/author :agent]]
+                              [?form :seon.cluster.eval/origin :model]]
                             database run-id ordinal)]
         (when (db/read-refusal? agent-form)
           (throw (ex-info (:seon.error/message agent-form) agent-form)))
@@ -4999,8 +5031,8 @@
                    ;; never regenerates it. Refusing the turn instead parked the
                    ;; agent's loop after three refusals (root, 2026-09-28).
                    fault (when-let [entity-id (when run-id (evaluation-entity-id basis (receipt-identity run-id ordinal)))]
-                             (when (and (= :system (:seon.cluster.eval/author
-                                                    (db/pull basis [:seon.cluster.eval/author] entity-id)))
+                             (when (and (not= :model (:seon.cluster.eval/origin
+                                                      (db/pull basis [:seon.cluster.eval/origin] entity-id)))
                                         (= :generate (:seon.turn.work/situation
                                                       (db/pull basis [:seon.turn.work/situation] [:seon.turn/id run-id]))))
                                (generated-read-fault basis (assoc row :seon.cluster.eval/ns [:seon.ns/name ns-before])

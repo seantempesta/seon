@@ -385,7 +385,6 @@
                {:seon.cluster.eval/id (str run-id "-0")
                 :seon.cluster.eval/run [:seon.turn/id run-id]
                 :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/author :system
                 :seon.cluster.eval/at now
                 :seon.cluster.eval/source "(help)"}])
       (is (= {:seon.turn.work/situation :resume

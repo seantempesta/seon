@@ -34,7 +34,7 @@
                            :seon.turn/reply-size
                            {:seon.cluster.eval/_run
                             [:seon.cluster.eval/ordinal
-                             :seon.cluster.eval/author
+                             :seon.cluster.eval/origin
                              :seon.cluster.eval/source]}
                            {:seon.turn/trigger
                             [:seon.message/id

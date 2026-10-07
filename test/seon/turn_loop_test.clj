@@ -960,7 +960,7 @@
                  :seon.cluster.eval/run [:seon.turn/id "run-1"]
                  :seon.cluster.eval/ordinal 0
                  :seon.cluster.eval/at now
-                 :seon.cluster.eval/author :agent
+                 :seon.cluster.eval/origin :model
                  :seon.cluster.eval/source "(def probe-staged-def …)"
                  :seon.cluster.eval/ns [:seon.ns/name 'user]}]))
 
@@ -1058,7 +1058,7 @@
                         :seon.cluster.eval/run [:seon.turn/id "run-1"]
                         :seon.cluster.eval/ordinal ordinal
                         :seon.cluster.eval/at now
-                        :seon.cluster.eval/author :agent
+                        :seon.cluster.eval/origin :model
                         :seon.cluster.eval/source (str "(+ " ordinal " 1)")
                         :seon.cluster.eval/ns [:seon.ns/name 'user]})
                      [0 1])))

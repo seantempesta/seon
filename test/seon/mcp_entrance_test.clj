@@ -4,19 +4,22 @@
   context reads."
   (:require [clojure.core.async :as async]
             [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.host :as host]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.eval.drive :as drive]
             [seon.fault :as fault]
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.operator.runtime :refer [running-instances]]
             [seon.render.transcript :as transcript]
             [seon.sci.admit :as admit]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.turn :as turn]))
 
 (defn- answer
   "`seon.mcp/call` on `tool` and `arguments`, decoded."
@@ -88,6 +91,69 @@
        (is (false? (get dug "isError")))
        (is (= 4 (:seon.repl/value (support/reply (first (stored-responses connection agent-id run)))))
            "the JVM value is bound under its handle in the agent's own context")))))
+
+(defn- outside
+  "`f`'s value, called on a fresh platform thread so no custody is conveyed."
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] :seon.schema/value]}
+  [f]
+  (let [task (java.util.concurrent.FutureTask. ^java.util.concurrent.Callable f)]
+    (.start (Thread. task))
+    (.get task 60 java.util.concurrent.TimeUnit/SECONDS)))
+
+(defn- stored-origins
+  "Each stored evaluation of `agent-id` as `[source origin]`, origin nil when
+  absent, plus the evaluations that carry the retired author."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:map [:origins [:set [:tuple :string [:maybe :keyword]]]] [:authored :int]]]}
+  [database agent-id]
+  (let [forms (db/q '[:find ?form ?source :in $ ?agent-id
+                      :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
+                      [?form :seon.cluster.eval/run ?run] [?form :seon.cluster.eval/source ?source]]
+                    database agent-id)]
+    {:origins (set (map (fn [[form source]]
+                          [(str/trim source) (db/q '[:find ?origin . :in $ ?form
+                                          :where [?form :seon.cluster.eval/origin ?origin]]
+                                        database form)])
+                        forms))
+     :authored (count (filter (fn [[form _]]
+                                (db/q '[:find ?author . :in $ ?form
+                                        :where [?form :seon.cluster.eval/author ?author]]
+                                      database form))
+                              forms))}))
+
+(deftest ^{:seon.test/subject "seon.turn/receipt-row"}
+  entrant-origin-is-recorded-on-each-evaluation
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (answer "eval_clj" {"code" "(+ 1 1)" "agent" agent-id "cluster" running})
+     (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
+     (let [cluster (:seon.turn.loop/cluster (get @running-instances running))
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           ledger (atom [])]
+       (support/with-provider
+        ledger (support/reply-queue ["```clojure\n(+ 40 2)\n```"])
+        (fn [server]
+          (answer "eval_clj" {"code" (str "(my.agent/settings! "
+                                          (id/printed (merge (support/provider-config server)
+                                                             {:seon.config.ai/no-provider false
+                                                              :seon.config.run/max-episode-runs 1}))
+                                          ")")
+                              "agent" agent-id "cluster" running})
+          (outside #(drive/inbound! connection cluster-name (:seon.db.process/id cluster) agent-id "Wake."))
+          ;; the member's wake routing is not armed: drive the agent's passes as its proc would
+          (loop [passes 0]
+            (let [now (java.util.Date.)
+                  work (turn/next-agent-work @connection {:seon.agent/id agent-id
+                                                          :seon.db.process/id (:seon.db.process/id cluster)
+                                                          :seon.turn.work/now now})]
+              (when (and work (< passes 4))
+                (turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next work} now)
+                (recur (inc passes)))))))
+       (let [{:keys [origins authored]} (stored-origins (db/db connection) agent-id)]
+         (is (contains? origins ["(+ 1 1)" :outside]) "an MCP SCI form is recorded by the outside entrant")
+         (is (contains? origins ["(+ 1 2)" :outside]) "an MCP JVM form is recorded by the outside entrant")
+         (is (contains? origins ["(+ 40 2)" :model]) "the model's reply form is recorded by the model entrant")
+         (is (zero? authored) "no evaluation carries the retired author"))))))
 
 (defn- core-fault!
   "Record one core fault on `connection`'s branch through the production writer."

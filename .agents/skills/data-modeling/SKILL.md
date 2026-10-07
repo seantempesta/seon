@@ -177,10 +177,10 @@ A `my.*` read returns small maps with the item's own keys;
 a write returns the changed entity.
 
 History, unanswered wakes, and routed faults remain queries.
-System turns store generated evaluations in the same family as
-agent-written evaluations. “System” derives from reply presence and
-no provider attempt. Do not add an author-kind stamp or a parallel
-generated-form family.
+Each evaluation names its entrant in `:seon.cluster.eval/origin`
+(`:model`, `:outside`; S4 adds `:opening`, `:input`, `:test` with their
+passes). The agent's history is its `:opening`, `:input` and `:model`
+evaluations; never derive origin from reply presence or provider attempts.
 
 ## Results and identity
 

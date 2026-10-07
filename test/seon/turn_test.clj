@@ -151,7 +151,6 @@
                 :seon.cluster.eval/at (java.util.Date.)
                 :seon.cluster.eval/run [:seon.turn/id run-id]
                 :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/author :system
                 :seon.cluster.eval/source source}])
            ctx (support/fork-cluster-ctx connection)
            handle (support/cluster-handle
@@ -188,13 +187,13 @@
                            [:seon.cluster.eval/id evaluation-id]))))
        (checked-transact! connection
                           [[:db/add [:seon.cluster.eval/id evaluation-id]
-                            :seon.cluster.eval/author :agent]])
+                            :seon.cluster.eval/origin :model]])
        (is (seq (get-in (first (:seon.turn.loop/evaluated-sources (turn/evaluate-sources request)))
                         [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
            "an agent may explicitly inspect its own history")
        (checked-transact! connection
                           [[:db/add [:seon.cluster.eval/id evaluation-id]
-                            :seon.cluster.eval/author :system]
+                            :seon.cluster.eval/origin :outside]
                            [:db/add [:seon.turn/id run-id] :seon.turn.work/situation :call]])
        (is (seq (get-in (first (:seon.turn.loop/evaluated-sources (turn/evaluate-sources request)))
                         [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
@@ -301,7 +300,6 @@
                  :seon.cluster.eval/at (java.util.Date.)
                  :seon.cluster.eval/run [:seon.turn/id run-id]
                  :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/author :system
                  :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]
                  :seon.cluster.eval/source source}])
             ctx (support/fork-cluster-ctx connection)
@@ -411,7 +409,6 @@
                   :seon.cluster.eval/at (java.util.Date.)
                   :seon.cluster.eval/run [:seon.turn/id run-id]
                   :seon.cluster.eval/ordinal 0
-                  :seon.cluster.eval/author :system
                   :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]
                   :seon.cluster.eval/source "(+ 1 1)"}])
              handle (support/cluster-handle
@@ -1054,15 +1051,15 @@
                 :seon.cluster.eval/ordinal 1
                 :seon.cluster.eval/source "(dir 'my.turn)"
                 :seon.ns/name 'my.agents.generated}))))
-      (is (= [[0 :system "(help)"]
-              [1 :system "(dir 'my.turn)"]]
+      (is (= [[0 "(help)"]
+              [1 "(dir 'my.turn)"]]
              (db/q {:query
-                    '[:find ?ordinal ?author ?source
+                    '[:find ?ordinal ?source
                       :where
                       [?run :seon.turn/id "generated-run"]
                       [?form :seon.cluster.eval/run ?run]
                       [?form :seon.cluster.eval/ordinal ?ordinal]
-                      [?form :seon.cluster.eval/author ?author]
+                      (not [?form :seon.cluster.eval/origin _])
                       [?form :seon.cluster.eval/source ?source]]
                     :args [@connection]
                     :order-by '[?ordinal :asc]})))
@@ -1106,12 +1103,12 @@
           (is (:seon.turn/missing-opening-datom (turn/opening-db @connection "absent-run")))
           (is (= 'replay.start
                  (get-in run [::turn/starting-ns :seon.ns/name]))))
-      (is (= :system
-             (db/q '[:find ?author .
+      (is (= :outside
+             (db/q '[:find ?origin .
                      :where
                      [?run :seon.turn/id "replay-run"]
                      [?form :seon.cluster.eval/run ?run]
-                     [?form :seon.cluster.eval/author ?author]]
+                     [?form :seon.cluster.eval/origin ?origin]]
                    @connection)))
       (is (= 'replay.start
              (db/q '[:find ?namespace-name .
@@ -2071,7 +2068,7 @@
                     :seon.turn/starting-ns [:seon.ns/name 'my.agents.printer] :seon.turn/opened-tx "datomic.tx"}
                    {:seon.cluster.eval/id evaluation-id :seon.cluster.eval/at (java.util.Date.)
                     :seon.cluster.eval/run [:seon.turn/id run-id] :seon.cluster.eval/ordinal 0
-                    :seon.cluster.eval/author :system :seon.cluster.eval/ns [:seon.ns/name 'my.agents.printer]
+                    :seon.cluster.eval/ns [:seon.ns/name 'my.agents.printer]
                     :seon.cluster.eval/source "(+ 1 1)"}])
                refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run {:seon.turn/id run-id})
                             (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
@@ -2146,7 +2143,7 @@
          (map-indexed (fn [ordinal source]
                         {:seon.cluster.eval/id (id/evaluation run-id ordinal) :seon.cluster.eval/at (java.util.Date.)
                          :seon.cluster.eval/run [:seon.turn/id run-id] :seon.cluster.eval/ordinal ordinal
-                         :seon.cluster.eval/author :agent :seon.cluster.eval/ns [:seon.ns/name 'my.agents.printer]
+                         :seon.cluster.eval/origin :model :seon.cluster.eval/ns [:seon.ns/name 'my.agents.printer]
                          :seon.cluster.eval/source source}))
          sources))
   (support/cluster-handle

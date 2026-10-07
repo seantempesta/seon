@@ -636,11 +636,18 @@
 
 (defn- evaluation-record
   "One entry as the recording writer's terminal evaluation."
-  {:malli/schema [:=> [:cat :string :seon.batch/entry] :map]}
+  {:malli/schema [:=> [:cat :string :seon.batch/entry]
+                  [:and :seon.cluster.eval/settle-request
+                   [:map
+                    [:seon.cluster.eval/at :seon.cluster.eval/at]
+                    [:seon.cluster.eval/source :seon.cluster.eval/source]
+                    [:seon.cluster.eval/ns :seon.cluster.eval/ns]
+                    [:seon.cluster.eval/origin [:= :outside]]]]]}
   [turn-id {ordinal :seon.batch/ordinal :as entry}]
   (merge {:seon.turn/id turn-id
           :seon.cluster.eval/ordinal ordinal
-          :seon.cluster.eval/at (java.util.Date.)}
+          :seon.cluster.eval/at (java.util.Date.)
+          :seon.cluster.eval/origin :outside}
          (admitted-form entry)
          (entry-evaluation entry)))
 

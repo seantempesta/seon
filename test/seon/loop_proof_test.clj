@@ -609,7 +609,7 @@
                                       (or (runtime-source? %)
                                           (and (seq? form) (= 'seon.agent/settings (first form)))))
                      observed #(filter (fn [entry]
-                                         (and (= :system (:seon.cluster.eval/author entry))
+                                         (and (not= :model (:seon.cluster.eval/origin entry))
                                               (not= :call (:seon.turn.work/situation
                                                            (db/pull @connection [:seon.turn.work/situation]
                                                                     (get-in entry [:seon.cluster.eval/run :db/id]))))))
