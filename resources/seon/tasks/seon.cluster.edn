@@ -89,4 +89,8 @@
  #:seon.task{:name "retiring-an-attribute-with-stored-component-data-refuses-adoption"
              :kind :function
              :intent "Removing :seon.maintenance.result/collect-branches (a component vector with no reader; its {:seon.store/branch :seon.source/commit-id} elements broke boot, fixed by 919be10c5) cannot adopt on default: the cluster population transaction refuses 'Complete component validation refused: vector-element-swept' (entity 106090, cell 106091) because the overnight collection receipt still holds the vector. Retiring a schema attribute must retract its stored values in the same population transaction (as drop-retired-families! does for retired identity families), not refuse. Done when that removal adopts on the live store and the receipt stops storing heads."
-             :must-read #{seon.cluster/populate-source! seon.maintenance/project-collect-result}}]
+             :must-read #{seon.cluster/populate-source! seon.maintenance/project-collect-result}}
+ #:seon.task{:name "reset-leaves-old-agents-branches-and-connections"
+             :kind :function
+             :intent "After `bin/seon reset default --force` the roster still held 16 :agent-* branches whose agents no longer existed on the reforked :cluster-default, each with an open connection in the JVM, so seon.cluster.registry/retire-branch! refused them ('still has a connection in this process'); the leaked hosts' loaded indexes held 4.6 GB of live heap. Reset must stop every hosted agent of the old cluster and release its connection, so boot's retire-unclaimed! retires the branches. Proof: a test that hosts agents on branches, stops the cluster's hosts and asserts no connection remains open for their branches."
+             :must-read #{seon.cluster.registry/retire-branch! seon.cluster.host/release-children!}}]

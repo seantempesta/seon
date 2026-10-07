@@ -185,6 +185,23 @@
                     (db/pull (branch-db handle branch) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
         (is (nil? (host/hosted handle branch)) "the parent roster no longer records the host")))))
 
+(deftest ^{:seon/tasks #{'seon.cluster/reset-leaves-old-agents-branches-and-connections}}
+  stopping-the-cluster-releases-every-host-connection
+  ;; A reset stops the instance in this JVM: a host left running kept its
+  ;; branch connection, so its branch outlived the reforked cluster.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [store (:seon.store/store handle)
+            branches [(branch!) (branch!)]]
+        (doseq [[branch agent-id] (map vector branches ["mcp/stop-a" "mcp/stop-b"])]
+          (host-on! handle branch agent-id))
+        (is (every? #(registry/active-branch-connection {:seon.store/store store :seon.store/branch %}) branches)
+            "each host holds its branch connection")
+        (is (nil? (host/release-children! (:seon.agent/routing handle))))
+        (is (empty? (:seon.agent/children @(:seon.agent/routing handle))))
+        (is (not-any? #(registry/active-branch-connection {:seon.store/store store :seon.store/branch %}) branches)
+            "no connection remains for a stopped host's branch")))))
+
 (deftest one-identity-is-homed-on-one-branch-decided-by-the-writer
   ;; Astra H2: two hosts of one new agent on sibling branches both pre-read an
   ;; absent cluster entity; the cluster writer now decides, so exactly one homes it.

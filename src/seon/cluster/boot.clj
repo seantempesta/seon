@@ -7,6 +7,7 @@
             [datahike.api :as d]
             [datahike.gc-guard :as gc-guard]
             [seon.cluster :as cluster]
+            [seon.cluster.host :as host]
             [seon.cluster.process :as process]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -558,7 +559,7 @@
 
   ## Errors
 
-  - A join `seon.cluster/disarm-agents!` misses is answered (the await
+  - A join `seon.cluster.host/release-children!` or `seon.cluster/disarm-agents!` misses is answered (the await
     owner's timeout naming the missing exit) with the instance restored in
     the roster: nothing after the join is released."
   {:malli/schema [:=> [:cat :seon.boot/instance] [:or :nil :seon.await/timeout-error]]}
@@ -576,7 +577,10 @@
                        (swap! running-instances assoc name (assoc current :seon.boot/stopping true))
                        true)))]
     (when claimed?
-      (if-let [missed (cluster/disarm-agents! instance)]
+      ;; hosts are newer than the cluster's own layers: they stop and release
+      ;; their branch connections first, so no retired cluster keeps them
+      (if-let [missed (or (some-> (:seon.agent/routing instance) host/release-children!)
+                          (cluster/disarm-agents! instance))]
         (do (swap! running-instances assoc name instance)
             missed)
         (try

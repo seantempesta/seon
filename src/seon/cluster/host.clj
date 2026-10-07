@@ -166,9 +166,34 @@
       :else (refusal `host! (str "Branch " branch " hosts " (:seon.agent/id host) ", not " agent-id ".")
                      :seon.agent/id (:seon.agent/id host) agent-id))))
 
+(defn stop!
+  "Stop a host without closing its admission: nil once its graphs have exited and
+  its execution is released, else the missed join's timeout with the host held."
+  {:malli/schema [:=> [:cat ::host] [:or :nil :seon.await/timeout-error]]}
+  [{roster :seon.agent/routing execution ::execution :as host}]
+  (or (cluster/disarm-agents! host)
+      (do (swap! roster dissoc ::host)
+          (agent/release-context! execution)
+          nil)))
+
+(defn release-children!
+  "Stop every host recorded in `routing`'s children, then release every
+  execution they still own; nil, or the first missed join's timeout, after
+  which nothing further is released."
+  {:malli/schema [:=> [:cat :seon.agent/routing] [:or :nil :seon.await/timeout-error]]}
+  [routing]
+  (or (some (fn [child] (let [host (some-> (::host @child) deref)]
+                          (when (::execution host) (stop! host))))
+            (vals (:seon.agent/children @routing)))
+      (run! agent/release-context!
+            (for [child (vals (:seon.agent/children @routing))
+                  execution (vals (:seon.agent/contexts @child))
+                  :when (or (:seon.agent/owns-connection? execution) (:seon.agent/owns-branch? execution))]
+              execution))))
+
 (defn retire!
   "Retire a host: close its agent's admission, on its branch row and then its
-  cluster row (one transaction each), then stop.
+  cluster row (one transaction each), then `stop!`.
 
   After the admission commit the run writer refuses every later run for the
   agent by name; runs that committed first are joined by
@@ -180,8 +205,7 @@
   is answered and nothing further happens."
   {:malli/schema [:=> [:cat ::host] [:or :nil :seon.db/invalid-read-error :seon.db/transaction-refused-error
                                      :seon.await/timeout-error]]}
-  [{handle :seon.turn.loop/cluster roster :seon.agent/routing agent-id :seon.agent/id
-    execution ::execution :as host}]
+  [{handle :seon.turn.loop/cluster agent-id :seon.agent/id :as host}]
   ;; The branch entity first: its run writer refuses every later run from then
   ;; on. The cluster entity then records that this host is closed.
   (or (some (fn [connection]
@@ -194,7 +218,4 @@
                                     [[:db/add (:db/id entity) :seon.agent/admission-closed-tx "datomic.tx"]]))]
                     (when-not (:db-after result) result)))))
             (keep identity [(:seon.db/connection handle) (::parent host)]))
-      (cluster/disarm-agents! host)
-      (do (swap! roster dissoc ::host)
-          (agent/release-context! execution)
-          nil)))
+      (stop! host)))
