@@ -42,4 +42,9 @@
              :kind :function
              :intent "Two build-cache keys still hash printed text, not structure: seon.dev.dependency-digest/digest-declarations! feeds pr-str of deps.edn's declarations (under fixed print bindings) into SHA-256, and seon.operator/program-classes hashes pr-str of [trees cache-identity]. seon.id/id hashes structure and loads in babashka (verified 2026-10-07: same ids in bb and the JVM); dependency_digest.clj is also loaded by path on tools.deps' tool classpath, which does not hold src/. Done when both keys hash their data with seon.id/id (or the source bytes they derive from) and no build-cache key prints a value to hash it."
              :must-read #{seon.operator/program-classes}
-             :evidence #{"docs/research/agent-platform/2026-10-07/task-tags/task-tags-notes.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/task-tags/task-tags-notes.md"}}
+ #:seon.task{:name
+            "a-candidate-that-babashka-cannot-load-passes-the-check",
+            :kind :function,
+            :intent
+            "The operator (`bin/seon`, `script/seon/operator.clj`) runs under babashka and requires first-party namespaces such as `seon.error.refusal`, but nothing proves a candidate's operator closure loads in babashka: `bin/seon check` runs HEAD's operator and boots the candidate in a JVM. A JVM-only form (lane refusal-walk-fix used `(.hasheq ^clojure.lang.IHashEq x)` in `seon.error.refusal/referenced`) passed lint and the JVM tests while `bb --config /dev/null -cp script:src:resources -e \"(require 'seon.operator)\"` failed with `Unable to resolve classname: clojure.lang.IHashEq`; committing it would break every bin/seon command. Correct: the check (or one test beside `seon.cluster.subprocess-test/plain-babashka-cannot-load-the-quarry`) requires `seon.operator` in babashka from the candidate's archive and refuses when it fails. Proof test: babashka loads the candidate's operator."}]

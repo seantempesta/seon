@@ -1,0 +1,21 @@
+[#:seon.task{:name
+            "every-form-is-analyzed-because-its-result-handle-is-a-binding",
+            :kind :function,
+            :intent
+            "seon.turn.batch/derive-form runs clj-kondo (analyze-form -> seon.fn/runtime-analysis-batch) for every evaluated form, including ones that define nothing: publication interns the value under its result handle (`result/e...`, seon.sci.eval/bind-result!), the write observer reports that :bind :root write, and derive-form's `finals` does not drop the result namespace the way seon.turn/entry-bindings does. Reproduce: MCP eval_clj (sci, agent r-read, default 722f110df, 2026-10-07) of forty forms (+ 0 1) ... (+ 39 1): seon.turn.batch/analyze-form 40 calls, 441 ms of a 667 ms evaluate-batch; read-row 41 calls 3.9 ms; segments 0.45 ms (profile cell deltas). Correct: only a form whose writes bind a program Var is analyzed; a plain call costs no analysis. Proof: a test running (+ 1 2) through the agent entrance asserts its batch entry carries no analysis and records no program change.",
+            :must-read
+            #{seon.sci.eval/bind-result!
+              seon.turn/entry-bindings
+              seon.turn.batch/derive-form},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "tests-read-forms-through-a-stage-no-entrant-uses",
+            :kind :function,
+            :intent
+            "seon.test-support/evaluate and code-request read a source through seon.turn.batch/code-request (forgive/read-state plus seon.sci.batch/read-next: one live read over the whole text), while every production SCI entrant (MCP eval_clj via seon.cluster.agent/submit-source! and seon.turn/code-sources, and model replies via seon.turn/planned-sources) segments first (seon.sci.forgive/segments, structural reads) and then reads each row again (seon.turn/read-row). seon.turn.batch/turn-request and seon.sci.batch/read-code have no caller. Tests therefore prove a read stage no entrant runs. Correct: one read stage, used by tests and every entrant; the uncalled ones deleted.",
+            :must-read
+            #{seon.turn/read-row
+              seon.turn.batch/code-request
+              seon.sci.batch/read-next},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]

@@ -1,4 +1,10 @@
 [#:seon.task{:name "a-jvm-run-answers-evaluated-but-not-recorded"
              :kind :function
              :intent "Two MCP JVM-mode evaluations (lane health-noise, 2026-10-06) answered 'evaluated but not recorded' (:seon.batch/applied true, :tx-count 0) after a 2.6 s form returning a large map: a run answered without its one synchronous settlement, which CLAUDE.md requires to be durable before the run answers. Reproduce with a JVM-mode form that runs ~2-3 s and returns a large map; find which stage drops the settlement (size bound? timeout?) and fix at that producer so the run settles or answers a declared error. Done when the repro settles (the evaluation is stored) or returns the named error alternative, with a regression."
-             :must-read #{seon.batch/evaluate-batch seon.turn.batch/settle}}]
+             :must-read #{seon.batch/evaluate-batch seon.turn.batch/settle}}
+ #:seon.task{:name
+            "an-earlier-redefinition-of-a-host-function-fails-as-a-core-fault",
+            :kind :function,
+            :intent
+            "produced-failures records a form's failure as a core fault when its producer is a compiled host Var this batch has not redefined. An agent that redefined a host function (e.g. my.fs/read) in an EARLIER batch and whose interpreted version then fails is still recorded as a core fault, and root is notified, although the failing code is the agent's. Correct: compare the definition digest that ran (interpreted on the branch) with the compiled Var's; a branch-only version is the agent's own mistake, delivered only. Proof: defn a host function's replacement in one evaluation, call it failing in the next, assert no signature is recorded.",
+            :must-read #{seon.batch/produced-failures}}]

@@ -14,7 +14,8 @@
              :kind :function
              :intent "Every boot logs datahike.query.estimate 'Index lacks precomputed subtree counts (old database format)': on default (created at 128/32) the EAVT, AEVT and all three temporal roots hold subtree count -1; AVET keeps 233,196. Not a creation flag, not keep-history, not our Datahike fork: persistent-sorted-set 0.4.137 Branch.java sets a parent's count to -1 whenever a mutated child's count is unknown, serializes the -1, and nothing recomputes it (a fresh store has counts on all six; 50 upserts on a throwaway store lost AVET's at diff-buf 0, tmp/store-writes/subtree_counts.clj). The planner then uses heuristic cardinalities. Counts cost one long per branch node (negligible bytes). A nuke restores them only until ordinary writes decay them again; the fix is in PSS: apply the add/remove delta (+1/-1) to a known parent count without requiring the child's count, then measure planner choices on default's slow queries."
              :must-read #{seon.cluster.store/datahike-configuration}
-             :evidence #{"tmp/store-writes/subtree_counts.clj" "tmp/store-writes/evidence.edn"}}
+             :evidence #{"tmp/store-writes/subtree_counts.clj" "tmp/store-writes/evidence.edn"
+                         "docs/research/agent-platform/2026-10-07/growth/growth-notes.md"}}
  #:seon.task{:name "each-commit-serializes-its-root-record-twice"
              :kind :function
              :intent "Datahike's commit! writes the same db-to-store value (the fused-root record, about 134 KB on default) twice, as the immutable commit record and as the mutable branch head, and konserve serializes each write separately: two sequential serializations on every commit's critical path (about 5-8 ms of the 26 ms of CPU a settlement commit spends outside I/O). One serialization written under both keys, or a head that names the durable commit record, removes one; either is a Datahike fork change."

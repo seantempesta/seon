@@ -17,4 +17,13 @@
              :kind :namespace
              :intent "Seon writes log, stderr and stdout lines that print values outside the value printer (fault print-unrecorded!, boot memory pressure, datahike-log! events, fs deletion reports, web page and request faults, test runner failure reports) and log-only warnings with no delivered fault (projection fallback, declaration population fallback, low disk space). CLAUDE.md: recording without delivery, a log line or a panic alone, is a defect; owner 2026-10-07: no bulk in logs. Inventory class log, 30 sites: test/runner.clj 5, cluster.clj 4, cluster/boot.clj 3, cluster/store.clj 3, render/web.clj 3, schema.clj 3, script/operator.clj 2, db.clj 2, fault.clj 2, fs.clj 2, sci/eval.clj 1 (17 grow with input, 13 fixed text). Done when each is a recorded fault delivered as data (the line, if any, names the fault id and nothing printed from a value), and seon.fault-test asserts a fault whose evidence prints over 1 MB writes no stderr line longer than one bounded sentence."
              :must-read #{seon.fault/print-unrecorded! seon.cluster.store/datahike-log! seon.fs/log-deletion!}
-             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+ #:seon.task{:name
+            "a-delivered-fault-names-the-normalizer-not-its-boundary",
+            :kind :function,
+            :intent
+            "seon.fault/fault! with context {:seon.error/layer :seon.flow/proc :seon.error/operation seon.flow/probe} stores the error entity with that layer and operation, but the occurrence copies the prepared source's diagnostic attributes (:seon.error/layer :seon.error/normalization, :seon.error/operation the blamed producer seon.sci.kernel/adopt-arm), and seon.error/latest-fact merges the occurrence over the entity, so the reply's :errors entry and every latest-fact reader name the normalizer, not the boundary that recorded it. Reproduce: the fault! call above; :errors showed :seon.error/layer :seon.error/normalization, :seon.error/operation seon.sci.kernel/adopt-arm while (seon.db/pull db [:seon.error/operation :seon.error/layer] [:seon.error/signature s]) answered seon.flow/probe / :seon.flow/proc. Correct: the boundary's layer and operation reach the prepared observation (prepare's boundary-layer/boundary-operation) so entity and occurrence agree. Proof: fault! with an explicit layer reads that layer back from latest-fact.",
+            :must-read
+            #{seon.error/commit-call
+              seon.error/latest-fact
+              seon.fault/record!}}]

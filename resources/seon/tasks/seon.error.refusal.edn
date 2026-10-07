@@ -26,4 +26,15 @@
              :kind :namespace
              :intent "Errors and caller lookups capture or walk whole stack traces: error.refusal stack-frames and current-frames, instrument caller-frame, schema fallback-caller, fs caller-frame and Throwable->map stored whole as :seon.error/cause or :seon.error/offending (test runner result-read-error, sci kernel triage, sci admit, operator launch forms). Owner 2026-10-07: 10k-line traces are useless; Seon's own error carries the producer's source location and the cause chain (class, message, ex-data per link) as data, never a trace. Inventory class stack-trace, 15 sites: error/refusal.clj 4, script/operator.clj 2, instrument.clj 2, schema.clj 2, script/operator_outcome_test.clj 1, fs.clj 1, sci/admit.clj 1, sci/kernel.clj 1, test/runner.clj 1. Done when no error value or stored fact holds a stack trace or Throwable->map, caller attribution reads one frame by StackWalker limit, and seon.error.refusal-test asserts a 5,000-deep recursion's error holds its chain and location with no frame list."
              :must-read #{seon.error.refusal/chain seon.instrument/caller-frame seon.schema/fallback-caller}
-             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+ #:seon.task{:name "identity-folding-assumes-stable-projectors",
+            :kind :function,
+            :intent
+            "3071fef19 memoizes completed nodes although post-order and referenced admit arbitrary callables. A stateful projector under a shared map returns parent [{:x 1} {:x 2}] versus change [{:x 1} {:x 1}]. Choose and declare once-per-identity semantics or preserve per-occurrence projection; prove through references with a registered projector. Shared 300 x 10000 depth: 11336.9 ms / 7249546240 allocated bytes parent, 93.8 ms / 27523840 change in SCI copies. Success tests must include the chosen mutable-world semantics.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"}}
+ #:seon.task{:name
+            "the-error-data-walk-allocates-a-kilobyte-per-collection-node",
+            :kind :function,
+            :intent
+            "`seon.error.refusal/referenced` allocates about 1.5 KB per collection node it walks, even when nothing is rebuilt: `(seon.error.refusal/references nil (mapv vector (range 1000000)))` takes 0.9-1.3 s and allocates 1.5 GB (compiled, unarmed, throwaway JVM). The cost is the explicit stack's node maps, `entries` tuples (`map-indexed vector`) and one armed `entries` call per node on default. Correct: a walk that rebuilds nothing allocates a small constant per node (reuse one mutable frame per stack level, iterate members without tuples), so error data the size of an agent's value is referenced well under one second. Proof: a profile probe of the 1M-vector walk under 300 ms / 200 MB."}]

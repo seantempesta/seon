@@ -15,4 +15,14 @@
  #:seon.task{:name "task-writes-are-untimed-and-refusals-are-hand-built"
              :kind :function
              :intent "Time my.task/plan! and done! writes against the 50 ms hot-path bound (R1), and convert the refusals in task.clj and my/task.clj to refusal/error against declared alternatives. Also reported by landing-reds-2: my.task/plan! returned {} for a fresh agent on its own branch, and a task-steps compaction test saw root compact! return {} (writer refused?) - verify both after c135d9993/c99c71dfd (the task-home write path from a branch). Done when writes are timed on the live path with numbers, the refusals are the one error shape, and each {} answer is reproduced or refuted with a regression."
-             :must-read #{my.task/done! my.task/plan! seon.task/task-steps seon.turn/compact!}}]
+             :must-read #{my.task/done! my.task/plan! seon.task/task-steps seon.turn/compact!}}
+ #:seon.task{:name "open-offers-no-authored-tasks",
+            :kind :function,
+            :intent
+            "my.task/open answers only tasks with :seon.task/faults or :seon.task/signal. Faults no longer create tasks (owner 2026-10-07), and nothing writes signal tasks, so the queue no longer offers any new work: tasks filed with seon.task/create! or ingested from resources/seon/tasks never appear, though the lane rules tell agents to search it. Correct: the queue is the open, unassigned tasks (seon.task/open-tasks), whatever created them. Proof: a task created with seon.task/create! appears in (my.task/open db).",
+            :must-read #{my.task/open}}
+ #:seon.task{:name
+            "open-takes-over-a-second-validating-query-variables",
+            :kind :function,
+            :intent
+            "(my.task/open (seon.db/db)) on default took 1,447 ms with 13,748 armed calls, led by seon.schema.datahike/query-variable? 6,004 calls, seon.db/database-value? 1,285 and seon.db/query-binding-values 414, and returned 12 tasks. The second identical call took 54 ms, so the cost is per-acquisition work proportional to queries/schema rather than to the 12 tasks returned. Correct: listing open tasks is sub-second cold; find what query-variable? is called 6,004 times on."}]

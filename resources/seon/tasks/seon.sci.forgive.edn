@@ -1,0 +1,35 @@
+[#:seon.task{:name
+            "a-prompt-marker-is-stripped-and-its-namespace-ignored",
+            :kind :function,
+            :intent
+            "A reply line `scratch.add2=> (defn add-one ...)` loses its marker (next-form :prompt-marker repair) and the form runs in the run's current namespace: loop-pass lp-add-2 call 1 defined user/add-one instead of scratch.add2/add-one, then #'add-one-adds-one did not resolve in user. The model copies the `ns=>` prompts its context shows; the marker names the namespace it meant. Correct: a marker that names a namespace is either honored or refused back to the agent, never silently dropped. Proof: the call-1 reply read through the agent entrance defines scratch.add2/add-one or answers a refusal naming the marker.",
+            :must-read #{seon.sci.forgive/next-form},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "a-prose-repair-replays-the-whole-reply",
+            :kind :function,
+            :intent
+            "seon.sci.forgive/segments on the nine live-run-1 replies joined (11,887 chars, 52 :prose repairs) takes 55 ms and allocates 339 MB per read at HEAD 439401ac3 (run4 7b254915ca94, 12 KB: 17.7 ms, 24.5 MB): each prose repair builds a new text with str, a new reader replayed char by char to the cursor (`version`), and structural trials over the rest of the text (first-form-structural? on (subs text start), code-suffix per paren, Parinfer over the rest). Correct: cost proportional to the reply once; prose becomes comments in one line pass. Measured by the reader-prose lane's measure script; the design is docs/research/agent-platform/2026-10-07/reader-prose/design-notes.md.",
+            :must-read
+            #{seon.sci.forgive/next-form
+              seon.sci.forgive/comment-rest-of-line
+              seon.sci.forgive/version}}
+ #:seon.task{:name "prose-after-the-last-form-is-dropped",
+            :kind :function,
+            :intent
+            "seon.sci.forgive/segments attaches prose only as the comment of the form after it, so prose after a reply's last form reaches no evaluation row: loop-pass lp-add-2 call 1 ended 'The fix is complete: add-one now uses (inc x) ... is green.' and the next prompt (loop-pass/runs/00-installed-turn-lp-add-2/call-2-prompt.md) holds none of it; (seon.sci.forgive/segments \"(+ 1 2)\\nDone, it works.\") answers only the (+ 1 2) segment. The agent's own claims vanish from its history while the raw reply is kept only as a blob. Correct: every line of a reply is either a form or a comment held by an exchange the agent sees again. Proof: segments of that text keeps the trailing comment.",
+            :must-read
+            #{seon.sci.forgive/comment-of seon.sci.forgive/segments},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name
+            "structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote",
+            :kind :function,
+            :intent
+            "seon.sci.forgive's structural reader passes its options map raw to edamame.core/parse-next, whose docstring requires options normalized by normalize-opts; `:all true` is only expanded there (edamame/impl/parser.cljc:960-967), so the structural trial refuses #'x, #(...), @x, #\"re\" and `x: (seon.sci.forgive/first-form-structural? \"(meta #'x)\") is false (edamame: 'Var literal not allowed. Use the `:var` option'), while the same text with (edamame.impl.parser/normalize-opts opts) reads. Each such form, and each prose token that is no valid token (`Note:`), in a reply then runs delimiter-repair: Parinfer over the whole rest of the reply (48 MB for one form at offset 944 of a 9.5 KB reply), and the repair is always rejected. Measured on default 722f110df (unarmed callers, armed forgive): segments of the live replies joined, 9.5 KB 61 ms 219 MB; 19 KB 297 ms 1.57 GB; 28.6 KB (planned-sources) 541 ms 5.1 GB; 38 KB 1.4 s 12 GB; 76 KB 4.1 s 94 GB. Same class as seon.sci.forgive/a-prose-repair-replays-the-whole-reply. Correct: structural trials accept every form the live reader accepts, and no trial reads past the form at the cursor. Proof: a table test that first-form-structural? accepts each of those forms, and a reply-size regression that allocation of segments grows linearly.",
+            :must-read
+            #{seon.sci.forgive/delimiter-repair
+              seon.sci.forgive/next-form
+              seon.sci.forgive/first-form-structural?},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]

@@ -6,4 +6,11 @@
              :kind :function
              :intent "my.agent/retire-branch! answered \"run transition refused: admission-closed\" for a finished probe agent (commit-floor lane, 2026-09-28): its branch agent-c67543ede734 stayed in the roster, so a finished agent cannot retire its own branch. The refusal comes from seon.turn's transition check (turn.clj:322-323, :seon.agent/admission-closed-tx) and reaches the agent as an error string; seon.mcp answers admission-closed as a bare one-key map (mcp.clj:178-186), not the one error shape. Done when retiring the branch of an agent whose admission is closed succeeds through my.agent/retire-branch! (branch unlinked, roster entry retired), the refusal for a genuinely running agent is the one error value naming the rule and the fix, a regression retires a finished agent from its own evaluation, and a retired agent's branch is also unlinked at run exit (the Flow launcher or seon.await) so agents need not call it."
              :must-read #{my.agent/retire-branch! seon.cluster.registry/retire-branch! seon.mcp/jvm-run}
-             :evidence #{"tmp/commit-floor/report.md"}}]
+             :evidence #{"tmp/commit-floor/report.md"}}
+ #:seon.task{:name "a-refused-retire-leaves-the-agent-admission-closed",
+            :kind :function,
+            :intent
+            "`(my.agent/retire-branch! {:seon.store/branch :agent-cfd70b5547f7})` run by agent r-turn (default, 2026-10-07) refused 'branch :agent-cfd70b5547f7 still has a connection in this process; release its connection, then retire it.' AFTER closing admission on the hosted agent r-turn-a (tx 536872981). r-turn-a's own `(my.agent/retire-branch! ...)` then answered MCP with a bare '{:seon.error/message \"run transition refused: admission-closed\"}' (no type, no operation). The refusal must leave nothing changed (decide before closing admission), the hosted agent's connection release must be reachable from the caller, and the admission-closed refusal must be a typed error map. Proof: a deftest retiring a branch whose connection is held asserts the agent stays admitted.",
+            :must-read #{my.agent/retire-branch!},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}]

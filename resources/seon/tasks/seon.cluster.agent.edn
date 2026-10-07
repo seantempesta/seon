@@ -12,4 +12,15 @@
              :kind :function
              :intent "turn-step catches only a bare InterruptedException (agent.clj ~551); a stop that interrupts a Datahike call surfaces as superv.async ExceptionInfo(InterruptedException) and is recorded as a core fault with no function entity, which never resolves (477a97dc, 67029fe7, 2026-09-27 02:08/02:25Z). Recognise the stop's interrupt anywhere in the bounded cause chain (cyclic chains: seon.fault/carried-receipt-hangs-on-cyclic-cause-chain). The same faults lost their agent: fault! puts :seon.agent/id into :seon.error/source (fault.clj ~286-292) but not into the recording request, so :seon.error.occurrence/agent is nil (error.clj ~1492) and for-agent's occurrence clause (error.clj ~2066) never reaches the agent; pass agent-id into the recording request. Done when a stop interrupting a wrapped Datahike call records no fault, and a fault recorded under an agent carries that agent on its occurrence."
              :must-read #{seon.cluster.agent/turn-step seon.fault/fault!}
-             :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}
+ #:seon.task{:name "interrupted-rewalks-the-cause-chain",
+            :kind :function,
+            :intent
+            "seon.cluster.agent/interrupted? walks .getCause with its own seen-set loop, a second copy of seon.error.refusal/cause-links. Replace the loop with (some #(instance? InterruptedException %) (refusal/cause-links failure)), EQUIVALENT on every chain (both stop at the first repeat)."}
+ #:seon.task{:name "reply-size-is-measured-by-printing-the-sources",
+            :kind :function,
+            :intent
+            "submit-source-in-projection records :seon.turn/reply-size as (count (pr-str sources)): it prints the segmented sources to count characters, a printer use outside the value printer on every MCP SCI evaluation. Correct: the size is the submitted text's length (the reply it stands for), computed without printing.",
+            :must-read #{seon.cluster.agent/submit-source!},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]

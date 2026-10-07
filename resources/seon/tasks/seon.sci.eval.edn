@@ -165,4 +165,55 @@
              :kind :function
              :intent "bind-result! interns every evaluation's value in the agent context's result namespace and in its ::result-objects atom, and nothing ever releases one: on default (pid 30874, 2026-10-07, db-watch lane) root's context holds 1,311 values (every MCP jvm-mode probe of every lane), waste-rank-probe 245 including 7 collections over 10,000 elements, heap-retained-probe 215; the live heap after a full GC is 3.32 GB with 15.45M java.lang.Long (371 MB), consistent with a retained (vec (range 1e7)). Twelve finished probe agents keep their branches and contexts (nobody retired them). Values are runtime only by owner ruling, so the context is their only home; it needs a declared bound, not a store. Smallest fix: keep the newest N handles per agent (a configured dial, e.g. 64) and the values the agent's def/atoms reference; older handles bind the :seon.eval/unstored marker, as a fresh fork already does. Done when 1,000 jvm-mode probes of (vec (range 1e5)) leave root's live heap within the bound (measured: class histogram after GC, watch.clj :live-results-by-agent), with a regression on the retained count."
              :must-read #{seon.sci.eval/bind-result! seon.sci.eval/fork-for-turn}
-             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}
+ #:seon.task{:name
+            "a-private-function-def-disappears-between-mcp-evaluations",
+            :kind :function,
+            :intent
+            "Review agent review-printer-codex defined (def measure (fn ...)), used it across several SCI evaluations, later received Unable to resolve symbol measure. ns-interns retained private data defs (request, inputs, allocation-bean, measurements) but omitted measure; scratch namespaces loaded through load-string retained prepare functions. Intervening calls included explicit JVM contract checks and task writes; causal trigger not isolated. Verify/falsify private function retention across the same agent's alternating SCI/JVM evaluations and program advancement, using a minimal def closure regression.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+ #:seon.task{:name
+            "a-stack-overflow-in-the-error-path-reaches-shown-failure-as-nil",
+            :kind :function,
+            :intent
+            "When building an evaluation's error throws StackOverflowError, the reply's :error is the bare throwable and `seon.sci.eval/shown-failure` is called with nil (fault: refused argument 0 `error`: expected a map, got nil, called from seon.turn/show-row). The boundary must turn the overflow into an error map delivered beside the value. Reproduce with the refusal overflow in task seon.error.refusal/a-deep-unchanged-child-under-a-rebuilt-parent-overflows-the-stack. Prove with a deftest naming this task.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-opus-notes.md"}}
+ #:seon.task{:name
+            "dependency-namespaces-have-no-doc-or-dir-in-an-agents-repl",
+            :kind :function,
+            :intent
+            "In an agent's SCI context, (doc clojure.string/split) returns the :seon.sci.eval/documentation-unavailable error value and (dir clojure.string) returns [] (lane steer, 2026-10-07, agent steer, ns scratch.steer), while (clojure.repl/apropos \"split\") finds clojure.string/split. An agent working in Clojure needs the same lookups for the dependency Vars it calls. Correct: doc returns the Var's docstring and arglists from its metadata and dir lists the namespace's public Vars, as data. Proof: a regression through the agent entrance asserting (doc clojure.string/split) has the arglists and (dir clojure.string) contains clojure.string/split; it fails today.",
+            :must-read
+            #{seon.sci.eval/documentation-value
+              seon.sci.eval/directory-value},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/steer/steer-notes.md"}}
+ #:seon.task{:name "diagnostics-dig-forms-point-into-the-value",
+            :kind :function,
+            :intent
+            "A later stage's failure beside a good value (:seon.repl/diagnostics) is printed by floor-text with the evaluation's own result handle as root, so its dig forms read (get-in result/eX [0 :seon.error/offending ...]) against the VALUE, not the diagnostics: MCP eval_clj (sci, agent error-delivery) of {:probe/x 1 :seon.render/ai (fn [v] (throw (ex-info \"render boom\" {})))} answered :diagnostics whose …73 frames dig form returned nil, and (keys result/e3ad00b27ea70) was (:probe/x :seon.render/ai). The diagnostics value is reachable from no handle; seon.turn/with-diagnostic prints with core-text and no root at all. Correct: each diagnostic is bound under its own handle (or a path under the evaluation's handle that resolves to it) and every dig form in :diagnostics answers the cut part. Proof: a test through support/evaluate whose renderer throws asserts the diagnostics dig form evaluates to the elided frames.",
+            :must-read
+            #{seon.turn/with-diagnostic seon.sci.eval/shown-result}}
+ #:seon.task{:name
+            "dir-shows-each-uncontracted-def-as-two-timestamped-errors",
+            :kind :function,
+            :intent
+            "The namespace render of seon.db (seon.render.ns/render-ai, which reads seon.sci.eval/directory-value) shows each dynamic Var row (seon.db/*conn*, *read-database*, *read-evidence-sink*) with :in and :out each holding a whole :seon.sci.eval/present-declaration error map with its own :seon.error/at timestamp: two error maps per row for a def that has no arglists or contract by nature. Done when a def without a function contract shows its kind (def, dynamic) and no :in/:out, and a defn lacking one shows the typed unknown once, asserted on the directory data.",
+            :must-read #{seon.sci.eval/directory-value},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name "loading-source-arms-tens-of-thousands-of-calls",
+            :kind :function,
+            :intent
+            "source-display/printer-notes.md reports loading about 160 forms using load-string costs 1.7 seconds and 54000 calls (database-value? about 10000). Review own-branch scratch load of candidate value source, excluding schema registration, measured 128 ms/16267 calls; parent 162 ms/15681. Diagnose per-form repeated setup and preserve one evaluation path. Regression should count repeated derivations rather than assert wall time.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+ #:seon.task{:name "run-test-var-throws-on-an-sci-test-var",
+            :kind :function,
+            :intent
+            "In an agent's SCI context, (clojure.test/run-test-var #'rr.scratch/rr-inc-test) on a resolvable deftest throws ClassCastException 'class sci.lang.Namespace cannot be cast to class clojure.lang.Symbol' (MCP eval_clj sci, agent r-read, default 722f110df, 2026-10-07); an unqualified var in another namespace answers 'Unable to resolve var'. Agents in live run 1 and loop-pass reached for run-test-var to run their proof tests. Correct: run-test-var (or a documented equivalent the help names) runs one SCI test var and answers its report as data. Proof: a deftest defined on a branch runs through run-test-var and answers pass counts.",
+            :must-read #{seon.sci.eval/agent-test-namespace},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]

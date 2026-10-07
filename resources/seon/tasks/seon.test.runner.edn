@@ -42,4 +42,10 @@
              :kind :function
              :intent "seon.cache kind :seon.test.runner/reach-entries holds 288 MB of the 512 MB budget for 33 loads (about 8.7 MB per entry) at a 49% hit rate, 15.1 s total load (default 2026-10-07, cache-status). It evicts the rest of the cache: :seon.schema.datahike/decoded-edn 41,601 misses and 21,743 evictions, reach-digest hit 35%. An entry is a whole-program reach map per key; find what each entry holds that its consumer reads and store only that (or key it by content so consecutive runs share it). Coordinate with lane no-print-hash (reach digests). Done when reach-entries stays under 10% of the budget with a hit rate above 90% across two consecutive test runs; regression: a runner test asserting the entry's weighed bytes for a small program."
              :must-read #{seon.test.runner/reach-entries seon.cache/status}
-             :evidence #{"tmp/waste-rank/cache-kinds.txt"}}]
+             :evidence #{"tmp/waste-rank/cache-kinds.txt"}}
+ #:seon.task{:name
+            "a-test-error-shows-runner-frames-not-the-throw-site",
+            :kind :function,
+            :intent
+            "A deftest whose body calls an agent function that throws (scratch probe-g throwing (ex-info \"inside test\" {:probe/x 3})) is reported by my.test/check with :seon.test.failure/actual as printed text whose 30 frames are seon.test.runner/seon.sci.eval/seon.test frames: the throw site (probe-g, its SCI location) appears nowhere, and the same text is printed again into the reply's :out (~733 tokens). Correct: the error inside a test is the same flat error an evaluation answers (ex-data whole, the author's SCI stacktrace), stored as data, never printed to :out. Linked: seon.test.runner/failure-evidence-is-stored-as-text (text storage). Proof: a check of a throwing test whose failure names the throwing function's SCI frame.",
+            :must-read #{seon.test.runner/record-tx}}]

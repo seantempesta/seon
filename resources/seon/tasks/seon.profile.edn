@@ -41,4 +41,11 @@
              :kind :function
              :intent "seon.profile/transaction-observation stamps every transaction over its call/ms threshold with :seon.db.transaction/hot (up to 20 [sym digest calls ms] tuples) and :seon.db.transaction/repeated; seon.db/stamp-transaction attaches them. No src reader exists (only seon.profile-test asserts them). A 17-test run-owned on a branch agent (default, 2026-10-07, db-watch lane) stamped 20+40 hot/repeated datoms (~6 KB of values) on its record-tx and 28 (~2.8 KB) on its request tx. Every stored fact names its consumer or is deleted: delete both attributes and their derivation (the explanation of a slow operation reads the live profile, not stored stamps), or name the consumer. Done when no transaction carries them and the per-test-run datom count (watch.clj :since-basis) drops accordingly."
              :must-read #{seon.profile/transaction-observation seon.db/stamp-transaction}
-             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}
+ #:seon.task{:name "begin-validates-every-cell-with-armed-predicates",
+            :kind :function,
+            :intent
+            "`seon.profile/begin` says it calls no other armed function, but each call grows the entry counters of seon.profile/adder? by 5,320 and measured-mark?, accumulator?, thread-local?, histogram? by 2,660 each (2,660 live cells, default 2026-10-07): about 18,600 armed calls and 3.5 MB per mark, from its contracts validating every cell. A window measured with begin therefore counts the probe itself. Make the mark's own cost independent of armed validation of each cell. Proof: a deftest asserting two consecutive marks show zero armed entry growth.",
+            :must-read #{seon.profile/begin},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}]

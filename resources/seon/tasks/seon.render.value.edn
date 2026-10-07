@@ -54,4 +54,31 @@
  #:seon.task{:name "bounded-text-survives-in-the-render-namespace"
              :kind :function
              :intent "Render dedup: seon.print.value/bounded-text and throwable-text are the survivors (6618eda17); render.value/bounded-text and its floor delegates remain until config.clj, test/runner.clj, cluster/wake.clj and render/var.clj convert, plus three test-fixture subjects and task/doc refs. Also the D1 (context owner out of web), D3, D4, D5 and D8 duplicates of the render-dedup series. Done when render.value/bounded-text is deleted and every caller converted in the same commit, lint clean."
-             :must-read #{seon.print.value/bounded-text seon.render.value/bounded-text seon.repl/entity-emission}}]
+             :must-read #{seon.print.value/bounded-text seon.render.value/bounded-text seon.repl/entity-emission}}
+ #:seon.task{:name "cuts-cost-more-than-they-hide-across-siblings",
+            :kind :function,
+            :intent
+            "Breadth before depth spends the budget on one cut per member: a vector of 50 eleven-line sources at 1,500 tokens shows the first whole, then 31 strings each cut at 64 characters with a 45-character subs form, and a health report shows four collapsed cache-kind maps as {…8 (get-in result/e… [:seon.health/cache :seon.cache/kinds :seon.cluster/file-derivation-key])}, each cut longer than the eight numbers it hides. Done when a level whose members would each be cut admits fewer members whole and folds the rest into the tail count, decided by cost, with a regression on these two shapes.",
+            :must-read
+            #{seon.render.value/admit-member
+              seon.render.value/select-nodes},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"}}
+ #:seon.task{:name "failed-selection-escapes-the-profile-budget",
+            :kind :function,
+            :intent
+            "Both parent and 7619b8dfd prepare of an unchunked lazy sequence throwing at index 5 with a 16-token profile returns 44 tokens through plain-projection/bounded-text, no runnable cut, text (0 1 2 3 4) misleadingly looks complete. This violates the sole budget and explicit cut rules. Remove fallback character clipping and present the partial value and diagnostic through the same printer budget. Existing bounded-text-survives-in-the-render-namespace is the broader deletion task.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+ #:seon.task{:name "printing-thirty-two-numbers-allocates-megabytes",
+            :kind :function,
+            :intent
+            "source-display reports compiled prepare of [0..31] allocates 2 MB. Review own-branch SCI, exact platform-thread allocation: parent 2645120 bytes/2.529 ms; 7619b8dfd 2649624 bytes/2.662 ms, for 27 shown tokens, 1586/1587 direct armed calls. Measure settle/assoc-in and per-admission wrappers, then reduce work at the owner. No timing-only test; retain ordinary output/budget tests.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+ #:seon.task{:name "string-fill-arms-a-call-for-each-character",
+            :kind :function,
+            :intent
+            "7619b8dfd fill-end invokes armed escaped-width for each added character. Same 50 MB ASCII string, 1500 tokens, own SCI copies: parent 227 calls and 1714072 allocated bytes; change 912 calls and 3485128 bytes. Inline the one-character arithmetic or compose a bounded scan once; proposed equivalent scratch patch reduces allocation to 2349944 bytes. Named reaching proof: seon.render.value-test/a-long-string-fills-the-budget-and-is-cut-at-a-line-end.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]

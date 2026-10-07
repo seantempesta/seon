@@ -151,4 +151,49 @@
              :kind :function
              :intent "Each evaluation's database reads are stored as one vector cell plus one evidence entity per read (receipt-read-evidence-tx), with :datahike.read/dependency-plan and :datahike.read/revision as printed strings (~660 bytes per read; 712 distinct revision strings repeated over 23,662 rows). On default (pid 30874, basis 536872613, 2026-10-07, db-watch lane) that is 23,663 reads owned by 115 of 1,189 evaluations: ~142k datoms (19% of 762k current datoms) and 15.7 MB of the 39 MB of stored value bytes (41%); four prepare-merge! evaluations hold 2,259 reads each (~1.5 MB per evaluation) and a probe defn ~547. The only reader is the old loop's refresh before a system turn (seon.turn/latest-evaluations, refresh status at the read-evidence-current? check), which the agent-loop spec deletes with system turns, while its settlement section keeps writing the rows. Evaluation results are runtime only (owner 2026-10-07), so evidence for re-evaluating them has no consumer after the cut. Done when settlement writes no read-evidence rows (or a bounded digest per evaluation, if a named consumer survives the cut), the attribute counts in docs/research/agent-platform/2026-10-07/db-watch/watch.clj stop growing with reads, and a regression asserts a 2,000-read evaluation settles under 10 datoms of evidence."
              :must-read #{seon.turn/receipt-read-evidence-tx seon.turn/latest-evaluations seon.db/read-evidence-current?}
-             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}
+ #:seon.task{:name "a-deferred-wake-is-answered-by-silence",
+            :kind :function,
+            :intent
+            "When `seon.turn/opening-deferred?` is true for a new wake, `next-agent-work` derives nil and nothing is recorded or delivered: the sender gets no reply, no fault, no diagnostic (agent r-turn-a, message ee63e682b520, default 2026-10-07). `episode-exhausted!` fires only on the pass that spends the last run, never for a wake arriving after. A wake the bound defers must reach the sender (or root) as data. Proof: a deftest that messages an exhausted agent and asserts the deferral is a stored, delivered error value.",
+            :must-read
+            #{seon.turn/next-agent-work seon.turn/episode-exhausted!},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
+ #:seon.task{:name "a-markdown-heading-in-a-reply-is-read-as-code",
+            :kind :function,
+            :intent
+            "planned-sources keeps Markdown structure as source: (planned-sources \"The fix is in `data-text`.\\n## What\\n(+ 1 2)\" 'user 100000) answers one source \"## What\\n(+ 1 2)\" (2026-10-07, default at 42e569d9d), whose `##` is an invalid reader token; live run 1 also saw backticked prose evaluated as syntax-quote. Prose lines, Markdown headings and fenced/backticked spans become comments; only forms are evaluated.",
+            :must-read #{seon.turn/planned-sources},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/live-run/report.md"}}
+ #:seon.task{:name "a-message-from-root-never-refills-the-turn-bound",
+            :kind :function,
+            :intent
+            "A message root sends an agent is an inside wake, so `seon.turn/outside-wake-t` stays 0 and `seon.turn/episode-runs` counts every turn the agent ever took. On default 2026-10-07, agent r-turn-a (branch :agent-cfd70b5547f7) with :seon.config.run/max-episode-runs 1 and one spent turn received root's message ee63e682b520 (seon.cluster.message/send! ... conn \"root\"): next-agent-work answered nil, outside-wake-t 0, spent 1, max 1, unanswered-wakes held the message. Root's work requests must refill the bound (or the bound must count calls per wake). Proof: a deftest where root messages an agent whose spent runs equal the dial and the agent takes one turn.",
+            :must-read
+            #{seon.turn/opening-deferred? seon.turn/outside-wake-t},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
+ #:seon.task{:name "a-prose-only-reply-evaluates-its-first-word",
+            :kind :function,
+            :intent
+            "When planned-sources finds no form (a prose-only model reply), the turn's freeze step plans the whole reply text as one row with no reader event, and read-row reads only that row's FIRST form as code: 'I will add two numbers.' evaluates the symbol I (Unable to resolve symbol) and the rest of the row is dropped unread; live run call 11 answered 'Invalid token: ##What' for its heading. The no-forms refusal ('Your reply had no form; only comments/prose. Send a form.') that planned-sources built never reaches the agent. Reproduce (default 722f110df): (seon.turn/planned-sources \"I will add two numbers.\" 'user 1048576) is the no-forms error; seon.turn/read-row over a row with that source reads I with end 1 of 23. Correct: the no-forms refusal is the row's read error, delivered once, and no prose is evaluated. Proof: a turn with a fixture reply of prose only answers the no-forms refusal as data.",
+            :must-read #{seon.turn/read-row seon.turn/planned-sources},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name
+            "generated-opening-reads-fail-when-evaluated-as-written",
+            :kind :function,
+            :intent
+            "The system turn's generated opening reads (seon.turn/declared-sources) include forms that fail when an agent evaluates the same text: (dir (quote user)) refuses 'seon.sci.eval/directory-value refused argument 1 namespace-name: expected a symbol, got a sequence', and (seon.db/pull (quote [*]) [:seon.runtime/agent {:seon.agent/id \"r-context-probe\", :db/id 125969}]) answers 'Expected number or lookup ref for entity id' (the lookup value is a pulled map, not an identity). In lp-add-2's captured prompt the second showed as a value holding only :seon.render/operations, so the failure was hidden from the model. Measured as agent r-context-probe on default (722f110df, 2026-10-07). Done when every generated opening form evaluates to the value it is shown with, or the system turn is deleted (live-agents plan D1).",
+            :must-read
+            #{seon.turn/declared-sources seon.turn/unit-read},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"}}
+ #:seon.task{:name "generated-render-sources-are-read-as-model-replies",
+            :kind :function,
+            :intent
+            "seon.turn's system plan segments each render block's generated :seon.render/source with seon.turn/planned-sources, the model-reply reader with prose forgiveness, instead of seon.turn/code-sources: system-generated code is read as if a model wrote it (turn.clj near the unit-read reduce in HEAD 439401ac3). Correct: generated code is code (code-sources).",
+            :must-read
+            #{seon.turn/code-sources seon.turn/planned-sources}}]

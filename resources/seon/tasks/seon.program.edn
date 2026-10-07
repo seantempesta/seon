@@ -22,4 +22,11 @@
              :kind :namespace
              :intent "Values are printed to order, compare or test them: (sort-by pr-str ...) and sorted-map-by over pr-str comparators (fn unresolved-callers, contract-findings, plan-file-change, index-tempids, database-manifest; render.web graph-model; runner reach-canonical; program map-binding-entries), schema.datahike storage-compare printing both values per comparison, and program/edn-round-trip-symbol? printing every symbol (health: 19,543,774 calls, 15.4 s on default 2026-10-07). Each is a print per comparison, n log n prints of values that grow. Inventory class sort-by-print, 28 sites: fn.clj 11, render/web.clj 4, program.cljc 3, schema/datahike.clj 2, test/runner.clj 2, cluster.clj 1, config.clj 1, db.clj 1, reconcile.cljc 1, test.clj 1, turn.clj 1. Done when ordering uses compare on the values (or a key computed once per element), edn-round-trip-symbol? checks the symbol's characters without printing, and seon.program-test asserts sorting 10,000 identities allocates under 10 MB."
              :must-read #{seon.program/edn-round-trip-symbol? seon.fn/unresolved-callers seon.schema.datahike/storage-compare}
-             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+ #:seon.task{:name
+            "sci-scratch-definitions-refuse-their-produced-digest",
+            :kind :function,
+            :intent
+            "On default 42e569d9d, copied contracted defn- declarations in own SCI namespace review.growth return their Vars but program settlement refuses definition-digest: expected and offending differ. Six scratch declarations remained private, not adopted. entries additionally refuses its existing bare nilable return under a renamed namespace. Probe evidence includes exact source transformations and result handles; preserve admitted declaration source and writer digest agreement.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"}}]

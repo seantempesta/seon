@@ -126,4 +126,76 @@
              :kind :function
              :intent "stamp-transaction names a transaction's :seon.db.transaction/operation after its FIRST :db.fn/call, so an agent branch's run settlement (which starts with the [:db.fn/call seon.db/absent-call ...] run open) is recorded as seon.db/absent-call: on db-watch-probe's branch (2026-10-07) the (+ 1 2), defn and test-run settlements (28 to 1,718 datoms) all read absent-call, while the same settlement on cluster-default reads seon.turn/record-evaluated-call. Provenance that names a guard instead of the writer blinds every attribution of store growth by operation (watch.clj :window :by-operation). Done when the settlement names its own operation (pass it explicitly, or skip guard calls such as absent-call when deriving it), with a regression on the stamped operation of an agent-branch settlement."
              :must-read #{seon.db/stamp-transaction seon.db/absent-call}
-             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}
+ #:seon.task{:name
+            "a-probe-below-the-seek-break-even-scans-the-attribute",
+            :kind :namespace,
+            :intent
+            "A bound lookup into a stored attribute reads nodes proportional to its answer, not to the attribute.",
+            :evidence
+            #{"datahike.query.execute/probe-driven-threshold is 2500 (an in-memory cost model: seek 50us vs 20ns/datom). One bound value into an attribute of under 2500 datoms scans and filters the whole attribute: [?run :turn/id ?id] read 9 nodes on a 2,000-run store and 3 on a 20,000-run store."}}
+ #:seon.task{:name
+            "a-variable-attribute-rule-query-reads-942-nodes-for-no-rows",
+            :kind :namespace,
+            :intent
+            "seon.cluster contract-findings' referrer query ([:find [?sym ...] :in $ % [?changed ...] [?attribute ...] :where (affected ?key ?changed) [?arity ?attribute ?key] [?function :seon.fn/arities ?arity] [?function :seon.fn/sym ?sym]], the recursive affected rule, ?attribute over :seon.fn.arity/input-refs, output-refs and guard-refs) read 942 index nodes, allocated 303 MB and took 120 ms on a fresh connection over a clone of default's store (warm: 7.8 ms, 7.5 MB), for 0 rows with three changed schema keys (fork eb404fa1 and 6f3b61f6 alike, dh-fix bench.clj :affected). Work should be proportional to the schemas reached and their referrers. Done when the same probe reads nodes proportional to its answer (diagnose the plan: variable attribute pattern, rule fixpoint scans) with a regression on node reads.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/dh-fix/dh-fix-notes.md"}}
+ #:seon.task{:name "an-agent-transact-reports-the-runs-open-datoms",
+            :kind :function,
+            :intent
+            "An SCI form (seon.db/transact! [{:seon.ns/name 'scratch.rrecw}]) in an MCP run answers a tx report of 26 datoms of which 1 is the agent's: the run row (seon.turn/id, agent, situation, opened-tx, reply, reply-size, starting-ns), two evaluation intent rows and the seon.db/receipt stamp ride the agent's write because custody prepends the run's open (seon.db/*open*, absent-call) to the first durable write of a form (default 722f110df, agent r-record, tx 536872944). The agent sees Seon's machinery datoms as its own write's result. Correct: an agent's transact! commits and reports only its own data; the turn's record is written by the turn's one settlement.",
+            :must-read #{seon.db/absent-call seon.db/transact!}}
+ #:seon.task{:name "an-identity-join-scans-the-whole-ref-attribute",
+            :kind :namespace,
+            :intent
+            "A query [?x :identity-attr ?input] [?y :ref-attr ?x] [?y :a ?v] ... is planned by Datahike as an entity group scanning the whole AEVT range of the ref attribute before the unique lookup binds ?x: work proportional to the store's history, not the answer. One (+ 1 2) visits 54,000 index nodes (run-receipts 19,000; runtime-analysis-batch 11,340; next-ordinal, continuing-reply?, spent-runs, branch-errors, evaluation-terminal-data, entity-emission, form-problem). Passing the identity as a lookup-ref input: run-receipts 19,004 -> 22 visits, 14.7 MB -> 0.9 MB. Root decides: Datahike planner fix (recommended) or caller rewrites. Done when one (+ 1 2) visits a number of nodes independent of the store's evaluation count.",
+            :must-read
+            #{seon.fn/runtime-analysis-batch
+              seon.db/q
+              seon.eval.drive/run-receipts},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/growth/growth-notes.md"}}
+ #:seon.task{:name
+            "an-or-clause-joined-to-a-pattern-costs-a-scan-per-binding",
+            :kind :function,
+            :intent
+            "seon.db/q with an or clause whose variable is then joined to another pattern costs about 65-88 ms and 135-160 MB per input binding, while datahike.api/q on the same query and database takes 8-10 ms for 142 bindings. Reproduce in JVM mode on default (722f110df, 2026-10-07): (seon.db/q '[:find ?d :in $ ?sym :where (or [?e :seon.fn/sym ?sym] [?e :seon.test/sym ?sym]) [?e :seon.program/definition-digest ?d]] db 'seon.db/q) 88 ms / 160 MB for one row; with [?sym ...] over 10 symbols 658 ms / 1.36 GB, 40 symbols 2.3 s / 5.4 GB; without the definition-digest join 1 ms. It is the whole cost of seon.turn/code-currency (142 symbols: 9.6 s / 19 GB; root's 672 symbols: about 42 s), hence the 43.6 s read-only system turn that ran past the 32 s MCP bound (profile: code-currency 15 calls, 114.6 s total, max 41.9 s). Done when seon.db/q on these shapes stays within a small constant factor of datahike.api/q, proven by a table test over or/or-join followed by a join, scalar and collection bindings.",
+            :must-read #{seon.turn/code-currency seon.db/q},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"}}
+ #:seon.task{:name "fork-optimistic-tx-report-test-races-its-listener",
+            :kind :namespace,
+            :intent
+            "datahike.test.optimistic-test/tx-report-happy-path-converges-to-conn (fork optimistic_test.cljc:310) asserts a :conn-advance event has fired as soon as the optimistic transact!'s result resolves, but the writer-listener delivers it asynchronously: the eb404fa1 full clj-pss run saw origins [:overlay-add] only (1 failure of 2 runs; the dh-fix snapshot runs passed). Done when the test waits for the :conn-advance event (bounded) before asserting, and passes in 10 consecutive runs.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/dh-fix/dh-fix-notes.md"}}
+ #:seon.task{:name "fork-planner-regression-bench-never-finishes",
+            :kind :namespace,
+            :intent
+            "The Datahike fork's planner-regression gate reports its shapes within minutes.",
+            :evidence
+            #{"`clojure -M:bench -m benchmark.planner-regression --assert` at d9121bbb (and with dh-planner's change) prints no shape row within 900 s after 'stores ready' (timeout exit 124)."}}
+ #:seon.task{:name "history-joins-ignore-shared-added-flags",
+            :kind :function,
+            :intent
+            "Datahike fused history merges compare shared values and tx variables but not shared fifth-position added variables. With entity 1 :item/a [1 2], :item/b [1 4 5], then retract b=1 and assert a=4, [:find ?v ?w ?added :where [?e :item/a ?v ?tx ?added] [?e :item/b ?w ?other-tx ?added]] produces 12 rows instead of 9, inventing [1 1 false], [2 1 false], [4 1 false]. Fix keeps added-variable scans separate at entity-group-key; ordinary relation joins enforce equality. Proof for root: datahike.test.query-planner-temporal-test/shared-added-bindings-match-every-joined-datom. See dh-fix/dh-audit-notes.md."}
+ #:seon.task{:name
+            "planner-estimates-load-every-node-of-the-counted-range",
+            :kind :namespace,
+            :intent
+            "Datahike plan estimates cost index node loads proportional to the attribute counted, not to the plan.",
+            :evidence
+            #{"persistent-sorted-set 0.4.137 count-slice loads every node under the counted range (a branch stores its own subtree count, not its children's): estimate-pattern of [?x :eval/run ?run] read 239 nodes on a 1.16M-datom file store; planning a 5-clause query on a fresh connection read 790 nodes. Plans are cached per shape, but the key embeds substituted constants, so scalar-input and literal queries re-plan per value. dh-planner notes 2026-10-07."}}
+ #:seon.task{:name "q-hands-a-non-query-map-to-refused-read",
+            :kind :function,
+            :intent
+            "(seon.db/q {:a 1}) passes the map to refused-read, whose contract refuses a non-error: the agent gets a 326-problem instrument refusal costing 109 MB and 70 ms, and a 10,000-deep map ran past 32 s. q should answer its own invalid-read refusal for a value that is neither a query, a database nor an error. Done when (seon.db/q {:a 1}) returns a :seon.db/invalid-read-error naming q under 1 MB.",
+            :must-read #{seon.db/q},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/growth/growth-notes.md"}}
+ #:seon.task{:name
+            "rule-arguments-resolve-lookup-shaped-data-as-entities",
+            :kind :function,
+            :intent
+            "Datahike 84790323/6f3b61f6 resolves every lookup-ref-shaped rule argument before inspecting its use. On {:u/id {:db/unique :db.unique/identity}}, entity 2 :u/id 2, (d/q '[:find ?x :in $ % ?v :where (same ?v ?x)] db '[[(same ?v ?x) [(identity ?v) ?x]]] [:u/id 2]) planned returns #{[2]} but base engine returns #{[[:u/id 2]]}; current/history/as-of, 20 and 320 entities. Preserve data arguments; resolve only at a database pattern's entity/ref position. Proof: datahike.test.query-planner-temporal-test/rule-arguments-preserve-lookup-shaped-data. Full evidence: docs/research/agent-platform/2026-10-07/dh-fix/dh-audit-notes.md."}]

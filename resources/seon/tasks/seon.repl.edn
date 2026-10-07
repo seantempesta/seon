@@ -31,4 +31,32 @@
  #:seon.task{:name "a-jvm-def-is-told-it-lives-in-sci"
              :kind :function
              :intent "def-note judges the source text alone, so a def evaluated in MCP JVM mode (a host Var in a real namespace) is told it \"lives only in your SCI context\", which is false for a host Var, and the note is printed beside a def whose evaluation failed (observed 2026-09-28, flow-processes-opus: (def routing (... inst ...)) with inst unresolved returned the compile error and the persistence note). Decide the note from the evaluation's surface (SCI vs JVM) and its outcome, not from the text: no note on a failed def; a JVM def names the host Var and that it lasts until the JVM restarts."
-             :must-read #{seon.repl/def-note seon.repl/text}}]
+             :must-read #{seon.repl/def-note seon.repl/text}}
+ #:seon.task{:name "a-def-bound-to-an-error-value-shows-only-the-var",
+            :kind :function,
+            :intent
+            "(def tasks (seon.db/q '[:find [(pull ?t [... :seon.task/sym ...]) ...] ...] db)) answered {:seon.render.var/symbol tasks} with no error, though the query refused (uninstalled :seon.task/sym); the next form (count tasks) answered 13, the error map's key count, and (map :seon.task/kind tasks) thirteen nils. Done when a def whose value is an error map shows that error (its type and message) beside the Var, asserted through the agent entrance.",
+            :must-read #{seon.render.var/render-ai},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name
+            "a-ref-from-another-branch-prints-with-the-wrong-identity",
+            :kind :function,
+            :intent
+            "A JVM-mode reply that shows a value pulled from ANOTHER branch prints its entity refs as lookup refs resolved against the evaluating agent's own branch: `(d/pull @(seon.db/branch-connection @(seon.cluster.boot/connection \"default\") :agent-cfd70b5547f7) '[{:seon.agent/settings [*]}] [:seon.agent/id \"r-turn-a\"])` run as agent r-turn (branch :agent-21293ca0b763) showed `:seon.config/agent [:seon.cluster.eval/id \"732b426d6067\"]`; eid 125951 is agent r-turn-a on the pulled branch and an evaluation on r-turn's branch. Turn refs printed the same way (`:seon.turn/agent [:seon.cluster.eval/id ...]`, `:seon.turn/trigger [:seon.turn/id ...]`). Resolve eids against the database the value came from, or print the eid. Proof: a deftest pulling from a second branch and asserting the shown ref.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
+ #:seon.task{:name "a-selected-render-arrives-as-an-escaped-string",
+            :kind :function,
+            :intent
+            "Evaluating {:seon.ns/name 'seon.render} (a map satisfying :seon.ns/ns, so the namespace render is selected) answered :value as ONE string holding the printed render with \\n escapes and quoted inner strings (2,489 tokens whole, 873 shown), while calling seon.render.ns/render-ai explicitly on the same entity answers the map as data, laid out by the printer. Done when a selected render's data reaches the reply as data printed once, the same as an explicit call, asserted on the reply map.",
+            :must-read #{seon.repl/response},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name "every-def-repeats-the-same-persistence-note",
+            :kind :function,
+            :intent
+            "Every SCI def reply carries the same :note sentence (about 60 tokens: 'x lives only in your SCI context and is lost when the JVM restarts...'), from seon.repl/def-note; one scratch session of 25 defs carried it 25 times, the largest repeated text in the context. Done when the note is shown once per agent session (or once per conversation) and later def replies carry no note, asserted on reply data.",
+            :must-read #{seon.repl/response},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]

@@ -1,4 +1,10 @@
 [#:seon.task{:name "changed-namespaces-flags-a-namespace-sci-merely-touched"
              :kind :function
              :intent "seon.sci.arm/changed-namespaces flags a namespace SCI merely touched (an unresolved qualified symbol), so the facts stage refuses a plain call (stale-agent-platform lane; 4be90d597 hid only the diagnostic). Done when the producer no longer reports a touched-only namespace as changed and a regression evaluates a plain call over an unresolved qualified symbol."
-             :must-read #{seon.sci.arm/changed-namespaces}}]
+             :must-read #{seon.sci.arm/changed-namespaces}}
+ #:seon.task{:name "a-def-without-line-metadata-refuses-its-origin",
+            :kind :function,
+            :intent
+            "source-display/printer-notes.md reports (eval (read r)) defining a function without reader line metadata refused by seon.sci.arm/write-event output at [:seon.batch/origin :line]. A def without an origin must remain valid, or refusal must happen at a declared input boundary; preserve the evaluated value. Regression through SCI evaluation with positionless source form.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]

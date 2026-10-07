@@ -52,4 +52,10 @@
  #:seon.task{:name "the-merge-prepare-costs-three-seconds-and-400k-calls"
              :kind :function
              :intent "The merge path: my.program/prepare-merge! takes 2.6-3.1 s and about 400k calls regardless of change size. The cold-projection hypothesis was falsified (800a94abb); it needs a sampled profile (Astra after a bow-out), then the responsible armed functions named and fixed. Done when a small merge prepares under one second, timed on parent and change."
-             :must-read #{my.program/prepare-merge! seon.cluster.source/prepare-merge!}}]
+             :must-read #{my.program/prepare-merge! seon.cluster.source/prepare-merge!}}
+ #:seon.task{:name "source-repeats-the-docstring",
+            :kind :function,
+            :intent
+            "source-display/printer-notes.md reports my.program/source returns the docstring both inside source and separately as doc. Return source plus only useful nonduplicated data or improve its declared render; keep value printer schema-agnostic. Regression at my.program/source/render's data boundary.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]

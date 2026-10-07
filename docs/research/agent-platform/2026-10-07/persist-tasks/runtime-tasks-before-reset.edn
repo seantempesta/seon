@@ -1,0 +1,1030 @@
+[#:seon.task{:ns my.agent,
+             :name
+             "a-refused-retire-leaves-the-agent-admission-closed",
+             :kind :function,
+             :intent
+             "`(my.agent/retire-branch! {:seon.store/branch :agent-cfd70b5547f7})` run by agent r-turn (default, 2026-10-07) refused 'branch :agent-cfd70b5547f7 still has a connection in this process; release its connection, then retire it.' AFTER closing admission on the hosted agent r-turn-a (tx 536872981). r-turn-a's own `(my.agent/retire-branch! ...)` then answered MCP with a bare '{:seon.error/message \"run transition refused: admission-closed\"}' (no type, no operation). The refusal must leave nothing changed (decide before closing admission), the hosted agent's connection release must be reachable from the caller, and the admission-closed refusal must be a typed error map. Proof: a deftest retiring a branch whose connection is held asserts the agent stays admitted.",
+             :must-read [my.agent/retire-branch!],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns my.auditchange,
+             :name "faults of lint2",
+             :kind :function,
+             :intent
+             "Make my.auditchange/lint2 stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [my.auditchange/lint2],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns my.fs,
+             :name "archive-file-reads-have-no-explicit-source-world",
+             :kind :function,
+             :intent
+             "source-display/printer-notes.md reports my.fs/read reads the running committed archive rather than the checkout, and reading 93 KB in 8 KB windows costs 1057 ms and 16600 armed calls. Make the source world explicit and bound work by requested content; measure the same read at the owner. Existing fs-read-ignores-limit-and-has-no-line-addressing covers limit/line addressing, not the archive-vs-tree ambiguity and per-window cost.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns my.fs,
+             :name "faults of read",
+             :kind :function,
+             :intent
+             "Make my.fs/read stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [my.fs/read],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns my.fs,
+             :name "faults of write!",
+             :kind :function,
+             :intent
+             "Make my.fs/write! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [my.fs/write!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns my.program,
+             :name "faults of diff",
+             :kind :function,
+             :intent
+             "Make my.program/diff stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [my.program/diff],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns my.program,
+             :name "source-repeats-the-docstring",
+             :kind :function,
+             :intent
+             "source-display/printer-notes.md reports my.program/source returns the docstring both inside source and separately as doc. Return source plus only useful nonduplicated data or improve its declared render; keep value printer schema-agnostic. Regression at my.program/source/render's data boundary.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns my.shell,
+             :name "faults of run!",
+             :kind :function,
+             :intent
+             "Make my.shell/run! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [my.shell/run!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns my.task,
+             :name "open-offers-no-authored-tasks",
+             :kind :function,
+             :intent
+             "my.task/open answers only tasks with :seon.task/faults or :seon.task/signal. Faults no longer create tasks (owner 2026-10-07), and nothing writes signal tasks, so the queue no longer offers any new work: tasks filed with seon.task/create! or ingested from resources/seon/tasks never appear, though the lane rules tell agents to search it. Correct: the queue is the open, unassigned tasks (seon.task/open-tasks), whatever created them. Proof: a task created with seon.task/create! appears in (my.task/open db).",
+             :must-read [my.task/open],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns my.task,
+             :name
+             "open-takes-over-a-second-validating-query-variables",
+             :kind :function,
+             :intent
+             "(my.task/open (seon.db/db)) on default took 1,447 ms with 13,748 armed calls, led by seon.schema.datahike/query-variable? 6,004 calls, seon.db/database-value? 1,285 and seon.db/query-binding-values 414, and returned 12 tasks. The second identical call took 54 ms, so the cost is per-acquisition work proportional to queries/schema rather than to the 12 tasks returned. Correct: listing open tasks is sub-second cold; find what query-variable? is called 6,004 times on.",
+             :created-by #:db{:id 117520}}
+ #:seon.task{:ns refusal-cause.probe,
+             :name "faults of bad-err",
+             :kind :function,
+             :intent
+             "Make refusal-cause.probe/bad-err stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [refusal-cause.probe/bad-err],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns scratch.add,
+             :name "add-one-returns-its-argument-plus-one",
+             :kind :function,
+             :intent
+             "Make `scratch.add/add-one` return its argument plus one. The proof test `scratch.add/add-one-adds-one` is red until it does.",
+             :must-read [scratch.add/add-one],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns scratch.add2,
+             :name "add-one-returns-its-argument-plus-one",
+             :kind :function,
+             :intent
+             "Make `scratch.add2/add-one` return its argument plus one. The proof test `scratch.add2/add-one-adds-one` is red until it does.",
+             :must-read [scratch.add2/add-one],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns scratch.error-delivery,
+             :name "faults of probe-bad",
+             :kind :function,
+             :intent
+             "Make scratch.error-delivery/probe-bad stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [scratch.error-delivery/probe-bad],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns scratch.sd-probe,
+             :name "faults of measure",
+             :kind :function,
+             :intent
+             "Make scratch.sd-probe/measure stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [scratch.sd-probe/measure],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.ai,
+             :name
+             "the-shipped-stop-sequence-cuts-replies-that-contain-it",
+             :kind :function,
+             :intent
+             "config/default.edn ships :seon.config.ai/stop [\"#:seon.repl\"], so any model reply containing that text (code about seon.repl reply maps, a docstring quoting one) ends there with an ordinary finish stop: live run 1 lost 5 of 11 replies (one empty) and the agent was never told. Remove the shipped stop string, or report a stop-sequence cut to the agent as an error value on the call.",
+             :must-read [seon.ai/request-body],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/live-run/report.md"],
+             :created-by #:db{:id 116537}}
+ #:seon.task{:ns seon.batch,
+             :name
+             "an-earlier-redefinition-of-a-host-function-fails-as-a-core-fault",
+             :kind :function,
+             :intent
+             "produced-failures records a form's failure as a core fault when its producer is a compiled host Var this batch has not redefined. An agent that redefined a host function (e.g. my.fs/read) in an EARLIER batch and whose interpreted version then fails is still recorded as a core fault, and root is notified, although the failing code is the agent's. Correct: compare the definition digest that ran (interpreted on the branch) with the compiled Var's; a branch-only version is the agent's own mistake, delivered only. Proof: defn a host function's replacement in one evaluation, call it failing in the next, assert no signature is recorded.",
+             :must-read [seon.batch/produced-failures],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.cluster.agent,
+             :name "interrupted? re-walks the cause chain",
+             :kind :function,
+             :intent
+             "seon.cluster.agent/interrupted? walks .getCause with its own seen-set loop, a second copy of seon.error.refusal/cause-links. Replace the loop with (some #(instance? InterruptedException %) (refusal/cause-links failure)), EQUIVALENT on every chain (both stop at the first repeat).",
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.cluster.agent,
+             :name "reply-size-is-measured-by-printing-the-sources",
+             :kind :function,
+             :intent
+             "submit-source-in-projection records :seon.turn/reply-size as (count (pr-str sources)): it prints the segmented sources to count characters, a printer use outside the value printer on every MCP SCI evaluation. Correct: the size is the submitted text's length (the reply it stands for), computed without printing.",
+             :must-read [seon.cluster.agent/submit-source!],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.cluster.boot,
+             :name "faults of memory-pressure-crossed!",
+             :kind :function,
+             :intent
+             "Make seon.cluster.boot/memory-pressure-crossed! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.cluster.boot/memory-pressure-crossed!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.cluster.prompt,
+             :name "merge 02b3f1f75a77",
+             :kind :merge,
+             :intent
+             "Merge branch agent-cf39ff4ab1c2's change for 02b3f1f75a77.",
+             :created-by #:db{:id 51518}}
+ #:seon.task{:ns seon.cluster.registry,
+             :name "faults of retire-branch!",
+             :kind :function,
+             :intent
+             "Make seon.cluster.registry/retire-branch! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.cluster.registry/retire-branch!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.cluster.source,
+             :name
+             "index-issues-drops-every-opened-date-in-a-git-less-archive",
+             :kind :function,
+             :intent
+             "seon.cluster.source/index-issues! (source.clj:523) indexes notes from an archive without .git, so every :seon.issue/opened is silently missing in production adoption. Done when the opened dates come from a declared source (the checkout's git) or the gap is recorded as a typed unknown, with a regression on an archive without .git. The issue namespaces are cut-planned (owner ruling 2026-09-28: cut only after tasks hold an ordered series); if the cut lands first, delete this task with it.",
+             :must-read [seon.cluster.source/changed-identities],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.cluster.store,
+             :name "the-store-index-roots-carry-no-subtree-count",
+             :kind :namespace,
+             :intent
+             "Default's index roots report has-subtree-counts? false (root _subtreeCount -1 though its children carry counts), so Datahike's planner uses heuristic estimates (a unique lookup estimated 768 rows, a ref attribute 38,416 of an actual 1,353). Fresh stores with Seon's index config, reconnects and branches keep counts; how default's roots lost theirs is unknown. Done when the producer is found and a store keeps exact estimates across restarts.",
+             :must-read [seon.cluster.store/open-store!],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/growth-notes.md"],
+             :created-by #:db{:id 116513}}
+ #:seon.task{:ns seon.contracts-compile-test,
+             :name
+             "edit-hook-refuses-a-lawful-throw-of-a-registered-error",
+             :kind :function,
+             :intent
+             "seon.contracts-compile-test/uncontained-changes (run by the PreToolUse edit hook bin/seon-hook) refuses ANY edit to a defn that throws ex-info carrying a registered :seon.error/type with error/uncontained-throw unless the output union declares an error alternative. CLAUDE.md and docs/seon/specs/errors.md say the opposite: a function whose job is not to answer throws the one error map inside ex-info and declares only its success value. Reproduce: edit any line of seon.id/structural-digest (it throws :seon.id/unhashable-error, registered in seon.id.edn): the hook answers 'seon.id/structural-digest (row 127) throws to its caller 1 way(s) with no error alternative'. This blocked an EQUIVALENT 9-line speedup of seon.id (patch in docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md). Correct: a throw whose ex-data is a registered :seon.error variant built by the installed constructor or a declared literal is lawful and not a finding; keep refusing throws of undeclared data. Proof: a contracts-compile-test case where a changed defn throwing a registered variant yields no :uncontained-throw finding.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md"],
+             :created-by #:db{:id 125902}}
+ #:seon.task{:ns seon.contracts-compile-test,
+             :name
+             "empty-input-calls-analyzer-with-a-refused-empty-source-map",
+             :kind :function,
+             :intent
+             "contracts-compile-test/check with :paths [] reaches namespace-contexts and calls seon.fn.analyzer/analyze with an empty sources map; the analyzer requires min 1 and throws a contract refusal. Return zero contract findings without analyzing when the selected source set is empty; preserve placement findings. Reproduced on default 42e569d9d, JVM root, result/e0f9f608c27e4. Regression should invoke check with no selected sources and assert its data result. Evidence: docs/research/agent-platform/2026-10-07/spec-reviews/review-final-codex-notes.md.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/spec-reviews/review-final-codex-notes.md"],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.db,
+             :name
+             "a-probe-below-the-seek-break-even-scans-the-attribute",
+             :kind :namespace,
+             :intent
+             "A bound lookup into a stored attribute reads nodes proportional to its answer, not to the attribute.",
+             :evidence
+             ["datahike.query.execute/probe-driven-threshold is 2500 (an in-memory cost model: seek 50us vs 20ns/datom). One bound value into an attribute of under 2500 datoms scans and filters the whole attribute: [?run :turn/id ?id] read 9 nodes on a 2,000-run store and 3 on a 20,000-run store."],
+             :created-by #:db{:id 116679}}
+ #:seon.task{:ns seon.db,
+             :name
+             "a-variable-attribute-rule-query-reads-942-nodes-for-no-rows",
+             :kind :namespace,
+             :intent
+             "seon.cluster contract-findings' referrer query ([:find [?sym ...] :in $ % [?changed ...] [?attribute ...] :where (affected ?key ?changed) [?arity ?attribute ?key] [?function :seon.fn/arities ?arity] [?function :seon.fn/sym ?sym]], the recursive affected rule, ?attribute over :seon.fn.arity/input-refs, output-refs and guard-refs) read 942 index nodes, allocated 303 MB and took 120 ms on a fresh connection over a clone of default's store (warm: 7.8 ms, 7.5 MB), for 0 rows with three changed schema keys (fork eb404fa1 and 6f3b61f6 alike, dh-fix bench.clj :affected). Work should be proportional to the schemas reached and their referrers. Done when the same probe reads nodes proportional to its answer (diagnose the plan: variable attribute pattern, rule fixpoint scans) with a regression on node reads.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/dh-fix/dh-fix-notes.md"],
+             :created-by #:db{:id 125922}}
+ #:seon.task{:ns seon.db,
+             :name "an-agent-transact-reports-the-runs-open-datoms",
+             :kind :function,
+             :intent
+             "An SCI form (seon.db/transact! [{:seon.ns/name 'scratch.rrecw}]) in an MCP run answers a tx report of 26 datoms of which 1 is the agent's: the run row (seon.turn/id, agent, situation, opened-tx, reply, reply-size, starting-ns), two evaluation intent rows and the seon.db/receipt stamp ride the agent's write because custody prepends the run's open (seon.db/*open*, absent-call) to the first durable write of a form (default 722f110df, agent r-record, tx 536872944). The agent sees Seon's machinery datoms as its own write's result. Correct: an agent's transact! commits and reports only its own data; the turn's record is written by the turn's one settlement.",
+             :must-read [seon.db/absent-call seon.db/transact!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.db,
+             :name "an-identity-join-scans-the-whole-ref-attribute",
+             :kind :namespace,
+             :intent
+             "A query [?x :identity-attr ?input] [?y :ref-attr ?x] [?y :a ?v] ... is planned by Datahike as an entity group scanning the whole AEVT range of the ref attribute before the unique lookup binds ?x: work proportional to the store's history, not the answer. One (+ 1 2) visits 54,000 index nodes (run-receipts 19,000; runtime-analysis-batch 11,340; next-ordinal, continuing-reply?, spent-runs, branch-errors, evaluation-terminal-data, entity-emission, form-problem). Passing the identity as a lookup-ref input: run-receipts 19,004 -> 22 visits, 14.7 MB -> 0.9 MB. Root decides: Datahike planner fix (recommended) or caller rewrites. Done when one (+ 1 2) visits a number of nodes independent of the store's evaluation count.",
+             :must-read
+             [seon.db/q
+              seon.eval.drive/run-receipts
+              seon.fn/runtime-analysis-batch],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/growth-notes.md"],
+             :created-by #:db{:id 116513}}
+ #:seon.task{:ns seon.db,
+             :name
+             "an-or-clause-joined-to-a-pattern-costs-a-scan-per-binding",
+             :kind :function,
+             :intent
+             "seon.db/q with an or clause whose variable is then joined to another pattern costs about 65-88 ms and 135-160 MB per input binding, while datahike.api/q on the same query and database takes 8-10 ms for 142 bindings. Reproduce in JVM mode on default (722f110df, 2026-10-07): (seon.db/q '[:find ?d :in $ ?sym :where (or [?e :seon.fn/sym ?sym] [?e :seon.test/sym ?sym]) [?e :seon.program/definition-digest ?d]] db 'seon.db/q) 88 ms / 160 MB for one row; with [?sym ...] over 10 symbols 658 ms / 1.36 GB, 40 symbols 2.3 s / 5.4 GB; without the definition-digest join 1 ms. It is the whole cost of seon.turn/code-currency (142 symbols: 9.6 s / 19 GB; root's 672 symbols: about 42 s), hence the 43.6 s read-only system turn that ran past the 32 s MCP bound (profile: code-currency 15 calls, 114.6 s total, max 41.9 s). Done when seon.db/q on these shapes stays within a small constant factor of datahike.api/q, proven by a table test over or/or-join followed by a join, scalar and collection bindings.",
+             :must-read [seon.db/q seon.turn/code-currency],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"],
+             :created-by #:db{:id 125940}}
+ #:seon.task{:ns seon.db,
+             :name "faults of q",
+             :kind :function,
+             :intent
+             "Make seon.db/q stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.db/q],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.db,
+             :name "faults of transact!",
+             :kind :function,
+             :intent
+             "Make seon.db/transact! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.db/transact!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.db,
+             :name "fork-datahike-suite-has-thirteen-reds",
+             :kind :namespace,
+             :intent
+             "The Datahike fork's clj-pss kaocha suite passes at its pinned revision.",
+             :evidence
+             ["At d9121bbb the clj-pss suite reports 913 tests, 13 failures: query-test dependency attributes return :all (4), query-cache-test config-mismatch (1), connector-release-test config-mismatch (2), writer-error-test writer-log (5), attribute-refs pull-api-test test-pull-limit (1). Same set after dh-planner's change (918 tests)."],
+             :created-by #:db{:id 116679}}
+ #:seon.task{:ns seon.db,
+             :name "fork-optimistic-tx-report-test-races-its-listener",
+             :kind :namespace,
+             :intent
+             "datahike.test.optimistic-test/tx-report-happy-path-converges-to-conn (fork optimistic_test.cljc:310) asserts a :conn-advance event has fired as soon as the optimistic transact!'s result resolves, but the writer-listener delivers it asynchronously: the eb404fa1 full clj-pss run saw origins [:overlay-add] only (1 failure of 2 runs; the dh-fix snapshot runs passed). Done when the test waits for the :conn-advance event (bounded) before asserting, and passes in 10 consecutive runs.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/dh-fix/dh-fix-notes.md"],
+             :created-by #:db{:id 125922}}
+ #:seon.task{:ns seon.db,
+             :name "fork-planner-regression-bench-never-finishes",
+             :kind :namespace,
+             :intent
+             "The Datahike fork's planner-regression gate reports its shapes within minutes.",
+             :evidence
+             ["`clojure -M:bench -m benchmark.planner-regression --assert` at d9121bbb (and with dh-planner's change) prints no shape row within 900 s after 'stores ready' (timeout exit 124)."],
+             :created-by #:db{:id 116679}}
+ #:seon.task{:ns seon.db,
+             :name
+             "fused-joins-with-a-predicate-answer-unprojected-tuples",
+             :kind :function,
+             :intent
+             "Datahike fork d9121bbb and 5258679c (the gitlink default runs): execute-plan-direct's multi-group path leaves a consumer group's attached-predicate tuples wide when there is no probe-map combine, so [:find ?form ?ordinal :in $ ?run-id :where [?run :turn/id ?run-id] [?form :eval/run ?run] [?form :eval/ordinal ?ordinal] [(> ?ordinal 0)]] returns [?form ?ordinal ?run] 3-tuples (measured on 2,000-100,000-run stores). Any Seon caller of that shape (unique lookup, ref join, predicate on a joined var) gets wrong-arity rows today. Fixed in fork 49e681db (seon/identity-join-first); proof: datahike.test.query-identity-join-test/an-identity-join-answers-like-the-base-engine :with-predicate. Done when Seon's gitlink includes 49e681db.",
+             :created-by #:db{:id 117520}}
+ #:seon.task{:ns seon.db,
+             :name "history-joins-drop-matching-datoms",
+             :kind :function,
+             :intent
+             "On both Datahike d9121bbb and 5258679c, the review probe's history predicate query omits [2 1] and [3 2], and its history-versions query returns three rows where the base engine returns six. Reproduction and full inputs: docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md. Required regression: datahike.test.query-planner-temporal-test/history-joins-preserve-every-matching-version. Diagnose the executor; ordering/estimates must not drop valid historical answers.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md"],
+             :created-by #:db{:id 116783}}
+ #:seon.task{:ns seon.db,
+             :name "history-joins-ignore-shared-added-flags",
+             :kind :function,
+             :intent
+             "Datahike fused history merges compare shared values and tx variables but not shared fifth-position added variables. With entity 1 :item/a [1 2], :item/b [1 4 5], then retract b=1 and assert a=4, [:find ?v ?w ?added :where [?e :item/a ?v ?tx ?added] [?e :item/b ?w ?other-tx ?added]] produces 12 rows instead of 9, inventing [1 1 false], [2 1 false], [4 1 false]. Fix keeps added-variable scans separate at entity-group-key; ordinary relation joins enforce equality. Proof for root: datahike.test.query-planner-temporal-test/shared-added-bindings-match-every-joined-datom. See dh-fix/dh-audit-notes.md.",
+             :created-by #:db{:id 125963}}
+ #:seon.task{:ns seon.db,
+             :name
+             "planned-recursive-rules-on-history-disagree-with-the-base-engine",
+             :kind :function,
+             :intent
+             "On Datahike fork d9121bbb, 5258679c and 49e681db, a recursive rule over a history db answers differently from the base engine. Reproduction (review-dhplanner-opus notes, docs/research/agent-platform/2026-10-07/dh-planner/review-dhplanner-opus-notes.md): 20 people p0..p19 each :p/friend the previous one, then retractEntity p4; rules (reach ?a ?b) [?a :p/friend ?b] / [?a :p/friend ?x] (reach ?x ?b). On (d/history db): [:find ?b :in $ % ?id :where [?a :p/id ?id] (reach ?a ?b)] with \"p6\" plans 1 row, base 6; [:find ?b :in $ % ?a :where (reach ?a ?b)] with [:p/id \"p6\"] plans 19 rows, base 6. as-of/since and the current db agree. Correct: the planner equals the base engine; proof test to add in datahike.test.query-planner-temporal-test.",
+             :created-by #:db{:id 117520}}
+ #:seon.task{:ns seon.db,
+             :name
+             "planner-estimates-load-every-node-of-the-counted-range",
+             :kind :namespace,
+             :intent
+             "Datahike plan estimates cost index node loads proportional to the attribute counted, not to the plan.",
+             :evidence
+             ["persistent-sorted-set 0.4.137 count-slice loads every node under the counted range (a branch stores its own subtree count, not its children's): estimate-pattern of [?x :eval/run ?run] read 239 nodes on a 1.16M-datom file store; planning a 5-clause query on a fresh connection read 790 nodes. Plans are cached per shape, but the key embeds substituted constants, so scalar-input and literal queries re-plan per value. dh-planner notes 2026-10-07."],
+             :created-by #:db{:id 116679}}
+ #:seon.task{:ns seon.db,
+             :name "q-hands-a-non-query-map-to-refused-read",
+             :kind :function,
+             :intent
+             "(seon.db/q {:a 1}) passes the map to refused-read, whose contract refuses a non-error: the agent gets a 326-problem instrument refusal costing 109 MB and 70 ms, and a 10,000-deep map ran past 32 s. q should answer its own invalid-read refusal for a value that is neither a query, a database nor an error. Done when (seon.db/q {:a 1}) returns a :seon.db/invalid-read-error naming q under 1 MB.",
+             :must-read [seon.db/q],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/growth-notes.md"],
+             :created-by #:db{:id 116513}}
+ #:seon.task{:ns seon.db,
+             :name "query-plans-are-reused-across-database-sizes",
+             :kind :namespace,
+             :intent
+             "A Datahike query plan built on one database value is reused for every later value with the same schema, however the data grew.",
+             :evidence
+             ["datahike.query/get-or-create-plan keys plans by [clauses bound-vars rules in-cards schema-hash]: a plan made on a 116k-datom db (group first) ran on a 1.16M-datom db and read 244 nodes where a fresh plan reads 6 (dh-planner notes 2026-10-07)."],
+             :created-by #:db{:id 116679}}
+ #:seon.task{:ns seon.db,
+             :name "recursive-rule-range-predicates-throw",
+             :kind :function,
+             :intent
+             "Both Datahike d9121bbb and 5258679c throw ClassCastException (Symbol cannot be cast to Number) for a bounded recursive path rule with [(< ?e ?y)] [(< ?y 8)]. The base engine returns six current rows. Full query, fixture and temporal outcomes: docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md. Required regression: datahike.test.query-rules-test/recursive-range-predicates-preserve-answers.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md"],
+             :created-by #:db{:id 116783}}
+ #:seon.task{:ns seon.db,
+             :name
+             "rule-arguments-resolve-lookup-shaped-data-as-entities",
+             :kind :function,
+             :intent
+             "Datahike 84790323/6f3b61f6 resolves every lookup-ref-shaped rule argument before inspecting its use. On {:u/id {:db/unique :db.unique/identity}}, entity 2 :u/id 2, (d/q '[:find ?x :in $ % ?v :where (same ?v ?x)] db '[[(same ?v ?x) [(identity ?v) ?x]]] [:u/id 2]) planned returns #{[2]} but base engine returns #{[[:u/id 2]]}; current/history/as-of, 20 and 320 entities. Preserve data arguments; resolve only at a database pattern's entity/ref position. Proof: datahike.test.query-planner-temporal-test/rule-arguments-preserve-lookup-shaped-data. Full evidence: docs/research/agent-platform/2026-10-07/dh-fix/dh-audit-notes.md.",
+             :created-by #:db{:id 125963}}
+ #:seon.task{:ns seon.dev.mcp,
+             :name "large-source-request-fails-in-the-bridge",
+             :kind :function,
+             :intent
+             "MCP eval_clj request containing load-string of about 95 KB source fails immediately with 'Tool eval_clj failed in the MCP bridge (PREPL evaluation failed.)' and misleading start-JVM guidance, while {:alive true} succeeds and same source loads when assembled through separate smaller requests. Verify actual bridge failure and report a structured size/compilation error; do not claim a limit from this one observation.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.dev.mcp,
+             :name
+             "the-timeout-remedy-names-a-parameter-eval-clj-does-not-declare",
+             :kind :function,
+             :intent
+             "An eval_clj call over 32 s answers 'Retry with a larger timeout_ms' (script/seon/dev/mcp.clj), and the bridge reads arguments \"timeout_ms\", but the eval_clj tool's declared input schema has only agent, cluster, code, mode, namespace, so an MCP client cannot pass it. Declare timeout_ms in the tool schema (with its bound) or stop naming it. Seen 2026-10-07 by lane r-turn.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns seon.error,
+             :name
+             "a-fault-without-an-operation-is-recorded-under-normalize",
+             :kind :function,
+             :intent
+             "seon.error/prepare names 'seon.error/normalize when neither the failure, the instrument data nor the boundary names an operation, so three StackOverflowError flow faults (deep-value-probe, 2026-10-07 02:08Z; two on 09-28) read as the recorder overflowing. Their producers (recursive canonical print and error-data walk) were made iterative in 77c9f5459 and 7a6878374; the misattribution remains. Done when such a fault names its boundary or a typed unknown operation, never the recorder.",
+             :must-read [seon.error/prepare],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/growth-notes.md"],
+             :created-by #:db{:id 116513}}
+ #:seon.task{:ns seon.error,
+             :name
+             "an-error-render-drops-the-members-that-say-what-is-missing",
+             :kind :function,
+             :intent
+             "seon.test/recorded-result's unknown answer {:seon.test/unknown sym :seon.test/next-tier :none :seon.error/message ...} is shown to the agent as the bare string \"No admitted execution is recorded for this test.\": the error AI face prints its message alone, so which test is unknown and what tier would run it are dropped. Done when an error's AI render keeps its variant's own members as data beside the message, asserted on the render's data.",
+             :must-read [seon.error/render-ai],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.error,
+             :name "fault-task-closing-has-no-writer-left",
+             :kind :function,
+             :intent
+             "Recording no longer writes a producer task, so :seon.task/faults is fed by no writer: seon.task/task-resolution's fault branch, my.task/open's fault query and seon.error/resolution's task-proof branch (proof) serve only the auto tasks written before 2026-10-07 (18 'faults of <fn>' tasks on default). Triage those into authored tasks with failing tests or retire them, then delete :seon.task/faults, the proof branch and their tests at the errors cut. Open decision for the errors spec owner: how an untriaged recorded error resolves (today: producer digest change alone, or seon.problems/resolve!). Proof: the attribute and the proof branch are gone and seon.error.resolution-test asserts the remaining rules.",
+             :must-read
+             [seon.error/resolution seon.task/task-resolution],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.error.refusal,
+             :name
+             "a-deep-unchanged-child-under-a-rebuilt-parent-overflows-the-stack",
+             :kind :function,
+             :intent
+             "Make `seon.error.refusal/references` (its post-order close) hash every collection as it closes, so a parent rebuilt around a place or world never hashes a deep unchanged sibling recursively. Today (throw (ex-info \"x\" {:place (atom 1) :deep <100,000-deep map>})) answers a bare java.lang.StackOverflowError (5,000 deep overflows a 1 MB stack). Patch and measurements: docs/research/agent-platform/2026-10-07/growth/review-growth-opus-notes.md. Prove with a deftest naming this task.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/review-growth-opus-notes.md"],
+             :created-by #:db{:id 116688}}
+ #:seon.task{:ns seon.error.refusal,
+             :name "closing-a-rebuilt-container-hashes-opaque-leaves",
+             :kind :function,
+             :intent
+             "Both parent and 3071fef19 referenced close eagerly hashes rebuilt containers. A map containing a promise and self-referencing java.util.ArrayList throws StackOverflowError in 4-7 ms. A lazy sequence leaf is realized by hash when a sibling changes. Hashing repeated opaque Java containers also repeats their contents despite fold memoization. Resolve depth-safe set construction and opaque/lazy leaf semantics together; regression through references must retain the error value for a finite cyclic Java leaf.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"],
+             :created-by #:db{:id 116674}}
+ #:seon.task{:ns seon.error.refusal,
+             :name "identity-folding-assumes-stable-projectors",
+             :kind :function,
+             :intent
+             "3071fef19 memoizes completed nodes although post-order and referenced admit arbitrary callables. A stateful projector under a shared map returns parent [{:x 1} {:x 2}] versus change [{:x 1} {:x 1}]. Choose and declare once-per-identity semantics or preserve per-occurrence projection; prove through references with a registered projector. Shared 300 x 10000 depth: 11336.9 ms / 7249546240 allocated bytes parent, 93.8 ms / 27523840 change in SCI copies. Success tests must include the chosen mutable-world semantics.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"],
+             :created-by #:db{:id 116674}}
+ #:seon.task{:ns seon.error.refusal,
+             :name
+             "the-error-data-walk-allocates-a-kilobyte-per-collection-node",
+             :kind :function,
+             :intent
+             "`seon.error.refusal/referenced` allocates about 1.5 KB per collection node it walks, even when nothing is rebuilt: `(seon.error.refusal/references nil (mapv vector (range 1000000)))` takes 0.9-1.3 s and allocates 1.5 GB (compiled, unarmed, throwaway JVM). The cost is the explicit stack's node maps, `entries` tuples (`map-indexed vector`) and one armed `entries` call per node on default. Correct: a walk that rebuilds nothing allocates a small constant per node (reuse one mutable frame per stack level, iterate members without tuples), so error data the size of an agent's value is referenced well under one second. Proof: a profile probe of the 1M-vector walk under 300 ms / 200 MB.",
+             :created-by #:db{:id 116742}}
+ #:seon.task{:ns seon.eval,
+             :name
+             "of-agent-default-selector-refuses-on-roots-stored-read-plans",
+             :kind :function,
+             :intent
+             "(seon.eval/of-agent db \"root\") with the default selector (read evidence pulled whole) returns the read refusal 'The EDN-backed attribute :datahike.read/dependency-plan has an invalid logical value.' on default (722f110df, 2026-10-07) instead of root's 1,387 evaluations; with seon.eval/history-selector it answers. A stored read plan that no longer decodes makes the agent's whole history unreadable through the documented arity. Done when the default arity answers every stored evaluation (the read-evidence cut, seon.turn/read-evidence-rows-are-two-fifths-of-the-stored-bytes, removes the attribute from the default selector), proven by of-agent over an agent whose history holds an undecodable plan.",
+             :must-read [seon.eval/of-agent],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"],
+             :created-by #:db{:id 125940}}
+ #:seon.task{:ns seon.eval,
+             :name
+             "of-agent-default-selector-refuses-on-stored-read-plans",
+             :kind :function,
+             :intent
+             "On default (pid 41301, 2026-10-07) (seon.eval/of-agent (seon.db/db (seon.cluster.boot/connection \"default\")) \"root\") answers an invalid-read error map (:seon.error/operation seon.db/q, message \"The EDN-backed attribute :datahike.read/dependency-plan has an invalid logical value.\") after 297 ms and 667 MB allocated, because the default selector pulls every stored read-evidence component whole; with seon.eval/history-selector the same call answers 1,387 evaluations (410 ms, 833 MB). An agent's history read must never refuse over a stored attribute no consumer shows: stop storing :seon.cluster.eval/read-evidence (its only consumer is the system-turn refresh slated for deletion) and drop it from the default selector. Proof: a test calling of-agent with the default selector on an agent with a stored generated read returns a vector.",
+             :must-read
+             [seon.eval/of-agent seon.turn/receipt-read-evidence-tx],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-delete-notes.md"],
+             :created-by #:db{:id 125954}}
+ #:seon.task{:ns seon.fault,
+             :name
+             "a-delivered-fault-names-the-normalizer-not-its-boundary",
+             :kind :function,
+             :intent
+             "seon.fault/fault! with context {:seon.error/layer :seon.flow/proc :seon.error/operation seon.flow/probe} stores the error entity with that layer and operation, but the occurrence copies the prepared source's diagnostic attributes (:seon.error/layer :seon.error/normalization, :seon.error/operation the blamed producer seon.sci.kernel/adopt-arm), and seon.error/latest-fact merges the occurrence over the entity, so the reply's :errors entry and every latest-fact reader name the normalizer, not the boundary that recorded it. Reproduce: the fault! call above; :errors showed :seon.error/layer :seon.error/normalization, :seon.error/operation seon.sci.kernel/adopt-arm while (seon.db/pull db [:seon.error/operation :seon.error/layer] [:seon.error/signature s]) answered seon.flow/probe / :seon.flow/proc. Correct: the boundary's layer and operation reach the prepared observation (prepare's boundary-layer/boundary-operation) so entity and occurrence agree. Proof: fault! with an explicit layer reads that layer back from latest-fact.",
+             :must-read
+             [seon.error/commit-call
+              seon.error/latest-fact
+              seon.fault/record!],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.fn,
+             :name "backticked-docstring-references-have-no-index",
+             :kind :function,
+             :intent
+             "CLAUDE.md says a backticked fully qualified symbol or keyword in a docstring is a reference the index resolves into the subject's context, one resolving to nothing a problem on that var. No producer exists: seon.fn indexes :seon/tasks, :seon/must-read and :seon/see-also metadata (task-links) and analyzer :seon.fn/references, never docstring spans. Done when docstring backtick spans are indexed as reference edges with dangling ones reported, or the law is corrected.",
+             :must-read [seon.fn/task-links],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.fn.analyzer,
+             :name "fork-source-lint-misreads-local-macro-bindings",
+             :kind :function,
+             :intent
+             "The source edit hook refuses unchanged Datahike execute.cljc local macro bindings first-attr, cur-d, si, cur-a, target-a at sorted-merge-inner-loop calls, and infers a nil type mismatch at execute-temporal-group-rel. It also refuses the test-rule-arguments name introduced by deftest-async in query_rules_test.cljc. Whole Seon archive lint reports zero errors because dependencies are outside its roots. Correct the analyzer's macro/signature understanding without disabling validation. This blocks the history cursor correctness fix described with its exact patch in docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md. Proof: prospective edits to these unchanged fork definitions should have no false error-level lint findings.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md"],
+             :created-by #:db{:id 116783}}
+ #:seon.task{:ns seon.mcp,
+             :name "jvm-mode-replies-omit-time-calls-and-location",
+             :kind :function,
+             :intent
+             "MCP eval_clj in JVM mode answers errors with no :ms, no :calls and no source location: (throw (ex-info \"jvm boom\" {})) and (Integer/parseInt \"nope\") answered only :error and :result, while the same forms in SCI mode carry :ms and :seon.sci.eval/stacktrace. Correct: both modes answer the same reply keys (time, armed calls, the form's location). Proof: a JVM-mode failing form's reply carries :seon.repl/ms.",
+             :must-read [seon.mcp/call],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.operator,
+             :name
+             "a-candidate-that-babashka-cannot-load-passes-the-check",
+             :kind :function,
+             :intent
+             "The operator (`bin/seon`, `script/seon/operator.clj`) runs under babashka and requires first-party namespaces such as `seon.error.refusal`, but nothing proves a candidate's operator closure loads in babashka: `bin/seon check` runs HEAD's operator and boots the candidate in a JVM. A JVM-only form (lane refusal-walk-fix used `(.hasheq ^clojure.lang.IHashEq x)` in `seon.error.refusal/referenced`) passed lint and the JVM tests while `bb --config /dev/null -cp script:src:resources -e \"(require 'seon.operator)\"` failed with `Unable to resolve classname: clojure.lang.IHashEq`; committing it would break every bin/seon command. Correct: the check (or one test beside `seon.cluster.subprocess-test/plain-babashka-cannot-load-the-quarry`) requires `seon.operator` in babashka from the candidate's archive and refuses when it fails. Proof test: babashka loads the candidate's operator.",
+             :created-by #:db{:id 116742}}
+ #:seon.task{:ns seon.print,
+             :name "a-dig-form-through-a-list-index-reads-nil",
+             :kind :function,
+             :intent
+             "A cut under a list or seq member prints a continuation through plain get-in, e.g. (subs (get-in result/e… [0]) 127) for (\"long string\"): get-in does not index a list or seq, so the offered dig form reads nil and subs throws. seon.print/continuation chooses get-in from the path alone; the value printer's member step for a non-vector sequential is a plain index. Done when every printed continuation, evaluated on the held value, returns the cut's rest (a regression evaluating the continuation form for list, lazy-seq and vector members).",
+             :must-read
+             [seon.print/continuation seon.render.value/admit-member],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"],
+             :created-by #:db{:id 116658}}
+ #:seon.task{:ns seon.print,
+             :name "multiline-literals-hide-line-breaks-from-layout",
+             :kind :function,
+             :intent
+             "7619b8dfd string-literal emits physical newlines inside one :text op. fipp.engine annotate-rights and format-nodes count all text characters as one column span, so following groups do not know the final line column. Original lane reports a long line after a multiline string overflowing width. Preserve exact string content (including blank/trailing lines); use dependency layout semantics without adding indentation inside literal contents. Distinguish inherently unbreakable long source lines from layout-added overflow; add nested map/vector regressions.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.problems,
+             :name
+             "an-agents-own-form-errors-are-assigned-to-another-agent",
+             :kind :function,
+             :intent
+             "Model turn 76fb76c15e95 of agent lp-add-2 (branch :agent-4512788dda3b, 2026-10-07) had three failing forms in namespace user; the settlement (tx 536872927) sent three 'Repair problem ... from run 76fb76c15e95' assignment messages from lp-add-2 to review-final-opus, another agent assigned to user. The author's own evaluation errors already return in its next context; routing them to another agent of the namespace delivers an agent mistake to someone who cannot act on it. Proof: a deftest where an agent's own failing form in a shared namespace sends no assignment.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns seon.profile,
+             :name "begin-validates-every-cell-with-armed-predicates",
+             :kind :function,
+             :intent
+             "`seon.profile/begin` says it calls no other armed function, but each call grows the entry counters of seon.profile/adder? by 5,320 and measured-mark?, accumulator?, thread-local?, histogram? by 2,660 each (2,660 live cells, default 2026-10-07): about 18,600 armed calls and 3.5 MB per mark, from its contracts validating every cell. A window measured with begin therefore counts the probe itself. Make the mark's own cost independent of armed validation of each cell. Proof: a deftest asserting two consecutive marks show zero armed entry growth.",
+             :must-read [seon.profile/begin],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns seon.program,
+             :name
+             "sci-scratch-definitions-refuse-their-produced-digest",
+             :kind :function,
+             :intent
+             "On default 42e569d9d, copied contracted defn- declarations in own SCI namespace review.growth return their Vars but program settlement refuses definition-digest: expected and offending differ. Six scratch declarations remained private, not adopted. entries additionally refuses its existing bare nilable return under a renamed namespace. Probe evidence includes exact source transformations and result handles; preserve admitted declaration source and writer digest agreement.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"],
+             :created-by #:db{:id 116674}}
+ #:seon.task{:ns seon.render,
+             :name "faults of unknown",
+             :kind :function,
+             :intent
+             "Make seon.render/unknown stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.render/unknown],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.render.ns,
+             :name
+             "a-doc-line-is-the-first-physical-line-not-the-first-sentence",
+             :kind :function,
+             :intent
+             "seon.render.ns/render-ai on seon.db shows :seon.ns/doc \"The one database namespace for all things Datahike. Reads and writes use\": first-doc-line takes the docstring's first physical line, so a wrapped first sentence is cut mid-clause for every namespace and function whose summary wraps. Done when the shown doc line is the docstring's first sentence (through its first period or the first blank line), asserted on the render's data.",
+             :must-read
+             [seon.render.ns/function-ai seon.render.ns/render-ai],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.render.ns,
+             :name "function-source-lines-print-several-per-line",
+             :kind :function,
+             :intent
+             "seon.render.ns/function-ai returns source as :seon.render.ns/source-lines, a vector of strings; the value printer fills each output line with several of them (\"        query-input\" \"        (if explicit-database?\" on one line), every quote escaped, and the docstring is shown twice (as :seon.fn/doc and inside the source). For seon.db/q (62 lines) 32 lines show before the cut. Done when a function's source is shown as code, one source line per output line and unescaped, without repeating the doc, asserted on the render's data and the printer's own test (lane source-display owns the printer side).",
+             :must-read [seon.render.ns/function-ai],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.render.test,
+             :name "a-test-render-omits-what-the-test-asserts",
+             :kind :function,
+             :intent
+             "seon.render.test/render-ai at distance 1 for seon.db-overhead-test/query-preparation-has-bounded-armed-work answers only its symbol, state \"pass\", :seon.test/run-basis-t and the host kind (72 ms, 5,220 armed calls): nothing of what the test asserts. An agent whose task names this proof must read its source separately. Done when the near view carries the test's assertions (its source lines or the is-forms as data) and drops the basis-t, asserted on the render's data.",
+             :must-read [seon.render.test/render-ai],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.render.transcript,
+             :name "delivered-errors-carry-no-result-handle",
+             :kind :function,
+             :intent
+             "A core error recorded during an agent's call (another thread included) reaches the reply's :seon.repl/errors as seon.error/value plus count and branch, but with no result handle or dig form: the agent can reach the whole recorded error only by knowing to pull [:seon.error/signature s] with the observation selector. Reproduce: in SCI as agent X, @(future (seon.fault/fault! env (ex-info \"async\" {:probe/async 1}) {:seon.agent/id X ...})) answers :errors [{:seon.error/signature … :seon.error/message \"async\"}] without :probe/async or any handle. Correct (errors spec, 'Every error in a reply's :errors and :diagnostics carries its result handle'): each delivered error carries a handle or requery form that answers the whole recorded value. Proof: an evaluation that records a core fault answers :errors whose handle reads the fault's ex-data.",
+             :must-read
+             [seon.render.transcript/branch-errors
+              seon.turn/fault-window],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.render.value,
+             :name "cuts-cost-more-than-they-hide-across-siblings",
+             :kind :function,
+             :intent
+             "Breadth before depth spends the budget on one cut per member: a vector of 50 eleven-line sources at 1,500 tokens shows the first whole, then 31 strings each cut at 64 characters with a 45-character subs form, and a health report shows four collapsed cache-kind maps as {…8 (get-in result/e… [:seon.health/cache :seon.cache/kinds :seon.cluster/file-derivation-key])}, each cut longer than the eight numbers it hides. Done when a level whose members would each be cut admits fewer members whole and folds the rest into the tail count, decided by cost, with a regression on these two shapes.",
+             :must-read
+             [seon.render.value/admit-member
+              seon.render.value/select-nodes],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"],
+             :created-by #:db{:id 116658}}
+ #:seon.task{:ns seon.render.value,
+             :name "failed-selection-escapes-the-profile-budget",
+             :kind :function,
+             :intent
+             "Both parent and 7619b8dfd prepare of an unchunked lazy sequence throwing at index 5 with a 16-token profile returns 44 tokens through plain-projection/bounded-text, no runnable cut, text (0 1 2 3 4) misleadingly looks complete. This violates the sole budget and explicit cut rules. Remove fallback character clipping and present the partial value and diagnostic through the same printer budget. Existing bounded-text-survives-in-the-render-namespace is the broader deletion task.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.render.value,
+             :name "printing-thirty-two-numbers-allocates-megabytes",
+             :kind :function,
+             :intent
+             "source-display reports compiled prepare of [0..31] allocates 2 MB. Review own-branch SCI, exact platform-thread allocation: parent 2645120 bytes/2.529 ms; 7619b8dfd 2649624 bytes/2.662 ms, for 27 shown tokens, 1586/1587 direct armed calls. Measure settle/assoc-in and per-admission wrappers, then reduce work at the owner. No timing-only test; retain ordinary output/budget tests.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.render.value,
+             :name "renderer-tests-assume-retired-text-layout",
+             :kind :function,
+             :intent
+             "Two pre-existing reds in value-test are stale assertions: a-value-s-own-inline-function-renders-it requires a one-line nested map prefix instead of asserting the nested render remains opaque; dir-of-a-large-namespace-is-its-declared-renderer-text passes render-directory-ai's vector to tokens/estimate and subs. Convert to printer tree/data assertions and budget/selected-renderer evidence. Exact replacement patches are in review-printer-codex-notes.md; test file is held by task-tags.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.render.value,
+             :name
+             "source-display-changes-two-functions-without-contracts",
+             :kind :function,
+             :intent
+             "The baseline-aware contracts compile check on 7619b8dfd versus its parent reports incomplete-contract for changed seon.print/leaf-ops at line 442 and added value-test/agent-unit at line 1302. Compiling declared schemas alone returns [], masking these missing contracts. Add complete contracts and compile against packaged schemas, preserving behavior. Reaching tests: strings-are-quoted-and-their-cut-path-is-associative and ordinary-values-print-whole-at-the-agent-budget.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.render.value,
+             :name "string-admission-compares-raw-and-escaped-cost",
+             :kind :function,
+             :intent
+             "7619b8dfd string-shown admits a 64-quote string whole at a 40-token budget, then refuses needed 130 vs budget 128; parent shows a cut. Compare escaped literal cost with cut cost, using a bounded scan. A scratch fix returns a 39-token cut and runnable continuation. Regression: seon.render.value-test/escaped-strings-remain-printable-under-a-small-budget, table of quotes, backslashes, tabs, root and tuple.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.render.value,
+             :name "string-fill-arms-a-call-for-each-character",
+             :kind :function,
+             :intent
+             "7619b8dfd fill-end invokes armed escaped-width for each added character. Same 50 MB ASCII string, 1500 tokens, own SCI copies: parent 227 calls and 1714072 allocated bytes; change 912 calls and 3485128 bytes. Inline the one-character arithmetic or compose a bounded scan once; proposed equivalent scratch patch reduces allocation to 2349944 bytes. Named reaching proof: seon.render.value-test/a-long-string-fills-the-budget-and-is-cut-at-a-line-end.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.render.web,
+             :name "the-built-stylesheet-is-stale-against-its-source",
+             :kind :function,
+             :intent
+             "Running bin/css on HEAD 178aa24e0 rewrites resources/public/css/output.css with 112 added and 5 removed lines unrelated to any current edit (.grow, .shadow, the expanded .seon-graph-kinds rules): the committed stylesheet the browser serves is not the build of input.css. Done when output.css equals bin/css's output for the committed input.css and a check refuses drift.",
+             :must-read [seon.render.web/handler],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"],
+             :created-by #:db{:id 116658}}
+ #:seon.task{:ns seon.repl,
+             :name "a-def-bound-to-an-error-value-shows-only-the-var",
+             :kind :function,
+             :intent
+             "(def tasks (seon.db/q '[:find [(pull ?t [... :seon.task/sym ...]) ...] ...] db)) answered {:seon.render.var/symbol tasks} with no error, though the query refused (uninstalled :seon.task/sym); the next form (count tasks) answered 13, the error map's key count, and (map :seon.task/kind tasks) thirteen nils. Done when a def whose value is an error map shows that error (its type and message) beside the Var, asserted through the agent entrance.",
+             :must-read [seon.render.var/render-ai],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.repl,
+             :name
+             "a-ref-from-another-branch-prints-with-the-wrong-identity",
+             :kind :function,
+             :intent
+             "A JVM-mode reply that shows a value pulled from ANOTHER branch prints its entity refs as lookup refs resolved against the evaluating agent's own branch: `(d/pull @(seon.db/branch-connection @(seon.cluster.boot/connection \"default\") :agent-cfd70b5547f7) '[{:seon.agent/settings [*]}] [:seon.agent/id \"r-turn-a\"])` run as agent r-turn (branch :agent-21293ca0b763) showed `:seon.config/agent [:seon.cluster.eval/id \"732b426d6067\"]`; eid 125951 is agent r-turn-a on the pulled branch and an evaluation on r-turn's branch. Turn refs printed the same way (`:seon.turn/agent [:seon.cluster.eval/id ...]`, `:seon.turn/trigger [:seon.turn/id ...]`). Resolve eids against the database the value came from, or print the eid. Proof: a deftest pulling from a second branch and asserting the shown ref.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns seon.repl,
+             :name "a-selected-render-arrives-as-an-escaped-string",
+             :kind :function,
+             :intent
+             "Evaluating {:seon.ns/name 'seon.render} (a map satisfying :seon.ns/ns, so the namespace render is selected) answered :value as ONE string holding the printed render with \\n escapes and quoted inner strings (2,489 tokens whole, 873 shown), while calling seon.render.ns/render-ai explicitly on the same entity answers the map as data, laid out by the printer. Done when a selected render's data reaches the reply as data printed once, the same as an explicit call, asserted on the reply map.",
+             :must-read [seon.repl/response],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.repl,
+             :name "every-def-repeats-the-same-persistence-note",
+             :kind :function,
+             :intent
+             "Every SCI def reply carries the same :note sentence (about 60 tokens: 'x lives only in your SCI context and is lost when the JVM restarts...'), from seon.repl/def-note; one scratch session of 25 defs carried it 25 times, the largest repeated text in the context. Done when the note is shown once per agent session (or once per conversation) and later def replies carry no note, asserted on reply data.",
+             :must-read [seon.repl/response],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.schema,
+             :name "contract-check-on-three-files-exceeds-one-second",
+             :kind :function,
+             :intent
+             "Review static check of seon.print, seon.render.value and value-test against packaged resources at 0daf87818 took 1301.291 ms after external JVM replacement; earlier same-class checks took 168.540 and 222.844 ms. Measure which installed contract-check operations repeat and preserve correctness; no causal ranking yet. Required full-tree clj-kondo --cache false on the archive also took 10739 ms over 494 files (0 errors/1488 warnings); that run is explicitly requested review work proportional to the whole tree, not an ordinary print. Record gate acquisition separately from warm execution; do not turn a timing observation into a wall-clock regression test.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.schema.edn,
+             :name "faults of unreadable-file!",
+             :kind :function,
+             :intent
+             "Make seon.schema.edn/unreadable-file! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.schema.edn/unreadable-file!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.sci.arm,
+             :name "a-def-without-line-metadata-refuses-its-origin",
+             :kind :function,
+             :intent
+             "source-display/printer-notes.md reports (eval (read r)) defining a function without reader line metadata refused by seon.sci.arm/write-event output at [:seon.batch/origin :line]. A def without an origin must remain valid, or refusal must happen at a declared input boundary; preserve the evaluated value. Regression through SCI evaluation with positionless source form.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.sci.arm,
+             :name "faults of write-event",
+             :kind :function,
+             :intent
+             "Make seon.sci.arm/write-event stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.sci.arm/write-event],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.sci.eval,
+             :name
+             "a-private-function-def-disappears-between-mcp-evaluations",
+             :kind :function,
+             :intent
+             "Review agent review-printer-codex defined (def measure (fn ...)), used it across several SCI evaluations, later received Unable to resolve symbol measure. ns-interns retained private data defs (request, inputs, allocation-bean, measurements) but omitted measure; scratch namespaces loaded through load-string retained prepare functions. Intervening calls included explicit JVM contract checks and task writes; causal trigger not isolated. Verify/falsify private function retention across the same agent's alternating SCI/JVM evaluations and program advancement, using a minimal def closure regression.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.sci.eval,
+             :name
+             "a-stack-overflow-in-the-error-path-reaches-shown-failure-as-nil",
+             :kind :function,
+             :intent
+             "When building an evaluation's error throws StackOverflowError, the reply's :error is the bare throwable and `seon.sci.eval/shown-failure` is called with nil (fault: refused argument 0 `error`: expected a map, got nil, called from seon.turn/show-row). The boundary must turn the overflow into an error map delivered beside the value. Reproduce with the refusal overflow in task seon.error.refusal/a-deep-unchanged-child-under-a-rebuilt-parent-overflows-the-stack. Prove with a deftest naming this task.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/growth/review-growth-opus-notes.md"],
+             :created-by #:db{:id 116688}}
+ #:seon.task{:ns seon.sci.eval,
+             :name
+             "dependency-namespaces-have-no-doc-or-dir-in-an-agents-repl",
+             :kind :function,
+             :intent
+             "In an agent's SCI context, (doc clojure.string/split) returns the :seon.sci.eval/documentation-unavailable error value and (dir clojure.string) returns [] (lane steer, 2026-10-07, agent steer, ns scratch.steer), while (clojure.repl/apropos \"split\") finds clojure.string/split. An agent working in Clojure needs the same lookups for the dependency Vars it calls. Correct: doc returns the Var's docstring and arglists from its metadata and dir lists the namespace's public Vars, as data. Proof: a regression through the agent entrance asserting (doc clojure.string/split) has the arglists and (dir clojure.string) contains clojure.string/split; it fails today.",
+             :must-read
+             [seon.sci.eval/directory-value
+              seon.sci.eval/documentation-value],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/steer/steer-notes.md"],
+             :created-by #:db{:id 125684}}
+ #:seon.task{:ns seon.sci.eval,
+             :name "diagnostics-dig-forms-point-into-the-value",
+             :kind :function,
+             :intent
+             "A later stage's failure beside a good value (:seon.repl/diagnostics) is printed by floor-text with the evaluation's own result handle as root, so its dig forms read (get-in result/eX [0 :seon.error/offending ...]) against the VALUE, not the diagnostics: MCP eval_clj (sci, agent error-delivery) of {:probe/x 1 :seon.render/ai (fn [v] (throw (ex-info \"render boom\" {})))} answered :diagnostics whose …73 frames dig form returned nil, and (keys result/e3ad00b27ea70) was (:probe/x :seon.render/ai). The diagnostics value is reachable from no handle; seon.turn/with-diagnostic prints with core-text and no root at all. Correct: each diagnostic is bound under its own handle (or a path under the evaluation's handle that resolves to it) and every dig form in :diagnostics answers the cut part. Proof: a test through support/evaluate whose renderer throws asserts the diagnostics dig form evaluates to the elided frames.",
+             :must-read
+             [seon.sci.eval/shown-result seon.turn/with-diagnostic],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.sci.eval,
+             :name
+             "dir-shows-each-uncontracted-def-as-two-timestamped-errors",
+             :kind :function,
+             :intent
+             "The namespace render of seon.db (seon.render.ns/render-ai, which reads seon.sci.eval/directory-value) shows each dynamic Var row (seon.db/*conn*, *read-database*, *read-evidence-sink*) with :in and :out each holding a whole :seon.sci.eval/present-declaration error map with its own :seon.error/at timestamp: two error maps per row for a def that has no arglists or contract by nature. Done when a def without a function contract shows its kind (def, dynamic) and no :in/:out, and a defn lacking one shows the typed unknown once, asserted on the directory data.",
+             :must-read [seon.sci.eval/directory-value],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.sci.eval,
+             :name "loading-source-arms-tens-of-thousands-of-calls",
+             :kind :function,
+             :intent
+             "source-display/printer-notes.md reports loading about 160 forms using load-string costs 1.7 seconds and 54000 calls (database-value? about 10000). Review own-branch scratch load of candidate value source, excluding schema registration, measured 128 ms/16267 calls; parent 162 ms/15681. Diagnose per-form repeated setup and preserve one evaluation path. Regression should count repeated derivations rather than assert wall time.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"],
+             :created-by #:db{:id 116661}}
+ #:seon.task{:ns seon.sci.eval,
+             :name "run-test-var-throws-on-an-sci-test-var",
+             :kind :function,
+             :intent
+             "In an agent's SCI context, (clojure.test/run-test-var #'rr.scratch/rr-inc-test) on a resolvable deftest throws ClassCastException 'class sci.lang.Namespace cannot be cast to class clojure.lang.Symbol' (MCP eval_clj sci, agent r-read, default 722f110df, 2026-10-07); an unqualified var in another namespace answers 'Unable to resolve var'. Agents in live run 1 and loop-pass reached for run-test-var to run their proof tests. Correct: run-test-var (or a documented equivalent the help names) runs one SCI test var and answers its report as data. Proof: a deftest defined on a branch runs through run-test-var and answers pass counts.",
+             :must-read [seon.sci.eval/agent-test-namespace],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.sci.forgive,
+             :name
+             "a-prompt-marker-is-stripped-and-its-namespace-ignored",
+             :kind :function,
+             :intent
+             "A reply line `scratch.add2=> (defn add-one ...)` loses its marker (next-form :prompt-marker repair) and the form runs in the run's current namespace: loop-pass lp-add-2 call 1 defined user/add-one instead of scratch.add2/add-one, then #'add-one-adds-one did not resolve in user. The model copies the `ns=>` prompts its context shows; the marker names the namespace it meant. Correct: a marker that names a namespace is either honored or refused back to the agent, never silently dropped. Proof: the call-1 reply read through the agent entrance defines scratch.add2/add-one or answers a refusal naming the marker.",
+             :must-read [seon.sci.forgive/next-form],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.sci.forgive,
+             :name "a-prose-repair-replays-the-whole-reply",
+             :kind :function,
+             :intent
+             "seon.sci.forgive/segments on the nine live-run-1 replies joined (11,887 chars, 52 :prose repairs) takes 55 ms and allocates 339 MB per read at HEAD 439401ac3 (run4 7b254915ca94, 12 KB: 17.7 ms, 24.5 MB): each prose repair builds a new text with str, a new reader replayed char by char to the cursor (`version`), and structural trials over the rest of the text (first-form-structural? on (subs text start), code-suffix per paren, Parinfer over the rest). Correct: cost proportional to the reply once; prose becomes comments in one line pass. Measured by the reader-prose lane's measure script; the design is docs/research/agent-platform/2026-10-07/reader-prose/design-notes.md.",
+             :must-read
+             [seon.sci.forgive/comment-rest-of-line
+              seon.sci.forgive/next-form
+              seon.sci.forgive/version],
+             :created-by #:db{:id 125692}}
+ #:seon.task{:ns seon.sci.forgive,
+             :name "prose-after-the-last-form-is-dropped",
+             :kind :function,
+             :intent
+             "seon.sci.forgive/segments attaches prose only as the comment of the form after it, so prose after a reply's last form reaches no evaluation row: loop-pass lp-add-2 call 1 ended 'The fix is complete: add-one now uses (inc x) ... is green.' and the next prompt (loop-pass/runs/00-installed-turn-lp-add-2/call-2-prompt.md) holds none of it; (seon.sci.forgive/segments \"(+ 1 2)\\nDone, it works.\") answers only the (+ 1 2) segment. The agent's own claims vanish from its history while the raw reply is kept only as a blob. Correct: every line of a reply is either a form or a comment held by an exchange the agent sees again. Proof: segments of that text keeps the trailing comment.",
+             :must-read
+             [seon.sci.forgive/comment-of seon.sci.forgive/segments],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.sci.forgive,
+             :name
+             "structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote",
+             :kind :function,
+             :intent
+             "seon.sci.forgive's structural reader passes its options map raw to edamame.core/parse-next, whose docstring requires options normalized by normalize-opts; `:all true` is only expanded there (edamame/impl/parser.cljc:960-967), so the structural trial refuses #'x, #(...), @x, #\"re\" and `x: (seon.sci.forgive/first-form-structural? \"(meta #'x)\") is false (edamame: 'Var literal not allowed. Use the `:var` option'), while the same text with (edamame.impl.parser/normalize-opts opts) reads. Each such form, and each prose token that is no valid token (`Note:`), in a reply then runs delimiter-repair: Parinfer over the whole rest of the reply (48 MB for one form at offset 944 of a 9.5 KB reply), and the repair is always rejected. Measured on default 722f110df (unarmed callers, armed forgive): segments of the live replies joined, 9.5 KB 61 ms 219 MB; 19 KB 297 ms 1.57 GB; 28.6 KB (planned-sources) 541 ms 5.1 GB; 38 KB 1.4 s 12 GB; 76 KB 4.1 s 94 GB. Same class as seon.sci.forgive/a-prose-repair-replays-the-whole-reply. Correct: structural trials accept every form the live reader accepts, and no trial reads past the form at the cursor. Proof: a table test that first-form-structural? accepts each of those forms, and a reply-size regression that allocation of segments grows linearly.",
+             :must-read
+             [seon.sci.forgive/delimiter-repair
+              seon.sci.forgive/first-form-structural?
+              seon.sci.forgive/next-form],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.sci.kernel,
+             :name "an-agent-exception-has-no-error-type",
+             :kind :function,
+             :intent
+             "An agent's thrown ex-info, a host exception and a time-limit interrupt come back as error maps with no :seon.error/type: (throw (ex-info \"probe boom\" {})) answered keys without :seon.error/type (operation seon.sci.kernel/failure-value, layer :seon.sci.kernel/evaluation); (Integer/parseInt \"nope\") likewise in SCI and JVM mode; a 30 s loop answered :error {:seon.error/message \"time-limit\"} in the reply while the value's message is \"Ran out of time after 30009ms.\" and names no bound. Correct (errors spec): an undeclared exception is :seon.error/exception with its chain, a time-limit is its own declared variant naming the bound and the elapsed ms, and the reply shows the value's own message. Proof: three rows through support/agent-value asserting :seon.error/type.",
+             :must-read [seon.sci.kernel/failure-value],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.sci.kernel,
+             :name "faults of adopt-arm",
+             :kind :function,
+             :intent
+             "Make seon.sci.kernel/adopt-arm stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.sci.kernel/adopt-arm],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.sci.reader,
+             :name "prose-in-a-reply-is-evaluated-as-symbols",
+             :kind :function,
+             :intent
+             "An agent reply mixing prose and a ```clojure fence evaluates every prose word as a form: 'I will add two numbers, see `seon.db/q` for nothing.' answered six 'Unable to resolve symbol' errors, the backticked span as syntax-quote (seon.db/q, clojure.core/for), and '## Next step' as an invalid-token read error; only the fence lines were dropped (agent context-mockups, default at 42e569d9d, 2026-10-07). CLAUDE.md: prose becomes comments. Done when a reply's prose outside fenced clojure blocks reads as comments (Markdown kept as comment text) and only fenced or bare forms evaluate, asserted through the agent entrance.",
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"
+              "docs/research/agent-platform/2026-10-07/live-run/report.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.task,
+             :name "task-text-references-are-never-resolved",
+             :kind :function,
+             :intent
+             "Over the 392 tasks installed on default: :seon.task/must-read names 41 symbols that resolve to no function, test or namespace (e.g. seon.print.value/bounded-text, seon.cluster/mcp-get-value, my.program/overrides); intents name 44 qualified symbols, 42 qualified keywords and about 34 namespaces that resolve to nothing (e.g. :seon.issue/id, :seon.task/done-when, my.plan). seon.task/task-findings checks only :seon/tasks tags. A task brief built from references shows a dangling reference as a hole. Done when task ingestion reports dangling must-read symbols per task (the program gate refusing new ones) and intent references are resolved by the same reference index, with counts in the notes.",
+             :must-read [seon.task/task-findings],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.test,
+             :name "a-check-answer-shows-digests-the-agent-cannot-use",
+             :kind :function,
+             :intent
+             "(my.test/check {:seon.test/changed ['seon.db-overhead-test/query-preparation-has-bounded-armed-work]}) on an agent branch took 7,799 ms (395,298 armed calls; 55,160 seon.print/node-child?, 19,404 seon.cache/lookup) for a 115 ms test body, and its answer prints three 64-hex digests, basis-t values, member flags and per-test timings (about 700 tokens) around the one fact the agent needs, :seon.test/passed?. Done when the check's AI render shows passed?, counts and failed assertions as data, with run and digests one requery away; the cost is seon.test/one-test-run-costs-seconds-around-a-147-ms-body.",
+             :must-read [my.test/check],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.test,
+             :name
+             "a-stale-stored-definition-digest-refuses-every-test-world",
+             :kind :function,
+             :intent
+             "On default (722f110df), (my.test/run-owned {:seon.ns/name 'scratch.rrec}) from agent r-record (a branch off the cluster head) answers \"The test world's program overlay (52 entries) was refused: The stored definition digest of [:seon.fn/sym user.sgprobe/fix] is not the one its definition produces\" after 5.8 s and 3 commits (2,721-datom settlement). The cluster head holds user.sgprobe/fix (entity 105933, written at tx 536872019 by an absent-call settlement) with :seon.program/definition-digest 28839736e08d..., which seon.db/write-digest-error now recomputes differently (the digest depends on the namespace's resolver context, which later writes changed). Every test world copies the overlay through the writer, so one stale row refuses all tests of every agent branched from default. Correct: a namespace change that alters its definitions' digests rewrites them in the same transaction (or the digest excludes resolver context it does not read), so a committed row is always one the writer accepts. Proof: a test that changes a namespace's aliases after a defn, then runs a test world, must stay green.",
+             :must-read [seon.db/transact! seon.test/run],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.test,
+             :name
+             "an-agent-branch-sees-none-of-its-clusters-test-evidence",
+             :kind :function,
+             :intent
+             "seon.test/recorded-result answers 'No admitted execution is recorded for this test.' for seon.db-overhead-test/query-preparation-has-bounded-armed-work on a fresh agent branch (agent context-mockups-probe, no definitions of its own), while the cluster head records it green (3 pass, run d53047e80b84). Evidence is read per branch, so every proof in a task brief rendered in the agent's world shows unrun until the agent reruns it (7.8 s for this one test). Done when a branch whose program reach digest equals the recorded member's reach-digest reuses that result, asserted on a forked branch.",
+             :must-read [seon.test/recorded-result],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"],
+             :created-by #:db{:id 116610}}
+ #:seon.task{:ns seon.test-support,
+             :name
+             "code-request-frames-an-empty-source-every-form-is-refused",
+             :kind :function,
+             :intent
+             "seon.test-support/code-request's :seon.turn/frame-request frames every form with :seon.cluster.eval/source \"\", which :seon.sci.eval/request refuses (:seon.cluster.eval/source is [:string {:min 1}]), so every form a fixture batch runs fails with 'seon.sci.eval/evaluate refused argument 0 at [:seon.cluster.eval/source]' instead of evaluating. Evidence: throwaway candidate run 5e09c06784b2 on HEAD 0daf87818 + the error-delivery slice: a batch of \"(defn make-row [] ...) (make-row)\" answered that refusal at ordinals 0 and 1. It reds seon.error.attribution-test/a-definitions-failure-in-an-evaluation-is-its-fault-and-task on the store (latest member 1 pass, 5 fail, 1 error) and reaches 9 more callers in seon.fn-test, seon.run-test and seon.turn-test. Also: that internal contract refusal was delivered as the form's error but never recorded as a core fault (produced-failures records only errors naming a producer). Correct: the fixture frames each form with its own read text, as seon.turn's frame does from its rows. Proof: a code-request batch of (inc 1) answers 2.",
+             :must-read
+             [seon.test-support/code-request seon.turn/evaluate-row],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.test-support,
+             :name "evaluate-answers-nil-for-a-refused-form",
+             :kind :function,
+             :intent
+             "(seon.test-support/evaluate {:seon.cluster.eval/source \"#:seon.repl{:value 1}\" ...}) whose only form the batch refuses (:seon.batch/refused :fabricated-response) answers nil: the last entry has no :seon.batch/evaluation, so the function's own :map output contract refuses with a contract error instead of the refusal (seen by the reader-prose lane's forgive_test on a check JVM, 2026-10-07). Correct: the refused entry's error reaches the caller as data, as evaluate-row builds an unrun evaluation for it in the turn.",
+             :must-read
+             [seon.test-support/evaluate seon.turn/evaluate-row],
+             :created-by #:db{:id 125692}}
+ #:seon.task{:ns seon.test.runner,
+             :name
+             "a-test-error-shows-runner-frames-not-the-throw-site",
+             :kind :function,
+             :intent
+             "A deftest whose body calls an agent function that throws (scratch probe-g throwing (ex-info \"inside test\" {:probe/x 3})) is reported by my.test/check with :seon.test.failure/actual as printed text whose 30 frames are seon.test.runner/seon.sci.eval/seon.test frames: the throw site (probe-g, its SCI location) appears nowhere, and the same text is printed again into the reply's :out (~733 tokens). Correct: the error inside a test is the same flat error an evaluation answers (ex-data whole, the author's SCI stacktrace), stored as data, never printed to :out. Linked: seon.test.runner/failure-evidence-is-stored-as-text (text storage). Proof: a check of a throwing test whose failure names the throwing function's SCI frame.",
+             :must-read [seon.test.runner/record-tx],
+             :created-by #:db{:id 116725}}
+ #:seon.task{:ns seon.turn,
+             :name "a-deferred-wake-is-answered-by-silence",
+             :kind :function,
+             :intent
+             "When `seon.turn/opening-deferred?` is true for a new wake, `next-agent-work` derives nil and nothing is recorded or delivered: the sender gets no reply, no fault, no diagnostic (agent r-turn-a, message ee63e682b520, default 2026-10-07). `episode-exhausted!` fires only on the pass that spends the last run, never for a wake arriving after. A wake the bound defers must reach the sender (or root) as data. Proof: a deftest that messages an exhausted agent and asserts the deferral is a stored, delivered error value.",
+             :must-read
+             [seon.turn/episode-exhausted! seon.turn/next-agent-work],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns seon.turn,
+             :name "a-markdown-heading-in-a-reply-is-read-as-code",
+             :kind :function,
+             :intent
+             "planned-sources keeps Markdown structure as source: (planned-sources \"The fix is in `data-text`.\\n## What\\n(+ 1 2)\" 'user 100000) answers one source \"## What\\n(+ 1 2)\" (2026-10-07, default at 42e569d9d), whose `##` is an invalid reader token; live run 1 also saw backticked prose evaluated as syntax-quote. Prose lines, Markdown headings and fenced/backticked spans become comments; only forms are evaluated.",
+             :must-read [seon.turn/planned-sources],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/live-run/report.md"],
+             :created-by #:db{:id 116537}}
+ #:seon.task{:ns seon.turn,
+             :name "a-message-from-root-never-refills-the-turn-bound",
+             :kind :function,
+             :intent
+             "A message root sends an agent is an inside wake, so `seon.turn/outside-wake-t` stays 0 and `seon.turn/episode-runs` counts every turn the agent ever took. On default 2026-10-07, agent r-turn-a (branch :agent-cfd70b5547f7) with :seon.config.run/max-episode-runs 1 and one spent turn received root's message ee63e682b520 (seon.cluster.message/send! ... conn \"root\"): next-agent-work answered nil, outside-wake-t 0, spent 1, max 1, unanswered-wakes held the message. Root's work requests must refill the bound (or the bound must count calls per wake). Proof: a deftest where root messages an agent whose spent runs equal the dial and the agent takes one turn.",
+             :must-read
+             [seon.turn/opening-deferred? seon.turn/outside-wake-t],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"],
+             :created-by #:db{:id 125934}}
+ #:seon.task{:ns seon.turn,
+             :name "a-prose-only-reply-evaluates-its-first-word",
+             :kind :function,
+             :intent
+             "When planned-sources finds no form (a prose-only model reply), the turn's freeze step plans the whole reply text as one row with no reader event, and read-row reads only that row's FIRST form as code: 'I will add two numbers.' evaluates the symbol I (Unable to resolve symbol) and the rest of the row is dropped unread; live run call 11 answered 'Invalid token: ##What' for its heading. The no-forms refusal ('Your reply had no form; only comments/prose. Send a form.') that planned-sources built never reaches the agent. Reproduce (default 722f110df): (seon.turn/planned-sources \"I will add two numbers.\" 'user 1048576) is the no-forms error; seon.turn/read-row over a row with that source reads I with end 1 of 23. Correct: the no-forms refusal is the row's read error, delivered once, and no prose is evaluated. Proof: a turn with a fixture reply of prose only answers the no-forms refusal as data.",
+             :must-read [seon.turn/planned-sources seon.turn/read-row],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.turn,
+             :name "faults of record-write-refusal-fault!",
+             :kind :function,
+             :intent
+             "Make seon.turn/record-write-refusal-fault! stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.turn/record-write-refusal-fault!],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.turn,
+             :name "faults of show-row",
+             :kind :function,
+             :intent
+             "Make seon.turn/show-row stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [seon.turn/show-row],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns seon.turn,
+             :name
+             "generated-opening-reads-fail-when-evaluated-as-written",
+             :kind :function,
+             :intent
+             "The system turn's generated opening reads (seon.turn/declared-sources) include forms that fail when an agent evaluates the same text: (dir (quote user)) refuses 'seon.sci.eval/directory-value refused argument 1 namespace-name: expected a symbol, got a sequence', and (seon.db/pull (quote [*]) [:seon.runtime/agent {:seon.agent/id \"r-context-probe\", :db/id 125969}]) answers 'Expected number or lookup ref for entity id' (the lookup value is a pulled map, not an identity). In lp-add-2's captured prompt the second showed as a value holding only :seon.render/operations, so the failure was hidden from the model. Measured as agent r-context-probe on default (722f110df, 2026-10-07). Done when every generated opening form evaluates to the value it is shown with, or the system turn is deleted (live-agents plan D1).",
+             :must-read
+             [seon.turn/declared-sources seon.turn/unit-read],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"],
+             :created-by #:db{:id 125940}}
+ #:seon.task{:ns seon.turn,
+             :name
+             "generated-render-sources-are-read-as-model-replies",
+             :kind :function,
+             :intent
+             "seon.turn's system plan segments each render block's generated :seon.render/source with seon.turn/planned-sources, the model-reply reader with prose forgiveness, instead of seon.turn/code-sources: system-generated code is read as if a model wrote it (turn.clj near the unit-read reduce in HEAD 439401ac3). Correct: generated code is code (code-sources).",
+             :must-read
+             [seon.turn/code-sources seon.turn/planned-sources],
+             :created-by #:db{:id 125692}}
+ #:seon.task{:ns seon.turn.batch,
+             :name
+             "every-form-is-analyzed-because-its-result-handle-is-a-binding",
+             :kind :function,
+             :intent
+             "seon.turn.batch/derive-form runs clj-kondo (analyze-form -> seon.fn/runtime-analysis-batch) for every evaluated form, including ones that define nothing: publication interns the value under its result handle (`result/e...`, seon.sci.eval/bind-result!), the write observer reports that :bind :root write, and derive-form's `finals` does not drop the result namespace the way seon.turn/entry-bindings does. Reproduce: MCP eval_clj (sci, agent r-read, default 722f110df, 2026-10-07) of forty forms (+ 0 1) ... (+ 39 1): seon.turn.batch/analyze-form 40 calls, 441 ms of a 667 ms evaluate-batch; read-row 41 calls 3.9 ms; segments 0.45 ms (profile cell deltas). Correct: only a form whose writes bind a program Var is analyzed; a plain call costs no analysis. Proof: a test running (+ 1 2) through the agent entrance asserts its batch entry carries no analysis and records no program change.",
+             :must-read
+             [seon.sci.eval/bind-result!
+              seon.turn/entry-bindings
+              seon.turn.batch/derive-form],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns seon.turn.batch,
+             :name "tests-read-forms-through-a-stage-no-entrant-uses",
+             :kind :function,
+             :intent
+             "seon.test-support/evaluate and code-request read a source through seon.turn.batch/code-request (forgive/read-state plus seon.sci.batch/read-next: one live read over the whole text), while every production SCI entrant (MCP eval_clj via seon.cluster.agent/submit-source! and seon.turn/code-sources, and model replies via seon.turn/planned-sources) segments first (seon.sci.forgive/segments, structural reads) and then reads each row again (seon.turn/read-row). seon.turn.batch/turn-request and seon.sci.batch/read-code have no caller. Tests therefore prove a read stage no entrant runs. Correct: one read stage, used by tests and every entrant; the uncalled ones deleted.",
+             :must-read
+             [seon.sci.batch/read-next
+              seon.turn/read-row
+              seon.turn.batch/code-request],
+             :evidence
+             ["docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"],
+             :created-by #:db{:id 125931}}
+ #:seon.task{:ns user,
+             :name "faults of bad3",
+             :kind :function,
+             :intent
+             "Make user/bad3 stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [user/bad3],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns user,
+             :name "faults of bad4",
+             :kind :function,
+             :intent
+             "Make user/bad4 stop producing the failures its faults record: each fault names the refused schema and path, where it happened and the reproduction. Prove the fix with a deftest naming this task, red before the fix and green after.",
+             :must-read [user/bad4],
+             :created-by #:db{:id 51289}}
+ #:seon.task{:ns user,
+             :name "work of lane-ots",
+             :kind :work,
+             :intent "The work agent lane-ots plans.",
+             :created-by #:db{:id 104132}}
+ #:seon.task{:ns user,
+             :name "work of review-astra-batch-b",
+             :kind :work,
+             :intent "The work agent review-astra-batch-b plans.",
+             :created-by #:db{:id 111059}}]

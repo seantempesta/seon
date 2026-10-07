@@ -101,4 +101,11 @@
              :kind :function
              :intent "A publication rewrites :seon.fn/form-span and :seon.program/analyzed-source-digest for every definition whose lines moved, not for the ones whose source changed: analyze-forms stamps each definition with its whole FILE's digest (:seon.fn.file/digest of the analyzed source) and same-indexed-entity? only skips a definition when everything but that digest is equal, so a moved span rewrites both. On default's history (2026-10-07, db-watch lane) one publish rewrote 2,674 form-span/digest datoms for 136 changed :seon.fn/source datoms (20x), another 2,892 for 327; overall 19.5k of the 162k history-only datoms on default are these two attributes. Each rewritten definition touches its aevt/avet leaves, so the files written follow the file length below the edit. Smallest fix: the file digest lives once on the file entity (:seon.fn.file/digest), not copied per definition; keep form-span but compare it as position, not as a change of the definition. Done when editing one defn in a 100-definition file writes O(changed definitions) program datoms (measured with watch.clj :since-basis), with a regression on that count."
              :must-read #{seon.fn/analyze-forms seon.fn/same-indexed-entity?}
-             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}
+ #:seon.task{:name "backticked-docstring-references-have-no-index",
+            :kind :function,
+            :intent
+            "CLAUDE.md says a backticked fully qualified symbol or keyword in a docstring is a reference the index resolves into the subject's context, one resolving to nothing a problem on that var. No producer exists: seon.fn indexes :seon/tasks, :seon/must-read and :seon/see-also metadata (task-links) and analyzer :seon.fn/references, never docstring spans. Done when docstring backtick spans are indexed as reference edges with dangling ones reported, or the law is corrected.",
+            :must-read #{seon.fn/task-links},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]

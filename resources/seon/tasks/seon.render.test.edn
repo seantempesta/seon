@@ -11,4 +11,11 @@
  #:seon.task{:name "render-coverage-reads-the-retired-render-unknown-refusal-key"
              :kind :namespace
              :intent "render-coverage a-refused-render-producer-contributes-a-stable-typed-unknown reads the retired :seon.render.unknown/refusal key. Done when the test follows the current typed unknown and is green."
-             :must-read #{seon.render.test/render-ai}}]
+             :must-read #{seon.render.test/render-ai}}
+ #:seon.task{:name "a-test-render-omits-what-the-test-asserts",
+            :kind :function,
+            :intent
+            "seon.render.test/render-ai at distance 1 for seon.db-overhead-test/query-preparation-has-bounded-armed-work answers only its symbol, state \"pass\", :seon.test/run-basis-t and the host kind (72 ms, 5,220 armed calls): nothing of what the test asserts. An agent whose task names this proof must read its source separately. Done when the near view carries the test's assertions (its source lines or the is-forms as data) and drops the basis-t, asserted on the render's data.",
+            :must-read #{seon.render.test/render-ai},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]

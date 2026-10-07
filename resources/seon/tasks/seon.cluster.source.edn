@@ -2,4 +2,10 @@
              :kind :function
              :intent "changed-identities answered 0 identities in 1.2 s on default (2026-09-28) when the cluster's adopted commit was the published commit: with no publication report it reads (d/since (d/history after) basis) over the whole history index, so its cost follows the store, not the change. Done when an equal prior and published commit answers #{} without reading history and a real diff costs what changed, with a timing regression."
              :must-read #{seon.cluster.source/changed-identities}
-             :evidence #{"tmp/boot-reliability/candidate.sh"}}]
+             :evidence #{"tmp/boot-reliability/candidate.sh"}}
+ #:seon.task{:name
+            "index-issues-drops-every-opened-date-in-a-git-less-archive",
+            :kind :function,
+            :intent
+            "seon.cluster.source/index-issues! (source.clj:523) indexes notes from an archive without .git, so every :seon.issue/opened is silently missing in production adoption. Done when the opened dates come from a declared source (the checkout's git) or the gap is recorded as a typed unknown, with a regression on an archive without .git. The issue namespaces are cut-planned (owner ruling 2026-09-28: cut only after tasks hold an ordered series); if the cut lands first, delete this task with it.",
+            :must-read #{seon.cluster.source/changed-identities}}]

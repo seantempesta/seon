@@ -33,4 +33,11 @@
              :kind :namespace
              :intent "Web, health, error, schema, var, status, problems and repl pages print values themselves ([:pre (pr-str value)], [:code (print.value/bounded-text v)], 422/500/503 bodies of clipped results) instead of rendering them through the value printer's HTML face, so humans see clipped text the AI path does not and large values are printed whole (debug-value-html, repl render-html, create-owner-response). CLAUDE.md: printing is rendering with two consumers on one pipeline. Inventory class ui-print, 32 sites: render/web.clj 17, health.clj 5, error.clj 3, render/schema.clj 2, cluster/status.clj 1, problems.clj 1, render/var.clj 1, render/walk.clj 1, repl.clj 1. Done when every page shows values through the printer's hiccup output, and seon.render.web-test asserts the debug page for a 10 MB value returns under the printer's budget with its elision link."
              :must-read #{seon.render.web/debug-value-html seon.render.web/node-attributes-html seon.health/finding-item}
-             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+ #:seon.task{:name "the-built-stylesheet-is-stale-against-its-source",
+            :kind :function,
+            :intent
+            "Running bin/css on HEAD 178aa24e0 rewrites resources/public/css/output.css with 112 added and 5 removed lines unrelated to any current edit (.grow, .shadow, the expanded .seon-graph-kinds rules): the committed stylesheet the browser serves is not the build of input.css. Done when output.css equals bin/css's output for the committed input.css and a check refuses drift.",
+            :must-read #{seon.render.web/handler},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"}}]

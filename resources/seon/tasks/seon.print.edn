@@ -1,0 +1,14 @@
+[#:seon.task{:name "a-dig-form-through-a-list-index-reads-nil",
+            :kind :function,
+            :intent
+            "A cut under a list or seq member prints a continuation through plain get-in, e.g. (subs (get-in result/e… [0]) 127) for (\"long string\"): get-in does not index a list or seq, so the offered dig form reads nil and subs throws. seon.print/continuation chooses get-in from the path alone; the value printer's member step for a non-vector sequential is a plain index. Done when every printed continuation, evaluated on the held value, returns the cut's rest (a regression evaluating the continuation form for list, lazy-seq and vector members).",
+            :must-read
+            #{seon.print/continuation seon.render.value/admit-member},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"}}
+ #:seon.task{:name "multiline-literals-hide-line-breaks-from-layout",
+            :kind :function,
+            :intent
+            "7619b8dfd string-literal emits physical newlines inside one :text op. fipp.engine annotate-rights and format-nodes count all text characters as one column span, so following groups do not know the final line column. Original lane reports a long line after a multiline string overflowing width. Preserve exact string content (including blank/trailing lines); use dependency layout semantics without adding indentation inside literal contents. Distinguish inherently unbreakable long source lines from layout-added overflow; add nested map/vector regressions.",
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]

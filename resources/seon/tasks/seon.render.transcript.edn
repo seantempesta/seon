@@ -8,4 +8,11 @@
              :kind :function
              :intent "fault-problems (src/seon/render/transcript.clj:2086) returns each delivered fault's occurrence count only inside its ::detail string (\"Error <signature>; occurrences: <n>\"), so seon.error-test/error-graph reads the count with (str/includes? (pr-str ...) \"occurrences: 6\") (test-data-assertions lane, 2026-09-28). A count is data: carry the signature and the count as keys beside the detail and let the render print them, so a test asserts (= 6 (:...count entry))."
              :must-read #{seon.render.transcript/fault-problems}
-             :evidence #{"test/seon/error_test.clj"}}]
+             :evidence #{"test/seon/error_test.clj"}}
+ #:seon.task{:name "delivered-errors-carry-no-result-handle",
+            :kind :function,
+            :intent
+            "A core error recorded during an agent's call (another thread included) reaches the reply's :seon.repl/errors as seon.error/value plus count and branch, but with no result handle or dig form: the agent can reach the whole recorded error only by knowing to pull [:seon.error/signature s] with the observation selector. Reproduce: in SCI as agent X, @(future (seon.fault/fault! env (ex-info \"async\" {:probe/async 1}) {:seon.agent/id X ...})) answers :errors [{:seon.error/signature … :seon.error/message \"async\"}] without :probe/async or any handle. Correct (errors spec, 'Every error in a reply's :errors and :diagnostics carries its result handle'): each delivered error carries a handle or requery form that answers the whole recorded value. Proof: an evaluation that records a core fault answers :errors whose handle reads the fault's ex-data.",
+            :must-read
+            #{seon.render.transcript/branch-errors
+              seon.turn/fault-window}}]
