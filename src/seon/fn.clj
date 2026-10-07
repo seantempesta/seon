@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.walk :as walk]
             [seon.cluster.registry :as registry]
+            [seon.cache :as cache]
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
@@ -1394,8 +1395,10 @@
   [projection attributes]
   (if (empty? attributes)
     {}
-    (declared-function-targets attributes (vals (:seon.schema.projection/forms projection))
-                               qualified-symbol?)))
+    (let [forms (:seon.schema.projection/forms projection)]
+      (cache/lookup ::population-targets [forms attributes]
+                    #(+ (* schema/declaration-projection-bytes-per-form (count forms)) (* 128 (reduce + 0 (map count (vals %)))))
+                    #(declared-function-targets attributes (vals forms) qualified-symbol?)))))
 
 (defn- program-targets
   "The population's declared targets that name a function of the program.
@@ -1427,24 +1430,27 @@
 
   `schema-targets` are the declaration population's targets of the invoked
   attributes, already restricted to program functions (`program-targets`)."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] [:map-of :string :map] [:map-of :qualified-keyword [:set :qualified-symbol]] :seon.schema/projection] [:map-of :string [:vector [:or [:map :seon.fn/sym] [:map :seon.test/sym] [:map :seon.ns/name]]]]]}
   [analysis first-party-functions contexts schema-targets projection]
   (let [used-keywords (keywords-by-holder analysis)
         host-bound (host-bound-callers analysis first-party-functions projection)
         invocations (invocations-by-definition analysis)
-        invoked-attributes (into #{} (mapcat val) invocations)
         declared-calls
         (reduce-kv
          (fn [calls filename context]
-           (let [values (map kondo.utils/sexpr
-                             (:children (kondo.utils/parse-string-all (:text context))))
-                 targets (merge-with set/union schema-targets
-                                     (declared-function-targets invoked-attributes values first-party-functions))
-                 holders (select-keys invocations
+           (let [holders (select-keys invocations
                                       (keep (fn [entry]
                                               (when (= filename (::analyzer/filename entry))
                                                 (symbol (str (::analyzer/ns entry)) (str (::analyzer/name entry)))))
                                             (::analyzer/var-definitions analysis)))]
-             (merge-with set/union calls (declared-calls-by-caller holders targets))))
+             (if (empty? holders)
+               calls
+               (let [attributes (into #{} (mapcat val) holders)
+                     values (map kondo.utils/sexpr
+                                 (:children (kondo.utils/parse-string-all (:text context))))
+                     targets (merge-with set/union schema-targets
+                                         (declared-function-targets attributes values first-party-functions))]
+                 (merge-with set/union calls (declared-calls-by-caller holders targets))))))
          {} contexts)
         calls-by-caller
         (merge-with set/union (call-targets-by-caller analysis first-party-functions)
@@ -2794,7 +2800,9 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :qualified-symbol] [:set :string]]
                   [:vector :string]]}
   [database removed selected]
-  (let [edges (for [attribute [:seon.fn/calls :seon.fn/references]
+  (if (empty? removed)
+    []
+    (let [edges (for [attribute [:seon.fn/calls :seon.fn/references]
                     symbol removed]
                 (db/datoms database :avet attribute symbol))
         refusal (some #(when (map? %) %) edges)
@@ -2811,7 +2819,7 @@
                     database (into [] (comp cat (map :e) (distinct)) edges))]
     (when (map? paths)
       (throw (ex-info "Publication could not read the removed definitions' callers." paths)))
-    (vec (sort (remove selected paths)))))
+    (vec (sort (remove selected paths))))))
 
 (defn- invoker-paths
   "Files of stored invokers whose declared targets differ between populations.
@@ -2904,16 +2912,13 @@
         ;; resolver entries are superseded and the definitions a removal
         ;; guard compares, never the files' whole entities.
         previous (if (and database selected)
-                   (db/q '[:find ?attribute ?value
-                           :in $ [?path ...] [?attribute ...]
-                           :where [?file :seon.fn.file/relative-path ?path]
-                                  [?entity :seon.fn/file ?file]
-                                  [?entity ?attribute ?value]]
-                         database (vec selected) [:seon.ns/name :seon.fn/sym])
+                   (db/pull-many database [{:seon.fn/_file [:seon.ns/name :seon.fn/sym]}]
+                                 (mapv #(vector :seon.fn.file/relative-path %) selected))
                    [])
         _ (when (map? previous)
             (throw (ex-info (:seon.error/message previous) previous)))
-        previous-names (fn [attribute] (into #{} (keep (fn [[a v]] (when (= attribute a) v))) previous))
+        previous (mapcat :seon.fn/_file previous)
+        previous-names (fn [attribute] (into #{} (keep attribute) previous))
         _ (when cache-root
             (analyzer/forget-namespaces! cache-root (previous-names :seon.ns/name)))
         artifacts (analyzed-artifacts projection roots directory
@@ -3328,12 +3333,10 @@
   # Costs
   Armed, measured at default's REPL 2026-09-27: ten changed files (eight
   changed contracts) 854 ms as a whole build, 43 ms derived."
-  {:malli/schema [:=> [:cat :seon.fn/index-request :seon.program/rows] [:or :nil :map]]}
-  [request source-rows]
+  {:malli/schema [:=> [:cat :seon.fn/index-request :seon.program/rows [:sequential :map]] [:or :nil :map]]}
+  [request source-rows old-entities]
   (when-let [database (:seon.source/previous-database request)]
     (let [prior (or (db/carried-projection database) (schema/projection-from-database database))
-          paths (:seon.fn/changed-paths request)
-          old-entities (file-entities database (vec paths) :seon.fn/file)
           schema-keys (changed-schema-keys request)
           source-forms (into {} (keep #(when (:seon.schema/key %)
                                         [(:seon.schema/key %) (edn/read-string (:seon.schema/form %))]))
@@ -3386,7 +3389,7 @@
           (filterv #(not (same-indexed-entity? (get prior-entities (program/row-identity %)) %))
                    source-rows)
           source-rows)
-        projection (or (when partial? (incremental-projection request source-rows))
+        projection (or (when partial? (incremental-projection request source-rows (vec (vals prior-entities))))
                        (schema/build-projection packaged-forms))
         ;; A dependent schema entity re-derives with the schemas it reaches,
         ;; and a row lifting a changed attribute as a property re-derives with
@@ -3724,6 +3727,15 @@
   (reconcile-tx-in (program/shapes-in (db/carried-projection database))
                    database entities previous-identities false))
 
+(defn- entity-identities
+  "Installed identities of the named entities, as attribute/value pairs."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :int] [:vector :qualified-keyword]] [:or [:set [:tuple :qualified-keyword :seon.schema/value]] :seon.db/invalid-read-error]]}
+  [database entities attributes]
+  (if (or (empty? entities) (empty? attributes))
+    #{}
+    (db/q '[:find ?attribute ?value :in $ [?entity ...] [?attribute ...]
+            :where [?entity ?attribute ?value]] database entities attributes)))
+
 (defn report-identities
   "Identities touched by a writer report or datoms between two database values.
   The explicit arity also accepts composed report datoms and retained history."
@@ -3738,14 +3750,9 @@
    ;; Logical datoms: a vector element changed in a cell names its owner.
    (report-identities before after (vec (db/logical-datoms report))))
   ([before after datoms]
-  (let [entities (into #{} (map :e) datoms)
+  (let [entities (into [] (comp (map :e) (distinct)) datoms)
         identities (fn [database]
-                     (let [entity-maps (db/pull-many database
-                                             (db/identity-attributes database)
-                                             (vec entities))]
-                       (if (:seon.db/invalid-read entity-maps)
-                         entity-maps
-                         (into #{} (mapcat #(dissoc % :db/id)) entity-maps))))
+                     (entity-identities database entities (db/identity-attributes database)))
         previous (identities before)
         current (identities after)]
     (or (when (:seon.db/invalid-read previous) previous)
@@ -3886,20 +3893,15 @@
                        [:enum :seon.fn/file :seon.lint/file]]
                   :seon.fn.file/identities]}
   [database paths file-attribute]
-  ;; Index seeks, proportional to the named files' declarations: the Datalog
-  ;; join on a variable file attribute took 990 ms for one 55-declaration file
-  ;; (these seeks: 15 ms, the same set). One pull-many reads their identities.
+  ;; Seek the named files' declarations before querying their identity values.
   (let [entities (vec (for [path paths
                             file (seek database :avet :seon.fn.file/relative-path path)
                             entity (seek database :avet file-attribute (:e file))]
                         (:e entity)))
-        pulled (db/pull-many database (filterv #(get (:schema database) %) program/identity-attributes)
-                             entities)]
-    (when (:seon.error/at pulled) (throw (ex-info (:seon.error/message pulled) pulled)))
-    (into [] (distinct)
-          (for [entity-map pulled attribute program/identity-attributes
-                :let [value (get entity-map attribute)] :when (some? value)]
-            [attribute value]))))
+        identities (entity-identities database entities
+                                      (filterv #(get (:schema database) %) program/identity-attributes))]
+    (when (:seon.error/at identities) (throw (ex-info (:seon.error/message identities) identities)))
+    (vec identities)))
 
 (defn file-entities
   "Read declarations or findings through file refs for only the named paths."

@@ -1773,6 +1773,11 @@
     (is (identical? (schema/declaration-projection forms)
                     (schema/declaration-projection forms)))))
 
+(deftest direct-references-follow-the-declaration-world
+  (doseq [key [:review/a :review/b :review/a]]
+    (let [projection (schema/declaration-projection {key [:int]})]
+      (is (= #{key} (schema/direct-references projection [:tuple key]))))))
+
 (deftest contract-references-follow-each-node's-own-scope
   ;; Astra's shadow (review of contracts-out-of-projection, R4): a local
   ;; `:registry` reusing a canonical name means its local target, so the

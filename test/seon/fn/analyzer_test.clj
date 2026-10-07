@@ -17,6 +17,19 @@
     (spit file source)
     (.getCanonicalPath file)))
 
+(deftest var-quote-spans-do-not-mark-neighboring-calls
+  (let [directory (fixture-directory (str (random-uuid)))
+        file (write-fixture! directory "quotes.clj" "")]
+    (try
+      (let [analysis (analyzer/analyze
+                      {::analyzer/sources {file "(ns quotes)\n(defn f [] [#'clojure.core/inc (inc 1)\n#'clojure.core/dec (dec 1)])"}})
+            usages (filter #(and (= 'clojure.core (::analyzer/to %))
+                                  (#{'inc 'dec} (::analyzer/name %))) (::analyzer/var-usages analysis))]
+        (is (= {'inc #{true false} 'dec #{true false}}
+               (update-vals (group-by ::analyzer/name usages)
+                            #(set (map (comp boolean ::analyzer/var-quote) %))))))
+      (finally (.delete (io/file file)) (.delete directory)))))
+
 (deftest publication-findings-depend-on-declarations-not-inferred-return-types
   (let [directory (fixture-directory (str (random-uuid)))
         callee (write-fixture! directory "callee.clj" "")

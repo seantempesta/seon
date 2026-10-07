@@ -437,20 +437,27 @@
            paths (vec (take 100 (sort (filter #(and (str/starts-with? % "src/")
                                                    (str/ends-with? % ".clj")) (keys inputs)))))
            schema-keys (#'cluster/stored-derivation-schema-keys
-                        database (set (keys (:seon.schema.projection/forms projection))))
+                        database (set paths))
            code (id/digest 64 [::key-probe])]
        (is (= 100 (count paths)))
+       (let [[again calls] (test-support/armed-calls
+                            '#{seon.cluster/derivation-schema-keys}
+                            #(#'cluster/stored-derivation-schema-keys database (set paths)))]
+         (is (= schema-keys again))
+         (is (zero? (get calls 'seon.cluster/derivation-schema-keys 0))))
        (doseq [n [1 10 100]]
          (let [selected (set (take n paths))
                changed (first paths)
                before (#'cluster/derivation-keys code projection inputs schema-keys selected)
                [after calls]
                (test-support/armed-calls
-                '#{seon.cluster/file-derivation-key}
+                '#{seon.cluster/file-derivation-key seon.id/digest}
                 #(#'cluster/derivation-keys code projection
                    (assoc inputs changed (id/digest 64 [::changed n])) schema-keys selected))]
            (is (= (dissoc before changed) (dissoc after changed)))
            (is (not= (get before changed) (get after changed)))
+           (is (<= (get calls 'seon.id/digest 0) 2)
+               "unchanged schema content is not hashed again")
            (is (<= (get calls 'seon.cluster/file-derivation-key) 1)
                "one changed file does not rehash every unchanged file")))))))
 

@@ -3047,11 +3047,31 @@
             reads (atom [])
             entities (binding [db/*read-evidence-sink* reads]
                    (seon.fn/file-entities database paths :seon.fn/file))]
+        (let [[identities calls] (test-support/armed-calls
+                                 '#{seon.db/pull-many}
+                                 #(#'seon.fn/file-identities database paths :seon.fn/file))]
+          (is (= (set identities) (set (map program/row-identity entities))))
+          (is (zero? (get calls 'seon.db/pull-many 0))
+              "identity selection reads tuples without materializing entity maps"))
         (is (< 16 (count entities)) "more entities than the read bound, so per-entity reads cannot pass")
         (is (< (count @reads) 16) "reads are per path and ref depth, not per entity")
         (is (= entities (into [] (mapcat #(seon.fn/published-index-entities database [(program/row-identity %)]))
                           entities))
             "a batch reads exactly the entities each identity reads alone")))))
+
+(deftest publication-reuses-the-prior-declarations-for-contract-derivation
+  (test-support/with-database
+   (fn [connection]
+     (let [request {:seon.fn/root (fs/source-directory) :seon.fn/roots ["src" "test"]
+                    :seon.fn/changed-paths #{"src/seon/id.clj"}
+                    :seon.source/previous-database (db/db connection)}
+           rows (seon.fn/analyze-entities request)
+           [desired calls] (test-support/armed-calls
+                            '#{seon.fn/file-entities}
+                            #(#'seon.fn/desired-entities (assoc request :seon.program/rows rows) nil))]
+       (is (vector? desired))
+       (is (= 1 (get calls 'seon.fn/file-entities 0))
+           "contract derivation consumes the prior declarations already read")))))
 
 (deftest index-entities-name-a-data-entity-by-its-identity
   ;; A namespace's steward is an agent (`:seon.program/partition :seon.data`)

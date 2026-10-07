@@ -3,7 +3,8 @@
   record a merge proposal. Tasks live on the cluster, so every write goes to
   the task home through the one task writer (`seon.task/adopt-tasks-tx`)."
   {:seon/tasks #{'seon.task/no-repl-entrance-creates-a-task}}
-  (:require [clojure.edn :as edn]
+  (:require [seon.cache :as cache]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [malli.core :as m]
@@ -98,9 +99,11 @@
   {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :map]] [:maybe :seon.task/declaration]]}
   [projection task]
   (when task
-    (update-vals (select-keys task (map first (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection)
-                                                                              :seon.task/declaration)))))
-                 #(if (sequential? %) (set %) %))))
+    (let [members (schema/projection-cache-value
+                   projection ::declaration-members
+                   #(mapv first (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection)
+                                                              :seon.task/declaration)))))]
+      (update-vals (select-keys task members) #(if (sequential? %) (set %) %)))))
 
 (defn- edn-forms
   "Every EDN form of `text`, in order."
@@ -142,16 +145,35 @@
                   [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
   [database attribute values]
   (let [entities (if (contains? (:schema database) attribute)
-               (db/q database '[:find [(pull ?e [*]) ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
-               [])]
-    (or (read-error entities) (into {} (map (juxt :seon.task/id identity)) entities))))
+                   (db/q database '[:find [?e ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
+                   [])
+        rows (or (read-error entities) (db/pull-many database '[*] entities))]
+    (or (read-error rows) (into {} (map (juxt :seon.task/id identity)) rows))))
+
+(defn- task-content
+  "The task attributes the declaration readers observe, as immutable index values."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] [:vector :seon.schema/value]]}
+  [database projection]
+  (mapv (fn [[attribute]]
+          (let [datoms (if (contains? (:schema database) attribute)
+                         (db/datoms database :aevt attribute) [])]
+            (when (map? datoms) (throw (ex-info (:seon.error/message datoms) datoms)))
+            datoms))
+        (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/task)))))
 
 (defn task-basis
   "The declarations stored now for the files' namespaces: the basis a caller reads with its proposal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files] [:or :seon.task/basis :seon.db/invalid-read-error]]}
   [database files]
-  (let [stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
-    (or (read-error stored) (update-vals stored #(declared (db/carried-projection database) %)))))
+  (let [projection (db/carried-projection database)
+        content (task-content database projection)
+        names (set (map file-namespace (keys files)))]
+    (cache/lookup ::task-basis [(:seon.schema.projection/forms projection) content names]
+                  #(+ (* schema/declaration-projection-bytes-per-form (count (:seon.schema.projection/forms projection)))
+                      (* 80 (reduce + 0 (map count content))) (* 512 (count %)))
+                  #(let [stored (stored-tasks database :seon.task/ns names)]
+                     (or (read-error stored) (update-vals stored (partial declared projection))))
+                  #(not (read-error %)))))
 
 (defn- task-delta
   "The writer's delta from `stored` to `by-id` tasks, by handle, retractions first, so a task
@@ -187,6 +209,27 @@
       (mapv (fn [[e ns task-name]] [:db/add e :seon.task/sym (task-sym ns task-name)]) (sort unnamed)))
     []))
 
+(defn- tasks-tx-in
+  "The task declaration delta under the writer's current database and supplied basis."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
+  [database files basis]
+  (let [projection (db/carried-projection database)
+        forms (:seon.schema.projection/forms projection)
+        grammar (cache/lookup ::file-grammar forms
+                              (constantly (* schema/declaration-projection-bytes-per-form (count forms)))
+                              #(id/digest 64 [forms]))
+        proposed (into [] (mapcat (fn [[path text]]
+                                   (cache/lookup ::file-declarations [grammar path text]
+                                                 #(+ 256 (* 2 (count text)) (* 512 (count %)))
+                                                 #(file-declarations projection path text)))) files)
+        by-id (into {} (map (juxt :seon.task/id identity)) proposed)
+        stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
+    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (when-let [sym (some (fn [[sym n]] (when (< 1 n) sym)) (frequencies (map :seon.task/sym proposed)))]
+      (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
+    ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
+    (into (symbol-tx database) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis))))
+
 (defn tasks-tx
   "The writer's delta from stored tasks to the declared `files`, by handle. A touched
   task whose current declaration differs from the caller's `basis` refuses with base,
@@ -196,14 +239,12 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
   [database files basis]
   (let [projection (db/carried-projection database)
-        proposed (into [] (mapcat (fn [[path text]] (file-declarations projection path text))) files)
-        by-id (into {} (map (juxt :seon.task/id identity)) proposed)
-        stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
-    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (when-let [sym (some (fn [[sym n]] (when (< 1 n) sym)) (frequencies (map :seon.task/sym proposed)))]
-      (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
-    ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
-    (into (symbol-tx database) (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis))))
+        content (task-content database projection)]
+    (cache/lookup ::tasks-tx [(:seon.schema.projection/forms projection) content files basis]
+                  #(+ (* schema/declaration-projection-bytes-per-form (count (:seon.schema.projection/forms projection)))
+                      (* 80 (reduce + 0 (map count content)))
+                      (* 2 (reduce + 0 (map count (vals files)))) (* 256 (count %)))
+                  #(tasks-tx-in database files basis))))
 
 (defn task-revision
   "The reviewed revision of the task `handle` in `database`: seon.id/digest over its declaration; nil when absent."

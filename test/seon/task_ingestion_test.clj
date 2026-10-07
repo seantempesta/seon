@@ -79,6 +79,11 @@
        (is (not-any? #(contains? % tag) (vals (task/task-findings @connection))))
        (testing "unchanged input, with an empty optional set, writes nothing"
          (is (= {:seon.task/changed? false} (ingest! connection text)))
+         (let [[again calls] (test-support/armed-calls
+                              '#{seon.task/file-declarations seon.task/task-delta}
+                              #(ingest! connection text))]
+           (is (= {:seon.task/changed? false} again))
+           (is (every? zero? (vals calls))))
          (is (empty? (seon.fn/reconcile-tx @connection entities []))))
        (testing "the same aspect with a new intent keeps its handle; clearing a set retracts it"
          (is (:seon.task/changed? (ingest! connection (task-text "Changed." ""))))

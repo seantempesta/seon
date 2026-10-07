@@ -471,14 +471,17 @@
    (sort-by key sources)))
 
 (defn- contains-position?
+  "Whether an entry starts inside the span, including its start and excluding its end."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :boolean]}
   [span entry]
-  (let [start ((juxt :row :col) span)
-        end ((juxt :end-row :end-col) span)
-        position ((juxt :row :col) entry)]
+  (let [start-row (:row span) start-col (:col span)
+        end-row (:end-row span) end-col (:end-col span)
+        row (:row entry) col (:col entry)]
     (and (= (:filename span) (:filename entry))
-         (every? integer? (concat start end position))
-         (not (pos? (compare start position)))
-         (neg? (compare position end)))))
+         (integer? start-row) (integer? start-col) (integer? end-row) (integer? end-col)
+         (integer? row) (integer? col)
+         (or (< start-row row) (and (= start-row row) (<= start-col col)))
+         (or (< row end-row) (and (= row end-row) (< col end-col))))))
 
 (defn- span-index
   "`spans` in start order (stable), for [[innermost-span]]."

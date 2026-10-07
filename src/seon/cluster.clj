@@ -1551,35 +1551,56 @@
 (declare selected-analyzer-digest launched-source-digests)
 
 (defn- derivation-schema-keys
-  "Per derivation input, the schema keys its entities' derivation reads: the
-  declared keywords they hold (`:seon.fn/keywords`) and those their contracts
-  name. `entities` are rows or stored entities, each naming its `:seon.fn/file`."
-  {:malli/schema [:=> [:cat [:set :keyword] [:sequential :map]] [:map-of :string [:set :keyword]]]}
-  [declared entities]
+  "Per file, keyword candidates held by its entities or named by their contracts."
+  {:malli/schema [:=> [:cat [:sequential :map]] [:map-of :string [:set :keyword]]]}
+  [entities]
   (reduce (fn [by-path {file :seon.fn/file keywords :seon.fn/keywords spec :seon.fn/spec}]
             (if-let [path (if (map? file) (:seon.fn.file/relative-path file) (second file))]
               (update by-path path (fnil into #{})
-                      (filter declared)
+                      (filter keyword?)
                       (concat keywords (when spec (tree-seq coll? seq (edn/read-string spec)))))
               by-path))
           {} entities))
 
 (defn- stored-derivation-schema-keys
-  "`derivation-schema-keys` of every stored entity in `database`."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :keyword]] [:map-of :string [:set :keyword]]]}
-  [database declared]
-  (let [held (db/q '[:find ?path ?keyword
-                     :where [?entity :seon.fn/keywords ?keyword] [?entity :seon.fn/file ?file]
-                            [?file :seon.fn.file/relative-path ?path]] database)
-        specs (db/q '[:find ?path ?spec
-                      :where [?entity :seon.fn/spec ?spec] [?entity :seon.fn/file ?file]
-                             [?file :seon.fn.file/relative-path ?path]] database)]
-    (when-let [refusal (some #(when (map? %) %) [held specs])]
-      (refused! "Stored derivation inputs could not be read." refusal))
-    (derivation-schema-keys
-     declared
-     (concat (map (fn [[path keyword]] {:seon.fn/file [:seon.fn.file/relative-path path] :seon.fn/keywords [keyword]}) held)
-             (map (fn [[path spec]] {:seon.fn/file [:seon.fn.file/relative-path path] :seon.fn/spec spec}) specs)))))
+  "Schema inputs per file, reusing each file's derivation content and reading misses together."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :string]] [:map-of :string [:set :keyword]]]}
+  [database paths]
+  (let [files (if (contains? (:schema database) :seon.fn.file/derivation-digest)
+                (db/q '[:find ?file ?path ?digest :in $ [?path ...]
+                        :where [?file :seon.fn.file/relative-path ?path]
+                               [(get-else $ ?file :seon.fn.file/derivation-digest "") ?digest]] database (vec paths))
+                (db/q '[:find ?file ?path :in $ [?path ...]
+                        :where [?file :seon.fn.file/relative-path ?path]] database (vec paths)))
+        _ (when (map? files) (refused! "Stored derivation inputs could not be read." files))
+        files (mapv (fn [[eid path digest]]
+                      (cond-> {:db/id eid :seon.fn.file/relative-path path}
+                        (seq digest) (assoc :seon.fn.file/derivation-digest digest))) files)
+        content (fn [file] (when-let [digest (:seon.fn.file/derivation-digest file)]
+                            [(:seon.fn.file/relative-path file) digest]))
+        held (into {} (keep (fn [file]
+                             (when-let [key (content file)]
+                               (when-let [value (cache/lookup ::file-schema-keys key
+                                                             (constantly 0) (constantly nil))]
+                                 [(:seon.fn.file/relative-path file) value])))) files)
+        missing (filterv #(not (contains? held (:seon.fn.file/relative-path %))) files)
+        rows (when (seq missing)
+               (db/pull-many database [{:seon.fn/_file [:seon.fn/keywords :seon.fn/spec]}]
+                             (mapv :db/id missing)))
+        _ (when (map? rows) (refused! "Stored derivation inputs could not be read." rows))]
+    (reduce (fn [result [file row]]
+              (let [path (:seon.fn.file/relative-path file)
+                    derive #(get (derivation-schema-keys
+                                  (map (fn [entity]
+                                         (assoc entity :seon.fn/file [:seon.fn.file/relative-path path]))
+                                       (:seon.fn/_file row))) path #{})
+                    value (if-let [key (content file)]
+                            (cache/lookup ::file-schema-keys key
+                                          #(+ 384 (* 64 (count %)))
+                                          derive)
+                            (derive))]
+                (assoc result path value)))
+            held (map vector missing rows))))
 
 (defn- file-derivation-key
   "Hash one file's already selected derivation inputs, only on a content miss."
@@ -1636,20 +1657,21 @@
                         (recur (into (pop pending) (get dependencies k)) (conj reached k)))
                       reached)))
         row-shapes (program/shapes-in projection)
-        ;; Derived once per refresh (a cached copy hit 0 of 1 and held 19% of the
-        ;; byte budget for the whole projection's forms); the per-file keys below
-        ;; are the content-keyed cache.
-        world (let [forms (update-vals forms derivation-form)]
-                (hash-map ::key (id/digest 64 [forms dependencies row-shapes])
-                          ::absent (id/digest 64 [nil])
-                          ::digests (into {} (map (fn [[k form]] [k (id/digest 64 [form])])) forms)
-                          ::shapes (closure (into #{} (filter (partial contains? forms))
-                                                (tree-seq coll? seq row-shapes)))))
+        world (cache/lookup
+               ::derivation-world [forms dependencies row-shapes]
+               #(+ (* schema/declaration-projection-bytes-per-form (count forms)) (* 128 (count dependencies))
+                   (* 128 (count (::digests %))))
+               #(let [forms (update-vals forms derivation-form)]
+                  {::key (id/digest 64 [forms dependencies row-shapes])
+                   ::absent (id/digest 64 [nil])
+                   ::digests (into {} (map (fn [[k form]] [k (id/digest 64 [form])])) forms)
+                   ::shapes (closure (into #{} (filter (partial contains? forms))
+                                          (tree-seq coll? seq row-shapes)))}))
         kondo [(get (source/loaded-dependencies) "reference-code/clj-kondo")
                (into (sorted-map) (filter #(str/starts-with? (key %) ".clj-kondo/")) inputs)]]
     (into {}
           (map (fn [path]
-                 (let [start (get schema-keys path #{})
+                 (let [start (into #{} (filter #(contains? forms %)) (get schema-keys path #{}))
                        input (get inputs path)]
                    [path
                     (cache/lookup
@@ -1759,7 +1781,6 @@
                                           :seon.source/relative-file-digests inputs})
                             database (assoc :seon.source/previous-database database)))
                 projection (schema/handed-projection)
-                declared (set (keys (:seon.schema.projection/forms projection)))
                 ;; The identity of the code that derived `analyzed`.
                 code (selected-analyzer-digest database selected analyzed inputs loaded)
                 derivation-inputs (into #{} (filter #(and (some (fn [root] (str/starts-with? % (str root "/")))
@@ -1768,8 +1789,8 @@
                                                           (contains? inputs %)))
                                         (concat (keys inputs) selected))
                 keyed (derivation-keys code projection inputs
-                                       (merge (when database (stored-derivation-schema-keys database declared))
-                                              (derivation-schema-keys declared analyzed))
+                                       (merge (when database (stored-derivation-schema-keys database derivation-inputs))
+                                              (derivation-schema-keys analyzed))
                                        derivation-inputs)
                 ;; A store that has not installed the key attribute (the first
                 ;; publication after it was declared) holds no keys: every input

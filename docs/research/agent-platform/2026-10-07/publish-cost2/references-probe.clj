@@ -1,0 +1,12 @@
+(let [database @(seon.cluster.boot/connection "default")
+      projection (seon.db/carried-projection database)
+      forms (take 100 (vals (:seon.schema.projection/forms projection)))
+      bean (java.lang.management.ManagementFactory/getThreadMXBean)
+      id (.threadId (Thread/currentThread)) mark (seon.profile/begin)
+      b (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean id)
+      t (System/nanoTime)
+      values (mapv #(seon.schema/direct-references projection %) forms)]
+ {:count (count values) :digest (seon.id/digest 64 [values])
+  :ms (/ (- (System/nanoTime) t) 1e6)
+  :bytes (- (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean bean id) b)
+  :calls (:seon.profile/calls (seon.profile/explain mark 5))})

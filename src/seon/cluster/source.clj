@@ -514,14 +514,9 @@
       (stale-publication-error 'seon.cluster.source/record-results! failure))))
 
 (defn- index-tasks!
-  "Reconcile every task file of the published `directory` through the task writer,
-  then refuse any dangling handle, an annotation naming no admitted task, with its
-  holders before the head advances (spec 7.5, 7.13). Every file, and every stored
-  task's file (a deleted file reads \"[]\"), not the changed ones: a recorded
-  task-file digest does not prove its tasks were admitted (a publication before
-  ingestion recorded it), and the whole set reconciles in ~2 ms. The basis is the
-  `previous` published value the request derived from (the head guard fences it);
-  a first publication, forked from none, reads its private scratch."
+  "Reconcile task declarations against the previous publication's basis, then
+  refuse dangling annotations before the head advances. Existing files are read
+  once; a removed file whose namespace still holds tasks supplies an empty declaration."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string [:maybe :seon.db/database-value]]
                   [:maybe :seon.task/report]]}
   [connection source-digest directory previous]
@@ -529,7 +524,9 @@
     (let [task-files (requiring-resolve 'seon.task/task-files)
           stored (require-committed! (db/q '[:find [?ns ...] :where [_ :seon.task/ns ?ns]] (db/db connection))
                                      :seon.task/findings-refused "Stored task namespaces could not be read." {})
-          files (merge (task-files directory (mapv #(str "resources/seon/tasks/" % ".edn") stored)) (task-files directory nil))
+          present (task-files directory nil)
+          removed (remove #(contains? present %) (map #(str "resources/seon/tasks/" % ".edn") stored))
+          files (merge present (task-files directory removed))
           basis (require-committed! ((requiring-resolve 'seon.task/task-basis) (or previous (db/db connection)) files)
                                     :seon.task/findings-refused "The task basis could not be read." {})
           report (require-committed!
