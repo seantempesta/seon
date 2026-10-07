@@ -7,7 +7,7 @@
  #:seon.task{:id "1d92b52b2470"
              :name "adoption-readopts-what-the-jvm-loaded"
              :kind :function
-             :intent "A move to HEAD spends 6.4-9.9 s adopting after readiness (development-source-refresh! 5,171 ms, adopt-entities! 2,761 ms) re-adopting what the fresh JVM already loaded; boot's store->branch layer is 27-32 s whenever the commit touches analyzer reach (full-source-refresh! :all: lint ~8 s, analysis ~8 s, three transactions ~10 s); today's nuke was ready in 43 s. Both are over the 10-second start law."
+             :intent "A move to HEAD spends 6.4-9.9 s adopting after readiness (development-source-refresh! 5,171 ms, adopt-entities! 2,761 ms) re-adopting what the fresh JVM already loaded; boot's store->branch layer is 27-32 s whenever the commit touches analyzer reach (full-source-refresh! :all: lint ~8 s, analysis ~8 s, three transactions ~10 s); today's nuke was ready in 43 s. Both are over the 10-second start law. 2026-10-07 start --head onto 108dd1c3e: ready 51.0 s, :seon.source/current 44.5 s publishing 132 of 847 changed inputs (.clj-kondo/config.edn among them, which reselects every source), then a post-readiness adoption of 20.8 s (refresh-source! -> development-source-refresh! 20.5 s, adopt-entities! 15.8 s, one 15.0 s transact! with write-report validation 4.5 s, published-changes 3.8 s). An unchanged restart selects 0 paths in 79 ms, so the publication is catch-up; the re-adoption is per move."
              :must-read #{seon.cluster/adopt-entities! seon.cluster/development-source-refresh! seon.cluster/full-source-refresh!}
              :evidence #{"docs/research/agent-platform/landing/inv-boot-operator-opus-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"
@@ -40,7 +40,7 @@
  #:seon.task{:id "17027736987a"
              :name "boot-publication-phases-are-invisible"
              :kind :function
-             :intent "A boot resume publication runs before arm-host-program!, so no profile cell observes it and refresh-source!'s explain-slow says nothing; *source-progress!* is bound nowhere (report-source-progress! is a no-op outside tests), so its phase lines vanish. The 132 s store->branch layer of the e405f51be boot could only be split by replaying the publication on a scratch branch (tmp/perf-boot-opus/replay.clj). Carry the boot publication's phase milliseconds in its result and the instance's readiness."
+             :intent "A boot resume publication runs before arm-host-program!, so no profile cell observes it and refresh-source!'s explain-slow says nothing; *source-progress!* is bound nowhere (report-source-progress! is a no-op outside tests), so its phase lines vanish. The 132 s store->branch layer of the e405f51be boot could only be split by replaying the publication on a scratch branch (tmp/perf-boot-opus/replay.clj). Carry the boot publication's phase milliseconds in its result and the instance's readiness. Still true 2026-10-07: the 44.5 s :seon.source/current layer of the 108dd1c3e boot has no profile cell; seon.log has two lines for the whole boot."
              :must-read #{seon.cluster/refresh-source! seon.cluster/populate-source!}
              :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
  #:seon.task{:name "a-test-adoption-moves-the-jvms-loaded-identity"
