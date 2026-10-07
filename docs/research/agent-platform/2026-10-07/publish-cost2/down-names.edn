@@ -1,0 +1,2 @@
+SEON down OK
+#:seon.operator{:stopped-processes [#:seon.boot{:pid 92950, :start-instant #inst "2026-10-07T16:11:49.404-00:00"}], :process-exit? true}
