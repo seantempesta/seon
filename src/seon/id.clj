@@ -48,12 +48,62 @@
   "Print `data` onto `writer` under fixed print bindings, so a caller's
   `*print-length*`, `*print-meta*` or other print binding cannot change the
   text. `*print-namespace-maps*` is true because every stored identity was
-  printed under clojure.main's REPL bindings, which set it."
+  printed under clojure.main's REPL bindings, which set it.
+
+  ITERATIVE: each open vector, seq, set, map or map entry is a frame on an
+  explicit stack, so depth costs heap, never JVM stack. `pr` recursed once
+  per level and threw `StackOverflowError` near 2,000 levels, which lost a
+  10,000-deep evaluation's settlement (`seon.turn/a-deep-value-loses-the-run`).
+  The text is `pr`'s, byte for byte: a value takes a frame only when
+  `print-method` would dispatch it to one of Clojure's four standard
+  collection methods, whose output the frame reproduces
+  (core_print.clj:48-68,174-176,225-269,338-340); any other value is printed
+  by its own `print-method`. The frame helpers are local: this loop is the
+  hot path of every identity."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical printing accepts arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:fn seon.id/writer?]] :nil]}
   [data ^Writer writer]
   (binding [*out* writer *print-length* nil *print-level* nil *print-meta* false *print-dup* false
             *print-readably* true *print-namespace-maps* true]
-    (pr data))
+    (let [vector-method (get-method print-method clojure.lang.IPersistentVector)
+          seq-method (get-method print-method clojure.lang.ISeq)
+          set-method (get-method print-method clojure.lang.IPersistentSet)
+          map-method (get-method print-method clojure.lang.IPersistentMap)
+          ;; `clojure.core/lift-ns` (core_print.clj:247-261)
+          lift-ns (fn [m]
+                    (loop [space nil
+                           [[k v :as entry] & entries] (seq m)
+                           kvs []]
+                      (if entry
+                        (when (and (qualified-ident? k) (or (nil? space) (= space (namespace k))))
+                          (recur (namespace k) entries
+                                 (conj kvs [(if (symbol? k) (symbol nil (name k)) (keyword nil (name k))) v])))
+                        [space kvs])))
+          ;; a frame is [sep close items started? entries?], advanced in place
+          frame (fn [x]
+                  (condp identical? (get-method print-method
+                                                (let [t (get (meta x) :type)] (if (keyword? t) t (class x))))
+                    vector-method (do (.write writer "[") (object-array [" " "]" (seq x) false false]))
+                    seq-method (do (.write writer "(") (object-array [" " ")" (seq x) false false]))
+                    set-method (do (.write writer "#{") (object-array [" " "}" (seq x) false false]))
+                    map-method (let [[space kvs] (lift-ns x)]
+                                 (.write writer (if space (str "#:" space "{") "{"))
+                                 (object-array [", " "}" (seq (if space kvs x)) false true]))
+                    nil))
+          stack (java.util.ArrayDeque.)]
+      (loop [x data entry? false visit? true]
+        (if visit?
+          (if-some [open (if entry? (object-array [" " "" (seq x) false false]) (frame x))]
+            (do (.push stack open) (recur nil false false))
+            (do (print-method x writer) (recur nil false false)))
+          (when-some [^objects top (.peek stack)]
+            (if-some [items (aget top 2)]
+              (do (when (aget top 3) (.write writer ^String (aget top 0)))
+                  (aset top 2 (next items))
+                  (aset top 3 true)
+                  (recur (first items) (aget top 4) true))
+              (do (.write writer ^String (aget top 1))
+                  (.pop stack)
+                  (recur nil false false))))))))
   nil)
 
 (defn printed

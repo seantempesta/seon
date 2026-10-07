@@ -28,7 +28,8 @@
    "(identity String)" "(range)" "(map (fn [_] (throw (ex-info \"boom when realized\" {}))) [1 2])"
    "(apply str (repeat 5000000 \"x\"))" "(vec (range 200000))"
    "(reduce (fn [m _] {:a m}) {} (range 1000))" "(let [a (atom nil)] (reset! a {:self a}) a)"
-   "(identity nil)" "##NaN" "(byte-array 16)" "(sorted-map 'a 1 'b 2)" "(transient [1 2])"])
+   "(identity nil)" "##NaN" "(byte-array 16)" "(sorted-map 'a 1 'b 2)" "(transient [1 2])"
+   "(reduce (fn [v _] [v]) [] (range 10000))"])
 
 (deftest ^{:seon.test/long "One run of 26 forms per entrant (a 5M-character string and a 200k vector among them) plus arming: 54 single-form runs took 7.2 s on default at 1be0f7448."
            :seon.test/long-ms 20000}
@@ -71,7 +72,10 @@
                 (let [evaluations (settled result)]
                   (is (= (count zoo) (count evaluations)) "every zoo form settles as its own evaluation")
                   (is (every? (fn [[shown error]] (or (seq shown) (seq error))) evaluations)
-                      "each is its value's shown text or its error value")))))
+                      "each is its value's shown text or its error value")
+                  (let [[shown error] (peek evaluations)]
+                    (is (and (str/starts-with? (str shown) "[[") (nil? error))
+                        "a 10,000-deep vector settles as its value, never a refused settlement"))))))
           (testing "the HTML page prints each live value, and the SCI context itself, with no throw"
             (doseq [source (conj zoo nil)
                     :let [value (if source (sci/eval-string* ctx source) ctx)

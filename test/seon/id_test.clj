@@ -40,3 +40,17 @@
       (with-bindings hostile
         (is (= expected (id/digest 12 parts)))
         (is (= "15564fc125fc" (id/digest 12 [{:a/b 1 :a/c 2}])))))))
+
+(deftest canonical-print-is-prs-text-at-any-depth
+  ;; THE CLASS: the one canonical print is iterative, so a value of any depth
+  ;; prints (and hashes) instead of overflowing the stack, and its text is
+  ;; exactly `pr`'s under REPL bindings (every stored identity's text).
+  (doseq [[value text] [[nil "nil"] ["q\"" "\"q\\\"\""] [{} "{}"] [() "()"] [#{} "#{}"]
+                        [{:a/b 1 :a/c 2} "#:a{:b 1, :c 2}"] [{:a/b 1 :c 2} "{:a/b 1, :c 2}"]
+                        [{'x/y [1 2]} "#:x{y [1 2]}"] [(sorted-map :b 1 :a 2) "{:a 2, :b 1}"]
+                        [(list 1 (list 2)) "(1 (2))"] [(range 3) "(0 1 2)"] [(first {:a 1}) "[:a 1]"]
+                        [{nil 1} "{nil 1}"] [{[1] {:x/y #{:z}}} "{[1] #:x{:y #{:z}}}"] [1/3 "1/3"] [\a "\\a"]]]
+    (is (= text (id/printed value))))
+  (is (= (str (apply str (repeat 10001 "[")) (apply str (repeat 10001 "]")))
+         (id/printed (reduce (fn [v _] [v]) [] (range 10000)))))
+  (is (= 12 (count (id/id (reduce (fn [m _] {:a/b m}) {} (range 10000)))))))
