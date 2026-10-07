@@ -114,25 +114,28 @@ wake (an outside message, or the agent still working with calls left)
            the task is complete and its creator is notified
 ```
 
-**One presentation, 100% consistent (owner, 2026-10-07).** We control the context, so it is always one REPL
-transcript, rebuilt each call. Every form, whether opening or the agent's own, appears as a prompt line followed
-IMMEDIATELY by its result, the way a real REPL shows it. An agent's prose comments stay above the form they
-preceded. Multi-form replies are fine: they come back interleaved.
+**One presentation: pure data (owner, 2026-10-07).** We control the context. It is ONE value, rebuilt each call:
+a vector of exchange maps, one per form, each holding its namespace, form, outcome and handle together. It is
+printed by the one value printer, with the same budget and dig forms as any value. There are no prompts, no
+`;; =>`, and no prose between exchanges. The opening forms are the first maps, and the agent's forms (multi-form
+is fine) follow in order:
 
-```
-;; I'll add and subtract.
-scratch.add2=> (+ 1 1)
-#:seon.repl{:value 2, :result result/e1a2b3, :ms 0}
-scratch.add2=> (- 10 2)
-#:seon.repl{:value 8, :result result/e4d5e6, :ms 0}
+```clojure
+[#:seon.repl{:ns user, :form "(help)", :value {…the protocol as data…}, :result result/e0a1b2}
+ #:seon.repl{:ns user, :form "(doc 'scratch.add2/add-one-returns-its-argument-plus-one)", :value {…task…}, …}
+ #:seon.repl{:ns scratch.add2, :comment "I'll add and subtract.",
+             :form "(+ 1 1)", :value 2, :result result/e1a2b3, :ms 0}
+ #:seon.repl{:ns scratch.add2, :form "(- 10 2)", :value 8, :result result/e4d5e6, :ms 0}
+ #:seon.repl{:ns scratch.add2, :form "(foo 1)", :error {…the error map…}, :result result/e7f8a9}]
 ```
 
-- The result is exactly the reply map the value printer showed; MCP shows the same map, so there is one format
-  everywhere.
-- The prompt is the form's namespace, so the agent always knows where it is.
-- An unread or refused form shows its error map in the same place.
-- Nothing else is interleaved: no "changed since" units, no "turns left" prose. Calls left, if shown at all, is one
-  line at the very end.
+- Each map is exactly the reply map MCP returns, plus `:form` and `:ns`, so there is one format everywhere.
+- The agent's prose before a form becomes that exchange's `:comment`.
+- The agent's own reply is plain code (fences, or forms that start a line; prose becomes comments), so it never
+  resembles the transcript.
+- A reply that writes an exchange-shaped map (`:value`/`:result` keys) as if it were a result is flagged by the
+  reader and never run.
+- "Calls left", if shown, is one key on a final map, not prose.
 
 Targets: one commit per model reply; Seon's own work per pass under 200 ms beyond the provider; the context
 render with no reference changed under 10 ms warm.
@@ -158,13 +161,9 @@ default.
 
 ## 6. Decisions for the owner
 
-1. The guard against invented results. With the one presentation above, every result begins with the same text,
-   `#:seon.repl{`. Stop on it: a model that starts writing a result is cut before it. The reader also flags any
-   imitation that slips through, and those forms never run. Cost: a reply whose real code contains that literal is
-   cut. That happened in live run 1, whose task was about `seon.repl` itself; it is rare otherwise, and the cut
-   shows in the next context because the result is simply missing. Alternative: a prompt-line stop
-   (`\nscratch.add2=>`), set per call to the agent's current namespace, which stops a model that starts writing
-   the next prompt. Recommendation: the result-map stop, measured live in S6 with the stop on and off.
+1. The guard against invented results, with the data transcript: the agent's reply is code and the transcript is
+   data, so the formats differ. The reader flags exchange-shaped maps. A stop sequence is likely unnecessary
+   (none shipped); S6 measures invented results on DeepSeek, and adds a stop only if they occur.
 2. History is "all of it, unclipped, for now". Confirm that this means each stored evaluation's shown text exactly
    as the agent saw it (nothing re-rendered).
 3. Approve this plan as the replacement for `docs/seon/specs/agent-loop.md` and the order S0 → S6.
