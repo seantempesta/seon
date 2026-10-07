@@ -596,16 +596,18 @@
   never its ordinal: ordinals restart at 0 in every run, so an ordinal handle
   named two different values in one agent's context and a later turn could
   read the wrong one. Any valid symbol is admissible; this binds the name in
-  the `result` namespace the handle qualifies."
+  the `result` namespace the handle qualifies. The binding is publication's,
+  not a write of the evaluated form, so the write observer never sees it."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "SCI result bindings retain the actual arbitrary result object, including nil, without serialization.", :gen/elements [nil false 0 "" :k [] {}]}]] :qualified-symbol]}
   [ctx handle value]
   (let [namespace-name 'result
         intern-name (symbol (name handle))]
     (when-let [objects (::result-objects ctx)]
       (swap! objects assoc (subs (name handle) 1) value))
-    (when-not (sci/find-ns ctx namespace-name)
-      (sci/add-namespace! ctx namespace-name {}))
-    (sci/intern ctx namespace-name intern-name value)
+    (binding [sci.lang/*write-observer* nil]
+      (when-not (sci/find-ns ctx namespace-name)
+        (sci/add-namespace! ctx namespace-name {}))
+      (sci/intern ctx namespace-name intern-name value))
     handle))
 
 (defn- binding-rows

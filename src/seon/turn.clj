@@ -4849,13 +4849,11 @@
 
 (defn- entry-bindings
   "The Vars each form bound, as the installation reads them: ordinal -> symbol
-  -> its value and metadata, from one walk of the batch's writes. A form's own
-  result handle is not one: publication interns it in the `result` namespace
-  (`sci.eval/bind-result!`), which the write observer also reports."
+  -> its value and metadata, from one walk of the batch's writes."
   {:malli/schema [:=> [:cat :seon.batch/batch] [:map-of :seon.cluster.eval/ordinal :seon.sci.eval/bindings]]}
   [batch]
   (reduce (fn [by {op :seon.batch/op sym :seon.batch/sym the-var :seon.batch/var kind :seon.batch/kind n :seon.batch/ordinal}]
-            (if (and (= :bind op) (= :root kind) sym (not= "result" (namespace sym)))
+            (if (and (= :bind op) (= :root kind) sym)
               (assoc-in by [n sym] {:seon.sci.eval/value @the-var :seon.sci.eval/metadata (meta the-var)})
               by))
           {} (:seon.batch/writes batch)))
