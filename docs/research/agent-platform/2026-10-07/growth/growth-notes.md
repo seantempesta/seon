@@ -68,6 +68,19 @@ query-result cache's miss path `inheritable-entry`/`compatible-source-keys?`, wh
 plan creation, because the plan cache key embeds substituted constants); `seon.db/q` adds 200-330 KB over `d/q`.
 47 queries x ~0.5 MB = ~25 MB of the trivial form.
 
+### A one-line `defn`
+
+Quiet reruns after the restart: `(defn plain-d [x] (inc x))` 232-264 ms, 335-397 MB JVM-wide (root's morning probe:
+537 ms / 843 MB). The ~200 MB over `(+ 1 2)` is on the writer's flow thread (async-mixed, 165-168 MB): JFR over four
+defns attributes 978 MB on async-mixed threads to `seon.db/speculative-projection` -> `seon.schema/load-projection`
+-> `projection-from-entities` (417 MB inclusive) and `seon.schema/deleted-predicate-functions` (377 MB: a `tree-seq`
+over every stored form and function contract per build). Every declaration commit rebuilds the whole projection:
+proportional to the program, existing tasks `seon.schema/a-declaration-write-reloads-the-whole-projection` and
+`seon.schema/a-function-contract-changes-the-schema-projection` (seon.schema held by task-tags; a design change).
+The defn also adds node visits of the §1 class (`seon.sci.eval/installation-covers-program-change?` 7,960).
+
+Konserve writes per `(+ 1 2)`: ~4 MB (LZ4 frame streams and byte buffers with no Seon frame in the JFR sample).
+
 ### Options for root (the fix is in the dependency's planner or across six owners)
 
 1. **Datahike fork, planner (recommended).** When a group's join variable is bound by a unique-identity pattern with
@@ -147,7 +160,38 @@ leaves per cell (`adder?` x3, `accumulator?`, `histogram?`, `throw-counts?`, `th
 designed; the constant is the armed predicate leaves (the platform-wide question in
 `seon.db/hot-total-predicates-run-hundreds-of-millions-of-times`).
 
+Measured with 2,766 live cells (thread-allocated; the window's own `begin`/`explain` reads included):
+
+| read | ms | MB | armed calls |
+|---|---|---|---|
+| `(seon.profile/cells)` unarmed original | 0.46 | 0.17 | 0 |
+| `(seon.profile/cells)` armed | 11-18 | 3.6 | ~47k |
+| `(seon.profile/explain mark 10)` | 98 | 7.8 | ~70k |
+| `(seon.profile/summary (seon.profile/cells) 5)` | 187 | 31.8 | ~160k |
+
+`summary` is what every `:slow` finding tells an agent to run. Options:
+1. **Platform (recommended):** schema predicate leaves call the unarmed function (`seon.schema/runtime-predicate`,
+   the existing task above). Every cell validation drops from ~9 armed calls to none, here and at every other
+   boundary validating host-object maps.
+2. **Profile-local:** `:seon.profile/cell` as one `[:fn seon.profile/cell?]` checking every member. One armed call
+   per cell, but `cell?` restates the registered member schemas inline (data-oriented-clojure 4.1) and weakens the
+   explained problems to one message.
+3. **Fewer boundaries:** `top` filters cells by `entries` before `observation`; saves the per-cell observation chain
+   for never-called cells only.
+
 ## 6. Patches for root (held files)
+
+- `seon.db/q` (task `seon.db/q-hands-a-non-query-map-to-refused-read`): the first branch calls `refused-read` for any
+  value that is not a database, query vector, string or query map; only an error value (`:seon.error/type` present)
+  belongs there. A plain map should get q's own invalid-read refusal (the `diagnostic` shape `schema-refusal` builds,
+  expected `:seon.db/query`, offending the map). Proof: `(seon.db/q {:a 1})` returns `:seon.db/invalid-read-error`
+  under 1 MB (today 109 MB / 70 ms through a 326-problem instrument refusal).
+- `seon.instrument` refusal construction: 326 problems for one argument against a union, each carrying the whole
+  argument as `:seon.error/offending`, 109 MB per refusal independent of the argument's size. Existing task
+  `seon.instrument/violation-construction-is-quadratic-in-explain-errors`.
+- `seon.error/prepare` (task `seon.error/a-fault-without-an-operation-is-recorded-under-normalize`): the
+  `(or function 'seon.error/normalize)` fallback names the recorder; use the boundary's layer operation or a typed
+  unknown.
 
 ## 7. Design check
 
@@ -158,6 +202,17 @@ designed; the constant is the armed predicate leaves (the platform-wide question
   the refusal in `prepare`, then admission); each walk is now proportional to distinct data. Sharing one walk across
   them needs `seon.error` (held).
 - Item 1's design held only as a diagnosis: the producer is Datahike's planner, so the fix is a dependency decision.
+
+## Commits and tasks
+
+- 3071fef19: `post-order` folds a repeated value once (src +10/-3; test +18; check 98 s, 21 tests / 133 assertions
+  green: `seon.error.shared-data-test`, `seon.error.refusal-test`,
+  `seon.sci.kernel-test/an-error-holding-a-ten-thousand-deep-value-keeps-its-error`). After-numbers on default need
+  root's restart; re-run the depth table in §3 (`refusal/chain` on the refusal of `(seon.db/q <n-deep map>)`).
+- Tasks created (database, agent growth): `seon.db/an-identity-join-scans-the-whole-ref-attribute` (a952d921f468),
+  `seon.db/q-hands-a-non-query-map-to-refused-read` (05518143b09f),
+  `seon.error/a-fault-without-an-operation-is-recorded-under-normalize` (ce40e5fac600),
+  `seon.cluster.store/the-store-index-roots-carry-no-subtree-count` (aa983ae094b7).
 
 ## Findings recorded
 
