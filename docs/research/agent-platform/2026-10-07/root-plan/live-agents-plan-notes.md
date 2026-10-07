@@ -1,6 +1,7 @@
-# Live agents: one pass for every entrant (plan v4)
+# Live agents: one pass for every entrant (plan v4.1)
 
-Status: DRAFT v4. v2 and v3 were each dual-reviewed: `review-plan-opus-notes.md` and `plan-v2-review-notes.md`, then
+Status: v4.1, ready for the owner. v4's third-round reviews (`review-plan4-opus-notes.md`, `plan-v4-review-notes.md`)
+asked for wording-level corrections, which are applied here. v2 and v3 were each dual-reviewed: `review-plan-opus-notes.md` and `plan-v2-review-notes.md`, then
 `review-plan3-opus-notes.md` and `plan-v3-review-notes.md`, all beside this file. Every finding is either decided
 here or listed in §7 as an owner decision. After the owner approves, this replaces `docs/seon/specs/agent-loop.md`
 in place and keeps its normative details named in §4.9.
@@ -44,14 +45,14 @@ Evidence is in `../plan-research/r-*-notes.md`. Numbers are single measured runs
 | the turn without the refresh (stages 2-6) | ~457 ms, ~550 MB | Astra v2 §7 |
 | MCP SCI `(+ 1 2)` | 1 commit, 27 datoms, ~150 KB, 205-358 ms, 159-232 MB. Settle 96 ms (of it, the fault-window query 34 ms), run-observation reread 27 ms, per-form kondo ~20 ms | r-record, Opus v3 |
 | a `defn` pass / the next pass | 712-733 MB per call; next pass 1.0-1.3 s, 3.2 GB (whole-program reacquire). Lane `defn-cost` fixing it | r-record, live profile |
-| reply read, 76 KB mixed | 4.1 s, 94 GB. Stop-gap lane `forgive-fix` | r-read |
+| reply read, a 76,408-character mixed reply | 4.1 s, 94 GB. Stop-gap lane `forgive-fix` | r-read |
 | one-test `my.test/check` | cold 2.3-6.0 s, warm 384 ms. After 4c9ccb3f7: cold 584-702 ms / 817 MB, warm 126 ms / 191 MB. Lane `test-cost2` continues | test-cost |
-| contract check per lane commit | 1.7-3.0 s, 3.2 GB over 471 files. Lane `contract-check` | Astra |
-| `or`+join query shape | 60 ms, 180 MB for one symbol. Lane `q-orjoin` | Astra v2 |
+| full src/test contract census (MCP) and the per-edit hook check | census 1.7-3.0 s, 3.2 GB; per-edit hook 165 ms / 188 MB. Fixed in 730b63fa0: hook edit 57 ms / 80 MB, census 1.7 GB (edamame boxes each character; our own file reads move to Clojure's reader) | Astra, contract-check |
+| `or`+join query shape (historical baseline) | 60 ms, 180 MB for one symbol. Fixed in 150feaf5d: live 13-14 ms, 21-23 MB for 1-142 symbols, the rest is a Datahike scan (lane dh-fix2) | Astra v2, q-orjoin |
 | reset | leaked hosted agents (5.1 GB heap); fixed in 71439648a. Hosting an agent costs 1.4-1.6 s and ~100 MB; a reset 6-13 s. Lane `host-cost` | reset-leak |
 | store per small commit | ~150 KB (root copies 36%, index nodes 64%); accepted by the owner for ordinary small passes | r-record |
 
-Behavior seen in the real model specimen: invented results (`ns=> … #:seon.repl{…}`, `;; => 42`), prompt markers
+Behavior seen (model transcripts plus reader/MCP probes, r-read §3): invented results (`ns=> … #:seon.repl{…}`, `;; => 42`), prompt markers
 stripped while their namespace is ignored, a prose-only reply evaluating its first word, a refused imitation
 showing as a nil core fault (batch.clj:390).
 
@@ -66,13 +67,18 @@ transactions attempted and durable, store bytes, tokens. Profiler marks (~3.5 MB
 | definition (one-line `defn`) | < 300 ms | < 30 MB | 1 |
 | the pass after a definition | < 150 ms | < 10 MB | 1 |
 | opening or input pass | < 200 ms | < 5 MB | 1 each |
-| context build | < 10 ms | ≤ 3× the history text returned | — |
+| context append (each pass) | < 10 ms | ≤ 3× the appended text | — |
+| cold history acquisition (proc start / new assignment) at 1/10/200 exchanges | measured | measured, then a budget set from evidence | — |
 | one-test check (runner setup, selection, recording, cleanup) | < 300 ms cold, < 150 ms warm | < 20 MB | as §4.2 |
+| a new fault signature | — | — | +1 at the task home |
 
 Store: ~150 KB for an ordinary small pass, as observed (not a universal bound). Definition and blob passes are
 measured and reported.
 
-**S0 acceptance workload:**
+**The definition-pass and test-check allocation targets exceed the 10 MB stop-and-fix line (owner decision §7.6). S0
+uses the HTTP fixture for the model entrant; other entrants use their real entrances.
+
+S0 acceptance workload:**
 - histories of 1, 10 and 200 exchanges at 2 KB of shown text each;
 - one ordinary pass, one `defn` pass and the pass after it;
 - one opening and one input;
@@ -95,17 +101,25 @@ one cursor, as at a REPL, for each form:
     PRINT   the result value, once, while observation is open → shown text, handle, diagnostics
             (lazy realization happens here and is observed)
 once per pass:
-    ANALYZE ONE clj-kondo run over the pass's ORIGINAL source text (spans = original offsets),
-            joined to the captured observations by span; skipped when nothing was defined;
-            JVM passes have no SCI observation and no analysis
+    ANALYZE ONE clj-kondo run over the reader's CODE SLICES only: non-code characters blanked to
+            spaces with newlines and columns kept, so spans are original offsets, and each slice's
+            observed namespace and aliases carried along; joined to the captured observations by
+            span; skipped when nothing was defined. JVM passes have no SCI observation and no
+            analysis. Original text is kept for history
     RECORD  ONE transaction, [:db.fn/call] at the writer on the current head:
             evaluation rows (ids = pass id + position, minted before eval; agent ordinals
             assigned at the writer), program facts (analysis + one batched digest check at the
             writer, which guards changed definitions as program-facts-call does today),
-            the call row, agent facts, fault occurrences
+            the call row, agent facts, fault occurrences; staged blobs published around the
+            commit through `blob/with-publication!` (every entrant; blob bytes counted separately).
+            The stored exchange = the shown result + every diagnostic known before the commit.
+            Pending-commit ownership: S5 makes `seon.db/transact-call` return its pending
+            completion and keep the blob permit, so an unknown outcome can be awaited
     FINISH  each reply envelope = its shown result + diagnostics accumulated through RECORD,
             composed by the value printer from already-printed units (no re-render, no reading
-            EDN back); commit failures are delivered as a separate diagnostic (§4.6)
+            EDN back). Diagnostics that arise after the commit (installation, commit failure) are
+            delivered immediately to the caller, and durably through the error/input path (its
+            counted task-home write), so the next context sees them as an input
 ```
 
 **Same-pass admission (blocking design proof for S5).** Today `apply-pending` (`src/seon/batch.clj:480-501`)
@@ -119,7 +133,8 @@ analysis preserve each of these, with a probe per case, before any code:
 - a private `def`;
 - a schema-only registration then use;
 - a failed definition followed by forms that depend on it;
-- definitions created during lazy realization.
+- definitions created during lazy realization;
+- prose containing a quote before a definition (the analysis input rule; Astra's live specimen).
 
 If a case needs analysis before a later form, the design says so with its measured cost.
 
@@ -127,10 +142,11 @@ If a case needs analysis before a later form, the design says so with its measur
 
 | Item | Fate |
 |---|---|
-| read evidence, `executed`, `code-evidence`, receipt and `*open*` intent | consumed only by the refresh; deleted with it |
-| the fault-window query (34 ms) | replaced by the fault occurrences the pass observed |
+| read evidence, `executed`, `code-evidence`, receipt | consumed only by the refresh; deleted in S4 |
+| `*open*` intent and its bindings, `open-tx`, boot `recover-tx` | still used by effects (`effect.clj:210`) and effect-reaching tests (`test.clj:179`); deleted in S6 with effect provenance and test-attempt conversion |
+| the fault-window query (34 ms) | replaced by the fault occurrences the pass observed (S5) |
 | problem-assignment routing | the defect that mailed an agent's own errors to another agent (task 5e7b36bfd02d); deleted |
-| the run-observation reread | replies come from the held pass |
+| the run-observation reread | replies come from the held pass (S5) |
 | unread token, elision and transaction hot/repeated/ms stamps | deleted |
 | profile measurement upserts (51-78% of datoms) | owner decision §7.2 |
 
@@ -140,7 +156,7 @@ If a case needs analysis before a later form, the design says so with its measur
 |---|---|---|---|
 | model | §4.3 / SCI | the agent's proc | 1 per pass, plus opening/input passes |
 | MCP SCI | §4.3 / SCI | the agent's proc (request port, as today) | 1 |
-| MCP JVM | host / host | **not serialized.** No SCI context acquired; handles dig from JVM mode. Ordinal assigned at the writer. Never changes the agent's current namespace or answeredness | 1 |
+| MCP JVM | host / host | **not serialized.** Each host invocation is owned until its exit. Its result is bound into the agent's SCI result owner only when that context is already acquired; otherwise its handle answers gone-value data with the class (a named behavior change; `mcp_entrance_test` converts). Ordinal assigned at the writer. Never changes the agent's current namespace or answeredness | 1 |
 | test member | its resolved body stage (SCI or host) | its execution ownership | 1 member pass |
 | test request | the runner | — | 1 request aggregate on the recording connection; task-home completion its own write (§4.9). The runner's admission, reach/positive evidence and late-exit handling are kept |
 
@@ -171,7 +187,11 @@ If a case needs analysis before a later form, the design says so with its measur
   an error value flagged "only the REPL supplies results", which fixes the nil fault. A `;; =>` line or an
   `ns=>` line outside fences is prose, reported once as an imitation. This is a syntax rule, not a truth
   detector.
-- **MCP** code goes through the same reader; MCP code legitimately has no prose.
+- **Same line:** after a top-level form closes, the rest of that line (outside a fence) is prose.
+- **Fence tags** treated as code also include ```` ```cljc ````. Outside fences, bare literals and indented forms are
+  prose (a deliberate compatibility choice); `(help)` teaches fences.
+- **Reading** uses SCI's `parse-next` with the agent's live options, not bare edamame.
+- **MCP** code is read as one code fence: every line is code (so `result/e…`, `*1`, `:k` and literals evaluate).
 - **Slicing.** S2b-1 lands these rules inside today's `segments` (normalized edamame options, no Parinfer, no
   trials, linear). S6 lands the one cursor and deletes `segments`, `forgive` and the second read together with
   their consumers (`source-rows`, `submission-open-tx`, `plan-call`, the quoted MCP segmenter and its schema key).
@@ -181,19 +201,25 @@ If a case needs analysis before a later form, the design says so with its measur
 - **Opening pass** (origin `:opening`): runs once per assignment revision.
   - It is an ordinary pass through the proc and the fold, recorded in its own transaction before any model call.
   - Its completion fact is written beside its evaluations on the agent's branch, keyed by assignment id + task
-    revision. Reassigning bumps the revision and causes a new opening.
+    revision. A changed task declaration or a new assignment id causes a new opening; reassigning an unchanged
+    task does not.
   - A crash mid-opening reruns it.
 - **Input pass** (origin `:input`): runs when a wake carries something not yet delivered (a message, an error
   delivered to this agent, a proof result).
   - One generated form (name TBD) runs as its own recorded pass before the model call.
-  - The delivered identities are recorded on its evaluation and derived at the writer, so a restart never
-    appends the same input twice.
+  - The pass supplies the identities it actually read. The writer validates them and records them on the
+    evaluation, so a restart never appends the same input twice and newly arrived items are never marked
+    delivered. Task-home items (proofs, errors) are read explicitly at the task home with per-home basis
+    evidence; branch transaction numbers are not compared across homes.
   - It reads at a captured basis, which the model call carries as its presented basis. A message arriving
     between that read and the model reply stays due.
 - **Model call context:**
   - The proc holds the agent's transcript text for the assignment and appends each pass's finished envelopes.
   - It reads ordered history once: at proc start or a new assignment, with ONE narrow read of `:opening`,
     `:input` and `:model` exchanges.
+  - The same origin predicate applies to appending and to restart acquisition. Origins (S3): `:opening`,
+    `:input`, `:model` (shown), and `:outside` (MCP SCI and JVM) and `:test` (not shown: owner ruling, outside
+    runs stay out of the model's history; `an-sci-call-answers-what-the-agents-next-context-reads` converts).
   - Old `:system` rows are not shown: §6 makes S4 a reset point.
 - **Presentations:** REPL is the form as sent, then its envelope. DATA is the envelope map including `:form`.
   Both are composed by the value printer at FINISH from already-printed units. During S8 both are stored and
@@ -229,7 +255,8 @@ If a case needs analysis before a later form, the design says so with its measur
   re-derives the work, so the model may repeat an action (owner ruling).
 - **A definite refusal** retries once without the refused program facts. The retry records the evaluations, the
   call row (under its original call id) and the refusal as a diagnostic. If that retry is refused too, it records
-  the call row and the fault alone, in one transaction.
+  the call row and the fault alone, in one transaction. If that fails as well, it is the storage-failure path
+  below.
 - **An unknown outcome** gets no retry and no extra write. The pass keeps ownership of the pending transaction and
   the agent stays unavailable until the outcome is known, then the diagnostic is delivered.
 - **Storage failure** stops the graph; it never spins.
@@ -251,7 +278,9 @@ data adaptation of SCI's walk. `(help)` teaches only what is installed in its co
 
 The MCP await uses the caller's deadline. On timeout the caller gets a terminal "still running" reply. A host call
 that ignores interruption keeps ownership until its actual exit, and no second pass overlaps it.
-`turn-step`'s thread and interrupt owner stays.
+`turn-step`'s thread and interrupt owner stays. The caller's lifecycle deadline also bounds disarm and join
+(`stop-graph!`'s bound today comes from the deleted backstop). "No second pass overlaps" applies to the serialized
+SCI/model execution; JVM invocations are owned individually until exit.
 
 ### 4.9 Kept from the old spec (normative)
 
@@ -265,11 +294,8 @@ that ignores interruption keeps ownership until its actual exit, and no second p
 - Reload/adoption overlap checks.
 - Completion's cross-branch crash window with idempotent recovery.
 
-Three earlier rulings are reversed and need owner approval (§7.4):
-- CLAUDE.md's "a crash before settlement leaves the database unchanged": the agent's own writes now commit
-  earlier;
-- capture-before-call: the capture is deleted;
-- the intent commit: deleted.
+Two earlier rulings are reversed and need owner approval (§7.4): capture-before-call (the capture is deleted), and
+the intent commit (deleted). The crash law already matches §1.5 (AGENTS.md).
 
 ## 5. Order of work
 
@@ -290,10 +316,10 @@ Every slice:
 | S1 | Lookups and help | standard lookups |
 | S2a | Delete the dead debug context views | — |
 | S2b-1 | Reader rules inside `segments` (§4.3) | the reader contract, linear |
-| S3 | In-place preparations used by today's entrants: origin enum, pass ids, writer-assigned ordinals, the opening fact, input delivery identities, schema adopted on a live-store branch | facts exist |
+| S3 | In-place preparations used by today's entrants: origin enum (`:opening :input :model :outside :test`), pass ids, writer-assigned ordinals, the opening fact, input delivery identities, schema adopted on a live-store branch | facts exist |
 | S4 | Context: opening and input passes, the proc-held transcript, the prompt seam. Deletes the system turn, its seed, the old prompt, walk and capture; persisted `:generate` rows are terminated. **Reset point.** | the model sees forms that ran; the refresh is gone |
-| S5 | One settlement owner shared by all entrants (§4.1-4.2); faults per §4.2; the admission proof first. Old run duties stay until S6 | one writer |
-| S6 | The cut: one cursor plus D5 (§4.3); delete the run machinery, permits, backstop, parking and episodes; §4.5 work rules; §4.6 failure; §4.8 bounds; launch and bail (`complete!`, `assign!` refusals, the proof seam via `my.test/check`). **Reset point.** | one machinery transaction per pass |
+| S5 | Reviewed in three parts: (a) in-place recording preparation, including `transact-call` exposing pending completion and the blob permit; (b) entrant, effect and error integration; (c) the admission proof (§4.1), then one settlement owner shared by all entrants. Deletes the fault-window query, problem-assignment routing and the run-observation reread. Old run duties (`*open*`) stay until S6 | one writer |
+| S6 | The cut: one cursor plus D5 (§4.3); `*open*`, `open-tx`, `recover-tx` and effect provenance converted; delete the run machinery, permits, backstop, parking and episodes; §4.5 work rules; §4.6 failure; §4.8 bounds; launch and bail (`complete!`, `assign!` refusals, the proof seam via `my.test/check`). **Reset point.** | one machinery transaction per pass |
 | S7 | Proof results as input passes; SCI `run-test-var` fixed (task 9236eba3f99e) | test-based completion |
 | S8 | Experiments on DeepSeek (unlimited): REPL vs DATA, system role vs first form, stop on vs off, feedback turns | owner reads |
 
@@ -307,8 +333,10 @@ Before the reset:
 - persist the tasks into task files (as `persist-tasks` did);
 - verify task identities and references round-trip from the committed archive.
 
-Discarded: runtime-only definitions, messages, live handles (gone-value markers), evaluation history, error
-occurrences.
+Restored after the reset (checked): task files ingest with identities and references intact. Archive-only (root
+re-applies by documented forms if still needed): assignments and their revisions, agent settings, schedules, open
+error signatures. Discarded: runtime-only definitions, messages, live handles (gone-value markers), evaluation
+history, error occurrences.
 
 After the reset: retire only owned or unclaimed branches (`reset-leak` makes stop release hosted agents).
 
@@ -324,9 +352,12 @@ Each schema retirement is adopted on a branch of the live store BEFORE its slice
    - (b) keep them, filtered, in the pass transaction.
 3. **Proof-test runs:** the body is agent work; runner setup, selection, recording and cleanup are Seon work inside
    §3 (recommended).
-4. **The three reversed rulings in §4.9:** approve.
+4. **The two reversed rulings in §4.9** (capture-before-call, the intent commit): approve.
 5. **Subtree counts** (dh-fix; independent of this plan):
    - child counts in branch nodes (format change; old nodes stay unknown until rewritten);
    - counting at each split (I/O, no format change);
    - a recount job (temporary).
-6. Approve the plan as the replacement for agent-loop.md.
+6. **Allocation exceptions:** a one-line definition pass < 30 MB and a one-test check < 20 MB, above the 10 MB
+   stop-and-fix line, as interim targets (recommended, with stop-and-fix still applying above them), vs holding
+   both to 10 MB now.
+7. Approve the plan as the replacement for agent-loop.md.
