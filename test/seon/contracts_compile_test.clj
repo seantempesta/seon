@@ -5,7 +5,7 @@
   warm JVM accepts but a fresh store refuses at its first publication —
   `[:fn #(instance? Throwable %)]`, a bare `:vector`, `[:fn #(instance?
   ValueKey %)]`. Publication reads each contract as the indexer stored it
-  (`seon.fn` qualifies its symbols, `schema/canonical-definition` canonicalizes
+  (`seon.fn.analyzer` qualifies its symbols, `schema/canonical-definition` canonicalizes
   it, the row carries its `pr-str` and `seon.fn/add-contract-facts` reads it
   back with `edn/read-string`), then compiles it inside
   `schema/build-projection`'s registry: `schema/compilable-form` binds named
@@ -31,9 +31,9 @@
             [malli.core :as m]
             [seon.cache :as cache]
             [seon.error.refusal :as error.refusal]
-            [seon.fn :as seon.fn]
             [seon.fn.analyzer :as analyzer]
             [seon.schema :as schema]
+            [seon.schema.datahike]
             [seon.schema.edn :as schema.edn]))
 
 ;;; ---------------------------------------------------------------------------
@@ -102,33 +102,33 @@
           [v (first spec)])))
 
 (defn- read-source
-  "Every top-level form of one JVM source text, read by Clojure's reader: `:clj`
-  reader conditionals, nothing evaluated, every tag a tagged literal, `::k` and
-  `::alias/k` resolved through the text's `ns` form, which also carries the
-  `:end-line` and `:end-column` it ends at. Lists carry `:line` and `:column`."
+  "The JVM source's forms and positions, cached by text. Clojure reads without
+  evaluation, resolving namespaces and aliases from the source's own ns form."
   {:malli/schema [:=> [:cat :string] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [text]
-  (let [reader (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
-        eof (Object.)
-        options {:eof eof :read-cond :allow :features #{:clj}}]
-    (binding [*read-eval* false
-              *data-readers* {}
-              *default-data-reader-fn* tagged-literal]
-      (loop [forms [] namespace-name 'user aliases {}]
-        (let [form (binding [*reader-resolver* (reify clojure.lang.LispReader$Resolver
-                                                 (currentNS [_] namespace-name)
-                                                 (resolveClass [_ _] nil)
-                                                 (resolveAlias [_ symbol-alias] (get aliases symbol-alias))
-                                                 (resolveVar [_ _] nil))]
-                     (read options reader))]
-          (cond
-            (identical? eof form) forms
+  (cache/lookup ::read-source text (fn [_] (* 24 (count text)))
+                (fn []
+                  (let [reader (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
+                        eof (Object.)
+                        options {:eof eof :read-cond :allow :features #{:clj}}]
+                    (binding [*read-eval* false
+                              *data-readers* {}
+                              *default-data-reader-fn* tagged-literal]
+                      (loop [forms [] namespace-name 'user aliases {}]
+                        (let [form (binding [*reader-resolver* (reify clojure.lang.LispReader$Resolver
+                                                                 (currentNS [_] namespace-name)
+                                                                 (resolveClass [_ _] nil)
+                                                                 (resolveAlias [_ symbol-alias] (get aliases symbol-alias))
+                                                                 (resolveVar [_ _] nil))]
+                                     (read options reader))]
+                          (cond
+                            (identical? eof form) forms
 
-            (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
-            (recur (conj forms (vary-meta form assoc :end-line (.getLineNumber reader) :end-column (.getColumnNumber reader)))
-                   (second form) (require-aliases [form]))
+                            (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+                            (recur (conj forms (vary-meta form assoc :end-line (.getLineNumber reader) :end-column (.getColumnNumber reader)))
+                                   (second form) (require-aliases [form]))
 
-            :else (recur (conj forms form) namespace-name aliases)))))))
+                            :else (recur (conj forms form) namespace-name aliases)))))))))
 
 (def ^:private no-namespace-context
   "The context of a text with no `ns` form: nothing aliased or referred."
@@ -160,7 +160,7 @@
   `texts` maps each path to its text and read forms. One
   `seon.fn.analyzer/analyze` over each text through its `ns` form, keyed by
   canonical path (the analysis mirror resolves only canonical paths), then
-  `seon.fn/namespace-context` on each namespace definition: symbol
+  `seon.fn.analyzer/namespace-context` on each namespace definition: symbol
   qualification is the indexer's rule, not a copy of it. The analysis writes a
   private clj-kondo cache, so a reconstructed text never answers for the
   checkout's namespace of the same name in the shared cache. A text with no
@@ -169,7 +169,7 @@
   [texts]
   (let [paths (into {} (map (fn [path] [(.getCanonicalPath (io/file path)) path]))
                     (keys texts))
-        ;; only a symbol in a contract is qualified through the context
+        ;; Only a symbol in a contract is qualified through the context.
         names-symbol? (fn [forms] (some #(some symbol? (tree-seq coll? seq (declared-schema %))) (definition-forms forms)))
         prefixes (into {} (keep (fn [[path {::keys [text forms]}]]
                                   (when-some [prefix (when (names-symbol? forms) (through-ns-form text forms))]
@@ -184,7 +184,7 @@
           (into {}
                 (map (fn [entry]
                        [(get paths (:seon.fn.analyzer/filename entry))
-                        (@#'seon.fn/namespace-context entry)]))
+                        (analyzer/namespace-context entry)]))
                 (:seon.fn.analyzer/namespace-definitions
                  (analyzer/analyze
                   {:seon.fn.analyzer/sources prefixes
@@ -218,7 +218,7 @@
                         (assoc entry ::stored
                                (edn/read-string
                                 (pr-str (schema/canonical-definition
-                                         (@#'seon.fn/qualify-schema-symbols
+                                         (analyzer/qualify-schema-symbols
                                           authored context)))))
                         (catch Exception error
                           (assoc entry ::read-refusal
@@ -729,10 +729,7 @@
             [directory extension]))))
 
 (defn- checkout-defines?
-  "True when the checkout's source for the predicate's namespace defines it.
-
-  The answer a fresh JVM's `requiring-resolve` gives, read statically for a
-  predicate the checking JVM has not loaded (a snapshot JVM predates it)."
+  "True when the checkout's source declares the predicate."
   {:malli/schema [:=> [:cat :string :qualified-symbol] :boolean]}
   [root predicate]
   (boolean
@@ -741,26 +738,23 @@
            (definition-forms (read-source text))))))
 
 (defn- predicate-bindings
-  "Callables for every qualified predicate `definitions` name, and the rest.
-
-  `schema/build-projection` binds each with the same private resolver
-  (`requiring-resolve`) before compiling. A predicate the checking JVM cannot
-  resolve but the checkout's source defines is what a fresh JVM would bind;
-  only the compile is asked, so nothing validates against its stand-in. A
-  predicate neither answers is `::unresolved`: the refusal is named here
-  rather than letting `compilable-form` reload a namespace of the checking
-  JVM to look for it."
-  {:malli/schema [:=> [:cat :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Authored declarations are arbitrary data until they compile.", :gen/elements [nil false 0 "" :k [] {}]}]]]
-                  [:map [::bound :map] [::unresolved [:set :qualified-symbol]]]]}
-  [root definitions]
-  (reduce (fn [result predicate]
-            (if-let [callable (@#'schema/runtime-predicate predicate)]
-              (assoc-in result [::bound predicate] callable)
-              (if (checkout-defines? root predicate)
-                (assoc-in result [::bound predicate] (resolve 'clojure.core/any?))
-                (update result ::unresolved conj predicate))))
-          {::bound {} ::unresolved #{}}
-          (sort (into #{} (mapcat @#'schema/predicate-symbols-in) definitions))))
+  "Loaded or supplied predicates, compile-only placeholders for checkout declarations, and unresolved names."
+  {:malli/schema [:function [:=> [:cat :string [:sequential :seon.schema/value]] [:map [::bound :map] [::unresolved [:set :qualified-symbol]]]] [:=> [:cat :string [:sequential :seon.schema/value] :map] [:map [::bound :map] [::unresolved [:set :qualified-symbol]]]]]}
+  ([root definitions] (predicate-bindings root definitions {}))
+  ([root definitions supplied]
+   (reduce (fn [result predicate]
+             (if (contains? (::bound result) predicate)
+               result
+               (if-let [callable (when (find-ns (symbol (namespace predicate))) (find-var predicate))]
+                 (assoc-in result [::bound predicate] callable)
+                 (if (checkout-defines? root predicate)
+                   (assoc-in result [::bound predicate] #'clojure.core/any?)
+                   (if-let [callable (when-not (namespace-source root (symbol (namespace predicate)))
+                                      (@#'schema/runtime-predicate predicate))]
+                     (assoc-in result [::bound predicate] callable)
+                     (update result ::unresolved conj predicate))))))
+           {::bound supplied ::unresolved #{}}
+           (sort (into #{} (mapcat @#'schema/predicate-symbols-in) definitions)))))
 
 (defn- population-projection
   "The projection publication builds from the packaged schema population `forms`
@@ -774,7 +768,7 @@
     (schema/build-projection forms {} {:seon.schema/predicate-functions bound})))
 
 (defn packaged-projection
-  "The projection publication builds from the checkout's schema resources."
+  "The checkout's compile-check projection; unloaded checkout predicates are placeholders, never validators."
   {:malli/schema [:=> [:cat :string] :map]}
   [root]
   (population-projection root (checkout-packaged-forms root)))
@@ -790,16 +784,16 @@
     (assoc entry ::chain read-refusal
            ::reason (str "the indexer refuses to store it: "
                          (:seon.error/message (first read-refusal))))
-    (let [{::keys [bound unresolved]} (predicate-bindings root [stored])]
+    (let [{::keys [bound unresolved]} (predicate-bindings root [stored] (schema/predicate-functions-in projection))]
       (if (seq unresolved)
-        (assoc entry ::chain []
+        (assoc entry ::chain [] ::unresolved unresolved
                ::reason (str "Predicate " (pr-str (first unresolved))
                              " has no admitted callable in the corpus projection"
                              " (neither this JVM nor the checkout defines it)."))
         (try
           (m/function-schema
            (schema/compilable-form
-            stored (merge (schema/predicate-functions-in projection) bound))
+            stored bound)
            {:registry (:seon.schema.projection/registry projection)})
           nil
           (catch Exception error
@@ -813,15 +807,25 @@
                                    (when subject
                                      (str " " (pr-str subject))))))))))))
 
+(defn- contract-refusals
+  "Compile `contracts` against one projection, resolving their distinct predicates once."
+  {:malli/schema [:=> [:cat :string :map [:vector :map]] [:vector :map]]}
+  [root projection contracts]
+  (let [{::keys [bound]} (predicate-bindings root (map ::stored contracts)
+                                            (schema/predicate-functions-in projection))
+        projection (schema/with-predicate-functions projection bound)]
+    (into [] (keep #(contract-refusal root projection %)) contracts)))
+
 (defn- finding
   "One refusal in the hook's clj-kondo finding shape."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{::keys [path row col authored reason chain] definition ::symbol}]
-  {:filename path :row row :col col :level :error
-   :type :contract-compile
-   :message (str definition " :malli/schema " (pr-str authored)
-                 " does not compile against the packaged projection: " reason)
-   ::chain chain})
+  [{::keys [path row col authored reason chain] definition ::symbol :as entry}]
+  (merge (select-keys entry [::unresolved])
+         {:filename path :row row :col col :level :error
+          :type :contract-compile
+          :message (str definition " :malli/schema " (pr-str authored)
+                        " does not compile against the packaged projection: " reason)
+          ::chain chain}))
 
 (defn throw-census
   "The containment census of every `defn`/`defn-` under `root`'s src/ that
@@ -904,19 +908,18 @@
         texts (read-texts (merge (into {} (map (fn [path] [path (read-file path)])) paths)
                                  sources))
         baselines (some-> baselines (update-vals read-source))
-        contexts (namespace-contexts texts)]
+        contexts (namespace-contexts texts)
+        contracts (into [] (mapcat (fn [[path {::keys [forms]}]]
+                                    (declared-contracts path forms (get contexts path no-namespace-context))))
+                        (sort-by key texts))]
     (into (into (into (resources-placement resources)
                       (mapcat (fn [[path {::keys [forms]}]]
                                 (when-some [[_ baseline] (find baselines path)]
                                   (incomplete-changes path forms baseline))))
                       (sort-by key texts))
                 (uncontained root texts baselines projection))
-          (comp (mapcat (fn [[path {::keys [forms]}]]
-                          (declared-contracts path forms
-                                              (get contexts path no-namespace-context))))
-                (keep #(contract-refusal root projection %))
-                (map finding))
-          (sort-by key texts))))
+          (map finding)
+          (contract-refusals root projection contracts))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Regressions
@@ -932,9 +935,7 @@
                                                       (get contexts path no-namespace-context))))
                         texts)
         projection (packaged-projection ".")
-        findings (into [] (comp (keep #(contract-refusal "." projection %))
-                                (map finding))
-                       contracts)]
+        findings (mapv finding (contract-refusals "." projection contracts))]
     (is (< 1000 (count contracts))
         "the static reader found the population's contracts")
     (is (= [] (mapv #(select-keys % [:filename :row :message]) findings)))
@@ -1097,3 +1098,24 @@
       (is (empty? (filter #(= :uncontained-throw (:type %))
                           (check {::sources {"test/seon/probe_test.clj" edited}
                                   ::baselines {"test/seon/probe_test.clj" baseline}})))))))
+
+(deftest ^{:seon/tasks #{'seon.contracts-compile-test/corpus-check-allocation-is-floored-by-edamame-per-char-boxing}}
+  checkout-predicates-are-checked-without-loading-and-follow-source-content
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory "contract-predicates" (make-array java.nio.file.attribute.FileAttribute 0)))
+        path (io/file root "src/contract/cost/fixture.clj")
+        projection (packaged-projection ".")
+        form [:=> [:cat [:fn 'contract.cost.fixture/predicate?]] :boolean]
+        entry {::path "consumer.clj" ::row 1 ::col 1 ::symbol 'contract.cost.consumer/f
+               ::authored form ::stored form}]
+    (try
+      (.mkdirs (.getParentFile path))
+      (doseq [[definition expected]
+              [["(defn predicate? [x] true)" []]
+               ["(defn other? [x] true)" [#{'contract.cost.fixture/predicate?}]]
+               ["(defn predicate? [x] false)" []]]]
+        (spit path (str "(ns contract.cost.fixture)\n" definition))
+        (is (= expected
+               (mapv ::unresolved (contract-refusals (.getPath root) projection [entry]))))
+        (is (nil? (find-ns 'contract.cost.fixture))))
+      (finally
+        (doseq [file (reverse (file-seq root))] (io/delete-file file true))))))

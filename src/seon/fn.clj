@@ -195,39 +195,6 @@
     [(offset (::analyzer/row entry) (::analyzer/col entry))
      (offset (::analyzer/end-row entry) (::analyzer/end-col entry))]))
 
-;; A simple symbol in schema position that Malli's default registry names
-;; (`ifn?`, `string?`) is that Malli schema and stays itself; qualifying it to
-;; `clojure.core/ifn?` names no schema and refuses the whole projection.
-;; Inside `[:fn …]` a symbol is a predicate and resolves as source does.
-(def ^:private malli-schema-symbols
-  "The simple symbols Malli's default registry names, derived once."
-  (into #{} (filter symbol?) (keys (m/default-schemas))))
-
-(defn- qualify-schema-symbols
-  "The authored contract `form` with its symbols qualified through the namespace context, if any."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil 0 :k [] {}]}] [:maybe [:map [:aliases [:map-of :symbol :symbol]] [:refers [:map-of :symbol :qualified-symbol]]]]]
-                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil 0 :k [] {}]}]]}
-  [form {:keys [aliases refers]}]
-  (let [qualify
-        (fn [value]
-          (if-not (symbol? value)
-            value
-            (if-let [symbol-ns (namespace value)]
-              (if-let [target (get aliases (symbol symbol-ns))]
-                (symbol (str target) (name value))
-                value)
-              (or (get refers value)
-                  (when (ns-resolve 'clojure.core value)
-                    (symbol "clojure.core" (name value)))
-                  value))))]
-    ((fn walk [value]
-       (cond
-         (and (vector? value) (= :fn (first value))) (walk/postwalk qualify value)
-         (and (simple-symbol? value) (contains? malli-schema-symbols value)) value
-         (coll? value) (walk/walk walk identity value)
-         :else (qualify value)))
-     form)))
-
 (declare task-links)
 
 (defn- namespace-entity
@@ -795,7 +762,7 @@
         (:malli/schema metadata)
         (assoc :seon.fn/spec
                (pr-str (schema/canonical-definition
-                        (qualify-schema-symbols
+                        (analyzer/qualify-schema-symbols
                          (:malli/schema metadata)
                         (get namespace-contexts namespace-name)))))
         (seq (get calls-by-caller qualified))
@@ -1455,37 +1422,6 @@
                        [attribute (set kept)])))
           targets)))
 
-(defn- namespace-context
-  "Requires, aliases, refers and imports of one namespace (its `ns` form and
-  top-level `require`s), from the clause facts the analyzer attached to its
-  definition (`with-namespace-clauses`),
-  never a second read of the file. An `:as-alias` require creates no load
-  edge (clojure `load-lib`, core.clj:6074-6078); an import binds its simple
-  class name, as `clojure.core/import` does. clj-kondo records no renamed
-  local, so a `:rename` is refused by name."
-  {:malli/schema [:=> [:cat :map]
-                  [:map [:requires [:set :symbol]]
-                   [:aliases [:map-of :symbol :symbol]]
-                   [:refers [:map-of :symbol :qualified-symbol]]
-                   [:imports [:map-of :symbol :symbol]]]]}
-  [{::analyzer/keys [clause-usages clause-refers clause-imports clause-renames]}]
-  (when-some [rename (first clause-renames)]
-    (let [message "A require's :rename is not indexed: clj-kondo's analysis records no renamed local."]
-      (throw (ex-info message {:seon.fn/index-refused true
-                               :seon.cluster.source/phase :analysis
-                               :seon.error/message message
-                               ::analysis-entry rename}))))
-  {:requires (into #{} (comp (remove ::analyzer/as-alias) (map ::analyzer/to)) clause-usages)
-   :aliases (into {} (comp (filter ::analyzer/alias)
-                           (map (juxt ::analyzer/alias ::analyzer/to))) clause-usages)
-   :refers (into {} (map (fn [{::analyzer/keys [to] target-name ::analyzer/name}]
-                           [target-name (symbol (str to) (str target-name))]))
-                 clause-refers)
-   :imports (into {} (map (fn [{class-name ::analyzer/class}]
-                            [(symbol (subs class-name (inc (or (str/last-index-of class-name ".") -1))))
-                             (symbol class-name)]))
-                  clause-imports)})
-
 (defn- analysis-entities-by-file
   "Rows by file, with source-observed writes independent of schema membership.
 
@@ -1530,7 +1466,7 @@
         (into {}
               (map (fn [entry]
                      [(::analyzer/name entry)
-                      (assoc (namespace-context entry)
+                      (assoc (analyzer/namespace-context entry)
                              :namespace-meta (::analyzer/meta entry))]))
               (::analyzer/namespace-definitions analysis))]
     (reduce

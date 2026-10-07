@@ -6,6 +6,8 @@
             [clj-kondo.impl.utils :as kondo.utils]
             [clj-kondo.impl.rewrite-clj.reader :as kondo.reader]
             [clojure.edn :as edn]
+            [clojure.walk :as walk]
+            [malli.core :as m]
             [clj-kondo.impl.version :as kondo.version]
             [babashka.process :as process]
             [seon.id :as id]
@@ -850,3 +852,61 @@
       ;; clj-kondo remains the diagnostic owner for malformed input. A parser
       ;; disagreement must not broaden context or throw out of the agent loop.
       #{namespace-name})))
+
+;; A simple symbol in schema position that Malli's default registry names
+;; (`ifn?`, `string?`) is that Malli schema and stays itself; qualifying it to
+;; `clojure.core/ifn?` names no schema and refuses the whole projection.
+;; Inside `[:fn …]` a symbol is a predicate and resolves as source does.
+(def ^:private malli-schema-symbols
+  "The simple symbols Malli's default registry names, derived once."
+  (into #{} (filter symbol?) (keys (m/default-schemas))))
+
+(defn qualify-schema-symbols
+  "The authored contract `form` with its symbols qualified through the namespace context, if any."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil 0 :k [] {}]}] [:maybe [:map [:aliases [:map-of :symbol :symbol]] [:refers [:map-of :symbol :qualified-symbol]]]]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "An authored contract is arbitrary data until it compiles.", :gen/elements [nil 0 :k [] {}]}]]}
+  [form {:keys [aliases refers]}]
+  (let [qualify
+        (fn [value]
+          (if-not (symbol? value)
+            value
+            (if-let [symbol-ns (namespace value)]
+              (if-let [target (get aliases (symbol symbol-ns))]
+                (symbol (str target) (name value))
+                value)
+              (or (get refers value)
+                  (when (ns-resolve 'clojure.core value)
+                    (symbol "clojure.core" (name value)))
+                  value))))]
+    ((fn walk [value]
+       (cond
+         (and (vector? value) (= :fn (first value))) (walk/postwalk qualify value)
+         (and (simple-symbol? value) (contains? malli-schema-symbols value)) value
+         (coll? value) (walk/walk walk identity value)
+         :else (qualify value)))
+     form)))
+
+(defn namespace-context
+  "The requires, aliases, refers and imports carried by a namespace analysis entry."
+  {:malli/schema [:=> [:cat :map]
+                  [:map [:requires [:set :symbol]]
+                   [:aliases [:map-of :symbol :symbol]]
+                   [:refers [:map-of :symbol :qualified-symbol]]
+                   [:imports [:map-of :symbol :symbol]]]]}
+  [{::keys [clause-usages clause-refers clause-imports clause-renames]}]
+  (when-some [rename (first clause-renames)]
+    (let [message "A require's :rename is not indexed: clj-kondo's analysis records no renamed local."]
+      (throw (ex-info message {:seon.fn/index-refused true
+                               :seon.cluster.source/phase :analysis
+                               :seon.error/message message
+                               :seon.fn/analysis-entry rename}))))
+  {:requires (into #{} (comp (remove ::as-alias) (map ::to)) clause-usages)
+   :aliases (into {} (comp (filter ::alias)
+                           (map (juxt ::alias ::to))) clause-usages)
+   :refers (into {} (map (fn [{::keys [to] target-name ::name}]
+                           [target-name (symbol (str to) (str target-name))]))
+                 clause-refers)
+   :imports (into {} (map (fn [{class-name ::class}]
+                            [(symbol (subs class-name (inc (or (str/last-index-of class-name ".") -1))))
+                             (symbol class-name)]))
+                  clause-imports)})

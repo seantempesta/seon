@@ -2433,6 +2433,7 @@
 
 (defn- analyzed-namespace-contexts
   "Each fixture source's namespace context, from one publication analysis."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol :map]]}
   [sources]
   (let [root (.getCanonicalPath (fixture-root))
         analysis (analyzer/analyze
@@ -2441,7 +2442,7 @@
     (into {}
           (map (fn [entry]
                  [(::analyzer/name entry)
-                  (try (#'seon.fn/namespace-context entry)
+                  (try (analyzer/namespace-context entry)
                        (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]))
           (::analyzer/namespace-definitions analysis))))
 
