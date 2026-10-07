@@ -1,0 +1,151 @@
+diff --git a/test/seon/contracts_compile_test.clj b/test/seon/contracts_compile_test.clj
+index 90874e74b..95c95e5d2 100644
+--- a/test/seon/contracts_compile_test.clj
++++ b/test/seon/contracts_compile_test.clj
+@@ -26,7 +26,7 @@
+   (:require [clojure.edn :as edn]
+             [clojure.java.io :as io]
+             [clojure.string :as str]
+-            [clojure.test :refer [deftest is testing]]
++            [clojure.test :refer [are deftest is testing]]
+             [clojure.walk :as walk]
+             [edamame.core :as edamame]
+             [malli.core :as m]
+@@ -319,9 +319,11 @@
+             (let [here (when (site? node)
+                          [(cond-> {::row (:row (meta node)) ::col (:col (meta node))
+                                    ::converted? converted?
++                                   ::in-catch? (boolean (seq bindings))
+                                    ::resurfaced? (and (seq? node) (= 'throw (first node))
+                                                       (contains? bindings (second node)))}
+-                            (symbol? node) (assoc ::node node))])]
++                            (symbol? node) (assoc ::node node)
++                            (and (seq? node) (= 'throw (first node))) (assoc ::throw node))])]
+               (into (vec here)
+                     (cond
+                       (and (seq? node) (#{'quote 'comment} (first node))) []
+@@ -357,6 +359,54 @@
+   [node]
+   (and (seq? node) (= 'throw (first node))))
+ 
++;; A throw of the one error map is the law, not a crash: CLAUDE.md "every
++;; other function throws the same map inside `ex-info` and declares only its
++;; success value". Its data is a registered variant: a constructor call
++;; `(seon.error.refusal/error :variant ...)`, a literal map whose
++;; `:seon.error/type` is registered (a namespace the constructor's own
++;; requires cannot call it), or a local every binding of which is one. A
++;; throw inside a catch clause wraps a caught cause and is judged as before.
++
++(def ^:private error-constructors
++  "The installed error constructors."
++  #{'seon.error.refusal/error})
++
++(defn- local-inits
++  "Every init form a `let`-family binding vector in `form` gives each simple symbol."
++  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]] [:map-of :symbol [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A binding's init is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]]}
++  [form]
++  (reduce (fn [m [k init]] (if (simple-symbol? k) (update m k (fnil conj []) init) m))
++          {}
++          (for [node (tree-seq coll? seq form)
++                :when (and (seq? node) ('#{let let* when-let if-let when-some if-some loop} (first node))
++                           (vector? (second node)))
++                pair (partition 2 (second node))]
++            pair)))
++
++(defn- error-data-form?
++  "True when `node` builds a registered error variant of `forms`: a constructor
++  call naming one, or a literal map whose `:seon.error/type` is one; call
++  heads resolve through `qualify`."
++  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any source node.", :gen/elements [nil 0 :k [] {}]}] :map [:=> [:cat :symbol] :symbol]] :boolean]}
++  [node forms qualify]
++  (boolean
++   (cond (map? node) (let [t (get node :seon.error/type)] (and (keyword? t) (contains? forms t)))
++         (and (seq? node) (symbol? (first node)))
++         (and (error-constructors (qualify (first node))) (keyword? (second node)) (contains? forms (second node)))
++         :else false)))
++
++(defn- lawful-throw?
++  "True when the throw `node` raises `(ex-info message data ...)` whose data is
++  a registered error variant (`error-data-form?`), directly or through a local
++  of `inits` every binding of which is one."
++  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any source node.", :gen/elements [nil 0 :k [] {}]}] [:map-of :symbol [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A binding's init is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] :map [:=> [:cat :symbol] :symbol]] :boolean]}
++  [node inits forms qualify]
++  (let [raised (second node)
++        data (when (and (seq? raised) ('#{ex-info clojure.core/ex-info} (first raised))) (nth raised 2 nil))]
++    (boolean (or (error-data-form? data forms qualify)
++                 (and (symbol? data) (seq (get inits data))
++                      (every? #(error-data-form? % forms qualify) (get inits data)))))))
++
+ (defn- output-schemas
+   "The output schema of each arity `contract` declares, following a named
+   function schema through `forms`."
+@@ -489,14 +539,21 @@
+         converting (runners definitions)
+         local-transactions (into #{} (map #(symbol (name %)))
+                                  (transaction-functions {"" text}))
++        aliases (require-aliases source)
++        qualify (fn [head] (if-let [ns-part (namespace head)]
++                             (symbol (str (get aliases (symbol ns-part) ns-part)) (name head))
++                             (symbol (str namespace-name) (name head))))
+         facts (into {}
+                     (map (fn [form]
+-                           (let [sites (form-sites form throw-site? converting)
++                           (let [inits (local-inits form)
++                                 sites (mapv #(assoc % ::lawful? (and (not (::in-catch? %))
++                                                                      (lawful-throw? (::throw %) inits forms qualify)))
++                                             (form-sites form throw-site? converting))
+                                  references (form-sites form #(and (symbol? %) (contains? names %)) converting)]
+                              [(second form)
+                               {::form form
+                                ::sites sites
+-                               ::direct (into [] (comp (remove #(or (::converted? %) (::resurfaced? %)))
++                               ::direct (into [] (comp (remove #(or (::converted? %) (::resurfaced? %) (::lawful? %)))
+                                                        (map #(assoc % ::sites-own? true)))
+                                               sites)
+                                ::references (filterv #(not= (second form) (::node %)) references)
+@@ -941,6 +998,32 @@
+       (is (empty? (filter #(= :incomplete-contract (:type %))
+                           (check {::sources {"src/seon/probe.clj" edited}})))))))
+ 
++(deftest a-throw-of-a-registered-error-variant-is-the-law
++  ;; CLAUDE.md "Nothing crashes": a function whose job is not to answer throws
++  ;; the one error map inside ex-info and declares only its success value.
++  (let [edited "(ns seon.probe (:require [seon.error.refusal :as refusal]))
++(defn literal {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"m\" {:seon.error/type :seon.id/unhashable-error :seon.error/operation 'seon.probe/literal})))
++(defn constructed {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"m\" (refusal/error :seon.id/unhashable-error {:seon.error/operation 'seon.probe/constructed}))))
++(defn bound {:malli/schema [:=> [:cat :int] :int]} [x] (let [e (refusal/error :seon.id/unhashable-error {:seon.error/operation 'seon.probe/bound})] (throw (ex-info (:seon.error/message e) e))))
++(defn unregistered {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"m\" {:seon.error/type :seon.probe/made-up-error})))
++(defn bare-map {:malli/schema [:=> [:cat :int] :int]} [x] (throw (ex-info \"m\" {:x x})))
++(defn non-error {:malli/schema [:=> [:cat :int] :int]} [x] (throw (Exception. \"m\")))
++(defn bound-elsewise {:malli/schema [:=> [:cat :int] :int]} [x] (let [e {:x x}] (throw (ex-info \"m\" e))))
++(defn wraps-caught {:malli/schema [:=> [:cat :int] :int]} [x] (try (inc x) (catch Exception c (throw (ex-info \"m\" (refusal/error :seon.id/unhashable-error {:seon.error/operation 'seon.probe/wraps-caught}) c)))))"
++        refused (into #{} (comp (filter #(= :uncontained-throw (:type %)))
++                                (map #(symbol (first (str/split (:message %) #" ")))))
++                      (check {::sources {"src/seon/probe.clj" edited}
++                              ::baselines {"src/seon/probe.clj" "(ns seon.probe)"}}))]
++    (are [function refused?] (= refused? (contains? refused function))
++      'seon.probe/literal        false
++      'seon.probe/constructed    false
++      'seon.probe/bound          false
++      'seon.probe/unregistered   true
++      'seon.probe/bare-map       true
++      'seon.probe/non-error      true
++      'seon.probe/bound-elsewise true
++      'seon.probe/wraps-caught   true)))
++
+ (deftest a-throw-that-reaches-its-caller-needs-an-error-alternative
+   ;; Owner 2026-09-28, AGENTS.md "Nothing crashes": a function an edit adds or
+   ;; changes that throws to its caller declares the failure in its output
+diff --git a/test/seon/id_test.clj b/test/seon/id_test.clj
+index 72819afc1..c7c793117 100644
+--- a/test/seon/id_test.clj
++++ b/test/seon/id_test.clj
+@@ -39,6 +39,8 @@
+     (->Point 1)           {:a 1}              false)
+   (is (= "ebc54726b35b" (id/id 'abc)) "the encoding is fixed: every stored identity was derived under it")
+   (is (= "ebc54726" (id/id 'abc 8)))
++  (is (= "7e98dfeae37c" (id/id [(apply str (repeat 10000 "ab")) (str (apply str (repeat 8190 "x")) "é") :a/b 'c/d]))
++      "text longer than the digest buffer encodes as it always has")
+   (is (= (id/id ["turn" 2]) (id/evaluation "turn" 2)))
+   (is (= (id/id ["turn" 2] 8) (id/digest 8 ["turn" 2])))
+   (let [a (id/id) b (id/id)]

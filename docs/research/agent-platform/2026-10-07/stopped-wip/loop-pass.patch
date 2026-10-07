@@ -1,0 +1,912 @@
+diff --git a/resources/seon/schemas/seon.agent.loop.edn b/resources/seon/schemas/seon.agent.loop.edn
+index 2f124fbac..8f76b5385 100644
+--- a/resources/seon/schemas/seon.agent.loop.edn
++++ b/resources/seon/schemas/seon.agent.loop.edn
+@@ -1,7 +1,12 @@
+-#:seon.agent.loop{:why [:string {:min 1 :description "Why a context unit is shown: one line for the reader auditing the context, never sent to the model."}]
+-                  :form [:schema {:description "The requery form an agent can run at its REPL to read the unit's value again."} :seon.schema/value]
+-                  :value [:schema {:description "The value the unit's form answers on the context's database, shown whole."} :seon.schema/value]
+-                  :unit [:map {:description "One unit of a task-seeded context (seon.agent.loop/task-context)."}
+-                         [:seon.agent.loop/why :seon.agent.loop/why]
+-                         [:seon.agent.loop/form :seon.agent.loop/form]
+-                         [:seon.agent.loop/value :seon.agent.loop/value]]}
++#:seon.agent.loop{:proofs [:map-of {:description "Each proof test of a task, with its latest recorded result on the reading branch (seon.test/recorded-result): a result, or the unknown naming missing evidence."}
++                           :qualified-symbol [:or :seon.test/result :seon.test/execution-error :seon.test/unknown-error]]
++                  :task-view [:map {:description "A task as its worker reads it at the REPL (seon.agent.loop/task)."}
++                              [:seon.task/sym :seon.task/sym]
++                              [:seon.task/intent :seon.task/intent]
++                              [:seon.task/must-read {:optional true} :seon.task/must-read]
++                              [:seon.agent.loop/proofs :seon.agent.loop/proofs]
++                              [:seon.render/operations {:optional true} :seon.render/operations]]
++                  :no-task-agent [:and {:description "The agent holding no opened task: none is assigned, or its opening run never ran."} :seon.agent/id]
++                  :no-task-error [:and :seon.error/base
++                                  [:map {:seon.db/attributes true}
++                                   [:seon.agent.loop/no-task-agent :seon.agent.loop/no-task-agent]]]}
+diff --git a/resources/seon/schemas/seon.help.edn b/resources/seon/schemas/seon.help.edn
+index dd46a659a..ab354d1b7 100644
+--- a/resources/seon/schemas/seon.help.edn
++++ b/resources/seon/schemas/seon.help.edn
+@@ -1,6 +1,20 @@
+-{:seon.help/lines [:vector :string]
++{:seon.help/heading [:string {:min 1 :description "A help section's heading."}]
++ :seon.help/rule [:string {:min 1 :description "One short rule of the REPL protocol, true of the installed system."}]
++ :seon.help/example [:string {:min 1 :description "The one example a rule shows: a form, or a REPL exchange."}]
++ :seon.help/entry [:map {:description "One help rule and its example."}
++                   [:seon.help/rule :seon.help/rule]
++                   [:seon.help/example {:optional true} :seon.help/example]]
++ :seon.help/rules [:vector {:min 1} :seon.help/entry]
++ :seon.help/section [:map {:description "A help section: a heading and its rules."}
++                     [:seon.help/heading :seon.help/heading]
++                     [:seon.help/rules :seon.help/rules]]
++ :seon.help/title [:string {:min 1 :description "The help's title line."}]
++ :seon.help/summary [:string {:min 1 :description "The help's opening paragraph."}]
++ :seon.help/sections [:vector {:min 1} :seon.help/section]
+  :seon.help/help
+- [:map {:description "The REPL instructions returned as data by help."
++ [:map {:description "The REPL protocol returned as data by help: sections of short rules, one example each."
+         :seon.render/ai seon.bootstrap/render-help-ai
+         :seon.render/html seon.bootstrap/render-help-html}
+-  [:seon.help/lines :seon.help/lines]]}
++  [:seon.help/title :seon.help/title]
++  [:seon.help/summary :seon.help/summary]
++  [:seon.help/sections :seon.help/sections]]}
+diff --git a/src/seon/agent/loop.clj b/src/seon/agent/loop.clj
+index 89983ea88..ff07a1075 100644
+--- a/src/seon/agent/loop.clj
++++ b/src/seon/agent/loop.clj
+@@ -1,230 +1,179 @@
+ (ns seon.agent.loop
+-  "The agent loop's context producers (spec agent-loop §3), not yet wired into
+-  any pass: the system message every call carries, and the context a task
+-  seeds. Both read one database value and answer data or text; neither writes.
+-
+-  The task context is a vector of units. Each unit is a requery form an agent
+-  can run at its REPL, the value that form answers on this database, and why
+-  the unit is shown. `context-text` prints the units as REPL exchanges; every
+-  value goes through the value printer under its budget."
+-  (:require [clojure.edn :as edn]
+-            [clojure.string :as str]
+-            [seon.ai.tokens :as tokens]
+-            [seon.bootstrap :as bootstrap]
+-            [seon.cluster.instruction :as instruction]
++  "An agent's model context: one REPL transcript of forms that ran.
++
++  `opening-tx` opens one system run of the agent whose forms are generated
++  from its task: `(help)`, the task, then `doc` and source for each
++  reference. The agent's turn proc evaluates and records it like any run.
++  `context` prints that run and every later form the agent's replies carried,
++  each as `user=>` and its stored result; nothing else is stored."
++  (:require [clojure.string :as str]
+             [seon.db :as db]
+             [seon.error.refusal :as refusal]
+-            [seon.render.value :as render.value]
+-            [seon.repl :as repl]
+-            [seon.sci.eval :as sci.eval]
++            [seon.eval :as evaluation]
++            [seon.id :as id]
+             [seon.task :as task]
+-            [seon.test :as test]))
+-
+-;;; SYSTEM MESSAGE: the REPL protocol from `(help)` and each toolkit namespace's
+-;;; own documentation, the same text on every call of one agent.
+-
+-(defn- tool-lines
+-  "One namespace's lines: its summary, then each public function's summary
+-  and documented example, the call an agent copies."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:vector :string]]}
+-  [database namespace-name]
+-  (let [summary (:summary (sci.eval/documentation-value database namespace-name namespace-name))
+-        functions (map :sym (:functions (sci.eval/directory-value database namespace-name true)))]
+-    (into [(str namespace-name (when summary (str ": " summary)))]
+-          (for [sym functions
+-                :let [{doc :summary example :example} (sci.eval/documentation-value database sym sym)]]
+-            (str "  " sym (when (seq doc) (str ": " doc))
+-                 (when (seq example) (str "\n    " (str/replace example "\n" "\n    "))))))))
+-
+-(defn system-message
+-  "The system message sent with every model call of `agent-id`.
+-
+-  The REPL protocol `(help)` answers, then each context-relevant namespace's tools
+-  (`seon.cluster.instruction/toolkit-namespaces`) as their own docs state them.
++            [seon.test :as test]
++            [seon.turn :as turn]))
++
++(defn- no-task
++  "The refusal naming `agent-id` as holding no opened task."
++  {:malli/schema [:=> [:cat :seon.agent/id :qualified-symbol] :seon.agent.loop/no-task-error]}
++  [agent-id operation]
++  (refusal/error :seon.agent.loop/no-task-error
++                 {:seon.error/operation operation
++                  :seon.error/message "The agent holds no opened task: assign one, then open it (seon.agent.loop/opening-tx)."
++                  :seon.error/member :seon.agent.loop/no-task-agent
++                  :seon.agent.loop/no-task-agent agent-id}))
++
++;;; THE TASK, as the agent reads it at its REPL.
++
++(defn- task-database
++  "The database value tasks live on, seen from `database`: the task home's."
++  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
++  [database]
++  (if-let [home (task/home database)] (db/db home) database))
++
++(defn task
++  "The task `task-sym` as its worker reads it: intent, must-read, and each
++  proof test with its latest result on this branch, plus the check that runs them.
+ 
+   Example:
+-  (seon.agent.loop/system-message (seon.db/db) \"root\")
+-
+-  ## Costs
+-
+-  One help read, then per toolkit namespace one documentation pull and one
+-  directory read; nothing is cached."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :string]}
+-  [database agent-id]
+-  (str/join "\n" (concat (:seon.help/lines (bootstrap/help-value database agent-id))
+-                         [""]
+-                         (mapcat #(tool-lines database %) (instruction/toolkit-namespaces database)))))
+-
+-;;; TASK CONTEXT: the task, then what its refs reach.
+-
+-(defn- unit
+-  "One context unit: why it is shown, the requery form and its value."
+-  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.schema/value] :seon.agent.loop/unit]}
+-  [why form value]
+-  {:seon.agent.loop/why why :seon.agent.loop/form form :seon.agent.loop/value value})
+-
+-(def ^:private task-selector
+-  [:seon.task/id :seon.task/sym :seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
+-   :seon.task/must-read :seon.task/evidence])
+-
+-(defn- contract-keys
+-  "The registered schema keys `functions`' declared contracts name, in order,
+-  each once; property keys and unregistered names are not schemas."
+-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-symbol]] [:vector :qualified-keyword]]}
+-  [database functions]
+-  (let [named (distinct (for [sym functions
+-                              :let [spec (:seon.fn/spec (db/pull database [:seon.fn/spec] [:seon.fn/sym sym]))]
+-                              :when spec
+-                              k (tree-seq coll? seq (edn/read-string spec))
+-                              :when (qualified-keyword? k)]
+-                          k))
+-        registered (set (when (seq named)
+-                          (db/q '[:find [?k ...] :in $ [?k ...] :where [_ :seon.schema/key ?k]] database (vec named))))]
+-    (filterv registered named)))
+-
+-(defn- test-units
+-  "A proof test's recorded status, its recorded failures when it has any, and
+-  its source."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :seon.agent.loop/unit]]}
+-  [database proof]
+-  (let [failures-query '[:find [(pull ?f [:seon.test.failure/type :seon.test.failure/message
+-                                          :seon.test.failure/expected :seon.test.failure/actual
+-                                          :seon.test.failure/testing-contexts :seon.test.failure/line]) ...]
+-                         :in $ ?s :where [?t :seon.test/sym ?s] [?f :seon.test.failure/test ?t]]
+-        failures (db/q failures-query database proof)]
+-    (cond-> [(unit "A proof test: the task is done when every proof is green on your branch. Its latest recorded result."
+-                   (list 'seon.test/recorded-result '(seon.db/db) (list 'quote proof))
+-                   (test/recorded-result database proof))]
+-      (seq failures)
+-      (conj (unit "The proof's recorded failing assertions."
+-                  (list 'seon.db/q (list 'quote failures-query) '(seon.db/db) (list 'quote proof))
+-                  (vec failures)))
+-      :always
+-      (conj (unit "The proof's source: what it asserts."
+-                  (list 'clojure.repl/source-fn (list 'quote proof)) (sci.eval/stored-source database proof))))))
+-
+-(defn- function-units
+-  "A function's documentation (summary, arglists, contract) and its stored source."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :seon.agent.loop/unit]]}
+-  [database sym]
+-  [(unit "A function the task names: its documentation and contract."
+-         (list 'doc sym) (sci.eval/documentation-value database sym sym))
+-   (unit "Its stored source, the code to change."
+-         (list 'clojure.repl/source-fn (list 'quote sym)) (sci.eval/stored-source database sym))])
+-
+-(defn- schema-unit
+-  "A schema key's stored form."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword] :seon.agent.loop/unit]}
+-  [database schema-key]
+-  (unit "A schema the contracts above name: the shape of the data in and out."
+-        (list 'seon.db/pull '(seon.db/db) [:seon.schema/form] [:seon.schema/key schema-key])
+-        (db/pull database [:seon.schema/form] [:seon.schema/key schema-key])))
+-
+-(defn- namespace-unit
+-  "A namespace the task names: its public functions and schemas."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :seon.agent.loop/unit]}
+-  [database namespace-name]
+-  (unit "A namespace the task names: its public functions and schemas."
+-        (list 'dir namespace-name) (sci.eval/directory-value database namespace-name true)))
+-
+-(defn- related-units
+-  "Other tasks naming the same functions, and recorded errors whose operation
+-  is one of them; each unit only when it has members."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle [:vector :qualified-symbol]]
+-                  [:vector :seon.agent.loop/unit]]}
+-  [database handle functions]
+-  (let [tasks-query '[:find [(pull ?t [:seon.task/id :seon.task/ns :seon.task/name :seon.task/intent]) ...]
+-                      :in $ [?f ...] ?h
+-                      :where [?t :seon.task/must-read ?f] [?t :seon.task/id ?id] [(not= ?id ?h)]]
+-        errors-query '[:find [(pull ?e [:seon.error/signature :seon.error/operation :seon.error/message
+-                                        :seon.error/occurrence-count]) ...]
+-                       :in $ [?op ...]
+-                       :where [?e :seon.error/operation ?op] [?e :seon.error/signature _]]
+-        tasks (when (seq functions) (db/q tasks-query database functions handle))
+-        errors (when (seq functions) (db/q errors-query database functions))]
+-    (cond-> []
+-      (seq tasks) (conj (unit "Other tasks naming the same functions: work that may overlap or conflict."
+-                              (list 'seon.db/q (list 'quote tasks-query) '(seon.db/db) (list 'quote functions) handle)
+-                              (vec tasks)))
+-      (seq errors) (conj (unit "Recorded errors raised by these functions."
+-                               (list 'seon.db/q (list 'quote errors-query) '(seon.db/db) (list 'quote functions))
+-                               (vec errors))))))
+-
+-(defn task-context
+-  "The context task `handle` seeds, as units.
+-
+-  The task; its edges (subjects
+-  and proof tests); each proof's status, recorded failures and source; each
+-  must-read or subject function's documentation and source; the schemas
+-  their contracts name; each namespace subject's directory; other tasks and
+-  recorded errors touching the same functions. A handle naming no task
+-  refuses `:unknown-task`.
++  (seon.agent.loop/task 'scratch.add/add-one-returns-its-argument-plus-one)"
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
++                  [:or :seon.agent.loop/task-view :seon.db/invalid-read-error]]}
++  [database task-sym]
++  (let [row (db/pull (task-database database) [:seon.task/sym :seon.task/intent :seon.task/must-read]
++                     [:seon.task/sym task-sym])
++        edges (task/task-edges database task-sym)
++        proofs (sort (:seon.task/proofs edges))]
++    (cond
++      (:seon.error/at row) row
++      (:seon.error/at edges) edges
++      :else (cond-> (assoc row :seon.agent.loop/proofs (into (sorted-map)
++                                                             (map (juxt identity #(test/recorded-result database %)))
++                                                             proofs))
++              (seq proofs) (assoc :seon.render/operations
++                                  [(list 'my.test/check {:seon.test/changed (list 'quote (vec proofs))})])))))
++
++;;; THE OPENING: forms generated from the task, run once as the agent.
++
++(defn- quoted-symbol
++  "`text` as the qualified symbol it spells, or nil when it spells none."
++  {:malli/schema [:=> [:cat :string] [:maybe :qualified-symbol]]}
++  [text]
++  (let [slash (str/last-index-of text "/")]
++    (when (and slash (pos? slash)
++               (task/symbol-name? (subs text 0 slash))
++               (task/symbol-name? (subs text (inc slash))))
++      (symbol (subs text 0 slash) (subs text (inc slash))))))
++
++(defn- backticked-symbols
++  "The qualified symbols `text` writes between single backticks, in order."
++  {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
++  [text]
++  (let [parts (mapv #(apply str %) (partition-by #{\`} text))]
++    (into [] (keep (fn [[before inside after]]
++                     (when (= "`" before after) (quoted-symbol inside))))
++          (partition 3 1 parts))))
++
++(defn opening-sources
++  "The forms an agent's task opens with, in order: `(help)`, the task, then
++  each named definition's `doc` and source, then each proof test's source.
+ 
+   Example:
+-  (seon.agent.loop/task-context (seon.db/db) (seon.task/task-handle 'seon.db \"the-query-wrapper-costs-36x-datahike\" :function))
+-
+-  ## Costs
++  (seon.agent.loop/opening-sources (seon.db/db) 'scratch.add/add-one-returns-its-argument-plus-one)"
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
++                  [:or [:vector :string] :seon.db/invalid-read-error]]}
++  [database task-sym]
++  (let [view (task database task-sym)]
++    (if (:seon.error/at view)
++      view
++      (let [proofs (set (keys (:seon.agent.loop/proofs view)))
++            named (remove proofs (distinct (concat (sort (:seon.task/must-read view))
++                                                   (backticked-symbols (:seon.task/intent view "")))))
++            defined (set (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]] database (vec named)))]
++        (into ["(help)" (str "(seon.agent.loop/task '" task-sym ")")]
++              (concat (mapcat (fn [sym] [(str "(doc " sym ")") (str "(clojure.repl/source-fn '" sym ")")])
++                              (filter defined named))
++                      (map #(str "(clojure.repl/source-fn '" % ")") (sort proofs))))))))
++
++(defn opening-id
++  "The run that opens `agent-id`'s work on the task `handle`."
++  {:malli/schema [:=> [:cat :seon.agent/id :seon.task/handle] :seon.turn/id]}
++  [agent-id handle]
++  (id/digest 12 [::opening agent-id handle]))
++
++(defn opening-tx
++  "Transaction data opening `agent-id`'s task on its branch: one system run
++  evaluating the task's opening forms, which the agent's next wake runs.
+ 
+-  One task pull and its edges, then per proof two reads and a source query,
+-  per function a documentation pull and a source query, per schema one pull,
+-  and two queries over the functions: proportional to what the task names."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+-                  [:or [:vector :seon.agent.loop/unit] :seon.task/refused-error :seon.db/error-result]]}
+-  [database handle]
+-  (let [the-task (db/pull database task-selector [:seon.task/id handle])]
++  Example:
++  (seon.agent.loop/opening-tx (seon.db/db) \"lp-add-1\")"
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
++                  [:or :seon.store/transaction-data :seon.db/invalid-read-error :seon.agent.loop/no-task-error]]}
++  [database agent-id]
++  (let [tasks (task-database database)
++        handle (task/agent-task tasks agent-id)
++        task-sym (when (string? handle) (:seon.task/sym (db/pull tasks [:seon.task/sym] [:seon.task/id handle])))
++        sources (when task-sym (opening-sources database task-sym))]
+     (cond
+-      (:seon.error/at the-task) the-task
+-      (nil? (:seon.task/id the-task))
+-      (refusal/diagnostic (java.util.Date.) :seon.task/ingestion 'seon.agent.loop/task-context
+-                          {:seon.error/message (str "No task has the handle " handle ".")
+-                           :seon.task/refused :unknown-task :seon.task/holder 'seon.task :seon.error/offending handle})
+-      :else
+-      (let [edges (task/task-edges database (:seon.task/sym the-task))
+-            ;; Subjects are functions (qualified) or namespaces (simple symbols).
+-            subjects (sort (:seon.task/subjects edges))
+-            functions (vec (distinct (filter qualified-symbol?
+-                                             (concat (:seon.task/must-read the-task) subjects))))
+-            namespaces (vec (distinct (filter simple-symbol? subjects)))
+-            schemas (contract-keys database functions)]
+-        (vec (concat
+-              [(unit "Your task: what to change and why."
+-                     (list 'seon.db/pull '(seon.db/db) task-selector [:seon.task/id handle]) the-task)
+-               (unit "The task's edges: the proof tests that define done, the subjects it names, and who must read them."
+-                     (list 'seon.task/task-edges '(seon.db/db) (list 'quote (:seon.task/sym the-task))) edges)]
+-              (mapcat #(test-units database %) (sort (:seon.task/proofs edges)))
+-              (mapcat #(function-units database %) functions)
+-              (map #(namespace-unit database %) namespaces)
+-              (map #(schema-unit database %) schemas)
+-              (related-units database handle functions)))))))
+-
+-(defn- shown-text
+-  "`value` as the value printer shows it under its budget; a printer refusal
+-  is itself shown as a value, never stringified."
+-  {:malli/schema [:=> [:cat :seon.schema/value :string] :string]}
+-  [value root]
+-  (let [shown (render.value/render-ai {:seon.render/value value :seon.render.value/root root})]
+-    (if (string? shown)
+-      shown
+-      (let [refusal (render.value/render-ai {:seon.render/value shown :seon.render.value/root (str root "-refusal")})]
+-        (if (string? refusal) refusal (:seon.error/message shown))))))
+-
+-(defn- unit-text
+-  "One unit as a REPL exchange: the form, then its value as the value
+-  printer shows it under its budget, sources included; a cut is read again
+-  by running the form."
+-  {:malli/schema [:=> [:cat :seon.agent.loop/unit :boolean] :string]}
+-  [{why :seon.agent.loop/why form :seon.agent.loop/form value :seon.agent.loop/value} annotated?]
+-  (let [shown (shown-text value (str "context-" (hash form)))]
+-    (str (when annotated? (str ";; why: " why " (~" (tokens/estimate shown) " tokens)\n"))
+-         "user=> " (repl/source-text form) "\n" shown "\n")))
+-
+-(defn context-text
+-  "The units as the text an agent reads, in order.
+-
+-  `annotated?` precedes each with why it is there and its estimated tokens.
++      (:seon.error/at handle) handle
++      (nil? task-sym) (no-task agent-id 'seon.agent.loop/opening-tx)
++      (:seon.error/at sources) sources
++      :else (turn/system-run-tx database {:seon.agent/id agent-id :seon.turn/id (opening-id agent-id handle)
++                                          :seon.turn/opened-tx "datomic.tx"
++                                          :seon.turn/sources (mapv #(hash-map :seon.cluster.eval/source %) sources)}))))
++
++;;; THE CONTEXT: the transcript since the opening.
++
++(def ^:private transcript-selector
++  "What one transcript block prints, and the run it belongs to."
++  [:seon.cluster.eval/source :seon.cluster.eval/comment :seon.cluster.eval/author :seon.cluster.eval/output
++   :seon.cluster.eval/error :seon.eval/shown {:seon.cluster.eval/run [:seon.turn/id]}])
++
++(defn- block
++  "One evaluation as the REPL showed it: its comment lines, `user=>` and its
++  source, its printed output, then its value or error as stored."
++  {:malli/schema [:=> [:cat :seon.db/pulled-entity] :string]}
++  [{source :seon.cluster.eval/source note :seon.cluster.eval/comment output :seon.cluster.eval/output
++    error :seon.cluster.eval/error shown :seon.eval/shown}]
++  (str/join "\n" (cond-> []
++                   (seq note) (conj (str/join "\n" (map #(str ";; " %) (str/split-lines note))))
++                   :always (conj (str "user=> " source))
++                   (seq output) (conj (str/trim-newline output))
++                   :always (conj (or shown error "")))))
++
++(defn transcript
++  "The evaluations `agent-id`'s context shows, in order: its opening run's,
++  then every later form its replies carried. Outside runs made as the agent
++  are not shown."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.turn/id]
++                  [:or [:vector :seon.db/pulled-entity] :seon.db/invalid-read-error :seon.agent/no-such-agent-error]]}
++  [database agent-id opening]
++  (let [evaluations (evaluation/of-agent database agent-id transcript-selector)]
++    (if (:seon.error/at evaluations)
++      evaluations
++      (let [opened? #(= opening (get-in % [:seon.cluster.eval/run :seon.turn/id]))]
++        (into [] (comp (drop-while (complement opened?))
++                       (filter #(or (opened? %) (= :agent (:seon.cluster.eval/author %)))))
++              evaluations)))))
++
++(defn context
++  "The request members `agent-id`'s next model call sends: the prompt, its
++  REPL transcript since its task opened. Refuses when the agent holds no
++  task or its task never opened.
+ 
+   Example:
+-  (seon.agent.loop/context-text (seon.agent.loop/task-context (seon.db/db) \"d6e3b775f474\") false)"
+-  {:malli/schema [:=> [:cat [:vector :seon.agent.loop/unit] :boolean] :string]}
+-  [units annotated?]
+-  (str/join "\n" (map #(unit-text % annotated?) units)))
++  (seon.agent.loop/context (seon.db/db) \"lp-add-1\")"
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
++                  [:or [:map [:seon.ai/prompt :seon.ai/prompt]]
++                   :seon.db/invalid-read-error :seon.agent/no-such-agent-error :seon.agent.loop/no-task-error]]}
++  [database agent-id]
++  (let [handle (task/agent-task (task-database database) agent-id)
++        shown (when (string? handle) (transcript database agent-id (opening-id agent-id handle)))]
++    (cond
++      (:seon.error/at handle) handle
++      (nil? handle) (no-task agent-id 'seon.agent.loop/context)
++      (:seon.error/at shown) shown
++      (empty? shown) (no-task agent-id 'seon.agent.loop/context)
++      :else {:seon.ai/prompt (str/join "\n\n" (map block shown))})))
+diff --git a/src/seon/bootstrap.clj b/src/seon/bootstrap.clj
+index 0f7a048e5..77c07e182 100644
+--- a/src/seon/bootstrap.clj
++++ b/src/seon/bootstrap.clj
+@@ -14,86 +14,106 @@
+   []
+   (list 'seon.bootstrap/help-value))
+ 
++(def ^:private help-sections
++  "The REPL protocol, section by section: short rules, one example each."
++  [{:seon.help/heading "The REPL transcript"
++    :seon.help/rules
++    [{:seon.help/rule "What you read is a REPL transcript. Each `user=>` line is a form that ran; the lines under it are its real value, or its error as data."
++      :seon.help/example "user=> (+ 1 2)\n3"}
++     {:seon.help/rule "Only the REPL writes `user=>` lines and values. Never write one yourself: your reply is cut where you start one, and nothing after the cut runs."}
++     {:seon.help/rule "Your forms run in order after your reply ends, starting in the namespace where your last form ended. Their results arrive in the next message, so do not act on a result in the reply that asks for it."}
++     {:seon.help/rule "A large value is shown cut. The cut names the form that shows the rest; run it."
++      :seon.help/example "(get-in result/e1a2b3c4d5e6 [:functions 0])"}]}
++   {:seon.help/heading "How to reply"
++    :seon.help/rules
++    [{:seon.help/rule "Write your reasoning as prose and the code to run in fenced clojure blocks. Prose becomes comments; only the code runs."
++      :seon.help/example "I read the function first.\n\n```clojure\n(doc my.task/open)\n```"}
++     {:seon.help/rule "When your task is done and its proof tests pass, make `(my.agent/done {})` the last form of your reply."}]}
++   {:seon.help/heading "Look things up"
++    :seon.help/rules
++    [{:seon.help/rule "`doc` returns a function's summary, arglists and contract as data."
++      :seon.help/example "(doc seon.task/task-edges)"}
++     {:seon.help/rule "`dir` lists a namespace's public functions."
++      :seon.help/example "(dir my.task)"}
++     {:seon.help/rule "`clojure.repl/source-fn` returns a definition's source, private ones included."
++      :seon.help/example "(clojure.repl/source-fn 'seon.task/task-edges)"}
++     {:seon.help/rule "`clojure.repl/apropos` finds names containing a string."
++      :seon.help/example "(clojure.repl/apropos \"task-edges\")"}
++     {:seon.help/rule "`my.program/callers` returns a function's callers and call sites."
++      :seon.help/example "(my.program/callers {:seon.program/subject 'seon.task/task-edges})"}]}
++   {:seon.help/heading "Name things"
++    :seon.help/rules
++    [{:seon.help/rule "Write every reference fully qualified, so the same text is a lookup anyone can run: a function `seon.task/task-edges`, a namespace `seon.task`, a schema `:seon.task/intent`, a task `ns/task-name`."}
++     {:seon.help/rule "Never write `file:line`, commit ids or aliases such as `d/q` in what you leave behind; nothing resolves them."}]}
++   {:seon.help/heading "Change code"
++    :seon.help/rules
++    [{:seon.help/rule "Enter the namespace, then define as in Clojure. Every function, private ones included, carries a one-line `:malli/schema` contract."
++      :seon.help/example "(in-ns 'scratch.math)\n(defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"}
++     {:seon.help/rule "`defn` and `deftest` become program entities on your branch; `def` is a scratch value lost at restart."}
++     {:seon.help/rule "Delete a definition with `my.program/ns-unmap!`."
++      :seon.help/example "(my.program/ns-unmap! 'scratch.math/twice)"}]}
++   {:seon.help/heading "Prove it"
++    :seon.help/rules
++    [{:seon.help/rule "`my.test/check` runs the named tests, and the tests reaching the named functions, on your branch. `:seon.test/passed?` is true only when all are green; failures are data."
++      :seon.help/example "(my.test/check {:seon.test/changed ['scratch.math-test/twice-doubles]})"}
++     {:seon.help/rule "Your task is done when its proof tests pass on your branch."}]}
++   {:seon.help/heading "Ask"
++    :seon.help/rules
++    [{:seon.help/rule "`my.message/send` sends a message; sending does not end your reply."
++      :seon.help/example "(my.message/send {:my.message/to \"root\" :my.message/content \"The proof cannot pass: ...\"})"}]}])
++
+ (defn help-value
+-  "Read the REPL instructions and tools from this program version."
++  "The REPL protocol of this program version, as sections of rules."
+   {:seon/tasks #{'seon.bootstrap/help-teaches-the-wrong-tools}
+    :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                   :seon.help/help]}
+-  [database agent-id]
++  [database _agent-id]
+   ;; The fixed prose belongs to this definition; the source read records
+   ;; its code version in the same dependency evidence as every other read.
+   (db/pull database [:seon.fn/source]
+            [:seon.fn/sym 'seon.bootstrap/help-value])
+-  (let [namespace-name
+-        (db/q '[:find ?name . :in $ ?id
+-                :where [?agent :seon.agent/id ?id]
+-                       [?agent :seon.agent/namespace ?namespace]
+-                       [?namespace :seon.ns/name ?name]] database agent-id)
+-        tools
+-        (db/q '[:find [?name ...]
+-                :in $ ?agent-id
+-                :where [?agent :seon.agent/id ?agent-id]
+-                       [?agent :seon.agent/namespace ?session]
+-                       [?session :seon.ns/requires ?name]
+-                       [?namespace :seon.ns/name ?name]
+-                       [?function :seon.fn/ns ?namespace]
+-                       [?function :seon.fn/private? false]
+-                       (not [?function :seon.fn/internal? true])]
+-              database agent-id)]
+-    ;; `help` is a macro, so its call names no producer; the value carries
+-    ;; its own pair, the render law's master override (issue
+-    ;; help-shows-its-map-because-a-macro-call-names-no-producer, option 1).
+-    {:seon.render/ai 'seon.bootstrap/render-help-ai
+-     :seon.render/html 'seon.bootstrap/render-help-html
+-     :seon.help/lines
+-    [(str "The prompt shows your namespace " namespace-name
+-          " and is drawn for you. Send only ;; thinking comments and forms.")
+-     "Your reply is read as Clojure: Markdown is not prose here (backticks read as syntax-quote, # starts a reader macro), so write every sentence as a ;; comment."
+-     "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Functions are callable by their fully qualified symbols."
+-     "Forms are evaluated in order, and their results arrive in your NEXT turn. Act on a result only after you have seen it; do not complete a step in the same reply as the form that does the work."
+-     "The REPL supplies responses: :value (or :error) is result data, :out is printed text, and :result names the live value. Do not write responses yourself."
+-     "result/e... is a real symbol bound to the live value: evaluate it, pass it as an argument, or dig in with get-in and keys."
+-     (str "When unsure, use (dir ns) first, for example (dir my.task); (clojure.repl/apropos \"steps\") finds names and (my.program/source 'my.task/steps) reads a declaration's source and contract. Copy the exact function name, including ! on mutations. (doc my.task/plan!) gives its request keys, return shape and example. (dir " namespace-name
+-          ") lists your own public functions and schema declarations.")
+-     "Your task is your instructions. (my.task/steps {}) reads its current step; (my.task/plan! {:seon.task/steps [\"first\" \"next\"]}) sets your ordered steps (it makes and claims your own work task when you hold none) and (my.task/done! {}) completes the current step, only after you have seen the result. Update an existing component by its identity or :db/id: a new identity-less nested map replaces it."
+-     "Read incoming messages with a reverse-ref pull on your agent. (my.message/send {:my.message/to \"root\" :my.message/content \"...\"}) sends; sending does not end your turn. Remove an entity and its incoming refs with (seon.db/transact! [[:db.fn/retractEntity lookup-ref]]); retract removes only the named fact."
+-     "Use pull for a known entity's shape, nested refs, and reverse refs such as :seon.message/_to; q for filters, joins, and aggregates; q with inner pull for filtering and shaping. (seon.db/transact! tx-data) writes. Your cluster database is supplied."
+-     "Define a function with its invoke contract: (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1)). The input :cat describes the arguments; the last schema describes the result. A function that can fail returns [:or <success> <declared-refusal-declared-schema>]; a bare :maybe is refused. [:vector X] needs a vector; use vec to convert a lazy seq. Admitted definitions are durable. Auto-check calls your function with generated inputs including each collection's empty value. A deftest becomes a durable test. deftest and is are referred; use clojure.test/testing with its namespace. (my.test/run) runs yours; (my.test/check {:seon.test/changed ['some.ns-test/a-test 'some.ns/a-fn]}) runs the named tests and the tests reaching the named functions on your branch, and :seon.test/passed? is true only when all are green."
+-     "A mistake returns :error data. Read the expected schema, offending value, and attribute candidates before retrying. Time is the transaction: a ref value \"datomic.tx\" names this write, as in :seon.step/done-tx; pull :db/txInstant through that ref."
+-     "Each reply is one turn. (seon.turn/turns-left) reads your remaining turns; settings contain the configured limit. (my.agent/done) must be the last form of your reply; it ends your session early."
+-     (str "Tools: "
+-          (str/join ", " (sort tools)) ". Inspect one with dir.")]}))
++  ;; `help` is a macro, so its call names no producer; the value carries
++  ;; its own pair, the render law's master override.
++  {:seon.render/ai 'seon.bootstrap/render-help-ai
++   :seon.render/html 'seon.bootstrap/render-help-html
++   :seon.help/title "You are a Seon agent at a Clojure REPL"
++   :seon.help/summary (str "You work on one task on your own branch of a live Clojure program. What you define "
++                           "stays on your branch until root merges it. The database is immutable, so every "
++                           "change can be rolled back.")
++   :seon.help/sections help-sections})
++
++(defn- entry-text
++  "One rule as a Markdown bullet, its example beneath it: inline when one
++  line, else an indented fenced block."
++  {:malli/schema [:=> [:cat :seon.help/entry] :string]}
++  [{rule :seon.help/rule example :seon.help/example}]
++  (cond
++    (nil? example) (str "- " rule)
++    (str/includes? example "\n") (str "- " rule "\n\n  ```\n  " (str/replace example "\n" "\n  ") "\n  ```")
++    :else (str "- " rule " For example: `" example "`")))
+ 
+ (defn render-help-ai
+-  "Show help lines as bare text, one per line."
++  "The help as Markdown: the title, the summary, then each section's heading and bulleted rules."
+   {:malli/schema [:=> [:cat :seon.help/help] :string]}
+-  [instructions]
+-  (str/join "\n" (:seon.help/lines instructions)))
++  [{title :seon.help/title summary :seon.help/summary sections :seon.help/sections}]
++  (str/join "\n\n" (into [(str "# " title) summary]
++                         (map (fn [{heading :seon.help/heading rules :seon.help/rules}]
++                                (str "## " heading "\n\n" (str/join "\n" (map entry-text rules)))))
++                         sections)))
+ 
+ (defn render-help-html
+-  "Show the same help lines as a list."
++  "The help as a page fragment: each section a heading and a list of rules, examples as code."
+   {:malli/schema [:=> [:cat :seon.help/help] :seon.render/hiccup]}
+-  [instructions]
+-  (let [line-html
+-        (fn [line]
+-          (loop [remaining line children [:li]]
+-            (let [start (.indexOf ^String remaining "(")]
+-              (if (or (neg? start) (str/includes? remaining "\n"))
+-                (conj children remaining)
+-                (let [source (subs remaining start)
+-                      length (try
+-                               (with-open [reader (clojure.lang.LineNumberingPushbackReader.
+-                                                   (java.io.StringReader. source))]
+-                                 (edn/read {:readers {} :default tagged-literal} reader)
+-                                 (dec (.getColumnNumber reader)))
+-                               (catch Exception _ 0))]
+-                  (if (pos? length)
+-                    (recur (subs source length)
+-                           (conj children (subs remaining 0 start)
+-                                 [:code (subs source 0 length)]))
+-                    (conj children remaining)))))))]
+-    (into [:ul {:class "seon-help seon-help-instructions"}]
+-          (map line-html (:seon.help/lines instructions)))))
++  [{title :seon.help/title summary :seon.help/summary sections :seon.help/sections}]
++  (into [:div {:class "seon-help"} [:h2 title] [:p summary]]
++        (mapcat (fn [{heading :seon.help/heading rules :seon.help/rules}]
++                  [[:h3 heading]
++                   (into [:ul {:class "seon-help-instructions"}]
++                         (map (fn [{rule :seon.help/rule example :seon.help/example}]
++                                (cond-> [:li rule]
++                                  example (conj [:pre [:code example]]))))
++                         rules)]))
++        sections))
+ 
+ (defn situation
+   "Derive one agent's live opening seeds from current database facts."
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index 925abe7e6..f51fc2e22 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -60,10 +60,8 @@
+   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
+ (defonce ^:private cluster-agent-evaluate-source!
+   (delay (requiring-resolve 'seon.cluster.agent/evaluate-source!)))
+-(defonce ^:private cluster-prompt-prompt
+-  (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
+-(defonce ^:private context-capture-tx
+-  (delay (requiring-resolve 'seon.context/capture-tx)))
++(defonce ^:private agent-loop-context
++  (delay (requiring-resolve 'seon.agent.loop/context)))
+ (defonce ^:private problems-assignment-value
+   (delay (requiring-resolve 'seon.problems/assignment-value)))
+ (defonce ^:private problems-form-problem
+@@ -4489,92 +4487,33 @@
+                    ; reader's fabricated-response event. No fault is submitted.
+                    (assoc :seon.sci.eval/event
+                           {:seon.sci.reader/error prepared}))))))
+-          ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
+-          ;; the trigger from the run's own creating transaction
+-          ;; (`message/trigger`), never a re-asked queue: the recorded
+-          ;; cause is the prompt's cause. One derivation, one owner.
+-          ;; NOTHING THROWS INTO THE AGENT LOOP: the prompt owner
+-          ;; refuses by throwing (`:seon.turn.loop/no-trigger`, `:seon.turn.loop/missing-input`),
+-          ;; and this one call site turns that refusal into the flat
+-          ;; error value the loop already records — the same shape a
+-          ;; refused transaction takes through `db/transact!`.
+-          observed-db (db/db connection)
+-          prompt-db (opening-db observed-db run-id)
++          ;; THE CONTEXT IS THE AGENT'S REPL TRANSCRIPT (`seon.agent.loop/context`):
++          ;; its task's opening run and every form its replies carried, read
++          ;; from the stored evaluations on this value. Its refusal (no
++          ;; opened task) is the flat error value the loop records.
+           rendered
+           (when-not (:seon.config.ai/no-provider settings)
+-          (phase
+-           ;; The prompt takes the observed value and the run id: its
+-           ;; acquisition derives the opening itself (`render/acquire-context!`).
+-           ;; Handing it `prompt-db` nested a second as-of whose origin has no
+-           ;; committed identity, so every render node re-keyed the projection
+-           ;; from declaration datoms (~40 ms each, 36 s per prompt).
+-           #(@cluster-prompt-prompt observed-db
+-                           {:seon.turn/id run-id
+-                            :seon.agent/id agent-id
+-                            :seon.db/connection connection
+-                            :seon.sci.admit/caps
+-                            (:seon.sci.admit/caps cluster)
+-                            :seon.sci.eval/ctx
+-                            (:seon.sci.eval/ctx cluster)
+-                            :seon.sci.eval/time-limit-ms
+-                            (:seon.config.eval/time-limit-ms cluster)})))
++            (phase #(@agent-loop-context (db/db connection) agent-id)))
+           refusal
+-          (when (or (:seon.turn.loop/phase-failed rendered)
+-                    (:seon.cluster.prompt/error-agent-id rendered))
+-            rendered)
+-          ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
+-          ;; exact prompt text, the rendered basis and the ordered
+-          ;; contribution records commit in ONE turn-owned transaction
+-          ;; BEFORE the unobservable remote call. Writer ordering then
+-          ;; guarantees: no capture → the prompt was never derived;
+-          ;; capture with no attempt row → the call may never have
+-          ;; fired. The provider call reuses this one capture:
+-          ;; the same prompt bytes go out.
+-          captured
+-          (when-not (:seon.config.ai/no-provider settings)
+-          (db/transact!
+-           connection
+-           (@context-capture-tx
+-            (if refusal
+-              {:seon.turn/id run-id
+-               ;; The immutable opening value the refused derivation used,
+-               ;; never a fresh connection deref after the fact.
+-               :seon.db/db (if (or (:seon.turn/missing-opening-datom prompt-db)
+-                                   (:seon.db/invalid-read prompt-db)
+-                                   (:seon.schema/expected-value prompt-db))
+-                             observed-db
+-                             prompt-db)
+-               :seon.error/value refusal}
+-              {:seon.turn/id run-id
+-               :seon.cluster.prompt/rendered-context rendered}))))
+-          ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
+-          ;; text and alone places that string in `:seon.ai/prompt` —
+-          ;; the bytes the capture recorded are the bytes sent.
+-          text (:seon.cluster.prompt/text rendered)]
++          (when (or (:seon.turn.loop/phase-failed rendered) (:seon.error/at rendered))
++            rendered)]
+       (cond
+         (:seon.config.ai/no-provider settings)
+         (freeze! {:seon.ai/text ""})
+ 
+-        (or (:seon.db.write.attempt/request-id captured)
+-            (:seon.db/invalid-read captured)
+-            (:seon.schema/expected-value captured))
+-        ;; A refused prompt/capture closes this run and records the refusal.
+-        ;; The next pass derives correction from those facts below the ONE
+-        ;; episode cap; at the cap it derives no work. No provider call occurs
+-        ;; without durable prompt evidence.
+-        (fail! captured)
+-
+         refusal
+-        ;; The refusal capture is now durable. Close without crossing the
+-        ;; provider boundary; a diagnosis never depends on absent signal.
++        ;; Close without crossing the provider boundary; the refusal is
++        ;; recorded with the run, and a diagnosis never depends on absent signal.
+         (fail! refusal)
+ 
+         :else
+         (let [completion (ai/complete
+                           (db/carried-projection db)
+-                          (cond-> (assoc primary :seon.ai/prompt text)
++                          (cond-> (merge primary (select-keys rendered [:seon.ai/system :seon.ai/prompt]))
+                             sink (assoc :seon.ai/stream? true
+-                                        :seon.ai/sink sink)))
++                                        :seon.ai/sink sink)
++                            ;; the HTTP leaf as a value, when the cluster carries one
++                            (:seon.ai/send! cluster) (assoc :seon.ai/send! (:seon.ai/send! cluster))))
+               failure (when (or (:seon.ai/unreadable-response-member completion)
+                                 (:seon.ai/unanswered-reasoning-count completion)
+                                 (:seon.ai/exhausted-finish-reason completion)
+diff --git a/test/seon/agent/loop_test.clj b/test/seon/agent/loop_test.clj
+index 8b5fa9f9f..127896a11 100644
+--- a/test/seon/agent/loop_test.clj
++++ b/test/seon/agent/loop_test.clj
+@@ -1,75 +1,88 @@
+ (ns seon.agent.loop-test
+-  "The context producers: the system message and the task-seeded context."
++  "An agent's model context is its REPL transcript: the task's opening forms
++  and every form its replies carried, with their stored results."
+   (:require [clojure.string :as str]
+-            [clojure.test :refer [deftest is]]
++            [clojure.test :refer [deftest is testing]]
++            [seon.agent :as seon.agent]
+             [seon.agent.loop :as loop]
+-            [seon.ai.tokens :as tokens]
++            [seon.cluster :as cluster]
+             [seon.cluster.agent :as agent]
+-            [seon.cluster.instruction :as instruction]
++            [seon.config :as config]
+             [seon.db :as db]
++            [seon.flow :as flow]
++            [seon.cluster.message :as message]
+             [seon.task :as task]
+             [seon.test-support :as support]))
+ 
+-(defn- with-context-agent
+-  "Run `body` with a fixture connection holding a seeded cluster and the agent \"context\"."
+-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] :seon.schema/value]}
+-  [body]
+-  (support/with-database
+-   (fn [connection]
+-     (support/seed-cluster! connection "context")
+-     (support/transacted! connection (agent/creation-tx {:seon.agent/id "context"
+-                                                         :seon.ns/name 'my.agents.context
+-                                                         :seon.cluster/name "context"}))
+-     (body connection))))
++(def ^:private reply
++  "The fixture model reply: prose, then one fenced form and the call that ends the session."
++  "I add two numbers.\n\n```clojure\n(+ 1 2)\n(my.agent/done {})\n```\n")
+ 
+-(deftest the-system-message-carries-help-and-every-toolkit-namespace
+-  (with-context-agent
+-   (fn [connection]
+-     (let [database (db/db connection)
+-           message (loop/system-message database "context")
+-           toolkit (instruction/toolkit-namespaces database)]
+-       (is (seq toolkit) "the fixture program declares context-relevant namespaces")
+-       (is (str/includes? message "(my.test/check {:seon.test/changed") "the protocol says how to run named tests")
+-       (is (every? #(str/includes? message (str % ": ")) toolkit) "each toolkit namespace heads its tools")))))
++(defn- evaluation-of
++  "The stored evaluation of `agent-id` whose source is `source`, or nil."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :string] [:maybe :map]]}
++  [database agent-id source]
++  (db/q '[:find (pull ?e [:seon.cluster.eval/author :seon.eval/shown {:seon.cluster.eval/run [:seon.turn/id {:seon.turn/attempts [:seon.ai.attempt/id]}]}]) .
++          :in $ ?id ?source
++          :where [?a :seon.agent/id ?id] [?r :seon.turn/agent ?a] [?e :seon.cluster.eval/run ?r]
++          [?e :seon.cluster.eval/source ?source]]
++        database agent-id source))
+ 
+-(deftest a-task-context-follows-the-tasks-refs
+-  (with-context-agent
+-   (fn [connection]
+-     (let [created (task/create! {:seon.db/connection connection :seon.agent/id "context"
+-                                  :seon.task/ns 'seon.id :seon.task/name "context-fixture" :seon.task/kind :function
+-                                  :seon.task/intent "Fixture task naming one function."
+-                                  :seon.task/must-read #{'seon.task/task-edges}})
+-           units (loop/task-context (db/db connection) (:seon.task/id created))
+-           by-form (into {} (map (juxt :seon.agent.loop/form :seon.agent.loop/value)) units)]
+-       (is (= "Fixture task naming one function." (:seon.task/intent (:seon.agent.loop/value (first units)))))
+-       (is (seq (:summary (by-form '(doc seon.task/task-edges)))) "the must-read function's documentation is shown")
+-       (is (string? (by-form '(clojure.repl/source-fn 'seon.task/task-edges))) "its stored source is shown")
+-       (is (some #(= :seon.schema/key (first (nth (:seon.agent.loop/form %) 3 nil))) units)
+-           "a schema its contract names is shown")))))
+-
+-(deftest related-task-requeries-quote-the-symbols-they-match
+-  (with-context-agent
+-   (fn [connection]
+-     (let [request {:seon.db/connection connection :seon.agent/id "context" :seon.task/ns 'seon.id
+-                    :seon.task/kind :function :seon.task/must-read #{'seon.task/task-edges}}
+-           created (task/create! (assoc request :seon.task/name "context-fixture" :seon.task/intent "First."))
+-           other (task/create! (assoc request :seon.task/name "context-neighbour" :seon.task/intent "Second."))
+-           units (loop/task-context (db/db connection) (:seon.task/id created))
+-           related (some (fn [u] (let [v (:seon.agent.loop/value u)]
+-                                   (when (and (vector? v) (some #(= (:seon.task/id other) (:seon.task/id %)) v)) u)))
+-                         units)]
+-       (is (string? (:seon.task/id other)) "the neighbour task is created")
+-       (is (some? related) "the other task naming the same function is shown")
+-       (is (= '(quote [seon.task/task-edges]) (nth (:seon.agent.loop/form related) 3))
+-           "the offered form matches symbols, not the functions they name")))))
+-
+-(deftest an-unknown-handle-refuses-by-name
+-  (with-context-agent
+-   (fn [connection]
+-     (is (= :unknown-task (:seon.task/refused (loop/task-context (db/db connection) "000000000000")))))))
+-
+-(deftest context-text-is-bounded-by-the-value-printer
+-  (let [value (vec (for [i (range 3000)] {:seon.task/id (str i) :seon.task/intent (apply str (repeat 50 "x"))}))
+-        text (loop/context-text [{:seon.agent.loop/why "a large value" :seon.agent.loop/form '(large)
+-                                  :seon.agent.loop/value value}] false)]
+-    (is (< (tokens/estimate text) 2000) "a large value is shown within the printer's budget, not whole")))
++(deftest ^{:seon.test/long "Arms one agent graph and settles its opening run and one model turn, each a Flow pass and its settlement commits."
++           :seon.test/long-ms 30000}
++  a-model-turn-reads-the-transcript-and-appends-its-forms
++  (let [target (support/execution-handle nil)
++        connection (:seon.db/connection target)
++        cluster-name (:seon.cluster/name target)
++        agent-id "loop-fixture"
++        environment (support/environment cluster-name connection)
++        ctx (support/fork-cluster-ctx connection cluster-name)
++        routing (support/attempt-routing connection)]
++    (with-open [launcher (support/closeable
++                          (flow/start-work-launcher!
++                           {:seon.env/environment environment
++                            :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
++                                                                  flow/flow-workload-attributes)})
++                          flow/stop-work-launcher!)]
++      (let [handle (assoc (support/cluster-handle
++                           {:seon.env/environment environment :seon.db/connection connection :seon.cluster/name cluster-name
++                            :seon.sci.eval/ctx ctx :seon.flow/work-launcher @launcher
++                            :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
++                            :seon.db.process/id cluster/boot-process-identity})
++                          :seon.ai/send! (fn [_request] {:seon.ai/text reply :seon.ai/finish-reason "stop"}))
++            request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
++        (support/transacted! connection (support/agent-tx @connection agent-id))
++        (is (map? (seon.agent/settings! {:seon.config.ai/no-provider false :seon.config.ai/no-auth true
++                                          :seon.config.run/max-episode-runs 2}
++                                         connection agent-id))
++            "the agent's provider is enabled with no credential: the fixture leaf answers")
++        (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'seon.agent.loop
++                                     :seon.task/name "loop-fixture-task" :seon.task/kind :function
++                                     :seon.task/intent "Read `seon.task/task-edges` and add two numbers."
++                                     :seon.task/must-read #{'seon.task/task-edges}})]
++          (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
++                         :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in @connection [:config :branch])}))
++        (testing "an agent with no opened task refuses its context by name"
++          (is (= :seon.agent.loop/no-task-error (:seon.error/type (loop/context @connection agent-id)))))
++        (support/transacted! connection (loop/opening-tx @connection agent-id))
++        (agent/arm! request)
++        (try
++          (support/transacted! connection (message/inbound-tx @connection {:seon.agent/id agent-id
++                                                                            :seon.message/inbound-content "Work on your task."
++                                                                            :seon.config.eval.result/max-string 1000}))
++          (support/await-event! connection ::model-form-settled #(:seon.eval/shown (evaluation-of % agent-id "(+ 1 2)")))
++          (let [database @connection
++                prompt (:seon.ai/prompt (loop/context database agent-id))
++                added (evaluation-of database agent-id "(+ 1 2)")]
++            (testing "the context opens with help, the task and its references as forms that ran"
++              (is (every? #(str/includes? prompt (str "user=> " %))
++                          ["(help)" "(seon.agent.loop/task 'seon.agent.loop/loop-fixture-task)"
++                           "(doc seon.task/task-edges)" "(clojure.repl/source-fn 'seon.task/task-edges)"])))
++            (testing "the reply's form ran as the agent's own, its attempt recorded on its run"
++              (is (= :agent (:seon.cluster.eval/author added)))
++              (is (= "3" (:seon.eval/shown added)))
++              (is (seq (get-in added [:seon.cluster.eval/run :seon.turn/attempts]))))
++            (testing "the next context appends the form and its stored result"
++              (is (str/includes? prompt "user=> (+ 1 2)\n3"))))
++          (finally
++            (agent/disarm! request)))))))

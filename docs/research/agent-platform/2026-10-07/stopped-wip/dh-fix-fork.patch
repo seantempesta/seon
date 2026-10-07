@@ -1,0 +1,215 @@
+diff --git a/src/datahike/query.cljc b/src/datahike/query.cljc
+index 67d42b19..9b3eb372 100644
+--- a/src/datahike/query.cljc
++++ b/src/datahike/query.cljc
+@@ -3248,6 +3248,38 @@
+               clause))
+           where-clauses)))
+ 
++(defn- rule-arg-scalar?
++  "True for a const that rule-call substitution inlines into the call's args."
++  [v]
++  (or (number? v) (string? v) (keyword? v) (boolean? v) (nil? v) (uuid? v) (inst? v)))
++
++(defn- rule-call-args
++  "Every argument of every rule call in `clauses`, nested or/and/not bodies included."
++  [clauses rule-names]
++  (letfn [(walk [form]
++            (cond
++              (and (seq? form) (contains? rule-names (first form))) (rest form)
++              (sequential? form) (mapcat walk form)
++              :else nil))]
++    (mapcat walk clauses)))
++
++(defn- bind-rule-arg-consts
++  "Context whose non-scalar scalar-input consts used as rule-call args are also
++   one-row relations, so the planner sees them bound. Rule-call substitution
++   inlines only scalars; without this a lookup-ref input such as
++   `[:p/id \"p6\"]` passed to `(reach ?a ?b)` leaves `?a` unbound."
++  [context-in where-clauses]
++  (let [consts (:consts context-in)
++        rule-names (set (keys (:rules context-in)))
++        vars (when (and (seq consts) (seq rule-names))
++               (into #{}
++                     (filter #(and (contains? consts %) (not (rule-arg-scalar? (get consts %)))))
++                     (rule-call-args where-clauses rule-names)))]
++    (reduce (fn [ctx v]
++              (update ctx :rels conj (rel/->Relation {v 0} [(object-array [(get consts v)])])))
++            context-in
++            vars)))
++
+ (defn- substitute-consts-with-lookup-refs
+   "Like substitute-consts but also resolves lookup refs in pattern positions.
+    Used by the query planner which needs patterns normalized before planning.
+@@ -3342,14 +3374,10 @@
+                                (= \$ (first (name (first clause)))))))
+                 (let [rule-name (first clause)
+                       args (rest clause)
+-                      scalar? (fn [v]
+-                                (or (number? v) (string? v) (keyword? v)
+-                                    (boolean? v) (nil? v) (uuid? v)
+-                                    (inst? v)))
+                       substituted-args (map (fn [x]
+                                               (if (and (symbol? x)
+                                                        (contains? consts x)
+-                                                       (scalar? (get consts x)))
++                                                       (rule-arg-scalar? (get consts x)))
+                                                 (get consts x)
+                                                 x))
+                                             args)]
+@@ -4396,9 +4424,10 @@
+           ;; For multi-source, don't pre-resolve lookup refs in :in bindings —
+           ;; they may resolve to different entity IDs per source. The relation path's
+           ;; lookup-batch-search handles per-source resolution at match time.
+-          (if multi-source?
+-            [context-in nil]
+-            (resolve-lookup-ref-bindings primary-db context-in))
++          (let [context-in (bind-rule-arg-consts context-in (:where query))]
++            (if multi-source?
++              [context-in nil]
++              (resolve-lookup-ref-bindings primary-db context-in)))
+           [context-in nil])]
+ 
+     (if (and limit (zero? limit))
+diff --git a/src/datahike/query/execute.cljc b/src/datahike/query/execute.cljc
+index e984dc83..e094d7f3 100644
+--- a/src/datahike/query/execute.cljc
++++ b/src/datahike/query/execute.cljc
+@@ -1464,7 +1464,8 @@
+       two monotonically advancing ForwardCursors: the scan emits entities in
+       ascending `e` and both EAVT indexes are sorted, so seekGE never re-seeks
+       from root. An entity's matched versions are collected once and replayed
+-      for each repeated scan datom of that entity (the history cartesian)."
++      for each repeated scan datom of that entity (the history cartesian),
++      filtered per scan datom when the merge shares its v or tx var."
+      [eavt-pss slice ground-filter strict-filter
+       probe-set probe-datom-field
+       collect-set collect-datom-field collect-merge-idx
+@@ -1500,13 +1501,18 @@
+                         (or (nil? scan-added-val) (= (datom/datom-added cur-d) scan-added-val)))
+                  (let [eid (.-e cur-d)
+                        scan-d cur-d]
++                   ;; The buffer holds the entity's versions independent of the
++                   ;; scan datom; a shared v or tx var is checked per scan datom.
+                    (when-not (== eid buffer-eid)
+                      (history-versions! buf pair eid ra vg? vgv
+-                                        #(temporal-merge-datom-match? % eid ra vg? vgv check-v? check-tx? scan-d temporal-tx-filter added-filter)))
++                                        #(temporal-merge-datom-match? % eid ra vg? vgv false false scan-d temporal-tx-filter added-filter)))
+                    (dotimes [bi (.size buf)]
+-                     (aset merge-datoms 0 ^Datom (.get buf bi))
+-                     (emit-tuple scan-d collect-set collect-datom-field collect-merge-idx merge-datoms
+-                                 n-find find-source const-vals result-list))
++                     (let [^Datom md (.get buf bi)]
++                       (when (and (or (not check-v?) (val-eq? (.-v md) (.-v scan-d)))
++                                  (or (not check-tx?) (= (datom/datom-tx md) (datom/datom-tx scan-d))))
++                         (aset merge-datoms 0 md)
++                         (emit-tuple scan-d collect-set collect-datom-field collect-merge-idx merge-datoms
++                                     n-find find-source const-vals result-list))))
+                    (recur nxt-d eid))
+                  ;; scan datom filtered out
+                  (recur nxt-d buffer-eid)))))))))
+diff --git a/src/datahike/query/lower.cljc b/src/datahike/query/lower.cljc
+index 92a1e909..3b9fdbcd 100644
+--- a/src/datahike/query/lower.cljc
++++ b/src/datahike/query/lower.cljc
+@@ -437,10 +437,14 @@
+                       (map (fn [rn]
+                              (let [rn-branches (get rules rn)
+                                    head-vars (vec (rest (first (first rn-branches))))
++                                   ;; Head vars get names private to this rule op: a
++                                   ;; head var spelled like an outer query var would
++                                   ;; otherwise pick up the outer relation (and its
++                                   ;; boundness) inside the fixpoint, and restrict
++                                   ;; every recursive step to the caller's values.
+                                    free-call-args (mapv (fn [hv]
+-                                                          (if (analyze/free-var? hv)
+-                                                            hv
+-                                                            (symbol (str "?" (name hv)))))
++                                                          (symbol (str (if (analyze/free-var? hv) (name hv) (str "?" (name hv)))
++                                                                       "__head__" seqid)))
+                                                         head-vars)
+                                    is-base? (fn [branch]
+                                               (let [[_head & body] branch]
+diff --git a/test/datahike/test/query_planner_temporal_test.clj b/test/datahike/test/query_planner_temporal_test.clj
+index c0b261b0..def94f40 100644
+--- a/test/datahike/test/query_planner_temporal_test.clj
++++ b/test/datahike/test/query_planner_temporal_test.clj
+@@ -9,6 +9,7 @@
+    [clojure.string :as str]
+    [clojure.test :refer [deftest is testing]]
+    [datahike.api :as d]
++   [datahike.db :as db]
+    [datahike.query :as q])
+   (:import [java.util Date UUID]))
+ 
+@@ -639,3 +640,70 @@
+       (finally
+         (when-let [conn @conn*] (d/release conn))
+         (d/delete-database cfg)))))
++
++;; ---------------------------------------------------------------------------
++;; Recursive rules answer like the base engine in every world
++;;
++;; A recursive rule's head vars kept the rule's own spelling inside the
++;; fixpoint, so a head var named like an outer query var (`?e` below) took the
++;; outer relation into every recursive step and the closure stopped at depth
++;; one. A scalar input holding a lookup ref and passed to a rule call was never
++;; bound at all, so the rule answered for every entity.
++
++(defn- chain-db
++  "Twenty people, each the friend of the previous one, then p4 retracted."
++  []
++  (let [base (d/db-with (db/empty-db {:p/id {:db/unique :db.unique/identity}
++                                      :p/friend {:db/valueType :db.type/ref}}
++                                     {:keep-history? true})
++                        (vec (for [i (range 20)]
++                               (cond-> {:db/id (- (inc i)) :p/id (str "p" i)}
++                                 (pos? i) (assoc :p/friend (- i))))))]
++    (d/db-with base [[:db/retractEntity [:p/id "p4"]]])))
++
++(defn- ring-db
++  "Eighty entities, each referring to the next and to the one three on, plus
++   one move of a unique value and one retracted ref."
++  []
++  (let [before (d/db-with (db/empty-db {:u/id {:db/unique :db.unique/identity}
++                                        :u/ref {:db/valueType :db.type/ref
++                                                :db/cardinality :db.cardinality/many}
++                                        :u/a {:db/index true}}
++                                       {:keep-history? true})
++                          (vec (for [i (range 1 81)]
++                                 {:db/id i :u/id i :u/a (mod i 7)
++                                  :u/ref (vec (distinct [(inc (mod i 80)) (inc (mod (+ i 3) 80))]))})))]
++    {:before before
++     :after (d/db-with before [[:db/retract 1 :u/id 1] [:db/add 81 :u/id 1] [:db/add 81 :u/a 3]
++                               [:db/add 81 :u/ref 3] [:db/retract 2 :u/ref 3]])}))
++
++(deftest recursive-rules-answer-like-the-base-engine
++  (let [chain (chain-db)
++        {:keys [before after]} (ring-db)
++        reach '[[(reach ?a ?b) [?a :p/friend ?b]] [(reach ?a ?b) [?a :p/friend ?x] (reach ?x ?b)]]
++        path '[[(path ?e ?x) [?e :u/ref ?x]]
++               [(path ?e ?x) [?e :u/ref ?y] [(< ?e ?y)] [(< ?y 8)] (path ?y ?x)]]
++        friend '[[(friend ?a ?b) [?a :p/friend ?b]]]]
++    (doseq [[world-label worlds] [["chain" {:current chain :history (d/history chain)
++                                            :as-of (d/as-of chain (dec (:max-tx chain)))}]
++                                  ["ring" {:current after :history (d/history after)
++                                           :as-of (d/as-of after (:max-tx before))}]]
++            [world database] worlds
++            [label q-form args]
++            (if (= "chain" world-label)
++              [["identity input" '[:find ?b :in $ % ?id :where [?a :p/id ?id] (reach ?a ?b)] [reach "p6"]]
++               ["lookup-ref input" '[:find ?b :in $ % ?a :where (reach ?a ?b)] [reach [:p/id "p6"]]]
++               ["lookup-ref input, right" '[:find ?a :in $ % ?b :where (reach ?a ?b)] [reach [:p/id "p2"]]]
++               ["lookup-ref input, plain rule" '[:find ?b :in $ % ?a :where (friend ?a ?b)] [friend [:p/id "p6"]]]]
++              [["head vars spelled like outer vars"
++                '[:find ?e ?x :in $ % [?id ...] :where [?e :u/id ?id] (path ?e ?x) [?x :u/a ?a]] [path [1 2]]]])]
++      (testing [world-label world label]
++        (let [{:keys [legacy planner]} (binding [q/*query-result-cache?* false]
++                                         (apply run-both q-form database args))]
++          (is (= (set legacy) (set planner))))))
++    (is (= #{[2 6] [2 7] [2 8] [2 10] [2 11] [81 3]}
++           (binding [q/*query-result-cache?* false]
++             (d/q '[:find ?e ?x :in $ % [?id ...] :where [?e :u/id ?id] (path ?e ?x) [?x :u/a ?a]]
++                  after path [1 2]))))
++    (is (= 6 (count (binding [q/*query-result-cache?* false]
++                      (d/q '[:find ?b :in $ % ?a :where (reach ?a ?b)] (d/history chain) reach [:p/id "p6"])))))))

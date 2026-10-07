@@ -1,0 +1,780 @@
+diff --git a/resources/seon/schemas/seon.repl.edn b/resources/seon/schemas/seon.repl.edn
+index 2c2b982e2..00c0803ec 100644
+--- a/resources/seon/schemas/seon.repl.edn
++++ b/resources/seon/schemas/seon.repl.edn
+@@ -11,17 +11,6 @@
+             :findings [:vector :seon.repl/finding-value]
+             :out-tokens
+             [:int {:min 0 :description "Estimated tokens (seon.ai.tokens/estimate) of an evaluation's printed output, derived from the saved output when its reply is rendered."}]
+-            :directory
+-            [:map {:seon.render/ai seon.repl/render-directory-ai
+-                   :seon.render/html seon.repl/render-directory-html
+-                   :description "The existing dir API's function and schema data."}
+-             [:functions [:vector [:map [:sym :qualified-symbol]
+-                                    [:arglists :seon.schema/value]
+-                                    [:doc {:optional true} :string]
+-                                    [:in :seon.schema/value]
+-                                    [:out :seon.schema/value]
+-                                    [:supplied {:optional true} [:vector :qualified-keyword]]]]]
+-             [:schemas [:map-of :qualified-keyword :seon.schema/value]]]
+             :columns [:vector :keyword]
+             :rows [:vector [:vector :seon.schema/value]]
+             :schemas [:map-of :qualified-keyword :seon.schema/value]
+diff --git a/resources/seon/schemas/seon.sci.eval.edn b/resources/seon/schemas/seon.sci.eval.edn
+index afd3cf615..28ea201f5 100644
+--- a/resources/seon/schemas/seon.sci.eval.edn
++++ b/resources/seon/schemas/seon.sci.eval.edn
+@@ -349,4 +349,27 @@
+ [:and {:description "The database an evaluation reads when its caller hands one. Absent, the evaluation reads its context's custody, so this is not a world member (seon.batch/world-members): a bound world never supplies it."}
+  :seon.db/database-value]
+ :stacktrace [:vector {:min 1 :description "An interpreted failure's source location: the author's SCI frames, innermost first, as [function-or-namespace line column] (sci.core/stacktrace). SCI's live callstack is read once and never stored."} [:tuple :symbol :int :int]]
++
++:reference [:or {:description "What a REPL lookup (doc) names: a symbol (a var, namespace, test or task) or a qualified keyword (a schema)."} :symbol :qualified-keyword]
++:lookup-pattern [:string {:min 1 :description "What apropos matches inside var names, or the regular expression find-doc finds in names and docstrings."}]
++:var-summary [:map {:description "One var as dir, apropos and find-doc list it: its symbol, arglists and docstring summary sentence when declared."}
++              [:sym :qualified-symbol] [:arglists {:optional true} :seon.schema/value] [:summary {:optional true} :string]]
++:var-summaries [:vector :seon.sci.eval/var-summary]
++:docstring-parts [:map {:description "A docstring as doc shows it: its summary sentence, the body after it and its Example section."}
++                  [:summary :string] [:body :string] [:example :string]]
++:namespace-doc [:map {:description "What doc shows for a namespace: its docstring parts when declared and its public var names."}
++                [:summary {:optional true} :string] [:body {:optional true} :string] [:example {:optional true} :string]
++                [:publics [:vector :symbol]]]
++:schema-doc [:map {:description "What doc shows for a schema keyword: the key, its stored Malli form and the form's description property when declared."}
++             [:key :qualified-keyword] [:form :seon.schema/value] [:description {:optional true} :string]]
++:proof-status [:map {:description "A test's current status on the reading branch: green, red (with its first failing assertion when recorded), unknown (an incomplete latest execution) or never run."}
++               [:sym :qualified-symbol] [:status [:enum :green :red :unknown :never-run]]
++               [:failure {:optional true} :seon.test.failure/value]]
++:task-doc [:map {:description "What doc shows for a task symbol: its intent, the subjects tagged with it and each proof test's current status."}
++           [:sym :seon.task/sym] [:intent :seon.task/intent] [:subjects [:vector :symbol]]
++           [:proofs [:vector :seon.sci.eval/proof-status]]]
++:schema-unavailable [:qualified-keyword {:description "The schema key a doc lookup named that no registered schema holds."}]
++:schema-unavailable-error [:and {:seon.db/attributes true}
++ :seon.error/base
++ [:map [:seon.sci.eval/schema-unavailable :seon.sci.eval/schema-unavailable]]]
+ }
+diff --git a/src/seon/render/ns.clj b/src/seon/render/ns.clj
+index f48b64881..01392527d 100644
+--- a/src/seon/render/ns.clj
++++ b/src/seon/render/ns.clj
+@@ -239,11 +239,15 @@
+                   [:or [:map [:seon.repl/columns [:vector :keyword]] [:seon.repl/rows [:vector [:vector :seon.schema/value]]]]
+                    :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+   [unit namespace-name]
+-  (let [found (sci.eval/directory-value (:seon.db/db unit) namespace-name true)
+-        columns [:sym :arglists :doc :in :out]]
+-    (if (:functions found)
++  (let [database (:seon.db/db unit)
++        found (sci.eval/documentation-value database namespace-name namespace-name)
++        columns [:sym :arglists :summary :in :out]]
++    (if (:publics found)
+       {:seon.repl/columns columns
+-       :seon.repl/rows (mapv #(mapv % columns) (:functions found))}
++       :seon.repl/rows (mapv (fn [local]
++                               (let [sym (symbol (str namespace-name) (str local))]
++                                 (mapv (assoc (sci.eval/documentation-value database sym sym) :sym sym) columns)))
++                             (:publics found))}
+       found)))
+ 
+ (defn render-ai
+diff --git a/src/seon/repl.clj b/src/seon/repl.clj
+index 3579b4c01..c03f8d4b0 100644
+--- a/src/seon/repl.clj
++++ b/src/seon/repl.clj
+@@ -33,25 +33,6 @@
+ 
+ (schema.edn/load! {})
+ 
+-(defn render-directory-ai
+-  "The namespace's public functions as data, one entry each: symbol, arglists
+-  and the summary sentence (absent when undocumented). Contracts are one
+-  `(doc sym)` away."
+-  {:malli/schema [:=> [:cat :seon.repl/directory]
+-                  [:vector [:map [:sym :qualified-symbol] [:arglists :seon.schema/value] [:summary {:optional true} :string]]]]}
+-  [directory]
+-  (mapv (fn [{:keys [sym arglists doc]}]
+-          (cond-> {:sym sym :arglists arglists} doc (assoc :summary doc)))
+-        (:functions directory)))
+-
+-(defn render-directory-html
+-  "Show complete directory data using the same named columns."
+-  {:malli/schema [:=> [:cat :seon.repl/directory] :seon.render/hiccup]}
+-  [directory]
+-  [:table
+-   (for [{:keys [sym arglists summary]} (render-directory-ai directory)]
+-     [:tr [:td [:code (str sym)]] [:td [:code (str arglists)]] [:td summary]])])
+-
+ (defn frame
+   "Derive the current turn budget outside the saved evaluation history.
+ 
+diff --git a/src/seon/sci/eval.clj b/src/seon/sci/eval.clj
+index ca625bfde..225292f30 100644
+--- a/src/seon/sci/eval.clj
++++ b/src/seon/sci/eval.clj
+@@ -98,6 +98,7 @@
+   (:require
+             [clojure.core.cache.wrapped :as cache]
+             [clojure.edn :as edn]
++            [clojure.repl :as repl]
+             [datahike.api :as d]
+             [edamame.core :as edamame]
+             [clojure.java.io :as io]
+@@ -137,6 +138,7 @@
+             [seon.schema :as schema]
+             [seon.schema.edn :as schema.edn]
+             [seon.sci.kernel :as kernel]
++            [seon.task :as task]
+             [seon.sci.reader :as reader]
+             [seon.test.runner :as test.runner]))
+ 
+@@ -345,6 +347,8 @@
+           (unreduced refusal)
+           (apply operation arguments))))))
+ 
++(declare install-program-doc!)
++
+ (defn build-base-ctx
+   "Build the minimal interpreter from the projection supplied by its caller."
+   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
+@@ -405,28 +409,18 @@
+          ;; the addon's pmap calls the host future-call: its threads escaped
+          ;; the arm and the form's owned work (task sci-pmap-escapes-the-arm)
+          (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)))
+-        help-var (get-in injected-namespaces ['seon.bootstrap 'help])
+-        dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
+-        doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
+-    ;; REPL documentation and test macros resolve through the core refer
++        help-var (get-in injected-namespaces ['seon.bootstrap 'help])]
++    ;; REPL lookups, help and test macros resolve through the core refer
+     ;; every namespace receives. Acquisition refreshes the same bindings.
++    (install-program-doc! ctx)
+     (sci/add-namespace!
+      ctx 'clojure.core
+-     (into {'dir dir-var
+-            'doc doc-var
+-            'help help-var
+-            'deftest (sci/resolve ctx 'clojure.test/deftest)
+-            'is (sci/resolve ctx 'clojure.test/is)}
++     (into {'help help-var}
+            ;; Native program mutation asks the program's facts first.
+            (map (fn [native-name]
+                   [native-name (native-mutation
+                                 (sci/resolve ctx (symbol "clojure.core" (name native-name))))]))
+            '[intern alter-var-root remove-ns ns-unalias]))
+-    (sci/add-namespace!
+-     ctx 'seon.bootstrap
+-     {'dir dir-var
+-      'doc doc-var
+-      'help help-var})
+     (assoc ctx
+            ::kernel/guard guard
+            ::kernel/installed-functions (atom #{})
+@@ -1832,20 +1826,8 @@
+      '(limit :seon.fn.arity/input-refs nil)
+      '(limit :seon.fn.arity/output-refs nil)]}])
+ 
+-(defn- program-documentation
+-  "Read one namespace's public functions at the evaluation's database basis."
+-  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
+-                  [:or [:vector :map] :seon.db/error-result]]}
+-  [database namespace-name]
+-  (db/q '[:find [(pull ?function selector) ...]
+-          :in $ selector ?name
+-          :where [?namespace :seon.ns/name ?name]
+-                 [?function :seon.fn/ns ?namespace]
+-                 [?function :seon.fn/sym _]
+-                 [?function :seon.fn/private? false]]
+-        database program-documentation-selector namespace-name))
+-
+ (defn- documentation-unavailable
++  "The typed unknown a lookup answers when nothing holds the symbol `requested`."
+   {:malli/schema [:=> [:cat :symbol] :seon.sci.eval/documentation-unavailable-error]}
+   [requested]
+   (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/documentation-unavailable
+@@ -1891,7 +1873,7 @@
+   cases, Costs, Recommendations, Errors, Known issues, any `## ` heading) or the
+   end; the sections around it stay in the body. `Example: (form)` on one line
+   yields that form."
+-  {:malli/schema [:=> [:cat :string] [:map [:summary :string] [:body :string] [:example :string]]]}
++  {:malli/schema [:=> [:cat :string] :seon.sci.eval/docstring-parts]}
+   [docstring]
+   (let [lines (mapv str/trim (str/split-lines (or docstring "")))
+         lines (vec (drop-while str/blank? lines))
+@@ -2016,92 +1998,139 @@
+                {:seon.schema.admission/note
+                 "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
+ 
+-(defn directory-value
+-  "Return current public function summaries and declared schemas for a namespace."
+-  {:malli/schema [:=> [:cat :seon.db/db :symbol :boolean] [:or :seon.repl/directory :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+-  [database namespace-name present?]
+-  (let [namespace-row (db/pull database
+-                             '[:seon.ns/name
+-                               {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
+-                               {:seon.schema/_ns [:seon.schema/key :seon.schema/form]}]
+-                             [:seon.ns/name namespace-name])
+-        functions (program-documentation database namespace-name)
+-        read-arglists (arglists-reader database namespace-name)]
++;;; REPL LOOKUP. SCI's `clojure.repl` (`sci.impl.namespaces`) finds names,
++;;; namespaces and matches in the agent's context; these functions return its
++;;; findings as data, and the database answers what only Seon holds: a program
++;;; function's contract, a namespace's facts, a test's status, a task, a schema.
++
++(defn- sci-meta
++  "The metadata of the var `qualified` names in the evaluating SCI context, or nil."
++  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil :map]]}
++  [qualified]
++  (some-> (sci.ctx-store/get-ctx) (sci/resolve qualified) meta))
++
++(defn- var-summary
++  "One var as `dir` and `find-doc` list it: its symbol, arglists and summary sentence."
++  {:malli/schema [:=> [:cat :qualified-symbol :map] :seon.sci.eval/var-summary]}
++  [sym {:keys [arglists doc]}]
++  (cond-> {:sym sym}
++    arglists (assoc :arglists arglists)
++    (string? doc) (assoc :summary (:summary (docstring-parts doc)))))
++
++(defn- schema-documentation
++  "A schema keyword's stored Malli form and description."
++  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
++                  [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/schema-unavailable-error]]}
++  [database schema-key]
++  (let [row (db/pull database [:seon.schema/form] [:seon.schema/key schema-key])
++        form (some-> (:seon.schema/form row) edn/read-string)
++        properties (when (vector? form) (second form))]
+     (cond
+-      (or (:seon.db/invalid-read namespace-row) (:seon.schema/expected-value namespace-row)) namespace-row
+-      (or (:seon.db/invalid-read functions) (:seon.schema/expected-value functions)) functions
+-      (or (:seon.ns/name namespace-row) present? (seq functions))
+-      (let [functions (sort-by (juxt #(get % :seon.fn/doc-order Long/MAX_VALUE)
+-                                    :seon.fn/sym) functions)]
+-        ;; `dir` is a macro, so its call names no producer; the directory
+-        ;; carries its own pair (the render law's master override).
+-        {:seon.render/ai 'seon.repl/render-directory-ai
+-         :seon.render/html 'seon.repl/render-directory-html
+-         :schemas (into (into (sorted-map) (mapcat #(documentation-schemas database %)) functions)
+-                        (map (fn [row]
+-                               [(:seon.schema/key row)
+-                                (edn/read-string (:seon.schema/form row))]))
+-                        (:seon.schema/_ns namespace-row))
+-         :functions (mapv (fn [row]
+-                            (merge {:sym (:seon.fn/sym row)
+-                                    :arglists (if-let [arglists (:seon.fn/arglists row)]
+-                                                (read-arglists arglists)
+-                                                (declaration-absent :seon.fn/arglists))}
+-                                   (when-let [doc (:seon.fn/doc row)]
+-                                     {:doc (:summary (docstring-parts doc))})
+-                                   (agent-documentation-contract database row)))
+-                          functions)})
++      (db/read-refusal? row) row
++      (nil? form) (seon.error.refusal/error :seon.sci.eval/schema-unavailable-error
++                                            {:seon.error/operation 'seon.sci.eval/documentation-value
++                                             :seon.error/message "No registered schema has this key."
++                                             ::schema-unavailable schema-key})
++      :else (cond-> {:key schema-key :form form}
++              (string? (:description properties)) (assoc :description (:description properties))))))
++
++(defn- namespace-documentation
++  "A namespace's docstring parts and public names: a program namespace's from
++  its facts, else a library namespace loaded in the evaluating SCI context."
++  {:malli/schema [:=> [:cat :seon.db/database-value :symbol]
++                  [:or :seon.sci.eval/namespace-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
++  [database namespace-name]
++  (let [row (db/pull database [:seon.ns/name :seon.ns/doc] [:seon.ns/name namespace-name])
++        publics (when (:seon.ns/name row)
++                  (db/q '[:find [?sym ...] :in $ ?name
++                          :where [?n :seon.ns/name ?name] [?f :seon.fn/ns ?n] [?f :seon.fn/private? false] [?f :seon.fn/sym ?sym]]
++                        database namespace-name))
++        ctx (sci.ctx-store/get-ctx)
++        library? (and (not (:seon.ns/name row)) ctx (sci/find-ns ctx namespace-name))
++        doc (if library? (some-> (find-ns namespace-name) meta :doc) (:seon.ns/doc row))]
++    (cond
++      (db/read-refusal? row) row
++      (db/read-refusal? publics) publics
++      (or library? (:seon.ns/name row))
++      (merge (when doc (docstring-parts doc))
++             {:publics (if library?
++                         (vec (sci.namespaces/dir-fn namespace-name))
++                         (vec (sort (map (comp symbol name) publics))))})
+       :else (documentation-unavailable namespace-name))))
+ 
++(defn- proof-status
++  "One test's status from its latest recorded result on this branch: green,
++  red with its first failing assertion, unknown, or never run."
++  {:malli/schema [:=> [:cat :qualified-symbol [:or :nil :map]] :seon.sci.eval/proof-status]}
++  [sym result]
++  (cond
++    (nil? result) {:sym sym :status :never-run}
++    (not (contains? result :seon.test/fail-count)) {:sym sym :status :unknown}
++    (zero? (+ (:seon.test/fail-count result) (:seon.test/error-count result))) {:sym sym :status :green}
++    :else (cond-> {:sym sym :status :red}
++            (seq (:seon.test/failures result)) (assoc :failure (first (:seon.test/failures result))))))
++
++(defn- proof-statuses
++  "Each test's status, in the order given, from one read of their latest results."
++  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-symbol]]
++                  [:or [:vector :seon.sci.eval/proof-status] :seon.test/execution-error]]}
++  [database tests]
++  (let [results (if (seq tests) (test.runner/latest-results database tests) [])
++        by-sym (when (vector? results)
++                 (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results))]
++    (if (vector? results) (mapv #(proof-status % (by-sym %)) tests) results)))
++
++(defn- task-documentation
++  "A task's intent, the subjects tagged with it and each proof test's status."
++  {:malli/schema [:=> [:cat :seon.db/database-value :map]
++                  [:or :seon.sci.eval/task-doc :seon.db/error-result :seon.test/execution-error]]}
++  [database {sym :seon.task/sym intent :seon.task/intent}]
++  (let [edges (task/task-edges database sym)
++        proofs (when-not (db/read-refusal? edges) (proof-statuses database (vec (sort (:seon.task/proofs edges)))))]
++    (cond
++      (db/read-refusal? edges) edges
++      (map? proofs) proofs
++      :else {:sym sym :intent intent :subjects (vec (sort (:seon.task/subjects edges))) :proofs proofs})))
++
++(defn- var-documentation
++  "Documentation for a qualified symbol, one kind at a time: a program
++  function, a test, a task, else a var of the evaluating SCI context."
++  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
++                  [:or :map :seon.db/error-result :seon.test/execution-error :seon.sci.eval/documentation-unavailable-error]]}
++  [database qualified]
++  (let [function (db/pull database program-documentation-selector [:seon.fn/sym qualified])
++        test-row (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym qualified]))
++        task (when-not (or (:seon.fn/sym function) (:seon.test/sym test-row))
++               (db/pull database [:seon.task/sym :seon.task/intent] [:seon.task/sym qualified]))
++        library (when-not (or (:seon.fn/sym function) (:seon.test/sym test-row) (:seon.task/sym task))
++                  (sci-meta qualified))]
++    (cond
++      (some db/read-refusal? [function test-row task]) (some #(when (db/read-refusal? %) %) [function test-row task])
++      (:seon.fn/sym function) (function-doc-map database function)
++      (:seon.test/sym test-row) (let [statuses (proof-statuses database [qualified])]
++                              (if (vector? statuses) (first statuses) statuses))
++      (:seon.task/sym task) (task-documentation database task)
++      library (cond-> (if (string? (:doc library)) (docstring-parts (:doc library)) {})
++                (:arglists library) (assoc :arglists (:arglists library)))
++      :else (documentation-unavailable qualified))))
++
+ (defn documentation-value
+-  "Read documentation for a public function, named override, or namespace."
+-  {:malli/schema [:=> [:cat :seon.db/db :symbol :symbol] [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+-  [database requested qualified]
+-  (if (namespace qualified)
+-    (let [row (db/pull database
+-                       program-documentation-selector
+-                       [:seon.fn/sym qualified])
+-          overrides (when (= :agent (:seon.schema.admission/source row))
+-                      (program/overrides database))
+-          overridden? (boolean (some #{qualified} overrides))]
+-      (cond
+-        (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+-        (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
+-        (:seon.fn/sym row)
+-        (function-doc-map database row overridden?)
+-        :else (documentation-unavailable requested)))
+-    (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]
+-      (cond
+-        (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+-        (:seon.ns/doc row) (merge (docstring-parts (:seon.ns/doc row)) {:in [] :out []})
+-        :else (documentation-unavailable requested)))))
+-
+-(defn- program-doc-var
+-  "Resolve in the calling SCI namespace; read facts when the form executes."
+-  {:malli/schema [:=> [:cat] :seon.schema/value]}
+-  []
+-  (sci/new-macro-var
+-   'doc
+-   (fn [_form _env function-symbol]
+-     `(let [resolved# (resolve '~function-symbol)
+-            metadata# (meta resolved#)]
+-        (seon.sci.eval/documentation-value
+-         (seon.db/db) '~function-symbol
+-         (if resolved#
+-           (symbol (str (:ns metadata#)) (str (:name metadata#)))
+-           '~function-symbol))))
+-   {:ns (sci/create-ns 'clojure.repl)}))
+-
+-(defn- program-dir-var
+-  "Read current facts through the calling evaluation's database custody."
+-  []
+-  (sci/new-macro-var
+-   'dir
+-   (fn [_form _env namespace-name]
+-     `(seon.sci.eval/directory-value
+-       (seon.db/db) '~namespace-name
+-       (boolean (clojure.core/find-ns '~namespace-name))))
+-   {:ns (sci/create-ns 'clojure.repl)}))
++  "What `doc` shows for `reference`, by kind: a schema keyword's form and
++  description; a namespace's doc and public names; a program function's
++  summary, arglists and contract; a test's status; a task's intent, subjects
++  and proof statuses; a library var's doc and arglists. `requested` is what
++  the caller typed, named when nothing answers."
++  {:malli/schema [:=> [:cat :seon.db/database-value :seon.sci.eval/reference :seon.sci.eval/reference]
++                  [:or :map :seon.db/error-result :seon.test/execution-error
++                   :seon.sci.eval/documentation-unavailable-error :seon.sci.eval/schema-unavailable-error]]}
++  [database requested reference]
++  (let [answer (cond
++                 (keyword? reference) (schema-documentation database reference)
++                 (simple-symbol? reference) (namespace-documentation database reference)
++                 :else (var-documentation database reference))]
++    (if (and (symbol? requested) (= reference (::documentation-unavailable answer)))
++      (documentation-unavailable requested)
++      answer)))
+ 
+ (defn stored-source
+   "The stored source of the program declaration named `qualified`, or nil.
+@@ -2124,29 +2153,95 @@
+                   source))))
+           (program/shapes-in projection))))
+ 
+-(defn- stored-source-fn
+-  "`clojure.repl/source-fn` for the evaluating context: SCI's `source` macro
+-  calls it (`reference-code/sci/src/sci/impl/namespaces.cljc:2436`); the
+-  symbol resolves in the calling SCI namespace and the stored row answers."
+-  {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
++(defn source-value
++  "What `source` shows: a program declaration's stored source (private ones
++  and tests included), else a library var's source read from the classpath by
++  `clojure.repl/source-fn`, else the typed unavailable error naming `requested`."
++  {:malli/schema [:=> [:cat :seon.db/database-value :symbol :symbol]
++                  [:or :string :seon.sci.eval/documentation-unavailable-error]]}
++  [database requested reference]
++  (or (stored-source database reference)
++      (when (and (qualified-symbol? reference) (sci-meta reference)) (repl/source-fn reference))
++      (documentation-unavailable requested)))
++
++(defn reference-in
++  "`requested` as the evaluating SCI namespace names it: a qualified symbol
++  with its namespace alias expanded, an unqualified symbol that resolves to a
++  var as that var's qualified symbol, anything else unchanged."
++  {:malli/schema [:=> [:cat :seon.sci.eval/reference] :seon.sci.eval/reference]}
++  [requested]
++  (let [ctx (sci.ctx-store/get-ctx)]
++    (cond
++      (qualified-symbol? requested)
++      (let [aliases (get-in @(:env ctx) [:namespaces (sci.utils/current-ns-name) :aliases])]
++        (symbol (str (get aliases (symbol (namespace requested)) (namespace requested))) (name requested)))
++      (simple-symbol? requested)
++      (let [resolved (sci/resolve ctx requested)]
++        (if (instance? sci.lang.Var resolved) (sci/var->symbol resolved) requested))
++      :else requested)))
++
++(defn directory
++  "What `dir` shows: SCI's `dir-fn` names of the namespace `requested` names
++  (an alias or a namespace), each with its arglists and summary sentence."
++  {:malli/schema [:=> [:cat :symbol] [:or :seon.sci.eval/var-summaries :seon.sci.eval/documentation-unavailable-error]]}
++  [requested]
++  (let [ctx (sci.ctx-store/get-ctx)
++        target (get-in @(:env ctx) [:namespaces (sci.utils/current-ns-name) :aliases requested] requested)]
++    (if (sci/find-ns ctx target)
++      (mapv #(let [sym (symbol (str target) (str %))] (var-summary sym (sci-meta sym)))
++            (sci.namespaces/dir-fn requested))
++      (documentation-unavailable requested))))
++
++(defn- agent-apropos
++  "SCI's `apropos` over the evaluating context, as a vector."
++  {:malli/schema [:=> [:cat :seon.sci.eval/lookup-pattern] [:vector :qualified-symbol]]}
++  [pattern]
++  (vec (sci.namespaces/apropos pattern)))
++
++(defn- agent-find-doc
++  "The public vars of the evaluating context whose name or docstring the
++  regular expression `pattern` finds, with their summaries."
++  {:malli/schema [:=> [:cat :seon.sci.eval/lookup-pattern] :seon.sci.eval/var-summaries]}
++  [pattern]
++  (let [ctx (sci.ctx-store/get-ctx)
++        expression (re-pattern pattern)]
++    (into [] (for [sci-ns (sort-by str (sci.namespaces/sci-all-ns))
++                   [local v] (sort-by key (sci.namespaces/sci-ns-publics* ctx sci-ns))
++                   :let [metadata (meta v)]
++                   :when (or (re-find expression (str local))
++                             (and (string? (:doc metadata)) (re-find expression (:doc metadata))))]
++               (var-summary (symbol (str sci-ns) (str local)) metadata)))))
++
++(defn- agent-source-fn
++  "`clojure.repl/source-fn` for the evaluating context: what `source` shows, or nil."
++  {:malli/schema [:=> [:cat :symbol] [:or :nil :string]]}
+   [requested]
+-  (let [resolved (sci/resolve (sci.ctx-store/get-ctx) requested)
+-        {var-ns :ns var-name :name} (meta resolved)]
+-    (stored-source (db/db) (if resolved (symbol (str var-ns) (str var-name)) requested))))
++  (let [shown (source-value (db/db) requested (reference-in requested))]
++    (when (string? shown) shown)))
++
++(defn- lookup-macro
++  "A `clojure.repl` macro var whose call `(name x)` becomes `(expansion 'x)`."
++  {:malli/schema [:=> [:cat :symbol ifn?] :seon.schema/value]}
++  [macro-name expansion]
++  (sci/new-macro-var macro-name (fn [_form _env requested] (expansion requested))
++                     {:ns (sci/create-ns 'clojure.repl)}))
+ 
+ (defn- install-program-doc!
+-  "Install REPL macros without capturing program facts or a database value."
+-  [ctx _db _projection]
+-  (let [doc-var (program-doc-var)
+-        dir-var (program-dir-var)]
+-    (sci/add-namespace! ctx 'clojure.repl
+-                        {'doc doc-var 'dir dir-var
+-                         'source-fn (sci/new-var 'source-fn stored-source-fn
+-                                                 {:ns (sci/create-ns 'clojure.repl)})})
+-    (sci/add-namespace! ctx 'clojure.core
+-                        {'doc doc-var 'dir dir-var
+-                         'deftest (sci/resolve ctx 'clojure.test/deftest)
+-                         'is (sci/resolve ctx 'clojure.test/is)})
++  "Refer the REPL lookups (`doc`, `source`, `dir`, `apropos`, `find-doc`) and
++  the test macros into every namespace through `clojure.core`."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/ctx]}
++  [ctx]
++  (let [repl-ns (sci/create-ns 'clojure.repl)
++        resolved #(list 'seon.sci.eval/reference-in (list 'quote %))
++        lookups {'doc (lookup-macro 'doc #(list 'seon.sci.eval/documentation-value '(seon.db/db) (list 'quote %) (resolved %)))
++                 'source (lookup-macro 'source #(list 'seon.sci.eval/source-value '(seon.db/db) (list 'quote %) (resolved %)))
++                 'dir (lookup-macro 'dir #(list 'seon.sci.eval/directory (list 'quote %)))
++                 'apropos (sci/new-var 'apropos #'agent-apropos {:ns repl-ns})
++                 'find-doc (sci/new-var 'find-doc #'agent-find-doc {:ns repl-ns})}]
++    (sci/add-namespace! ctx 'clojure.repl (assoc lookups 'source-fn (sci/new-var 'source-fn #'agent-source-fn {:ns repl-ns})))
++    (sci/add-namespace! ctx 'clojure.core (assoc lookups
++                                                 'deftest (sci/resolve ctx 'clojure.test/deftest)
++                                                 'is (sci/resolve ctx 'clojure.test/is)))
+     ctx))
+ 
+ (defn- install-declared-classes!
+@@ -2378,7 +2473,7 @@
+             (throw (ex-info "Cannot acquire the affected function closure." closure)))
+         interpreted (into overridden (:seon.fn/affected closure))
+         function-rows (filterv (fn [[sym]] (interpreted sym)) all-function-rows)
+-        _ (install-program-doc! ctx db projection)
++        _ (install-program-doc! ctx)
+         selected-namespace-names
+         (into (into #{} (map #(nth % 2)) function-rows)
+               (comp
+diff --git a/test/seon/render/ns_test.clj b/test/seon/render/ns_test.clj
+index 2442a3c83..d0a0d455f 100644
+--- a/test/seon/render/ns_test.clj
++++ b/test/seon/render/ns_test.clj
+@@ -75,7 +75,7 @@
+           (is (= 'seon.flow (:seon.ns/name flow))))
+         (testing "distance one is its requires and dir's columns and rows"
+           (is (= (sort (:seon.ns/requires (namespace-unit db 'seon.flow 1 100000))) (:seon.ns/requires flow)))
+-          (is (= [:sym :arglists :doc :in :out] (:seon.repl/columns flow)))
++          (is (= [:sym :arglists :summary :in :out] (:seon.repl/columns flow)))
+           (is (contains? names 'seon.flow/start-work-launcher!))
+           (is (not-any? #(= "work-launcher-step" (name %)) names) "private functions are not listed")
+           (is (every? #(= 5 (count %)) (:seon.repl/rows flow)) "one row per function, no member source"))
+diff --git a/test/seon/sci/documentation_test.clj b/test/seon/sci/documentation_test.clj
+index a1e1a4365..da036e60b 100644
+--- a/test/seon/sci/documentation_test.clj
++++ b/test/seon/sci/documentation_test.clj
+@@ -6,7 +6,7 @@
+             [seon.db :as db]
+             [seon.program :as program]
+             [seon.sci.eval :as evaluation]
+-            [seon.schema :as schema]
++            [seon.task :as task]
+             [seon.test-support :as support]))
+ 
+ (deftest a-named-private-override-documents-the-jvm-boundary
+@@ -23,12 +23,12 @@
+          {:seon.schema.admission/source :agent :seon.fn/private? true}))
+        (let [database (db/db connection)
+              doc (evaluation/documentation-value database function-symbol function-symbol)
+-             directory (evaluation/directory-value database 'seon.eval.drive true)]
++             publics (:publics (evaluation/documentation-value database 'seon.eval.drive 'seon.eval.drive))]
+          (is (= "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."
+                 (:seon.schema.admission/note doc))
+              "the override's documentation names the JVM boundary")
+-         (is (not-any? #(= function-symbol (:sym %)) (:functions directory))
+-             "a private override stays out of the public directory"))))))
++         (is (not-any? #{(symbol (name function-symbol))} publics)
++             "a private override stays out of the namespace's public names"))))))
+ 
+ (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
+   (support/with-database
+@@ -44,55 +44,6 @@
+         (is (= [[:cat :int] [:cat [:or :string :int] :boolean]] (:in contract)))
+         (is (= [:string :keyword] (:out contract)))))))
+ 
+-(deftest documentation-is-returned-data-without-a-second-printed-copy
+-  (support/with-database
+-   (fn [connection]
+-     (let [ctx (support/fork-cluster-ctx connection)
+-           run (fn [source]
+-                 (support/evaluate
+-                  {:seon.sci.eval/ctx ctx
+-                   :seon.cluster.eval/source source
+-                   :seon.sci.admit/caps (config/result-caps config/defaults)
+-                   :seon.sci.eval/time-limit-ms 2000}))
+-           directory (run "(dir my.agent)")
+-           documentation (run "(doc my.agent/settings!)")
+-           missing (run "(doc my.agent/does-not-exist)")
+-           missing-ns (run "(dir missing.namespace)")
+-           empty-ns (run "(do (in-ns 'fixture.empty-doc) (dir fixture.empty-doc))")
+-           directory-value (:seon.sci.admit/value directory)
+-           entities (:functions directory-value)
+-           entity (:seon.sci.admit/value documentation)]
+-       (is (seq entities))
+-       (is (some #(= 'my.agent/settings! (:sym %)) entities))
+-       (is (every? #(and (:in %) (:out %)) entities))
+-       (is (every? #(not (str/includes? (:doc %) "\n")) entities))
+-       (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys entity))))
+-       (is (= (first (str/split-lines (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc]
+-                                    [:seon.fn/sym 'my.agent/settings!]))))
+-              (:summary entity)))
+-       (is (= (:in entity)
+-              (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
+-       (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
+-       (is (= :map (first (second (:in entity)))))
+-       (doseq [target ["my.message/send" "my.agent/done" "my.task"]
+-               :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
+-         (is (= (cond-> #{:summary :body :example :in :out}
+-                  (namespace (symbol target)) (conj :arglists :supplied))
+-                (set (keys doc))))
+-         (is (not (str/blank? (:summary doc))))
+-         (is (not (str/blank? (:body doc))))
+-         (is (seq (read-string (:example doc)))))
+-       (doseq [result [directory documentation missing missing-ns]]
+-         (is (empty? (:seon.cluster.eval/output result))))
+-       (is (symbol? (get-in missing [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
+-       (is (= 'seon.sci.eval/documentation-unavailable
+-              (get-in missing [:seon.sci.admit/value :seon.error/operation])))
+-       (is (symbol? (get-in missing-ns [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
+-       (is (= 'seon.sci.eval/documentation-unavailable
+-              (get-in missing-ns [:seon.sci.admit/value :seon.error/operation])))
+-       (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
+-       (is (nil? (:seon.cluster.eval/error empty-ns)))))))
+-
+ (deftest directory-observes-a-function-installed-after-context-acquisition
+   (support/with-database
+    (fn [connection]
+@@ -113,14 +64,14 @@
+                      :seon.sci.admit/caps (config/result-caps configuration)
+                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)})))
+            initial (run "(dir fixture.own-functions)")
+-           evidence (db/read-evidence @captured)
++           evidence (do (run "(doc fixture.own-functions)") (db/read-evidence @captured))
+            source "(defn identity-number \"Return the number.\nA durable function.\" {:malli/schema [:=> [:cat :int] :int]} [number] number)"
+            defined (run source)
+            ;; evaluate admits nothing since S10 (5e22bc5f6): the entity is the
+            ;; one its canonical writer produces for the same source
+            entity (support/program-fn-entity (db/db connection)
+                                              'fixture.own-functions/identity-number source)]
+-       (is (= [] (get-in initial [:seon.sci.admit/value :functions])))
++       (is (= [] (:seon.sci.admit/value initial)))
+        (is (seq evidence))
+        (is (true? (db/read-evidence-current? (db/db connection) evidence)))
+        (is (nil? (:seon.cluster.eval/error defined)))
+@@ -141,9 +92,8 @@
+          (is (nil? (:seon.cluster.eval/error directory)))
+          (is (= [{:sym 'fixture.own-functions/identity-number
+                   :arglists '([number])
+-                  :doc "Return the number."
+-                  :in [:cat :int] :out :int}]
+-                (get-in directory [:seon.sci.admit/value :functions]))))
++                  :summary "Return the number."}]
++                (:seon.sci.admit/value directory))))
+        (doseq [source ["(doc identity-number)"
+                        "(doc fixture.own-functions/identity-number)"]]
+          (let [documented (run source)]
+@@ -160,7 +110,7 @@
+                     :seon.agent/id "documentation"}
+            retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))
+            old-dir @(sci/resolve retained 'clojure.core/dir)]
+-       (#'evaluation/install-program-doc! base (db/db connection) (schema/handed-projection))
++       (#'evaluation/install-program-doc! base)
+        (is (not (identical? old-dir @(sci/resolve base 'clojure.core/dir))))
+        (let [updated (:seon.sci.eval/ctx
+                       (evaluation/fork-for-turn
+@@ -197,7 +147,7 @@
+        (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
+          (is (nil? (sci/resolve retained 'deftest)))
+          (is (nil? (sci/resolve retained 'is))))
+-       (#'evaluation/install-program-doc! base (db/db connection) (schema/handed-projection))
++       (#'evaluation/install-program-doc! base)
+        (let [updated (:seon.sci.eval/ctx
+                       (evaluation/fork-for-turn
+                        (assoc request :seon.sci.eval/agent-ctx retained)))]
+@@ -258,10 +208,9 @@
+            doc (evaluation/documentation-value database
+                                                'my.turn/undeclared
+                                                'my.turn/undeclared)
+-           entity (some #(when (= 'my.turn/undeclared (:sym %)) %)
+-                     (:functions (evaluation/directory-value database 'my.turn false)))]
++           publics (:publics (evaluation/documentation-value database 'my.turn 'my.turn))]
+        (is (contains? doc :in))
+-       (is (some? entity) "the undeclared entity is still listed by dir")
++       (is (some #{'undeclared} publics) "the undeclared function is still a public name")
+        (doseq [[_label value attribute]
+                [["doc :in" (:in doc) :seon.fn/spec]
+                 ["doc :out" (:out doc) :seon.fn/spec]
+@@ -269,9 +218,7 @@
+          (is (= attribute (:seon.sci.eval/missing-declaration value)))
+          (is (= 'seon.sci.eval/declaration-absent (:seon.error/operation value))))
+        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
+-       (is (not= "" (:summary doc)))
+-       (is (str/includes? (:summary doc) (str :seon.fn/doc)))
+-       (is (str/includes? (:doc entity) (str :seon.fn/doc)))))))
++       (is (not (contains? doc :summary)) "an absent docstring is no summary, never an empty one")))))
+ 
+ (deftest clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
+   (support/with-database
+@@ -303,27 +250,6 @@
+            (is (str/includes? (str (:seon.cluster.eval/output result))
+                               "Ran 2 tests containing 3 assertions."))))))))
+ 
+-(deftest source-at-the-agent-repl-prints-the-stored-declaration
+-  (support/with-database
+-   (fn [connection]
+-     (let [ctx (support/fork-cluster-ctx connection)
+-           run (fn [source]
+-                 (support/evaluate
+-                  {:seon.sci.eval/ctx ctx
+-                   :seon.cluster.eval/source source
+-                   :seon.sci.admit/caps (config/result-caps config/defaults)
+-                   :seon.sci.eval/time-limit-ms 2000}))
+-           stored (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source]
+-                                            [:seon.fn/sym 'my.agent/settings!]))
+-           qualified (run "(clojure.repl/source my.agent/settings!)")
+-           aliased (run "(do (require '[my.agent :as agent]) (clojure.repl/source agent/settings!))")
+-           missing (run "(clojure.repl/source fixture.missing/nothing)")]
+-       (is (string? stored))
+-       (is (= (str stored "\n") (:seon.cluster.eval/output qualified)))
+-       (is (= (str stored "\n") (:seon.cluster.eval/output aliased)))
+-       (is (= "Source not found\n" (:seon.cluster.eval/output missing)))
+-       (is (= stored (evaluation/stored-source (db/db connection) 'my.agent/settings!)))))))
+-
+ (deftest an-example-ends-at-the-next-fixed-heading
+   ;; The example ran to the docstring's end, so a heading after it (Costs,
+   ;; Errors, `## Known issues`) was read as example forms (tasks eba5d142ef12,
+@@ -336,3 +262,34 @@
+   (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/open)"}
+          (evaluation/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
+   (is (= "" (:example (evaluation/docstring-parts "No example here.")))))
++
++(deftest each-lookup-answers-its-reference-kind-as-data
++  (support/with-database
++   (fn [connection]
++     (let [created (task/create! {:seon.db/connection connection :seon.agent/id "lookup"
++                                  :seon.task/ns 'seon.id :seon.task/name "lookup-fixture" :seon.task/kind :function
++                                  :seon.task/intent "Fixture task for doc."})
++           ctx (support/fork-cluster-ctx connection)
++           proof 'seon.sci.documentation-test/an-example-ends-at-the-next-fixed-heading
++           syms (fn [value] (set (map :sym value)))]
++       (is (= 'seon.id/lookup-fixture (:seon.task/sym created)) "the fixture task is created")
++       (doseq [[kind source holds?]
++               [["program function" "(doc seon.db/q)" #(and (seq (:arglists %)) (contains? % :in) (string? (:summary %)))]
++                ["library var" "(doc clojure.set/union)" #(and (seq (:arglists %)) (string? (:summary %)))]
++                ["aliased library var" "(do (require '[clojure.set :as set]) (doc set/union))" #(seq (:arglists %))]
++                ["program namespace" "(doc my.task)" #(some #{'open} (:publics %))]
++                ["library namespace" "(doc clojure.set)" #(some #{'union} (:publics %))]
++                ["schema keyword" "(doc :seon.task/sym)" #(= [:seon.task/sym :qualified-symbol] [(:key %) (first (:form %))])]
++                ["task symbol" "(doc seon.id/lookup-fixture)" #(= ["Fixture task for doc." []] [(:intent %) (:proofs %)])]
++                ["test symbol" (str "(doc " proof ")") #(and (= proof (:sym %)) (#{:green :red :unknown :never-run} (:status %)))]
++                ["unknown symbol" "(doc fixture.missing/nothing)" #(= 'fixture.missing/nothing (:seon.sci.eval/documentation-unavailable %))]
++                ["unknown schema" "(doc :fixture.missing/key)" #(= :seon.sci.eval/schema-unavailable-error (:seon.error/type %))]
++                ["program source" "(source seon.id/symbol-in)" #(str/starts-with? % "(defn symbol-in")]
++                ["private source" "(source seon.sci.eval/var-summary)" #(str/starts-with? % "(defn- var-summary")]
++                ["test source" (str "(source " proof ")") #(str/starts-with? % "(deftest an-example-ends")]
++                ["library source" "(source clojure.set/union)" #(str/starts-with? % "(defn union")]
++                ["program dir" "(dir my.task)" #(and (vector? %) ((syms %) 'my.task/open))]
++                ["library dir" "(dir clojure.set)" #(and (vector? %) ((syms %) 'clojure.set/union))]
++                ["apropos" "(apropos \"split-lines\")" #(and (vector? %) (some #{'clojure.string/split-lines} %))]
++                ["find-doc" "(find-doc \"union of the input sets\")" #(and (vector? %) ((syms %) 'clojure.set/union))]]]
++         (is (holds? (support/agent-value ctx source)) kind))))))

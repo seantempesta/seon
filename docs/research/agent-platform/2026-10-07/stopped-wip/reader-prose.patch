@@ -1,0 +1,333 @@
+diff --git a/src/seon/batch.clj b/src/seon/batch.clj
+index 5c4678092..4a22e0d40 100644
+--- a/src/seon/batch.clj
++++ b/src/seon/batch.clj
+@@ -387,7 +387,7 @@
+         base (merge base @measured)
+         value? (some? @returned)
+         entry (cond
+-                refused (assoc base :seon.batch/error (ex-info "Only the REPL writes responses: this map was not evaluated."
++                refused (assoc base :seon.batch/error (ex-info "Only the REPL writes responses: this imitated result was not evaluated; send code only."
+                                                                {:seon.batch/refused refused}))
+                 read-error (assoc base :seon.batch/error read-error)
+                 (and value? @printed) (first @printed)
+diff --git a/src/seon/sci/forgive.clj b/src/seon/sci/forgive.clj
+index 8d907de0c..c4c35b83e 100644
+--- a/src/seon/sci/forgive.clj
++++ b/src/seon/sci/forgive.clj
+@@ -1,18 +1,27 @@
+ (ns seon.sci.forgive
+   "The forgiving input stage in front of the one reader.
+ 
++  A model reply that holds a Markdown fence is read as Markdown first
++  (`fenced`): only its Clojure fences are code, every other line a `;`
++  comment, and inside them every form is code (`:fenced`). A reply without a
++  fence is read as Clojure with prose forgiven (`:reply`).
++
+   One reader cursor per text version. `next-form` reads ONE form at the
+   cursor with the caller's reader (SCI's, under the live resolver). Only when
+-  that read fails, or, in a model reply, when a bare token does not stand
++  that read fails, or, in an unfenced reply, when a bare token does not stand
+   alone on its line, does it repair the text at that point and read again
+-  from the same offset. Only a model reply (`:reply`) is repaired; code
+-  (`:code`) is read as written:
+-
+-    prose line          -> `; prose` comment line (a structured code suffix on
+-                           the line stays code, on its own line)
+-    prompt marker       -> removed (`user=> (f 1)`)
+-    unbalanced closers  -> Parinfer indent mode, accepted only when the rest
+-                           of the text then reads without a structural error
++  from the same offset. Code (`:code`) is read as written:
++
++    imitated result     -> refused, never run, in every mode: a REPL prompt
++                           line (`user=> (f 1)`, `=> 42`) through the next
++                           blank or fence line, or a `#:seon.repl{...}` map
++    prose line          -> `; prose` comment line in `:reply`, as is a
++                           Markdown heading or a line opening with a code
++                           span (a structured code suffix on the line stays
++                           code, on its own line)
++    unbalanced closers  -> Parinfer indent mode in `:reply` and `:fenced`,
++                           accepted only when the rest of the text then reads
++                           without a structural error
+     anything else       -> unread from here, as data
+ 
+   Trials (is the rest balanced? is this suffix all collections?) use a
+@@ -23,12 +32,7 @@
+ 
+   A repair makes a new text version (new line index, new cursor advanced to
+   the offset): cost is proportional to the text once per repair, never per
+-  form. The repaired text is what is evaluated, stored and rendered.
+-
+-  ## Costs
+-
+-  - 52 recorded replies (7 run4, 18 stored, 18 reply_test, 9 by hand): 69 ms
+-    total, max 35 ms on 12 KB (default, 2026-09-27, unarmed)."
++  form. The repaired text is what is evaluated, stored and rendered."
+   (:require [clojure.string :as str]
+             [clojure.tools.reader.reader-types :as rt]
+             [edamame.core :as edamame]
+@@ -79,6 +83,103 @@
+           (and (str/blank? (subs text ls p)) (fence-line? (subs text ls le))) (recur le)
+           :else p)))))
+ 
++(def ^:private clojure-fence-tags
++  "The first info-string words of a fence whose body is Clojure; an untagged fence is Clojure too."
++  #{"" "clojure" "clj" "cljc" "cljs" "edn"})
++
++(defn- fence-open
++  "The fence `line` opens, or nil: three or more backticks or tildes and an
++  info string, which holds no backtick after backticks (CommonMark)."
++  {:malli/schema [:=> [:cat :string] [:maybe [:map [::fence-char char?] [::fence-length pos-int?] [::clojure? :boolean]]]]}
++  [line]
++  (let [l (str/trim line)
++        c (first l)
++        n (count (take-while #(= c %) l))
++        info (str/trim (subs l n))]
++    (when (and (contains? #{\` \~} c) (>= n 3) (not (and (= \` c) (str/includes? info "`"))))
++      {::fence-char c ::fence-length n
++       ::clojure? (contains? clojure-fence-tags
++                             (str/lower-case (apply str (take-while #(not (Character/isWhitespace ^char %)) info))))})))
++
++(defn- fence-close?
++  "Whether `line` closes the fence `open`: only its character, at least as many."
++  {:malli/schema [:=> [:cat :string [:map [::fence-char char?] [::fence-length pos-int?]]] :boolean]}
++  [line {c ::fence-char n ::fence-length}]
++  (let [l (str/trim line)]
++    (and (>= (count l) n) (every? #(= c %) l))))
++
++(defn- text-lines
++  "`text`'s lines without their newlines; joined with newlines they are `text`."
++  {:malli/schema [:=> [:cat :string] [:vector :string]]}
++  [^String text]
++  (let [starts (line-starts text)]
++    (mapv #(subs text %1 %2) starts (conj (mapv dec (rest starts)) (count text)))))
++
++(defn- fenced-line
++  "One line of a fenced reply and the fence open after it: prose outside a
++  Clojure fence's body becomes a `;` comment; fence lines stay, as delimiters."
++  {:malli/schema [:=> [:cat [:map [::lines [:vector :string]]] :string] [:map [::lines [:vector :string]]]]}
++  [{open ::open :as acc} line]
++  (let [prose? (not (or (str/blank? line) (str/starts-with? (str/triml line) ";")))
++        add (fn [l] (update acc ::lines conj l))]
++    (cond
++      (nil? open) (if-let [opened (fence-open line)]
++                    (assoc (add line) ::open opened)
++                    (add (if prose? (str "; " line) line)))
++      (fence-close? line open) (dissoc (add line) ::open)
++      (or (::clojure? open) (not prose?)) (add line)
++      :else (add (str "; " line)))))
++
++(defn fenced
++  "`text` read as Markdown, or nil when it holds no fence.
++
++  Only the bodies of its Clojure fences (untagged, clojure, clj, cljc, cljs,
++  edn) stay code; every other line becomes a `;` comment. An unclosed fence
++  runs to the text's end."
++  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
++  [text]
++  (let [lines (text-lines text)]
++    (when (some fence-open lines)
++      (str/join "\n" (::lines (reduce fenced-line {::lines []} lines))))))
++
++(defn- markdown-line?
++  "Whether `line` is a Markdown heading (one to six `#`, then whitespace or
++  the line's end) or opens with a code span (`` `name` ``): neither is Clojure."
++  {:malli/schema [:=> [:cat :string] :boolean]}
++  [line]
++  (let [l (str/triml line)
++        hashes (count (take-while #(= \# %) l))
++        after (get l hashes)
++        span (take-while #(not (or (= \` %) (Character/isWhitespace ^char %))) (rest l))]
++    (boolean
++     (or (and (<= 1 hashes 6) (or (nil? after) (Character/isWhitespace ^char after)))
++         (and (= \` (first l)) (seq span) (= \` (get l (inc (count span)))))))))
++
++(def ^:private prompt #"^[A-Za-z][\w.\-]*=>[ \t]*")
++
++(defn- prompt-line?
++  "Whether `line` opens like a REPL transcript: `ns=>` or `=>`, then
++  whitespace or the line's end."
++  {:malli/schema [:=> [:cat :string] :boolean]}
++  [line]
++  (let [l (str/triml line)
++        marker (if (str/starts-with? l "=>") "=>" (re-find prompt l))]
++    (boolean (and marker (or (= (count marker) (count l))
++                             (Character/isWhitespace ^char (last marker))
++                             (Character/isWhitespace ^char (get l (count marker))))))))
++
++(defn- imitation-end
++  "The end of the imitated transcript block whose prompt line starts at
++  `line-start`: before the next blank or fence line, else the text's end."
++  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
++  [^String text line-start]
++  (loop [[_ e] (line-bounds text line-start)]
++    (if (>= e (count text))
++      e
++      (let [[s' e'] (line-bounds text (inc e))
++            line (subs text s' e')]
++        (if (or (str/blank? line) (fence-line? line)) e (recur [s' e']))))))
++
+ (defn- advance
+   "The version with its cursor moved forward to `pos`."
+   {:malli/schema [:=> [:cat :seon.batch/text-version nat-int?] :seon.batch/text-version]}
+@@ -142,16 +243,20 @@
+ 
+ (defn- comment-rest-of-line
+   "The text with everything from `start` to the end of its line made a `;`
+-  comment, keeping a structured code suffix as code on its own line. The
+-  commented text begins with `;`, so the next read advances."
+-  {:malli/schema [:=> [:cat :string nat-int?] [:map [:text :string] [:repair :seon.batch/repair]]]}
+-  [^String text start]
++  comment, keeping a structured code suffix as code on its own line unless
++  `whole?` (Markdown is prose to its end). The commented text begins with
++  `;`, so the next read advances."
++  {:malli/schema [:function
++                  [:=> [:cat :string nat-int?] [:map [:text :string] [:repair :seon.batch/repair]]]
++                  [:=> [:cat :string nat-int? :boolean] [:map [:text :string] [:repair :seon.batch/repair]]]]}
++  ([text start] (comment-rest-of-line text start false))
++  ([^String text start whole?]
+   (let [[_ le] (line-bounds text start)
+         tail (subs text start le)
+-        suffix (code-suffix tail)
++        suffix (when-not whole? (code-suffix tail))
+         prose (str/trim (if suffix (subs tail 0 suffix) tail))]
+     {:text (str (subs text 0 start) "; " prose (when suffix (str "\n" (subs tail suffix))) (subs text le))
+-     :repair {:seon.batch/repair-kind :prose :seon.batch/prose prose}}))
++     :repair {:seon.batch/repair-kind :prose :seon.batch/prose prose}})))
+ 
+ (defn- delimiter-repair
+   "Parinfer indent mode over the rest of the text, accepted only if it changed
+@@ -166,8 +271,6 @@
+       {:text (str (subs text 0 pos) candidate)
+        :repair {:seon.batch/repair-kind :delimiters :seon.batch/at pos}})))
+ 
+-(def ^:private prompt #"^[A-Za-z][\w.\-]*=>[ \t]*")
+-
+ (defn structure?
+   "Whether a reply holds any line that begins with a collection.
+ 
+@@ -195,8 +298,9 @@
+   {:seon.batch/form :seon.batch/start :seon.batch/end} or {:seon.batch/eof
+   true} or {:seon.batch/unread-from :seon.batch/reason}, each with the
+   (possibly repaired) :seon.batch/version and the accumulated
+-  :seon.batch/repairs. `state` is :seon.batch/read-state."
+-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:enum :reply :code] :seon.batch/read-state]
++  :seon.batch/repairs. `state` is :seon.batch/read-state. `mode` is `:reply`,
++  `:code` or `:fenced` (a reply's text after `fenced`)."
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:enum :reply :code :fenced] :seon.batch/read-state]
+                   :seon.batch/read-step]}
+   [ctx opts mode {v :seon.batch/version repairs :seon.batch/repairs
+                   structured-reply? :seon.batch/structured? last-code-end :seon.batch/last-code-end}]
+@@ -209,19 +313,24 @@
+           follows-code? (and last-code-end (<= last-code-end start)
+                              (str/blank? (subs text last-code-end start))
+                              (not (str/includes? (subs text last-code-end start) "\n")))
+-          ;; code is read as written: only a model reply is repaired
++          ;; code is read as written: only a model reply is repaired, and
++          ;; only an unfenced one has prose among its code
+           reply? (= :reply mode)
+-          marker (when (and reply? begins-line?) (re-find prompt (subs text start le)))
++          imitated (when (and begins-line? (prompt-line? (subs text ls le))) (imitation-end text start))
+           done (fn [m] (assoc m :seon.batch/version v :seon.batch/repairs repairs))
+-          fixed (delay (when (and reply? (< start (count text)) (not (first-form-structural? (subs text start))))
++          fixed (delay (when (and (#{:reply :fenced} mode) (< start (count text)) (not (first-form-structural? (subs text start))))
+                          (delimiter-repair text start)))
+           step
+           (cond
+             (> guard 64) (done {:seon.batch/unread-from start :seon.batch/reason :too-many-repairs})
+             (>= start (count text)) (done {:seon.batch/eof true})
+-            marker
+-            [:redo (str (subs text 0 start) (subs text (+ start (count marker)))) start
+-             {:seon.batch/repair-kind :prompt-marker}]
++            ;; Only the REPL writes results: an imitated transcript is refused, never run.
++            imitated
++            {:seon.batch/form (subs text start imitated) :seon.batch/start start :seon.batch/end imitated
++             :seon.batch/version (advance v imitated) :seon.batch/repairs repairs :seon.batch/refused :fabricated-response}
++            (and reply? begins-line? (markdown-line? (subs text ls le)))
++            (let [{t :text rep :repair} (comment-rest-of-line text start true)]
++              [:redo t start rep])
+             ;; the delimiter decision is structural and comes first, so the one
+             ;; semantic read (tag readers, alias resolution) runs once, on the
+             ;; accepted form
+@@ -238,7 +347,7 @@
+                 {:seon.batch/form (:form r) :seon.batch/start start :seon.batch/end (:end r)
+                  :seon.batch/version (:v r) :seon.batch/repairs repairs :seon.batch/refused :fabricated-response}
+                 (contains? r :form)
+-                (if (or (= :code mode)
++                (if (or (#{:code :fenced} mode)
+                         (and (structured? (:form r) source) (or begins-line? follows-code?))
+                         (and structured-reply? begins-line?
+                              (= (str/trim (subs text ls le)) (str/trim source))))
+@@ -272,7 +381,7 @@
+   Answers the accepted sources with their spans in the repaired text, the
+   repaired text, the repairs and where reading stopped (tests, the refresh
+   classifier and the structural segmentation of a reply)."
+-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:enum :reply :code] :string] :map]}
++  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :map [:enum :reply :code :fenced] :string] :map]}
+   [ctx opts mode text]
+   (loop [state (read-state text) out [] spans []]
+     (let [r (next-form ctx opts mode state)
+@@ -334,24 +443,11 @@
+             (\) \] \}) (if (= 1 depth) (inc i) (recur (inc i) (dec depth)))
+             (recur (inc i) depth)))))))
+ 
+-(defn segments
+-  "A reply's forms (`:reply`, the default: prose becomes comments) or code's
+-  (`:code`: every form is a form, nothing is repaired) read structurally (edamame, every semantic hook neutral:
+-  tags unread, any alias), with the forgiving stage's repairs: each form's
+-  source text and the prose above it as its comment. A balanced form the
+-  structural read refuses (an odd map) is one form whose evaluation-time read
+-  answers its error once, and reading continues after it; an unbalanced rest
+-  is the unread rest. The one semantic read of each form happens later, at
+-  the live cursor, when it is evaluated.
+-
+-  ## Costs
+-
+-  - 52 recorded replies: 64 ms total (default, 2026-09-28, unarmed)."
+-  {:malli/schema [:function
+-                  [:=> [:cat :string] :seon.batch/segmented]
+-                  [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]]}
+-  ([text] (segments text :reply))
+-  ([text mode]
++(defn- read-segments
++  "`text`'s segments read in `mode` (`segments`); an unread balanced form is
++  one segment and reading continues after it in the same mode."
++  {:malli/schema [:=> [:cat :string [:enum :reply :code :fenced]] :seon.batch/segmented]}
++  [text mode]
+   (let [ctx @structural-ctx
+         opts {:all true :read-cond :preserve :auto-resolve (constantly 'seon.sci.forgive.trial)
+               :suppress-read true :end-location true}
+@@ -367,10 +463,31 @@
+     (cond
+       (nil? unread-from) {:seon.batch/segments found}
+       end (let [c (comment-of (subs repaired (peek ends) start))
+-                rest-segments (segments (subs repaired end) mode)]
++                rest-segments (read-segments (subs repaired end) mode)]
+             (update rest-segments :seon.batch/segments
+                     #(into (conj found (cond-> {:seon.batch/source (subs repaired start end)}
+                                         (not (str/blank? c)) (assoc :seon.batch/comment c)))
+                            %)))
+       (str/blank? (subs repaired unread-from)) {:seon.batch/segments found}
+-      :else {:seon.batch/segments found :seon.batch/unread (str/trim (subs repaired unread-from))}))))
++      :else {:seon.batch/segments found :seon.batch/unread (str/trim (subs repaired unread-from))})))
++
++(defn segments
++  "A reply's forms (`:reply`, the default: prose becomes comments) or code's.
++
++  Code (`:code`) is read as written: every form is a form, nothing is
++  repaired. A reply holding a Markdown fence runs only its Clojure fences'
++  forms, every one of them (`fenced`). Reading is structural (edamame, every
++  semantic hook neutral: tags unread, any alias), with the forgiving stage's
++  repairs: each form's source text and the prose above it as its comment. A
++  balanced form the structural read refuses (an odd map) is one form whose
++  evaluation-time read answers its error once, and reading continues after
++  it; an unbalanced rest is the unread rest. The one semantic read of each
++  form happens later, at the live cursor, when it is evaluated."
++  {:malli/schema [:function
++                  [:=> [:cat :string] :seon.batch/segmented]
++                  [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]]}
++  ([text] (segments text :reply))
++  ([text mode]
++   (if-let [markdown (when (= :reply mode) (fenced text))]
++     (read-segments markdown :fenced)
++     (read-segments text mode))))

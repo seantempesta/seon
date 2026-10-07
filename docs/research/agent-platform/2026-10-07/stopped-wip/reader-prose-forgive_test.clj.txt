@@ -1,0 +1,109 @@
+(ns seon.sci.forgive-test
+  "A model reply read at its entrance (`seon.turn/planned-sources`): fenced
+  Clojure is code, prose is comments, imitated REPL results never run."
+  (:require [clojure.edn :as edn]
+            [clojure.test :refer [deftest is testing]]
+            [seon.config :as config]
+            [seon.test-support :as support]
+            [seon.turn :as turn]))
+
+(defn- planned
+  "Each planned source with its comment, if any; or the no-forms error's type."
+  {:malli/schema [:=> [:cat :string] [:or [:vector [:vector :string]] :qualified-keyword]]}
+  [reply]
+  (let [plan (turn/planned-sources reply 'user 1000000)]
+    (if (vector? plan)
+      (mapv #(cond-> [(:seon.cluster.eval/source %)]
+               (:seon.cluster.eval/comment %) (conj (:seon.cluster.eval/comment %)))
+            plan)
+      (:seon.error/type plan))))
+
+(defn- live-reply
+  "The recorded DeepSeek reply of live run 1's call `n`."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [n]
+  (slurp (str "docs/research/agent-platform/2026-10-07/live-run/raw/call-" n "-reply.txt")))
+
+(deftest a-reply-runs-its-clojure-fences-and-keeps-its-prose-as-comments
+  (doseq [[label reply expected]
+          [["prose with a backticked name around a fence; a heading and a closing word after it"
+            "I will add two numbers, see `seon.db/q` for nothing.\n\n```clojure\n(+ 1 2)\n```\n\n## Next step\n\nDone."
+            [["(+ 1 2)" "; I will add two numbers, see `seon.db/q` for nothing."]]]
+           ["a closing word after a fence stays prose"
+            "Here is code:\n```clojure\n(+ 1 2)\n```\nDone."
+            [["(+ 1 2)" "; Here is code:"]]]
+           ["every form in a fence is code, a lone symbol included"
+            "Dig in:\n```clojure\nresult/e1234\nx y\n:k\n```"
+            [["result/e1234" "; Dig in:"] ["x"] ["y"] [":k"]]]
+           ["clj and untagged fences are code; bash and text fences are comments"
+            "```clj\n(inc 1)\n```\n```\n(inc 2)\n```\n```bash\nls -la\n(rm)\n```\n```text\n(oops)\n```"
+            [["(inc 1)"] ["(inc 2)"]]]
+           ["a longer fence holds a line of backticks inside a string"
+            "````clojure\n(def s \"\n```\n\")\n````"
+            [["(def s \"\n```\n\")"]]]
+           ["unfenced: a heading is prose, parentheses included"
+            "The fix is in `data-text`.\n## What (and why)\n(+ 1 2)"
+            [["(+ 1 2)" "; The fix is in `data-text`.\n; ## What (and why)"]]]
+           ["unfenced: a line opening with a code span is prose, never a syntax-quote"
+            "`reply-map` joins entries.\n(+ 1 2)"
+            [["(+ 1 2)" "; `reply-map` joins entries."]]]
+           ["unfenced: `#:seon.repl` inside a string is code"
+            "(str \"#:seon.repl\" 1)"
+            [["(str \"#:seon.repl\" 1)"]]]
+           ["unfenced: pure code runs as written"
+            "(+ 1 2)\n#{1 2}\n'sym\n`(a ~b)\n^:m []\nx\n:k\n42"
+            [["(+ 1 2)"] ["#{1 2}"] ["'sym"] ["`(a ~b)"] ["^:m []"] ["x"] [":k"] ["42"]]]
+           ["only prose plans no form"
+            "Only prose here.\nAnd more."
+            :seon.cluster.reply/no-forms-error]
+           ["only prose and a text fence plans no form"
+            "The output was:\n```text\n(f 1)\n```"
+            :seon.cluster.reply/no-forms-error]
+           ["live call 04: an unclosed fence runs to the end; its unreadable rest is one source"
+            (live-reply "04")
+            [["(defn- reply-map\n  \"The entries as one `"]]]
+           ["live call 06: backticked prose outside the fence never runs"
+            (live-reply "06")
+            [["[(clojure.repl/source-fn 'seon.repl-test/one-map)\n (clojure.repl/source-fn 'seon.repl/data-text)\n (-> #'seon.repl/response-entries meta :line)]"]]]
+           ["live call 11: a cut reply of headings and prose plans no form"
+            (live-reply "11")
+            :seon.cluster.reply/no-forms-error]
+           ["a paid reply whose prose held an inline form runs only its two fences"
+            (get-in (edn/read-string (slurp "docs/prds/steward-platform/research/issue-family-paid-2026-09-16.edn"))
+                    [:turn :seon.turn/reply])
+            [["(my.issue/status {:seon.issue/id \"d1f11894d81f\"})"]
+             ["(my.agent/done)"]]]]]
+    (testing label
+      ;; a row naming only sources leaves the comment unasserted
+      (let [found (planned reply)]
+        (is (= expected (if (and (vector? expected) (= (count expected) (count found)))
+                          (mapv (fn [row [source :as plan]] (if (= 1 (count row)) [source] plan)) expected found)
+                          found)))))))
+
+(deftest an-imitated-repl-result-is-one-source-of-its-own
+  (doseq [[label reply expected]
+          [["a prompt line through the next blank line"
+            "user=> (f 1)\n42\n\n(g 2)"
+            ["user=> (f 1)\n42" "(g 2)"]]
+           ["a bare result line"
+            "(f 1)\n=> 42\n\n(h)"
+            ["(f 1)" "=> 42" "(h)"]]
+           ["a REPL response map"
+            "(dir x)\n#:seon.repl{:value 1}\n\n(y)"
+            ["(dir x)" "#:seon.repl{:value 1}" "(y)"]]
+           ["inside a fence too"
+            "```clojure\nuser=> (f 1)\n1\n```"
+            ["user=> (f 1)\n1"]]
+           ["a symbol holding => is code"
+            "(def a=>b 1)\na=>b"
+            ["(def a=>b 1)" "a=>b"]]]]
+    (testing label
+      (is (= expected (mapv first (planned reply)))))))
+
+(deftest an-imitated-result-is-refused-at-evaluation-and-never-run
+  (let [ctx (support/fork-cluster-ctx (:seon.db/connection (support/execution-handle nil)))
+        evaluated (support/evaluate {:seon.cluster.eval/source "user=> (def imitated-leak 1)\n1"
+                                     :seon.sci.eval/ctx ctx
+                                     :seon.sci.admit/caps (config/result-caps config/defaults)})]
+    (is (= :fabricated-response (:seon.batch/refused (ex-data (:seon.batch/error evaluated)))))
+    (is (= :undefined (support/agent-value ctx "(if (resolve 'imitated-leak) :defined :undefined)")))))
