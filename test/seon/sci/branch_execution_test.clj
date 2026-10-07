@@ -236,7 +236,8 @@
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
        (let [live (support/fork-cluster-ctx connection)
-             subject 'seon.render.value/bounded-text
+             ;; host-bound by its own call of a macro SCI does not interpret (log/warn)
+             subject 'seon.cluster/warn-low-space!
              indexed (db/pull (db/db connection) '[*] [:seon.fn/sym subject])]
          (is (true? (:seon.fn/host-bound? indexed))
              "the indexer marks the declaration's own proxy (class usage alone interprets, task bd7cb669b45d)")
@@ -248,12 +249,11 @@
          ;; root that refuses by name when called (only an agent's evaluation
          ;; keeps the returned refusal), so the rest of the program still runs.
          ;; WANTED since 9dd373901: the override carries its contract's arity
-         ;; facts, and the writer refuses one that drops an arity callers use
-         ;; (`bounded-text` is called with two arguments), so it keeps both.
+         ;; facts, and the writer refuses one that drops an arity callers use,
+         ;; so it keeps the two-argument arity boot calls.
          (let [entity (declared! connection subject
-                     (str "(defn ^{:malli/schema [:function [:=> [:cat :string] :string]"
-                          " [:=> [:cat :string :int] :string]]}"
-                          " bounded-text ([text] text) ([text _limit] text))"))
+                     (str "(defn ^{:malli/schema [:=> [:cat :string :seon.config/effective] :seon.operator/footprint]}"
+                          " warn-low-space! [_managed-root _effective] (seon.fs/filesystem-space \"/\"))"))
                installed (eval/install-row! {:seon.sci.eval/ctx live
                                              :seon.db/db (db/db connection)
                                              :seon.program/row entity})
@@ -320,7 +320,7 @@
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [subject 'seon.render.value/bounded-text
+       (let [subject 'seon.cluster/warn-low-space!
              cluster-name (:seon.cluster/name (support/execution-handle connection))
              before (db/db connection)
              record-entity (db/q '[:find ?e . :where [?e :seon.source/commit-id]] before)
@@ -419,13 +419,13 @@
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program with two changed entities whose closures reach four declarations."
            :seon.test/long-ms 8000}
-  an-unoverridden-host-bound-declaration-refuses-by-name-only-when-called
+  an-unchanged-host-bound-caller-of-a-changed-definition-runs-as-compiled
   (support/with-database
    (fn [connection]
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
-       (let [changed 'seon.render.value/datum
-             caller 'seon.render.value/bounded-text
+       (let [changed 'seon.fs/filesystem-space
+             caller 'seon.cluster/warn-low-space!
              unloaded-changed 'seon.cluster.reload-measure/measured-request
              unloaded 'seon.cluster.reload-measure/-main
              before (db/db connection)
@@ -439,7 +439,7 @@
              view (acquisition-view ctx)]
          (println "UNOVERRIDDEN-HOST-BOUND-MS" (:ms acquired) (:interpreted-count view))
          (is (false? (host-bound? changed)) "the changed helper interprets")
-         (is (host-bound? caller) "the caller's proxy is host-bound")
+         (is (host-bound? caller) "the caller is host-bound")
          (is (not-any? host-bound? [unloaded-changed unloaded])
              "class usage alone never makes a declaration host-bound (task bd7cb669b45d)")
          (is (some? (find-ns (symbol (namespace caller)))) "the caller's namespace is loaded")
@@ -447,14 +447,11 @@
          (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
              "each changed entity's closure reaches its host-bound caller")
          (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")
-         (is (= caller (:seon.sci.eval/refused-function (refusal-of ctx caller))) "an unchanged caller of a changed definition refuses by name when called")
-         ;; graph-definition is in datum's closure, not host-bound, and
-         ;; constructs its namespace's deftype by its short class name, which
-         ;; no namespace import fact names: an unchanged core entity SCI cannot
-         ;; interpret refuses by name when called, never the acquisition.
-         (is (= 'seon.cluster.agent/graph-definition
-                (:seon.sci.eval/refused-function (refusal-of ctx 'seon.cluster.agent/graph-definition)))
-             "an unchanged core entity that fails to interpret refuses by name when called")))))))
+         ;; A BRANCH NEVER CHANGES THE PLATFORM (`seon.sci.eval`, install of a
+         ;; host-bound row): the unchanged host-bound caller of a branch-changed
+         ;; definition binds its compiled Var, never a refusal.
+         (is (identical? @(find-var caller) @(sci/resolve ctx caller))
+             "an unchanged host-bound caller of a changed definition runs as compiled")))))))
 
 (deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
            :seon.test/long-ms 12000}

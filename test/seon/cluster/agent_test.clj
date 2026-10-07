@@ -1339,9 +1339,9 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
-            ;; the indexer marks it host-bound (its own proxy), as
+            ;; the indexer marks it host-bound (its own log/warn macro call), as
             ;; branch_execution_test's refuse-by-name regressions use it
-            subject 'seon.render.value/bounded-text
+            subject 'seon.cluster/warn-low-space!
             refusal-of (fn [agent-ctx]
                          (try (sci/eval-string* agent-ctx (str "(" subject " \"x\")")) nil
                               (catch Exception failure
