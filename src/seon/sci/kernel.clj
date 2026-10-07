@@ -132,17 +132,16 @@
     {::pool (.getName pool) ::used-bytes (.getUsed usage) ::max-bytes (.getMax usage)}))
 
 (defn memory-pressure-error
-  "The refusal a new arm answers under `pressure`, naming work then in flight."
+  "The refusal a new arm answers under `pressure`: a fixed message, the pool,
+  its bytes, both bounds and the work then in flight as `pressure`'s keys,
+  shown only through the value printer."
   {:malli/schema [:=> [:cat ::memory-pressure] ::memory-pressure-error]}
-  [{::keys [pool used-bytes max-bytes enter-bytes resume-bytes in-flight] :as pressure}]
+  [pressure]
   (error.refusal/diagnostic
    (java.util.Date.) ::arming 'seon.sci.kernel/acquire-arm
    (assoc pressure
           :seon.error/message
-          (str "This JVM is under memory pressure: " pool " holds " used-bytes " of " max-bytes
-               " bytes after its last collection. New evaluations refuse from " enter-bytes
-               " and admit again below " resume-bytes ". In flight when it began: "
-               (if (seq in-flight) (pr-str in-flight) "no open run") ".")
+          "This JVM is under memory pressure: new evaluations refuse until its tenured pool falls below the resume bound."
           :seon.error/expected ::resume-bytes)))
 
 (defn enter-memory-pressure!
@@ -730,6 +729,25 @@
     (assoc link :seon.error/data data)
     (dissoc link :seon.error/data)))
 
+(defn- triage-input
+  "What `clojure.main/ex-triage` reads of `throwable` (main.clj:219-260), in
+  `Throwable->map`'s shape: `:via` holds only the first, second and root
+  links (the ones it reads), and `:trace` is the root's frames, converted
+  lazily as ex-triage reaches them. `Throwable->map` converted every link
+  and every root frame: links x depth for a text that reads three links and
+  one frame."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :map]}
+  [^Throwable throwable]
+  (let [links (error.refusal/cause-links throwable)
+        base (fn [^Throwable t]
+               (cond-> {:type (symbol (.getName (class t)))}
+                 (.getLocalizedMessage t) (assoc :message (.getLocalizedMessage t))
+                 (ex-data t) (assoc :data (ex-data t))))
+        ^Throwable root (peek links)]
+    (cond-> {:via (mapv (comp base links) (distinct [0 (min 1 (dec (count links))) (dec (count links))]))
+             :trace (map StackTraceElement->vec (.getStackTrace root))}
+      (-> throwable ex-data :clojure.error/phase) (assoc :phase (-> throwable ex-data :clojure.error/phase)))))
+
 (defn- execution-error-text
   "`clojure.main`'s own text for one exception an agent's code threw:
   `ex-triage` names the root class and message. SCI's location wrapper
@@ -741,7 +759,7 @@
   {:malli/schema [:=> [:cat :seon.error/throwable] [:string {:min 1}]]}
   [throwable]
   (let [data (ex-data throwable)
-        triage (main/ex-triage (Throwable->map throwable))]
+        triage (main/ex-triage (triage-input throwable))]
     (str/trim
      (main/ex-str
       (if (isa? (:type data) :sci/error)
@@ -764,15 +782,20 @@
   "The author's SCI frames for `throwable`, innermost first, as
   `[where line column]` (`sci.core/stacktrace`, sci/core.cljc:419): the
   source location of an interpreted failure. SCI's live callstack volatile is
-  read here once and never leaves as a value."
+  read here once and never leaves as a value. Each distinct frame is kept
+  once, at its outermost position (`peek` stays the outermost frame): a
+  recursion's repeated run is its distinct frames, so the value is the
+  program's frames, never the stack's depth."
   {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe :seon.sci.eval/stacktrace]]}
   [throwable]
-  (not-empty
-   (into [] (keep (fn [{frame-ns :ns frame-name :name :keys [line column]}]
-                    (when (and frame-ns (int? line) (int? column))
-                      [(if frame-name (symbol (str frame-ns) (str frame-name)) (symbol (str frame-ns)))
-                       line column])))
-         (try (sci/stacktrace throwable) (catch Exception _ nil)))))
+  (some->> (try (sci/stacktrace throwable) (catch Exception _ nil))
+           (into () (comp (keep (fn [{frame-ns :ns frame-name :name :keys [line column]}]
+                                  (when (and frame-ns (int? line) (int? column))
+                                    [(if frame-name (symbol (str frame-ns) (str frame-name)) (symbol (str frame-ns)))
+                                     line column])))))
+           (into () (distinct))
+           vec
+           not-empty))
 
 (defn- author-throwable
   "The exception the author's code threw: `throwable` past SCI's location
@@ -789,8 +812,9 @@
   way `clojure.main` reports it (`ex-triage`/`ex-str`, main.clj:219-300):
   the class and message the author's code threw, never SCI's location
   wrapper; the whole cause chain once, each link's message and `ex-data`
-  (worlds referenced) and first-party frames, kept whole; the author's
-  source location as `:seon.sci.eval/stacktrace` (SCI's own). What an agent
+  (worlds referenced) and the first-party frames it does not share with its
+  enclosing link; the author's source location as `:seon.sci.eval/stacktrace`
+  (SCI's own, each distinct frame once). What an agent
   is shown is the schema pair's selection (`render-ai`), never a trim here.
   The evaluation's duration, allocation and outcome stay on its record.
   The value is a `:seon.sci.kernel/execution-error`; a fired deadline also

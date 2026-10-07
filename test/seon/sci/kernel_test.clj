@@ -14,6 +14,7 @@
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.print.value :as print.value]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]
@@ -147,3 +148,54 @@
     (is (= (:seon.sci.eval/stacktrace refusal) (:seon.sci.eval/stacktrace reply)) "the author's location")
     (is (not-any? #(contains? reply %) [:seon.error/expected-shape :seon.error/chain :seon.instrument/malli])
         "instrument bookkeeping stays on the value, unshown")))
+
+(deftest a-failures-cost-follows-its-distinct-frames-not-its-depth
+  ;; waste-rank 2026-10-07: a recursion's StackOverflowError kept 7,969 SCI
+  ;; frames and a thrown 1,000-link chain converted and classified 1,000 x
+  ;; 209 JVM frames (187 ms, 757 MB in failure-value alone). A link keeps
+  ;; only the frames it does not share with the link enclosing it, and the
+  ;; SCI stacktrace keeps each distinct frame once.
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))
+        overflow (failure ctx "(defn deep [n] (inc (deep (inc n)))) (deep 0)")
+        chained "(throw (reduce (fn [c i] (ex-info (str \"link \" i) {:i i} c)) (ex-info \"root\" {}) (range 999)))"
+        chain (failure ctx chained)
+        frames (mapcat :seon.error/frames (:seon.error/chain chain))]
+    (testing "a recursion's stacktrace is its distinct frames, outermost last"
+      (is (= 'java.lang.StackOverflowError (:seon.error/exception-class overflow)))
+      (is (apply distinct? (:seon.sci.eval/stacktrace overflow)))
+      (is (< (count (:seon.sci.eval/stacktrace overflow)) 10) "was 7,969")
+      (is (= 'user (first (peek (:seon.sci.eval/stacktrace overflow))))))
+    (testing "every link is kept; a link shares no frames with the link enclosing it"
+      (is (= 1000 (count (:seon.error/chain chain))))
+      (is (= [{:i 998} "root"] [(:seon.error/data (first (:seon.error/chain chain)))
+                                (:seon.error/message (peek (:seon.error/chain chain)))]))
+      (is (seq frames))
+      (is (<= (count (filter :seon.error/frames (:seon.error/chain chain))) 3)
+          "the links built at one site share their frames with the outermost"))
+    (testing "the producer's allocation does not grow with the chain"
+      (let [thrown (try (sci/eval-string chained) (catch Throwable t t))
+            bean ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+            thread (.getId (Thread/currentThread))
+            before (.getThreadAllocatedBytes bean thread)
+            started (System/nanoTime)
+            value (kernel/failure-value {::kernel/time-limit-kind ::eval/time-limit
+                                         ::kernel/failure-kind ::eval/evaluation-failed}
+                                        thrown (kernel/unarmed-record (System/nanoTime)))
+            allocated (- (.getThreadAllocatedBytes bean thread) before)
+            elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+        (is (= 1000 (count (:seon.error/chain value))))
+        (is (< allocated (* 50 1024 1024)) "was 757 MB before the frames-in-common rule")
+        (is (< elapsed-ms 100) "was 187 ms")))))
+
+(deftest an-error-holding-a-ten-thousand-deep-value-keeps-its-error
+  ;; deep-value lane 2026-10-07: the error's data walks (refusal/referenced,
+  ;; bounded-cost) recursed once per level and overflowed the stack, so the
+  ;; reply was a bare StackOverflowError. They fold over an explicit stack.
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))
+        deep (failure ctx "(let [deep (reduce (fn [v _] [v]) [] (range 10000))] (throw (ex-info \"deep\" {:v deep})))")
+        reply (error/reply-value nil deep)]
+    (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class deep)))
+    (is (= "deep" (:seon.error/message (first (:seon.error/chain deep)))))
+    (is (error.refusal/within-evidence-bound-chain? (:seon.error/chain deep))
+        "the 20,000-character value is held within the evidence bound")
+    (is (string? (print.value/bounded-text reply 4000)))))

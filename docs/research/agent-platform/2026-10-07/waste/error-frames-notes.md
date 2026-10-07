@@ -39,3 +39,15 @@ O(distinct frames) kept.
 - Not migrating links to the spec's `{:type :message :data :at}` shape (spec slice, not this lane).
 - The defn installation cost inside the original stack-overflow measurement (install-evaluated-rows! 482 ms) is
   not this producer.
+
+## Added on coordinator request (2026-10-07)
+- Deep value (deep-value lane): `(throw (ex-info "deep" {:v deep}))` with a 10,000-deep vector overflowed in
+  `refusal/referenced` and `bounded-cost` (both recursed per level; bounded-cost through its armed wrapper).
+  Both now fold over one explicit-stack `post-order` (heap, not stack); same results, one armed call per walk.
+- kernel `memory-pressure-error`: fixed message; pool/bytes/bounds/in-flight stay as the pressure's data keys
+  (no pr-str of in-flight runs).
+- kernel `execution-error-text`: `Throwable->map` (every link, every root frame converted) replaced by
+  `triage-input`: the three links ex-triage reads and the root trace converted lazily.
+- Not done here (other owners / spec slice): second-clipper deletion (`bounded-cost`, `chain` vs
+  `recorded-chain`, `:seon.error/bounded-chain`) needs src/seon/error.clj (held by printers-errors) and the
+  schema EDN; stack-trace sites in schema.clj, operator.clj (printers-errors), test/runner.clj (reach-review).
