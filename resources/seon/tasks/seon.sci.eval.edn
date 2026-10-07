@@ -154,4 +154,19 @@
              :kind :function
              :intent "value-storage (eval.clj:3524) admits the whole printed value again with seon.sci.admit/admit-value under :seon.config.eval.result/max-bytes 8,388,608, discards the EDN it built, then re-serializes the print node with render.value/artifact-edn and settles that copy into the blob tier, on every evaluation whose shown text was cut. Measured on default 2026-10-07 through MCP sci: (vec (range 100000)) costs 505 ms, 900 MB and 1,315,014 armed calls (seon.print/print-number? 600,128, node-child? 500,132, node? 100,010, seon.sci.admit/semantic-leaf 100,000: about 13 armed calls per element), of which show/storage is 386-400 ms, and writes 5.27 MB; a 1 MB string writes +1,083 KB; an infinite (map f (range)) is realized 157,403 elements to show 32. Our work and our stored copy grow with the value up to the 8 MB bound, per evaluation. Fix at the producer, one path: the print floor's one walk already measures the whole value; take the stored artifact (if it has a consumer) from that walk, never a second admission and a third serialization, and make the per-node predicates internal steps of the one contracted walk instead of separately armed calls. Done when (vec (range 100000)) shows in under 50 ms with under 1,000 armed calls and allocation independent of length beyond the shown prefix, and an infinite lazy seq is realized only as far as it is shown; regressions: those two cases plus a 1 MB string, asserting stored bytes."
              :must-read #{seon.sci.eval/value-storage seon.sci.eval/shown-result seon.sci.admit/admit-value seon.render.value/artifact-edn}
-             :evidence #{"tmp/waste-rank/large-values.edn" "tmp/waste-rank/jfr-vec1e5-alloc.txt"}}]
+             :evidence #{"tmp/waste-rank/large-values.edn" "tmp/waste-rank/jfr-vec1e5-alloc.txt"}}
+ #:seon.task{:name "doc-prints-contracts-expanded-with-keys-garbled"
+             :kind :function
+             :intent "An agent's (doc f) prints the function's contract fully expanded with map entries garbled into [[schema] [schema]] pairs (the key replaced by its schema): (doc seon.sci.eval/install-evaluated-rows!) costs 1,907 estimated tokens, twice the function's source, and hides which keys the input needs. doc must show the contract as declared (registry names, one level) through the value printer. Done when a regression asserts (doc install-evaluated-rows!) shows its declared :malli/schema form with its keys and is smaller than its source."
+             :must-read #{seon.sci.eval/program-doc-var}
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
+ #:seon.task{:name "bare-source-and-apropos-do-not-resolve-in-an-agents-repl"
+             :kind :function
+             :intent "In an agent's SCI context (source x) and (apropos s) are unresolved; only clojure.repl/source-fn and clojure.repl/apropos work, and (clojure.repl/source x) prints to :out with a nil value. Agents reach for the clojure.repl names first (live run 1, context-examples). Done when an agent evaluation of (source my.task/steps) and (apropos \"steps\") in a fresh agent world returns the source text and matching symbols as values, asserted by a regression through the agent entrance."
+             :must-read #{seon.sci.eval/build-base-ctx}
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md" "docs/research/agent-platform/2026-10-07/live-run/report.md"}}
+ #:seon.task{:name "find-doc-floods-out-with-thousands-of-tokens"
+             :kind :function
+             :intent "clojure.repl/find-doc in an agent's REPL prints about 5,600 tokens of every matching docstring to :out, outside the value printer and its budget. Lookup tools must return values the value printer shows (matching symbols with one doc line each, dig forms for the rest), never print. Done when a regression asserts an agent's (find-doc \"task\") returns a value whose shown reply stays within the reply budget and :out is empty."
+             :must-read #{seon.sci.eval/build-base-ctx}
+             :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}]
