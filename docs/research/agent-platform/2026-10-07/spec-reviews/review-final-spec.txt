@@ -1,0 +1,12 @@
+Review commit 18c3d1286 in /Users/sean/src/seon (lane final-revision: docs/seon/specs/errors.md, docs/seon/specs/agent-loop.md, AGENTS.md, .agents/skills/data-oriented-clojure/SKILL.md, .agents/skills/clojure-testing/SKILL.md, docs/seon/architecture/reference-code.md). Read `git show 18c3d1286 --stat`, the notes docs/research/agent-platform/2026-10-07/final-revision/final-revision-notes.md, and each changed file end to end.
+
+EXCLUDED: agent-loop.md section 3 (context). The owner rejected the "system message + task-context producers" design on 2026-10-07 and is redesigning it (docs/research/agent-platform/2026-10-07/context-design/). Only flag places elsewhere that depend on it.
+
+Verify every factual claim against the code (file:line or function name) and the running system (MCP eval_clj, cluster default, JVM mode for reads with (seon.cluster.boot/connection "default")). Find:
+1. false or stale claims about installed code;
+2. guide rules or examples that are wrong, unsafe (an EQUIVALENT label that is really a behavior change), or contradict AGENTS.md or another skill;
+3. spec steps that will not work against the real code, missing steps, or slices in the wrong order;
+4. contradictions between the files;
+5. bloat: text that does not help an agent write correct code or a lane implement a slice; say what to cut.
+
+FIX what you verify: claim with `bin/lane claim REVIEWER PATHS` (REVIEWER = your lane name), edit in place, commit with `bin/lane commit REVIEWER -m "..." PATHS` (documentation-only: no checks), then `bin/lane release REVIEWER`. If another reviewer holds a file, write the patch into your notes instead. Write docs/research/agent-platform/2026-10-07/spec-reviews/<your-lane>-notes.md: every finding with evidence, fixed or not, plus open questions for the owner, and commit it. Scratch only under your session scratchpad/<lane>/ or tmp/<lane>/. No model/provider calls; never stop or reset default; never load-file/intern/alter-var-root into default.
