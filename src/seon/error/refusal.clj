@@ -3,7 +3,8 @@
   error holds references, never copies: every world in it is referenced here."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [seon.id :as id]))
+            [seon.id :as id])
+  (:import [java.util IdentityHashMap]))
 
 (defn- machinery-namespace?
   "Whether `frame-ns` is Seon's own fault machinery or the operator's prepl
@@ -280,13 +281,18 @@
   10,000 deep costs heap, never JVM stack. `open` answers a value's
   `{::result r}` when it is a leaf, else `{::state s ::entries [[k child] ..]}`;
   `step` folds one child's result into its parent's state, `(step state k
-  result child)`; `(close state)` is the node's result."
+  result child)`; `(close state)` is the node's result. A collection met
+  again by identity is folded once: its first result is reused."
   {:malli/schema [:=> [:cat [:map [:open :seon.instrument/callable] [:step :seon.instrument/callable]
                              [:close :seon.instrument/callable]]
                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]
                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Error evidence is arbitrary producer data; only registry-declared worlds inside it are replaced.", :gen/elements [nil false 0 "" :k [] {}]}]]}
   [{:keys [open step close]} value]
-  (let [root (open value)]
+  ;; folded collections by identity, local to this one walk: error data repeats
+  ;; one value under every problem that names it
+  (let [folded (IdentityHashMap.)
+        open (fn [value] (if (.containsKey folded value) {::result (.get folded value)} (open value)))
+        root (open value)]
     (if-not (contains? root ::entries)
       (::result root)
       (loop [stack (list root)]
@@ -294,6 +300,7 @@
           (if (nil? entries)
             (let [result (close state)
                   stack (pop stack)]
+              (when-let [[_ child] (find top ::child)] (.put folded child result))
               (if-let [parent (peek stack)]
                 (recur (conj (pop stack) (update parent ::state step (::key top) result (::child top))))
                 result))
