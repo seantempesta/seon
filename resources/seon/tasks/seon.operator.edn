@@ -26,4 +26,14 @@
              :kind :namespace
              :intent "The operator and dev scripts print whole result values with prn outside the value printer (seon.operator -main's :else prn of the result and its headline's MISSING collection, harness_costs measure, seon.schema.admission -main): an unknown option printed the whole nested error map twice (observed 2026-10-07). Inventory class cli-print, 4 sites: script/operator.clj 2, script/dev/harness_costs.clj 1, schema/admission.clj 1. Done when the operator prints its outcome through the value printer's budget (headline plus the diagnostic file path), and script/seon/operator_outcome_test asserts an argv failure prints one bounded line."
              :must-read #{seon.operator/check!}
-             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+ #:seon.task{:name "check-rehearsal-cost-follows-drift-not-the-change"
+             :kind :function
+             :intent "bin/seon check rehearses a FULL refresh against the program the running JVM published (seon.cluster/rehearse-source! passes :seon.source/changed-paths []), so its cost follows how far HEAD has drifted from the running JVM's commit, not the candidate's change: on 2026-10-07 default ran a8e3bde5b, 15 commits and 89 program files behind HEAD 433214bc5, and `bin/seon check` of HEAD itself took 55.4 s (published 45.5 s, adopted 9.5 s, 2,008 identities). Every lane commit paid it (a docs commit 42.6 s of 56 s, a task-file commit 16.5 s of 21 s, at smaller drift). Done when a check's rehearsal cost follows the candidate's delta from HEAD (e.g. HEAD's rehearsal publication kept once per commit and the candidate's changed paths published partially on it), measured: a one-file check under 5 s with default 15 commits behind."
+             :must-read #{seon.operator/check! seon.cluster/rehearse-source!}
+             :evidence #{"docs/research/agent-platform/2026-10-07/lane-tool/notes.md"}}
+ #:seon.task{:name "check-decides-documentation-by-input-roots"
+             :kind :function
+             :intent "bin/seon check publishes and adopts a candidate whose paths are all outside seon.test.cache/input-roots (documentation), contrary to 'documentation never publishes or widens gates'. bin/lane now skips the check for a commit whose every path is under docs/ and that names no --test, an interim rule beside the declared roots because the operator (babashka) cannot load seon.test.cache (it requires hasch, which babashka cannot load) and script/seon/operator.clj was held by another lane. Done when seon.operator/check! classifies the paths by the declared input roots, answers a no-input candidate without rehearsal, and bin/lane's documentation_only is deleted."
+             :must-read #{seon.operator/check! seon.test.cache/input-roots}
+             :evidence #{"docs/research/agent-platform/2026-10-07/lane-tool/notes.md"}}]

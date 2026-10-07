@@ -4,16 +4,29 @@
 #   bin/lane claim   LANE PATH...        claim files (or dir/ prefixes) before editing them
 #   bin/lane add     LANE PATH...        claim more
 #   bin/lane commit  LANE -m MSG [--test NS]... [--include-long] PATH...
-#                                        check, lint, then commit exactly PATH... (git commit --only)
+#                                        lint and check the candidate, then commit exactly PATH...
 #   bin/lane release LANE                drop the lane's claims
 #   bin/lane status                      every live claim
 #   LANE_ADOPT=1 bin/lane claim ...      root only: record a claim for a lane already editing those files
+#
+# The candidate is HEAD plus exactly the committed paths (a tree written through a
+# temporary index; HEAD, the shared index and the working tree are untouched).
+# clj-kondo lints a `git archive` of that tree, never the working tree, so another
+# lane's half-finished edit refuses nobody else. `bin/seon check` (publication,
+# adoption, --test) runs alongside it, except for a documentation-only commit
+# (every path under docs/, no --test): documentation is no program input.
+# The commit itself (staged-index check, new-file add, git commit, verification)
+# holds .git/lane-commit.lock: git commit shares .git/COMMIT_EDITMSG, the index and
+# HEAD between processes, and two concurrent commits once crossed (649829332
+# carried lane commit-validation's paths under lane heap-retained's message).
 #
 # Refusals (exit 2) name the rule they enforce:
 #   - a path claimed by another lane, or already dirty in the tree (someone else's work in progress);
 #   - a commit path the lane never claimed;
 #   - anything staged in the index beyond the commit's paths;
-#   - `bin/seon check PATHS [--test NS...]` or clj-kondo reporting an error.
+#   - `bin/seon check PATHS [--test NS...]` or clj-kondo reporting an error on the candidate.
+# A landed commit whose paths or message differ from the request exits 3 (LANE COMMIT MISMATCH);
+# history is never rewritten, root fixes forward.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -71,6 +84,58 @@ claim() {
   echo "lane $lane claims: $(tr '\n' ' ' < "$claims/$lane.paths")"
 }
 
+
+# The tree of HEAD with the named working-tree paths (deletions included), written
+# through a temporary index: what `git commit --only PATHS` will commit.
+candidate_tree() {
+  local scratch="$1"; shift
+  local index="$scratch/index"
+  GIT_INDEX_FILE="$index" git read-tree HEAD
+  GIT_INDEX_FILE="$index" git add -A -- "$@"
+  GIT_INDEX_FILE="$index" git write-tree
+}
+
+# clj-kondo over `git archive TREE` in DIRECTORY. The analyzer's ignored
+# configuration (library imports, generated configs) is linked from the checkout;
+# --cache false reads and writes no cache, as the working-tree lint did.
+lint_candidate() {
+  local tree="$1" directory="$2" entry
+  mkdir -p "$directory"
+  git archive --format=tar "$tree" src script test .clj-kondo | tar -x -C "$directory"
+  while IFS= read -r entry; do
+    entry="${entry%/}"
+    [[ "$entry" == .clj-kondo/.cache || -e "$directory/$entry" ]] && continue
+    mkdir -p "$directory/$(dirname "$entry")"
+    ln -s "$root/$entry" "$directory/$entry"
+  done < <(git ls-files --others --ignored --exclude-standard --directory -- .clj-kondo)
+  (cd "$directory" && clj-kondo --lint src script test --cache false --parallel)
+}
+
+# True when every path is documentation (docs/): no program input, nothing to publish.
+documentation_only() {
+  local path
+  for path in "$@"; do [[ "$path" == docs/* ]] || return 1; done
+}
+
+# PATH is one of the requested paths or lies under a requested directory.
+requested() {
+  local path="$1" entry; shift
+  for entry in "$@"; do
+    [[ "$path" == "$entry" || "$path" == "${entry%/}/"* ]] && return 0
+  done
+  return 1
+}
+
+staged_only() {
+  local staged path ok
+  while IFS= read -r staged; do
+    [[ -z "$staged" ]] && continue
+    ok=0
+    for path in "$@"; do [[ "$staged" == "$path" ]] && ok=1; done
+    [[ $ok == 1 ]] || refuse "$staged is staged in the shared index but not part of this commit; a commit must carry only its own paths"
+  done < <(git diff --cached --name-only)
+}
+
 commit() {
   local lane="$1"; shift
   valid_lane "$lane"
@@ -86,34 +151,92 @@ commit() {
   done
   [[ -n "$message" ]] || refuse "commit needs -m MESSAGE"
   [[ ${#paths[@]} -gt 0 ]] || refuse "commit needs the exact paths to commit"
-  local path owner staged
+  local path owner
   for path in "${paths[@]}"; do
     owner="$(owner_of "$path" || true)"
     [[ "$owner" == "$lane" ]] || refuse "$path is not claimed by lane $lane${owner:+ (lane $owner holds it)}"
   done
-  while IFS= read -r staged; do
-    [[ -z "$staged" ]] && continue
-    local ok=0
-    for path in "${paths[@]}"; do [[ "$staged" == "$path" ]] && ok=1; done
-    [[ $ok == 1 ]] || refuse "$staged is staged in the shared index but not part of this commit; a commit must carry only its own paths"
-  done < <(git diff --cached --name-only)
+  staged_only "${paths[@]}"
 
-  echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
-  bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
-  echo "== clj-kondo --lint src script test --cache false"
-  local lint
-  lint="$(clj-kondo --lint src script test --cache false 2>&1 | tail -1 || true)"
-  echo "$lint"
-  [[ "$lint" =~ errors:\ 0, ]] || refuse "clj-kondo reports errors; nothing committed"
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/lane-commit.XXXXXX")"
+  lint_pid=""
+  trap '[[ -n "$lint_pid" ]] && kill "$lint_pid" 2>/dev/null; rm -rf -- "$scratch"' EXIT
+  local tree began
+  began=$SECONDS
+  tree="$(candidate_tree "$scratch" "${paths[@]}")" || refuse "the candidate tree could not be written"
+  echo "== clj-kondo --lint src script test --cache false --parallel (candidate tree ${tree:0:12})"
+  lint_candidate "$tree" "$scratch/candidate" > "$scratch/lint.out" 2>&1 &
+  lint_pid=$!
 
+  if documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
+    echo "== documentation only (docs/): no program input; bin/seon check not run"
+  else
+    echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
+    bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
+  fi
+  local lint_status=0
+  wait "$lint_pid" || lint_status=$?
+  lint_pid=""
+  local summary
+  summary="$(grep -E '^linting took' "$scratch/lint.out" | tail -1 || true)"
+  echo "${summary:-$(tail -1 "$scratch/lint.out")}"
+  if [[ ! "$summary" =~ errors:\ 0, ]]; then
+    grep -E ': error: ' "$scratch/lint.out" | head -40 >&2 || true
+    refuse "clj-kondo reports errors on the candidate (HEAD + ${paths[*]}); nothing committed"
+  fi
+  echo "== proved in $((SECONDS - began)) s; committing under .git/lane-commit.lock"
+
+  printf '%s\n' "$message" > "$scratch/message"
+  local git_dir
+  git_dir="$(git rev-parse --absolute-git-dir)"
+  perl -MFcntl=:flock -e 'open(my $lock, ">>", shift) or die "lane-commit.lock: $!\n";
+                          flock($lock, LOCK_EX) or die "lane-commit.lock: $!\n";
+                          my $status = system(@ARGV); exit($status == -1 ? 2 : ($status >> 8) || ($status & 127 ? 2 : 0));' \
+    "$git_dir/lane-commit.lock" "$root/bin/lane" _commit-locked "$lane" "$scratch/message" "${paths[@]}"
+}
+
+# Under .git/lane-commit.lock (held by `commit`): the staged-index check, the
+# new-file add, the commit and its verification, so no two lanes' commits interleave.
+commit_locked() {
+  local lane="$1" message_file="$2"; shift 2
+  local paths=("$@") path added=() before after
+  staged_only "${paths[@]}"
+  before="$(git rev-parse HEAD)"
   # A new file the lane names is not yet known to git; --only refuses such a
   # pathspec, so it is added (alone) first. Nothing else enters the index.
   for path in "${paths[@]}"; do
     if [[ -e "$path" ]] && ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
       git add -- "$path"
+      added+=("$path")
     fi
   done
-  git commit --only -m "$message" -- "${paths[@]}" || refuse "git commit failed; nothing committed"
+  if ! git commit --only --cleanup=whitespace -F "$message_file" -- "${paths[@]}"; then
+    [[ ${#added[@]} -gt 0 ]] && git reset -q -- "${added[@]}"
+    refuse "git commit failed; nothing committed"
+  fi
+  after="$(git rev-parse HEAD)"
+
+  # The landed commit must be exactly the request: its parent, its paths, its message.
+  local problems=() committed
+  [[ "$(git rev-parse "$after^")" == "$before" ]] || problems+=("parent is $(git rev-parse --short "$after^"), not ${before:0:9}")
+  while IFS= read -r committed; do
+    requested "$committed" "${paths[@]}" || problems+=("carries $committed, which lane $lane did not request")
+  done < <(git diff-tree --no-commit-id --name-only -r --no-renames "$before" "$after")
+  for path in "${paths[@]}"; do
+    git diff --quiet "$after" -- "$path" || problems+=("$path in the working tree differs from the commit")
+  done
+  if [[ "$(git stripspace < "$message_file")" != "$(git log -1 --format=%B "$after" | git stripspace)" ]]; then
+    problems+=("message is \"$(git log -1 --format=%s "$after")\", requested \"$(head -1 "$message_file")\"")
+  fi
+  if [[ ${#problems[@]} -gt 0 ]]; then
+    {
+      echo "LANE COMMIT MISMATCH: lane $lane's commit $(git rev-parse --short "$after") is not what it requested:"
+      printf '  - %s\n' "${problems[@]}"
+      echo "  requested paths: ${paths[*]}"
+      echo "  History is not rewritten; root fixes forward."
+    } >&2
+    exit 3
+  fi
   git log --oneline -1
 }
 
@@ -140,7 +263,8 @@ command="${1:-status}"; shift || true
 case "$command" in
   claim|add) claim "$@" ;;
   commit) commit "$@" ;;
+  _commit-locked) commit_locked "$@" ;;
   release) release "$@" ;;
   status) status ;;
-  *) sed -n '2,15p' "$0"; exit 1 ;;
+  *) sed -n '2,29p' "$0"; exit 1 ;;
 esac
