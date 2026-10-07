@@ -15,7 +15,7 @@
 # lane's half-finished edit refuses nobody else; a commit touching none of
 # those roots skips it (the candidate lints as HEAD). `bin/seon check` (publication,
 # adoption, --test) runs alongside it, except for a documentation-only commit
-# (every path under docs/, no --test): documentation is no program input.
+# (docs/, AGENTS.md, CLAUDE.md or skill Markdown, no --test): documentation is no program input.
 # The commit itself (staged-index check, new-file add, git commit, verification)
 # holds .git/lane-commit.lock: git commit shares .git/COMMIT_EDITMSG, the index and
 # HEAD between processes, and two concurrent commits once crossed (649829332
@@ -134,10 +134,16 @@ lints_unchanged() {
   done
 }
 
-# True when every path is documentation (docs/): no program input, nothing to publish.
+# Documentation outside the program input roots has nothing to publish.
+# Skill scripts and fixtures are deliberately not covered by the Markdown rule.
 documentation_only() {
   local path
-  for path in "$@"; do [[ "$path" == docs/* ]] || return 1; done
+  for path in "$@"; do
+    case "$path" in
+      docs/*|AGENTS.md|CLAUDE.md|.agents/skills/*.md) ;;
+      *) return 1 ;;
+    esac
+  done
 }
 
 # The message belongs to this commit: lanes have built -m from one shared
@@ -237,7 +243,7 @@ commit() {
   fi
 
   if documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
-    echo "== documentation only (docs/): no program input; bin/seon check not run"
+    echo "== documentation only: no program input; bin/seon check not run"
   else
     echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
     bin/seon check "${paths[@]}" ${tests[@]+"${tests[@]}"} || refuse "bin/seon check failed; nothing committed"
