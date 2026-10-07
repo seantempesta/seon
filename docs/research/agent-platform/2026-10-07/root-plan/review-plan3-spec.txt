@@ -1,0 +1,11 @@
+Review root's plan v3 (second review round; v2 reviews are review-plan-opus-notes.md and plan-v2-review-notes.md beside it: check every v2 finding is resolved or explicitly deferred): docs/research/agent-platform/2026-10-07/root-plan/live-agents-plan-notes.md, in /Users/sean/src/seon. Read docs/research/agent-platform/2026-10-07/lane-rules.md first and follow it. The plan was written from five research notes in docs/research/agent-platform/2026-10-07/plan-research/ (r-turn, r-read, r-record, r-context, r-delete); read them. The owner's rulings are §1 of the plan; do not argue with them, check the plan serves them.
+
+Verify against the code and the running system (MCP eval_clj on default; JVM mode for reads with (seon.cluster.boot/connection "default"); never load-file/intern/alter-var-root into default; never stop/reset default; retire any branch you create):
+1. ACCURACY: every factual claim and number in §2 and §4 (spot-check the most load-bearing ones at the REPL, cite file:line). Anything wrong or overstated?
+2. FEASIBILITY: can each slice (P0, S0-S6) be done in the stated order while HEAD keeps booting and MCP/tests keep working (principle 2: MCP runs the same machinery)? Hidden dependencies, wrong order, a slice too big to review?
+3. SIMPLICITY: is §4 the smallest composition? What else can be deleted instead of changed? Is anything added speculative or a second path? Does "one read + one kondo analysis + one batched query + one machinery transaction" hold for all entrants (model, MCP SCI, MCP JVM, test), including definitions, faults, blobs, effects?
+4. BUDGETS: are the §3 targets reachable with this design? Which stage would still blow a budget, and why?
+5. RISKS the plan doesn't name (data loss, the reset, answeredness, crash behavior, concurrency between MCP and the model proc on one agent).
+6. The owner decisions in §6: are the options right and complete?
+
+Write docs/research/agent-platform/2026-10-07/root-plan/<your-lane>-notes.md: findings ranked by severity with evidence, concrete changes to the plan text, and questions. Do NOT edit the plan or any src/test file. Commit only your notes via bin/lane (claim, commit, release). No model calls needed. No Monitor tasks, pollers or extra JVMs.
