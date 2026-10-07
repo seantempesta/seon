@@ -197,7 +197,7 @@
    :seon.render.profile/composition :multiline
    :seon.print/requery-refusal "printed by the core printer: the value has no result handle"})
 
-(declare render-ai render-html)
+(declare render-ai render-html project)
 
 (defn- opaque
   "How the core names a value nothing else could print: its class and
@@ -255,10 +255,12 @@
                         (and (instance? clojure.lang.IObj value) (::print/full (meta value)))
                         (vary-meta value dissoc ::print/full)
                         :else value)
-            text (render-ai {:seon.render/value shown
-                             :seon.render.value/root 'seon.render.value/core
-                             :seon.render/profile core-profile
-                             :seon.render.value/options {:seon.render.value/structural? true}})]
+            text (:seon.render.value/text
+                  (project {:seon.render/value shown
+                            :seon.render.value/root 'seon.render.value/core
+                            :seon.render/profile core-profile
+                            :seon.render.value/options {:seon.render.value/structural? true}}
+                           :seon.render/ai))]
         (if (string? text) text (last-resort)))
       (catch Throwable _ (last-resort)))))
 
@@ -452,7 +454,7 @@
 
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
-  {:malli/schema [:=> [:cat :seon.render/unit :seon.render.data/path]
+  {:malli/schema [:=> [:cat :seon.render.value/unit :seon.render.data/path]
                   [:or :string :seon.render.value/missing-root-identity-error]]}
   [unit path]
   (let [root-address
@@ -991,7 +993,7 @@
   producer failed. A failure never replaces the value: the node prints as the
   data it is and the failure is shown once beside it (AGENTS.md, the REPL
   path is total)."
-  {:malli/schema [:=> [:cat :seon.render/unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :seon.render.value/unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
   [unit value path output]
   (when (and (or (keyword-lookup? value)
                  ;; a defined Var selects the Var render pair (`seon.render/declared-producers`)
@@ -1070,7 +1072,9 @@
                (let [;; A root continuation pages from its absolute offset.
                      c (classify value identity-attributes (+ (:offset context 0) (:max-children context)))
                      ;; A root paged from an offset keeps its members addressable.
-                     tuple (when (or (pos? id) (zero? (:offset context 0)))
+                     tuple (when (and (or (pos? id) (zero? (:offset context 0)))
+                                      (or (nil? (:length context)) (<= (:total c 0) (:length context)))
+                                      (or (nil? (:level context)) (< depth (:level context))))
                              (tuple-node c identity-attributes path (:requery-id base) (:max-string context)))]
                  (case (if tuple :tuple (:kind c))
                    :tuple (assoc base :kind :leaf :node tuple)
@@ -1197,7 +1201,8 @@
 (defn- admit-member
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
-  (when (or (:past-max-children? context) (<= (:ord work) (:max-children context)))
+  (when (and (or (:past-max-children? context) (<= (:ord work) (:max-children context)))
+             (or (nil? (:length context)) (<= (:ord work) (:length context))))
   (let [parent (get-in state [:nodes (:parent work)])
         [held & more] (:pending parent)
         ordinal (:ord work)
@@ -1269,8 +1274,9 @@
 
 (defn- fill-end
   "Where a cut string grown into `room` more characters of literal (render
-  text: of characters) ends: at most `room` wide, back to its last line end
-  inside the growth when it has one."
+  text: of characters) ends: at most `room` wide, back to its last line end,
+  inside the growth for a literal and anywhere in the shown prefix for render
+  text, which may shrink to it."
   {:malli/schema [:=> [:cat :map :int :int] :int]}
   [node room max-string]
   (let [^String text (:value node)
@@ -1283,20 +1289,21 @@
                  (if (<= width room) (recur (inc i) width) i))
                i))
         line-end (inc (.lastIndexOf text "\n" (int (dec to))))]
-    (if (and (< to limit) (> line-end (:shown node))) line-end to)))
+    (if (and (< to limit) (> line-end (if (:raw? node) 0 (:shown node)))) line-end to)))
 
 (defn- fill-string
   "`state` with cut string `node` grown into the budget left (`fill-end`),
-  shrinking past what the regrown cut costs; nil when nothing more fits."
+  shrinking past what the regrown cut costs, or render text ended at its last
+  line end; nil when nothing changes."
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state node context]
-  (loop [room (- (:budget context) (charge state))]
-    (when (pos? room)
-      (let [to (fill-end node room (:max-string context))]
-        (when (> to (:shown node))
-          (let [grown (grown-to state node to context)
-                over (- (charge grown) (:budget context))]
-            (if (pos? over) (recur (- room over)) grown)))))))
+  (loop [room (max 0 (- (:budget context) (charge state)))]
+    (let [to (fill-end node room (:max-string context))]
+      (when (not= to (:shown node))
+        (let [grown (grown-to state node to context)
+              over (- (charge grown) (:budget context))]
+          (cond (not (pos? over)) grown
+                (pos? room) (recur (max 0 (- room over)))))))))
 
 (defn- fill-strings
   "`state` with the budget left after selection spent on its cut strings,
@@ -1380,7 +1387,9 @@
   (let [bound (cond (and (= :string (:kind node)) (>= (:shown node) (:max-string context)))
                     :seon.render.profile/max-string-length
                     (#{:string :name} (:kind node)) :seon.render.profile/token-budget
+                    (and (:level context) (>= (:depth node) (:level context))) :seon.print/level
                     (>= (:depth node) (:max-depth context)) :seon.render.profile/max-depth
+                    (and (:length context) (>= (:n node) (:length context))) :seon.print/length
                     (>= (:n node) (:max-children context)) :seon.render.profile/max-children
                     :else :seon.render.profile/token-budget)
         raw? (:raw? node)
@@ -1540,26 +1549,13 @@
                                [:pre {:class "seon-data-panel seon-core-value"} diagnostic]]]
      :seon.render.value/diagnostics [{:seon.render.data/path path :seon.render.value/failure failure}]}))
 
-(defn prepare
-  "Select the value under its render profile (design one-render-path §3) and
-  emit the one tree as laid-out AI text and structural HTML.
-
-  TOTAL (AGENTS.md, the REPL path is total): a renderer that fails leaves its
-  node printed as data, a failure of the value printer itself prints the value as
-  plain bounded Clojure text, and either failure is shown once beside the
-  value and returned as `:seon.render.value/diagnostics` for the caller to
-  record as a core fault."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.render/unit]
-     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
-      :seon.render.value/insufficient-floor-budget-error]]
-    [:=> [:cat :seon.render/unit :seon.render/output]
-     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
-      :seon.render.value/insufficient-floor-budget-error]]]}
-  ([unit]
-   (prepare unit :seon.render/ai))
-  ([unit output]
+(defn- project
+  "The projection `prepare` answers, for a unit that may carry no database:
+  the core prints with none, and a database present is read, never supplied."
+  {:malli/schema [:=> [:cat :seon.render.value/unit :seon.render/output]
+                  [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+                   :seon.render.value/insufficient-floor-budget-error]]}
+  [unit output]
    (let [path (vec (get-in unit [:seon.render.data/cursor
                                 :seon.render.data/path] []))]
      (try
@@ -1594,9 +1590,13 @@
                       :width (:seon.print/width options)
                       :budget (tokens/estimate-chars (:seon.render.profile/token-budget profile))
                       :max-children (cond-> (:seon.render.profile/max-children profile)
-                                      (int? length) (min (max 1 length)))
+                                      (int? length) (min length))
                       :max-depth (cond-> (:seon.render.profile/max-depth profile)
-                                   (int? level) (min (max 1 level)))
+                                   (int? level) (min level))
+                      ;; A session bound is the agent's own, as hard as
+                      ;; Clojure's: no whole admission passes it.
+                      :length (when (int? length) length)
+                      :level (when (int? level) level)
                       :max-string (or (:seon.render.profile/max-string-length profile) Long/MAX_VALUE)
                       :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
                       :root-path path}
@@ -1606,7 +1606,7 @@
              context (cond-> context
                        full? (assoc :budget Long/MAX_VALUE
                                     :max-children Long/MAX_VALUE :max-depth Long/MAX_VALUE
-                                    :max-string Long/MAX_VALUE))
+                                    :max-string Long/MAX_VALUE :length nil :level nil))
              state (select-nodes (:seon.render/value unit) context)]
          ;; The selection answers its node state or its budget refusal.
          (if-not (:nodes state)
@@ -1669,7 +1669,7 @@
            ;; the value keeps its cuts and its whole-size estimate (LARGE
            ;; VALUE reads it). The failure is the one diagnostic beside it;
            ;; only a value printer that fails structurally too prints plain text.
-           (let [projection (prepare (assoc-in unit [:seon.render.value/options
+           (let [projection (project (assoc-in unit [:seon.render.value/options
                                                      :seon.render.value/structural?] true)
                                      output)
                  entry {:seon.render.data/path path :seon.render.value/failure failure}]
@@ -1689,7 +1689,27 @@
                                 (:seon.render.value/text projection)))
                      (update :seon.render.value/text str "\n" shown-text)
                      (update :seon.render.value/html conj shown-html)
-                     (update :seon.render.value/diagnostics (fnil conj []) entry)))))))))))
+                     (update :seon.render.value/diagnostics (fnil conj []) entry))))))))))
+
+(defn prepare
+  "Select the value under its render profile (design one-render-path §3) and
+  emit the one tree as laid-out AI text and structural HTML.
+
+  TOTAL (AGENTS.md, the REPL path is total): a renderer that fails leaves its
+  node printed as data, a failure of the value printer itself prints the value as
+  plain bounded Clojure text, and either failure is shown once beside the
+  value and returned as `:seon.render.value/diagnostics` for the caller to
+  record as a core fault."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.render/unit]
+     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+      :seon.render.value/insufficient-floor-budget-error]]
+    [:=> [:cat :seon.render/unit :seon.render/output]
+     [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+      :seon.render.value/insufficient-floor-budget-error]]]}
+  ([unit] (project unit :seon.render/ai))
+  ([unit output] (project unit output)))
 
 (defn render-ai-data
   "Return the text sink result from one already prepared projection."
@@ -1768,28 +1788,21 @@
   [stored]
   (admit/semantic-value (:seon.sci.admit/print-node stored)))
 
-(defn- render-prepared
-  [unit output]
-  (let [projection (prepare unit output)]
-    ;; A projection holds its tree; prepare's refusals do not.
-    (if-not (:seon.render.value/tree projection)
-      projection
-      (if (= output :seon.render/html)
-        (render-html-data projection)
-        (render-ai-data projection)))))
-
 (defn render-ai
-  "Render any value-printer unit through the admitted text sink."
+  "Render any value-printer unit as its text, or the refusal its projection answered."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
   [unit]
-  (render-prepared unit :seon.render/ai))
+  (let [projection (project unit :seon.render/ai)]
+    ;; A projection holds its tree; the refusals do not.
+    (if (:seon.render.value/tree projection) (:seon.render.value/text projection) projection)))
 
 (defn render-html
-  "Render any value-printer unit through the admitted hiccup sink."
+  "Render any value-printer unit as its hiccup, or the refusal its projection answered."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
   [unit]
-  (render-prepared unit :seon.render/html))
+  (let [projection (project unit :seon.render/html)]
+    (if (:seon.render.value/tree projection) (:seon.render.value/html projection) projection)))

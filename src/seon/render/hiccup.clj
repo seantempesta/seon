@@ -130,7 +130,7 @@
         (let [head (nth x 0)]
           (and (or (keyword? head) (symbol? head) (string? head))
                (let [second-node (when (> length 1) (nth x 1))
-                     start (if (and (map? second-node) (not (raw? second-node)))
+                     start (if (and (map? second-node) (not (instance? Raw second-node)))
                              2
                              1)]
                  (loop [index start]
@@ -141,7 +141,7 @@
     (string? x) true
     (nil? x) true
     ;; BEFORE map?, because Raw is a record
-    (raw? x) true
+    (instance? Raw x) true
     (map? x) false
     (sequential? x) (every? hiccup? x)
     (number? x) true
@@ -423,7 +423,7 @@
   attributes with `map?` alone would swallow every element's first raw
   child."
   [x]
-  (and (map? x) (not (raw? x))))
+  (and (map? x) (not (instance? Raw x))))
 
 (defn- append-element!
   [^StringBuilder builder element]
@@ -472,7 +472,7 @@
     (nil? node) true
     (false? node) true
     ;; BEFORE map?, because Raw is a record
-    (raw? node) (do (.append builder ^String (:string node)) true)
+    (instance? Raw node) (do (.append builder ^String (:string node)) true)
     (map? node) false
     (sequential? node) (append-children! builder node)
     ;; a number needs no escaping

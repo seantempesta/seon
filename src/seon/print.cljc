@@ -11,10 +11,14 @@
             [seon.schema.internal :as internal]))
 
 (defn- literal
+  "`value` as readable EDN under fixed print bindings, bound only when the
+  caller's differ: a binding frame costs more than printing a symbol."
   [value]
-  (binding [*print-readably* true *print-dup* false
-            *print-length* nil *print-level* nil *print-meta* false]
-    (pr-str value)))
+  (if (and (true? *print-readably*) (not *print-dup*) (nil? *print-length*) (nil? *print-level*) (not *print-meta*))
+    (pr-str value)
+    (binding [*print-readably* true *print-dup* false
+              *print-length* nil *print-level* nil *print-meta* false]
+      (pr-str value))))
 
 (defn string-literal
   "`s` as a readable string literal whose newlines stay line breaks, so a

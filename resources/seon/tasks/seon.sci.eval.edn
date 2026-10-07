@@ -216,4 +216,11 @@
             "In an agent's SCI context, (clojure.test/run-test-var #'rr.scratch/rr-inc-test) on a resolvable deftest throws ClassCastException 'class sci.lang.Namespace cannot be cast to class clojure.lang.Symbol' (MCP eval_clj sci, agent r-read, default 722f110df, 2026-10-07); an unqualified var in another namespace answers 'Unable to resolve var'. Agents in live run 1 and loop-pass reached for run-test-var to run their proof tests. Correct: run-test-var (or a documented equivalent the help names) runs one SCI test var and answers its report as data. Proof: a deftest defined on a branch runs through run-test-var and answers pass counts.",
             :must-read #{seon.sci.eval/agent-test-namespace},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "a-forms-set-print-length-is-recorded-but-not-applied"
+            :kind :function,
+            :intent
+            "After (set! *print-length* 2) in one SCI run, the next form (range 5) shows (0 1 2 3 4) and (vec (range 3000)) shows 32 elements, although each evaluation stores :seon.print/length 2 (seon.db/q on the run's receipts). Neither the shown text nor the response applies the form's own print length (entity-emission's comment says the response must print under it). Reproduce on default as agent review-s5a-opus: eval_clj sci '(set! *print-length* 2)\\n(range 5)'. Correct: the value prints under the length the form set, as in a Clojure REPL. Proof: a deftest asserting the shown node count of (range 5) is 2 after the set!; seon.mcp-entrance-test/an-sci-reply-is-what-the-run-saved's set! row asserts only that :seon.repl/value exists.",
+            :must-read #{seon.sci.eval/shown-result seon.repl/response},
+            :evidence
+            #{"docs/research/agent-platform/2026-10-07/s5a-reply/review-diff-opus-notes.md"}}]

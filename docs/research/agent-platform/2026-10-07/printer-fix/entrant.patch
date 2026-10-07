@@ -1,0 +1,44 @@
+--- a/src/seon/turn/batch.clj	2026-10-08 07:06:26.835065071 +0900
++++ b/src/seon/turn/batch.clj	2026-10-08 07:06:26.877774015 +0900
+@@ -903,7 +903,10 @@
+               db (assoc :seon.db/db db)
+               ctx (assoc :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms (or limit 30000)
+                          :seon.sci.admit/caps caps)
+-              (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal))))
++              (and ctx turn-id) (assoc :seon.repl/handle (admit/result-handle (id/evaluation turn-id ordinal)))
++              ;; The host form's own `set!` of *print-length* / *print-level*:
++              ;; the show stage runs inside its evaluation's bindings.
++              :always (assoc :seon.print/options {:seon.print/length *print-length* :seon.print/level *print-level*}))
+         record {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0
+                 :seon.eval/duration-ms (Math/round (double duration-ms)) :seon.eval/allocated-bytes (or allocated-bytes -1)
+                 :seon.eval/outcome (if (contains? entry :seon.batch/error) :error :ok)}]
+--- a/src/seon/turn.clj	2026-10-08 07:06:26.843755153 +0900
++++ b/src/seon/turn.clj	2026-10-08 07:06:26.878126100 +0900
+@@ -4758,10 +4758,12 @@
+   [{{ctx :seon.sci.eval/ctx ordinal :seon.batch/ordinal} :seon.batch/world working :seon.batch/working
+     frame :seon.turn/frame-request limit :seon.sci.eval/time-limit-ms}
+    {:seon.batch/keys [value error evaluation form ns-before source] :as entry}]
+-  (let [request (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
+-                       :seon.cluster.eval/source (or source "")
+-                       ;; the form's working value: its render reads what it read
+-                       :seon.db/db working)
++  (let [request (cond-> (assoc (frame ordinal (or ns-before (second (:seon.cluster.eval/ns evaluation)) 'user))
++                               :seon.cluster.eval/source (or source "")
++                               ;; the form's working value: its render reads what it read
++                               :seon.db/db working)
++                  ;; the form prints under its own evaluation's print options
++                  (:seon.print/options evaluation) (assoc :seon.print/options (:seon.print/options evaluation)))
+         record (:seon.sci.admit/record evaluation)
+         shown (kernel/with-arm
+                ctx limit
+--- a/test/seon/turn_test.clj	2026-10-08 07:25:03.463994436 +0900
++++ b/test/seon/turn_test.clj	2026-10-08 07:25:03.467638286 +0900
+@@ -788,7 +788,7 @@
+           :seon.eval/shown
+           "42"})
+         lines (str/split-lines rendered)]
+-    (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:value 42, :result result/e7042}"
++    (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:result result/e7042, :value 42}"
+            rendered)
+         "the handle is the evaluation's own entity id, never its ordinal")
+     ;; THE RESPONSE IS ONE DATUM. It may wrap when a value is wide, but the

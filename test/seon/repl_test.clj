@@ -57,13 +57,13 @@
                   :seon.eval/duration-ms 3})]
       (is (= (str "my.agents.juniper=> ;; I should check the sum.\n"
                   "(+ 1 1)\n"
-                  "#:seon.repl{:value 2, :result result/e41, :ms 3}")
+                  "#:seon.repl{:result result/e41, :ms 3, :value 2}")
              emitted))
       (is (= 3 (count (str/split-lines emitted)))
           "prompt and comment, form, response")))
   (testing "no comment means no blank line before the prompt"
     (is (= (str "my.agents.juniper=> (+ 1 1)\n"
-                "#:seon.repl{:value 2, :result result/e41, :ms 3}")
+                "#:seon.repl{:result result/e41, :ms 3, :value 2}")
            (repl/text {:seon.cluster.eval/source "(+ 1 1)"
                        :seon.ns/name 'my.agents.juniper
                        :seon.repl/handle (admit/result-handle "41")
@@ -114,11 +114,11 @@
                     :seon.ns/name 'my.agents.juniper}
           response (repl/response emission)
           position (fn [k] (str/index-of response k))]
-      (is (< (position ":value") (position ":result")
-             (position ":out") (position ":ns") (position ":ms"))
-          "value, result, out, ns, ms — enforced by the ordered vector")
-      (is (= 1 (count (str/split-lines response)))
-          "the response map is one line"))))
+      (is (< (position ":result") (position ":out") (position ":ns") (position ":ms")
+             (position ":value"))
+          "result, out, ns, ms, then the shown value — enforced by the ordered vector")
+      (is (= 2 (count (str/split-lines response)))
+          "the response map is one line but for the output's own line break, which its string literal keeps"))))
 
 (deftest printed-output-is-separate-from-the-value
   (let [response (repl/response {:seon.cluster.eval/source "(println \"hi\")"
@@ -163,8 +163,8 @@
       (is (not (contains? (reply "(def secret 99)" {}) :seon.repl/note)))
       (is (not (contains? (reply "(defn hello [] 42)" {:seon.eval/value-class "sci.lang.Var"})
                           :seon.repl/note))))
-    (testing "the note sits after :out and before :ns in the one order"
-      (is (= [:seon.repl/value :seon.repl/note]
+    (testing "the note sits after :out and before :ns, and before the shown value, in the one order"
+      (is (= [:seon.repl/note :seon.repl/value]
              (filter #{:seon.repl/value :seon.repl/note :seon.repl/out :seon.repl/ns :seon.repl/ms}
                      (keys (reply "(def secret 99)" {:seon.eval/value-class "sci.lang.Var"}))))))))
 
@@ -391,7 +391,19 @@
                                            :seon.eval/shown "#:seon.repl{:columns [:sym], :rows [[x/f]]}"
                                            :seon.eval/duration-ms 3}))]
         (is (= {:seon.repl/columns [:sym] :seon.repl/rows [['x/f]]} (:seon.repl/value reply))
-            "a render that is EDN is data")))))
+            "a render that is EDN is data")))
+    (testing "prose with an open delimiter or quote cannot swallow a key the composer wrote"
+      (let [emission {:seon.cluster.eval/source "(steps)" :seon.eval/renderer 'my.task/steps
+                      :seon.repl/handle handle :seon.eval/duration-ms 12
+                      :seon.eval/shown "Steps: 1) open it\n2) say \"hi"}
+            reply (repl/response emission)
+            composed (one-map (str (subs reply 0 (str/index-of reply ", :value ")) "}"))]
+        (is (= :seon.repl/value (first (peek (#'repl/response-entries emission)))) "the shown text comes last")
+        (is (= {:seon.repl/result handle :seon.repl/ms 12} composed))))
+    (testing "only spliced printer text is ended before the next key"
+      (is (= "#:seon.repl{:findings [{:seon.repl/fix \"a; b\"}], :ms 1, :value [\"a;b\"]\n}"
+             (#'repl/reply-map [[:seon.repl/findings "[{:seon.repl/fix \"a; b\"}]"] [:seon.repl/ms "1"]
+                                [:seon.repl/value "[\"a;b\"]"]]))))))
 
 (deftest ^{:seon/tasks #{'seon.repl/a-selected-render-arrives-as-an-escaped-string}} a-rendered-value-with-cuts-is-spliced-verbatim
   ;; A render's shown text, its cut and dig form included, is the printer's
@@ -423,7 +435,7 @@
                   :seon.eval/shown "2"
                   :seon.eval/duration-ms 4}]
     (testing "the normal reply is the answer, the handle and the time"
-      (is (= "#:seon.repl{:value 2, :result result/ee5885, :ms 4}" (repl/response emission)))
+      (is (= "#:seon.repl{:result result/ee5885, :ms 4, :value 2}" (repl/response emission)))
       (is (= [] (repl/findings emission))))
     (testing "each exceeded bound is one data map under :findings in the one reply map"
       (let [slow (assoc emission :seon.eval/duration-ms 1450

@@ -112,23 +112,30 @@
 ;;; One ordered vector is the whole order authority. A key absent from an
 ;;; evaluation is absent from its response: the agent never reads a `nil` it
 ;;; would have to interpret, and `:value` / `:error` are mutually exclusive
-;;; because exactly one of them is a terminal fact of the evaluation.
+;;; because exactly one of them is a terminal fact of the evaluation. The
+;;; composer's own entries come first; the printer's text, spliced as shown
+;;; (`spliced`), follows them, so prose a render returned with an open
+;;; delimiter or quote cannot swallow a key the composer wrote.
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private response-order
-  [:seon.repl/value
-   :seon.repl/error
-   :seon.repl/findings
-   :seon.repl/diagnostics
+  [:seon.repl/findings
    :seon.repl/interrupted
    :seon.repl/result
    :seon.repl/out
-   :seon.repl/errors
    :seon.repl/note
    :seon.repl/ns
    :seon.repl/ms
    :seon.repl/calls
-   :seon.repl/repeated])
+   :seon.repl/repeated
+   :seon.repl/errors
+   :seon.repl/diagnostics
+   :seon.repl/value
+   :seon.repl/error])
+
+(def ^:private spliced
+  "The entries that are the value printer's shown text, spliced as shown."
+  #{:seon.repl/repeated :seon.repl/errors :seon.repl/diagnostics :seon.repl/value :seon.repl/error})
 
 (defn- def-note
   "Explain a temporary def from the evaluation's own record: its source is a
@@ -170,6 +177,7 @@
   and `:diagnostics`. Only an unshown failure's prose `:seon.cluster.eval/error`
   is quoted, by the printer's `string-literal`. The declared bounds' findings
   are `:findings`; nothing is printed above or around the map."
+  {:malli/schema [:=> [:cat :seon.repl/emission] [:vector [:tuple :qualified-keyword :string]]]}
   [{output :seon.cluster.eval/output
     source :seon.cluster.eval/source
     handle :seon.repl/handle
@@ -191,29 +199,26 @@
                 ;; text is the printer's; the prose error string is quoted.
                 :seon.repl/error (when failed?
                                    (or value (print/string-literal (:seon.cluster.eval/error emission))))
-                :seon.repl/findings (when (seq found)
-                                      (binding [*print-namespace-maps* true] (pr-str found)))
+                :seon.repl/findings (when (seq found) (value/core-text found))
                 :seon.repl/diagnostics diagnostics
                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
                 ;; for an interrupted evaluation carried `:ms` alone and read
                 ;; exactly like one still running — absence of signal read as
                 ;; health, in the agent's own history (PRD §4).
                 :seon.repl/interrupted
-                ;; AN INSTANT IS AN INSTANT. `(pr-str (.toString …))` made it
-                ;; a quoted string where the one print grammar renders every
-                ;; other instant as readable `#inst` data.
+                ;; An instant prints as the printer prints every instant: `#inst` data.
                 (when (inst? interrupted-at)
-                  (pr-str interrupted-at))
+                  (value/core-text interrupted-at))
                 ;; A HANDLE IS A FACT, NOT A FLAG. The caller that could bind
                 ;; one hands the symbol it bound; ruling 59c's "no handle" is
                 ;; simply its absence, so nothing here re-decides what the
                 ;; binding already settled.
                 :seon.repl/result (some-> handle str)
-                :seon.repl/out (when (seq output) (pr-str output))
+                :seon.repl/out (when (seq output) (print/string-literal output))
                 ;; ALREADY TEXT: the value renderer bounded it once.
                 :seon.repl/errors (:seon.repl/errors emission)
                 :seon.repl/note (when-not failed?
-                                  (some-> (def-note source (:seon.eval/value-class emission) prompt-ns) pr-str))
+                                  (some-> (def-note source (:seon.eval/value-class emission) prompt-ns) print/string-literal))
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
                 :seon.repl/ms (when (and (int? duration)
@@ -245,19 +250,19 @@
 
 (defn- reply-map
   "The entries as one `#:seon.repl{…}` map: entries join with `, ` on one
-  line, and an entry whose last line may end in a comment (`ends-in-comment?`)
-  is ended before the next key or the closing brace."
+  line, and a spliced entry whose last line may end in a comment is ended
+  before the next key or the closing brace; the composer's own never does."
   {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}
   [entries]
   (when (seq entries)
-    (let [ends (fn [text] (if (ends-in-comment? text) "\n " ", "))]
+    (let [ended? (fn [[response-key text]] (and (spliced response-key) (ends-in-comment? text)))]
       (str "#:seon.repl{"
            (str/join (map-indexed
                       (fn [index [response-key text]]
-                        (str (when (pos? index) (ends (second (nth entries (dec index)))))
+                        (str (when (pos? index) (if (ended? (nth entries (dec index))) "\n " ", "))
                              ":" (name response-key) " " text))
                       entries))
-           (when (ends-in-comment? (second (peek entries))) "\n")
+           (when (ended? (peek entries)) "\n")
            "}"))))
 
 ;;; ---------------------------------------------------------------------------
@@ -382,7 +387,7 @@
     (str (input-text emission)
          (when answer (str "\n" answer))
          (when (and full-handle (map? changed) (:seon.repl/changes changed))
-           (str "\n;; full value: " (pr-str (list 'get-in full-handle [])))))))
+           (str "\n;; full value: " (print/form-text (list 'get-in full-handle [])))))))
 
 (defn- token-boundary? [character]
   (or (Character/isWhitespace ^char character)

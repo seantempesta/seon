@@ -126,7 +126,7 @@
                 [:seon.render.transcript/entry :eval "stored-evaluation"]]
                (mapv :seon.render.history/call-id entries)))
         (is (= [(str agent-prompt "(future-work)")
-                (str agent-prompt "(+ 1 2)\n#:seon.repl{:value 3, :result result/estored-evaluation}")]
+                (str agent-prompt "(+ 1 2)\n#:seon.repl{:result result/estored-evaluation, :value 3}")]
                bytes)
             "a submitted form has a prompt and no response; a settled one
              answers with the one REPL response map")))))
@@ -397,9 +397,9 @@
                ai
                (str "my.agents.transcript=> ;; calculate the answer\n"
                     "(do (println \"side effect\") (+ 20 22))\n"
-                    "#:seon.repl{:value 42, :result "
+                    "#:seon.repl{:result "
                     (admit/result-handle "eval-result") ", "
-                    ":out \"side effect\\n\"}"))
+                    ":out \"side effect\n\", :value 42}"))
               "one prompt, the agent's own input, one response map")
           (is (str/includes? ai "waiting for the peer review"))
           (is (str/includes? ai "Execution error (ArithmeticException) at"))
@@ -542,7 +542,7 @@
             ;; over the one grammar rather than over a bare printed value.
             prompted (fn [ordinal]
                        (str agent-prompt "(identity " ordinal
-                            ")\n#:seon.repl{:value " ordinal))
+                            ")\n#:seon.repl{"))
             ai-positions
             (mapv #(.indexOf ai (prompted %)) (range bootstrap-count))
             ;; the task message is SOURCE like every other message: its own
@@ -982,9 +982,9 @@
          (is (= "(do (println \"side effect\") (+ 20 22))"
                 (:seon.render.history/form (first entries)))
              "the form is the form; its comment is a fact beside it")
-         (is (= (str "#:seon.repl{:value 42, :result "
+         (is (= (str "#:seon.repl{:result "
                      (admit/result-handle "eval-result") ", "
-                     ":out \"side effect\\n\"}")
+                     ":out \"side effect\n\", :value 42}")
                 (:seon.render.history/printed-value (first entries)))
              "the printed value is the one REPL response, output as its own key")
          (let [facts (db/pull database
@@ -1268,7 +1268,7 @@
                     joined
                     "my.agents.one-grammar=> ;; a definition worth keeping\n(def x 1)")
                    "the agent's comment, verbatim, on the prompt it introduces")
-               (is (str/includes? joined ":out \"hi\\n\"")
+               (is (str/includes? joined ":out \"hi\n\"")
                    ":out is its own key, never folded into :value")
                (is (str/includes? joined ":value 41"))
                (is (str/includes? joined ":ns my.agents.probe")

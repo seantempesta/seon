@@ -152,19 +152,19 @@
             [:map
              {:description
               "The REPL's one answer to one evaluated form, emitted in exactly this key order by seon.repl/response. The agent is never asked to write one; every key is absent when the evaluation has nothing to say for it."}
-             [:seon.repl/value {:optional true} :seon.repl/value]
-             [:seon.repl/error {:optional true} :seon.repl/error]
              [:seon.repl/interrupted
               {:optional true}
               :seon.repl/interrupted]
              [:seon.repl/result {:optional true} :seon.repl/result]
              [:seon.repl/out {:optional true} :seon.repl/out]
-             [:seon.repl/errors {:optional true} :seon.repl/errors]
+             [:seon.repl/note {:optional true} :seon.repl/note]
              [:seon.repl/ns {:optional true} :seon.repl/ns]
              [:seon.repl/ms {:optional true} :seon.repl/ms]
              [:seon.repl/calls {:optional true} :seon.repl/calls]
              [:seon.repl/repeated {:optional true} :seon.repl/repeated]
-             [:seon.repl/note {:optional true} :seon.repl/note]],
+             [:seon.repl/errors {:optional true} :seon.repl/errors]
+             [:seon.repl/value {:optional true} :seon.repl/value]
+             [:seon.repl/error {:optional true} :seon.repl/error]],
             :candidates [:vector :seon.repl/candidate],
             :ns
             [:string

@@ -975,7 +975,7 @@
   [tag hiccup]
   (filter #(and (vector? %) (= tag (first %))) (tree-seq vector? seq hiccup)))
 
-(deftest a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form
+(deftest ^{:seon/tasks #{'seon.render.value/render-text-past-the-budget-is-cut-mid-line-with-no-dig-form}} a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form
   ;; Render text is a string shown as written and cut like one: at a line end
   ;; when one fits, counted, and read whole with `seon.print/full` on the handle.
   (support/with-database
@@ -983,6 +983,8 @@
      (let [lines (apply str (repeat 400 "line \"q\" \\ <b>&amp;\n"))
            crlf (apply str (repeat 400 "a windows line\r\n"))
            long-line (str (apply str (repeat 10000 "x")) "\nmore")
+           sparse (apply str (repeat 10 (str (apply str (repeat 1000 "x")) "\n")))
+           short-first (str "first\n" (apply str (repeat 10000 "x")))
            prepared (fn [raw root]
                       (value/prepare (assoc (render-request connection raw) :seon.render/profile probe-profile
                                             :seon.render.value/root root)))]
@@ -991,6 +993,8 @@
                 [:producer-text {:seon.render/ai (fn [_] lines)} 'result/e0123456789ab true true]
                 [:crlf {:seon.render/ai crlf} 'result/e0123456789ab true true]
                 [:first-line-past-the-budget {:seon.render/ai long-line} 'result/e0123456789ab false true]
+                [:sparse-lines {:seon.render/ai sparse} 'result/e0123456789ab true true]
+                [:short-first-line {:seon.render/ai short-first} 'result/e0123456789ab true true]
                 [:no-result-handle {:seon.render/ai lines} [:seon.render.value-test/registered :text] true false]]]
          (let [projection (prepared raw root)
                [cut & more] (tree-cuts projection)
@@ -1039,25 +1043,68 @@
                     (hiccup-elements :span hiccup))
               "a cut with no route shows its continuation"))))))
 
-(deftest a-session-print-length-bounds-the-shown-members
+(defn- members
+  "The members a projection's root shows: its items or entries, its cut aside."
+  [projection]
+  (let [root (:seon.render.value/tree projection)]
+    (remove #(= :seon.print/elided (:seon.print/face %))
+            (or (:seon.print/items root) (:seon.print/entries root)))))
+
+(deftest ^{:seon/tasks #{'seon.render.value/session-print-length-loses-to-whole-admission}} a-session-print-bound-is-hard
+  ;; *print-length* / *print-level* are the agent's own bounds, as hard as
+  ;; Clojure's: a collection whose cut would cost more than it hides is still
+  ;; cut, zero shows none, and the cut names the session bound.
+  (support/with-database
+   (fn [connection]
+     (doseq [[options raw shown bound]
+             [[{:seon.print/length 2} (vec (range 12)) 2 :seon.print/length]
+              [{:seon.print/length 2} {:a 1 :b 2 :c 3} 2 :seon.print/length]
+              [{:seon.print/length 2} #{1 2 3 4} 2 :seon.print/length]
+              [{:seon.print/length 2} [1 2 3] 2 :seon.print/length]
+              [{:seon.print/length 0} [1 2 3] 0 :seon.print/length]
+              [{:seon.print/level 0} [[1 2]] 0 :seon.print/level]]]
+       (let [projection (value/prepare (assoc (unit raw) :seon.db/db (db/db connection)
+                                              :seon.repl/handle 'result/e0123456789ab
+                                              :seon.print/options options))
+             [cut & more] (tree-cuts projection)]
+         (is (= shown (count (members projection))) (str options " " raw))
+         (is (and cut (empty? more)) (str options " " raw ": one cut"))
+         (is (= bound (:seon.print/bound-by cut)) (str options " " raw)))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-forms-set-print-length-is-recorded-but-not-applied}} a-session-print-length-bounds-the-shown-members
   ;; As at Clojure's REPL, a form's `set!` of *print-length* / *print-level*
-  ;; bounds how the session's later values print; the cut reads the rest.
+  ;; bounds how the session's later values print, with a result handle; the
+  ;; cut reads the rest.
   (support/with-database
    (fn [connection]
      (let [ctx (:seon.sci.eval/ctx
                 (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                                            :seon.db/db (db/db connection)
                                            :seon.agent/id "root"}))
-           shown #(:seon.eval/shown (support/evaluate {:seon.cluster.eval/source % :seon.sci.eval/ctx ctx
-                                                       :seon.db/db (db/db connection) :seon.sci.admit/caps caps
-                                                       :seon.sci.eval/time-limit-ms 5000}))]
-       (is (= "(0 1 2 3 4)" (shown "(range 5)")) "the profile's bounds when the session set none")
-       (let [text (shown "(set! *print-length* 2) (range 5)")
-             members (edn/read-string (str/replace text #" ….*\)$" ")"))]
-         (is (= '(0 1) members) "two members shown")
-         (is (str/includes? text "…") "a cut follows them"))
-       (is (= 2 (count (edn/read-string (str/replace (shown "(vec (range 9))") #" ….*\]$" "]"))))
-           "a later form keeps the session's length")))))
+           evaluated #(support/evaluate {:seon.cluster.eval/source % :seon.sci.eval/ctx ctx
+                                         :seon.repl/handle 'result/e0123456789ab
+                                         :seon.db/db (db/db connection) :seon.sci.admit/caps caps
+                                         :seon.sci.eval/time-limit-ms 5000})
+           ;; the members shown, the cut and its dig form read away
+           shown-members #(edn/read-string (str/replace (:seon.eval/shown (evaluated %)) #" ?…\S*( \(.*\)| result/\S+)?(?=[\]\})])" ""))]
+       (is (= '(0 1 2 3 4) (shown-members "(range 5)")) "the profile's bounds when the session set none")
+       (is (= '(0 1) (shown-members "(set! *print-length* 2) (range 5)")))
+       (doseq [[source shown] [["(vec (range 12))" [0 1]] ["[1 2 3]" [1 2]] ["{:a 1 :b 2 :c 3}" {:a 1 :b 2}]]]
+         (is (= shown (shown-members source)) source)
+         (is (= 1 (:seon.eval/elisions (evaluated source))) source))
+       (is (= 2 (count (shown-members "#{1 2 3 4}"))))
+       (is (= [] (shown-members "(set! *print-length* 0) [1 2 3]")) "zero shows none")))))
+
+(deftest ^{:seon/tasks #{'seon.render.value/core-text-refused-outside-custody}} a-diagnostic-printed-off-custody-shows-its-path-and-message
+  ;; The core prints with no database: on a thread with no custody (a page
+  ;; handler, any thread) a diagnostic still shows where and why it failed.
+  (let [answer (promise)]
+    (.start (Thread. #(deliver answer (value/core-text {:seon.render.value/diagnostics
+                                                         [{:seon.render.data/path [:a 1]
+                                                           :seon.render.value/failure (ex-info "boom here" {:x 1})}]}))))
+    (let [text (deref answer 5000 ::timeout)]
+      (is (str/includes? text "[:a 1]") "its path")
+      (is (str/includes? text "boom here") "its message"))))
 
 (deftest a-terminal-structural-failure-does-not-reenter-selection
   ;; The core's last resort is projection-free: a value whose realization

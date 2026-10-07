@@ -5,6 +5,7 @@
                       {:optional true}
                       :seon.sci.admit/record]],
                     :html :seon.render/hiccup,
+                    :unit [:map {:description "A value-printer unit that needs no database: the core printer has none (no custody, any thread), and a database the unit holds is read, never supplied."}],
                     :max-collection
                     [:int {:min 1, :seon.config/dial true}],
                     :options

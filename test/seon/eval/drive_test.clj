@@ -63,6 +63,6 @@
         ;; ONE ENTITY PER (run, ordinal), ONE GRAMMAR: the evaluation names
         ;; its own namespace through the run's agent instead of falling back
         ;; to `user`, and the settled value is the one REPL response map.
-        (is (= "my.agents.projection-proof=> 42\n#:seon.repl{:value 42, :result result/eprojection-proof-receipt}"
+        (is (= "my.agents.projection-proof=> 42\n#:seon.repl{:result result/eprojection-proof-receipt, :value 42}"
                (full-transcript database "projection-proof"
                                 instance settings)))))))

@@ -126,7 +126,7 @@
        (is (instance? Long agent-eid))
        (is (instance? Long component-eid))
        (is (= 1 (count history)))
-       (is (= "my.agents.history-probe=> (my.task/steps {})\n#:seon.repl{:value The component's shown text., :result result/ehistory-probe-evaluation}"
+       (is (= "my.agents.history-probe=> (my.task/steps {})\n#:seon.repl{:result result/ehistory-probe-evaluation, :value The component's shown text.}"
               (:seon.render.history/bytes (first history))))
        (is (= history
               (walk/history (assoc request :seon.render.walk/lookup
