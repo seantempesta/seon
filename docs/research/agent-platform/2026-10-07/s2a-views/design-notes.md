@@ -1,6 +1,6 @@
 ---
 type: design
-status: v4, root-ruled (ledger option A; golden deleted; gaps 1-2 owned by S4; gap 3 by a printer lane). Code waits on transcript.clj (s5a-reply)
+status: v5, root-ruled; Opus (87e6991a2) and Astra (7a67ce9c7) reviews reconciled. Code waits on transcript.clj (s5a-reply)
 created: 2026-10-07
 tags: [design, agent-loop, deletion, debug]
 ---
@@ -372,6 +372,80 @@ them with the assembly. The shared helpers the graph used (`forward-attribute`, 
   delete the `session-problems`/`problems-html` snapshot parts.
 - **Unchanged**: `web_context_test/context-and-page-do-not-demand-the-render-proc`, because it tests
   `acquire-context!` (S4's).
+
+### 4.5 Astra review (7a67ce9c7) reconciled against v4
+
+**Findings that fall away under option (A).** Each reviewed the v1 ledger, which v4 deletes:
+
+| Astra finding | Why it falls away |
+|---|---|
+| P1: attempt-less turn is not "Virtual" (label and regression) | `turn-kind` is deleted, and so is the turn-kind regression it asked for |
+| P1: the narrow history read allocates 40.9 MB, so the landing is over budget | v4 never writes the narrow-selector reader (v1's `ledger-data`), and no other caller uses that selector |
+| P2: eager emission rendering and ledger-effects' T × D cross product | `ledger-data`, `ledger-effects` and `ledger-turn-body` are deleted |
+| P2: `ledger-data`'s error union | `ledger-data` and its two renderer entrances are deleted |
+
+Consequences for tasks:
+
+- `seon.eval/narrow-history-read-allocates-over-ten-megabytes` (`17390920f38d`) closes as deleted when S2a lands: its
+  reader never lands.
+- `of-agent`'s other callers (`walk/history` inside the assembly) carry the assembly's cost. That is gap 1, owned by
+  S4.
+- Tasks `a9a7bb6e6f29` and `ec70b6017334` close as deleted too (§3). Astra's note that `ec70b6017334`'s intent claims
+  a sorted pass that does not exist dies with the function.
+
+**What still applies, folded in:**
+
+1. **Refusals on the surviving page and context view** (Astra's P2 refusal finding, restated for the survivors). No
+   new catch, wrapper or error family is added.
+   - **`sent-context-html`.** `seon.cluster.prompt/prompt` returns its declared union
+     `[:or :seon.cluster.prompt/rendered-context :seon.cluster.prompt/error]` (prompt.clj:432-434).
+     - The view passes either value to `value/html` unchanged. A refusal prints as the refusal value, never as an
+       empty context.
+     - Today's `(string? text)` branch goes, so the view has no success-or-refusal fork at all.
+     - A thrown `ex-info` reaches the web handler's one entrant boundary, `failure-response` (web.clj:3925, caught at
+       3987). That is CLAUDE.md's third catch.
+     - The `try`/`catch ExceptionInfo` → refusal conversions in the deleted `render-session` and `outline-everything`
+       go with them.
+   - **`render-agent-header`.** It already treats a refused `turn-entities` read as no turns (`(if (vector? entities)
+     entities [])`, transcript.clj:1203).
+     - A refused database reaching the page is task
+       `seon.render.web/a-page-renders-with-a-refused-database` (`page-response`'s producer), not S2a's.
+     - S2a does not touch that path, and the debug-page agent branch shares `page-response`'s `db/db` read.
+   - **Regression** (Astra asked for refusal cases at the surviving entrances):
+     - fetch `/agent/<id>/debug?sent=true` (datastar) for an agent whose prompt refuses, e.g. a cluster with no
+       configuration (`:seon.cluster.prompt/missing-config`);
+     - assert status 200, a value printer panel in the body, and no composed-text panel;
+     - assert the refusal as data with one direct call, `(seon.cluster.prompt/prompt db request)` returning the
+       `:seon.cluster.prompt/error` variant. The implementation lane names it with root.
+2. **Test list.** Astra's list, mapped onto v4:
+
+   | Test | v4 |
+   |---|---|
+   | `web-debug-test/turn-details-use-the-loop-opening-and-exact-segments` | converted: the assembly assertions only (§4.4); no kind table, since `turn-kind` is deleted |
+   | `web-debug-test/ledger-derives-shared-data-once`, `web-debug-test/passive-ledger-never-reconstructs-directory`, `rereads-panel-test/problems-count-every-silent-refresh-from-history` | deleted with the ledger |
+   | `web-debug-test/blocks-use-the-values-schema-documentation` | converted (drop the `emission-label` assertion) |
+   | `web-debug-test/saved-history-preserves-shown-text-with-numeric-lookups` | unchanged; it reaches `derive-context!`, whose ledger branch is the only edit there |
+   | `web-context-test/selected-session-defers-prompt-acquisition` | converted to the zero-on-load, one-on-open regression |
+   | `web-test/inspecting-the-page-writes-no-run-evaluation-or-fault-facts`, `each-agent-has-an-isolated-debug-route`, `debug-algorithm-carries-the-render-evaluation-inputs` | converted (§4.4); the three controls stay |
+   | `turn-test/virtual-turns-use-the-proc-and-compaction-is-agent-scoped` | converted (it owns the :621 `seon-ledger-full-context` assertion, plus the 705-721 card block) |
+   | `turn-test/agent-budget-counts-a-call-that-closes-before-the-provider` | unchanged (no transcript reach), named because it guards pre-provider closure |
+   | `run6-stall-test/an-open-session-provider-refusal-is-the-first-problem` | converted: the header's stalled line stays; the problem-rule assertions go |
+   | `eval-test/history-orders-turn-transactions-before-ordinals-and-keeps-unfinished-forms` | unchanged; S2a no longer adds an `of-agent` caller |
+   | new | the refusal case above |
+
+   - **Counter scope (Astra P2).** `support/armed-calls` sums JVM-wide cells. Root runs the zero-acquisition proof in
+     the check's throwaway JVM with no concurrent page or prompt use. A nonzero count under concurrency is not an S2a
+     regression.
+   - **Assertions.** Assert on data and selectors, not prose.
+3. **S1 overlap on the passive-history test.** Root ruling: S2a lands first, and S1 rebases.
+   - S2a deletes `passive-ledger-never-reconstructs-directory` with its entrance, the ledger, which also deletes its
+     `with-redefs` over `directory-value` and `render-directory-ai`.
+   - S1's design (`s1-lookups/design-notes.md`, table "history: stored … rows") planned to keep that test's
+     byte-for-byte assertion. After rebasing, S1 has nothing to convert there.
+   - If S1 still wants proof that stored directory and help rows display as saved without invoking a deleted
+     renderer, the surviving entrance until S4 is the assembly: `saved-history-preserves-shown-text-with-numeric-lookups`
+     (`derive-context!`). S1 adds that case there, on S1's side.
+   - S2a does not count Vars that S1 deletes.
 
 ## 5. Duplicates, library seams, size
 
