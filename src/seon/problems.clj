@@ -288,7 +288,7 @@
   Unarmed, default 2026-09-27: 2 ms, against 114 ms when every agent ever
   created (123) was asked. A deferred trigger is a message wake, so only
   agents a message addresses through a turn-opening wake attribute are asked."
-  {:seon/tasks #{"41a8e43ce5a4"}}
+  {:seon/tasks #{'seon.problems/a-status-observation-costs-half-a-gigabyte}}
   [db]
   (->> (db/q '[:find [?agent-id ...]
               :in $ [?attribute ...]

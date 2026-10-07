@@ -10,7 +10,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{"361088de3d56"}} a-batched-report-does-not-advance-the-acquired-program
+(deftest ^{:seon/tasks #{'seon.sci.eval/program-change-check-scans-the-whole-history}} a-batched-report-does-not-advance-the-acquired-program
   (support/with-database
    (fn [connection]
      ;; Tasks carry no program identity; the agent entity (with its seeded

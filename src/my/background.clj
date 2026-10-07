@@ -58,7 +58,7 @@
                (my.shell/run! {:my.shell/argv [\"printf\" \"%s\" \"Verified.\"]
                                :my.shell/cwd \".\"}))]
     (my.background/poll {:my.background/result work}))"
-  {:seon/tasks #{"7bfe767bec09"}
+  {:seon/tasks #{'seon.effect/background-poll-answers-edn-strings}
    :malli/schema [:=> [:cat [:map [:my.background/result :my.background/result]]] [:or :my.background/receipt :my.background/invalid-result-error :my.background/missing-result-error]]}
   [request]
   (background/poll (:my.background/result request)))

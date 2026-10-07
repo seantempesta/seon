@@ -1494,7 +1494,7 @@
 
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."
-  {:seon/tasks #{"c5e9496b4cb1"}
+  {:seon/tasks #{'seon.render/captured-invocations-blank-source-faces}
    :malli/schema [:=> [:cat :seon.render/call-request]
                   [:or :nil :seon.render/rendered :seon.render/error-result]]}
   [{database :seon.db/db

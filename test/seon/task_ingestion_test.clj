@@ -1,6 +1,6 @@
 (ns seon.task-ingestion-test
-  "Task ingestion (spec 7.9-7.16): handle-valued edges, task EDN by handle with a
-  revision basis, lookups both ways, and the publication seam's dangling refusal."
+  "Task ingestion (spec 7.9-7.16): symbol-valued edges, task EDN with derived handles
+  and a revision basis, lookups both ways, and the publication seam's dangling refusal."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -12,25 +12,27 @@
             [seon.program :as program]
             [seon.test-support :as test-support]))
 
-(def ^:private handle "043df611d179")
+(def ^:private handle (task/task-handle 'tq.a "prove-ingestion" :function))
+
+(def ^:private tag 'tq.a/prove-ingestion)
 
 (def ^:private digest
   "A source digest the publication seam's contract admits."
   (apply str (repeat 64 "d")))
 
 (def ^:private subject-source
-  (str "(ns tq.a {:seon/tasks #{\"043df611d179\"} :seon/must-read ['tq.a/f]}\n"
+  (str "(ns tq.a {:seon/tasks #{'tq.a/prove-ingestion} :seon/must-read ['tq.a/f]}\n"
        "  (:require [clojure.test :refer [deftest is]] [clojure.string :as s]))\n"
-       "(defn f {:seon/tasks #{\"043df611d179\"} :seon/must-read ['tq.a/g] :seon/see-also [`s/join]} [v] v)\n"
-       "(defn g {:seon/tasks #{\"043df611d179\"}} [v] (:seon/tasks {:seon/tasks #{::x}}))\n"
-       "(deftest ^{:seon/tasks #{\"043df611d179\"}} proves (is (= 1 (f 1))) (is (= #{} (:seon/tasks {:seon/tasks #{}}))))\n"))
+       "(defn f {:seon/tasks #{'tq.a/prove-ingestion} :seon/must-read ['tq.a/g] :seon/see-also [`s/join]} [v] v)\n"
+       "(defn g {:seon/tasks #{'tq.a/prove-ingestion}} [v] (:seon/tasks {:seon/tasks #{::x}}))\n"
+       "(deftest ^{:seon/tasks #{'tq.a/prove-ingestion}} proves (is (= 1 (f 1))) (is (= #{} (:seon/tasks {:seon/tasks #{}}))))\n"))
 
 (def ^:private task-path "resources/seon/tasks/tq.a.edn")
 
 (defn- task-text
   {:malli/schema [:=> [:cat :string :string] :string]}
   [intent members]
-  (str "[#:seon.task{:id \"043df611d179\" :name \"prove-ingestion\" :kind :function :intent \"" intent "\" " members "}]"))
+  (str "[#:seon.task{:name \"prove-ingestion\" :kind :function :intent \"" intent "\" " members "}]"))
 
 (defn- with-root
   "Call `body` with a fresh fixture directory holding `files` (relative path to text); delete it after."
@@ -70,11 +72,11 @@
      (let [entities (entities-of subject-source) text (task-text "Prove ingestion." ":must-read #{tq.a/g} :evidence #{}")]
        (admit! connection entities)
        (is (:seon.task/changed? (ingest! connection text)))
-       (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f handle}}
-              (task/task-edges @connection handle)))
+       (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f tag}}
+              (task/task-edges @connection tag)))
        (is (= '#{clojure.string/join} (set (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f])))))
-       (is (= #{handle} (task/open-tasks @connection '[:seon.fn/sym tq.a/g])))
-       (is (not-any? #(contains? % handle) (vals (task/task-findings @connection))))
+       (is (= #{tag} (task/open-tasks @connection '[:seon.fn/sym tq.a/g])))
+       (is (not-any? #(contains? % tag) (vals (task/task-findings @connection))))
        (testing "unchanged input, with an empty optional set, writes nothing"
          (is (= {:seon.task/changed? false} (ingest! connection text)))
          (is (empty? (seon.fn/reconcile-tx @connection entities []))))
@@ -83,9 +85,9 @@
          (is (= {:seon.task/intent "Changed."}
                 (db/pull @connection [:seon.task/intent :seon.task/must-read] [:seon.task/id handle]))))
        (testing "removing one annotation drops only that edge"
-         (admit! connection (entities-of (str/replace subject-source "(defn g {:seon/tasks #{\"043df611d179\"}}" "(defn g")))
-         (is (= '#{tq.a tq.a/f} (:seon.task/subjects (task/task-edges @connection handle)))))
-       (testing "program attributes carry the handle edges, never task entities"
+         (admit! connection (entities-of (str/replace subject-source "(defn g {:seon/tasks #{'tq.a/prove-ingestion}}" "(defn g")))
+         (is (= '#{tq.a tq.a/f} (:seon.task/subjects (task/task-edges @connection tag)))))
+       (testing "program attributes carry the symbol edges, never task entities"
          (let [attributes (program/program-attributes (db/carried-projection @connection))]
            (is (contains? attributes :seon.task/tasks))
            (is (not-any? attributes [:seon.task/id :seon.task/intent]))))
@@ -106,11 +108,11 @@
        (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :kind :function :intent \"i\"}]"
                             :unreadable-file "[{"
                             :invalid-entry "[#:seon.task{:name \"x\" :kind :function :intnet \"i\"}]"
-                            :handle-mismatch "[#:seon.task{:id \"000000000000\" :name \"x\" :kind :function :intent \"i\"}]"
-                            :duplicate-id "[#:seon.task{:name \"x\" :kind :function :intent \"i\"} #:seon.task{:name \"x\" :kind :function :intent \"j\"}]"}]
+                            :invalid-name "[#:seon.task{:name \"x y\" :kind :function :intent \"i\"}]"
+                            :duplicate-name "[#:seon.task{:name \"x\" :kind :function :intent \"i\"} #:seon.task{:name \"x\" :kind :namespace :intent \"j\"}]"}]
          (is (= rule (refusal #(ingest! connection text)))))
        (testing "only #{} at an optional set member is absence; other empty values meet the closed entry"
-         (doseq [members [":unknown []" ":must-read []" ":evidence {}" ":id []" ":id \"\""]]
+         (doseq [members [":unknown []" ":must-read []" ":evidence {}" ":id \"000000000000\"" ":id []"]]
            (let [text (str "[#:seon.task{:name \"x\" :kind :function :intent \"i\" " members "}]")
                  refused (ingest! connection text)]
              (is (= :invalid-entry (:seon.task/refused refused)))
@@ -125,26 +127,28 @@
     (is (= :metadata-after-test-name (refusal #(entities-of (str head "(deftest t {:seon/tasks #{\"x\"}} (is true))\n")))))
     (is (nil? (refusal #(entities-of (str head "(deftest t (is (:seon/tasks {:seon/tasks #{::b/x}})))\n")))))
     (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/tasks #{::b/x}} [v] v)\n")))))
+    (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/tasks #{\"043df611d179\"}} [v] v)\n"))))
+        "a task is tagged by its symbol, never a handle")
     (is (= :malformed-annotation (refusal #(entities-of (str head "(defn ^:seon/tasks f [v] v)\n")))))
     (is (= :malformed-annotation (refusal #(entities-of (str head "(defn f {:seon/must-read [clojure.core/inc]} [v] v)\n")))))))
 
-(deftest publication-ingests-tasks-and-refuses-a-dangling-handle
+(deftest publication-ingests-tasks-and-refuses-a-dangling-tag
   ;; The destination is a branch of the live program, so the checkout's own task
-  ;; files ride along: only this fixture's handle may dangle.
+  ;; files ride along: only this fixture's tag may dangle.
   (let [publish-tasks! #'seon.cluster.source/index-tasks!
         checkout (task/task-files "." nil)
         dangling #(try (% ) nil (catch clojure.lang.ExceptionInfo e (keys (:seon.task/dangling (ex-data e)))))]
     (test-support/with-database
      (fn [connection]
        (admit! connection (entities-of subject-source))
-       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection digest (.getPath root) nil)))))
+       (is (= [tag] (with-root checkout (fn [root] (dangling #(publish-tasks! connection digest (.getPath root) nil)))))
            "an annotation whose task is absent at the destination refuses with its holders")
        (with-root (assoc checkout task-path (task-text "Prove ingestion." ""))
          (fn [root]
            (is (:seon.task/changed? (publish-tasks! connection digest (.getPath root) nil)) "coherent task and annotation admission")
            (is (= {:seon.task/changed? false} (publish-tasks! connection digest (.getPath root) nil)) "repeat is a no-op")
            (io/delete-file (io/file root task-path))
-           (is (= [handle] (dangling #(publish-tasks! connection digest (.getPath root) nil)))
+           (is (= [tag] (dangling #(publish-tasks! connection digest (.getPath root) nil)))
                "a removed task file retracts its task, leaving its annotations dangling")))))))
 
 (deftest a-source-only-publication-admits-the-unchanged-task-file-its-annotations-name
@@ -158,7 +162,7 @@
      (with-root (assoc (task/task-files "." nil) task-path (task-text "Prove ingestion." ""))
        (fn [root]
          (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection digest (.getPath root) nil)))
-         (is (not-any? #(contains? % handle) (vals (task/task-findings @connection)))))))))
+         (is (not-any? #(contains? % tag) (vals (task/task-findings @connection)))))))))
 
 (deftest adoption-carries-published-tasks-keeps-the-destinations-own-and-refuses-a-competing-edit
   ;; P1-2 (review 5fb38b91f): the adoption compares against the destination value
@@ -200,29 +204,24 @@
      (let [head @connection
            merged #{[:seon.fn/sym 'tq.a/f] [:seon.test/sym 'tq.a/proves]}]
        (admit! connection (entities-of subject-source))
-       (is (= {handle '#{tq.a/f tq.a/proves}} (task/candidate-dangling @connection head merged)))
-       (is (not (contains? (task/candidate-dangling @connection head #{}) handle)) "unmerged holders are the destination's")
-       (is (= {handle '#{tq.a tq.a/g}} (select-keys (task/candidate-dangling head @connection merged) [handle]))
+       (is (= {tag '#{tq.a/f tq.a/proves}} (task/candidate-dangling @connection head merged)))
+       (is (not (contains? (task/candidate-dangling @connection head #{}) tag)) "unmerged holders are the destination's")
+       (is (= {tag '#{tq.a tq.a/g}} (select-keys (task/candidate-dangling head @connection merged) [tag]))
            "a merged entity without the annotation drops its edge; the unmerged holders keep theirs")
        (ingest! connection (task-text "Prove ingestion." ""))
-       (is (= {} (select-keys (task/candidate-dangling @connection @connection merged) [handle])))))))
+       (is (= {} (select-keys (task/candidate-dangling @connection @connection merged) [tag])))))))
 
-(deftest the-checkouts-migrated-records-ingest-by-aspect-and-repeat-as-a-no-op
-  ;; Slice 2 (spec 7.12, 7.15): the checkout's own task files are the migrated
-  ;; records. Each handle is its aspect's; an entry moved to another namespace's
-  ;; file names a different aspect, so its written handle refuses there.
+(deftest the-checkouts-records-ingest-by-symbol-and-repeat-as-a-no-op
+  ;; The checkout's own task files: each task is found by its symbol, under the
+  ;; handle its aspect derives.
   (test-support/with-database
    (fn [connection]
      (let [files (task/task-files "." nil)
            basis (task/task-basis @connection files)]
        (task/index-tasks! {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
-       (doseq [[id aspect] {"d215b1ebde7c" '[seon.sci.eval "acquisition-rebuilds-the-whole-program" :function]
-                                "cea47b015b23" '[seon.schema "agents-can-validate" :namespace]}]
-         (is (= aspect ((juxt :seon.task/ns :seon.task/name :seon.task/kind)
-                        (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind] [:seon.task/id id]))))
-         (is (= id (apply task/task-handle aspect))))
-       (is (= {:seon.task/changed? false} (task/index-tasks! {:seon.db/connection connection :seon.task/files files})))
-       (is (= :handle-mismatch
-              (refusal #(task/index-tasks! {:seon.db/connection connection
-                                             :seon.task/files {"resources/seon/tasks/seon.sci.eval.edn"
-                                                               (get files "resources/seon/tasks/seon.schema.edn")}}))))))))
+       (doseq [[sym aspect] {'seon.sci.eval/acquisition-rebuilds-the-whole-program '[seon.sci.eval "acquisition-rebuilds-the-whole-program" :function]
+                             'seon.schema/agents-can-validate '[seon.schema "agents-can-validate" :namespace]}]
+         (is (= (conj aspect (apply task/task-handle aspect))
+                ((juxt :seon.task/ns :seon.task/name :seon.task/kind :seon.task/id)
+                 (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/id] [:seon.task/sym sym])))))
+       (is (= {:seon.task/changed? false} (task/index-tasks! {:seon.db/connection connection :seon.task/files files})))))))

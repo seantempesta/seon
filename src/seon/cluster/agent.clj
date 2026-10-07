@@ -337,7 +337,7 @@
                                              [:code (str namespace-name)]]))
                    steward (conj (entry "Steward" (agent-link steward)))
                    namespace-name
-                   (conj (entry "Tasks" (if (seq tasks) (into [:span] (interpose " " (map #(vector :code %) (sort tasks)))) "None")))
+                   (conj (entry "Tasks" (if (seq tasks) (into [:span] (interpose " " (map #(vector :code (str %)) (sort tasks)))) "None")))
                    (:seon.db/db unit)
                    (conj (entry "Status" (str (cond (:seon.agent/archived-tx agent-data) "Archived"
                                                     (some (complement :seon.turn/closed-tx) turns) "Turn open"

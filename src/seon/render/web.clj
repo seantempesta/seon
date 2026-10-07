@@ -3154,7 +3154,7 @@
       (assoc :seon.db/connection connection)))
 
 (defn- page-response
-  {:seon/tasks #{"0be9b4c92c56"}
+  {:seon/tasks #{'seon.render.web/a-page-renders-with-a-refused-database}
    :seon.fn/external-sink :html-response
    :seon.fn/projection-boundary :seon.render/html}
   [service

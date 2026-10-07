@@ -2,7 +2,7 @@
   "Runtime tasks (spec 7.8): create a task, assign it to an agent's branch and
   record a merge proposal. Tasks live on the cluster, so every write goes to
   the task home through the one task writer (`seon.task/adopt-tasks-tx`)."
-  {:seon/tasks #{"2fe9c6b7fe31"}}
+  {:seon/tasks #{'seon.task/no-repl-entrance-creates-a-task}}
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [edamame.core :as edamame]
@@ -17,7 +17,7 @@
             [seon.schema :as schema]))
 
 ;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
-;;; and proofs are the `:seon.task/tasks` handles program entities carry.
+;;; and proofs are the `:seon.task/tasks` symbols program entities carry.
 
 (defn- replacement-tx
   "The delta from one stored task to its desired facts, over the `owned` attributes
@@ -48,6 +48,22 @@
   {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name :seon.task/kind] :seon.task/handle]}
   [ns name kind]
   (id/id [ns name kind]))
+
+(defn symbol-name?
+  "Whether `task-name` reads back as one symbol's name: no whitespace, delimiter, `/` or `:`,
+  not leading with a digit, `'` or `#`."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [^String task-name]
+  (boolean (and (seq task-name)
+                (not (or (Character/isDigit (.charAt task-name 0)) (#{\' \#} (.charAt task-name 0))))
+                (not-any? #(or (Character/isWhitespace (char %)) (#{\( \) \[ \] \{ \} \" \@ \^ \` \~ \, \; \\ \/ \:} %))
+                          task-name))))
+
+(defn task-sym
+  "The symbol `ns/name` that tags and readers name a task by."
+  {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/sym]}
+  [ns task-name]
+  (symbol (name ns) task-name))
 
 (defn task-path?
   "Whether a repository-relative path names a task file."
@@ -88,7 +104,7 @@
 
 (defn- file-declarations
   "Read one task file with edamame's all-forms reader (nothing evaluated), require one
-  vector of valid entries with empty sets absent, and verify each supplied handle."
+  vector of valid entries with empty sets absent and symbol names, and derive each handle and symbol."
   {:malli/schema [:=> [:cat :seon.schema/projection :string :string] [:vector :seon.task/task]]}
   [projection path text]
   (let [ns (file-namespace path)
@@ -105,10 +121,9 @@
         entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
     (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
       (refuse-task! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
-    (mapv (fn [{:seon.task/keys [id name kind] :as entry}]
-            (let [handle (task-handle ns name kind)]
-              (when (and id (not= id handle)) (refuse-task! :handle-mismatch entry {:seon.error/expected handle}))
-              (assoc entry :seon.task/id handle :seon.task/ns ns)))
+    (mapv (fn [{:seon.task/keys [name kind] :as entry}]
+            (when-not (symbol-name? name) (refuse-task! :invalid-name entry {}))
+            (assoc entry :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name) :seon.task/ns ns))
           entries)))
 
 (defn- stored-tasks
@@ -161,8 +176,8 @@
         by-id (into {} (map (juxt :seon.task/id identity)) proposed)
         stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (when-let [id (some (fn [[id n]] (when (< 1 n) id)) (frequencies (map :seon.task/id proposed)))]
-      (functions/task-refused! 'seon.task/tasks-tx :duplicate-id (:seon.task/ns (by-id id)) id {}))
+    (when-let [sym (some (fn [[sym n]] (when (< 1 n) sym)) (frequencies (map :seon.task/sym proposed)))]
+      (functions/task-refused! 'seon.task/tasks-tx :duplicate-name (symbol (namespace sym)) sym {}))
     ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
     (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))
 
@@ -239,44 +254,45 @@
 
 (defn task-edges
   "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
-  namespaces and tasks whose must-read names one of its subjects, over one held value."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :seon.task/edges :seon.db/invalid-read-error]]}
-  [database handle]
+  namespaces and tasks whose must-read names one of its subjects, over one held value.
+  The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.task/edges :seon.db/invalid-read-error]]}
+  [database sym]
   (let [holders (db/q database '[:find ?s ?proof :in $ ?t :where [?e :seon.task/tasks ?t]
                                  (or (and [?e :seon.test/sym ?s] [(ground true) ?proof])
-                                     (and (or [?e :seon.fn/sym ?s] [?e :seon.ns/name ?s]) [(ground false) ?proof]))] handle)
+                                     (and (or [?e :seon.fn/sym ?s] [?e :seon.ns/name ?s]) [(ground false) ?proof]))] sym)
         subjects (when-not (read-error holders) (set (keep (fn [[s proof]] (when-not proof s)) holders)))
         referrers (when subjects
                     (db/q database '[:find [?h ...] :in $ [?target ...]
                                      :where (or (and [?e :seon.fn/must-read ?target]
                                                      (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h]))
-                                                (and [?e :seon.task/must-read ?target] [?e :seon.task/id ?h]))] (vec subjects)))]
+                                                (and [?e :seon.task/must-read ?target] [?e :seon.task/sym ?h]))] (vec subjects)))]
     (or (read-error holders) (read-error referrers)
         {:seon.task/subjects subjects :seon.task/proofs (set (keep (fn [[s proof]] (when proof s)) holders))
          :seon.task/referrers (set referrers)})))
 
 (defn open-tasks
-  "The task handles a definition still lists; listing is openness (spec 7.2, 7.6)."
+  "The task symbols a definition still lists; listing is openness (spec 7.2, 7.6)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:tuple :qualified-keyword :symbol]]
-                  [:or [:set :seon.task/handle] :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+                  [:or [:set :seon.task/sym] :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
   [database program-identity]
   (let [pulled (db/pull database [:seon.task/tasks] program-identity)]
     (or (read-error pulled) (set (:seon.task/tasks pulled)))))
 
 (defn task-findings
-  "`:seon.task/dangling` handles listed in code with no task entity, by holder (the
-  program gate refuses them), and `:seon.task/triage` tasks with no subject or proof."
+  "`:seon.task/dangling` task symbols listed in code with no task entity, by holder (the
+  program gate refuses them), and `:seon.task/triage` task symbols with no subject or proof."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.task/findings :seon.db/invalid-read-error]]}
   [database]
-  (let [dangling (db/q database '[:find ?t ?h :where [?e :seon.task/tasks ?t] (not [_ :seon.task/id ?t])
+  (let [dangling (db/q database '[:find ?t ?h :where [?e :seon.task/tasks ?t] (not [_ :seon.task/sym ?t])
                                   (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h])])
-        triage (db/q database '[:find [?t ...] :where [_ :seon.task/id ?t] (not [_ :seon.task/tasks ?t])])]
+        triage (db/q database '[:find [?t ...] :where [_ :seon.task/sym ?t] (not [_ :seon.task/tasks ?t])])]
     (or (read-error dangling) (read-error triage)
         {:seon.task/dangling (update-vals (group-by first dangling) #(set (map second %)))
          :seon.task/triage (set triage)})))
 
 (defn candidate-dangling
-  "The `:seon.task/dangling` handles, by holder, of the program `destination` would
+  "The `:seon.task/dangling` task symbols, by holder, of the program `destination` would
   hold after taking `candidate`'s rows for `identities`: those holders' task edges
   from `candidate`, every other holder's from `destination`, against the tasks
   admitted on `destination`. Task rows never ride the merge (7.13)."
@@ -287,10 +303,13 @@
                  (db/q '[:find ?t ?a ?h :in $ [?a ...] :where [?e :seon.task/tasks ?t] [?e ?a ?h]]
                        % [:seon.fn/sym :seon.test/sym :seon.ns/name])
                  #{})
-        mine (edges candidate) theirs (edges destination) admitted (task-handles destination false)
+        mine (edges candidate) theirs (edges destination)
+        admitted (if (contains? (:schema destination) :seon.task/sym)
+                   (db/q '[:find [?s ...] :where [_ :seon.task/sym ?s]] destination)
+                   #{})
         touched? (fn [[_ attribute holder]] (contains? identities [attribute holder]))]
     (or (some read-error [mine theirs admitted])
-        (update-vals (group-by first (remove (comp admitted first) (concat (filter touched? mine) (remove touched? theirs))))
+        (update-vals (group-by first (remove (comp (set admitted) first) (concat (filter touched? mine) (remove touched? theirs))))
                      #(set (map (fn [[_ _ holder]] holder) %))))))
 
 (defn home
@@ -327,10 +346,11 @@
     (db/call-with-custody {:seon.db/connection target} #(db/transact! target tx))))
 
 (defn- task-entity
-  "`declaration` as the runtime task entity `agent-id` writes, under its handle."
+  "`declaration` as the runtime task entity `agent-id` writes, under its handle and symbol."
   {:malli/schema [:=> [:cat :seon.task/declaration :seon.agent/id] :seon.task/task]}
   [{:seon.task/keys [ns name kind] :as declaration} agent-id]
-  (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/created-by [:seon.agent/id agent-id]))
+  (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name)
+         :seon.task/created-by [:seon.agent/id agent-id]))
 
 (defn- task-call
   "The task writer's call for `row` against `basis` on the task home of
@@ -352,12 +372,13 @@
 
 (defn create!
   "Create a runtime task on the cluster from its declaration (7.8). Its handle is
-  the aspect `[ns name kind]`: the same declaration again changes nothing; a
-  different one refuses with base, current and proposed unless `:seon.task/basis`
-  names the revision I read (7.16).
+  the aspect `[ns name kind]` and its symbol `ns/name`: the same declaration again
+  changes nothing; a different one refuses with base, current and proposed unless
+  `:seon.task/basis` names the revision I read (7.16). A name that is no symbol
+  name refuses `:invalid-name`.
 
   Example:
-  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles trim\"
+  (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\"
                       :seon.task/kind :function :seon.task/intent \"Trim reply titles.\"})"
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                              [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
@@ -366,14 +387,16 @@
                              [:seon.task/basis {:optional true} :seon.task/basis]]]
                   [:or [:map [:seon.task/id :seon.task/id] [:seon.task/changed? :seon.task/changed?]]
                    :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
-  [{connection :seon.db/connection agent-id :seon.agent/id :as request}]
-  (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
-                                            :seon.task/must-read :seon.task/evidence]) agent-id)
-        tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
-        report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
-    (if (:seon.error/at report)
-      report
-      {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))})))
+  [{connection :seon.db/connection agent-id :seon.agent/id task-name :seon.task/name :as request}]
+  (if-not (symbol-name? task-name)
+    (refused 'seon.task/create! :invalid-name (:seon.task/ns request) task-name)
+    (let [entity (task-entity (select-keys request [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
+                                                    :seon.task/must-read :seon.task/evidence]) agent-id)
+          tx (refusal-data #(task-call connection entity (:seon.task/basis request {})))
+          report (if (and (vector? tx) (seq tx)) (written connection tx) tx)]
+      (if (:seon.error/at report)
+        report
+        {:seon.task/id (:seon.task/id entity) :seon.task/changed? (boolean (seq tx))}))))
 
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
@@ -417,14 +440,15 @@
                        database agent-id branch)
         [[key handle revision]] (when-not (map? assigned) (seq assigned))
         current (when handle (task-revision database handle))
-        edges (when handle (task-edges database handle))]
-    (cond (some :seon.error/at [assigned current edges]) (some #(when (:seon.error/at %) %) [assigned current edges])
+        task (when handle (db/pull database [:seon.task/ns :seon.task/sym] [:seon.task/id handle]))
+        edges (when (:seon.task/sym task) (task-edges database (:seon.task/sym task)))]
+    (cond (some :seon.error/at [assigned current task edges]) (some #(when (:seon.error/at %) %) [assigned current task edges])
           (and (= 1 (count assigned)) (not= revision current))
           (refused 'seon.task/assignment :revised-since-assignment 'seon.task {:seon.task/revision revision :seon.task/current current})
           (= 1 (count assigned))
-          {:seon.task/key key :seon.task/assigned handle :seon.task/proposes [:seon.task/assignment key]
-           :seon.task/ns (:seon.task/ns (db/pull database [:seon.task/ns] [:seon.task/id handle]))
-           :seon.task/proofs (:seon.task/proofs edges)}
+          (merge {:seon.task/key key :seon.task/assigned handle :seon.task/proposes [:seon.task/assignment key]
+                  :seon.task/proofs (:seon.task/proofs edges #{})}
+                 (select-keys task [:seon.task/ns :seon.task/sym]))
           :else (refused 'seon.task/assignment :unassigned 'seon.task {:seon.agent/id agent-id :seon.store/branch branch
                                                                       :seon.task/assignment (mapv first assigned)}))))
 
@@ -566,7 +590,7 @@
   "Record on the cluster the merge task for the assigned `work` and one proposal
   of the commit `view` names on its branch: its proofs at their definition digests, the run and its tested
   program, and each proof observed red on the branch before the change
-  (`:seon.task/refuted`, read from the branch `connection` holds). The merge task's aspect is `[ns \"merge <key>\" :merge]`, so a repeat
+  (`:seon.task/refuted`, read from the branch `connection` holds). The merge task's aspect is `[ns \"merge-<key>\" :merge]`, so a repeat
   proposal finds it; the recurrence key `[key commit]` records one proposal per
   commit. Answers the proposal view."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.task/assigned-work
@@ -575,7 +599,7 @@
                         [:seon.task/program :seon.task/program]]]
                   [:or :seon.task/proposal-view :seon.task/conflict-error :seon.error/value]]}
   [connection agent-id {:seon.task/keys [key ns proposes]} view]
-  (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge " key) :seon.task/kind :merge
+  (let [entity (task-entity {:seon.task/ns ns :seon.task/name (str "merge-" key) :seon.task/kind :merge
                        :seon.task/intent (str "Merge branch " (name (:seon.task/branch view)) "'s change for " key ".")}
                       agent-id)
         red (refuted (db/db connection) (into #{} (map first) (:seon.task/proved view)))

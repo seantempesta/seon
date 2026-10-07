@@ -64,7 +64,7 @@
   {:seon.agent.loop/why why :seon.agent.loop/form form :seon.agent.loop/value value})
 
 (def ^:private task-selector
-  [:seon.task/id :seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
+  [:seon.task/id :seon.task/sym :seon.task/ns :seon.task/name :seon.task/kind :seon.task/intent
    :seon.task/must-read :seon.task/evidence])
 
 (defn- contract-keys
@@ -161,7 +161,7 @@
   refuses `:unknown-task`.
 
   Example:
-  (seon.agent.loop/task-context (seon.db/db) \"d6e3b775f474\")
+  (seon.agent.loop/task-context (seon.db/db) (seon.task/task-handle 'seon.db \"the-query-wrapper-costs-36x-datahike\" :function))
 
   ## Costs
 
@@ -179,7 +179,7 @@
                           {:seon.error/message (str "No task has the handle " handle ".")
                            :seon.task/refused :unknown-task :seon.task/holder 'seon.task :seon.error/offending handle})
       :else
-      (let [edges (task/task-edges database handle)
+      (let [edges (task/task-edges database (:seon.task/sym the-task))
             ;; Subjects are functions (qualified) or namespaces (simple symbols).
             subjects (sort (:seon.task/subjects edges))
             functions (vec (distinct (filter qualified-symbol?
@@ -190,7 +190,7 @@
               [(unit "Your task: what to change and why."
                      (list 'seon.db/pull '(seon.db/db) task-selector [:seon.task/id handle]) the-task)
                (unit "The task's edges: the proof tests that define done, the subjects it names, and who must read them."
-                     (list 'seon.task/task-edges '(seon.db/db) handle) edges)]
+                     (list 'seon.task/task-edges '(seon.db/db) (list 'quote (:seon.task/sym the-task))) edges)]
               (mapcat #(test-units database %) (sort (:seon.task/proofs edges)))
               (mapcat #(function-units database %) functions)
               (map #(namespace-unit database %) namespaces)

@@ -1164,7 +1164,7 @@
     ;; Clojure; nothing walks the live result after evaluation to call it red.
     (is (nil? (:seon.cluster.eval/error bare)) "sci produced a value")))
 
-(deftest ^{:seon/tasks #{"0ae6b217abdd"}} a-failed-evaluation-shows-its-whole-error-as-data
+(deftest ^{:seon/tasks #{'seon.sci.eval/deliver-evaluation-errors-as-values}} a-failed-evaluation-shows-its-whole-error-as-data
   ;; Audit P1: the saved shown text IS the flat error, printed by the floor:
   ;; it reads back as data with every link's class, message and ex-data, and
   ;; the author's SCI location; no triage copy, no SCI wrapper link, and no
@@ -2568,7 +2568,7 @@
        (is (nil? (:seon.cluster.eval/diagnostics evaluation))
            "the print had its database: no diagnostic")))))
 
-(deftest ^{:seon/tasks #{"8874c8ec8093"}} showing-a-value-realizes-and-stores-only-what-is-shown
+(deftest ^{:seon/tasks #{'seon.sci.eval/value-storage-walks-serializes-and-stores-every-value-up-to-eight-megabytes}} showing-a-value-realizes-and-stores-only-what-is-shown
   ;; waste-rank V1 (2026-10-07): the show stage admitted every printed value
   ;; again under the 8 MB bound and serialized its print node for storage:
   ;; (vec (range 100000)) cost 417 ms, 740 MB and a 5.3 MB stored copy, and an

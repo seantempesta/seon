@@ -209,7 +209,7 @@
                       {:seon.print/options {:seon.print/length 0}}]]
       (is (= response (repl/response (merge emission settings)))))))
 
-(deftest ^{:seon/tasks #{"0ae6b217abdd" "b331d31540bb"}} a-response-carries-errors-as-data-and-late-diagnostics-beside-the-value
+(deftest ^{:seon/tasks #{'seon.sci.eval/deliver-evaluation-errors-as-values 'seon.turn/late-faults-accompany-evaluated-values}} a-response-carries-errors-as-data-and-late-diagnostics-beside-the-value
   ;; ONE SAVED OBSERVATION (AGENTS.md, one error shape): a failed
   ;; evaluation's shown text is its whole flat error, and the response embeds
   ;; it as data; a later stage's failure is its own entry beside the value.
@@ -346,7 +346,7 @@
       (is (not (str/starts-with? (str/triml text) ";")) "nothing precedes the reply map")
       reply)))
 
-(deftest ^{:seon/tasks #{"18c37812b5bc"}} the-reply-is-one-edn-map-whatever-the-value
+(deftest ^{:seon/tasks #{'seon.repl/reply-map-is-not-edn-when-elided-or-rendered}} the-reply-is-one-edn-map-whatever-the-value
   ;; Owner 2026-09-27: "The repl should be returning the timing and the result
   ;; so it's already a map" — "return data whenever possible so it's
   ;; unambiguous." Value, error, findings, handle and time are keys of the one

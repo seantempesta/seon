@@ -17,7 +17,7 @@
 
    Compiled entity inspection and register!-time gates
    live in `seon.schema.internal`, outside agent context."
-  {:seon/tasks #{"cea47b015b23"}}
+  {:seon/tasks #{'seon.schema/agents-can-validate}}
   (:require [malli.core :as m]
             [seon.id :as id]
             [malli.registry :as mr]

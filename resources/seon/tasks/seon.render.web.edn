@@ -1,5 +1,4 @@
-[#:seon.task{:id "55974f161f71"
-             :name "the-render-cache-keeps-every-debug-view"
+[#:seon.task{:name "the-render-cache-keeps-every-debug-view"
              :kind :function
              :intent "The environment's :seon.render/cache atom holds 69.8 MB at idle with no eviction: ::graph-calls 36.7 MB keeps every debug-page view forever (four keys at 12.6, 12.6, 7.9 and 3.6 MB), ::invocations 27.5 MB, and entries retain read results. The debug page costs 3.13 s cold and 1.74 s warm at n=2; its n=2 load (14.8 s) preceded the 10:10 OOM. Retain read evidence without results, and bound the cache."
              :must-read #{seon.render.web/graph-debug-html seon.render/render-call}
@@ -27,7 +26,7 @@
              :must-read #{seon.render.web/start! seon.render.web/stop!}}
  #:seon.task{:name "stale-debt-tags-remain-in-web-and-schema"
              :kind :namespace
-             :intent "Stale debt tags remain: render/web.clj:3193 (task 0be9b4c92c56) and schema.clj:20 (cea47b015b23, closed). Done when each tag names an open task or is deleted."
+             :intent "Stale debt tags remain: render/web.clj:3193 (task seon.render.web/a-page-renders-with-a-refused-database) and schema.clj:20 (seon.schema/agents-can-validate, closed). Done when each tag names an open task or is deleted."
              :must-read #{seon.render.web/derive-context!}
              :evidence #{"tmp/root-cause-census/report.md"}}
  #:seon.task{:name "pages-print-values-instead-of-the-printer-html-face"

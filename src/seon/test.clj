@@ -1834,7 +1834,7 @@
   and writes `program-overlay-tx`'s rows there. Checkpoints of every base in
   use coexist (an agent branch records the commit it was forked at); boot
   retires them all (`registry/retire-unclaimed!`), as the name holds the process."
-  {:seon/tasks #{"c86d834ab695" "845e1bce2592"}
+  {:seon/tasks #{'seon.test/a-test-world-has-no-agent 'seon.test/a-changed-check-builds-a-world-per-request}
    :malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
                        :seon.cluster/name :seon.config/effective]
                   :seon.agent/execution-handle]}

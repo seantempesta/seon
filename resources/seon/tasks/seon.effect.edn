@@ -1,5 +1,4 @@
-[#:seon.task{:id "7bfe767bec09"
-             :name "background-poll-answers-edn-strings"
+[#:seon.task{:name "background-poll-answers-edn-strings"
              :kind :function
              :intent "my.background/poll answers :seon.effect/request-edn and :seon.effect/result-edn as EDN strings, so the agent must parse its own result; component arguments stay in request EDN."
              :must-read #{my.background/poll seon.effect/request!}

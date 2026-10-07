@@ -919,7 +919,7 @@
 (defn- value-references
   "`[holder identity]` for each stored value attribute naming another entity
   by its identity value: the holder's value schema bottoms out in the same
-  named schema as the identity attribute's (`:seon.task/tasks` and
+  named schema as the identity attribute's (`:seon.task/assigned` and
   `:seon.task/id` both end in `:seon.task/handle`), or the holder or that
   named schema declares `:seon.db/reference-to` (one identity or a set)."
   {:malli/schema [:=> [:cat :seon.schema/projection [:sequential :map]] :seon.render.walk/value-attributes]}

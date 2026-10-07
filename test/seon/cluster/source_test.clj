@@ -375,6 +375,7 @@
         entity #(test-support/program-entity (db/db %1) [%2 (sym %3)] %4)
         write! #(test-support/transacted! %1 (vec %2))
         handle (task/task-handle 'scratch.merge-tasks "merge-task" :function)
+        tag 'scratch.merge-tasks/merge-task
         proofs #{(sym "merge-tasked-check")}
         c (keyword (str "merge-task-test-c-" (id/id)))
         _ (write! h-conn [(test-support/namespace-entity (db/db h-conn) 'scratch.merge-tasks)
@@ -392,12 +393,12 @@
       ;; A stored identity is replaced exactly (its dropped contract retracted),
       ;; so the writer's final value carries its definition's digest.
       (write! c-conn (test-support/replacement-tx (db/db c-conn) [:seon.fn/sym (sym "merge-tasked")]
-                                                  (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"} :malli/schema [:=> [:cat] :int]} [] 2)") {}))
+                                                  "(defn merge-tasked {:seon/tasks #{'scratch.merge-tasks/merge-task} :malli/schema [:=> [:cat] :int]} [] 2)" {}))
       (let [proposal (prepare)
             before (db/commit-id (db/db h-conn))
             refused (source/accept-merge! target held-store proposal)]
         (is (true? (:seon.test/passed? proposal)))
-        (is (= {handle #{(sym "merge-tasked")}} (:seon.error/offending refused)))
+        (is (= {tag #{(sym "merge-tasked")}} (:seon.error/offending refused)))
         (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
           (is (:seon.task/changed? (task/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
@@ -405,7 +406,7 @@
                                                                            "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
           ;; The task write touches no merged entity, so the same proposal now merges.
           (is (:seon.source/commit-id (source/accept-merge! target held-store proposal)))
-          (is (= #{handle} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
+          (is (= #{tag} (task/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
           (is (= "Merge." (intent)))))
       (finally
         (cluster.agent/release-context! candidate)

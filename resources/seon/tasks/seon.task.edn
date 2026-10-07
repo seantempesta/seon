@@ -1,5 +1,4 @@
-[#:seon.task{:id "2fe9c6b7fe31"
-             :name "no-repl-entrance-creates-a-task"
+[#:seon.task{:name "no-repl-entrance-creates-a-task"
              :kind :namespace
              :intent "No REPL entrance creates a task. Detectors, errors, users and agents can add a task only by hand-editing resources/seon/tasks EDN, the bootstrap exception of spec 7.14. seon.task/create! (spec 7.8) must submit a declaration, with the basis it read, to the one task writer: the handle is seon.id over [ns name kind], a duplicate or a supplied handle that differs from its aspect refuses, and a competing revision returns base, current and proposed (7.16). Today every task in this directory was written by hand."
              :must-read #{seon.task/index-tasks! seon.task/task-basis seon.task/task-handle seon.task/tasks-tx}
@@ -8,7 +7,7 @@
                          "docs/research/agent-platform/language-requirements-2026-09-24.md"}}
 #:seon.task{:name "open-tasks-with-all-proofs-green-are-not-flagged"
              :kind :function
-             :intent "Every bucket-D task in tmp/orchestrator/triage.tsv whose proofs were checked on 2026-10-07 has all proofs green while the task stays open: 0261d4d9bbe6 (2 proofs), bd7cb669b45d, 361088de3d56, 135d92ea1308 (2 proofs), d6e3b775f474 and 18c37812b5bc (my.test/check on branch agent ctx-ex-1 and recorded results on default). Either the work is done and the task should close, or the proof does not test the intent (e.g. d6e3b775f474's intent is a 36x cost, its proof bounds armed work). A green proof on an open task must be visible in the task's view and in the queue, and a task's proof must fail before its fix."
+             :intent "Every bucket-D task in tmp/orchestrator/triage.tsv whose proofs were checked on 2026-10-07 has all proofs green while the task stays open: seon.call-preparation/acquired-functions-get-no-supplied-defaults (2 proofs), seon.fn/host-bound-class-list-copies-interpreter-config, seon.sci.eval/program-change-check-scans-the-whole-history, seon.render/a-renderer-is-chosen-by-key-presence (2 proofs), seon.db/the-query-wrapper-costs-36x-datahike and seon.repl/reply-map-is-not-edn-when-elided-or-rendered (my.test/check on branch agent ctx-ex-1 and recorded results on default). Either the work is done and the task should close, or the proof does not test the intent (e.g. seon.db/the-query-wrapper-costs-36x-datahike's intent is a 36x cost, its proof bounds armed work). A green proof on an open task must be visible in the task's view and in the queue, and a task's proof must fail before its fix."
              :must-read #{seon.task/task-edges seon.test/recorded-result}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
 #:seon.task{:name "tasks-have-no-done-when-and-name-subjects-only-through-must-read"

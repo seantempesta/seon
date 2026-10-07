@@ -73,7 +73,7 @@
   (db/pull (db/db connection)
            [:seon.error/producer :seon.instrument/fn
             {:seon.error/occurrences [:seon.error.occurrence/count :seon.error/caller]}
-            {:seon.task/_faults [:seon.task/id :seon.task/must-read]}]
+            {:seon.task/_faults [:seon.task/id :seon.task/sym :seon.task/must-read]}]
            [:seon.error/signature signature]))
 
 (deftest a-recorded-violation-lands-on-the-event-graph

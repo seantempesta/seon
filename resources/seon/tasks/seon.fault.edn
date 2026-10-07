@@ -1,11 +1,9 @@
-[#:seon.task{:id "6b8d26a16ce7"
-             :name "delete-panic-record-policy-branch"
+[#:seon.task{:name "delete-panic-record-policy-branch"
              :kind :function
              :intent "The REPL path is total (AGENTS.md ee4044ff8, owner 2026-09-26: the production path was always the one path). Delete the :seon.config/on-core-error dial and every :panic/:record branch (~20 files: fault, db panic-on-core-error?, instrument, sci.eval, kernel, admit, render, effect, config, eval.drive, accretion, six schemas, config/default.edn) in one scripted sweep; faults are always recorded and delivered beside the result; a graph stops only when its own execution cannot continue or storage fails."
              :must-read #{seon.fault/fault!}
              :evidence #{"AGENTS.md"}}
- #:seon.task{:id "465ff60ccda0"
-             :name "carried-receipt-hangs-on-cyclic-cause-chain"
+ #:seon.task{:name "carried-receipt-hangs-on-cyclic-cause-chain"
              :kind :function
              :intent "seon.fault/carried-receipt never returns on a cyclic cause chain and cannot be cancelled (a probe held one core at 99% for ~7 minutes); seon.render.value/floor walks the same chain safely. Walk causes with a visited set at the one normalization owner."
              :must-read #{seon.fault/carried-receipt}

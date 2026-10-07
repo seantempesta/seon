@@ -2158,7 +2158,7 @@
               (finally
                 (disarm-all! routing)))))))))
 
-(deftest ^{:seon/tasks #{"47b64f4cebf4"}
+(deftest ^{:seon/tasks #{'seon.turn/failed-run-left-unsettled}
            :seon.test/long "Five ordinary agent runs through evaluate-source!, each a run transaction, one Flow turn and its settlement (184-229 ms warm each on default, 2026-09-26, evaluate_source_test), plus arming; the alias batch also analyzes a declaration."
            :seon.test/long-ms 20000}
   every-run-reaches-one-terminal-and-the-next-run-works

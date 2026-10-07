@@ -268,7 +268,7 @@
 
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
-  {:seon/tasks #{"0a149b4c6d27"}
+  {:seon/tasks #{'my.program/breaks-plans-a-contract-change-as-a-retraction}
    :malli/schema [:=> [:cat :my.program/breaks-request]
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
@@ -428,14 +428,14 @@
 
   Example:
   (my.program/propose-merge! {})"
-  {:seon/tasks #{"70bf0e12569e"}
+  {:seon/tasks #{'my.program/an-agent-cannot-see-or-choose-its-change}
    :malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
                              [:seon.agent/id :seon.agent/id]]]
                   [:or :seon.task/proposal-answer :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection agent-id :seon.agent/id}]
   (let [branch (get-in (db/db connection) [:config :branch])
         work (task/assignment (db/db (task/home-connection connection)) agent-id branch)
-        edges (when (:seon.task/assigned work) (task/task-edges (db/db connection) (:seon.task/assigned work)))
+        edges (when (:seon.task/sym work) (task/task-edges (db/db connection) (:seon.task/sym work)))
         proofs (into (set (:seon.task/proofs work)) (:seon.task/proofs edges))
         refuse #(seon.error.refusal/diagnostic (java.util.Date.) :seon.task/ingestion 'my.program/propose-merge!
                  {:seon.error/message (str "The proposal is refused: " (name %1) ".") :seon.task/refused %1
@@ -794,7 +794,7 @@
   The SCI hook calls this before supplied-default preparation. Intern and
   alter-var-root remain available for private bindings with no program row."
   {:seon.fn/internal? true
-   :seon/tasks #{"2497b961dccc" "20e88abfc982"}
+   :seon/tasks #{'my.program/refusal-names-nonexistent-define 'my.program/native-calls-are-refused-instead-of-routed}
    :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value :seon.schema/arguments]
                   :seon.schema/value]}
   [ctx callee arguments]

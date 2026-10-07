@@ -1,6 +1,5 @@
 [
- #:seon.task{:id "e5af812dbf95"
-             :name "doc-and-dir-erase-request-keys"
+ #:seon.task{:name "doc-and-dir-erase-request-keys"
              :kind :function
              :intent "The agent doc/dir contract view replaces every schema keyword with its form by postwalk-replace (agent-documentation-contract, eval.clj:2370), including map entry keys, so request keys disappear and supplied members are not removed; my.issue/add! cannot be called from its doc. (dir my.program) and (dir seon.schema) are about 25 KB each and list plumbing (native-call-refusal, supplied-context, *-generator functions, begin-registration-delta); my.test/run shows 'The program entity lacks a declaration ... :seon.fn/spec' as :in and :out. Walk Malli's own structure (m/walk, m/entries) and leave internal functions out of dir."
              :must-read #{seon.sci.eval/agent-documentation-contract seon.sci.eval/documentation-schemas seon.sci.eval/documentation-value}
@@ -8,28 +7,24 @@
                          "docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/seon/issues/doc-replaces-every-schema-keyword-so-request-keys-disappear.md"}}
- #:seon.task{:id "85bb0e44a4b9"
-             :name "a-contract-predicate-is-refused-both-ways"
+ #:seon.task{:name "a-contract-predicate-is-refused-both-ways"
              :kind :function
              :intent "A contract naming a predicate is refused both quoted and unquoted: [:=> [:cat] inst?] is refused because 'contracts are data; use ... a quoted symbol', and [:=> [:cat] 'inst?] is refused by canonical-definition as '(quote inst?)'. Two admission stages read two different values (evaluated metadata and authored source); only a registered schema key works."
              :must-read #{seon.schema/canonical-definition seon.turn.batch/derive-form}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/seon/issues/a-contract-predicate-is-refused-both-quoted-and-unquoted.md"}}
- #:seon.task{:id "c5f80919df38"
-             :name "incremental-install-leaves-callers-on-the-jvm-definition"
+ #:seon.task{:name "incremental-install-leaves-callers-on-the-jvm-definition"
              :kind :function
              :intent "install-row! installs an override's one entity and does not interpret its affected callers, while regeneration (base-ctx on the changed database) does: with seon.id/valid? overridden, the affected closure has 11 members and regeneration binds 701 names incremental installation does not. Compiled callers direct-link the JVM definition, so after an incremental install they still call it, not the override."
              :must-read #{seon.sci.eval/base-ctx seon.sci.eval/install-row!}
              :evidence #{"docs/research/agent-platform/landing/fix-eval-schema-reds-2026-09-26.md"}}
- #:seon.task{:id "60fa86de1b8c"
-             :name "repl-namespace-changes-drift-from-the-ns-text"
+ #:seon.task{:name "repl-namespace-changes-drift-from-the-ns-text"
              :kind :function
              :intent "alias, refer and import at the REPL change a namespace entity's facts but keep its stored ns text, so write-back's equivalence proof refuses :not-equivalent; a REPL-evaluated ns form also drops the entity's :seon.fn/file. require was fixed (5ced0160b). Splice every namespace-table change into the stored ns form, and keep the file."
              :must-read #{seon.sci.eval/namespace-context-row seon.sci.eval/namespace-source}
              :evidence #{"docs/research/agent-platform/landing/merge-ns-rows-2026-09-26.md"
                          "docs/seon/issues/a-require-at-the-repl-records-the-require-form-as-its-namespaces-source.md"}}
- #:seon.task{:id "d215b1ebde7c"
-             :name "acquisition-rebuilds-the-whole-program"
+ #:seon.task{:name "acquisition-rebuilds-the-whole-program"
              :kind :function
              :intent "Acquiring a context re-derives the whole program: a base-ctx cache miss is 2,925 ms, dominated by acquire-program!; acquisition measured 1,467-3,376 ms; the first agent evaluation on a new branch allocated 11.2 GB and took 3.6 s JVM-wide; the base-context memo is keyed by program identity per commit, so every test-request commit misses (414-450 ms of the ~1 s clean-request-handle). The 16:10Z OOM died inside derive-base-ctx -> acquire-program! -> reverse-closure. Cost must follow the changed entities, not the program."
              :must-read #{seon.sci.eval/acquire! seon.sci.eval/acquire-program! seon.sci.eval/base-ctx seon.sci.eval/derive-base-ctx}
@@ -37,53 +32,45 @@
                          "docs/research/agent-platform/landing/inv-agent-run-stability-opus-2026-09-26.md"
                          "docs/research/agent-platform/landing/stability-guard-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "07317379b8ae"
-             :name "copied-vars-pin-old-wrapper-generations"
+ #:seon.task{:name "copied-vars-pin-old-wrapper-generations"
              :kind :function
              :intent "copy-host-var copies each JVM Var root into an sci.lang.Var, so a context alive across a reload pins a whole generation of instrument wrappers (2,070 of 2,072 old wrappers were held by one in-flight prepl evaluation, about 85 MB per generation). A copied dynamic Var's binding also never reaches the compiled library code that reads it. SCI can expose the clojure.lang.Var itself: reference instead of copy."
              :must-read #{seon.sci.eval/copy-host-var seon.sci.eval/load-host-namespace}
              :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"
                          "docs/research/agent-platform/landing/unrestrict-sci-2026-09-26.md"}}
- #:seon.task{:id "c088e4367dc5"
-             :name "shown-result-ignores-the-floor-refusal"
+ #:seon.task{:name "shown-result-ignores-the-floor-refusal"
              :kind :function
              :intent "shown-result (eval.clj ~3858) and seon.repl (repl.clj:483) recognise a render refusal only by :seon.render.value/root-description, so the new declared :seon.render.value/insufficient-floor-budget-error would be refused by render-ai-data's contract. Test :seon.error/at instead (one line each)."
              :must-read #{seon.sci.eval/shown-result}
              :evidence #{"docs/research/agent-platform/landing/fix-floor-review-2026-09-26.md"}}
- #:seon.task{:id "349ec82bd051"
-             :name "clojure-test-parity-residue"
+ #:seon.task{:name "clojure-test-parity-residue"
              :kind :function
              :intent "After the agent clojure.test fix (agent-repl-gaps), a FAIL line still names SCI's frame (FAIL in (fails) (lang.cljc:217)) instead of the test's line; test-ns-hook is not honoured; a custom :begin-test-ns report is bypassed; run-all-tests walks the host's namespaces; an install refusal's failure location reads 'fail AFn.java:154'."
              :must-read #{seon.sci.eval/evaluate}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/research/agent-platform/landing/agent-repl-gaps-2026-09-26.md"}}
- #:seon.task{:id "9aed35a8bbc6"
-             :name "required-library-vars-read-as-definitions"
+ #:seon.task{:name "required-library-vars-read-as-definitions"
              :kind :function
              :intent "A required dependency namespace is a library: never the agent's definition, always kept across turns. Fixed 926326d8c; proven by root after restart."
              :must-read #{seon.sci.eval/load-host-namespace seon.sci.eval/regenerate-agent-context!}
              :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:id "9949c640e249"
-             :name "branch-change-measured-against-loaded-program"
+ #:seon.task{:name "branch-change-measured-against-loaded-program"
              :kind :function
              :intent "A branch's change is computed against the JVM's loaded program, not its fork point, so a branch forked before an adoption refuses every form (Astra M1)."
              :must-read #{seon.sci.eval/install-row!}
              :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:id "2d2e18e61f60"
-             :name "analysis-order-differs-from-evaluation-order"
+ #:seon.task{:name "analysis-order-differs-from-evaluation-order"
              :kind :function
              :intent "Analysis runs per batch and acquisition installs by name order, not evaluation order: alias hang, (do (in-ns) (defn)), register! only at top level, name-order install (Astra M1)."
              :must-read #{seon.sci.eval/acquire!}
              :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:id "0ae6b217abdd"
-             :name "deliver-evaluation-errors-as-values"
+ #:seon.task{:name "deliver-evaluation-errors-as-values"
              :kind :function
              :intent "An evaluation's failure is saved as its whole flat error data (class, message, ex-data per link, the author's SCI source location, refusal fields), printed by the floor, and that saved text is what MCP replies and the next context show; no triage prose, wrapper frame or SCI callstack object. Audit P1/P2/P3."
              :must-read #{seon.sci.eval/shown-result seon.sci.kernel/failure-value seon.repl/response}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
                          "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}
- #:seon.task{:id "56b1dad969bd"
-             :name "forms-just-after-boot-cost-hundreds-of-ms"
+ #:seon.task{:name "forms-just-after-boot-cost-hundreds-of-ms"
              :kind :function
              :intent "smoke-6 (default b4b90d405, about one minute after readiness) recorded :seon.eval/duration-ms 284-495 ms for each trivial form of a fresh branch run; the same forms on a fresh branch 30 minutes later took 0-3 ms (a new defn 73 ms, its first call 23 ms). Not reproduced warm: at the next restart, profile the first eight forms (seon.profile/begin + explain, JFR) and name what each recomputes while cold."
              :must-read #{seon.sci.eval/evaluate seon.sci.eval/fork-for-turn}
@@ -93,8 +80,7 @@
              :intent "On live e405f51be (one-commit A) every write an agent form makes on its branch refuses 'Nothing found for entity id [:seon.cluster.eval/id <this form>]': the evaluation's receipt lookup ref (seon.sci.eval/evaluate, receipt at eval.clj:4341-4343) names the evaluation entity that is written only at settlement. It breaks (seon.db/transact! ...) at the REPL and every test run from the agent REPL (my.test/run-owned admission), so no agent can prove a change. Reproduced 2026-09-26 20:38Z and 20:46Z on branch merge-cut1-opus (evals 78f381684a44, 82cf53bace3b)."
              :must-read #{seon.sci.eval/evaluate}
              :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}
- #:seon.task{:id "361088de3d56"
-             :name "program-change-check-scans-the-whole-history"
+ #:seon.task{:name "program-change-check-scans-the-whole-history"
              :kind :function
              :intent "installation-covers-program-change? (install-evaluated-rows!, every defining batch) finds the entities written since the context's acquired program with [:find [?entity ...] :where [?entity]] over (db/since (db/history after) basis): an unbound pattern, so Datahike scans the whole EAVT history and filters by transaction (no transaction index exists). On default (pid 70849, 2026-09-26) the same query found 10 entities written in the last 3 transactions in 2,025 ms. It cost 1,636 ms of a 3,735 ms first contracted defn on a fresh MCP branch (pid 75849), 303-800 ms on warm branches, and 1,646-4,160 ms per test request whose members define functions. Cost must follow the written datoms: derive the program change from the settled reports' tx-data, or from attribute-bound reads of the program partition only."
              :must-read #{seon.sci.eval/install-evaluated-rows!}
@@ -143,7 +129,7 @@
              :evidence #{"resources/seon/schemas/seon.cluster.eval.edn"}}
  #:seon.task{:name "docstring-parts-reads-everything-after-example-as-the-example"
              :kind :function
-             :intent "seon.sci.eval/docstring-parts (eval.clj ~1883) takes every line after the last 'Example:' line as :example, so a docstring heading after the example (Errors:, Edge cases:, '## Costs') became forms the examples test read (RuntimeException 'Invalid token: Errors:', 'Unknown symbolic value: ##Costs'; task eaf75398383c). Lane examples-red moved the headings before Example in my.program and my.task, the symptom fix. The single-line 'Example: (form)' (my.program/ns-unalias!, native-call-refusal) also yields a blank :example. Done when docstring-parts ends the example at the next docstring heading or accepts the one-line form, with a regression, and the Example-last ordering is no longer required of authors."
+             :intent "seon.sci.eval/docstring-parts (eval.clj ~1883) takes every line after the last 'Example:' line as :example, so a docstring heading after the example (Errors:, Edge cases:, '## Costs') became forms the examples test read (RuntimeException 'Invalid token: Errors:', 'Unknown symbolic value: ##Costs'; task my.examples/the-examples-test-reads-a-docstring-example-as-an-invalid-token). Lane examples-red moved the headings before Example in my.program and my.task, the symptom fix. The single-line 'Example: (form)' (my.program/ns-unalias!, native-call-refusal) also yields a blank :example. Done when docstring-parts ends the example at the next docstring heading or accepts the one-line form, with a regression, and the Example-last ordering is no longer required of authors."
              :must-read #{seon.sci.eval/docstring-parts}}
  #:seon.task{:name "the-defn-reply-prints-before-its-own-change-applies"
              :kind :function
@@ -170,7 +156,7 @@
              :intent "clojure.repl/find-doc in an agent's REPL prints about 5,600 tokens of every matching docstring to :out, outside the value printer and its budget. Lookup tools must return values the value printer shows (matching symbols with one doc line each, dig forms for the rest), never print. Done when a regression asserts an agent's (find-doc \"task\") returns a value whose shown reply stays within the reply budget and :out is empty."
              :must-read #{seon.sci.eval/build-base-ctx}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
- #:seon.task{:name "a fresh context's result handles have no regression"
+ #:seon.task{:name "a-fresh-contexts-result-handles-have-no-regression"
              :kind :function
              :intent "Since c08e2c766 an evaluation's value is never stored: a fork without a carried agent context (a restart) binds each settled handle result/eN to a marker {:seon.eval/unstored :live-only, :seon.eval/value-class <class when recorded>} (seon.sci.eval/bind-settled-results!), and a refused read of the handles rides the fork as :seon.sci.eval/unbound-results. No test reaches either. Done when one entrance-level regression settles evaluations of a cut vector, nil and a host object through the ordinary path, checks the carried context still holds the original value by identity, forks fresh and reads each handle's marker, and checks no value blob was staged."
              :must-read #{seon.sci.eval/bind-settled-results! seon.sci.eval/fork-for-turn seon.turn/settlement-projection}

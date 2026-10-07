@@ -1,57 +1,48 @@
-[#:seon.task{:id "023acee5f88d"
-             :name "a-refused-settlement-is-stored-as-a-core-fault"
+[#:seon.task{:name "a-refused-settlement-is-stored-as-a-core-fault"
              :kind :function
              :intent "A run whose settlement is refused by a declared writer refusal is stored as a core fault (signature 6e0c6d4e..., seon.db/transact!), shows 'Contract finding: seon.db/transact! returned this error ...' and carries a datahike.writer stack trace into the MCP reply, although it is the agent's mistake. Decide it in evaluate-sources, where the run's working value already settles each form's entity: an entity settled-value refuses becomes that form's refusal through refuse-install, and settle-batch-refusal!'s ordinal search is deleted."
              :must-read #{seon.turn/evaluate-sources seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md"
                          "docs/seon/issues/expected-refusal-logs-raw-datom-error-twice.md"}}
- #:seon.task{:id "1bf47dae6f04"
-             :name "refusal-schemas-are-guessed-by-key"
+ #:seon.task{:name "refusal-schemas-are-guessed-by-key"
              :kind :function
              :intent "refusal-terminal-data (and the settle-batch! refusal and provider-failure recordings: three copies) chooses an error schema with a ~15-arm key-presence cond, because producers attach no :seon.error/declared-schema: seon.db write refusals and invalid-read, seon.schema validation, reply no-forms, render walk/request/ambiguous/invalid-output/unknown, transcript, config, fn namespace-unresolvable, eleven seon.ai refusals, cluster.prompt and turn rules. A missed producer gave a nil schema and panicked root's graph at every boot (fixed for one producer in e2d1690d4). One scripted sweep adds the metadata at each producer, then the three conds go."
              :must-read #{seon.error/recording seon.turn/refusal-terminal-data}
              :evidence #{"docs/research/agent-platform/landing/fix-root-refusal-schema-2026-09-26.md"}}
- #:seon.task{:id "f491f58f9973"
-             :name "a-preview-reparses-retained-source"
+ #:seon.task{:name "a-preview-reparses-retained-source"
              :kind :function
              :intent "The preview path (system-turn with write? false, used by the page) re-parses retained source through planned-sources and parses root's retained bare symbol 'accepted' as no forms, so the whole preview is refused. The write path does not re-parse."
              :must-read #{seon.turn/planned-sources seon.turn/system-turn}
              :evidence #{"docs/research/agent-platform/landing/fix-root-refusal-schema-2026-09-26.md"}}
- #:seon.task{:id "0e9208e52dea"
-             :name "close-turn-is-a-third-commit"
+ #:seon.task{:name "close-turn-is-a-third-commit"
              :kind :function
              :intent "A replied run commits close-turn as a separate third transaction after settlement: a trivial root run costs 122-136 ms warm, about 75 ms of it three file-store commits (24-31 ms each), and close-turn is 32-36 ms. Fold the close into the settlement at the writer (hunk in the fix-write-cost landing), keeping the separate pass for issue-bearing agents and generated system turns."
              :must-read #{seon.turn/close-turn seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"}}
- #:seon.task{:id "9fb12ed97bb2"
-             :name "a-reload-between-forms-is-undetected"
+ #:seon.task{:name "a-reload-between-forms-is-undetected"
              :kind :function
              :intent "A reload between the forms of one run, or between admission and settlement, is undetected; only a reload inside one evaluation is (call-detecting-program-change since e81cb51dc). Wrap the run's evaluate-and-settle in call-detecting-program-change with since captured at admission."
              :must-read #{seon.sci.eval/call-detecting-program-change seon.turn/evaluate-sources}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md"}}
- #:seon.task{:id "ffb23155d2a0"
-             :name "a-blind-cross-branch-writer-is-promoted-to-a-read"
+ #:seon.task{:name "a-blind-cross-branch-writer-is-promoted-to-a-read"
              :kind :function
              :intent "read-only-evaluation? (fixed for writers that read other branches in 90c542fd0) still promotes a form that writes another branch without reading it and reads only its own database, so a system turn may re-run a writer. A positive proof records every transaction the evaluation made."
              :must-read #{seon.turn/read-only-evaluation?}
              :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
- #:seon.task{:id "47b64f4cebf4"
-             :name "failed-run-left-unsettled"
+ #:seon.task{:name "failed-run-left-unsettled"
              :kind :function
              :intent "A run failing after it records its sources was never closed with its cause (sorted-map wedge, sticky unavailable). rc-m4 f83931226 closes escaping runs; proven by root after restart."
              :must-read #{seon.turn/turn}
              :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:id "b331d31540bb"
-             :name "late-faults-accompany-evaluated-values"
+ #:seon.task{:name "late-faults-accompany-evaluated-values"
              :kind :function
              :intent "A settlement refusal, a renderer failure or a printing failure never replaces a completed evaluation's value: it is saved beside it as :seon.cluster.eval/diagnostics and shown as its own response entry; each settlement saves its fault window as references."
              :must-read #{seon.turn/refusal-terminal-data seon.turn/settle-batch-refusal! seon.turn/fault-window}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
                          "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}
- #:seon.task{:id "62c45543598c"
-             :name "a-turn-pass-derives-its-work-twice"
+ #:seon.task{:name "a-turn-pass-derives-its-work-twice"
              :kind :function
              :intent "Each agent pass derives next-agent-work on a fresh database value, runs the turn, then derives it again for the rewake (more-agent-work?); with episode-exhausted! (turns-left: episode-runs + max-episode-runs, four history queries) and opening-deferred? a trivial form spends ~12 ms and ~59 seon.db/q in turn derivations (2 ms for the same derivation on a held value). The rewake answer is decidable from the pass's own report (a closed run with no unanswered wake) without re-deriving from scratch; the budget reads scan the agent's whole turn history since assignment."
              :must-read #{seon.turn/step seon.turn/next-agent-work seon.turn/more-agent-work? seon.turn/turns-left}
@@ -107,21 +98,18 @@
              :intent "unbound-value? walks the evaluation's live value with (tree-seq coll? seq value) after disarm: no bound, no deadline, no interrupt, and it runs twice per form (problems/form-problem and evaluation-facts). An evaluation returning (range) realized 115.9 M elements (10.2 GB, 93.7% of heap) and killed default pid 63809 with OutOfMemoryError; a finite (map f (range 200000)) is realized in full although 32 are shown. Answer 'contains SCI's unbound marker' from admission's one bounded walk inside the arm (its object-node leaves) and delete the live-value walk at both callers. Class regression: an ordinary run of (range) settles and old gen stays flat."
              :must-read #{seon.turn/unbound-value? seon.problems/form-problem seon.turn/evaluation-facts seon.sci.admit/admit}
              :evidence #{"docs/research/agent-platform/landing/oom-63809-2026-09-27.md"}}
- #:seon.task{:id "d066476a2fd2"
-             :name "a-refused-refusal-settlement-throws-past-the-reply"
+ #:seon.task{:name "a-refused-refusal-settlement-throws-past-the-reply"
              :kind :function
              :intent "settle-batch-refusal! throws 'Batch refusal settlement was refused.' when its own write is refused (turn.clj ~4165); the pass rethrows through close-escaped-run! (turn.clj ~5728), turn-step's finally closes the reply, and evaluate-source! answers :seon.await/closed-error (agent.clj ~826). The caller sees 'awaited channel closed' while the fault (317111871b50, 3 occurrences 16:17-17:51Z 2026-09-27) goes only to root and to the agent's NEXT run. The nested in-ns trigger is fixed (9e61340b2); the throw path remains. Return both refusals as the value ({:refused-outcome :refusal-refused}) and answer them on the reply; boot recovery closes the run as for any failed terminal write. Related: a-refused-multi-form-settlement-returns-nothing (the non-throwing arm). Done when a regression whose refusal settlement is itself refused gets both refusals as data in its own reply, never a closed channel."
              :must-read #{seon.turn/settle-batch-refusal! seon.cluster.agent/evaluate-source!}
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}
- #:seon.task{:id "86ed257beb07"
-             :name "a-transient-write-refusal-parks-the-agent-until-restart"
+ #:seon.task{:name "a-transient-write-refusal-parks-the-agent-until-restart"
              :kind :function
              :intent "At 02:35Z 2026-09-27 memory pressure refused root's renderer three times; the write-refusal bound parked root's turn proc (fault c2268b2f) until the JVM died, and every submission was answered by closing its reply (turn.clj ~6044-6051; park recorded ~6155-6160). A park is left only by disarm/arm: right for a deterministic storm, wrong for a transient cause that clears. Neither fault was messaged (root is removed from its own recipients, error.clj ~1516-1520), and a parked root builds no next context. Keep wakes suppressed while parked, but give an explicit submission one attempt, answer its refusal on the reply, and clear the park on a committed write. Done when a regression that parks an agent through a transient refusal then submits after the cause clears gets an answered run, and a still-refused submission gets the park error on its reply."
              :must-read #{seon.turn/step seon.turn/write-refusal-bound seon.turn/record-write-refusal-fault!}
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"
                          "docs/seon/issues/a-parked-turn-proc-pings-unknown-on-a-healthy-agent.md"}}
- #:seon.task{:id "8bb6b8b791ac"
-             :name "a-definition-is-settled-twice"
+ #:seon.task{:name "a-definition-is-settled-twice"
              :kind :function
              :intent "A definition's facts are derived twice: once on the batch's working value, where the writer's validation admits them form by form (seon.turn.batch/apply-facts), then again at the writer on the head in the turn's one settlement (seon.turn.batch/program-facts-call, since S4a; before it, with-settled then receipt-settle-call's row-tx: x43 mean 315 ms and x93 mean 244 ms on pid 66629, the second on the writer thread where it serializes every write on the branch). Settle the working value's validated tx-data under an expected-basis fence (:datahike/expected-basis-t) and re-derive only when the head moved. Done when a defining form's facts are derived once (profile count per form) and a moved head still settles correctly."
              :must-read #{seon.turn.batch/program-facts-call seon.turn.batch/apply-facts seon.turn/settle-batch!}

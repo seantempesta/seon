@@ -947,7 +947,7 @@
        (is (= "hello 1" (text {:seon.render/ai (fn [unit] (str "hello " (:x unit))) :x 1})))
        (is (str/starts-with? (text {:a {:seon.render/ai (fn [_] "inner")}}) "{:a {:seon.render/ai #object["))))))
 
-(deftest ^{:seon/tasks #{"135d92ea1308"}} a-failing-renderer-never-replaces-the-value
+(deftest ^{:seon/tasks #{'seon.render/a-renderer-is-chosen-by-key-presence}} a-failing-renderer-never-replaces-the-value
   ;; AGENTS.md, the REPL path is total: a renderer that throws or refuses
   ;; leaves its value printed as data, with ONE diagnostic line beside it for
   ;; the whole value, and the failures returned for the caller to record.
@@ -991,7 +991,7 @@
        (is (str/starts-with? (text undeclared) "{"))
        (is (str/includes? (text [undeclared]) ":seon.error/operation seon.db/pull"))))))
 
-(deftest ^{:seon/tasks #{"135d92ea1308"}} a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
+(deftest ^{:seon/tasks #{'seon.render/a-renderer-is-chosen-by-key-presence}} a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
   ;; Smoke 2026-09-26: `(sorted-map 'b 2 'a 1)` printed a ClassCastException
   ;; from the renderer's keyword lookup in place of the map. Only a map
   ;; `keyword-lookup?` permits carries an attachment or an identity; a keyword

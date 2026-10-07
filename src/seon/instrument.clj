@@ -7,7 +7,7 @@
   Compiled validators belong to the immutable projection that defines them.
   Host calls without cluster custody use the supplied program captured at
   arming; they never consult Malli's global registry."
-  {:seon/tasks #{"f985bfc97116" "96ac997dcf2f"}}
+  {:seon/tasks #{'seon.instrument/instrumentation-is-jvm-global 'seon.instrument/hot-internals-pay-armed-validation}}
   (:require [seon.error.refusal :as refusal]
             [clojure.edn :as edn]
             [clojure.set :as set]
@@ -821,7 +821,7 @@
            ((mi/-f->original db/database-value?) database) (assoc :seon.db/db database))))))))
 
 (defn- compiled-wrapper
-  {:seon/tasks #{"a57e8b27de67"}
+  {:seon/tasks #{'seon.instrument/contract-refusal-carries-wrapper-bookkeeping}
    :malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
   [projection function-symbol authored original _caps & [policy]]
   (let [contract (get (:seon.schema.projection/function-contracts projection)

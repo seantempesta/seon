@@ -1,18 +1,15 @@
-[#:seon.task{:id "d741e6812a31"
-             :name "a-trivial-form-waits-on-two-durable-commits"
+[#:seon.task{:name "a-trivial-form-waits-on-two-durable-commits"
              :kind :function
              :intent "A one-form MCP run costs 155 ms warm in the JVM (168 ms through the bridge), 128 ms of it two durable Datahike commits (submission in submit-source!, settlement in settle-batch!), 64 ms each; evaluation is 1-2 ms. Under the ruled durability (sync-blob? and commit-graph? false inadmissible) a commit on this workstation cannot go below ~30 ms of forces, so a single-digit-ms form needs the owner to choose: keep two durable commits and trim (~115 ms), make the submission a non-durable hand-off so one commit per form remains (~60 ms), or relax durability for evaluation records. Options priced in the landing."
              :must-read #{seon.cluster.agent/submit-source! seon.cluster.agent/evaluate-source! seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}
- #:seon.task{:id "29edc2859620"
-             :name "an-escaped-pass-closes-the-reply-without-its-fault"
+ #:seon.task{:name "an-escaped-pass-closes-the-reply-without-its-fault"
              :kind :function
              :intent "When a turn pass escapes after seon.fault/fault! committed, turn-step's finally (agent.clj ~515-558) closes the reply and the caller gets :seon.await/closed-error with no fault, although the receipt is on the throw's ex-data (:seon.fault/recorded). The causing agent meets the fault only in its next, unrelated run. Offer the recorded receipt (or the fault value) on the reply before closing it. Done when a regression whose pass escapes after recording a fault receives that fault as data in the same reply."
              :must-read #{seon.cluster.agent/turn-step seon.cluster.agent/evaluate-source! seon.fault/carried-receipt}
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}
- #:seon.task{:id "e7feed4a2e86"
-             :name "a-wrapped-stop-interrupt-is-recorded-as-a-core-fault"
+ #:seon.task{:name "a-wrapped-stop-interrupt-is-recorded-as-a-core-fault"
              :kind :function
-             :intent "turn-step catches only a bare InterruptedException (agent.clj ~551); a stop that interrupts a Datahike call surfaces as superv.async ExceptionInfo(InterruptedException) and is recorded as a core fault with no function entity, which never resolves (477a97dc, 67029fe7, 2026-09-27 02:08/02:25Z). Recognise the stop's interrupt anywhere in the bounded cause chain (cyclic chains: 465ff60ccda0). The same faults lost their agent: fault! puts :seon.agent/id into :seon.error/source (fault.clj ~286-292) but not into the recording request, so :seon.error.occurrence/agent is nil (error.clj ~1492) and for-agent's occurrence clause (error.clj ~2066) never reaches the agent; pass agent-id into the recording request. Done when a stop interrupting a wrapped Datahike call records no fault, and a fault recorded under an agent carries that agent on its occurrence."
+             :intent "turn-step catches only a bare InterruptedException (agent.clj ~551); a stop that interrupts a Datahike call surfaces as superv.async ExceptionInfo(InterruptedException) and is recorded as a core fault with no function entity, which never resolves (477a97dc, 67029fe7, 2026-09-27 02:08/02:25Z). Recognise the stop's interrupt anywhere in the bounded cause chain (cyclic chains: seon.fault/carried-receipt-hangs-on-cyclic-cause-chain). The same faults lost their agent: fault! puts :seon.agent/id into :seon.error/source (fault.clj ~286-292) but not into the recording request, so :seon.error.occurrence/agent is nil (error.clj ~1492) and for-agent's occurrence clause (error.clj ~2066) never reaches the agent; pass agent-id into the recording request. Done when a stop interrupting a wrapped Datahike call records no fault, and a fault recorded under an agent carries that agent on its occurrence."
              :must-read #{seon.cluster.agent/turn-step seon.fault/fault!}
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}]

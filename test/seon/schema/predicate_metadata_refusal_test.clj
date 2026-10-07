@@ -18,7 +18,7 @@
                  (config/result-caps config/defaults) policy)]
     (support/refusal-data #(apply wrapped arguments))))
 
-(deftest ^{:seon/tasks #{"407264e2b69d" "7095e91b3f42"}}
+(deftest ^{:seon/tasks #{'seon.schema/canonical-definition-cannot-invert-evaluated-roots 'seon.instrument/an-oversized-refusal-hides-its-cause}}
   a-refusal-carries-its-producers-arm-identity-for-any-predicate
   ;; E2 (agent-path root-cause audit M3): a contract evaluated from `defn`
   ;; metadata holds the predicate's root function, which names nothing. The
@@ -54,7 +54,7 @@
          (is (valid? returned))
          (is (= (id/digest 64 [operation 0 :output]) (:seon.error/expected-shape returned))))))))
 
-(deftest ^{:seon/tasks #{"407264e2b69d"}}
+(deftest ^{:seon/tasks #{'seon.schema/canonical-definition-cannot-invert-evaluated-roots}}
   an-interpreted-contract-naming-a-core-predicate-refuses-readably
   ;; The SCI path: the committed spec names the predicate; binding resolves
   ;; it to its root, which the refusal never has to name again.

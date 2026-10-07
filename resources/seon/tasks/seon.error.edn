@@ -1,31 +1,26 @@
-[#:seon.task{:id "3d1e36226ec4"
-             :name "a-deleted-functions-fault-never-resolves"
+[#:seon.task{:name "a-deleted-functions-fault-never-resolves"
              :kind :function
-             :intent "resolution needs the fault's function entity, so a fault naming a deleted function can never resolve: the seon.flow/release-admission! ClassCastException fault stays open after 69229772b deleted the function and its cause. Also faults whose operation never had a function entity: superv.async/throw-if-exception- (477a97dc, 67029fe7, 2026-09-27) can resolve only by resolve!. The wider rule is task 9612584f8e1e."
+             :intent "resolution needs the fault's function entity, so a fault naming a deleted function can never resolve: the seon.flow/release-admission! ClassCastException fault stays open after 69229772b deleted the function and its cause. Also faults whose operation never had a function entity: superv.async/throw-if-exception- (477a97dc, 67029fe7, 2026-09-27) can resolve only by resolve!. The wider rule is task seon.error/health-stays-faulted-on-dead-process-faults."
              :must-read #{seon.error/resolution}
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"
                          "docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/a-fault-whose-function-is-deleted-never-resolves.md"}}
- #:seon.task{:id "a4b6cdcf40d6"
-             :name "a-missing-key-message-reads-badly"
+ #:seon.task{:name "a-missing-key-message-reads-badly"
              :kind :function
              :intent "A missing key whose schema carries :error/message reads 'the required key :seon.db/db with must be ...' (error.clj:867)."
              :must-read #{seon.error/explain-problem}
              :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}
- #:seon.task{:id "c75ab14cb365"
-             :name "deliver-core-faults-to-responsible-agent"
+ #:seon.task{:name "deliver-core-faults-to-responsible-agent"
              :kind :function
              :intent "The writer chooses who acts on a recorded fault from held relations (the steward, else the escalation owner the producer names), never from whether a Throwable was present; the notification carries the error value, not prose (audit §2.5 items 2-3, E01)."
              :must-read #{seon.error/commit-call}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"}}
- #:seon.task{:id "f58c3aab9277"
-             :name "fault-observation-returns-the-recorded-error"
+ #:seon.task{:name "fault-observation-returns-the-recorded-error"
              :kind :function
              :intent "occurred-since returns each touched error's recorded observation with its references and resolution instead of a signature/message/count summary, and resolution never hides a fault from its window; for-agent reaches the escalation owner of a fault no steward answers for (audit §2.5 items 5-6)."
              :must-read #{seon.error/occurred-since seon.error/for-agent}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"}}
- #:seon.task{:id "5e008f619131"
-             :name "error-transactions-carry-references-never-worlds"
+ #:seon.task{:name "error-transactions-carry-references-never-worlds"
              :kind :function
              :intent "An error-recording transaction's writer call carried the whole schema projection, so any refused write copied it into its refusal and the operator could not read the failure back (owner 2026-09-26, start --head at 7c40396b3). The call holds data and references; the writer reads its database's own projection."
              :must-read #{seon.error/recording seon.error/commit-call}
@@ -35,10 +30,9 @@
              :intent "Since ea802169d each shown value in a refusal's HTML is a block seon-data-panel mid-sentence, breaking the sentence; the sentence repeats the schema key after 'a string'; a missing key shows :seon.error/unknown as the offending value; the refusal path shows a raw entity id [56626 :my.plan.item/title]; a fault with no operation renders an empty seon-kicker paragraph. Values inline (a CSS rule for .seon-error-problem .seon-data-panel in resources/public/css/input.css), no repeated key, a missing key named as missing, no entity-id dump, no empty kicker; check browser paint (fix-html-views 1c10d3536)."
              :must-read #{seon.error/render-html}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
- #:seon.task{:id "9612584f8e1e"
-             :name "health-stays-faulted-on-dead-process-faults"
+ #:seon.task{:name "health-stays-faulted-on-dead-process-faults"
              :kind :function
-             :intent "At 18:01Z 2026-09-27 all 10 open faults came from dead processes and 7 were stale: resolution (error.clj ~1309-1354) fires only when the digest of :seon.instrument/fn changes, and that fn is often the reporter (memory-pressure-crossed!, record-write-refusal-fault!, maintenance/exception-value) or an outer wrapper (seon.test/run's digest change resolved three record-tx signatures while record-tx still refused; settle-batch-refusal! stays open after its cause was fixed elsewhere), or absent (superv.async; see 3d1e36226ec4). runtime_status reads :faulted whenever any fault is open. Let the producer's error schema declare process scope (e.g. memory pressure, the write-refusal park, a stop's interrupt, :seon.flow/launcher-stopped) and resolve such a fault once none of its occurrences' processes is live; resolve by the failing operation (:seon.error/operation), not the outermost armed Var. Done when a regression's process-scoped fault reads resolved after its process ends, and editing an unrelated wrapper resolves nothing."
+             :intent "At 18:01Z 2026-09-27 all 10 open faults came from dead processes and 7 were stale: resolution (error.clj ~1309-1354) fires only when the digest of :seon.instrument/fn changes, and that fn is often the reporter (memory-pressure-crossed!, record-write-refusal-fault!, maintenance/exception-value) or an outer wrapper (seon.test/run's digest change resolved three record-tx signatures while record-tx still refused; settle-batch-refusal! stays open after its cause was fixed elsewhere), or absent (superv.async; see seon.error/a-deleted-functions-fault-never-resolves). runtime_status reads :faulted whenever any fault is open. Let the producer's error schema declare process scope (e.g. memory pressure, the write-refusal park, a stop's interrupt, :seon.flow/launcher-stopped) and resolve such a fault once none of its occurrences' processes is live; resolve by the failing operation (:seon.error/operation), not the outermost armed Var. Done when a regression's process-scoped fault reads resolved after its process ends, and editing an unrelated wrapper resolves nothing."
              :must-read #{seon.error/resolution seon.problems/open-faults seon.fault/fault!}
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}
  #:seon.task{:name "an-enum-refusal-prints-the-schema-properties"

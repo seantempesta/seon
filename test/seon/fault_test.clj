@@ -166,7 +166,7 @@
        (is (true? (:seon.db/transaction-refused kept)))
        (is (= "r1" (:seon.db.write.attempt/request-id kept)))))))
 
-(deftest ^{:seon/tasks #{"6b8d26a16ce7"}}
+(deftest ^{:seon/tasks #{'seon.fault/delete-panic-record-policy-branch}}
   a-stored-fault-returns-its-receipt-beside-the-result-and-a-carried-receipt-is-not-recounted
   ;; Task 6b8d26a16ce7: there is no core-error dial. A fault whose write
   ;; commits is data beside the caller's result: `fault!` returns, never throws.

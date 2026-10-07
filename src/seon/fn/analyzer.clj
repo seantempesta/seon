@@ -378,7 +378,7 @@
   share the parent, and deleting a live sibling cost its owner a ~6 s refill on
   every boot (waste-profile 2026-09-28). Lint non-program checkout roots every
   boot so script dependencies are current even when no program file changed."
-  {:seon/tasks #{"547fc42c47a5"}
+  {:seon/tasks #{'seon.fn.analyzer/local-root-dependency-analysis-goes-stale}
    :malli/schema [:=> [:cat [:vector :string]] :map]}
   [program-roots]
   (let [current (io/file cache-directory)

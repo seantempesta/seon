@@ -1,5 +1,4 @@
-[#:seon.task{:id "845e1bce2592"
-             :name "a-changed-check-builds-a-world-per-request"
+[#:seon.task{:name "a-changed-check-builds-a-world-per-request"
              :kind :function
              :intent "A my.test/check of a changed program pays about 1 s in clean-request-handle per request: an overlay write of 480-620 ms and a fresh SCI acquisition of 414-450 ms. A changed one-test check measures 1,485-1,584 ms, a newcomer's one-assertion run 3,456 ms (clean-request-handle 2,527 ms), and prepare-merge! of a one-test delta 4.06 s. Recommended: fold the overlay into the checkpoint keyed by [base cluster effective process overlay-digest], so a request is a branch! plus a base-context hit."
              :must-read #{seon.test/clean-request-handle seon.test/prepare-checkpoint! seon.test/run}
@@ -7,45 +6,39 @@
                          "docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
                          "docs/seon/issues/test-world-preparation-spends-seconds-in-config-apply-and-unmemoized-reads.md"}}
- #:seon.task{:id "35a7b8abc200"
-             :name "check-fails-on-agent-registered-schemas"
+ #:seon.task{:name "check-fails-on-agent-registered-schemas"
              :kind :function
              :intent "Once any contract on a branch names a schema the agent registered, my.test/check fails every test on the branch with :malli.core/invalid-schema {:schema :notes-index/note}: the check world's fork (fork-cluster-ctx via clean-request-handle -> install-function-contract!) builds contracts against a projection without the branch's schemas, while the install gate uses the right one. 1.6-3.2 s, once 17.3 s."
              :must-read #{seon.sci.eval/install-function-contract! seon.test/clean-request-handle}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/seon/issues/my-test-check-fails-every-test-once-a-branch-contract-names-an-agent-schema.md"}}
- #:seon.task{:id "bda75cdae36e"
-             :name "a-check-with-nothing-to-run-answers-green"
+ #:seon.task{:name "a-check-with-nothing-to-run-answers-green"
              :kind :function
              :intent "my.test/check answers green when the changed symbol has no executable reaching test, e.g. a caller dropped at acquisition (dogfood #20): the change goes untested and the answer says pass. Missing coverage must refuse by name."
              :must-read #{seon.test/run seon.test/select}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-agent-run-stability-opus-2026-09-26.md"}}
- #:seon.task{:id "c86d834ab695"
-             :name "a-test-world-has-no-agent"
+ #:seon.task{:name "a-test-world-has-no-agent"
              :kind :function
              :intent "A REPL deftest's member world contains no agent entity and no :seon.agent/id, so an agent-scoped call such as (my.task/steps {}) is untestable (only refusal paths are). Seeding the agent costs 88 ms (creation-tx); acquiring with an agent id 626 ms against 31 ms. Owner ruling: seed the executing agent, or branch the world from the agent's own commit (which deletes the checkpoint and overlay machinery, about 200 lines)."
              :must-read #{seon.cluster.agent/creation-tx seon.test/clean-request-handle}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/research/agent-platform/landing/agent-test-worlds-2026-09-26.md"
                          "docs/seon/issues/an-agents-test-world-has-no-agent-so-my-functions-cannot-be-tested-as-documented.md"}}
- #:seon.task{:id "bc7224ccaa61"
-             :name "property-members-pay-a-commit-per-step"
+ #:seon.task{:name "property-members-pay-a-commit-per-step"
              :kind :function
              :intent "turn-test's recovery, transitions and virtual members take 17-18 s each against the 5 s bound, because each step is a file-store commit (48-96 ms; an in-memory commit is 5 ms). Recommended: member worlds as in-memory branches of one prepared commit (the fast-harness slice)."
              :must-read #{seon.test/run}
              :evidence #{"docs/research/agent-platform/landing/fix-turn-test-reds-2026-09-26.md"
                          "docs/seon/issues/turn-test-property-members-pay-a-file-store-commit-per-step.md"}}
- #:seon.task{:id "b9933ca067dc"
-             :name "tests-redefine-default-vars"
+ #:seon.task{:name "tests-redefine-default-vars"
              :kind :namespace
              :intent "About 300 with-redefs / alter-var-root sites in test/ redefine default's Vars JVM-wide; e.g. fn_test.clj:1067's with-redefs of analyzer/analyze made a concurrent read-only analyze-entities throw 'analysis must not run', and a concurrent publication or write-back fails the same way. Substitute effects as explicit values in injected worlds. Census by clj-kondo analysis (2026-09-27): 303 call sites (with-redefs 208, with-redefs-fn 47, intern 23, alter-var-root 17, load-file 8) binding 404 Var replacements across 96 files; top targets seon.ai/complete 56, seon.db/transact! 14, seon.sci.kernel/invoke 10, seon.sci.eval/evaluate 10, seon.db/q 10. The seam per target and the tests each converts are in the evidence note's seam census."
              :must-read #{seon.test/run}
              :evidence #{"docs/research/agent-platform/landing/merge-ns-rows-2026-09-26.md"
                          "docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"
                          "docs/seon/issues/eval-test-with-redefs-of-packaged-forms-breaks-concurrent-publication.md"}}
- #:seon.task{:id "d6fa80e274ac"
-             :name "checks-write-into-live-custody"
+ #:seon.task{:name "checks-write-into-live-custody"
              :kind :function
              :intent "The auto-check and gate bodies write into the agent's live branch; functions keep their creation context's connection, so forking alone cannot move their calls (Astra M2; owner decision on gate world pending)."
              :must-read #{seon.test/run}
@@ -92,4 +85,5 @@
              :kind :function
              :intent "A test world's release does not own its connections exactly once. (1) The full-tier run of 2026-10-06 (bin/test, tmp/orchestrator/full-run-2.txt) ended in seon.cluster.store/release-store! throwing Datahike's 'Cannot delete a database with active connections. Release them first.' with two agent overlay connections ([:datahike/overlay ...] on :agent-fa3beda720e7 and :agent-1e8be0903fd1) still open; the request escaped as 'PREPL evaluation failed' and the run's tally was lost. (2) An error recorded on default (2026-10-07, signature 7147098166ec, operation seon.cluster.registry/retire-branch! reached from seon.test/release-context!): 'Connection has been released.' (a release after the connection was already released). Done when a test request releases each hosted agent's overlay connection before its store, retire-branch! never runs on a released connection, a full-tier run ends with its tally, and a regression releases a world holding agent overlays. Proof: a new seon.test-test/a-world-holding-agent-overlays-releases-cleanly (to be written first) naming this task."
              :must-read #{seon.cluster.agent/release-context! seon.cluster.registry/retire-branch! seon.cluster.store/release-store! seon.test/run}
-             :evidence #{"tmp/orchestrator/full-run-2.txt"}}]
+             :evidence #{"tmp/orchestrator/full-run-2.txt"}}
+ #:seon.task{:name "reds-on-head-9d6b392b6-in-task-reaching-tests", :kind :namespace, :intent "Booted from HEAD 9d6b392b6 in a throwaway JVM (runs dd2d7c0063ce, e3c499a59e18), these reds exist without lane task-tags' diff: seon.error.attribution-test/a-definitions-failure-in-an-evaluation-is-its-fault-and-task (the error value carries no :seon.error/producer or :seon.instrument/fn, no fault signature), seon.error.attribution-test/a-batch-failure-names-the-definition-visible-when-it-ran (error), seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes (56 of 200 stored intents exceed 400 characters), seon.task-steps-test/steps-persist-across-a-compaction (compact! answers no :seon.agent/id), seon.cluster.host-test/a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root (prepare-merge! answers no :seon.test/passed?, proofs or merge). Done when each is classified by the commit that changed its behavior and fixed, converted or deleted, and the five run green on HEAD.", :must-read #{seon.task/steps! my.program/prepare-merge!}, :evidence #{"docs/research/agent-platform/2026-10-07/task-tags/task-tags-notes.md"}}]

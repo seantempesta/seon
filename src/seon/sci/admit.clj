@@ -114,7 +114,7 @@
   fragment that crossed the bound — because `:seon.sci.admit/bytes` is declared as a
   measurement, and a diagnostic that reads as a measurement and is a constant
   is the one thing a diagnostic may not be."
-  {:seon/tasks #{"6af99d6bdb94"}}
+  {:seon/tasks #{'seon.sci.admit/large-printed-output-refuses-the-evaluation}}
   [state total]
   (let [bound (:max-bytes state)]
     (when (and bound (> (long total) (long bound)))

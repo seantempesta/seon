@@ -147,7 +147,7 @@
   (support/with-database
    (fn [connection]
      (let [handle (task/task-handle 'tn.a "render-node" :function)
-           entry (str "[#:seon.task{:id \"" handle "\" :name \"render-node\" :kind :function"
+           entry (str "[#:seon.task{:name \"render-node\" :kind :function"
                       " :intent \"Render one node.\\nThen stop.\" :must-read #{tn.a/f}}]")
            indexed (task/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
            database @connection
@@ -156,13 +156,13 @@
                     (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))]
        (is (:seon.task/changed? indexed))
        (testing "a task at distance 0 is its name"
-         (is (= {:seon.task/id handle :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
+         (is (= {:seon.task/id handle :seon.task/sym 'tn.a/render-node :seon.task/name "render-node" :seon.task/kind :function :seon.task/ns 'tn.a}
                 (sut/task-ai (unit [:seon.task/id handle] 0)))))
        (testing "a task at distance 1 shows its intent and must-reads; its proofs and subjects are related data"
          (let [shown (sut/task-ai (unit [:seon.task/id handle] 1))]
            (is (= "Render one node.\nThen stop." (:seon.task/intent shown)))
            (is (= #{'tn.a/f} (:seon.task/must-read shown)))
-           (is (= (list 'seon.task/task-edges (list 'seon.db/db) handle) (sut/task-form (unit [:seon.task/id handle] 1)))
+           (is (= (list 'seon.task/task-edges (list 'seon.db/db) (list 'quote 'tn.a/render-node)) (sut/task-form (unit [:seon.task/id handle] 1)))
                "the form face is the edges read")
            (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
        (testing "a schema's AI face is data: the form it replaces and what names the key"

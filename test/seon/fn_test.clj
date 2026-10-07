@@ -2872,7 +2872,7 @@
         (is (seq (:seon.fn/findings refusal))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest ^{:seon/tasks #{"bd7cb669b45d"}} host-binding-is-a-declaration-fact-not-a-caller-closure
+(deftest ^{:seon/tasks #{'seon.fn/host-bound-class-list-copies-interpreter-config}} host-binding-is-a-declaration-fact-not-a-caller-closure
   (let [root (fixture-root)
         text (str "(ns sample.host-bound)\n"
                   "(defn clock [] (System/currentTimeMillis))\n"

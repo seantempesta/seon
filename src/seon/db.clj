@@ -2791,7 +2791,7 @@
   Nil scalar inputs, including members of tuple and collection bindings,
   return an invalid-read error before executing the query. False and empty
   collections remain ordinary inputs."
-  {:seon/tasks #{"d6e3b775f474"}
+  {:seon/tasks #{'seon.db/the-query-wrapper-costs-36x-datahike}
    :malli/schema
    [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
@@ -4093,7 +4093,7 @@
    EAVT supplies every child; AVET discovers owners without pull's 1,000 cap.
    Returns the refusal, or on success every changed arity-bearing root's
    identity attributes as `::changed-identity-attributes`, the arity gate's input."
-  {:seon/tasks #{"4bb788513862"}
+  {:seon/tasks #{'seon.db/the-checked-writer-is-slow-on-a-fresh-branch}
    :malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
                        ;; Datahike's `:schema` also maps each attribute's entity
                        ;; id to its ident, so the plans carry integer keys too.

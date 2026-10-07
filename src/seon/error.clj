@@ -1124,8 +1124,8 @@
           database function)))
 
 (defn- proof
-  "Whether task `handle`'s proof holds in `database`: at least one test names it
-  (`:seon.task/tasks`) and each such test's latest stored run is green (passes,
+  "Whether task `handle`'s proof holds in `database`: at least one test names its
+  symbol (`:seon.task/tasks`) and each such test's latest stored run is green (passes,
   no failure or error, terminated) and completed after the transaction that
   wrote `producer`'s current definition digest. A task no test names has no
   proof. The answer is derived, never stored."
@@ -1136,7 +1136,8 @@
                       :where [?f :seon.fn/sym ?producer] [?f :seon.program/definition-digest _ ?tx]]
                     database producer)
         runs (db/q '[:find ?test ?done ?pass ?fail ?error :in $ ?handle
-                     :where [?t :seon.task/tasks ?handle] [?t :seon.test/sym ?test]
+                     :where [?task :seon.task/id ?handle] [?task :seon.task/sym ?s]
+                            [?t :seon.task/tasks ?s] [?t :seon.test/sym ?test]
                             [?m :seon.test.member/symbol ?test]
                             [?m :seon.test.member/completed-tx ?done]
                             [?m :seon.test.member/terminated-tx]
@@ -1145,7 +1146,8 @@
                             [?m :seon.test.member/error-count ?error]]
                    database handle)
         named (db/q '[:find [?test ...] :in $ ?handle
-                      :where [?t :seon.task/tasks ?handle] [?t :seon.test/sym ?test]]
+                      :where [?task :seon.task/id ?handle] [?task :seon.task/sym ?s]
+                             [?t :seon.task/tasks ?s] [?t :seon.test/sym ?test]]
                     database handle)
         latest (when (set? runs) (into {} (map (juxt first identity)) (sort-by second runs)))]
     (cond
@@ -1268,17 +1270,18 @@
 
 (defn- producer-task
   "The runtime task a producer's faults answer: one per producing definition,
-  its handle the aspect `[ns \"faults of <name>\" :function]` minted as
-  `seon.task/task-handle` mints it, so a second signature of the same producer
+  its handle the aspect `[ns \"faults-of-<name>\" :function]` minted as
+  `seon.task/task-handle` mints it and its symbol `ns/faults-of-<name>`, so a second signature of the same producer
   lands on the same task. It refs each signature it answers
   (`:seon.task/faults`); it is closed when every one is resolved
   (`seon.task/resolution`), never by a stored flag."
   {:malli/schema [:=> [:cat :seon.error/producer :string [:maybe [:tuple [:= :seon.agent/id] :seon.agent/id]]] :map]}
   [producer signature-tempid created-by]
   (let [task-ns (symbol (namespace producer))
-        task-name (str "faults of " (name producer))]
+        task-name (str "faults-of-" (name producer))]
     (cond-> {:db/id auto-task-tempid
              :seon.task/id (id/id [task-ns task-name :function])
+             :seon.task/sym (symbol (name task-ns) task-name)
              :seon.task/ns task-ns :seon.task/name task-name :seon.task/kind :function
              :seon.task/intent (str "Make " producer " stop producing the failures its faults record: each fault"
                                     " names the refused schema and path, where it happened and the reproduction."

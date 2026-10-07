@@ -1015,7 +1015,7 @@
 
   Caller presence is tested by argument occupancy and `contains?`, never
   truthiness: a supplied nil reaches ordinary Malli input validation."
-  {:seon/tasks #{"775e3222a980"}
+  {:seon/tasks #{'seon.call-preparation/a-positional-database-is-not-supplied}
    :malli/schema
    [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
          [:maybe :seon.call-preparation/plan] :seon.schema/arguments]

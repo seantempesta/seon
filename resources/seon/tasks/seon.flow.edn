@@ -1,5 +1,4 @@
-[#:seon.task{:id "f12bf9eda5f1"
-             :name "a-cancelled-future-is-not-exit"
+[#:seon.task{:name "a-cancelled-future-is-not-exit"
              :kind :function
              :intent "stop-work-launcher! cancels each Future and settles it at once, so 'drained' can mean the callback emitted while work-fn is still inside a host call. The launcher lifecycle atoms (atom audit A100-A105) fold into the submission map together with this actual-exit distinction (15-35 lines, reviewed)."
              :must-read #{seon.flow/stop-work-launcher!}

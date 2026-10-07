@@ -1,13 +1,11 @@
-[#:seon.task{:id "cea47b015b23"
-             :name "agents-can-validate"
+[#:seon.task{:name "agents-can-validate"
              :kind :namespace
              :intent "An agent can validate a value against a registered schema key from its SCI context in one ordinary call. Historical: passed on branch exp-validate-2 from the brief alone, never delivered; that branch is not retained."
              :must-read #{seon.schema/valid-candidate-value? seon.schema/explain-candidate-value seon.schema/projection-from-database}
              :evidence #{"docs/research/agent-platform/experiments/tasks-v02/seon.schema.edn"
                          "docs/research/agent-platform/language-requirements-2026-09-24.md"
                          "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}
- #:seon.task{:id "6c1b8083edbe"
-             :name "validation-throws-on-non-keyword-sorted-maps"
+ #:seon.task{:name "validation-throws-on-non-keyword-sorted-maps"
              :kind :function
              :intent "valid-candidate-value? throws ClassCastException (Keyword.compareTo) on a sorted map with symbol or string keys, because Malli's map validation calls get with a keyword on it. At the agent REPL the throw escapes settlement: the run never closes and every later form answers agent-already-running until the branch is retired (maintainer #5; analyst probe 5 timed out at 60,258 ms). Symbol- and String-to-Keyword casts in seon.cluster.agent/turn-step were recorded as core faults at 16:02-16:10Z. Validate without a keyword lookup on foreign sorted maps, and settle any throw as the run's failure."
              :must-read #{seon.schema/valid-candidate-value?}
@@ -15,36 +13,31 @@
                          "docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/landing/stability-guard-2026-09-26.md"
                          "docs/seon/issues/armed-error-validation-throws-on-non-keyword-sorted-maps.md"}}
- #:seon.task{:id "b9163458502a"
-             :name "register-works-only-top-level"
+ #:seon.task{:name "register-works-only-top-level"
              :kind :function
              :intent "seon.schema/register! inside let or any nested form refuses 'Schema declarations require an isolated registration delta' (schema.clj:1279): the delta opens only for a syntactically top-level register!. The first run of three register! took 1,786 ms and eight took 3,681 ms. Open the delta around any register! reached during a form."
              :must-read #{seon.schema/begin-registration-delta seon.schema/register!}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/seon/issues/schema-registration-works-only-as-a-top-level-form.md"}}
- #:seon.task{:id "c87892f697b8"
-             :name "the-projection-travels-ambiently"
+ #:seon.task{:name "the-projection-travels-ambiently"
              :kind :namespace
              :intent "The projection still travels in dynamic Vars (*projection*, *projection-state*, *packaged-forms*, *candidate-forms-overlay*) plus a registration-delta candidate atom: 18 handed-projection, 42 call-with-projection (16 files), 12 call-with-projection-state and 5 call-with-forms call sites. db/carried-projection already answers the same value in 0.01 ms. The current JVM's profile shows call-with-projection-state inclusive 229,243 ms, max 55,673 ms, x97, which also hides real costs from profiles. Convert readers to the carried projection and delete the ambient Vars (C5); C2 waits on this."
              :must-read #{seon.db/carried-projection seon.schema/call-with-projection seon.schema/call-with-projection-state seon.schema/handed-projection}
              :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
                          "docs/research/agent-platform/landing/task-log-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "b2e2909e662d"
-             :name "a-declaration-write-reloads-the-whole-projection"
+ #:seon.task{:name "a-declaration-write-reloads-the-whole-projection"
              :kind :function
              :intent "Every declaration-touching write (a new function, a spec or schema change) pays load-projection from an identical base: 35-42 ms, O(program) even when nothing else differs. Derive the projection incrementally from the changed declarations."
              :must-read #{seon.db/carried-projection seon.schema/load-projection}
              :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"}}
- #:seon.task{:id "407264e2b69d"
-             :name "canonical-definition-cannot-invert-evaluated-roots"
+ #:seon.task{:name "canonical-definition-cannot-invert-evaluated-roots"
              :kind :function
              :intent "A refusal of any contract holding [:fn ns/pred] armed from Var metadata cannot be built: canonicalization tries to invert compiled predicates. Model fix (Astra M3): preserve the admitted declarative form at arming; never canonicalize a compiled schema while building a refusal."
              :must-read #{seon.schema/canonical-definition seon.instrument/compiled-wrapper}
              :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:id "5c8cf0549616"
-             :name "map-validation-throws-on-sorted-maps-with-foreign-keys"
+ #:seon.task{:name "map-validation-throws-on-sorted-maps-with-foreign-keys"
              :kind :function
              :intent "Malli's :map validator looks each declared key up (malli core.cljc:1276); a sorted map whose comparator cannot compare that key with its own keys throws ClassCastException instead of answering false (fault fa60ad84, seon.schema/valid-candidate-value? from turn-step, 17:13Z). The producer site was fixed in seon.turn/disposition (f83931226) by validating only maps that name the discriminator, and seon.render.value/keyword-lookup? guards the same class in render: two copies of one guard. Validating an arbitrary value against a candidate schema belongs to one owner; decide there, once, so callers delete their guards."
              :must-read #{seon.schema/valid-candidate-value? seon.turn/disposition seon.render.value/keyword-lookup?}

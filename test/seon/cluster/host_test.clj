@@ -412,7 +412,7 @@
             "the assignment offers the agent its proposal")
         (is (= ":no-proofs" (refusal)) "a task no test names cannot be proposed")
         (hosted-run! hosted "(defn square \"Square x.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x x))")
-        (hosted-run! hosted (str "(clojure.test/deftest ^{:seon/tasks #{" (pr-str task-id) "}} square-test"
+        (hosted-run! hosted (str "(clojure.test/deftest ^{:seon/tasks #{'" (task/task-sym host-ns "square") "}} square-test"
                                  " (clojure.test/is (= 9 (square 3))))"))
         (is (= ":unproven" (refusal)) "a red proof refuses")
         (is (empty? (to-root)) "and root hears nothing")

@@ -331,7 +331,7 @@
     check or bound. A two-link cycle held one core for about seven minutes on
     2026-09-26. [[seon.render.value/core-text]] walks the same chain safely. Task
     [[task:465ff60ccda0]]."
-  {:seon/tasks #{"465ff60ccda0"}
+  {:seon/tasks #{'seon.fault/carried-receipt-hangs-on-cyclic-cause-chain}
    :malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
   [failure]
   (when (instance? Throwable failure)

@@ -130,7 +130,7 @@
        (is (str/includes? page "href=\"/ns/seon.id\""))
        (is (not (str/includes? page "seon.id/id")))))))
 
-(deftest ^{:seon/tasks #{"15a0784f82d5"}} declared-identity-and-producer-lookups-name-their-owners
+(deftest ^{:seon/tasks #{'seon.render/error-operation-read-as-returner}} declared-identity-and-producer-lookups-name-their-owners
   ;; Slices 0a/0b of the one render path: ownership is the identity
   ;; attribute's declared entity schema over a closed key set, and an error's
   ;; renderer follows the schema its producer declared.

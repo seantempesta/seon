@@ -1,5 +1,4 @@
-[#:seon.task{:id "bae29b83a938"
-             :name "a-config-read-walks-the-whole-registry"
+[#:seon.task{:name "a-config-read-walks-the-whole-registry"
              :kind :function
              :intent "dial-attributes (and required-dial-attributes) walk every form in the projection's registry on every config/effective call; a trivial agent form reads config three times on fresh database values, 1.9 ms each under load (0.97 ms quiet). Both are functions of the projection alone: keep the answer on the projection's own holder (schema/projection-cache-value; 0.0008 ms on a hit, same answer, the carried projection is identical across commits). Patch: tmp/perf-eval-overhead-opus/patches/config-dial-attributes-memo.patch."
              :must-read #{seon.config/dial-attributes seon.config/effective seon.schema/projection-cache-value}

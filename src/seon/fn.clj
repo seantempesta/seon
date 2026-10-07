@@ -624,9 +624,9 @@
     (throw (ex-info (:seon.error/message refusal) refusal (:seon.error/throwable members)))))
 
 (defn- task-links
-  "One holder's `:seon.task/annotation`, validated, as its `:seon.task/links`: task
-  handles as string values; must-read/see-also quoted symbols resolved through the
-  namespace's aliases. A map naming `:seon/tasks` after a deftest's name refuses."
+  "One holder's `:seon.task/annotation`, validated, as its `:seon.task/links`: task,
+  must-read and see-also quoted symbols resolved through the namespace's aliases.
+  A map naming `:seon/tasks` after a deftest's name refuses."
   {:malli/schema [:=> [:cat :seon.schema/projection :map :symbol :map] :seon.task/links]}
   [projection context holder entry]
   (let [authored (select-keys (::analyzer/meta entry) [:seon/tasks :seon/must-read :seon/see-also])
@@ -636,9 +636,9 @@
       (refuse! :metadata-after-test-name (::analyzer/name entry) {}))
     (when-let [explanation (schema/explain-candidate-value projection :seon.task/annotation authored)]
       (refuse! :malformed-annotation authored {:seon.task/explanation (me/humanize explanation)}))
-    (let [must-read (link :seon/must-read) see-also (link :seon/see-also)]
+    (let [tasks (link :seon/tasks) must-read (link :seon/must-read) see-also (link :seon/see-also)]
      (cond-> {}
-      (:seon/tasks authored) (assoc :seon.task/tasks (:seon/tasks authored))
+      tasks (assoc :seon.task/tasks tasks)
       must-read (assoc :seon.fn/must-read must-read)
       see-also (assoc :seon.fn/see-also see-also)))))
 
@@ -1229,7 +1229,7 @@
   namespace; it defaults to the checkout's cache (`shared-dependency-analysis`).
   A host call into a namespace it lacks refuses as
   `:seon.fn/dependency-analysis-missing-error`."
-  {:seon/tasks #{"56e90b0bf6b7"}
+  {:seon/tasks #{'seon.fn/agent-mistakes-read-as-missing-dependency-analysis}
    :malli/schema
    [:function
     [:=> [:cat :seon.db/database-value
@@ -1921,7 +1921,7 @@
 (defn- gate-sets-in
   "Select tests through surviving named edges in one immutable database.
    Acquire identity and genuine declaration-ref joins once per operation."
-  {:seon/tasks #{"e4c8eac6a69a"}
+  {:seon/tasks #{'seon.fn/mention-closure-survives-beside-call-reach}
    :malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential :qualified-symbol]]
                   [:or [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
@@ -2050,7 +2050,7 @@
   answers, per seed, the conservative reverse closure through calls,
   references and declared edges that destructive isolation reads
   (`seon.test/destructive-reach`), never selection."
-  {:seon/tasks #{"e4c8eac6a69a"}
+  {:seon/tasks #{'seon.fn/mention-closure-survives-beside-call-reach}
    :malli/schema
    [:function
     [:=> [:cat :seon.fn/gate-request]
@@ -2107,7 +2107,7 @@
 (defn gate-set
   "The tests exercising one function identity (`call-reach`).
   Use gate-sets when one operation asks about several identities."
-  {:seon/tasks #{"300aca1ad57c"}
+  {:seon/tasks #{'seon.fn/tests-reaching-saturates}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
@@ -2115,7 +2115,7 @@
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
-  {:seon/tasks #{"300aca1ad57c"}
+  {:seon/tasks #{'seon.fn/tests-reaching-saturates}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]

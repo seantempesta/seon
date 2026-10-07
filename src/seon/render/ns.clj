@@ -98,13 +98,13 @@
     (if (vector? steps) steps [])))
 
 (defn task-ai
-  "One task as data: its id, name, kind and namespace, with its current step and progress; beyond
+  "One task as data: its id, symbol, name, kind and namespace, with its current step and progress; beyond
   distance zero its intent, must-reads and steps. Its subjects and proofs are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.task/view]}
   [unit]
   (let [task (or (:seon.render/value unit) unit)
         steps (unit-steps unit task)
-        named (merge (select-keys task [:seon.task/id :seon.task/name :seon.task/kind :seon.task/ns])
+        named (merge (select-keys task [:seon.task/id :seon.task/sym :seon.task/name :seon.task/kind :seon.task/ns])
                      (task/step-summary steps))]
     (if (zero? (node-distance unit))
       named
@@ -118,7 +118,7 @@
   "The read of a task's edges. Shown, never executed."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
   [unit]
-  (list 'seon.task/task-edges '(seon.db/db) (:seon.task/id (or (:seon.render/value unit) unit))))
+  (list 'seon.task/task-edges '(seon.db/db) (list 'quote (:seon.task/sym (or (:seon.render/value unit) unit)))))
 
 (defn task-html
   "Render one task as a card: intent, must-reads, evidence. Its subjects and

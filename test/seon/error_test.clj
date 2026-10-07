@@ -867,7 +867,7 @@
                               (db/db connection)))))))))
    (is (= 1 @applications) "The canonical cluster seed is the sole config writer.")))
 
-(deftest ^{:seon/tasks #{"c75ab14cb365"}} the-writer-not-the-evidence-shape-chooses-who-acts
+(deftest ^{:seon/tasks #{'seon.error/deliver-core-faults-to-responsible-agent}} the-writer-not-the-evidence-shape-chooses-who-acts
   ;; Audit 2026-09-26 §2.5 item 2: a Throwable's presence used to route an
   ;; attributed fault to the agent it happened to, and the same fault as a
   ;; flat value to nobody. Both now reach the escalation owner the producer

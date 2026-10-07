@@ -6,7 +6,8 @@
 
   Example:
   (my.task/steps {})"
-  (:require [seon.db :as db]
+  (:require [clojure.string :as str]
+            [seon.db :as db]
             [seon.error.refusal :as refusal]
             [seon.task :as task]))
 
@@ -34,7 +35,7 @@
                              (not [_ :seon.task/assigned ?handle])]
                     database
                     (into task/resolution-selector
-                          [:seon.task/name :seon.task/ns :seon.task/intent
+                          [:seon.task/sym :seon.task/name :seon.task/ns :seon.task/intent
                            {:seon.task/faults [:seon.error/signature
                                                {:seon.error/occurrences [:seon.error.occurrence/count]}]}]))
         view (fn [task]
@@ -48,6 +49,7 @@
                                                                      occurrence (:seon.error/occurrences fault)]
                                                                  (:seon.error.occurrence/count occurrence)))
                             :seon.render/operations [(list 'my.task/claim! {:seon.task/assigned (:seon.task/id task)})]}
+                     (:seon.task/sym task) (assoc :seon.task/sym (:seon.task/sym task))
                      (seq (:seon.task/faults task))
                      (assoc :seon.task/faults (mapv :seon.error/signature (:seon.task/faults task)))))))]
     (if (map? tasks)
@@ -63,7 +65,7 @@
   holder.
 
   Example:
-  (let [created (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles trim\"
+  (let [created (seon.task/create! {:seon.task/ns 'my.turn :seon.task/name \"titles-trim\"
                                     :seon.task/kind :function :seon.task/intent \"Trim reply titles.\"})]
     (my.task/claim! {:seon.task/assigned (:seon.task/id created)}))"
   {:malli/schema [:=> [:cat :seon.task/claim-request]
@@ -114,7 +116,7 @@
             namespace-name (get-in (db/pull database [{:seon.agent/namespace [:seon.ns/name]}] [:seon.agent/id agent-id])
                                    [:seon.agent/namespace :seon.ns/name] 'user)
             created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns namespace-name
-                                   :seon.task/name (str "work of " agent-id) :seon.task/kind :work
+                                   :seon.task/name (str "work-of-" (str/replace agent-id "/" ".")) :seon.task/kind :work
                                    :seon.task/intent (or intent (str "The work agent " agent-id " plans."))})]
         (if (:seon.error/at created)
           created

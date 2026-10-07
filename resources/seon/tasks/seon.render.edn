@@ -1,18 +1,15 @@
-[#:seon.task{:id "c5e9496b4cb1"
-             :name "captured-invocations-blank-source-faces"
+[#:seon.task{:name "captured-invocations-blank-source-faces"
              :kind :function
              :intent "Passing :seon.render/captured-invocations to render-call makes every source-producing AI face return nil (render.clj ~1573 returns the invocation's :seon.render.call/output, nil for source output): the same arguments change the meaning of the output."
              :must-read #{seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"}}
- #:seon.task{:id "76e1261553f3"
-             :name "cold-renders-recompute-read-evidence"
+ #:seon.task{:name "cold-renders-recompute-read-evidence"
              :kind :function
              :intent "A cold task-rooted debug page (48 nodes) made 2.3 M canonical-value-string calls and spent 1.1 s in seon.db/read-evidence for 115 render calls; root at n=2 costs 2.25 s and 6.8 GB cold. Render cost must follow what changed."
              :must-read #{seon.db/read-evidence seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "135d92ea1308"
-             :name "a-renderer-is-chosen-by-key-presence"
+ #:seon.task{:name "a-renderer-is-chosen-by-key-presence"
              :kind :function
              :intent "A plain value is rendered through an entity's declared renderer because it contains that entity's key: (select-keys issue [:seon.issue/id :seon.issue/status]) printed 'Issue ... still open.'; a map with :seon.turn/id 12 went through the turn renderer, which refused, and the evaluation was reported as an exception (7 KB, value printed twice); a schema definition whose properties hold :seon.render/ai renders its properties map through that renderer (about 10 KB of context dumped three times). Select by schema validity, and a render refusal is not an evaluation failure."
              :must-read #{seon.render/render-call}
@@ -20,8 +17,7 @@
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/seon/issues/a-plain-value-with-an-entity-key-renders-through-that-entitys-renderer-and-fails-the-evaluation.md"
                          "docs/seon/issues/schema-rows-render-through-the-pair-they-declare.md"}}
- #:seon.task{:id "15a0784f82d5"
-             :name "error-operation-read-as-returner"
+ #:seon.task{:name "error-operation-read-as-returner"
              :kind :function
              :intent "Rendering read :seon.error/operation as the function that returned the error and appended a false contract finding to every agent exception. Fixed 5d353149b and b51fbb71d; the producer's declared identity now selects the renderer (M3)."
              :must-read #{seon.render/declared-producers}

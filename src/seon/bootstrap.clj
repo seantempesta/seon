@@ -16,7 +16,7 @@
 
 (defn help-value
   "Read the REPL instructions and tools from this program version."
-  {:seon/tasks #{"2c66ac931003"}
+  {:seon/tasks #{'seon.bootstrap/help-teaches-the-wrong-tools}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.help/help]}
   [database agent-id]

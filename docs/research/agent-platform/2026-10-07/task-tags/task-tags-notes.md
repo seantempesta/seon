@@ -24,3 +24,100 @@ symbols; (B) `seon.id/id` hashes value structure, never printed text. Order C, A
 - Stale references left for their owners: `.agents/skills/clojure-testing/SKILL.md` §2.11 and §3 name the deleted
   test (lane final-revision); `docs/seon/schedule/README.md` lines on `examples_test` (root's index);
   `docs/seon/issues/an-agents-test-world-has-no-agent-so-my-functions-cannot-be-tested-as-documented.md` cites it.
+
+## Slice A: tasks are tagged and read by `ns/task-name` symbols
+
+What existed: `:seon/tasks #{"<handle>"}` string sets copied verbatim by `seon.fn/task-links` into the program
+entity's `:seon.task/tasks` (strings, indexed); readers (`seon.task/task-edges`, `open-tasks`, `task-findings`,
+`candidate-dangling`, `seon.error/proof`) joined those strings to `:seon.task/id`. 130 task-file entries wrote their
+handle as a literal `:id`; all matched their derivation.
+
+Change (BEHAVIOR CHANGE; schema, ingestion and readers in one slice):
+
+- `:seon.task/sym` (`ns/name`, `:db.unique/value`, row schema `:seon.task/task`) is derived at ingestion beside the
+  handle (`seon.task/task-sym`), by the file reader, `create!`/`propose!` (runtime) and `seon.error/producer-task`.
+  It is derived like the handle and stays out of `:seon.task/declaration` (the revision a basis compares): a stored
+  task written before this slice has no symbol until the reset rebuilds the tasks.
+- `:seon/tasks` takes quoted symbols, resolved through the namespace's aliases like `:seon/must-read`
+  (`task-links` uses the same `link`); a string tag refuses `:malformed-annotation`.
+- `:seon.task/tasks` holds symbols (`:seon.db/reference-to :seon.task/sym`, so the related-data walk follows
+  `[:seon.task/tasks :seon.task/sym]` with no hand list). Valuetype string→symbol: adoption replaces the attribute
+  (`seon.cluster/attribute-change-tx` `:replace`) and the reindexed program writes the symbols.
+- Readers join tags to `:seon.task/sym`: `task-edges` (handle in, referrers now all symbols), `open-tasks` and
+  `task-findings` (`:dangling` keyed by symbol, `:triage` a set of symbols), `candidate-dangling`,
+  `seon.error/proof`. The task's AI face (`seon.render.ns/task-ai`) and `my.task/open` show `:seon.task/sym`.
+- Ingestion: the `:entry` schema no longer admits `:seon.task/id` (closed, so a written handle refuses
+  `:invalid-entry`); `:handle-mismatch` and `:duplicate-id` are replaced by `:invalid-name` (a name that is no
+  symbol name, `seon.task/symbol-name?`) and `:duplicate-name` (same ns+name, any kind; Datahike's unique value
+  refuses the same across writers).
+- Runtime names became symbol names: `merge-<key>`, `faults-of-<name>`, `work-of-<agent-id with / as .>`; `create!`
+  refuses a non-symbol name with `:invalid-name`.
+- Sweep (one script, `scratchpad/task-tags/sweep.py`, mapping from `seon.task/task-handle` over every task file):
+  every `:id` stripped from 68 task files; every `:seon/tasks` handle set in src/test rewritten to quoted symbols
+  (85 sets in 50 files); handles quoted in task intents replaced by the symbol; the three spaced names hyphenated
+  (`seon.sci.reader/schema-entities-lose-their-declaring-namespace`,
+  `seon.sci.reader/a-value-deeper-than-the-readers-stack-cannot-be-read-back`,
+  `seon.sci.eval/a-fresh-contexts-result-handles-have-no-regression`). Hand conversions: task_ingestion,
+  related, walk_graph, source, host, resolution, ns, program tests; `test-support/task-row` writes a symbol.
+
+Design check: the design held against the code with four corrections found while converting and proving.
+1. Stored tasks written before the slice carry no symbol, so on a live branch every tag dangles until the tasks
+   are rebuilt. Putting `:seon.task/sym` in the declaration would let the delta rewrite them, but it changes what a
+   basis compares (`seon.cluster.host-test` passes a hand basis without it and refused `:revision-conflict`); the
+   symbol stays derived, outside the revision, and the owner-approved reset rebuilds the tasks.
+4. `task-edges` joined the tag through the task row, but an agent's branch may hold the tag and not the task row
+   (the task is created at the home after the branch forked): `my.program/propose-merge!` answered `:no-proofs`.
+   `task-edges` now takes the task's symbol, which `seon.task/assignment` reads at the home
+   (`:seon.task/assigned-work` gains `:seon.task/sym`); `seon.agent.loop/task-context` and the task's form face pass
+   the symbol.
+2. Runtime producers minted names with spaces (`"faults of f"`, `"work of <id>"`, `"merge <key>"`); a symbol needs a
+   symbol name, so the producers changed and `create!` refuses others. An agent id with whitespace still cannot
+   make a work task (refused by name, loud).
+3. `walk` follows value references only to unique attributes by shared named leaf or `:seon.db/reference-to`; the
+   tag attribute needed the explicit reference and the symbol attribute its row schema, else the related walk would
+   own task nodes under `:seon.task/sym` itself.
+Awkward: `seon.error/producer-task` still derives the handle with its own `id/id` (it cannot require `seon.task`:
+`seon.task` requires `seon.error`); it now derives the symbol beside it the same way.
+
+Held files: `test/seon/render/value_test.clj` and `resources/seon/tasks/seon.render.value.edn` (lane source-display)
+carry 2 handle tags and 2 `:id`s; the slice cannot land without them (ingestion refuses). Patch:
+`scratchpad/task-tags/held.patch`; root arranged the transfer.
+
+Not converted (recorded for root): `seon.agent.loop/task-context`, `seon.task/assign!`, `my.task/claim!` and
+`seon.task/resolution` still take a handle (task-context now passes the symbol to `task-edges` and its docstring
+example derives the handle instead of citing one). Health and fault delivery show runtime task handles (`:tasks
+#{"9abceddcc929"}`), not symbols. Accepting the task symbol wherever a handle is taken would finish "tasks are
+referenced as `ns/task-name`".
+
+### Landing path and proof (root's option 1)
+
+`bin/seon check` refused: it rehearses publication in default's running JVM (pid 65136, old compiled `seon.fn`), and
+the old `seon.fn/task-links` cannot index `#{'ns/name}` tags ("seon.fn/task-links refused its result at
+[:seon.task/tasks (quote my.edit/file-edit-tools-bypass-write-back)]",
+`data/clusters/default/logs/operator-check-20261007T145415.659.edn`). A rehearsal by the old indexer of an indexer
+change is the wrong proof by construction. Task `seon.operator/check-rehearses-an-indexer-change-with-the-old-indexer`
+(created on default, handle `5d2bfc4c45f8`, persisted in `resources/seon/tasks/seon.operator.edn`).
+
+Proof = the candidate booted in a throwaway JVM on a disposable store (fresh-install adoption by the new code) with
+the reaching tests, through the operator's own `candidate-revision!` and `candidate-tests!`:
+
+    bb -cp script:src <scratchpad>/task-tags/throwaway-full.clj   # paths = the slice's path list
+
+Runs (candidate, then HEAD baselines for every red):
+
+| run | commit | tests | result |
+|---|---|---|---|
+| first boot | candidate | (boot) | refused: dangling `seon.schema/declaration-stamp-has-no-caller` — my mapping read `seon.schema.edn.edn` as namespace `seon.schema`; fixed to `'seon.schema.edn/declaration-stamp-has-no-caller` |
+| 85225de5ff9f | candidate | 11 names | 176 pass, 7 fail, 2 error |
+| dd2d7c0063ce | HEAD 9d6b392b6 | the 4 red tests | 17 pass, 7 fail, 2 error: identical reds |
+| 46e98cf72f2f | candidate | host, ingestion, ns, loop | host-test 5 fails (3 on HEAD, 2 mine: basis conflict), found `task-edges` needing the symbol |
+| e3c499a59e18 | HEAD 9d6b392b6 | host-test proposal | 13 pass, 3 fail (lines 439, 440, 446) |
+| 1c27e62a17ae | final candidate (tree of `dad76d540`, lint of its `git archive` 0 errors) | 14 names incl. long | 216 pass, 10 fail, 2 error: exactly the HEAD reds above |
+
+Pre-existing reds on HEAD 9d6b392b6, unchanged by the slice: task `seon.test/reds-on-head-9d6b392b6-in-task-reaching-tests`
+(handle `f8a29d6a540a`, persisted in `resources/seon/tasks/seon.test.edn`).
+
+Mistake, corrected: a JVM-mode `spit` with relative paths wrote two task files inside default's running source
+archive (`data/source/42e569d9d…/resources/seon/tasks/seon.operator.edn` and `seon.test.edn`): default's working
+directory is that archive, not the checkout. Both restored byte-for-byte from `git show 42e569d9d:<path>` and
+verified with `cmp`; only a publication or boot from that archive reads them, and none ran in between.

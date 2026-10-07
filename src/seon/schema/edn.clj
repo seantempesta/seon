@@ -380,7 +380,7 @@
 
   A resource served from a jar cannot change while this process runs, so it
   stamps once as its URL and that connection's last-modified."
-  {:seon/tasks #{"68490518e186"}
+  {:seon/tasks #{'seon.schema.edn/declaration-stamp-has-no-caller}
    :malli/schema [:=> [:cat] [:vector [:tuple :string :int :int]]]}
   []
   (let [url (or (io/resource default-resource (resource-loader))

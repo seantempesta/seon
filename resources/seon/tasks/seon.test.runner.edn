@@ -1,11 +1,9 @@
-[#:seon.task{:id "f868dc9e74f5"
-             :name "admission-filters-the-whole-program-history"
+[#:seon.task{:name "admission-filters-the-whole-program-history"
              :kind :function
              :intent "program-written-since? costs 75 ms per admission even when nothing was written, because Datahike's SinceDB filters every program attribute's history under a time predicate (170 attributes). Carry Datahike attribute revisions in the provenance and compare them (exact, including in-transaction values)."
              :must-read #{seon.test.runner/program-written-since? seon.test/admit-run}
              :evidence #{"docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"}}
- #:seon.task{:id "32db32ffe15c"
-             :name "failure-evidence-is-stored-as-text"
+ #:seon.task{:name "failure-evidence-is-stored-as-text"
              :kind :namespace
              :intent ":seon.test.failure/expected and :actual are declared :string and :seon.test/failure-message is a stored string read in nine places (test.clj, issue.clj, render/test.clj, test/accretion.clj, problems.clj, sci/eval.clj), so report-value, message-text and failure-message cannot retire (R10). Store native operands (A/B key retirement) and convert the readers."
              :must-read #{seon.test.runner/record-tx}
@@ -27,7 +25,7 @@
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
  #:seon.task{:name "drift-is-blamed-on-concurrent-requests"
              :kind :namespace
-             :intent "With two test requests running at once in one JVM, ambient-drift blames one request's member for the other's instrumentation changes: refusal-test/every-producer-references-the-worlds-it-was-handed went red with 486 foreign wrappers while instrument-test ran; refusal-test/armed-refusal-returns-every-declared-family-without-refusing red with :snapshot-planned drift-removed while a second refusal-test request ran. restore-live-cluster-schema! also advances every live cluster's projection after every member. The before/after snapshot assumes nothing else runs; test agents (option B) route JVM-global tests to the isolated host and delete this family (f985bfc97116). Done when concurrent requests of non-host-global tests produce no drift reds."
+             :intent "With two test requests running at once in one JVM, ambient-drift blames one request's member for the other's instrumentation changes: refusal-test/every-producer-references-the-worlds-it-was-handed went red with 486 foreign wrappers while instrument-test ran; refusal-test/armed-refusal-returns-every-declared-family-without-refusing red with :snapshot-planned drift-removed while a second refusal-test request ran. restore-live-cluster-schema! also advances every live cluster's projection after every member. The before/after snapshot assumes nothing else runs; test agents (option B) route JVM-global tests to the isolated host and delete this family (seon.instrument/instrumentation-is-jvm-global). Done when concurrent requests of non-host-global tests produce no drift reds."
              :must-read #{seon.test.runner/ambient-snapshot seon.test.runner/ambient-drift seon.test.runner/restore-live-cluster-schema!}
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
  #:seon.task{:name "a-green-re-record-sweeps-the-failure-cell"

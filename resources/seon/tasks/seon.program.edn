@@ -1,18 +1,15 @@
-[#:seon.task{:id "0798a2fb94f3"
-             :name "a-docstring-edit-changes-the-definition-digest"
+[#:seon.task{:name "a-docstring-edit-changes-the-definition-digest"
              :kind :function
              :intent "definition-digest includes the docstring and the source text carrying it, so a docstring-only edit selects its callers' tests (observed on my.note/add!, since deleted: its doc edit gated 4 unrelated tests) and invalidates reuse through the reach digest's leaf. Owner ruling: docstring edits select nothing. Recommended option 1: an executable digest derived from the entity without doc and with the source read without its docstring (~40 + 15 lines)."
              :must-read #{seon.db/definition-digest-of seon.program/definition-digest seon.test.runner/reach-entity}
              :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"}}
- #:seon.task{:id "e457c998969e"
-             :name "program-attributes-trust-any-partition"
+ #:seon.task{:name "program-attributes-trust-any-partition"
              :kind :function
              :intent "program-attributes takes every partitioned schema's entries, not only :seon.db/attributes entities; a report schema marked with a partition put four uninstalled attributes into root's reads and stopped root's graph (fixed at the schema in 367871c45). Read only entity schemas, as seon.schema/assert-entity-partition! does."
              :must-read #{seon.program/program-attributes}
              :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
- #:seon.task{:id "400bcf52dd53"
-             :name "a-defn-scans-every-projection-form-per-call"
+ #:seon.task{:name "a-defn-scans-every-projection-form-per-call"
              :kind :function
              :intent "An agent defn on a branch takes 1.7 s p50 and allocates 1.57 GB JVM-wide with 182,000 armed calls per form (10 x (inc 1) on the same branch: 168 ms, 160 MB, 6,700 calls). The top counts are whole-projection walks: seon.program/source-family? 38,000 per defn (shapes-in and the families classification filter every key of :seon.schema.projection/forms, ~3,500, on each call), seon.schema.internal/reference-id 32,000, entity-maps 28,000, schema.datahike/compiled-storage 12,000, storable-attribute-in? 9,300. The family set and shapes are functions of the projection alone; derive them once per projection (the projection's own cache seam) and find which caller rebuilds per defn."
              :must-read #{seon.program/shapes-in seon.schema.internal/entity-maps}

@@ -1085,7 +1085,7 @@
   string: the twelve-character `handle` and its `intent`."
   {:malli/schema [:=> [:cat :seon.task/handle :seon.task/intent] :seon.task/task]}
   [handle intent]
-  {:seon.task/id handle :seon.task/ns 'fixture.tasks :seon.task/name handle
+  {:seon.task/id handle :seon.task/sym (symbol "fixture.tasks" handle) :seon.task/ns 'fixture.tasks :seon.task/name handle
    :seon.task/kind :function :seon.task/intent intent})
 
 (defn seed-cluster!

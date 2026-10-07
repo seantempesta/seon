@@ -1,13 +1,11 @@
-[#:seon.task{:id "18c37812b5bc"
-             :name "reply-map-is-not-edn-when-elided-or-rendered"
+[#:seon.task{:name "reply-map-is-not-edn-when-elided-or-rendered"
              :kind :function
              :intent "seon.repl/response splices shown text into the reply map verbatim. (vec (range 3000)) answered #:seon.repl{:value [0 1 … …2968] then a newline and the floor's ';; …N = N more … (seon.print/value-at result/e7b3b69b578ae [...]).' legend, so ', :result result/e7b3b69b578ae, :ms 711}' sits on the comment line: read as EDN the reply loses its handle, its time and its closing brace. A declared renderer's response keeps only diagnostics and errors (a pull of a turn answered prose alone), so every rendered value loses :result and :ms. One composer: the reply map must read back as data for every value, and a rendered value keeps its handle and time."
              :must-read #{seon.repl/response seon.repl/value-text}
              :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}
- #:seon.task{:id "2f667b760734"
-             :name "a-slow-reply-names-nothing"
+ #:seon.task{:name "a-slow-reply-names-nothing"
              :kind :function
-             :intent "The SCI reply's :seon.repl/ms is the arm's evaluation time only (repl.clj ~218-219): acquisition (339 ms on a probe, recorded as :seon.eval/acquisition-ms but not shown), the install gate's disposable branch, and settlement are absent, and no armed function is named. pid 66629's 82 s evaluations left nothing on the cluster (max recorded duration 471 ms). Record [sym ms] of armed calls over slow-ms into the evaluating kernel arm (already per evaluation and carried across threads, adopt-arm), settle them beside acquisition-ms, and show the whole wall time and those names when it exceeds one second; this lets explain-slow's JVM-wide window go (c7bc0c506aa4). Done when a regression whose evaluation waits over one second on an armed call gets a reply naming that call and the whole wall time, and concurrent work in other arms is not named."
+             :intent "The SCI reply's :seon.repl/ms is the arm's evaluation time only (repl.clj ~218-219): acquisition (339 ms on a probe, recorded as :seon.eval/acquisition-ms but not shown), the install gate's disposable branch, and settlement are absent, and no armed function is named. pid 66629's 82 s evaluations left nothing on the cluster (max recorded duration 471 ms). Record [sym ms] of armed calls over slow-ms into the evaluating kernel arm (already per evaluation and carried across threads, adopt-arm), settle them beside acquisition-ms, and show the whole wall time and those names when it exceeds one second; this lets explain-slow's JVM-wide window go (seon.profile/slow-explanation-blames-the-agent-for-platform-time). Done when a regression whose evaluation waits over one second on an armed call gets a reply naming that call and the whole wall time, and concurrent work in other arms is not named."
              :must-read #{seon.profile/explain-slow seon.sci.kernel/adopt-arm seon.repl/response-entries}
              :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}
  #:seon.task{:name "every-reply-repeats-open-faults"

@@ -13,18 +13,17 @@
             [seon.render.walk :as walk]
             [seon.test-support :as support]))
 
-;; A literal task handle, the one ingestion derives for [rd.a "related" :function].
-(def ^:private handle "da318500997f")
+(def ^:private handle (task/task-handle 'rd.a "related" :function))
 
 (def ^:private source
   (str "(ns rd.a (:require [clojure.test :refer [deftest is]]))\n"
        "(defn c [v] v)\n"
-       "(defn b {:seon/tasks #{\"" handle "\"}} [v] (c v))\n"
+       "(defn b {:seon/tasks #{'rd.a/related}} [v] (c v))\n"
        "(defn a [v] (b v))\n"
-       "(deftest ^{:seon/tasks #{\"" handle "\"}} proves (is (= 1 (a 1))))\n"))
+       "(deftest ^{:seon/tasks #{'rd.a/related}} proves (is (= 1 (a 1))))\n"))
 
 (def ^:private task
-  (str "[#:seon.task{:id \"" handle "\" :name \"related\" :kind :function"
+  (str "[#:seon.task{:name \"related\" :kind :function"
        " :intent \"Prove related data.\" :must-read #{rd.a/c}}]"))
 
 (defn- world!
@@ -55,15 +54,12 @@
   [group]
   (into #{} (map #(or (:seon.fn/sym %) (:seon.test/sym %) (:seon.ns/name %) (:seon.task/id %))) (:seon.related/items group)))
 
-(deftest the-fixture-handle-is-the-derived-task-handle
-  (is (= (task/task-handle 'rd.a "related" :function) handle)))
-
 (deftest value-references-derive-from-the-schemas
   (support/with-database
    (fn [connection]
      (let [pairs (set (:seon.render.walk/value-attributes (walk/graph-structure (db/carried-projection @connection))))]
        (is (every? pairs [[:seon.fn/calls :seon.fn/sym] [:seon.task/must-read :seon.fn/sym] [:seon.test/subject :seon.fn/sym]
-                          [:seon.task/tasks :seon.task/id] [:seon.fn.arity/input-refs :seon.schema/key]
+                          [:seon.task/tasks :seon.task/sym] [:seon.fn.arity/input-refs :seon.schema/key]
                           [:seon.schema/references :seon.schema/key] [:seon.instrument/fn :seon.fn/sym]
                           [:seon.fn/references :seon.fn/sym] [:seon.task/assigned :seon.task/id]])
            "every value attribute naming an identity is followed, with no hand list")))))

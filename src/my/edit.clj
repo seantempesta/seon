@@ -1,6 +1,6 @@
 (ns ^{:seon.ns/context-relevant? true} my.edit
   "Edit source files only when their expected digest still matches."
-  {:seon/tasks #{"6a6e13871530"}}
+  {:seon/tasks #{'my.edit/file-edit-tools-bypass-write-back}}
   (:require [clojure.test.check.generators :as gen]
             [seon.edit :as edit]
             [seon.schema :as schema]

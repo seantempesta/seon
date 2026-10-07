@@ -36,7 +36,7 @@
   (with-context-agent
    (fn [connection]
      (let [created (task/create! {:seon.db/connection connection :seon.agent/id "context"
-                                  :seon.task/ns 'seon.id :seon.task/name "context fixture" :seon.task/kind :function
+                                  :seon.task/ns 'seon.id :seon.task/name "context-fixture" :seon.task/kind :function
                                   :seon.task/intent "Fixture task naming one function."
                                   :seon.task/must-read #{'seon.task/task-edges}})
            units (loop/task-context (db/db connection) (:seon.task/id created))
@@ -52,8 +52,8 @@
    (fn [connection]
      (let [request {:seon.db/connection connection :seon.agent/id "context" :seon.task/ns 'seon.id
                     :seon.task/kind :function :seon.task/must-read #{'seon.task/task-edges}}
-           created (task/create! (assoc request :seon.task/name "context fixture" :seon.task/intent "First."))
-           other (task/create! (assoc request :seon.task/name "context neighbour" :seon.task/intent "Second."))
+           created (task/create! (assoc request :seon.task/name "context-fixture" :seon.task/intent "First."))
+           other (task/create! (assoc request :seon.task/name "context-neighbour" :seon.task/intent "Second."))
            units (loop/task-context (db/db connection) (:seon.task/id created))
            related (some (fn [u] (let [v (:seon.agent.loop/value u)]
                                    (when (and (vector? v) (some #(= (:seon.task/id other) (:seon.task/id %)) v)) u)))

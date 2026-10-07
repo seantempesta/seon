@@ -3016,7 +3016,7 @@
         (is (identical? projection (db/carried-projection retained))
             "its projection is the loaded builder's, not one keyed by its recorded program")))))
 
-(deftest ^{:seon/tasks #{"54a8f328a32e"}} transaction-report-datom-law
+(deftest ^{:seon/tasks #{'seon.db/hot-total-predicates-run-hundreds-of-millions-of-times}} transaction-report-datom-law
   ;; The leaf of every :seon.db/transaction-report contract: true for each
   ;; datom a real write reports, false for anything else.
   (test-support/with-database

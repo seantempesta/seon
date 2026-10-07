@@ -420,7 +420,7 @@
 
   The top `limit` definitions by each measure, and every definition whose
   maximum exceeds one second."
-  {:seon/tasks #{"5f54ae50d841"}
+  {:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}
    :malli/schema [:=> [:cat [:vector :seon.profile/cell] [:int {:min 1}]] :seon.profile/report]}
   [population limit]
   (let [observed (into [] (comp (map observation) (filter (comp pos? :seon.profile/calls))) population)
@@ -601,7 +601,7 @@
 
   Nil is the declared answer for an operation that finished within the bound;
   the fast path pays one clock read."
-  {:seon/tasks #{"c7bc0c506aa4"}
+  {:seon/tasks #{'seon.profile/slow-explanation-blames-the-agent-for-platform-time}
    :malli/schema [:=> [:cat :seon.profile/mark] [:or :nil :seon.profile/explanation]]}
   [mark]
   (when (< slow-ms (quot (- (System/nanoTime) (:seon.profile/started-ns mark)) 1000000))

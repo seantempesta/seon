@@ -145,7 +145,7 @@ Verified at default's REPL on 2026-09-23. Forms and timings are in
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program entities, so it does not test an in-memory def (measured).
 5. **Propose, then root accepts.** Root assigns the task (`seon.task/assign!`);
-   the agent writes a deftest naming it (`^{:seon/tasks #{"<handle>"}}`) and calls
+   the agent writes a deftest naming it by symbol (`^{:seon/tasks #{'ns/task-name}}`) and calls
    `(my.program/propose-merge! {})`, which runs those proofs on its branch.
    Root reads `(my.program/proposals)` and passes one open proposal to
    `my.program/prepare-merge!`, then the answer to `accept-merge!` (which

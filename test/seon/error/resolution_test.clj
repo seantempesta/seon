@@ -10,7 +10,7 @@
             [seon.test-support :as test-support]))
 
 (defn- fault-in
-  "Records a fault `producer` produced as of another digest; answers its signature and its task's handle."
+  "Records a fault `producer` produced as of another digest; answers its signature and its task's handle and symbol."
   [connection environment producer]
   (let [receipt (fault/fault! environment
                               {:seon.error/at (java.util.Date.) :seon.error/layer ::boundary
@@ -20,12 +20,12 @@
                                :seon.task/refused :unproven :seon.task/holder (symbol (namespace producer))}
                               (assoc context :seon.error/declared-schema :seon.task/refused-error))
         signature (:seon.error/signature receipt)]
-    [signature (-> (signature-row connection signature) :seon.task/_faults first :seon.task/id)]))
+    (into [signature] ((juxt :seon.task/id :seon.task/sym) (-> (signature-row connection signature) :seon.task/_faults first)))))
 
 (defn- define-in!
-  "Writes `producer` as a stored declaration, and the test `tested` naming `handle` with one stored run of
+  "Writes `producer` as a stored declaration, and the test `tested` naming the task `tag` with one stored run of
   `failures` failures, in that order."
-  [connection producer tested handle failures]
+  [connection producer tested tag failures]
   (let [namespace-name (symbol (namespace producer))
         source #(str "(" % ")")]
     (test-support/transacted! connection [(test-support/namespace-entity (db/db connection) namespace-name)
@@ -34,7 +34,7 @@
     (when tested
       (test-support/transacted! connection [(test-support/program-entity
                                              (db/db connection) [:seon.test/sym tested]
-                                             (str "(deftest ^{:seon/tasks #{\"" handle "\"}} " (name tested) " (is true))"))])
+                                             (str "(deftest ^{:seon/tasks #{'" tag "}} " (name tested) " (is true))"))])
       (test-support/transacted!
        connection
        [{:seon.test.run/id (str (random-uuid)) :seon.test.run/at (java.util.Date.)
@@ -51,8 +51,8 @@
            open? #(nil? (error/resolution (db/db connection) %))
            resolved-by #(:seon.error/resolved-by (error/resolution (db/db connection) %))
            scenario (fn [producer failures]
-                      (let [[signature handle] (fault-in connection environment producer)]
-                        (define-in! connection producer (symbol (namespace producer) "proves") handle failures)
+                      (let [[signature handle tag] (fault-in connection environment producer)]
+                        (define-in! connection producer (symbol (namespace producer) "proves") tag failures)
                         [signature handle]))
            [green] (scenario 'attribution.green/target 0)
            [red] (scenario 'attribution.red/target 1)

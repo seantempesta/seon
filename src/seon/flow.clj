@@ -705,7 +705,7 @@
 
 (defn stop-work-launcher!
   "Close IO admission, settle accepted work, then stop the Flow graph."
-  {:seon/tasks #{"f12bf9eda5f1"}
+  {:seon/tasks #{'seon.flow/a-cancelled-future-is-not-exit}
    :malli/schema
    [:=> [:cat :seon.flow/work-launcher]
     [:or :nil :seon.await/timeout-error]]}

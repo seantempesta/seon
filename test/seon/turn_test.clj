@@ -2185,7 +2185,7 @@
                   [:seon.cluster.eval/id (id/evaluation run-id %)])
         (range 2)))
 
-(deftest ^{:seon/tasks #{"47b64f4cebf4"}} a-throwable-escaping-the-turn-closes-its-run-and-propagates-whole
+(deftest ^{:seon/tasks #{'seon.turn/failed-run-left-unsettled}} a-throwable-escaping-the-turn-closes-its-run-and-propagates-whole
   ;; THE CLASS (audit 2026-09-26 M4 L2): a Throwable leaving the turn after
   ;; its run opened left the run open, so the agent's every later run refused
   ;; `agent-already-running`. The turn boundary closes it with the writer's
@@ -2207,7 +2207,7 @@
        (is (identical? escaped (#'turn/close-escaped-run! handle "printer" escaped))
            "with no open run the boundary writes nothing and still answers the throwable")))))
 
-(deftest ^{:seon/tasks #{"023acee5f88d"}} a-refused-settlement-keeps-each-evaluated-value
+(deftest ^{:seon/tasks #{'seon.turn/a-refused-settlement-is-stored-as-a-core-fault}} a-refused-settlement-keeps-each-evaluated-value
   ;; THE CLASS (audit 2026-09-26 M4 L3): a refused batch settlement guessed a
   ;; failing ordinal by re-applying entities, and every other form's shown text
   ;; was replaced by the refusal. The evaluated values stay; the refused

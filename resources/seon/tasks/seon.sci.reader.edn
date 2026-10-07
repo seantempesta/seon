@@ -1,21 +1,19 @@
-[#:seon.task{:id "430c53fde483"
-             :name "fabrication-refusal-guards-every-reader"
+[#:seon.task{:name "fabrication-refusal-guards-every-reader"
              :kind :function
              :intent "The anti-fabrication refusal (reader.cljc:567-577) applies to every reader, so MCP, tests and agent code cannot read {:seon.repl/value 1} as data. The provider request already stops at '#:seon.repl'; move the check to provider-reply planning (seon.cluster.reply) so it guards only model replies (agent-centric F14)."
              :must-read #{seon.sci.reader/read-events}
              :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
                          "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}
- #:seon.task{:id "5f48e860a402"
-             :name "reader-head-check-is-a-second-declaration-derivation"
+ #:seon.task{:name "reader-head-check-is-a-second-declaration-derivation"
              :kind :function
              :intent "The reader derives function and test declarations by a top-level head check (function-declaration, reader.cljc:252, test-declaration :306: (first form) resolves to defn/deftest), beside admission's one derivation from clj-kondo's analysis (seon.sci.eval/analyzed-rows -> seon.fn/source-rows). Admission never reads these facts (seon.sci.eval/row uses only schema, ns and deletion facts), but seon.turn's read-only-evaluation classifier (turn.clj:2024, program/declaration-row over source events) does, so (do (defn f ...)) reads there as declaring nothing. Make that classifier read the evaluation's admitted entity, then delete the reader's function/test head checks."
              :must-read #{seon.sci.reader/read-events seon.turn.batch/derive-form seon.program/declaration-row}
              :evidence #{"docs/research/agent-platform/landing/fix-do-defn-opus-2026-09-26.md"}}
- #:seon.task{:name "schema entities lose their declaring namespace"
+ #:seon.task{:name "schema-entities-lose-their-declaring-namespace"
              :kind :function
              :intent "A schema declared by seon.schema/register! in an agent namespace stores no :seon.schema/ns link: every one of 3390 schema entities on default has none, though seon.sci.reader/declaration-facts sets it, program.cljc:1308 copies it and my.program/names-through (src/my/program.clj:285) reads it to list a namespace's schemas. Done when loop-proof-test/virtual-loop-end-to-end line 'the 4 order schema keys of my.agents.juniper' (test/seon/loop_proof_test.clj, the [?s :seon.schema/ns ?n] query) passes: find where the batch/turn path drops the ns (suspect 5e22bc5f6, one path S10) and fix the producer."
              :must-read #{my.program/names-through seon.program/canonical-row seon.sci.reader/declaration-facts}}
- #:seon.task{:name "a value deeper than the reader's stack cannot be read back"
+ #:seon.task{:name "a-value-deeper-than-the-readers-stack-cannot-be-read-back"
              :kind :function
              :intent "seon.id/printed prints any depth (77c9f5459), but the one reader recurses once per level (edamame parse-next/parse-to-delimiter): a stored value artifact nested deeper than ~2,000 collection levels reads as one error event 'java.lang.StackOverflowError' after a restart, so seon.render.value/read-artifact refuses it (3,000-deep vector text on default, 2026-10-07). Make the read depth-safe at its producer (iterative collection reading in the edamame fork, or a declared depth bound the printer and admission share so no unreadable artifact is ever stored). Done when a seon.sci.reader-test regression reads (str (apply str (repeat 10000 \"[\")) (apply str (repeat 10000 \"]\"))) as one form and seon.render.value-test round-trips a 10,000-deep artifact through read-artifact."
              :must-read #{seon.sci.reader/read seon.render.value/read-artifact seon.id/printed}

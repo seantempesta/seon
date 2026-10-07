@@ -1,44 +1,37 @@
-[#:seon.task{:id "5188bb532195"
-             :name "status-casts-a-keyword-to-a-symbol-during-boot"
+[#:seon.task{:name "status-casts-a-keyword-to-a-symbol-during-boot"
              :kind :function
              :intent "bin/seon status during boot threw ClassCastException Keyword -> Symbol in instrument/replaced-roots, reached from mcp-runtime-observation's program-function-files entities (diagnostic data/clusters/default/logs/operator-status-20260926T103046.142.edn). Not investigated."
              :must-read #{seon.cluster/mcp-runtime-observation seon.instrument/replaced-roots}
              :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "1d92b52b2470"
-             :name "adoption-readopts-what-the-jvm-loaded"
+ #:seon.task{:name "adoption-readopts-what-the-jvm-loaded"
              :kind :function
              :intent "A move to HEAD spends 6.4-9.9 s adopting after readiness (development-source-refresh! 5,171 ms, adopt-entities! 2,761 ms) re-adopting what the fresh JVM already loaded; boot's store->branch layer is 27-32 s whenever the commit touches analyzer reach (full-source-refresh! :all: lint ~8 s, analysis ~8 s, three transactions ~10 s); today's nuke was ready in 43 s. Both are over the 10-second start law. 2026-10-07 start --head onto 108dd1c3e: ready 51.0 s, :seon.source/current 44.5 s publishing 132 of 847 changed inputs (.clj-kondo/config.edn among them, which reselects every source), then a post-readiness adoption of 20.8 s (refresh-source! -> development-source-refresh! 20.5 s, adopt-entities! 15.8 s, one 15.0 s transact! with write-report validation 4.5 s, published-changes 3.8 s). An unchanged restart selects 0 paths in 79 ms, so the publication is catch-up; the re-adoption is per move."
              :must-read #{seon.cluster/adopt-entities! seon.cluster/development-source-refresh! seon.cluster/full-source-refresh!}
              :evidence #{"docs/research/agent-platform/landing/inv-boot-operator-opus-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"
                          "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md"}}
- #:seon.task{:id "8aba59c87b88"
-             :name "record-jvm-evaluations-on-shared-path"
+ #:seon.task{:name "record-jvm-evaluations-on-shared-path"
              :kind :function
              :intent "A JVM-mode MCP evaluation is evaluated by the prepl and projected by mcp-project, but never recorded: it has no evaluation record, no settlement window and so no fault observation, unlike an SCI run. The JVM evaluator should be a stage value supplied to the one read-evaluate-record-print path (no custody), so its value, its error in the one shape and its window's faults are the same saved observation MCP and the context show."
              :must-read #{seon.cluster/mcp-project seon.cluster/mcp-valf}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
                          "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
- #:seon.task{:id "0b3f443d1d94"
-             :name "the-mcp-value-is-a-converted-tree"
+ #:seon.task{:name "the-mcp-value-is-a-converted-tree"
              :kind :function
              :intent "The MCP :seon.dev.mcp/value is the selected print tree converted back to data (admit/semantic-value) with elision maps inline, not the shared AI text the one-render-path design names (its 3h item 9); a stored backing also reads a sorted map back in hash order."
              :must-read #{seon.cluster/mcp-project}
              :evidence #{"docs/research/agent-platform/landing/fix-floor-review-2026-09-26.md"}}
- #:seon.task{:id "5786fd38774b"
-             :name "a-missed-quiescence-keeps-the-route-listener"
+ #:seon.task{:name "a-missed-quiescence-keeps-the-route-listener"
              :kind :function
              :intent "A stop that misses armer quiescence keeps the route listener: a wedged proc cannot run its own stop transition. Recommended option 2 queues flow/stop even on a miss (about 15 lines in disarm-agents!)."
              :must-read #{seon.cluster/disarm-agents!}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/a-cluster-stop-that-misses-armer-quiescence-keeps-the-route-listener.md"}}
- #:seon.task{:id "d8f73961e44f"
-             :name "adoption-write-costs-sixteen-seconds"
+ #:seon.task{:name "adoption-write-costs-sixteen-seconds"
              :kind :function
              :intent "start --head spends 15.9 s in the adoption write, mostly seon.db with-declarations x18,794; over the one-second rule. Cost must follow the changed declarations."
              :evidence #{"docs/research/agent-platform/landing/fix-dial-retirement-adoption-2026-09-26.md"}}
- #:seon.task{:id "17027736987a"
-             :name "boot-publication-phases-are-invisible"
+ #:seon.task{:name "boot-publication-phases-are-invisible"
              :kind :function
              :intent "A boot resume publication runs before arm-host-program!, so no profile cell observes it and refresh-source!'s explain-slow says nothing; *source-progress!* is bound nowhere (report-source-progress! is a no-op outside tests), so its phase lines vanish. The 132 s store->branch layer of the e405f51be boot could only be split by replaying the publication on a scratch branch (tmp/perf-boot-opus/replay.clj). Carry the boot publication's phase milliseconds in its result and the instance's readiness. Still true 2026-10-07: the 44.5 s :seon.source/current layer of the 108dd1c3e boot has no profile cell; seon.log has two lines for the whole boot."
              :must-read #{seon.cluster/refresh-source! seon.cluster/populate-source!}
@@ -58,8 +51,7 @@
              :intent "In JVM mode for a cluster with no connection (before the store layer is up, or a cluster name this JVM does not host), mcp-project has no database for render.value/prepare, whose unit requires :seon.db/db; the refusal is attached and the value falls back to plain printing with the MCP profile's budget unapplied. AGENTS: nothing prints unbounded. The fallback prints through the floor's bounded path (bounded-text), never plain Clojure printing of the whole value (fix-c, 4c2ac5774)."
              :must-read #{seon.cluster/mcp-project seon.render.value/prepare}
              :evidence #{"docs/research/agent-platform/red-triage-3-2026-09-27.md"}}
- #:seon.task{:id "e4f90fb37e0c"
-             :name "incremental-publication-test-redefines-process-wide-vars"
+ #:seon.task{:name "incremental-publication-test-redefines-process-wide-vars"
              :kind :function
              :intent "seon.incremental-publication-test/non-program-inputs-have-their-own-publication-owner points publication at a fixture checkout with with-redefs-fn over clojure.java.io/resource and seon.cluster/publication-roots. Both are Var roots, so every thread of the shared JVM (default's agents, other test members) reads the fixture's schemas and roots while it runs. Give refresh-source! a source seam (publication roots and the schema resource directory passed as values) so the test hands its checkout, or declare the test isolated until then."
              :must-read #{seon.cluster/refresh-source! seon.cluster/publication-roots}
@@ -69,8 +61,7 @@
              :intent "invalid-value-retraction decodes each stored value with seon.schema.datahike/decode-attribute-value-in, which for an EDN-encoded attribute validates the decoded value against the attribute's NEW form and throws ::schema-invalid (datahike.clj:328-331). So a narrowed EDN-encoded attribute makes the whole adoption throw instead of retracting only the refused values, and an EDN-encoded cardinality-many attribute would validate one member against its whole [:vector ...] form. No installed many attribute is EDN-encoded today (117 probed on default, 2026-09-27), so the many case is latent. Decode without the slot validation here (the retraction validates), or share the writer's attribute plan (db.clj write-attribute-plan)."
              :must-read #{seon.cluster/invalid-value-retraction seon.schema.datahike/decode-attribute-value-in}
              :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}
- #:seon.task{:id "47491ad902b3"
-             :name "runtime-status-throws-on-a-boot-window-read"
+ #:seon.task{:name "runtime-status-throws-on-a-boot-window-read"
              :kind :function
              :intent "At 18:01:08Z 2026-09-27, 19 s into pid 75447, runtime_status threw open-faults' contract refusal ('expected must be an immutable Datahike database value, got a map') instead of answering: mcp-runtime-observation (cluster.clj ~620-624) calls db/db several times and passes its declared :seon.db/invalid-read-error map on (cause unverified). Read one database value; an error value makes problems unavailable (:seon.dev.mcp/problems-unavailable) and health :unknown. Done when a regression whose database read answers an error value gets an observation with health :unknown, never a throw."
              :must-read #{seon.cluster/mcp-runtime-observation}

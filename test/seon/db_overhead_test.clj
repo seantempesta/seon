@@ -42,7 +42,7 @@
            :seon.db-overhead/datoms (count (:tx-data report))
            :seon.db-overhead/entities (count (into #{} (map :e) (:tx-data report))))))
 
-(deftest ^{:seon/tasks #{"d6e3b775f474"}} query-preparation-has-bounded-armed-work
+(deftest ^{:seon/tasks #{'seon.db/the-query-wrapper-costs-36x-datahike}} query-preparation-has-bounded-armed-work
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -77,7 +77,7 @@
         (is (= attribute (:seon.schema.datahike/attr refusal)))
         (is (= rule (:seon.schema.datahike/rule refusal)))))))
 
-(deftest ^{:seon/tasks #{"00c46a820209"}} final-validation-asks-cell-storage-of-written-attributes-only
+(deftest ^{:seon/tasks #{'seon.db/every-commit-validates-its-write-report-three-ways}} final-validation-asks-cell-storage-of-written-attributes-only
   ;; A declaration write leaves a new projection whose holder answers nothing
   ;; yet. Default, 2026-10-07: every defn commit then asked all 3,389 forms
   ;; whether they are vector-shaped (143-177 ms of a 190-315 ms validation).

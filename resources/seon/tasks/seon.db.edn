@@ -1,52 +1,44 @@
-[#:seon.task{:id "d6e3b775f474"
-             :name "the-query-wrapper-costs-36x-datahike"
+[#:seon.task{:name "the-query-wrapper-costs-36x-datahike"
              :kind :function
              :intent "seon.db/q costs 107 us and 472 KB for a two-clause query against d/q's 3 us and 6 KB (36x time, 76x allocation): query-patterns/parsed-nodes are tree-seq walked 5 times per call, query-input-values 4 times, and armed private checks add about 70 us (encode-query-request 18, decode-query-result 16, query-value-type-error 12, query-attribute-error 9 us). A trivial root run issues 62 q and 43 pull, 10-35 ms. Compute patterns and input values once per call; db? was fixed in the fork (cefd8a2bf)."
              :must-read #{seon.db/q}
              :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "991ce24cca22"
-             :name "call-reach-is-recomputed-per-render"
+ #:seon.task{:name "call-reach-is-recomputed-per-render"
              :kind :function
              :intent "stored-call-reach is recomputed on every render call (about 4 ms each; 2.2 GB in one debug-page window). Memoize it per commit and call identity."
              :must-read #{seon.db/stored-call-reach seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "a8e1644f2c19"
-             :name "the-sci-call-hook-pays-armed-database-resolution"
+ #:seon.task{:name "the-sci-call-hook-pays-armed-database-resolution"
              :kind :function
              :intent "The call-preparation hook costs 4.8 us and 14 KB per SCI Var call, 77% of it inside db/db's armed internals (resolve-database-value), measured over 100,000 calls. It runs on every interpreted call. Resolve the database unarmed on the hook path."
              :must-read #{seon.call-preparation/hook seon.db/db seon.db/resolve-database-value}
              :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:id "0caf995ddc22"
-             :name "arity-caches-copy-the-indexes"
+ #:seon.task{:name "arity-caches-copy-the-indexes"
              :kind :function
              :intent "seon.db/arity-commit-cache holds 92.6 MB at idle: two bases of 54 and 38 MB (one with 99,659 edges, 7,518 callers, 4,927 callees), whose edge-set, by-caller and by-callee copy what the EAVT index and the :seon.fn/calls AVET index already hold; bases evicted from arity-base-cache (LRU 4) stay alive in the commit cache (LRU 16); the content key holds 78k-datom vectors that keep loose datoms alive (1.48 M loose datoms, 160 MB heap-wide). Keep only candidates, checked, edges and bounds per value and read callers and callees from the indexes. Measured again 2026-09-28 (default, seon.cache/status): the three arity kinds hold 458 of the cache's 503 MB weighted bytes (arity-base 283 MB, 39 hits / 131 misses; arity-revision 175 MB, 14 hits / 211 misses; the same base objects are weighed once per kind that holds them), evicting everything else (decoded-edn 22,054 evictions); arity-base rebuilds from the whole program per write revision (116 calls, 142 ms mean, 1.3 s max). The gate is whole-program work per change: check only the edges a write touches (callers among the written definitions, and callers of written callees via the :seon.fn/calls AVET index), keep no whole-program base, and delete the three kinds."
              :must-read #{seon.db/arity-mismatches}
              :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"}}
- #:seon.task{:id "d46e436e65f4"
-             :name "custody-scopes-widen"
+ #:seon.task{:name "custody-scopes-widen"
              :kind :function
              :intent "Held custody is not a positive value: call-with-custody rebinds *conn* to any connection, including one conjured by branch-connection, seon.cluster.boot/connection or registry/active-branch-connection, all reachable from agent SCI. A branch agent read :cluster-default and its 23 agents; foreign-connection-error then compares the cluster with itself; call-without-custody clears *conn* so agent code looks like a JVM REPL; the db.clj:325 refusal teaches agents (seon.cluster.boot/connection 'default'); capability handlers such as seon.shell.jvm/run run without admission. Violates 'Authority comes only from held custody'. Needs the owner's delivery ruling (options: refuse delivery out of a branch, declared deliveries at the writer, or root pulling)."
              :must-read #{seon.db/branch-connection seon.db/call-with-custody seon.db/call-without-custody}
              :evidence #{"docs/research/agent-platform/landing/custody-authority-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"}}
- #:seon.task{:id "b2c9509deb26"
-             :name "deletion-error-has-no-caller"
+ #:seon.task{:name "deletion-error-has-no-caller"
              :kind :function
              :intent "seon.db/deletion-error (18 lines) has zero callers in src, test, script and default's program graph (agent-centric F01 residue). Delete it."
              :must-read #{seon.db/deletion-error}
              :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
                          "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}
- #:seon.task{:id "126f25106b63"
-             :name "a-query-refusal-holds-a-parser-object"
+ #:seon.task{:name "a-query-refusal-holds-a-parser-object"
              :kind :function
              :intent "A seon.db/q refusal's :seon.error/offending holds a datalog.parser.type.Placeholder host object instead of the authored clause, so an honest [:or [:vector ...] :seon.db/error-result] contract still refuses the returned refusal."
              :must-read #{seon.db/q}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/research/agent-platform/landing/agent-test-worlds-2026-09-26.md"}}
- #:seon.task{:id "4bb788513862"
-             :name "the-checked-writer-is-slow-on-a-fresh-branch"
+ #:seon.task{:name "the-checked-writer-is-slow-on-a-fresh-branch"
              :kind :function
              :intent "A test request's 8-datom overlay write takes 480-620 ms, 211 ms of it write-report-error; root runs pay 8-9 ms of it over 3 transactions. Make the checked writer's report validation cost follow the written datoms. Named cause (2026-09-26, commit-floor): every agent settlement adds its turn to :seon.runtime/turns, a cardinality-many component, so write-owned-values-error expands the runtime's whole owning value, every turn the agent ever ran: 10.8 ms at 179 turns, 12.3 ms at 219 (about 37 us per turn, on the writer, per form), unbounded until :seon.config.db/validation-node-limit refuses the agent's writes. Validate the changed children and the owner's own attributes, or drop the runtime->turns edge that :seon.turn/agent already derives."
              :must-read #{seon.db/transact! seon.db/write-report-error seon.db/write-owned-values-error}
