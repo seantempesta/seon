@@ -1,7 +1,0 @@
-#:seon.agent.loop{:why [:string {:min 1 :description "Why a context unit is shown: one line for the reader auditing the context, never sent to the model."}]
-                  :form [:schema {:description "The requery form an agent can run at its REPL to read the unit's value again."} :seon.schema/value]
-                  :value [:schema {:description "The value the unit's form answers on the context's database, shown whole."} :seon.schema/value]
-                  :unit [:map {:description "One unit of a task-seeded context (seon.agent.loop/task-context)."}
-                         [:seon.agent.loop/why :seon.agent.loop/why]
-                         [:seon.agent.loop/form :seon.agent.loop/form]
-                         [:seon.agent.loop/value :seon.agent.loop/value]]}

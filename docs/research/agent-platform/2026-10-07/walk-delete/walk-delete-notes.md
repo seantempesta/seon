@@ -9,7 +9,7 @@ tags: [notes, agent-loop, deletion]
 
 Owner, 2026-10-07: "Pull out the old multi hop stuff." Root correction, same day: "don't invent new systems, improve
 the existing ones". The turn loop stays the agent loop. Lane loop-pass makes the seam edit in `src/seon/turn.clj`, so
-the model pass sends `seon.agent.loop/context` instead of `seon.cluster.prompt/prompt`. walk-delete deletes
+the model pass sends the proc transcript (S4) instead of `seon.cluster.prompt/prompt`. walk-delete deletes
 what is left once that seam lands. Until root says loop-pass has released `turn.clj`, this lane edits nothing in
 `turn.clj`, and nothing whose only live caller is in `turn.clj`.
 

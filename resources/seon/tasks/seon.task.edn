@@ -12,7 +12,7 @@
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
 #:seon.task{:name "tasks-have-no-done-when-and-name-subjects-only-through-must-read"
              :kind :function
-             :intent "seon.task/task-edges answers :subjects #{} for most tasks: the functions a task is about are on the task's :seon.task/must-read, not on the functions' :seon/tasks. The context producer (seon.agent.loop/task-context) unions both. No :seon.task/done-when exists; under the 2026-10-07 ruling done = the proofs green, so a task without proofs cannot be launched: refuse assignment of a task with no proof test."
+             :intent "seon.task/task-edges answers :subjects #{} for most tasks: the functions a task is about are on the task's :seon.task/must-read, not on the functions' :seon/tasks. Context assembly from the proc transcript (S4) must union both. No :seon.task/done-when exists; under the 2026-10-07 ruling done = the proofs green, so a task without proofs cannot be launched: refuse assignment of a task with no proof test."
              :must-read #{seon.task/task-edges seon.task/assign!}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
  #:seon.task{:name "task-text-references-are-never-resolved",

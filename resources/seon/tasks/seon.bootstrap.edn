@@ -10,7 +10,7 @@
              :must-read #{seon.bootstrap/help-value}}
 #:seon.task{:name "help-lists-no-tools-for-an-agent"
              :kind :function
-             :intent "(help) ends with 'Tools: . Inspect one with dir.' for a fresh branch agent (ctx-ex-1 on default, 2026-10-07): help-value lists the namespaces the agent's own namespace requires, which is none. The toolkit is seon.cluster.instruction/toolkit-namespaces; calling it from help-value made seon.help-test/help-evidence-tracks-its-code-version stale on any new namespace (its query reads every :seon.ns/name). Derive the tools line from the context-relevant namespaces with an attribute-bound read, or drop the line now that seon.agent.loop/system-message lists the tools."
+             :intent "(help) ends with 'Tools: . Inspect one with dir.' for a fresh branch agent (ctx-ex-1 on default, 2026-10-07): help-value lists the namespaces the agent's own namespace requires, which is none. The toolkit is seon.cluster.instruction/toolkit-namespaces; calling it from help-value made seon.help-test/help-evidence-tracks-its-code-version stale on any new namespace (its query reads every :seon.ns/name). Derive the tools line from the context-relevant namespaces with an attribute-bound read, or drop the line."
              :must-read #{seon.bootstrap/help-value seon.cluster.instruction/toolkit-namespaces}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
 #:seon.task{:name "help-evidence-test-red-on-head"

@@ -21,7 +21,7 @@ can decide what to re-run.
 
 **After.** The happy path is the one in `lane-rules.md` ("One happy path", owner 2026-10-07): context = the forms
 that ran plus the agent's own forms with their real results → model → one read → eval → record → print. Lane
-loop-pass's seam puts `seon.agent.loop/context` where the prompt was. Everything below exists only to build or show
+loop-pass's seam puts the proc transcript (S4) where the prompt was. Everything below exists only to build or show
 the old context, and goes.
 
 Every row of this design serves one step of that path: it deletes a second producer of the "context" step and a
@@ -105,7 +105,7 @@ seam edit is not counted.
 
 | Survivor | Today reads | After |
 |---|---|---|
-| The model pass (`turn` `:call`) | `prompt/prompt` + `context/capture-tx` | `seon.agent.loop/context` + system message (loop-pass seam). Whether the exact prompt is still recorded before the paid call (capture ruling 4) is loop-pass's decision; if it is, it should be one attribute on the run, not `seon.context.capture` with contribution components |
+| The model pass (`turn` `:call`) | `prompt/prompt` + `context/capture-tx` | the proc transcript (S4; loop-pass seam). Whether the exact prompt is still recorded before the paid call (capture ruling 4) is loop-pass's decision; if it is, it should be one attribute on the run, not `seon.context.capture` with contribution components |
 | `turn` `:open` | `system-turn` refresh, then `open-call` | `open-call` only |
 | `:generate` runs (bootstrap seed) | `generate-turn` → walk | bootstrap stops seeding a generated opening (spec §5: "the generated opening becomes a message to root", loop-pass owns bootstrap); until then `generate-turn` closes the run with no forms |
 | MCP / eval_clj recording | `record-evaluated-call` + read-evidence rows | `record-evaluated-call` unchanged; no read-evidence rows |
@@ -131,7 +131,7 @@ Not in this closure, but nearby (checked; each needs its own measurement before 
 
 ## 3. Deletion order (each slice boots, and keeps eval_clj, MCP and tests working)
 
-0. **Seam (loop-pass)**: `call-turn` sends `seon.agent.loop/context`. After it, `prompt/prompt` and
+0. **Seam (loop-pass)**: `call-turn` sends the proc transcript (S4). After it, `prompt/prompt` and
    `context/capture-tx` have no production caller.
 1. **B1: debug views**. Files: render.clj, web.clj, transcript.clj, schemas `seon.render.edn` and
    `seon.render.transcript.edn`, transcript_test, web_test, web_context_test, plus a patch to web_debug_test
