@@ -21,4 +21,9 @@
  #:seon.task{:name "status-prints-ok-while-the-cluster-is-still-starting"
              :kind :function
              :intent "bin/seon status prints OK while the cluster is still starting. Done when status prints the boot layer reached and a non-OK state until readiness is published (seon.cluster.boot/readiness), with a test on a booting fixture. Boot readiness layers are also not logged anywhere persistent (start output is the only record): record them as facts."
-             :must-read #{seon.cluster.boot/readiness}}]
+             :must-read #{seon.cluster.boot/readiness}}
+ #:seon.task{:name "operator-prints-whole-results"
+             :kind :namespace
+             :intent "The operator and dev scripts print whole result values with prn outside the value printer (seon.operator -main's :else prn of the result and its headline's MISSING collection, harness_costs measure, seon.schema.admission -main): an unknown option printed the whole nested error map twice (observed 2026-10-07). Inventory class cli-print, 4 sites: script/operator.clj 2, script/dev/harness_costs.clj 1, schema/admission.clj 1. Done when the operator prints its outcome through the value printer's budget (headline plus the diagnostic file path), and script/seon/operator_outcome_test asserts an argv failure prints one bounded line."
+             :must-read #{seon.operator/check!}
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]

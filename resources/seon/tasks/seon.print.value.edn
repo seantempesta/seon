@@ -1,4 +1,14 @@
 [#:seon.task{:name "a-contract-refusal-prints-a-generated-example-of-the-whole-schema"
              :kind :function
              :intent "A contract refusal on a wrong-type argument prints a generated :example of the whole schema (about 40 lines of fake data, e.g. seon.cluster.boot/readiness given a string). Done when the refusal shows the expected schema name and one dig form, with no generated example for large maps, asserted on the refusal's data."
-             :must-read #{seon.print.value/bounded-text}}]
+             :must-read #{seon.print.value/bounded-text}}
+ #:seon.task{:name "printed-copies-stored-or-sent-instead-of-values"
+             :kind :namespace
+             :intent "Values are printed (pr-str or print.value/bounded-text) into strings that are then stored or sent as data: the REPL reply's findings and agent stdout (repl response-entries, :seon.repl/out pr-str of the whole output), provider settings and usage stored as EDN text (turn record-attempt!), faults and errors clipped into system-turn and diagnostic text, batch sources, error message content, test member drift and accretion reports, a background call's source. Owner 2026-10-07: keep real values; the value printer is the only way we print, once, at the edge. Inventory class printed-copy, 39 sites: turn.clj 6, error.clj 4, repl.clj 4, sci/eval.clj 4, batch.clj 2, cluster/boot.clj 2, test.clj 2, test/accretion.clj 2, src/my/background.clj 1, background.clj 1, cluster.clj 1, cluster/message.clj 1, cluster/prompt.clj 1, cluster/wake.clj 1, config.clj 1, env.clj 1, instrument.clj 1, mcp.clj 1, render.clj 1, render/value.clj 1, schema.clj 1. Done when each site stores or sends the value (or its reference) and the edge prints it through the value printer, and seon.repl-test asserts an evaluation printing 50 MB to stdout answers a reply under the printer's budget with a dig form to the output blob."
+             :must-read #{seon.print.value/bounded-text seon.repl/text seon.turn/record-attempt!}
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+ #:seon.task{:name "ad-hoc-text-clips-outside-the-printer"
+             :kind :namespace
+             :intent "Two sites cut text with subs outside the value printer: my.program/match-row (100-character snippet with ...) and seon.mcp/call (first 200 characters of a request as its source). Owner 2026-10-07: no random clipping. Inventory class ad-hoc-clip, 2 sites: src/my/program.clj 1, mcp.clj 1. Done when both keep the whole line or request as data and the printer bounds what is shown, asserted by a my.program-test search over a 10,000-character line whose result holds the full line."
+             :must-read #{seon.mcp/call seon.print.value/bounded-text}
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]

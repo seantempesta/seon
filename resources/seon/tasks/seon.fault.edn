@@ -14,4 +14,9 @@
              :kind :function
              :intent "seon.fault-test/a-fault-stores-the-whole-fault-and-wakes-the-responsible-agent asserts (< elapsed-ms 1000.0) for one synchronous fault write; serial it passes, at six concurrent test requests it measured 1,026 and 1,040 ms (CPU and store I/O contention; transact-call averaged 149 ms against 95 ms serial). Done when the write's cost is proportional to the fault (measure where the ~1 s goes) and the bound holds under the declared test admission bound."
              :must-read #{seon.fault/fault!}
-             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
+ #:seon.task{:name "log-lines-print-values-outside-the-printer"
+             :kind :namespace
+             :intent "Seon writes log, stderr and stdout lines that print values outside the value printer (fault print-unrecorded!, boot memory pressure, datahike-log! events, fs deletion reports, web page and request faults, test runner failure reports) and log-only warnings with no delivered fault (projection fallback, declaration population fallback, low disk space). CLAUDE.md: recording without delivery, a log line or a panic alone, is a defect; owner 2026-10-07: no bulk in logs. Inventory class log, 30 sites: test/runner.clj 5, cluster.clj 4, cluster/boot.clj 3, cluster/store.clj 3, render/web.clj 3, schema.clj 3, script/operator.clj 2, db.clj 2, fault.clj 2, fs.clj 2, sci/eval.clj 1 (17 grow with input, 13 fixed text). Done when each is a recorded fault delivered as data (the line, if any, names the fault id and nothing printed from a value), and seon.fault-test asserts a fault whose evidence prints over 1 MB writes no stderr line longer than one bounded sentence."
+             :must-read #{seon.fault/print-unrecorded! seon.cluster.store/datahike-log! seon.fs/log-deletion!}
+             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}]
