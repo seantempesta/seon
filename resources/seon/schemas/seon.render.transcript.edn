@@ -3,12 +3,6 @@
                           [:seon.runtime/trigger {:optional true} :map]
                           [:seon.runtime/listens {:optional true} [:sequential :map]]
                           [:seon.render/operations :seon.render/operations]]
-                         :prefix-subject
-                         [:map
-                          {:description "One turn's captured history prefix, as a debug finding compares it."
-                           :seon.render/ai seon.render.transcript/render-captured-prefix}
-                          [:seon.turn/id :seon.turn/id]
-                          [:seon.agent/id :seon.agent/id]]
                          :history-request
                          [:map
                           {:description

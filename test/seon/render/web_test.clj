@@ -42,21 +42,18 @@
             [seon.config :as config]
             [seon.context :as seon.context]
             [seon.db :as db]
-            [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.web :as web]
-            [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]
-            [seon.turn :as turn]
             [seon.program :as program]
             [sci.core :as sci])
   (:import [org.jsoup Jsoup]
@@ -959,17 +956,17 @@ handle))}}
                         :seon.cluster.eval/ordinal 0
                         :seon.cluster.eval/source "(+ 1 1)"}])))
         (inspect!)
-        (is (= 200 (.statusCode (fetch server "/agent/root/debug?prompt=true"))))
+        (is (= 200 (.statusCode (fetch server "/agent/root/debug"))))
         (let [before (durable-counts)
               before-basis (db/basis-t @connection)]
           (dotimes [_ 10]
-            (is (= 200 (.statusCode
-                        (fetch server "/agent/root/debug?prompt=true"))))
+            (is (= 200 (.statusCode (fetch server "/agent/root/debug"))))
+            (is (= 200 (.statusCode (fetch server "/agent/root/debug?sent=true" {"datastar-request" "true"}))))
             (inspect!))
           (is (= before (durable-counts))
               "repeated inspection creates no run, evaluation, form, or fault")
           (is (= before-basis (db/basis-t @connection))
-              "ten loads of the debug page and its feed write no datom at all")
+              "ten loads of the debug page, its context view and its feed write no datom at all")
           (is (and (pos? (:runs before)) (pos? (:evaluations before)))
               "the counters see the facts an ordinary turn writes"))))))
 
@@ -2016,14 +2013,14 @@ handle))}}
                            :seon.cluster/name "web-test"
                            :seon.ns/name 'my.agents.alice}))
       (let [agent-page (.body (fetch server "/agent/root"))
-            root (.body (fetch server "/agent/root/debug?prompt=true"))
+            root (.body (fetch server "/agent/root/debug"))
             alice (.body (fetch server "/agent/alice/debug"))]
         (is (some #{"/agent/root/debug"} (map #(.attr ^Element % "href") (.select (dom agent-page) "a")))
             "the always-available debug view is linked from the curated page")
         (is (= [true true]
-               [(some? (element root "#surface-debug-session_2f_root"))
-                (some? (element alice "#surface-debug-session_2f_alice"))])
-            "each agent's debug page is its own session surface"))
+               [(some? (element root "#surface-graph-sent_2f_root"))
+                (some? (element alice "#surface-graph-sent_2f_alice"))])
+            "each agent's debug page is its own context surface"))
       (is (= 404 (.statusCode (fetch server "/agent/missing/debug")))))))
 
 (deftest an-undeclared-incoming-reference-is-reachable-from-the-page
@@ -2348,7 +2345,7 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (let [before @connection
-            responses (vec (repeatedly 10 #(fetch server "/agent/root/debug?prompt=true")))
+            responses (vec (repeatedly 10 #(fetch server "/agent/root/debug")))
             bodies (mapv #(.body %) responses)
             response (last responses)
             body (last bodies)]
@@ -2360,77 +2357,3 @@ handle))}}
                (set (map #(.attr ^Element % "value")
                          (.select (dom body) ".seon-session-actions input[name=action]"))))
             "the rendered session offers its three system actions")))))
-
-(deftest ^{:seon.test/golden "The colourised reader is presentation: each saved emission's HTML appears in the page in acquisition order, and the wake's shown text is the agent-visible transcript."}
-  next-turn-context-keeps-runtime-history-through-an-empty-turn-and-a-wake
-  (with-server
-    (fn [connection server _context]
-      (let [check-page
-            (fn [entries]
-              ;; A named turn is its opening prompt, before its own results.
-              ;; Open the next turn to inspect all currently completed work.
-              (let [id (turn/next-id @connection "web-test" "root")]
-                (is (:db-after
-                     (db/transact! connection
-                       (conj (turn/open-tx {:seon.turn/id id
-                                           :seon.turn/agent [:seon.agent/id "root"]
-                                           :seon.turn/opened-tx "datomic.tx"})
-                             [:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"])))))
-              (let [basis (db/basis-t @connection)
-                    turns (db/q '[:find ?id ?opened :where
-                                   [?a :seon.agent/id "root"] [?turn :seon.turn/agent ?a]
-                                   [?turn :seon.turn/id ?id ?opened]] @connection)
-                    selected (ffirst (sort-by second > turns))
-                    page-path (str "/ns/my.agents.root/debug?turn=" selected)
-                    response (fetch server page-path {"datastar-request" "true"})
-                    body (.body response)
-                    raw (.body (fetch server (str page-path "&prompt=true") {"datastar-request" "true"}))
-                    inputs (mapv #(hiccup/->string (repl/render-emission-html (repl/entity-emission (assoc % :seon.db/db @connection)))) entries)
-                    positions (reduce (fn [found input]
-                                        (conj found (str/index-of body input
-                                                     (if-let [previous (peek found)] (inc previous) 0))))
-                                      [] inputs)]
-                (is (= 200 (.statusCode response)))
-                (is (= basis (db/basis-t @connection)) "selected-turn inspection writes no facts")
-                (is (seq inputs))
-                (is (and (every? some? positions) (apply <= positions))
-                    "The colourised reader contains every saved emission in acquisition order")
-                (is (some #{(str/join "\n\n" (map repl/render-ai entries))}
-                          (map #(.wholeText ^Element %) (.select (painted raw) "code")))
-                    "The raw toggle shows the exact acquired AI text as one code block")
-                body))]
-        (is (= 204 (.statusCode (post-form server "/agent/root/context"
-                                          "action=system-turn"))))
-        (let [opening (evaluation/of-agent @connection "root")]
-          (is (seq opening) "the real SCI system turn stored an opening")
-          (is (every? :seon.eval/shown opening))
-          (check-page opening)
-          (is (:db-after
-               (db/transact! connection
-                 (conj (turn/open-tx {:seon.turn/id "empty-context-turn"
-                                      :seon.turn/agent [:seon.agent/id "root"]
-                                      :seon.turn/opened-tx "datomic.tx"})
-                       [:db/add [:seon.turn/id "empty-context-turn"]
-                        :seon.turn/closed-tx "datomic.tx"]))))
-          (check-page opening)
-          (is (:db-after
-               (db/transact! connection
-                 [{:seon.message/id "context-runtime-wake"
-                   :seon.message/to [:seon.agent/id "root"]
-                   :seon.message/content "Runtime history wake."}])))
-          (is (= 204 (.statusCode (post-form server "/agent/root/context"
-                                            "action=system-turn"))))
-          (let [continued (evaluation/of-agent @connection "root")]
-            (is (< (count opening) (count continued)))
-            ;; An unchanged read advances its read basis in place
-            ;; (:seon.wake/context-inert); what the agent saw does not move.
-            (is (= (mapv #(select-keys % [:seon.cluster.eval/id :seon.cluster.eval/source
-                                          :seon.cluster.eval/ordinal :seon.eval/shown]) opening)
-                   (mapv #(select-keys % [:seon.cluster.eval/id :seon.cluster.eval/source
-                                          :seon.cluster.eval/ordinal :seon.eval/shown])
-                         (subvec continued 0 (count opening))))
-                "the wake appends without rewriting the opening")
-            (is (some #(str/includes? (:seon.eval/shown % "") "Runtime history wake.")
-                      (drop (count opening) continued)))
-            (check-page continued)))))))
-

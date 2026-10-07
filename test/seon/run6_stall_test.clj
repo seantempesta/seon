@@ -17,7 +17,7 @@
       (throw (ex-info (:seon.error/message result) result)))
     result))
 
-(deftest an-open-session-provider-refusal-is-the-first-problem
+(deftest a-stalled-session-header-names-its-provider-refusal
   (support/with-database
    (fn [connection]
      ;; The fixture's own cluster. Its turn bound is the agent's own override:
@@ -65,28 +65,12 @@
                     :seon.sci.admit/caps (config/result-caps (support/effective-config))
                     :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms (support/effective-config))
                     :seon.render/profile (render/agent-render-profile (support/effective-config))}
-           snapshot (fn []
-                      (let [unit (assoc request :seon.db/db @connection)
-                            entities (#'transcript/ledger-entities @connection
-                                   (#'transcript/turn-entities @connection "run6-stall") {})
-                            problems (#'transcript/session-problems unit entities {})]
-                        {:header (pr-str (transcript/render-agent-header unit))
-                         :problems problems
-                         :html (#'transcript/problems-html unit problems)}))
-           before (snapshot)
-           first-rule (first (:seon.render.transcript/rules (:problems before)))
-           active-panels (filter #(and (vector? %) (:data-problem (second %)))
-                                 (tree-seq coll? seq (:html before)))]
+           header #(pr-str (transcript/render-agent-header (assoc request :seon.db/db @connection)))]
        (is (= 2 (turn/turns-left @connection "run6-stall")))
        (is (nil? (turn/next-agent-work @connection {:seon.agent/id "run6-stall"})))
-       (is (str/includes? (:header before) "stalled: seon.ai/complete at "))
-       (is (str/includes? (:header before) ", waiting for an outside wake"))
-       (is (= "Session stalled" (:seon.render.transcript/label first-rule)))
-       (is (= 1 (:seon.render.transcript/count first-rule)))
-       (is (= "stalled" (:data-problem (second (first active-panels)))))
+       (is (str/includes? (header) "stalled: seon.ai/complete at "))
+       (is (str/includes? (header) ", waiting for an outside wake"))
        (is (:db-after (db/transact! connection
                                    [[:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply ""]
                                     [:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply-size 0]])))
-       (is (not (str/includes? (:header (snapshot)) "stalled:")))
-       (is (zero? (:seon.render.transcript/count
-                    (first (:seon.render.transcript/rules (:problems (snapshot)))))))))))
+       (is (not (str/includes? (header) "stalled:")))))))

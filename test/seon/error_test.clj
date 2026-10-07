@@ -160,14 +160,12 @@
             (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (:seon.cluster.status/store-bytes status)))
             (is (some? (:seon.cluster.status/unavailable-observation (:seon.cluster.status/store-bytes status)))
                 "store bytes are an unavailable observation, never a scanned number"))
-          (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
           (is (= 6 (:seon.error/occurrence-count (error/render-ai entity))))
           (is (some #{"Open"} (test-support/hiccup-leaves (error/render-html {:seon.db/db database :seon.render/value entity}))))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
             (is (= 1 (count observed))))
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
-          (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
           (is (some #{"Resolved"} (test-support/hiccup-leaves (error/render-html {:seon.db/db (db/db connection) :seon.render/value (read-error)}))))
           ;; A render always has a database (`:seon.render/unit` requires it): one

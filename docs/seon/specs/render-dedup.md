@@ -40,14 +40,10 @@ Debug page, entity view (`?subject=`, the namespace debug tab):
 - Render experiments (run a chosen producer over the subject, AI and HTML face): `debug-render-experiment` 1482, `selected-unit-experiment` 1158, `experiment-preview-html` 1065.
 - Entity ref graph (cytoscape JSON): `graph-model` 898, `debug-graph-html` 947.
 
-Debug page, agent view (`?prompt`, `?ledger`, `?turn`, `?outline`, `?sent`, `?n`, `?record`, dispatched in `debug-response` 3585):
-- Context at a turn, byte-exact colour, turn selector, re-read folding, raw prompt toggle: `transcript/render-session` 1350.
-- Ledger of turns (acquisition, evaluations, effects, budget, problems): `render-ledger` 2344, `render-ledger-turn` 1954, `render-ledger-context` 1965.
-- Outline of every unit the prompt holds: `render-outline` 1623.
-- Problem findings (error, fabricated, empty reply, repeated, churn, directory, fault, prefix mismatch): `session-problems` 2168, `render-captured-prefix` 2072.
-- Context as sent (the provider's user message, size in tokens): `sent-context-html` web.clj:3430.
-- Owner's context-tuning graph (walk at depth N, per-node AI face beside HTML face, groups, windows): `graph-debug-html` 3446, `context-graph-model` 3331.
-- Agent record panel (lazy): `debug-response` record branch (3591).
+Debug page, agent view (`?sent`, `?record`, dispatched in `debug-response`): the header, one context view and the
+agent record. The context view is `sent-context-html`: the turn's own context function `seon.cluster.prompt/prompt`
+printed through the value printer's HTML face, computed when the reader opens it. The turn session, outline, turn
+ledger, problem panel, captured-prefix check and the walk graph page (`?n=`) are deleted (S2a).
 
 Transcript consumers (who reads the same evaluations):
 - Agent's next-turn context (history units): `transcript/history-entries` 793, called from `cluster/agent.clj:857`; priced in `prompt/history-contributions` prompt.clj:189.
@@ -69,41 +65,31 @@ read-evidence cache (`::ai-calls`) that repeats the page cache's (`::calls`, `de
 `refresh-root` 1997, `retained-interest` 1921): the same evidence-current test (`same-invocation-evidence?`,
 `retained-program-current?`, `read-evidence-current?`) written twice. Survives: one retention owner in `seon.render`
 keyed by call identity; the AI history call and page unit calls are two producers in it, not two caches. The debug
-ledger's data (`::transcript/ledger-data`, 2561) is also computed inside this AI acquisition, behind a request flag
-(`::transcript/ledger?`): debug display work inside the prompt path.
+ledger's data was also computed inside this AI acquisition behind a request flag; S2a deleted the ledger and the flag.
 
 **D2. One evaluation entity becomes an emission three ways (~150 lines).**
 (a) `transcript/receipt-entry` 258 then `transcript/emission` 470-508 (history, prompt, `render-ai`);
-(b) `repl/entity-emission` repl.clj:487-569 (debug session 1439, ledger 1841, `repl/render-ai|html`);
+(b) `repl/entity-emission` repl.clj:487-569 (`repl/render-ai|html`);
 (c) `turn.clj:2215` merging form and evaluation maps for `repl/text`. (a) and (b) are near-identical `select-keys`
 lists plus handle, changed-since and namespace resolution; (b) pulls the namespace and renderer symbol from the
 database when the caller forgot them. Survives: (b) `repl/entity-emission`, taking the pulled entity and its
 database; `transcript/emission` and the `receipt-entry` re-shaping disappear: the history pull selects the evaluation
 attributes once (`receipt-selector` 40 already lists them) and the entity flows to `repl/text` unchanged. This is the
-producer of red 1 (section 5): the session page calls (b) without the database (1439) while the ledger passes it
-(1841).
+producer of red 1 (section 5; the session page that omitted the database is deleted).
 
-**D3. The debug page re-assembles what the agent saw, three more times (~400 lines).**
-`render-session` (1350) acquires via `acquire-context!` with a turn id; `render-outline` (1623) acquires again without
-one (1640) and separately calls `prompt/prompt` (1597); `sent-context-html` (web.clj:3430) calls `prompt/prompt`
-a third time; `render-ledger` gets it through D1's flag. Each wraps the acquisition in its own
-`catch ExceptionInfo` that turns an instrument refusal into a value (transcript.clj:1363, 1597-1608, 1640-1647,
-web.clj `debug-turn-request`): four copies of one conversion. The prompt path (`prompt.clj:379`) already calls
-`acquire-context!`, so `prompt/prompt` result = acquire + compose + frame. Survives: one `context-view` value
-(units, segments, composed text, frame, refusal-as-data) produced once per (agent, turn) by the prompt owner; session,
-outline, ledger and sent are four renderers of it.
+**D3. The debug page re-assembled what the agent saw, four times (deleted in S2a).**
+The turn session, the outline, the ledger and the sent-context panel each acquired the context again, each wrapping
+the acquisition in its own `catch ExceptionInfo`. Now one view remains, `sent-context-html`, calling the turn's
+context function once when opened; a thrown refusal reaches the web handler's entrant boundary and a returned one prints
+as the refusal value. S4 replaces the context function and the view's one call with it.
 
-**D4. Two graph pages (~350 lines).**
-`graph-model` 898 + `debug-graph-html` 947 (entity refs) and `context-graph-model` 3331 + `graph-legend-html` 3391 +
-`graph-debug-html` 3446 (walk). Both turn datoms or walk edges into `{:elements {:nodes :edges} "seon.graph/selected"
-"seon.graph/snapshot"}` for `seon-graph.js`; the second also does grouping and windows. Survives: one node/edge
-builder over `render.walk/graph` (the entity view is a walk at depth 1 with reverse edges), one legend, one page.
+**D4. Two graph pages (the walk page deleted in S2a).**
+The entity ref graph (`graph-model`, `debug-graph-html`) stays; the walk page (`context-graph-model`,
+`graph-debug-html`) is gone, with its legend and its grouping and windows.
 
-**D5. Two "AI face beside HTML face" experiments (~250 lines).**
-`debug-render-experiment` 1482 / `experiment-preview-html` 1065 / `selected-unit-experiment` 1158 (entity page) and the
-`face` closure in `graph-debug-html` 3488-3499 (each walk node rendered both ways through `render/render-call`).
-Same operation: render one value for both consumers and show both. Survives: `experiment-preview-html` fed by
-`render/render-call` for each face.
+**D5. Two "AI face beside HTML face" experiments (one deleted in S2a).**
+`debug-render-experiment` / `experiment-preview-html` / `selected-unit-experiment` (entity page) remain; the walk
+page's `face` closure went with `graph-debug-html`.
 
 **D6. Value bounding in four places (~130 lines).** `print.value/bounded-text` print/value.clj:54, delegate
 `value/bounded-text` value.clj:76 (its docstring says it "then goes"), `value/floor` 86 (delegate of `throwable-text`),
@@ -117,7 +103,7 @@ database or config, `text`/`html` are the total unit entries; the delegates are 
 `render-runtime-ai|html`, `render-agent-header` and `session-header` 1237 each re-derive turn entities
 (`turn-entities` 1131, `debug-turn-selector` 1115, `history-run-selector` 898, `runtime-selector` 1008: four
 selectors over turns) and time/duration formatting (`runtime-time` 1055, `runtime-duration` 1063, `nav-click`,
-`session-url`, `outline-url`, `ledger-url` 1727: three URL builders for one route table). Survives: one turn pull with
+the deleted view URL builders). Survives: one turn pull with
 one selector and one turn-link function in `seon.render.route`.
 
 **D8. Page fragment path vs debug fragment path in the web proc (~250 lines).**
@@ -156,18 +142,15 @@ One pipeline, per CLAUDE.md "Presentation": **select units, render function per 
    stay as schema-attached faces but share one turn pull and one link function (D7).
 3. **Retention.** One cache kind in `seon.cache` keyed by call id and read-evidence (CLAUDE.md "one central cache");
    `::calls` and `::ai-calls` merge. Contract of the surviving check: `same-invocation-evidence?` (render.clj:994).
-4. **Views of the one context-view.** `transcript/render-session`, `render-outline`, `render-ledger`, `render-ledger-context`
-   and web `sent-context-html` all take a `context-view` (never call `prompt/prompt` or `acquire-context!` themselves).
-   `debug-turn-request` acquires once; the four renderers are functions `[:=> [:cat :seon.render/context-view ...] :seon.render/hiccup]`.
-   The refusal-to-value catch exists once, in `acquire-context!`.
-5. **Debug page = the same units.** The session and outline show the very units and segment bytes the provider
-   received (segment i of the context-view), coloured by `repl/render-emission-html` over the same emission. The
-   ledger's per-turn measures (contributed bytes, effects, calibration) are computed by the ledger renderer from the
-   view, off the prompt path; `::transcript/ledger?` and `::transcript/ledger-data` disappear from acquisition.
+4. **One view of the context.** The debug page's `sent-context-html` calls the turn's context function when opened
+   and prints the composed value through `seon.render.value/html`; it holds no second assembly. S4 changes the Var it
+   calls, in the same commit as the turn's.
+5. **Debug page = the same units.** The view shows the composed map the turn hands the model. Per-turn ledger
+   measures are gone; `::transcript/ledger?` and `::transcript/ledger-data` are deleted from acquisition.
 6. **Faces.** Every consumer face is `render-call` (render.clj:1496) selecting by the existing three-step rule; both
    faces of one value come from one `value/prepare` (print.cljc emit-both). Graph and experiment pages use it for
    the AI/HTML pair (D4, D5).
-7. **One graph.** `render.web/graph-page` over `render.walk/graph`, one node/edge builder, one legend.
+7. **One graph.** The entity ref graph is the only graph page (S2a deleted the walk page).
 8. **One floor.** The value printer's core (`seon.render.value/core-text`, `core-html`), its projection-free text
    private to it; delegates in value.clj deleted.
 9. **Web proc.** `page-result` handles namespace and debug subjects; `feed`, `render-step`, `render-pass` unchanged in

@@ -73,7 +73,6 @@
             [seon.print :as print]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
-            [seon.ai.tokens :as tokens]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [malli.registry :as mr]
@@ -255,9 +254,6 @@
       agent-id
       (assoc :seon.agent/id agent-id)
 
-      (= "true" (get query "prompt"))
-      (assoc ::prompt-preview? true)
-
       (read-query-value (get query "outgoingCursor"))
       (assoc :seon.render.data/outgoing-cursor
              (read-query-value (get query "outgoingCursor")))
@@ -290,10 +286,7 @@
 
     (:seon.render.data/incoming-cursor debug-request)
     (assoc :incomingCursor
-           (pr-str (:seon.render.data/incoming-cursor debug-request)))
-
-    (::prompt-preview? debug-request)
-    (assoc :prompt "true")))
+           (pr-str (:seon.render.data/incoming-cursor debug-request)))))
 
 (defn- with-database
   "`unit` carrying the database `request` renders against, when it has one: a
@@ -365,11 +358,11 @@
       [:title (str "seon · " (or viewer-namespace id))]
       [:link {:rel "stylesheet"
               :href (route/path ::route/css {:path "output.css"})}]
-      (when (or viewer-namespace (::graph? request))
+      (when viewer-namespace
         [:script {:src (route/path ::route/js {:path "cytoscape.min.js"})}])
       [:script {:type "module"
                 :src (route/path ::route/js {:path "datastar.js"})}]
-      (when (or viewer-namespace (::graph? request))
+      (when viewer-namespace
         [:script {:type "module"
                   :src (route/path ::route/js {:path "seon-graph.js"})}])]
      ;; SEMANTIC CLASSES, not utility strings, for the same reason the
@@ -2517,14 +2510,10 @@
                (assoc entries :seon.render.web/refused-member :seon.render.history/entries)
                :else
                (let [segments (history-segments entries)
-                     ledger-data (when (::transcript/ledger? request)
-                                   (binding [db/*read-evidence-sink* reads]
-                                     (transcript/acquire-ledger-data request entries segments)))
-                     result (cond-> {:seon.cluster.prompt/text (apply str segments)
+                     result {:seon.cluster.prompt/text (apply str segments)
                              :seon.render.history/entries entries
                              :seon.render.history/segments segments
-                             :seon.db/db (:seon.db/db request)}
-                              ledger-data (assoc ::transcript/ledger-data ledger-data))]
+                             :seon.db/db (:seon.db/db request)}]
                  (swap! cache assoc-in [::ai-calls key]
                         (assoc @calls root-call
                                (merge evidence
@@ -3185,363 +3174,27 @@
                  :seon.render.web/feed-url
                  (route/path ::route/feed {:id agent-id})}))))))
 
-(defn- debug-turn-response
-  ([service agent-id turn-id] (debug-turn-response service agent-id turn-id false))
-  ([service agent-id turn-id raw?]
-   (debug-turn-response service agent-id turn-id raw? :full))
-  ([service agent-id turn-id raw? view]
-  (let [connection (:seon.store/connection-object service)
-        database (db/db connection)
-        owner (db/q '[:find ?agent-id . :in $ ?turn-id
-                       :where [?agent :seon.agent/id ?agent-id]
-                              [?turn :seon.turn/agent ?agent]
-                              [?turn :seon.turn/id ?turn-id]] database turn-id)]
-    (if (not= agent-id owner)
-      (not-found nil)
-      (html-response
-       (hiccup/->string
-        ((case view :card transcript/render-ledger-turn
-                    :context transcript/render-ledger-context
-                    :ledger transcript/render-ledger
-                    transcript/render-session)
-         (session-controls (debug-turn-request database connection agent-id
-                                               (:seon.sci.admit/caps service)
-                                               (assoc service :seon.turn/id turn-id
-                                                      ::transcript/raw? raw?)))))
-       {"datastar-mode" "replace"})))))
 
-(defn- debug-outline-response
-  "The agent's history OUTLINE, deferred from the session page's first paint.
 
-  It is not turn-scoped: the outline names every turn, so the request carries
-  no turn id and `render-outline` acquires the whole history once."
-  [{connection :seon.store/connection-object :as service} agent-id]
-  (let [database (db/db connection)]
-    (html-response
-     (hiccup/->string
-      (transcript/render-outline
-       (session-controls
-        (debug-turn-request database connection agent-id
-                            (:seon.sci.admit/caps service)
-                            (dissoc service :seon.turn/id)))))
-     {"datastar-mode" "replace"})))
 
-(defn- graph-node-name
-  "What names a node: its identity value, else the component attribute reaching it."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] :seon.render.walk/node] :string]}
-  [identities {value :seon.render/value reached ::render.walk/attribute}]
-  (let [[attribute named] (some #(find value %) (sort identities))]
-    (cond (:db/id named) (str attribute " → e" (:db/id named))
-          attribute (pr-str named)
-          reached (str "via " reached)
-          :else "")))
 
-(defn- inclusion-paths
-  "Why each node is in the context: its shortest `[attribute node]` path of walk
-  edges from the root (reverse attributes spelled `:ns/_name`)."
-  {:malli/schema [:=> [:cat :int :seon.render.walk/edges] [:map-of :int [:vector [:tuple :qualified-keyword :int]]]]}
-  [root edges]
-  (let [out (group-by first edges)]
-    (loop [paths {root []} frontier [root]]
-      (let [found (for [e frontier [_ a t] (out e) :when (not (paths t))] [t (conj (paths e) [a t])])
-            grown (reduce (fn [m [t p]] (cond-> m (not (m t)) (assoc t p))) paths found)]
-        (if (= paths grown) paths (recur grown (distinct (map first found))))))))
 
-(defn- edge-kind
-  "One walk edge's relationship: `attachment` (a reverse ref its source's
-  schema declares in `:seon.render/units`), `reverse` (any other reverse
-  ref), `value` (an interim value edge), `component`, then `required` or
-  `optional` by the source schema's entry; beside it, true for
-  cardinality-many and every reverse ref."
-  {:malli/schema [:=> [:cat :seon.render.walk/structure :seon.db/database-value :seon.render.walk/nodes :seon.render.walk/edge]
-                  [:tuple :string :boolean]]}
-  [structure database nodes [e a _]]
-  (let [reverse? (str/starts-with? (name a) "_")
-        attribute (forward-attribute a)
-        schema (get-in nodes [e ::render.walk/node-schema])]
-    [(cond (and reverse? (contains? (get (::render.walk/attachments structure) schema) a)) "attachment"
-           reverse? "reverse"
-           (not (some #{attribute} (::render.walk/ref-attributes structure))) "value"
-           (get (::render.walk/component-owners structure) attribute) "component"
-           (contains? (get (::render.walk/required-attributes structure) schema) attribute) "required"
-           :else "optional")
-     (or reverse? (many-attribute? (db/schema-database database) attribute))]))
 
-(defn- node-attributes-html
-  "One node's attributes grouped value / ref / component, each with its
-  declared schema form, then its owning schema's render pair."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.render.walk/structure :seon.db/database-value [:=> [:cat :string] :string] :seon.render.walk/node] :seon.render/hiccup]}
-  [projection structure database root-href {value :seon.render/value schema-key ::render.walk/node-schema}]
-  (let [refs (set (::render.walk/ref-attributes structure))
-        ;; A symbol value is an observed name; it links when a symbol identity currently names an entity.
-        named (into [] (keep (fn [[a {t :db/valueType u :db/unique}]] (when (and u (= :db.type/symbol t)) a))) (:schema (db/schema-database database)))
-        link (fn [v] (when-let [a (and (symbol? v) (seq named) (db/q '[:find ?a . :in $ [?a ...] ?v :where [_ ?a ?v]] database named v))]
-                       [:a {:href (root-href (pr-str [a v]))} [:code (str v)]]))
-        group #(cond ((::render.walk/component-owners structure) %) "component" (refs %) "ref" :else "value")
-        shown #(value/html {:seon.render/value (if (refs %1) (if (map? %2) (:db/id %2) (mapv :db/id %2)) %2) :seon.db/db database :seon.render.value/root [::attribute (:db/id value) %1]})
-        properties (some->> schema-key (mr/schema (:seon.schema.projection/registry projection)) internal/entity-properties)]
-    [:div {:class "seon-graph-attributes"}
-     [:p "owning schema " [:code (str schema-key)] " · render pair "
-      (value/html {:seon.render/value (select-keys properties [:seon.render/ai :seon.render/html]) :seon.db/db database :seon.render.value/root [::render-pair schema-key]})]
-     (into [:table {:class "seon-graph-summary"} [:tr [:th "kind"] [:th "attribute"] [:th "value"] [:th "declared schema"]]]
-           (for [[kind entries] (sort-by key (group-by (comp group key) (dissoc value :db/id)))
-                 [a v] (sort-by (comp str key) entries)]
-             [:tr [:td kind] [:td [:code (str a)]] [:td (or (link v) (shown a v))]
-              [:td (value/html {:seon.render/value (projection-form projection a) :seon.db/db database :seon.render.value/root [::declared-schema a]})]]))]))
 
-(defn- context-graph-model
-  "The walk as `seon-graph.js`'s tree: each node labeled by its schema and
-  identity with its symbol and keyword values as chips; a card-one edge drawn
-  parent to child; each cardinality-many edge family (a component set or a
-  declared attachment) one counted group node whose members, in graph order,
-  show `window` from their offset, eight at a time, then a `… N more` node that
-  requeries the next eight. A node carries the groups on its path, so the page
-  shows it once every one is expanded."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] [:=> [:cat :seon.render.walk/edge] [:tuple :string :boolean]]
-                       [:=> [:cat :seon.render.walk/node] [:vector :string]] [:map-of [:tuple :int :qualified-keyword] :int]
-                       [:=> [:cat :int :qualified-keyword :int] :string] :seon.render.walk/graph] :map]}
-  [identities kind chips window more-href {nodes ::render.walk/nodes edges ::render.walk/edges root ::render.walk/graph-root order ::render.walk/graph-order}]
-  (let [position (zipmap order (range))
-        edges (into [] (comp (filter (fn [[e _ t]] (and (nodes e) (nodes t) (not= e t)))) (distinct)) edges)
-        kinds (into {} (map (juxt identity kind)) edges)
-        singles (group-by first (remove (comp second kinds) edges))
-        groups (group-by ffirst (group-by (juxt first second) (filter (comp second kinds) edges)))
-        gid (fn [e a] (str "g" e a))
-        inline (fn [e a members] (take 8 (drop (get window [e a] 0) (sort-by position (distinct (map peek members))))))
-        children (fn [x p] (concat (for [[_ _ t] (singles x)] [t p])
-                                   (for [[[e a] members] (groups x) m (inline e a members)] [m (conj p (gid e a))])))
-        paths (loop [paths {root []} frontier [root]]
-                (let [found (remove (comp paths first) (for [x frontier child (children x (paths x))] child))
-                      grown (reduce (fn [m [c p]] (cond-> m (not (m c)) (assoc c p))) paths found)]
-                  (if (= (count grown) (count paths)) paths (recur grown (distinct (map first found))))))
-        edge (fn [source target k a & [label]] {:data (cond-> {:id (str source ">" target " " a) :source source :target target :kind k :attribute (str a " · " k)}
-                                                         label (assoc :label label))})
-        into-parent? #(#{"attachment" "reverse"} %)]
-    {:elements
-     {:nodes (-> []
-                 (into (for [[id path] (sort-by (comp position key) paths) :let [{schema ::render.walk/node-schema level ::render.walk/node-level :as node} (nodes id)
-                                                   named (graph-node-name identities node)
-                                                   [_ identity-value] (some #(find (:seon.render/value node) %) (sort identities))]]
-                         {:data {:id (str "e" id) :level level :href (str "#node-" id) :groups (vec path)
-                                 :label (str/join "  ·  " (cons (str (if schema (name schema) "unowned") " " (or (scalar-label identity-value) named)) (chips node)))
-                                 :full (str (some-> schema str (subs 1)) " " named " · e" id)}}))
-                 (into (for [[e families] groups :when (paths e) [[_ a] members] families
-                             :let [g (gid e a) total (count (distinct (map peek members))) offset (get window [e a] 0)]
-                             data (cond-> [{:id g :group true :expanded (contains? window [e a]) :groups (paths e) :href "#"
-                                            :level (inc (get-in nodes [e ::render.walk/node-level]))
-                                            :label (str (if (str/starts-with? (name a) "_") (str "← " (forward-attribute a)) a) " · " total)
-                                            :full (str (first (kinds (first members))) " · " total " members")}]
-                                    (> total (+ offset 8))
-                                    (conj {:id (str g "+") :more true :groups (conj (paths e) g) :href (more-href e a (+ offset 8))
-                                           :label (str "… " (- total offset 8) " more") :full "requery the next eight"}))]
-                         {:data data})))
-      :edges (-> []
-                 (into (for [[e a t :as walked] (mapcat val singles) :when (and (paths e) (paths t))]
-                         (edge (str "e" e) (str "e" t) (first (kinds walked)) a (str a))))
-                 (into (for [[e families] groups :when (paths e) [[_ a] members] families
-                             :let [g (gid e a) k (first (kinds (first members)))]
-                             created (cons (if (into-parent? k) (edge g (str "e" e) k a) (edge (str "e" e) g k a))
-                                           (concat (for [m (inline e a members) :when (paths m)]
-                                                     (if (into-parent? k) (edge (str "e" m) g k a) (edge g (str "e" m) k a)))
-                                                   (when (> (count (distinct (map peek members))) (+ (get window [e a] 0) 8))
-                                                     [(edge g (str g "+") k a)])))]
-                         created)))}
-     "seon.graph/selected" (str "e" root)
-     "seon.graph/snapshot" nil}))
 
-(defn- graph-legend-html
-  "One line per relationship kind of the data-modeling guide §3, each with the
-  stroke `seon-graph.js` draws for it."
-  {:malli/schema [:=> [:cat] :seon.render/hiccup]}
-  []
-  (let [line (fn [dash width & [faint]] [:svg {:width 44 :height 10 :aria-hidden "true"}
-                                         [:line {:x1 2 :y1 5 :x2 42 :y2 5 :stroke "currentColor" :stroke-width width
-                                                 :stroke-dasharray dash :opacity (if faint 0.4 1)}]])]
-    [:dl {:class "seon-graph-kinds"}
-     [:dt (line nil 3.5) "◆"] [:dd "component — owned: cascades with, is pulled and validated as part of its parent; ◆ at the parent"]
-     [:dt (line nil 1.5)] [:dd "required peer ref — the writer refuses a deletion that would break it"]
-     [:dt (line "1 3" 1.5)] [:dd "optional peer ref — swept silently when its target goes"]
-     [:dt (line "6 3" 1.5)] [:dd "declared attachment — a fact the other entity states (arrow into this one), read back through :seon.render/units"]
-     [:dt (line "6 3" 1.5 true)] [:dd "undeclared reverse ref — queryable, not the story: hidden forward, faint in every-ref mode"]
-     [:dt [:span {:class "seon-graph-chip"} "ns: x"]] [:dd "identity value — an observed name stored as a value (survives deletion): a chip on its node; a symbol naming an entity links from the node's attribute table"]
-     [:dt [:span {:class "seon-graph-chip"} "attr · N"]] [:dd "cardinality-many — one counted node, members in graph order, eight at a time; click to expand"]
-     [:dt "—"] [:dd "settlement-moved edge — no schema property declares it today, so it is not drawn distinctly"]]))
 
-(defn- graph-debug-href
-  "The graph page for `query` (string keys n, root, branch, mode, more) with `changes`; a nil change removes its key."
-  {:malli/schema [:=> [:cat :seon.agent/id [:map-of :string [:maybe :string]] [:map-of :string [:maybe :string]]] :string]}
-  [agent-id query changes]
-  (route/path ::route/agent-debug {:id agent-id}
-              (into {} (keep (fn [[k v]] (when v [(keyword k) v]))) (merge (select-keys query ["n" "root" "branch" "mode" "more"]) changes))))
-
-(defn- graph-node-label
-  "A node's summary line: graph position, owning schema, what names it, and a
-  link rooting the walk at it when its identity is a scalar."
-  {:malli/schema [:=> [:cat [:set :qualified-keyword] :seon.agent/id [:map-of :string [:maybe :string]] :int :int :seon.render.walk/node] :seon.render/hiccup]}
-  [identities agent-id query position id {schema-key ::render.walk/node-schema value :seon.render/value :as node}]
-  (let [[attribute named] (some #(find value %) (sort identities))]
-    [:span {:class "seon-graph-label"}
-     [:span {:class "seon-graph-position" :title "graph order: definitions before uses, turns by time"} (str "#" position)]
-     [:span {:class "seon-graph-kind"} (if schema-key (subs (str schema-key) 1) "unowned")]
-     [:span {:class "seon-graph-identity"} (graph-node-name identities node)]
-     [:span {:class "seon-graph-eid"} (str "e" id)]
-     (when (and attribute (not (:db/id named)))
-       [:a {:class "seon-graph-reroot" :href (graph-debug-href agent-id query {"root" (pr-str [attribute named]) "more" nil})} "walk from here"])]))
 
 (defn- sent-context-html
-  "The agent's context exactly as its next turn sends it: `seon.cluster.prompt/prompt`'s
-  composed text (the provider's one user message), not a second assembly."
+  "The agent's context as its next model call is sent it, through the value printer's HTML face."
   {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id] :seon.render/hiccup]}
   [{connection :seon.store/connection-object :as service} agent-id]
   (let [database (db/db connection)
         composed ((requiring-resolve 'seon.cluster.prompt/prompt) database
-                  (debug-turn-request database connection agent-id (:seon.sci.admit/caps service) (dissoc service :seon.turn/id)))
-        text (:seon.cluster.prompt/text composed)]
+                  (debug-turn-request database connection agent-id (:seon.sci.admit/caps service) (dissoc service :seon.turn/id)))]
     [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
-     (if (string? text)
-       (list [:p {:class "seon-graph-counts"} (format "%,d chars · ≈%,d tokens · %d segments" (count text) (tokens/estimate text)
-                                                      (count (:seon.context/contributions composed)))]
-             [:pre {:class "seon-graph-prompt"} text])
-       (value/html {:seon.render/value (dissoc composed :seon.db/db) :seon.db/db database :seon.render.value/root [::sent-context agent-id]}))]))
+     (value/html {:seon.render/value (dissoc composed :seon.db/db) :seon.db/db database
+                  :seon.render.value/root [::context agent-id]})]))
 
-(defn- graph-debug-html
-  "The owner's context-tuning page for one agent: the context as sent (lazy),
-  then the walk from `root` (an EDN lookup or entity id; default the agent) at
-  N (0-3) as a graph, a per-schema summary, and each node's AI face beside its
-  HTML face, its grouped attributes, size and the path that included it.
-  The walked subject and the viewing agent `agent-id` are distinct: the header
-  names both. `branch` reads that branch's head value (`db/branch-database`, no
-  connection) instead of the cluster's, with its own projection; `mode=both`
-  follows every ref both ways instead of the forward story. Every face goes through `render/render-call`, retained in the
-  ctx's shared render cache."
-  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id [:map-of :string [:maybe :string]]] :seon.render/hiccup]}
-  [service agent-id query]
-  (let [n (-> (or (some-> (get query "n") parse-long) 3) (max 0) (min 3))
-        root-text (not-empty (get query "root"))
-        branch (not-empty (get query "branch"))
-        forward? (not= "both" (get query "mode"))
-        lookup (if root-text (try (reader.edn/read-string root-text) (catch Exception _ root-text)) [:seon.agent/id agent-id])
-        ;; A branch view is a read: the branch head's value, no connection.
-        connection (when-not branch (:seon.store/connection-object service))
-        database (if branch
-                   (db/branch-database (db/db (:seon.store/connection-object service)) (keyword branch))
-                   (db/db connection))
-        cache (render/shared-cache (:seon.sci.eval/ctx service))
-        cache-key [agent-id lookup n branch forward?]
-        captured-calls (atom {})
-        request (cond-> {:seon.db/db database :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
-                         :seon.sci.admit/caps (:seon.sci.admit/caps service) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
-                         :seon.agent/id agent-id
-                         ;; Calls, not invocations: with captured invocations a source-producing AI face defers its forms to the caller.
-                         :seon.render/retained-calls (get-in @cache [::graph-calls cache-key] {}) :seon.render/captured-calls captured-calls}
-                  connection (assoc :seon.db/connection connection))
-        graph (cond
-                (nil? database)
-                {:seon.error/message (str "This store has no branch named " branch ".")
-                 :seon.error/offending branch}
-                (or (int? lookup) (and (vector? lookup) (= 2 (count lookup)) (qualified-keyword? (first lookup))))
-                (render.walk/graph (assoc request :seon.render.walk/lookup lookup :seon.render/distance n :seon.render.walk/forward-only? forward?))
-                :else
-                {:seon.error/message "The root must be an entity id or an EDN lookup such as [:seon.task/id \"…\"] or [:seon.ns/name my.program]."
-                 :seon.error/offending root-text})
-        projection (some-> database db/carried-projection)
-        structure (some-> projection render.walk/graph-structure)
-        face (fn [id value distance output & [reached]]
-               (let [call #(render/render-call (cond-> (assoc request :seon.render/value %1 :seon.render/output %2 :seon.render/distance distance
-                                                              :seon.render.call/id [::graph %3 %2 id distance])
-                                                 (and reached (= :value %3)) (assoc :seon.render.data/path [reached])))
-                     shown (call value output :value)]
-                 (if (or (string? shown) (vector? shown)) shown (call shown :seon.render/html :failure))))
-        nodes (::render.walk/nodes graph)
-        order (::render.walk/graph-order graph)
-        level-of #(get-in nodes [% ::render.walk/node-level])
-        faces (into {} (map (fn [id] (let [{value :seon.render/value reached ::render.walk/attribute} (nodes id)
-                                            distance (max 0 (- n (level-of id)))]
-                                        [id [(face id value distance :seon.render/ai reached) (face id value distance :seon.render/html reached)]])))
-                    order)
-        _ (swap! cache assoc-in [::graph-calls cache-key] @captured-calls)
-        size #(let [ai (first (faces %))] (if (string? ai) (tokens/estimate ai) 0))
-        levels (group-by level-of order)
-        skipped (::render.walk/skipped graph {})
-        cuts (::render.walk/cuts graph)
-        positions (zipmap order (range 1 (inc (count order))))
-        identities (if database (set (db/identity-attributes database)) #{})
-        paths (when nodes (inclusion-paths (::render.walk/graph-root graph) (::render.walk/edges graph)))
-        node-text #(str "e" % " " (graph-node-name identities (nodes %)))
-        ;; `more=<eid> <attribute> <offset>`: the one group whose members start at offset.
-        window (let [[e a o] (some-> (get query "more") (str/split #" "))]
-                 (if (and (some-> e parse-long) (some-> o parse-long) (some-> a (str/starts-with? ":")))
-                   {[(parse-long e) (keyword (subs a 1))] (parse-long o)} {}))
-        chips (fn [{v :seon.render/value}]
-                (into [] (comp (remove (comp identities key)) (filter (comp #(or (symbol? %) (keyword? %)) val)) (take 2)
-                               (map (fn [[a x]] (str (name a) ": " x))))
-                      (sort-by (comp str key) v)))
-        toggle #(vector :button {:type "button" :class "seon-graph-toggle"
-                                 (keyword "data-on:click") (str "document.querySelectorAll('.seon-graph-node').forEach(d => d.open = " %1 ")")} %2)]
-    [:section {:class "seon-graph-page"}
-     [:header {:class "seon-graph-head"}
-      [:h1 (str "Context · " (pr-str lookup) (when branch (str " · branch " branch)) " · viewed by " agent-id)]
-      (into [:nav {:class "seon-graph-distance" :aria-label "distance N"}]
-            (map #(vector :a (cond-> {:href (graph-debug-href agent-id query {"n" (str %)})} (= % n) (assoc :aria-current "page")) (str "N=" %)))
-            (range 4))
-      [:nav {:class "seon-graph-distance" :aria-label "walk direction"}
-       [:a (cond-> {:href (graph-debug-href agent-id query {"mode" nil})} forward? (assoc :aria-current "page")) "forward + attachments"]
-       [:a (cond-> {:href (graph-debug-href agent-id query {"mode" "both"})} (not forward?) (assoc :aria-current "page")) "every ref, both ways"]]
-      [:form {:class "seon-graph-root" :method "get" :action (route/path ::route/agent-debug {:id agent-id})}
-       (for [k ["n" "branch" "mode"] :let [v (get query k)] :when v] [:input {:type "hidden" :name k :value v}])
-       [:input {:name "root" :value (pr-str lookup) :spellcheck "false" :aria-label "walk root lookup"}]
-       [:button {:type "submit" :class "seon-graph-toggle"} "walk"]
-       [:a {:href (graph-debug-href agent-id query {"root" nil})} (str "walk from the viewer, " agent-id)]]
-      (when nodes
-        [:p {:class "seon-graph-counts"}
-         (str (count order) (if (= 1 (count order)) " node" " nodes") " · ≈" (format "%,d" (reduce + (map size order))) " tokens · "
-              (reduce + (vals skipped)) " skipped · " (count cuts) (if (= 1 (count cuts)) " cut" " cuts")
-              " · " (count (::render.walk/back-references graph)) " back-references")])
-      [:p {:class "seon-graph-legend"}
-       "AI face: the text the model reads. HTML face: what a human explores. #k: graph order (definitions before uses, turns by time)."
-       " " (toggle "true" "open all") " " (toggle "false" "close all")]]
-     [:details {:class "seon-graph-sent" (keyword "data-on:toggle") (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
-      [:summary (str "The context as sent — the prompt the viewer " agent-id "'s next turn composes on the cluster (seon.cluster.prompt/prompt),"
-                     " not the walked subject's: its turns' stored shown text, render forms with their results; the walk below is not yet on that path")]
-      [:div {:id (block/surface-id (keyword "graph-sent" agent-id))} "Composing…"]]
-     (cond
-       (not database) [:p {:class "seon-debug-empty"} (:seon.error/message graph)]
-       (not nodes) (face :graph graph 0 :seon.render/html)
-       :else
-       [:div {:class "seon-graph-body"}
-        [:div {:class "seon-graph-panel"}
-         [:section {:class "seon-debug-graph seon-graph-canvas-section" :data-seon-graph ""}
-          [:div {:class "seon-debug-graph-canvas" :data-graph-canvas "" :data-ignore-morph "" :role "img" :aria-label "The walked context graph"}]
-          [:script {:type "application/json" :data-graph-model ""} (hiccup/raw (json-script-text (context-graph-model identities #(edge-kind structure database nodes %) chips window
-                                                                                                 #(graph-debug-href agent-id query {"more" (str %1 " " %2 " " %3)}) graph)))]
-          [:p {:class "seon-debug-graph-status" :data-graph-detail "" :aria-live "polite"} "Select a node to open its faces; a counted node to expand its members."]]
-         (graph-legend-html)
-         [:table {:class "seon-graph-summary"}
-          [:tr [:th "level"] [:th "owning schema"] [:th "nodes"] [:th "≈tokens"]]
-          (for [[[level k] ids] (sort-by key (group-by (juxt level-of #(get-in nodes [% ::render.walk/node-schema])) order))]
-            [:tr [:td level] [:td [:code (if k (subs (str k) 1) "unowned")]] [:td (count ids)] [:td (format "%,d" (reduce + (map size ids)))]])
-          (for [[k c] (sort-by (comp - val) skipped)] [:tr {:class "seon-graph-skipped-row"} [:td "—"] [:td [:code (str k)] " (skipped: no render pair)"] [:td c] [:td "—"]])]
-         (when cuts [:div {:class "seon-graph-cuts"} [:h2 "Cuts"] (face :cuts cuts 1 :seon.render/html)])]
-        (into [:div {:class "seon-graph-nodes"}]
-              (for [level (sort (keys levels))]
-                (into [:section {:class "seon-graph-level"}
-                       [:h2 (str "Level " level) [:span (str (count (levels level)) (if (= 1 (count (levels level))) " node · ≈" " nodes · ≈")
-                                                             (format "%,d" (reduce + (map size (levels level)))) " tokens")]]]
-                      (for [id (levels level) :let [[ai html] (faces id)]]
-                        [:details (cond-> {:class "seon-graph-node" :id (str "node-" id) :data-node id} (<= level 1) (assoc :open true))
-                         [:summary (graph-node-label identities agent-id query (positions id) id (nodes id))
-                          (when (string? ai) [:span {:class "seon-graph-size"} (str (count ai) " chars · ≈" (size id) " tokens")])]
-                         [:p {:class "seon-graph-why"} "included by: "
-                          (if (seq (paths id))
-                            (str/join " " (cons "root" (map (fn [[a t]] (str "—" a "→ " (node-text t))) (paths id))))
-                            "the root")]
-                         [:div {:class "seon-graph-faces"}
-                          [:div {:class "seon-graph-face seon-graph-ai"}
-                           ;; This page calls no evaluator: the forms are the render function's return, unevaluated.
-                           [:h3 "AI face · forms as the render returns them, not evaluated (the agent sees them evaluated in its system turn; see the context as sent)"]
-                           (if (string? ai) [:pre ai] ai)]
-                          [:div {:class "seon-graph-face seon-graph-html"} [:h3 "HTML face"] (if (string? html) [:pre html] html)]]
-                         (node-attributes-html projection structure database #(graph-debug-href agent-id query {"root" % "more" nil}) (nodes id))]))))])]))
 
 (defn- debug-response
   [{connection :seon.store/connection-object
@@ -3561,29 +3214,9 @@
                 (vals (dissoc page stream-strip-id))))
          {"datastar-mode" "replace"}))
 
-      (and agent-id (= "true" (get query "outline"))
-           datastar?)
-      (debug-outline-response service agent-id)
-
-      (and (get query "turn")
-           datastar?)
-      (debug-turn-response service agent-id (get query "turn")
-                           (= "true" (get query "prompt"))
-                           (cond
-                             (get query "card") :card
-                             (get query "context") :context
-                             (get query "ledger") :ledger
-                             :else :full))
-
       (and agent-id (= "true" (get query "sent")) datastar?)
       (html-response (hiccup/->string (sent-context-html service agent-id))
                      {"datastar-mode" "replace"})
-
-      (and agent-id (get query "n"))
-      (html-response
-       (shell {:seon.agent/id agent-id ::session? true ::graph? true
-               :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
-               :seon.render/page [(graph-debug-html service agent-id query)]}))
 
       (and agent-id (not (get query "subject")))
       (html-response
@@ -3594,20 +3227,15 @@
                :seon.render.debug/viewer-namespace viewer-namespace
                :seon.render/page
                [[:section {:class "seon-session-page"}
-                 ((if (= "true" (get query "prompt"))
-                    transcript/render-session-loading transcript/render-ledger)
+                 (transcript/render-agent-header
                   (session-controls (debug-turn-request (db/db connection) connection agent-id
-                                      (:seon.sci.admit/caps service)
-                                      (cond-> service
-                                        (get query "turn")
-                                        (assoc :seon.turn/id (get query "turn"))
-                                        ;; THE SESSION PANEL IS AN OUTLINE, NOT A
-                                        ;; DUMP (owner, 2026-09-16). `?prompt=true`
-                                        ;; defers to the outline, which carries the
-                                        ;; composed prompt behind its own control.
-                                        (= "true" (get query "prompt"))
-                                        (assoc ::transcript/raw? true
-                                               ::transcript/outline? true)))))
+                                                        (:seon.sci.admit/caps service) service)))
+                 [:details {:class "seon-session-context"
+                            (keyword "data-on:toggle")
+                            (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:sent "true"}) "')")}
+                  [:summary "Context"]
+                  [:div {:id (block/surface-id (keyword "graph-sent" agent-id))}
+                   "Loading the agent’s context…"]]
                  [:details {:class "seon-session-record"
                             (keyword "data-on:toggle")
                             (str "el.open && @get('" (route/path ::route/agent-debug {:id agent-id} {:record "true"}) "')")}
@@ -3632,14 +3260,6 @@
                  (render/agent-render-profile effective))
           rendered-page (current-page render-context db [::debug-tab debug-request])
           feed-id (or agent-id (str viewer-namespace))
-          prompt-section
-          (when agent-id
-            (transcript/render-session-loading
-             (session-controls
-              (debug-turn-request db connection agent-id
-                                  (:seon.sci.admit/caps service)
-                                  (assoc render-context ::transcript/raw?
-                                         (::prompt-preview? debug-request))))))
           page
           [[:section {:class "seon-debug"
                       :data-signals__ifmissing
@@ -3655,7 +3275,6 @@
              [:div [:span "output"]
               [:code (pr-str (:seon.render/output debug-request))]]]
             [:div {:class "seon-debug-grid"}
-             prompt-section
              (debug-experiment-html rendered-page)]]]]
       (html-response
        (shell

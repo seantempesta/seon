@@ -4,11 +4,6 @@
              :must-read #{seon.render.transcript/branch-errors}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
                          "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
- #:seon.task{:name "fault-problems-counts-occurrences-in-prose"
-             :kind :function
-             :intent "fault-problems (src/seon/render/transcript.clj:2086) returns each delivered fault's occurrence count only inside its ::detail string (\"Error <signature>; occurrences: <n>\"), so seon.error-test/error-graph reads the count with (str/includes? (pr-str ...) \"occurrences: 6\") (test-data-assertions lane, 2026-09-28). A count is data: carry the signature and the count as keys beside the detail and let the render print them, so a test asserts (= 6 (:...count entry))."
-             :must-read #{seon.render.transcript/fault-problems}
-             :evidence #{"test/seon/error_test.clj"}}
  #:seon.task{:name "delivered-errors-carry-no-result-handle",
             :kind :function,
             :intent

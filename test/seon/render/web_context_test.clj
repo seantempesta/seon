@@ -182,26 +182,28 @@
                                [:seon.render.web/calls "root"])))]
        (is (empty? (disj unbounded "seon.error/render-faults-html" "seon.agent/render-settings-html")))))))
 
-(deftest selected-session-defers-prompt-acquisition
+(deftest the-context-view-is-computed-only-when-opened
   (#'web-test/with-server
    (fn [_connection server _context]
-     ;; The armed counter of the acquisition observes the server thread's
-     ;; calls; no Var is redefined.
-     (let [acquisitions (fn [thunk]
-                          (let [[result calls] (support/armed-calls '#{seon.render/acquire-context!} thunk)]
-                            [result (get calls 'seon.render/acquire-context!)]))
-           [ordinary ordinary-calls] (acquisitions #(#'web-test/fetch server "/agent/root/debug"))
-           [explicit explicit-calls] (acquisitions #(#'web-test/fetch server "/agent/root/debug?prompt=true"))
+     ;; The armed counters observe the server thread's calls; no Var is redefined.
+     (let [counted (fn [thunk]
+                     (let [[result calls] (support/armed-calls
+                                           '#{seon.cluster.prompt/prompt seon.render/acquire-context!} thunk)]
+                       [result (get calls 'seon.cluster.prompt/prompt)
+                        (get calls 'seon.render/acquire-context!)]))
+           [ordinary ordinary-prompts ordinary-acquisitions] (counted #(#'web-test/fetch server "/agent/root/debug"))
+           [opened opened-prompts _] (counted #(#'web-test/fetch server "/agent/root/debug?sent=true"
+                                                                 {"datastar-request" "true"}))
            inspection (#'web-test/fetch server "/agent/root/debug?subject=%5B%3Aseon.agent%2Fid%20%22root%22%5D")]
        (is (= 200 (.statusCode ordinary)))
-       (is (= 1 ordinary-calls) "The ledger acquires current history once for saved entities and byte totals.")
-       (is (str/includes? (.body ordinary) "Turn ledger"))
-       (is (str/includes? (.body ordinary) "Record"))
-       (is (= 200 (.statusCode explicit)))
-       (is (zero? explicit-calls) "The explicit session defers its selected prompt; it adds no acquisition.")
-       (is (str/includes? (.body explicit) "Session"))
+       (is (zero? ordinary-prompts) "loading the page assembles no context")
+       (is (zero? ordinary-acquisitions) "loading the page acquires no history")
+       (is (some? (web-test/element (.body ordinary) "details.seon-session-context")))
+       (is (some? (web-test/element (.body ordinary) "details.seon-session-record")))
+       (is (= 200 (.statusCode opened)))
+       (is (= 1 opened-prompts) "opening the view assembles the context once")
+       (is (some? (web-test/element (.body opened) ".seon-data-panel")) "the value printer's panel shows it")
        (is (= 200 (.statusCode inspection)))
-       (is (str/includes? (.body inspection) "Session"))
        (is (str/includes? (.body inspection) "debug-units"))
        (is (not (str/includes? (.body inspection) "Context now")))
        (is (not (str/includes? (.body inspection) "debug-ai-")))))))

@@ -18,7 +18,6 @@
 
             [seon.config :as config]
             [seon.render :as render]
-            [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
@@ -1363,27 +1362,6 @@
                        (and (= :response region) rendered?))
                    "a comment-shaped line no renderer and no agent wrote"))))
          (finally (async/close! channel)))))))
-
-;; The ledger's prefix check derived its profile from a request and carried a
-;; refusal as the profile (the defect c1cd41b25 fixed in turn/evaluate-sources).
-(deftest a-refused-render-profile-is-passed-on-never-used-as-the-prefix-profile
-  (support/with-database
-   (fn [connection]
-     (let [request {:seon.db/db @connection :seon.agent/id agent-id
-                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)}
-           cluster-name (#'support/seeded-cluster-name connection @connection)
-           ;; the caller's name wins over its context environment's
-           refused (try (#'transcript/prefix-problem
-                         (assoc request :seon.cluster/name "no-such-cluster") [])
-                        (catch clojure.lang.ExceptionInfo e (ex-data e)))
-           named (#'transcript/prefix-problem
-                  (assoc request :seon.cluster/name cluster-name) [])]
-       (is (string? cluster-name))
-       (is (= :seon.render/profile (:seon.render/refused-member refused))
-           "a refused profile throws; it is never the prefix render's profile")
-       (is (string? (:seon.error/message refused)))
-       (is (= :prefix (:seon.render.transcript/code named))
-           "the cluster the caller names on the request derives the profile")))))
 
 (defn- core-fault!
   "Record one core fault on `connection`'s branch through the production writer."

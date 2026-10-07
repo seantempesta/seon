@@ -1,7 +1,7 @@
 [#:seon.task{:name "the-render-cache-keeps-every-debug-view"
              :kind :function
-             :intent "The environment's :seon.render/cache atom holds 69.8 MB at idle with no eviction: ::graph-calls 36.7 MB keeps every debug-page view forever (four keys at 12.6, 12.6, 7.9 and 3.6 MB), ::invocations 27.5 MB, and entries retain read results. The debug page costs 3.13 s cold and 1.74 s warm at n=2; its n=2 load (14.8 s) preceded the 10:10 OOM. Retain read evidence without results, and bound the cache."
-             :must-read #{seon.render.web/graph-debug-html seon.render/render-call}
+             :intent "The environment's :seon.render/cache atom held 69.8 MB at idle with no eviction; the graph page's ::graph-calls (36.7 MB) is deleted with that page, and ::invocations (27.5 MB) remains, with entries that retain read results. Retain read evidence without results, and bound the cache."
+             :must-read #{seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/landing/mem-idle-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
@@ -32,7 +32,7 @@
  #:seon.task{:name "pages-print-values-instead-of-the-printer-html-face"
              :kind :namespace
              :intent "Web, health, error, schema, var, status, problems and repl pages print values themselves ([:pre (pr-str value)], [:code (print.value/bounded-text v)], 422/500/503 bodies of clipped results) instead of rendering them through the value printer's HTML face, so humans see clipped text the AI path does not and large values are printed whole (debug-value-html, repl render-html, create-owner-response). CLAUDE.md: printing is rendering with two consumers on one pipeline. Inventory class ui-print, 32 sites: render/web.clj 17, health.clj 5, error.clj 3, render/schema.clj 2, cluster/status.clj 1, problems.clj 1, render/var.clj 1, render/walk.clj 1, repl.clj 1. Done when every page shows values through the printer's hiccup output, and seon.render.web-test asserts the debug page for a 10 MB value returns under the printer's budget with its elision link."
-             :must-read #{seon.render.web/debug-value-html seon.render.web/node-attributes-html seon.health/finding-item}
+             :must-read #{seon.render.web/debug-value-html seon.health/finding-item}
              :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
  #:seon.task{:name "the-built-stylesheet-is-stale-against-its-source",
             :kind :function,

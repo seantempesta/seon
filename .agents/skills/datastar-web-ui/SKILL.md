@@ -63,9 +63,8 @@ read form's latest evaluation, including agent-written reads.
 Writes and effects never rerun. Passive browser render work cannot
 append evaluations.
 
-The debug page uses the turn ledger and the acquired session component;
-entity inspection shares that session component (`debug-response`,
-`src/seon/render/web.clj:3410`). Debug text wraps in CSS; AI bytes do not
+The agent debug page shows the agent's context through the turn's own context
+function, on demand, via the value printer's HTML face (`sent-context-html`). Debug text wraps in CSS; AI bytes do not
 acquire display-width breaks (`prepare`, `src/seon/render/value.clj:986`).
 Compaction wipes evaluations and regenerates
 the opening. Do not preserve manual Add/remove/curation controls
