@@ -137,6 +137,24 @@ is fine) follow in order:
   reader and never run.
 - "Calls left", if shown, is one key on a final map, not prose.
 
+**Two presentations, decided by evidence (owner, 2026-10-07).** "I'd prefer if it was closer to a normal REPL
+but I want to follow the evidence and ask the agents." Both are small context functions over the same stored
+exchanges, chosen per agent by a settings value. Neither is a second system.
+- **REPL**, closest to a real REPL. Each form is shown as `ns=> form` and followed immediately by what a REPL
+  prints: its value through the value printer, or its error. There is no `;; =>` and nothing interleaved. The
+  agent's prose comments sit above the form, as it wrote them.
+- **DATA**: the vector of exchange maps shown above.
+
+S6 runs the same micro-tasks under both and measures:
+- protocol followed;
+- invented results, counted;
+- forms that error;
+- calls to finish;
+- correctness.
+
+After each run, a separate feedback turn asks the agent how the transcript read. If the evidence is a tie, REPL
+wins (owner preference). The loser's function is deleted.
+
 Targets: one commit per model reply; Seon's own work per pass under 200 ms beyond the provider; the context
 render with no reference changed under 10 ms warm.
 
