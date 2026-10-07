@@ -63,7 +63,10 @@ code the cut orphaned, five changed functions have no contract, and stale commen
      render. §5 item 1 still describes `render-session` (transcript.clj:1439) as a live red.
    - `docs/seon/issues/debug-reread-summary-duplicates-shown-value-and-diff-owners.md` concerns `readable-shown`,
      `changed-paths` and `reread-summary`, all of which are deleted. The issue is dissolved but still open.
-   - `docs/seon/schedule/README.md:122` and `triage.tsv:48` still schedule
+   - In `resources/seon/tasks/seon.render.web.edn:35` the diff edited the ui-print task's `:must-read` to remove
+    `node-attributes-html`, but left `seon.render.web/debug-value-html`. That Var has not existed since b55945b57,
+    so the task still names a Var that resolves to nothing.
+  - `docs/seon/schedule/README.md:122` and `triage.tsv:48` still schedule
      `seon.render.transcript/fault-problems-counts-occurrences-in-prose`, which the diff dissolved. The schedule is
      root's to edit.
 6. **Formatting** (low): web.clj keeps 11 blank lines where the graph Vars were (after `debug-turn-response`'s
@@ -81,7 +84,7 @@ code the cut orphaned, five changed functions have no contract, and stale commen
 
 | # | Claim | Status | Evidence |
 |---|---|---|---|
-| 1 | Nothing deleted is still referenced | **supported** for code, CSS, schema, routes and JS | `git grep -w` of all 71 deleted def names over src, test, resources, .agents, bin, script and docs/seon at 25bb94be0. The only hits are prose (docs/issues, render-dedup, schedule, one task intent that says the function was deleted) and same-named unrelated Vars (`seon.ai/attempt-html`, `db/error-problem-sentence`, `bin/seon-hook` `finding`). Of 86 removed `.seon-*` selectors, none is emitted under src or js (exact-token grep); no dynamic `"seon-…-"` prefix matches a removed family. `prefix-subject`, `::transcript/ledger?`, `?prompt`, `?outline`, `?turn` and `?n` have no remaining reader. Task `:must-read` re-points resolve. |
+| 1 | Nothing deleted is still referenced | **supported** for code, CSS, schema, routes and JS | `git grep -w` of all 71 deleted def names over src, test, resources, .agents, bin, script and docs/seon at 25bb94be0. The only hits are prose (docs/issues, render-dedup, schedule, one task intent that says the function was deleted) and same-named unrelated Vars (`seon.ai/attempt-html`, `db/error-problem-sentence`, `bin/seon-hook` `finding`). Of 86 removed `.seon-*` selectors, none is emitted under src or js (exact-token grep); no dynamic `"seon-…-"` prefix matches a removed family. `prefix-subject`, `::transcript/ledger?`, `?prompt`, `?outline`, `?turn` and `?n` have no remaining reader. The re-pointed task `:must-read` entries resolve (`seon.render/render-call`, `seon.repl/entity-emission`), apart from the older `debug-value-html` in finding 5. |
 | 1b | `output.css` is the build of the committed `input.css` | **supported** | `bun …tailwindcss/cli -i input.css` run on a `git archive 25bb94be0` copy gives no diff against the committed `output.css` (78 ms) |
 | 2 | Nothing that should be gone is still live | **contradicted** (finding 2) | `agent-calibration`; clj-kondo `--cache false` on both files gives 0 errors and no unused requires (28 warnings against the parent's 41) |
 | 3a | Zero assembly on page load, one call when opened | **supported** | The test counts with armed `prompt/prompt` and `acquire-context!` (0/0 on load, 1 prompt on open), and was green in the commit check. Live: the page is 3,213 B with no context text. |
