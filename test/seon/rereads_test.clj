@@ -229,5 +229,5 @@
          (is (= #{:seon.turn/id} (:seon.turn/generated-read-attributes refused))
              "an unbound turn pattern still refuses")
          (is (= :seon.turn/generated-read-depends-on-turns-error
-                (:seon.error/declared-schema (meta refused)))
+                (:seon.error/type refused))
              "the refusal declares the schema its recording validates"))))))

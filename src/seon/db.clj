@@ -212,7 +212,7 @@
   [value operation]
   (if (:seon.db/invalid-read value)
     value
-    (vary-meta (assoc value :seon.db/invalid-read true :seon.db/refused-read-operation operation) assoc :seon.error/declared-schema :seon.db/invalid-read-error)))
+    (assoc (assoc value :seon.db/invalid-read true :seon.db/refused-read-operation operation) :seon.error/type :seon.db/invalid-read-error)))
 
 (defn- schema-refusal
   "Return the actual unavailable value and the declared shape it cannot satisfy."
@@ -220,13 +220,13 @@
    [:=> [:cat :qualified-symbol :seon.schema/key :seon.schema/value :string :map]
     :seon.schema/validation-refusal]}
   [operation expected value message evidence]
-  (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/acquisition operation
+  (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/acquisition operation
    {:seon.error/message message
     :seon.db/invalid-read true
     :seon.db/refused-read-operation operation
     :seon.schema/expected-value expected
     :seon.schema/refused-value value
-    :seon.error/data (merge evidence {:seon.error/layer :database-read})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))
+    :seon.error/data (merge evidence {:seon.error/layer :database-read})}) :seon.error/type :seon.db/invalid-read-error))
 
 (defn- dependency-error
   "Classify one declared read refusal: an `ExceptionInfo`, the one carrier of
@@ -238,9 +238,9 @@
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.db/error-result]}
   [operation error]
   (if (:seon.schema/expected-value (ex-data error))
-    (vary-meta (assoc (ex-data error) :seon.db/invalid-read true
+    (assoc (assoc (ex-data error) :seon.db/invalid-read true
            :seon.db/refused-read-operation
-           operation) assoc :seon.error/declared-schema :seon.db/invalid-read-error)
+           operation) :seon.error/type :seon.db/invalid-read-error)
     ;; Every other dependency failure keeps its whole cause: the diagnostic
     ;; derives the class, root frame and cause chain from the Throwable.
     (error.refusal/diagnostic
@@ -1100,8 +1100,7 @@
     (if (and physical
              (or (instance? HistoricalDB database) (instance? SinceDB database))
              (some #(or (= '* %) (and (map? %) (contains? % :seon.db.vector/cells))) physical))
-      (vary-meta
-       (diagnostic
+      (assoc (diagnostic
         {:seon.error/message (str "A vector is whole only in a complete database value; this pull reads "
                                   "vectors over a history or since view. Pull from (as-of db t); query "
                                   "membership changes with Datalog over history.")
@@ -1111,8 +1110,7 @@
          :seon.error/operation 'seon.db/pull
          :seon.error/expected :seon.db/database-value
          :seon.error/offending selector
-         :seon.error/data {:seon.db/pull-selector selector}})
-       assoc :seon.error/declared-schema :seon.db/invalid-read-error)
+         :seon.error/data {:seon.db/pull-selector selector}}) :seon.error/type :seon.db/invalid-read-error)
       (let [response (apply operation database arguments)
             result (decode-pull-result declarations (:datahike.pull/plan response) result-key
                                        (get response result-key))]
@@ -1176,7 +1174,7 @@
                            (d/index-page database
                                          (:seon.db/index-page-options request)))
 
-        (vary-meta (diagnostic
+        (assoc (diagnostic
          {:seon.error/message (str "seon.db/replay-read cannot replay the read operation "
                (pr-str (:seon.db/read-operation request)) ".")
           :seon.db.read/unknown-read-operation (:seon.db/read-operation request)
@@ -1186,7 +1184,7 @@
           :seon.error/member :seon.db/read-operation
           :seon.error/expected :seon.db/read-operation
           :seon.error/offending (:seon.db/read-operation request)
-          :seon.error/data {:seon.db/read-request request}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error)))))
+          :seon.error/data {:seon.db/read-request request}}) :seon.error/type :seon.db/invalid-read-error)))))
 
 (defn- index-pattern-change
   "The first changed datom matching a retained read pattern, found by the
@@ -1394,12 +1392,12 @@
   (binding [*out* *err*]
     (println "WARN seon.db/projection-fallback caller=" operation
              "missing-projection count=1; supply the operation's projection."))
-  (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/projection 'seon.db/projection-fallback
+  (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/projection 'seon.db/projection-fallback
    {:seon.error/message "This operation requires a carried schema projection."
     :seon.db/invalid-read true
     :seon.db/refused-read-operation operation
     :seon.schema/expected-value :seon.schema/projection
-    :seon.schema/refused-value {:seon.db/operation operation}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))
+    :seon.schema/refused-value {:seon.db/operation operation}}) :seon.error/type :seon.db/invalid-read-error))
 
 (def projection-cache-policy
   "Bound retained compiled projections independently of the number of commits."
@@ -1843,14 +1841,14 @@
       {::installed-schema installed
        ::read-projection
        (delay (carried-projection database))}
-      (vary-meta (diagnostic
+      (assoc (diagnostic
        {:seon.error/message (str operation " cannot decode a read: the supplied value carries no installed database schema.")
         :seon.db.read/unreadable-declarations operation
         :seon.db/invalid-read true
         :seon.error/layer :database-read
         :seon.error/operation operation
         :seon.error/member ::installed-schema
-        :seon.error/data {:seon.db/db database}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))))
+        :seon.error/data {:seon.db/db database}}) :seon.error/type :seon.db/invalid-read-error))))
 
 (def ^:private relation-only-declarations
   "The declaration table for a read with no database source.
@@ -1999,7 +1997,7 @@
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.error/base]}
   [operation database attribute offending]
   (let [evidence (attribute-observation database attribute)]
-    (vary-meta (diagnostic
+    (assoc (diagnostic
      {:seon.error/message (str operation " cannot read uninstalled attribute "
            (pr-str attribute) ".")
       :seon.db/invalid-read true
@@ -2008,12 +2006,12 @@
       :seon.error/expected {::installed-declaration :seon.error/unknown
        ::registered-candidates (::registered-candidates evidence)}
       :seon.error/offending offending
-      :seon.error/data (merge evidence {:seon.error/member attribute})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error)))
+      :seon.error/data (merge evidence {:seon.error/member attribute})}) :seon.error/type :seon.db/invalid-read-error)))
 
 (defn- value-type-error
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :map :qualified-keyword :seon.schema/value] :seon.error/base]}
   [operation database declaration attribute value]
-  (vary-meta (diagnostic
+  (assoc (diagnostic
    {:seon.error/message (str operation " received " (pr-str value) " for "
          (pr-str attribute) ", whose installed value type is "
          (pr-str (:db/valueType declaration)) ".")
@@ -2024,7 +2022,7 @@
     :seon.error/offending {::attribute attribute ::value value}
     :seon.error/data (merge (attribute-observation database attribute)
                             {:seon.error/member attribute :seon.error/source {::validation ::value-does-not-match-installed-type
-     ::value-type (:db/valueType declaration)}})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))
+     ::value-type (:db/valueType declaration)}})}) :seon.error/type :seon.db/invalid-read-error))
 
 (defn- lookup-ref-error
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value] [:or :nil :seon.error/base]]}
@@ -2041,7 +2039,7 @@
         (unknown-attribute-error operation database attribute entity-id)
 
         (nil? (:db/unique declaration))
-        (vary-meta (diagnostic
+        (assoc (diagnostic
          {:seon.error/message (str operation " requires a unique lookup-ref attribute; "
                (pr-str attribute) " is not unique.")
           :seon.db/invalid-read true
@@ -2050,7 +2048,7 @@
           :seon.error/expected declaration
           :seon.error/offending entity-id
           :seon.error/data (merge (attribute-observation database attribute)
-                                  {:seon.error/member attribute})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error)
+                                  {:seon.error/member attribute})}) :seon.error/type :seon.db/invalid-read-error)
 
         (not valid-value?)
         (value-type-error operation database declaration attribute value)))))
@@ -2090,16 +2088,14 @@
                   [:maybe :seon.db/invalid-read-error]]}
   [request parsed-query]
   (when (some true? (map nil-query-binding? (:qin parsed-query) (:args request)))
-    (vary-meta
-     (diagnostic
+    (assoc (diagnostic
       {:seon.error/message "A query :in binding supplied nil; supply a value or omit the read when its subject is absent."
        :seon.db/invalid-read true
        :seon.error/layer :database-read
        :seon.error/operation 'seon.db/q
        :seon.error/expected :some
        :seon.error/offending nil
-       :seon.error/data {::query (:query request) :seon.error/member :in}})
-     assoc :seon.error/declared-schema :seon.db/invalid-read-error)))
+       :seon.error/data {::query (:query request) :seon.error/member :in}}) :seon.error/type :seon.db/invalid-read-error)))
 
 (defn- query-input-values
   {:malli/schema [:=> [:cat :seon.schema/value [:sequential :seon.schema/value]] :map]}
@@ -2137,7 +2133,7 @@
   (when-let [pattern (some #(when (> (count (:pattern %)) 5) %)
                            (query-patterns parsed-query))]
     (let [offending (parsed-pattern-value pattern)]
-      (vary-meta (diagnostic
+      (assoc (diagnostic
        {:seon.error/message "seon.db/q received a data pattern with more than five positions."
         :seon.db/invalid-read true
         :seon.error/layer :database-read
@@ -2145,7 +2141,7 @@
         :seon.error/expected [:entity :attribute :value :transaction :added]
         :seon.error/offending offending
         ;; the query form, never the request: its arguments carry the database
-        :seon.error/data {:seon.error/member offending ::query (:query request)}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))))
+        :seon.error/data {:seon.error/member offending ::query (:query request)}}) :seon.error/type :seon.db/invalid-read-error))))
 
 (defn- query-source-databases
   [query-form arguments]
@@ -2500,8 +2496,7 @@
                     (lowered-query-request projection encoded parsed-query)
                     (catch clojure.lang.ExceptionInfo cause
                       (if-let [f (::schema.datahike/vector-scalar-function (ex-data cause))]
-                        (vary-meta
-                         (diagnostic
+                        (assoc (diagnostic
                           {:seon.error/message (ex-message cause)
                            :seon.db/vector-scalar-function f
                            :seon.db/invalid-read true
@@ -2509,8 +2504,7 @@
                            :seon.error/operation 'seon.db/q
                            :seon.error/expected :seon.db/query
                            :seon.error/offending (::schema.datahike/clause (ex-data cause))
-                           :seon.error/data {:seon.db/query (:query logical)}})
-                         assoc :seon.error/declared-schema :seon.db/invalid-read-error)
+                           :seon.error/data {:seon.db/query (:query logical)}}) :seon.error/type :seon.db/invalid-read-error)
                         (throw cause)))))]
     (if (:seon.error/at lowered)
       lowered
@@ -2678,7 +2672,7 @@
 (defn- query-input-shape-error
   {:malli/schema [:=> [:cat :map [:sequential :seon.schema/value]] :seon.error/base]}
   [query-form arguments]
-  (vary-meta (diagnostic
+  (assoc (diagnostic
    {:seon.error/message (query-argument-message query-form arguments)
     :seon.db/invalid-read true
     :seon.error/layer :database-read
@@ -2688,7 +2682,7 @@
     :seon.error/offending (error.refusal/references
                            (some-> (some #(when (db.utils/db? %) %) arguments) carried-projection)
                            (vec arguments))
-    :seon.error/data (merge {::query query-form} {:seon.error/member :in})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))
+    :seon.error/data (merge {::query query-form} {:seon.error/member :in})}) :seon.error/type :seon.db/invalid-read-error))
 
 (defn- query-input-position
   "Return the omitted $ position, :explicit, or :invalid from parsed bindings."
@@ -2850,14 +2844,14 @@
              (map? (first arguments))
              (not (contains? (first arguments) :selector)))
     (let [request (first arguments)]
-      (vary-meta (diagnostic
+      (assoc (diagnostic
        {:seon.error/message (str public-operation " argument maps require :selector.")
         :seon.db/invalid-read true
         :seon.error/layer :database-read
         :seon.error/operation public-operation
         :seon.error/expected [:map [:selector :seon.db/pull-selector]]
         :seon.error/offending request
-        :seon.error/data {:seon.error/member :selector :seon.error/source request}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))))
+        :seon.error/data {:seon.error/member :selector :seon.error/source request}}) :seon.error/type :seon.db/invalid-read-error))))
 
 (defn- pull-entity-id
   [arguments]
@@ -2891,7 +2885,7 @@
             validator (schema/projection-validator projected derived-key)]
         (if (validator value)
           value
-          (vary-meta (diagnostic
+          (assoc (diagnostic
            {:seon.error/message (str public-operation
                  " returned a value that does not satisfy the derived pulled form "
                  derived-key " of " schema-key ".")
@@ -2901,7 +2895,7 @@
             :seon.error/operation public-operation
             :seon.error/expected (get (:seon.schema.projection/forms projected) derived-key)
             :seon.error/offending value
-            :seon.error/data {:seon.schema/key schema-key :seon.db/pull-selector selector}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))))))
+            :seon.error/data {:seon.schema/key schema-key :seon.db/pull-selector selector}}) :seon.error/type :seon.db/invalid-read-error))))))
 
 (defn- validate-pulled-result
   "Check pulled values only against the schema explicitly named by the caller."
@@ -2956,7 +2950,7 @@
                        (and (= 2 (count arguments))
                             (vector? options) (not (map? (second arguments)))))]
           (when-not valid?
-            (vary-meta (diagnostic
+            (assoc (diagnostic
              {:seon.error/message (str public-operation " received invalid arguments " (pr-str arguments)
                    ". Use (" public-operation " selector " (if many? "eids" "eid")
                    ") with the database elided, or (" public-operation
@@ -2967,7 +2961,7 @@
               :seon.error/operation public-operation
               :seon.error/expected expected
               :seon.error/offending arguments
-              :seon.error/data (merge {::operation operation-key} {:seon.error/member :args})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error)))
+              :seon.error/data (merge {::operation operation-key} {:seon.error/member :args})}) :seon.error/type :seon.db/invalid-read-error)))
         (when (#{'seon.db/pull 'seon.db/entity} public-operation)
           (lookup-ref-error public-operation database
                             (pull-entity-id arguments)))
@@ -3295,7 +3289,7 @@
     (not (dbi/-temporal-index? database))
     (do
       (append-database-evidence! database :all)
-      (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/database-read 'seon.db/database-view
+      (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/database-read 'seon.db/database-view
        {:seon.error/message "The database does not retain temporal indices."
         :seon.db/invalid-read true
         :seon.db/refused-read-operation 'seon.db/database-view
@@ -3304,7 +3298,7 @@
         :seon.error/expected [:= true]
         :seon.error/offending false
         :seon.error/data (merge {::operation ::temporal-read
-                          :seon.config.db/keep-history? false} {:seon.error/layer :database-read :seon.error/source {:seon.config.db/keep-history? false}})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))
+                          :seon.config.db/keep-history? false} {:seon.error/layer :database-read :seon.error/source {:seon.config.db/keep-history? false}})}) :seon.error/type :seon.db/invalid-read-error))
 
     :else
     ;; Building a view reads no datom: each read on the view records its own
@@ -4801,8 +4795,7 @@
       (let [breaks (vec (sort-by pr-str breaks))]
         ;; The producer declares what it refused; `write-observation` carries
         ;; that identity as `:seon.db.write/validator-schema`.
-        (vary-meta
-         (diagnostic
+        (assoc (diagnostic
          {::transaction-refused true
           :seon.program/referrers breaks
           :seon.error/message (str "Program deletion leaves surviving referrers: "
@@ -4812,8 +4805,7 @@
           :seon.error/operation 'seon.db/transact!
           :seon.error/member :seon.program/referrer
           :seon.error/expected :seon.program/deletion-row
-          :seon.error/offending breaks})
-         assoc :seon.error/declared-schema :seon.program/deletion-refused-error)))))
+          :seon.error/offending breaks}) :seon.error/type :seon.program/deletion-refused-error)))))
 
 (defn deletion-error
   "Refuse a publication removing definitions still named in its final database.
@@ -5575,21 +5567,19 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/transaction :seon.error/base]
                   [:and :seon.db.write/validation-refusal :seon.db/error-result]]}
   [database transaction observation]
-  (vary-meta
-   (-> observation
+  (assoc (-> observation
       ;; The validator's own declared identity (e.g. a deletion refusal) is
       ;; provenance beside the generic write-attempt identity, never replaced.
-      (cond-> (some-> (meta observation) :seon.error/declared-schema
+      (cond-> (some-> (:seon.error/type observation)
                       (not= :seon.db.write/validation-refusal))
-        (assoc :seon.db.write/validator-schema (:seon.error/declared-schema (meta observation))))
+        (assoc :seon.db.write/validator-schema (:seon.error/type observation)))
       (assoc :seon.db.write.attempt/request-id (id/id)
              :seon.error/basis
              {:seon.error.basis/store (datahike.store/store-identity (:store (dbi/-config database)))
               :seon.error.basis/branch (:branch (dbi/-config database))
               :seon.error.basis/commit (d/commit-id database)
               :seon.error.basis/t (dbi/-max-tx database)})
-      (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] (attempted-transaction transaction)))
-   assoc :seon.error/declared-schema :seon.db.write/validation-refusal))
+      (assoc-in [:seon.error/data :seon.db.write.attempt/transaction] (attempted-transaction transaction))) :seon.error/type :seon.db.write/validation-refusal))
 
 (defn- prepared-write
   "The request the writer applies for `transaction` on `database`: JDK
@@ -5967,5 +5957,5 @@
            refusal
            (if (database-value? database)
              (write-observation database transaction refusal)
-             (vary-meta (assoc refusal :seon.db.write.attempt/request-id (id/id)) assoc :seon.error/declared-schema :seon.db.write/validation-refusal))))
+             (assoc (assoc refusal :seon.db.write.attempt/request-id (id/id)) :seon.error/type :seon.db.write/validation-refusal))))
        result))))

@@ -354,7 +354,7 @@
                                [?c :seon.context.capture/prompt ?text]]
                       database turn-id)]
     (when (and (string? capture) (not= capture text))
-      (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.prompt/capture 'seon.cluster.prompt/capture-mismatch
+      (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.prompt/capture 'seon.cluster.prompt/capture-mismatch
        {:seon.error/message
         "Saved evaluations do not reconstruct the captured provider prompt."
         :seon.turn/id turn-id
@@ -362,7 +362,7 @@
         ;; The captured prompt is the value the recomposition failed to match.
         :seon.cluster.prompt/derivation-observation
         {:seon.error.evidence/attribute :seon.context.capture/prompt
-         :seon.error.evidence/value capture}}) assoc :seon.error/declared-schema :seon.cluster.prompt/error))))
+         :seon.error.evidence/value capture}}) :seon.error/type :seon.cluster.prompt/error))))
 
 (defn- acquire-context-report
   "`settings` is the ONE resolution `prompt` already made (2.1): the turn
@@ -384,10 +384,10 @@
     (cond
       (or (:seon.render/refused-member acquired)
           (:seon.render.web/refused-member acquired))
-      (vary-meta (assoc acquired :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
+      (assoc (assoc acquired :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
                        :seon.cluster.prompt/derivation-observation
                        {:seon.error.evidence/attribute :seon.error/message
-                        :seon.error.evidence/value (:seon.error/message acquired)}) assoc :seon.error/declared-schema :seon.cluster.prompt/error)
+                        :seon.error.evidence/value (:seon.error/message acquired)}) :seon.error/type :seon.cluster.prompt/error)
 
       ;; ABSENCE IS NOT AN EMPTY HISTORY. Acquisition publishes one unit per
       ;; stored evaluation; a text with no units behind it would compose to
@@ -437,10 +437,10 @@
   (let [agent-id (:seon.agent/id request)
         settings (effective-ai-settings database (request-cluster-name request) agent-id)
         refused (fn [error]
-                  (vary-meta (assoc error :seon.cluster.prompt/error-agent-id agent-id
+                  (assoc (assoc error :seon.cluster.prompt/error-agent-id agent-id
                          :seon.cluster.prompt/derivation-observation
                          {:seon.error.evidence/attribute :seon.error/message
-                          :seon.error.evidence/value (:seon.error/message error)}) assoc :seon.error/declared-schema :seon.cluster.prompt/error))]
+                          :seon.error.evidence/value (:seon.error/message error)}) :seon.error/type :seon.cluster.prompt/error))]
     (if (or (:seon.cluster.prompt/missing-cluster settings)
             (:seon.cluster.prompt/missing-config settings)
             (:seon.config/error-key settings) (:seon.db/invalid-read settings)

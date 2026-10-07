@@ -426,7 +426,7 @@
                       ;; interpreted caller's refusal arrives inside SCI's
                       ;; location wrapper, whose own data declares nothing
                       (when throwable?
-                        (some #(:seon.error/declared-schema (meta (ex-data %)))
+                        (some #(:seon.error/type (ex-data %))
                               (refusal/cause-links failure)))
                       :seon.flow/exception-error)})
         committed? (contains? #{:seon.flow/committed :seon.fault/folded} outcome)

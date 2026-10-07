@@ -439,7 +439,7 @@
                                                          {:seon.error/operation 'seon.error.refusal-test/probe})])))]
     (.start thread)
     (let [[valid undeclared] (deref built 5000 [nil nil])]
-      (is (= :seon.error/base (:seon.error/declared-schema (meta valid))))
+      (is (= :seon.error/base (:seon.error/type valid)))
       (is (= :seon.error/base (:seon.error/layer valid)))
       (is (= :seon.error.refusal/construction (:seon.error/layer undeclared)))
       (is (= :no.such/error (:seon.error/member undeclared))))))
@@ -459,7 +459,7 @@
       (is (= alternative (:seon.error/layer valid)))
       (is (= operation (:seon.error/operation valid)))
       (is (inst? (:seon.error/at valid)))
-      (is (= alternative (:seon.error/declared-schema (meta valid)))))
+      (is (= alternative (:seon.error/type valid))))
     (testing "the result validates against the named alternative"
       (is ((schema/projection-validator projection alternative) valid)))
     (testing "a missing required member is a base refusal carrying the attempted error"

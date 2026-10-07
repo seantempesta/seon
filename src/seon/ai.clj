@@ -310,12 +310,12 @@
       (seq (:seon.schema/references entity))
       (set (:seon.schema/references entity))
       :else
-      (vary-meta (refusal/diagnostic (java.util.Date.) :seon.ai/settings 'seon.ai/agent-setting-attributes
+      (assoc (refusal/diagnostic (java.util.Date.) :seon.ai/settings 'seon.ai/agent-setting-attributes
        {:seon.error/message "The agent overlay schema has no declared setting references."
         :seon.schema/refused-value entity
         :seon.schema/expected-value :seon.config/agent-overlay
         :seon.error/member :seon.schema/references
-        :seon.error/expected "installed agent-overlay setting references"}) assoc :seon.error/declared-schema :seon.schema/validation-refusal))))
+        :seon.error/expected "installed agent-overlay setting references"}) :seon.error/type :seon.schema/validation-refusal))))
 
 (defn agent-overlay
   "Declared setting overrides for one agent in a database value."
@@ -506,8 +506,7 @@
   "A flat `:seon.ai/request` error of declared `schema`, produced by `operation`."
   {:malli/schema [:=> [:cat :qualified-keyword :seon.error/operation :map] :seon.error/base]}
   [schema operation members]
-  (vary-meta (refusal/diagnostic (java.util.Date.) :seon.ai/request operation members)
-             assoc :seon.error/declared-schema schema))
+  (assoc (refusal/diagnostic (java.util.Date.) :seon.ai/request operation members) :seon.error/type schema))
 
 (defn- unparseable
   "The declared error for a provider document with no textual assistant reply.
@@ -1216,7 +1215,7 @@
                             :seon.error/data (assoc (answered status true) ::error-class :response)})))
           (let [body (str (read-body))]
             ;; a rejection carries no generated output; a 2xx would not be here
-            (vary-meta {:seon.error/at (java.util.Date.)
+            (assoc {:seon.error/at (java.util.Date.)
                         :seon.error/layer :seon.ai/request
                         :seon.error/operation 'seon.ai/send-request
                         :seon.error/message (str "The provider answered " status ".")
@@ -1225,8 +1224,7 @@
                                                 ::error-class (status-class status))
                         :seon.ai/provider-error status
                         :seon.error/member :seon.ai/http-status
-                        :seon.error/expected "an HTTP success response"}
-                       assoc :seon.error/declared-schema :seon.ai/provider-error-error))))
+                        :seon.error/expected "an HTTP success response"} :seon.error/type :seon.ai/provider-error-error))))
       (catch java.net.http.HttpTimeoutException failure
         ;; an ordinary outcome: the model was slow. Never a bug report.
         ;; A CONNECT timeout never transmitted anything; any other

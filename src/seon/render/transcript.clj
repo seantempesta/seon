@@ -675,8 +675,7 @@
 (defn- request-error
   "One refused render request, declared as `:seon.render.transcript/request-error`."
   [operation data]
-  (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render operation data)
-             assoc :seon.error/declared-schema :seon.render.transcript/request-error))
+  (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render operation data) :seon.error/type :seon.render.transcript/request-error))
 
 (defn- missing-selected-run
   {:malli/schema [:=> [:cat :seon.render/unit :map] :seon.render.transcript/request-error]}
@@ -1508,10 +1507,10 @@
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
                        (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal))
-                         (vary-meta (assoc refusal :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
+                         (assoc (assoc refusal :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
                        :seon.cluster.prompt/derivation-observation
                        {:seon.error.evidence/attribute :seon.error/message
-                        :seon.error.evidence/value (:seon.error/message refusal)}) assoc :seon.error/declared-schema :seon.cluster.prompt/error)
+                        :seon.error.evidence/value (:seon.error/message refusal)}) :seon.error/type :seon.cluster.prompt/error)
                          (throw failure)))))
         refusal (:seon.cluster.prompt/error-agent-id composed)]
     [:details {:class "seon-outline-everything" :data-preserve-attr "open"}

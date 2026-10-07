@@ -304,6 +304,7 @@
  [:seon.error/at :seon.error/at]
  [:seon.error/layer :seon.error/layer]
  [:seon.error/operation :seon.error/operation]
+ [:seon.error/type {:optional true} :seon.error/type]
  [:seon.error/result-id {:optional true} :seon.error/result-id]
  [:seon.error/shown {:optional true} :seon.error/shown]
  [:seon.error/data-blob {:optional true} :seon.error/data-blob]
@@ -418,6 +419,8 @@
 
  :seon.error/operation
  [:qualified-symbol {:seon.db/index true}]
+ :seon.error/type
+ [:qualified-keyword {:description "The error's variant: the registered schema key its producer declared (seon.error.refusal/error). It selects the variant's render pair and the recorder's declared schema; a key, so it survives merge, assoc and ex-data across a boundary."}]
  :seon.error/refused-schema :qualified-keyword
  :seon.error/normalization-error
  [:and :seon.error/base [:map [:seon.error/data-edn :seon.error/data-edn]]]

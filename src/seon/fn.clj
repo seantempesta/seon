@@ -1041,14 +1041,13 @@
                        ". Fill the checkout's cache from this JVM's classpath at its REPL: " dependency-analysis-command)]
       ;; A platform fault, not the author's mistake: its own declared schema
       ;; (`seon.turn` stores and delivers it rather than returning it).
-      (throw (ex-info message (with-meta (error.refusal/diagnostic
+      (throw (ex-info message (assoc (error.refusal/diagnostic
                                           (java.util.Date.) :seon.fn/analysis 'seon.fn/unresolved-macro-refusal
                                           {:seon.fn/index-refused true
                                            ::dependency-analysis-missing true
                                            :seon.cluster.source/phase :analysis
                                            :seon.error/message message
-                                           ::unresolved-targets (vec (sort targets))})
-                                {:seon.error/declared-schema ::dependency-analysis-missing-error}))))))
+                                           ::unresolved-targets (vec (sort targets))}) :seon.error/type ::dependency-analysis-missing-error))))))
 
 (defn- interpreted-namespaces
   "Namespaces whose macros expand in SCI: SCI's own (`sci.impl.namespaces/namespaces`),
@@ -1259,7 +1258,7 @@
              (if-let [namespace-name (:seon.ns/name namespace-entity)]
                (assoc request :namespace-name namespace-name
                               :form-source source)
-               (vary-meta {:seon.error/at (java.util.Date.)
+               (assoc {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
                  ::namespace-unresolvable true
@@ -1270,7 +1269,7 @@
                  :seon.error/expected :seon.ns/name
                  :seon.error/offending namespace-ref
                  :seon.error/data {:seon.fn/namespace-ref namespace-ref
-                  :seon.fn/namespace-row namespace-entity}} assoc :seon.error/declared-schema :seon.fn/namespace-unresolvable-error))))
+                  :seon.fn/namespace-row namespace-entity}} :seon.error/type :seon.fn/namespace-unresolvable-error))))
          requests)
         refusal (some #(when (::namespace-unresolvable %) %) resolved)]
     (if refusal

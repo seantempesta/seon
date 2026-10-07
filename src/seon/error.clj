@@ -1633,13 +1633,13 @@
      {:seon.error/fact fact
       :seon.error/ref [:seon.error/signature signature]
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
-      ;; the declared schema rides as the value's metadata, the key render
-      ;; selection reads (`seon.render`'s declared stage)
-      :seon.error/value (with-meta (merge (value fact)
-                                          (distinguishing-members (:seon.schema/projection request)
-                                                                  (:seon.error/declared-schema fact)
-                                                                  (:seon.error/source request)))
-                          {:seon.error/declared-schema (:seon.error/declared-schema fact)})
+      ;; the declared schema rides as the value's `:seon.error/type`, the
+      ;; key render selection reads (`seon.render`'s declared stage)
+      :seon.error/value (assoc (merge (value fact)
+                                      (distinguishing-members (:seon.schema/projection request)
+                                                              (:seon.error/declared-schema fact)
+                                                              (:seon.error/source request)))
+                               :seon.error/type (:seon.error/declared-schema fact))
       :seon.blob/staged-writes staged
       :seon.db/tx-data tx}))))
   ([cluster database declared-schema source at attribution]
@@ -1648,7 +1648,7 @@
                                           :seon.config.error/max-evidence-bytes :seon.config.error/escalate-to])
                      (select-keys cluster [:seon.db/connection])
                      ;; RECORDING IS TOTAL. A value whose producer declared no
-                     ;; schema (its metadata was lost, or a fixture built it by
+                     ;; schema (it carries no `:seon.error/type`, or a fixture built it by
                      ;; hand) is recorded as normalized escaped data, the
                      ;; declared schema for exactly that case, never refused:
                      ;; a refused recording loses the fault.

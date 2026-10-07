@@ -317,9 +317,9 @@
    (fn [connection]
      (let [;; Selection is by declared identity, never structural
            ;; resemblance: the producer declares the value's schema.
-           failure (with-meta {:my.message/no-recipient true
-                               :seon.error/message "A recipient is required."}
-                     {:seon.error/declared-schema :fixture/declared-producer})
+           failure {:my.message/no-recipient true
+                    :seon.error/message "A recipient is required."
+                    :seon.error/type :fixture/declared-producer}
            request (render-request connection failure)
            projection (schema/projection-from-database (db/db connection))]
        (is (some? (mr/schema (:seon.schema.projection/registry projection)
@@ -969,10 +969,10 @@
    (fn [connection]
      (let [database (db/db connection)
            refusal (db/pull database '[*] [:no.such/attr 1])
-           undeclared (vary-meta refusal dissoc :seon.error/declared-schema)
+           undeclared (dissoc refusal :seon.error/type)
            text #(:seon.render.value/text (value/prepare (render-request connection %)))
            sentence "cannot read uninstalled attribute :no.such/attr"]
-       (is (= :seon.db/invalid-read-error (:seon.error/declared-schema (meta refusal))))
+       (is (= :seon.db/invalid-read-error (:seon.error/type refusal)))
        (is (str/includes? (text refusal) sentence))
        (is (str/includes? (text [refusal]) sentence))
        (is (str/includes? (text {:k [1 refusal]}) sentence))

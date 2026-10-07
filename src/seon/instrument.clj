@@ -659,7 +659,7 @@
               :seon.error/expected :seon.sci.admit/caps
               :seon.error/offending caps})]
         (throw (ex-info (:seon.error/message failure)
-                        (with-meta failure {:seon.error/declared-schema :seon.instrument/registration-error})))))
+                        (assoc failure :seon.error/type :seon.instrument/registration-error)))))
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
                                         (edn/read-string spec-edn) original caps
@@ -920,7 +920,7 @@
                     (binding [*compiling-contract* true]
                       (let [[declared-schema value] (refusal kind data)]
                         (throw (ex-info (:seon.error/message value)
-                                        (with-meta value {:seon.error/declared-schema declared-schema}))))))}
+                                        (assoc value :seon.error/type declared-schema))))))}
          original options)
         current (:seon.call-preparation/snapshot policy)
         plan (when current

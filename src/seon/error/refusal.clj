@@ -663,12 +663,10 @@
   "`error` with the common part every recorded failure carries supplied where
   it states none: the blame rule's [[producer]] and the calling world's
   reference ([[world-reference]]). What the producer stated wins, its
-  metadata included."
+  `:seon.error/type` included."
   {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]] :map]}
   [error throwable]
   (let [world (when-not (:seon.error/world error) (world-reference (current-world)))]
-    ;; onto `error` itself: its metadata (the producer's
-    ;; `:seon.error/declared-schema`, which selects its render) is kept
     (cond-> (reduce-kv (fn [held k v] (if (contains? held k) held (assoc held k v)))
                        error (producer error throwable))
       world (assoc :seon.error/world world))))
@@ -757,8 +755,8 @@
 
   The built value is checked against `alternative` (`seon.schema/
   explain-candidate-value`, Malli `m/explainer`, compiled once per schema
-  object). Valid: the error, its metadata naming `alternative` as
-  `:seon.error/declared-schema` (which selects its render). Invalid (a
+  object). Valid: the error, carrying `alternative` as its
+  `:seon.error/type` (which selects its render). Invalid (a
   missing operation included), or when `alternative` is not declared in the
   handed projection, else the packaged declaration projection (so an error is
   buildable at boot, at load and on any thread): a `:seon.error/base` refusal naming
@@ -786,7 +784,7 @@
           (try
             (if-let [explanation ((:explain @schema-seam) projection alternative built)]
               (refused "the built error does not satisfy it" ((:humanize @schema-seam) explanation))
-              (vary-meta built assoc :seon.error/declared-schema alternative))
+              (assoc built :seon.error/type alternative))
             (catch clojure.lang.ExceptionInfo e
               (refused (str "it cannot be checked: " (ex-message e)) nil))))))))
 

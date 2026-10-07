@@ -538,7 +538,7 @@
           (testing "the writer's refusal declares itself and types each removed identity"
             (is (string? (:seon.db.write.attempt/request-id refusal)))
             (is (some? (:seon.error/basis refusal)))
-            (is (= :seon.db.write/validation-refusal (:seon.error/declared-schema (meta refusal))))
+            (is (= :seon.db.write/validation-refusal (:seon.error/type refusal)))
             (is (= :seon.program/deletion-refused-error (:seon.db.write/validator-schema refusal)))
             (is (= #{[:seon.fn/sym (named "h")] [:seon.fn/sym (named "k")]}
                    (set (map :seon.program/identity (:seon.program/referrers refusal))))))

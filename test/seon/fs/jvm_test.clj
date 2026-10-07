@@ -7,7 +7,9 @@
             [seon.db :as db]
             [seon.fs :as filesystem]
             [seon.config :as config]
-            [seon.fs.jvm])
+            [seon.fs.jvm]
+            [seon.schema :as schema]
+            [seon.schema.edn])
   (:import [java.nio.charset StandardCharsets]
            [java.nio.file Files LinkOption Path]
            [java.security MessageDigest]
@@ -89,6 +91,16 @@
         (is (= (sha-256 octets) (:my.fs/digest result)))
         (is (true? (:my.fs/eof? result)))
         (is (not (contains? result :my.fs/text)))))))
+
+;; T1 (docs/seon/specs/errors.md §8): a returned error names its variant on
+;; the `:seon.error/type` key, which a merge keeps, never on metadata.
+(deftest an-absent-path-answers-the-not-found-error-type
+  (with-temp-tree
+    (fn [root]
+      (let [result ((handler 'read) {:my.fs/path "absent.md"} (policy root))]
+        (is (= :my.fs/not-found-error (:seon.error/type result)))
+        (is (= :my.fs/not-found-error (:seon.error/type (merge {} result))))
+        (is ((schema/projection-validator (schema/declaration-projection (seon.schema.edn/packaged-forms)) :my.fs/not-found-error) result))))))
 
 (deftest a-window-is-bounded-by-the-window-not-by-the-file
   ;; The class: a bound measured against something other than what it bounds.

@@ -71,6 +71,6 @@
        (is (= 3 (wrapped inc 2)))
        (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))
        (is (= :seon.instrument/contract-error
-              (:seon.error/declared-schema (meta refusal)))
+              (:seon.error/type refusal))
            "the producer's declared identity rides on the thrown value")
        (is (not (str/includes? (ex-message thrown) "could not be built")))))))

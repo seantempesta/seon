@@ -310,10 +310,10 @@
   [transition rule request]
   (let [message (str "run transition refused: " (name rule))]
     (throw (ex-info message
-                    (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
+                    (assoc (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
                      {:seon.error/message message
                      ::rule rule
-                     :seon.error/data {::request request}}) assoc :seon.error/declared-schema :seon.turn/refused-error)))))
+                     :seon.error/data {::request request}}) :seon.error/type :seon.turn/refused-error)))))
 
 (defn- refuse-closed-admission!
   "Refuse, inside the writer, a run for an agent whose admission is closed."
@@ -2032,15 +2032,13 @@
                                       (filter inert attributes)))))
                         evidence)]
     (when (seq offending)
-      (with-meta
-       (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
+      (assoc (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
        {:seon.turn/generated-read-attributes offending
         :seon.error/message "A generated context read depends on the agent's own turn-taking."
         :seon.error/member :seon.cluster.eval/source
         :seon.error/expected :seon.wake/context-inert
         :seon.error/offending (:seon.cluster.eval/source source)
-        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})})
-       {:seon.error/declared-schema :seon.turn/generated-read-depends-on-turns-error}))))
+        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})}) :seon.error/type :seon.turn/generated-read-depends-on-turns-error))))
 
 (defn system-turn
   "Project the declared opening and every distinct retained read form.
@@ -2058,13 +2056,13 @@
                    (declared-sources handle database agent-id namespace-name))]
     (cond
       (nil? namespace-name)
-      (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.turn/system `system-turn
+      (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.turn/system `system-turn
        {:seon.turn/rule ::agent-namespace-missing
         :seon.turn/refused-system-agent agent-id
         :seon.error/message "The system turn requires the agent's assigned namespace."
         :seon.error/member :seon.agent/id
         :seon.error/expected :seon.agent/id
-        :seon.error/data {:seon.error/layer :seon.turn}}) assoc :seon.error/declared-schema :seon.turn/refused-error)
+        :seon.error/data {:seon.error/layer :seon.turn}}) :seon.error/type :seon.turn/refused-error)
 
       (:seon.turn/refused-system-agent declared)
       (assoc declared :seon.turn/refused-system-agent agent-id)
@@ -3038,11 +3036,10 @@
                   unread (conj {:seon.cluster.eval/source unread :seon.ns/name namespace-name}))]
     (if (seq sources)
       sources
-      (vary-meta {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
+      (assoc {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
                   :seon.error/at (Date.) :seon.error/layer :seon.cluster.reply/source
                   :seon.error/operation `segmented-sources :seon.error/message no-form-message
-                  :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources}
-                 assoc :seon.error/declared-schema :seon.cluster.reply/no-forms-error))))
+                  :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources} :seon.error/type :seon.cluster.reply/no-forms-error))))
 
 (defn planned-sources
   "The ordered forms one ordinary source run executes from a model reply:
@@ -3255,16 +3252,14 @@
   (try
     (operation)
     (catch clojure.lang.ExceptionInfo failure
-      (with-meta
-       (merge {:seon.error/at (java.util.Date.)
+      (assoc (merge {:seon.error/at (java.util.Date.)
               :seon.error/layer :seon.turn/phase
               :seon.error/operation 'seon.turn/phase
               :seon.error/message
               (or (ex-message failure) (some-> failure class .getName) "The form was not evaluated.") :seon.turn.loop/phase-failed true}
              (error/refusal failure)
              {:seon.turn.loop/failed-step
-              (or (:seon.error/operation (error/refusal failure)) 'seon.turn/phase)})
-       {:seon.error/declared-schema :seon.turn.loop/phase-failed-error}))))
+              (or (:seon.error/operation (error/refusal failure)) 'seon.turn/phase)}) :seon.error/type :seon.turn.loop/phase-failed-error))))
 
 (defn- closing-settlement?
   "True when this settlement closes the ordinary turn.
@@ -3678,7 +3673,7 @@
   (let [recording
         (error/recording cluster database
                   (or (:seon.error/declared-schema source)
-                      (:seon.error/declared-schema (meta source)))
+                      (:seon.error/type source))
                   source now
                   (cond-> {:seon.agent/id agent-id}
                     run-id (assoc :seon.turn/id run-id)))
@@ -3814,7 +3809,7 @@
         associated (group-by :seon.cluster.eval/ordinal (filter :seon.cluster.eval/ordinal proposals))
         unassociated (str/join " " (map proposal-text (remove :seon.cluster.eval/ordinal proposals)))
         recording (error/recording cluster (db/db connection)
-                            (:seon.error/declared-schema (meta refusal))
+                            (:seon.error/type refusal)
                             refusal now
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
@@ -4161,7 +4156,7 @@
                      :seon.turn/id run-id}
         failure-recording (when failure
                             (error/recording cluster db
-                              (:seon.error/declared-schema (meta failure))
+                              (:seon.error/type failure)
                               failure now attribution))
         truncation-recording
         (cond

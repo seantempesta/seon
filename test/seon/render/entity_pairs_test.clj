@@ -152,18 +152,18 @@
            (set program/identity-attributes))
         "data identity owners do not become program families")
     (let [declared #(#'render/declared-producers projection {} % :seon.render/ai)
-          identified (with-meta ambiguous {:seon.error/declared-schema :seon.render/ambiguous-error})]
+          identified (assoc ambiguous :seon.error/type :seon.render/ambiguous-error)]
       (is (= ['seon.error/render-ai] (declared identified)) "the producer-declared schema's pair")
       (is (= ['seon.error/elision-prose]
-             (declared (with-meta ambiguous {:seon.error/declared-schema :seon.render.walk/elided-error})))
+             (declared (assoc ambiguous :seon.error/type :seon.render.walk/elided-error)))
           "the producer's declaration selects, never a guess from the value's members")
       ;; `ambiguity` itself declares its schema (M3 3cf5ff927), so "nobody
       ;; declared" is that value without the declaration.
-      (is (= [] (declared (with-meta ambiguous nil)))
+      (is (= [] (declared (dissoc ambiguous :seon.error/type)))
           (str "an error nobody declared is data for the floor: its members never select "
                "(owner 2026-09-26, no error-specific dispatch)"))
       (is (= []
-             (declared (with-meta (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none) nil)))
+             (declared (-> ambiguous (dissoc :seon.error/type) (assoc :seon.error/operation 'entity-pairs.fixture/none))))
           (str "the operation names where an error was raised, not a function that "
                "returned it, so it selects no renderer")))))
 
@@ -175,7 +175,7 @@
   (let [projection (schema/handed-projection)
         declared (fn [schema-key output]
                    (#'render/declared-producers
-                    projection {} (with-meta {} {:seon.error/declared-schema schema-key}) output))]
+                    projection {} (assoc {} :seon.error/type schema-key) output))]
     (doseq [schema-key [:seon.flow/submission-capacity-error :seon.program/not-found-error
                         :seon.sci.kernel/memory-pressure-error]]
       (is (= [['seon.error/render-ai] ['seon.error/render-html]]

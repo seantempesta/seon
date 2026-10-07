@@ -2965,7 +2965,7 @@
                        (clj-kondo.impl.core/resolve-cache-dir (str (io/file root ".clj-kondo")) true cache)
                        :clj 'clojure.core.async)]
             (is (= :seon.fn/dependency-analysis-missing-error
-                   (:seon.error/declared-schema (meta (ex-data refusal)))))
+                   (:seon.error/type (ex-data refusal))))
             (is (m/validate :seon.fn/dependency-analysis-missing-error (ex-data refusal)
                             {:registry (:seon.schema.projection/registry (db/carried-projection @connection))}))
             (is (= '[clojure.core.async/<! clojure.core.async/go-loop] (:seon.fn/unresolved-targets (ex-data refusal))))
