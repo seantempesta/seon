@@ -207,13 +207,14 @@
   "Reconcile the selected `handles` into a development database from the `rows` the
   exact published source holds for them, against the `basis` the adoption read at
   the destination: a competing edit since refuses (7.16); a handle absent from
-  `rows` retracts."
+  `rows` retracts. Every task the destination holds without its derived symbol gains it first."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle] :seon.task/basis]
                   [:vector :seon.schema/value]]}
   [database entities handles basis]
   (let [stored (stored-tasks database :seon.task/id handles)]
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis)))
+    (into (symbol-tx database)
+          (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) entities) basis))))
 
 (defn- task-handles
   "Every stored task handle, or with `retracted?` every handle `database`'s history

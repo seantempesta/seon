@@ -155,3 +155,31 @@ boots the pre-A commit 58f2af834 (old schema, string tags), stops, then boots th
 Verification limit: the upgraded throwaway keeps its program (its tests ran the pre-A test bodies, run 436eb7bb101c),
 so incremental adoption of the changed program rows onto an upgraded store is proven only by default's own
 `start --head`; the same rows adopt onto an empty store in the fresh throwaway.
+
+## Fix forward 2: runtime tasks on the cluster branch
+
+`start --head` on 178aa24e0 failed again (rolled back): "seon.db/transact! refused transaction data at [106991
+:seon.task/sym]" in `seon.cluster/adopt-entities!` (`operator-start-20261007T154542.904.edn`). Entity 106991 is
+`seon.schedule/a-scheduled-collection-runs-inside-the-schedule-proc-step-and-reports-as-in-world`, a runtime task
+(created by root, 2026-09-29) later persisted to its task file, so the publication holds it under the same handle.
+Development adoption copies published task rows onto the cluster branch through `seon.task/adopt-tasks-tx`, whose
+delta writes only changed declaration members; the symbol is no declaration member, and `symbol-tx` ran only on the
+publishing branch, so the cluster's stored row stayed without one and its rewrite failed the task schema. Default
+held 449 tasks on `:cluster-default` (137 runtime, 27 names with spaces, slashes or colons; no two with one ns and
+name). Fix: `adopt-tasks-tx` also starts with `symbol-tx` on its destination, so every task the cluster holds
+(runtime or published) gains its derived symbol before the delta.
+
+My earlier "upgrade" proofs never ran development adoption (the operator's `start` stops at readiness;
+`move-to-head!` adopts with an `:init` request afterwards), and a fresh old-commit store holds none of default's
+runtime rows. Proof now on default's REAL data: an APFS clone of `data/store` (`cp -c -R`, 17.5 s) in a disposable
+root, booted from a proof-only commit (HEAD 178aa24e0 + this `seon.task` fix + a store-id override,
+`SEON_PROOF_STORE_ID`, because the store id is derived from the canonical path and Datahike refuses a store opened
+under another id), then the same `:init` development adoption `move-to-head!` sends:
+
+| run | result |
+|---|---|
+| clone boot (no adoption) | ready 91 s; still on the live store's source commit 6ac5d64c, so it proved nothing about adoption |
+| clone boot + adoption | ready 75 s, adoption 13.5 s, commit 6ac5eccc, converged, 0 refusals |
+| clone boot + adoption + tests, run 54eeecb2f3dc | 27 tests, 105 pass, 1 fail = `seon.task-steps-test/steps-persist-across-a-compaction` (red on HEAD) |
+
+The store-id override exists only in the proof commit (`git commit-tree`, never on a branch); it is not landed.
