@@ -148,4 +148,14 @@
  #:seon.task{:name "turn-continue-read-results-arrive-before-done-takes-six-seconds"
              :kind :namespace
              :intent "turn-continue read-results-arrive-before-done (:147) takes 5.8-7.3 s: undiagnosed. Done when a profile names the responsible armed functions and the test fits its bound."
-             :must-read #{seon.turn/compact!}}]
+             :must-read #{seon.turn/compact!}}
+ #:seon.task{:name "a-deep-value-loses-the-run"
+             :kind :function
+             :intent "An MCP sci run of (reduce (fn [v _] [v]) [] (range 10000)) on a branch agent (default pid 30874, 2026-10-07, waste-rank lane) evaluates in 34-47 ms, then its settlement is refused 'run transition refused: no-terminal-fact' (seon.turn/receipt-settle-call, validator :seon.turn/refused-error) and the reply carries only that 1,138-character diagnostic: the agent never receives its value (218-314 ms, 357-452 MB, 81-122 k armed calls, transact! x4). The one path is not total for deep values. Hypothesis to verify first: a recursive walk in recording or settlement (admission's project, the shown map or the receipt validation) overflows the stack and the throw becomes the refusal. Done when the case returns its value with a bounded shown text and settles as an ordinary evaluation; regression: that form through the one path, asserting the reply's value handle and the settled receipt."
+             :must-read #{seon.turn/receipt-settle-call seon.sci.admit/admit seon.sci.eval/shown-result}
+             :evidence #{"tmp/waste-rank/large-values.edn" "tmp/waste-rank/error-replies.txt"}}
+ #:seon.task{:name "each-trivial-evaluation-retains-two-hundred-kilobytes"
+             :kind :function
+             :intent "Heap after System/gc grows linearly with ordinary evaluations: 100 MCP runs of (+ 1 2) on one branch agent grew default's live heap 2,562 -> 2,582 MB (~200 KB per run), and a further 100 runs added 22.9 MB in the live class histogram: Object[] +10.2 MB, datahike.datom.Datom +60,174 (about 600 per run for a 28-datom commit), persistent-sorted-set Leaf +6,296 and Branch +2,531 (default pid 30874, 2026-10-07, tmp/waste-rank/hist-diff-100-evals.txt). Retiring the branch did not release its heap within 3 s. Hypothesis: something keeps each commit's database value reachable (read evidence, a reply's basis, a world or cache key holding a db), pinning old index leaves. Find the holder with a heap dump's path to GC roots for the new Datoms and drop the reference at its producer (hold a commit id, never a db value). Done when 100 x (+ 1 2) leaves the live heap within noise (< 1 MB) and a retired branch's context and results are collectable; regression: the 100-run heap probe as a test with a declared memory bound."
+             :must-read #{seon.turn/settle-batch! seon.batch/freeze-step seon.cluster.agent/release-context!}
+             :evidence #{"tmp/waste-rank/hist-diff-100-evals.txt" "tmp/waste-rank/class-histogram-live.txt"}}]

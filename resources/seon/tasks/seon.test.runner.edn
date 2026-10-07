@@ -39,4 +39,9 @@
              :kind :function
              :intent "The in-process runner appends \"Worker-global state changed: \" (pr-str drift) to a result's failure message (runner.clj, in-process result capture): drift holds the whole native sets of changed process-global members (272a02eab), printed outside the floor with no bound. The failure-report path already renders through report-value under the value renderer's bound (failure-report); drift must too. A 2 GB unbounded print of a failure :actual killed default on 2026-09-28T00:07Z (pid 42397, a lane's probe script); the same pattern here is one large drift away. Render drift with seon.render.value/bounded-text or keep it as data on the result and print it only through the floor."
              :must-read #{seon.test.runner/failure-report seon.render.value/bounded-text}
-             :evidence #{"src/seon/test/runner.clj"}}]
+             :evidence #{"src/seon/test/runner.clj"}}
+ #:seon.task{:name "reach-entries-fill-half-the-cache-at-half-hit-rate"
+             :kind :function
+             :intent "seon.cache kind :seon.test.runner/reach-entries holds 288 MB of the 512 MB budget for 33 loads (about 8.7 MB per entry) at a 49% hit rate, 15.1 s total load (default 2026-10-07, cache-status). It evicts the rest of the cache: :seon.schema.datahike/decoded-edn 41,601 misses and 21,743 evictions, reach-digest hit 35%. An entry is a whole-program reach map per key; find what each entry holds that its consumer reads and store only that (or key it by content so consecutive runs share it). Coordinate with lane no-print-hash (reach digests). Done when reach-entries stays under 10% of the budget with a hit rate above 90% across two consecutive test runs; regression: a runner test asserting the entry's weighed bytes for a small program."
+             :must-read #{seon.test.runner/reach-entries seon.cache/status}
+             :evidence #{"tmp/waste-rank/cache-kinds.txt"}}]

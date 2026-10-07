@@ -4,4 +4,9 @@
              :intent "seon.db/pull-many on evaluation entities is 40x Datahike: 49 entities took 231 ms and 1,018 MB against d/pull-many 5.9 ms and 21 MB; the debug-page walk of 83 nodes spends 195 ms / 986 MB of its 215 ms in it. The EDN codec re-prints stored values to compare them (canonical-print-string 3.6 GB in one page recording, storage-compare, reader-round-trips?). Decode without printing."
              :must-read #{seon.db/pull-many seon.schema.datahike/canonical-print-string seon.schema.datahike/reader-round-trips? seon.schema.datahike/storage-compare}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
-                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}]
+                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
+ #:seon.task{:name "decoding-pays-a-projection-scope-and-cache-claim-per-value"
+             :kind :function
+             :intent "Each decoded attribute value enters seon.schema/call-with-projection, seon.cache/claim and compiled-storage separately. An agent's (seon.db/q '[:find (pull ?e [*]) :where [?e :seon.cluster.eval/source _]] db) over 715 evaluations took 1,529 ms and 937,544 armed calls: projection-cache-value 169,764, call-with-projection 47,309 (756 ms), compiled-storage 47,316 (518 ms), edn-encoded-attr-in? 47,309 (530 ms), seon.cache/claim 47,303 (default 2026-10-07). Over a 50 min session compiled-storage ran 551,856 times and allocated 1.85 GB self in one 60 s JFR window; projection-cache-value ran 3.94 M times. Fix: resolve the projection and each attribute's decoder once per query/pull (per result shape), then decode values with the resolved decoders. Done when the 715-entity pull answers in under 150 ms with armed calls proportional to attributes, not datoms; regression: the pull probe as a test with a call-count bound."
+             :must-read #{seon.schema.datahike/compiled-storage seon.schema.datahike/decode-attribute-value-in seon.schema/call-with-projection}
+             :evidence #{"tmp/waste-rank/profile-delta-table.txt" "tmp/waste-rank/jfr-large-errors-alloc.txt"}}]

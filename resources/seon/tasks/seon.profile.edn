@@ -33,4 +33,9 @@
              :kind :function
              :intent "There is no per-symbol profile function for an agent, and zero calls cannot be told from never measured. Done when a my.* call answers one symbol's calls, mean and max, and a symbol with no measurement answers a typed unknown while a measured zero answers zero."
              :must-read #{seon.profile/cell}
-             :evidence #{"tmp/repl-audit/read.md"}}]
+             :evidence #{"tmp/repl-audit/read.md"}}
+ #:seon.task{:name "reading-the-profile-validates-every-cell"
+             :kind :function
+             :intent "seon.profile/cells returns [:vector :seon.profile/cell] and its armed output check runs seven predicates (adder? x2, thread-local?, accumulator?, histogram?, throw-counts?, measured-mark?) on every live cell: one call costs 20,497 armed calls and 12 MB with 2,928 cells (default 2026-10-07). begin, explain, explain-slow, top and health/report each read cells, so this is the producer of seon.profile/histogram? on the health top (4.97 M calls) and of 0.49-0.98 M calls of each sibling predicate in a 50 min session. Fix: the roster's members are cells by construction (cell is the only writer); check the cell once at `cell`, and declare the read's output by a schema that does not re-validate each member's JDK objects. Done when (seon.profile/cells) costs under 10 armed calls; regression: a profile test asserting the armed-call count of one cells read."
+             :must-read #{seon.profile/cells seon.profile/cell seon.profile/begin}
+             :evidence #{"tmp/waste-rank/plus-1-2-armed-calls.edn"}}]
