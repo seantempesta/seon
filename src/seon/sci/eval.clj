@@ -119,7 +119,6 @@
             [sci.interrupt :as sci.interrupt]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
-            [seon.blob :as blob]
             [seon.cache]
             [seon.batch]
             [seon.db :as db]
@@ -2769,14 +2768,13 @@
     ctx))
 
 (defn- settled-results
-  "Every evaluation of the agent that has a handle, `{evaluation-id
-  {digest, unstored, class}}`: what a fresh context binds again under
-  `result/eN`."
+  "Every evaluation of the agent that has a handle, `{evaluation-id {class}}`:
+  the handles a fresh context binds again under `result/eN`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  ;; pull answers nil for an evaluation holding none of the three
+                  ;; pull answers nil for an evaluation that recorded no class
                   [:or [:map-of :string [:maybe :map]] :seon.db/invalid-read-error]]}
   [db agent-id]
-  (let [rows (db/q '[:find ?id (pull ?evaluation [:seon.eval/value-digest :seon.eval/unstored :seon.eval/value-class])
+  (let [rows (db/q '[:find ?id (pull ?evaluation [:seon.eval/value-class])
                      :in $ ?agent-id
                      :where [?agent :seon.agent/id ?agent-id]
                             [?turn :seon.turn/agent ?agent]
@@ -2786,58 +2784,24 @@
     ;; a refused read is answered as itself, never as no handles
     (if (db/read-refusal? rows) rows (into {} rows))))
 
-(declare bind-handles!)
-
-(def ^:private unstored-notes
-  "What a handle bound after a restart says when its value was not stored."
-  {:live-only "live-only, not stored"
-   :printed-whole "small value, printed whole, not stored"
-   :over-bound "over the storage bound, not stored"
-   :not-recorded "not stored (evaluated before values were stored, or an error)"
-   :unreadable "stored, but its blob cannot be read"})
-
 (defn- bind-settled-results!
   "Bind every handle of the agent in a context that holds none (a fresh fork:
-  after a restart, the handles its earlier replies printed): a stored cut
-  value as itself, anything else as a marker naming its class and why it was
-  not stored. No handle dangles silently; a blob that cannot be read binds
-  the marker with that reason, and a refused read of the handles is answered
-  as the refusal."
+  after a restart, the handles its earlier replies printed) to a marker naming
+  the value's class: values live only in the context that evaluated them and
+  are never stored, so no handle dangles silently. A refused read of the
+  handles is answered as the refusal."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:maybe :seon.agent/id]]
                   [:or :nil :seon.error/value]]}
   [ctx db agent-id]
   (when agent-id
-    (if-let [connection (:seon.db/connection (env/of ctx))]
-      (let [handles (settled-results db agent-id)]
-        (if (db/read-refusal? handles)
-          handles
-          (bind-handles! ctx connection handles)))
-      ;; the blob tier is the context's connection's: without one no stored
-      ;; value can be read, and saying nothing would leave every handle dangling
-      (seon.error.refusal/diagnostic
-       (java.util.Date.) :seon.sci.eval/fork 'seon.sci.eval/bind-settled-results!
-       {:seon.error/message "The agent's result handles could not be bound: its context has no connection to read stored values from."
-        :seon.error/member :seon.db/connection
-        :seon.error/expected :seon.db/connection}))))
-
-(defn- bind-handles!
-  "Bind each handle of `handles` (`settled-results`) in `ctx`: a stored cut
-  value as itself, anything else as its marker."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection [:map-of :string [:maybe :map]]] :nil]}
-  [ctx connection handles]
-  (doseq [[evaluation-id {digest :seon.eval/value-digest kind :seon.eval/unstored class-name :seon.eval/value-class}]
-          handles
-            :let [artifact (when digest (some-> (blob/get connection digest) render.value/read-artifact))
-                  kind (cond (:seon.sci.admit/print-node artifact) nil
-                             digest :unreadable
-                             :else (or kind :not-recorded))]]
-      (bind-result! ctx (admit/result-handle evaluation-id)
-                    (if kind
-                      (cond-> {:seon.eval/unstored kind
-                               :seon.eval/unstored-note (unstored-notes kind)}
-                        class-name (assoc :seon.eval/value-class class-name))
-                      (render.value/artifact-value artifact))))
-  nil)
+    (let [handles (settled-results db agent-id)]
+      (if (db/read-refusal? handles)
+        handles
+        (doseq [[evaluation-id {class-name :seon.eval/value-class}] handles]
+          (bind-result! ctx (admit/result-handle evaluation-id)
+                        (cond-> {:seon.eval/unstored :live-only
+                                 :seon.eval/unstored-note "lived only in the context that evaluated it; values are not stored"}
+                          class-name (assoc :seon.eval/value-class class-name))))))))
 
 (defn fork-for-turn
   "Fork the current base and reapply the agent's in-memory private layer.
@@ -3521,28 +3485,6 @@
                                     (:seon.eval/shown (shown-result (:seon.sci.admit/value evaluation) form-request
                                                                     (:seon.sci.admit/record evaluation))))))))))))
 
-(defn- value-storage
-  "How a printed value outlives this process: a cut value's artifact
-  (canonical EDN of its admitted print node) for settlement to store, so its
-  handle and the dig forms its print offers answer after a restart; any other
-  value names why it is not stored and its class, which a fresh context's
-  handle then says (`bind-settled-results!`)."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                                   :seon.schema.admission/reason "Any printed value is admitted here."
-                                   :gen/elements [nil false 0 "" :k [] {}]}]
-                       :seon.sci.admit/caps [:maybe :int]]
-                  [:or [:map [:seon.eval/value-edn :seon.eval/value-edn]]
-                   [:map [:seon.eval/unstored :seon.eval/unstored] [:seon.eval/value-class :seon.eval/value-class]]]]}
-  [value caps elisions]
-  (let [admitted (admit/admit-value {:seon.sci.admit/value value
-                                     :seon.sci.admit/interrupt-fn (fn [])
-                                     :seon.sci.admit/caps caps})
-        reason (:seon.sci.admit/reason admitted)]
-    (if (and (pos-int? elisions) (:seon.sci.admit/print-node admitted) (not reason))
-      {:seon.eval/value-edn (render.value/artifact-edn (render.value/artifact admitted))}
-      {:seon.eval/unstored (case reason :unserializable :live-only :over-bound :over-bound :printed-whole)
-       :seon.eval/value-class (if (nil? value) "nil" (.getName (class value)))})))
-
 (defn shown-result
   "The one print of a final value: its admitted value and exact shown text.
 
@@ -3614,12 +3556,12 @@
              (tokens/estimate-of-characters (:seon.render.value/whole-characters projection)))
       (int? (:seon.render.value/elisions projection))
       (assoc :seon.eval/elisions (:seon.render.value/elisions projection))
-      ;; A CUT VALUE OUTLIVES THE PROCESS: its artifact settles into the blob
-      ;; tier with the evaluation (`seon.turn/settlement-projection`), so
-      ;; `result/eN` and its dig forms answer after a restart. A value shown
-      ;; whole stores nothing (a blob write is ~10 ms) and records why.
+      ;; THE VALUE STAYS LIVE IN ITS WORLD, NEVER COPIED: what outlives the
+      ;; process is the shown text, the handle and the value's class (CLAUDE.md:
+      ;; never serialize live results). A fresh context binds the handle to a
+      ;; marker naming that class (`bind-settled-results!`).
       (and (:seon.sci.admit/caps request) (not (::rendering? request)))
-      (merge (value-storage value (:seon.sci.admit/caps request) (:seon.render.value/elisions projection)))
+      (assoc :seon.eval/value-class (if (nil? value) "nil" (.getName (class value))))
       (:seon.render.value/full? projection) (assoc :seon.eval/full true)
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
@@ -3645,15 +3587,13 @@
                             record)]
     (when (and ctx handle) (bind-result! ctx handle error))
     (-> (apply dissoc shown [:seon.eval/value-tokens :seon.eval/shown-tokens
-                             :seon.eval/elisions :seon.eval/full :seon.eval/value-edn
-                             :seon.eval/unstored :seon.eval/value-class])
+                             :seon.eval/elisions :seon.eval/full :seon.eval/value-class])
         (assoc :seon.sci.admit/value error))))
 
 (def ^:private value-size-keys
   "The shown value's recorded size, carried from `shown-result` to the
   evaluation and settled onto its receipt."
-  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full :seon.eval/value-edn
-   :seon.eval/unstored :seon.eval/value-class])
+  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full :seon.eval/value-class])
 
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted

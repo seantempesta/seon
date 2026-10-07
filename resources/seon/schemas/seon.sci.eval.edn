@@ -115,8 +115,6 @@
                  [:seon.eval/shown-tokens {:optional true} :seon.eval/shown-tokens]
                  [:seon.eval/value-tokens {:optional true} :seon.eval/value-tokens]
                  [:seon.eval/elisions {:optional true} :seon.eval/elisions]
-                 [:seon.eval/value-edn {:optional true} :seon.eval/value-edn]
-                 [:seon.eval/unstored {:optional true} :seon.eval/unstored]
                  [:seon.eval/value-class {:optional true} :seon.eval/value-class]
                  [:seon.eval/full {:optional true} :seon.eval/full]
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]

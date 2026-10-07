@@ -171,7 +171,7 @@
       ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
                                               :seon.eval/elisions :seon.eval/full
-                                              :seon.eval/unstored :seon.eval/value-class
+                                              :seon.eval/value-class
                                               :seon.eval/replaced]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
@@ -182,31 +182,19 @@
       (int? (get-in evaluation [:seon.print/options :seon.print/level]))
       (assoc :seon.print/level
              (get-in evaluation [:seon.print/options :seon.print/level]))
-      (:seon.eval/value-digest settlement-evaluation)
-      (assoc :seon.eval/value-digest (:seon.eval/value-digest settlement-evaluation))
       value (assoc :my.turn/value value))))
 
 (defn settlement-projection
-  "Preserve evaluation evidence and stage a cut value's artifact blob."
+  "Preserve evaluation evidence and split off the blob writes it staged. An
+  evaluation's value is never stored (`seon.sci.eval/shown-result`)."
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection :seon.db/connection]] :seon.turn.loop/evaluation]
     [:tuple :map :map [:vector :seon.blob/staged-write]]]}
-  [cluster evaluation]
+  [_cluster evaluation]
   ;; Shown text is already projected; settlement preserves its exact bytes.
-  (let [receipt evaluation
-        ;; A cut value's artifact (`seon.sci.eval/shown-result`) settles into
-        ;; the blob tier under the same publication permit as its evaluation.
-        receipt
-        (if-let [value-edn (:seon.eval/value-edn receipt)]
-          (let [staged (blob/stage! (:seon.db/connection cluster) value-edn)]
-            (-> receipt
-                (dissoc :seon.eval/value-edn)
-                (assoc :seon.eval/value-digest (:seon.blob/digest staged))
-                (update :seon.blob/staged-writes (fnil conj []) staged)))
-          receipt)]
-    [(dissoc receipt :seon.blob/staged-writes)
-     evaluation
-     (vec (:seon.blob/staged-writes receipt))]))
+  [(dissoc evaluation :seon.blob/staged-writes)
+   evaluation
+   (vec (:seon.blob/staged-writes evaluation))])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations
@@ -1205,8 +1193,6 @@
    :seon.eval/shown-tokens
    :seon.eval/elisions
    :seon.eval/full
-   :seon.eval/value-digest
-   :seon.eval/unstored
    :seon.eval/value-class
    :seon.eval/replaced
    :seon.print/length

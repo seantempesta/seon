@@ -2569,3 +2569,35 @@
        (is (string? (:seon.eval/shown evaluation)))
        (is (nil? (:seon.cluster.eval/diagnostics evaluation))
            "the print had its database: no diagnostic")))))
+
+(deftest showing-a-value-realizes-and-stores-only-what-is-shown
+  ;; waste-rank V1 (2026-10-07): the show stage admitted every printed value
+  ;; again under the 8 MB bound and serialized its print node for storage:
+  ;; (vec (range 100000)) cost 417 ms, 740 MB and a 5.3 MB stored copy, and an
+  ;; infinite lazy seq was realized 157,403 elements to show 32. A value stays
+  ;; live in its world; the evaluation records its shown text and class.
+  (let [request {:seon.cluster.eval/source "value"
+                 :seon.render/profile (render/agent-render-profile config/defaults)
+                 :seon.sci.admit/caps caps}
+        threads (java.lang.management.ManagementFactory/getThreadMXBean)
+        allocated (fn [value]
+                    (let [thread (.getId (Thread/currentThread))
+                          before (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean threads thread)
+                          shown (eval/shown-result value request nil)]
+                      [(- (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean threads thread) before) shown]))
+        _ (allocated (vec (range 1000)))
+        [small-bytes small] (allocated (vec (range 1000)))
+        [large-bytes large] (allocated (vec (range 1000000)))
+        [string-bytes string] (allocated (apply str (repeat 1000000 \a)))
+        realized (volatile! 0)
+        infinite (eval/shown-result (map (fn [x] (vswap! realized inc) x) (range)) request nil)]
+    (testing "nothing is serialized for storage"
+      (is (every? #(not (contains? % :seon.eval/value-edn)) [small large string infinite]))
+      (is (= "clojure.lang.PersistentVector" (:seon.eval/value-class large)))
+      (is (= "java.lang.String" (:seon.eval/value-class string))))
+    (testing "the show's work is independent of the value's length"
+      (is (< large-bytes (+ small-bytes (* 16 1024 1024))) "a million elements cost what a thousand do")
+      (is (< string-bytes (* 16 1024 1024)) "a 1 MB string is not copied for storage"))
+    (testing "an infinite lazy seq is realized only as far as it is shown"
+      (is (pos? (:seon.eval/elisions infinite)))
+      (is (<= @realized 64)))))

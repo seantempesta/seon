@@ -621,8 +621,8 @@
     ;; the reply's :ms, as an SCI evaluation records it
     duration-ms (assoc :seon.eval/duration-ms (Math/round (double duration-ms)))
     shown (assoc :seon.eval/shown shown)
-    ;; what the value was, as the show stage measured it (`value-storage`)
-    (:seon.eval/value-class shown-map) (merge (select-keys shown-map [:seon.eval/unstored :seon.eval/value-class]))
+    ;; what the value was, as the show stage recorded it (`seon.sci.eval/shown-result`)
+    (:seon.eval/value-class shown-map) (assoc :seon.eval/value-class (:seon.eval/value-class shown-map))
     (contains? entry :seon.batch/error)
     (assoc :seon.cluster.eval/error (or (ex-message error) (.getName (class error))))
     facts-error (assoc :seon.cluster.eval/error (str "facts not proposed: " (:seon.error/message facts-error)))
