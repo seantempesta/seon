@@ -83,3 +83,10 @@ forms with their real results → the model → ONE read → eval → record →
 simpler, faster or more correct for the agent. Before adding anything, answer in your notes: which step of this path
 does it serve, what existing owner or library already does it, and what it lets you delete. A second path, a parallel
 mechanism, a new subsystem, a fallback, or a feature no agent turn needs is refused. Smaller diffs that delete code win.
+
+## Budgets (owner, 2026-10-07)
+
+"Measure everything. DO NOT LET MULTI SECOND, MULTI MB OR GB ANYTHING happen. Period." Every slice reports
+before/after wall ms, allocated bytes, armed calls, commits and store bytes on the same probe. Any non-agent,
+non-provider operation over 1 s or 10 MB is stop-and-fix at its producer before landing. A slice that worsens any
+number does not land. Budgets per pass: root-plan/live-agents-plan-notes.md §4b.

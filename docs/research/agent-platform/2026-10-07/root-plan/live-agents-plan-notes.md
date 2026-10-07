@@ -167,6 +167,31 @@ wins (owner preference). The loser's function is deleted.
 Targets: one commit per model reply; Seon's own work per pass under 200 ms beyond the provider; the context
 render with no reference changed under 10 ms warm.
 
+## 4b. Budgets: measured on every slice, never exceeded (owner, 2026-10-07)
+
+"Measure everything. DO NOT LET MULTI SECOND, MULTI MB OR GB ANYTHING happen. Period."
+
+The S0 probe measures each stage of one pass, and every slice reports the numbers before and after:
+- wall ms;
+- allocated bytes (`ThreadMXBean/getTotalThreadAllocatedBytes`, plus per-thread for the pass's own threads);
+- armed calls;
+- commits;
+- bytes written to the store;
+- tokens shown.
+
+| Per pass, excluding the provider's own latency | Budget |
+|---|---|
+| Seon's total work (context read, read, eval overhead, record, print) | < 200 ms |
+| allocation | < 5 MB plus what the agent's own forms allocate |
+| commits | 1 |
+| store bytes written | < 50 KB plus the agent's own data |
+| context read for N stored exchanges | O(N) on one indexed read, < 10 ms at N = 200 |
+
+Any operation over 1 s or over 10 MB that is not the agent's own work, or the provider's, is a STOP-AND-FIX
+finding: it is fixed at its producer before the slice lands, never scheduled. Today's baseline breaks these
+budgets: `(+ 1 2)` allocates about 150 MB, a one-line `defn` 0.3-0.8 GB, and a model turn makes 5-6 commits. The
+Datahike planner fix and S1/S4 exist to bring them inside. A slice that makes any number worse does not land.
+
 ## 5. Order of work
 
 | Slice | What | Proof | Gate |
