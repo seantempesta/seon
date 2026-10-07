@@ -3,9 +3,9 @@
   record a merge proposal. Tasks live on the cluster, so every write goes to
   the task home through the one task writer (`seon.task/adopt-tasks-tx`)."
   {:seon/tasks #{'seon.task/no-repl-entrance-creates-a-task}}
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
-            [edamame.core :as edamame]
             [malli.core :as m]
             [malli.error :as me]
             [malli.registry :as mr]
@@ -102,15 +102,25 @@
                                                                               :seon.task/declaration)))))
                  #(if (sequential? %) (set %) %))))
 
+(defn- edn-forms
+  "Every EDN form of `text`, in order."
+  {:malli/schema [:=> [:cat :string] [:vector :seon.schema/value]]}
+  [text]
+  (let [reader (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
+        eof (Object.)]
+    (loop [forms []]
+      (let [form (edn/read {:eof eof} reader)]
+        (if (identical? eof form) forms (recur (conj forms form)))))))
+
 (defn- file-declarations
-  "Read one task file with edamame's all-forms reader (nothing evaluated), require one
+  "Read one task file's EDN forms with `clojure.edn` (nothing evaluated), require one
   vector of valid entries with empty sets absent and symbol names, and derive each handle and symbol."
   {:malli/schema [:=> [:cat :seon.schema/projection :string :string] [:vector :seon.task/task]]}
   [projection path text]
   (let [ns (file-namespace path)
         refuse-task! #(functions/task-refused! 'seon.task/file-declarations %1 ns %2 %3)
-        forms (try (edamame/parse-string-all text)
-                   (catch clojure.lang.ExceptionInfo failure (refuse-task! :unreadable-file text {:seon.error/throwable failure})))
+        forms (try (edn-forms text)
+                   (catch clojure.lang.EdnReader$ReaderException failure (refuse-task! :unreadable-file text {:seon.error/throwable failure})))
         _ (when-not (task-path? path) (refuse-task! :misplaced-file path {}))
         _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse-task! :not-one-vector forms {}))
         ;; Only an empty set at an optional set member is absence (#{} clears);

@@ -13,7 +13,7 @@
   compiles the prepared form against the declaration registry.
 
   [[check]] runs exactly that chain over source TEXT, read statically with
-  edamame, against the projection built from `seon.schema.edn/packaged-forms`
+  Clojure's reader, against the projection built from `seon.schema.edn/packaged-forms`
   (the resources on disk now). It loads no namespace it reads. `bin/seon-hook`
   calls it in the live root for the files a hook event changes; the deftests
   run it over all of `src/` and `test/` and over the three historical forms.
@@ -26,9 +26,8 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [are deftest is testing]]
             [clojure.walk :as walk]
-            [edamame.core :as edamame]
             [malli.core :as m]
             [seon.cache :as cache]
             [seon.error.refusal :as error.refusal]
@@ -87,18 +86,49 @@
                     :else [])))
         forms))
 
+(defn- require-aliases
+  "The `:as` and `:as-alias` aliases the `ns` form among `forms` requires, alias to namespace."
+  {:malli/schema [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:map-of :symbol :symbol]]}
+  [forms]
+  (into {}
+        (for [form forms
+              :when (and (seq? form) (= 'ns (first form)))
+              clause (drop 2 form)
+              :when (and (seq? clause) (= :require (first clause)))
+              spec (rest clause)
+              :when (and (vector? spec) (symbol? (first spec)))
+              [k v] (partition 2 (rest spec))
+              :when (and (#{:as :as-alias} k) (symbol? v))]
+          [v (first spec)])))
+
 (defn- read-source
-  "Every top-level form of one JVM source text, `::alias/k` resolved."
+  "Every top-level form of one JVM source text, read by Clojure's reader: `:clj`
+  reader conditionals, nothing evaluated, every tag a tagged literal, `::k` and
+  `::alias/k` resolved through the text's `ns` form, which also carries the
+  `:end-line` and `:end-column` it ends at. Lists carry `:line` and `:column`."
   {:malli/schema [:=> [:cat :string] [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [text]
-  (edamame/parse-string-all
-   text
-   {:all true
-    :read-eval false
-    :auto-resolve-ns true
-    :read-cond :allow
-    :features #{:clj}
-    :readers (fn [tag] (fn [value] (tagged-literal tag value)))}))
+  (let [reader (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. text))
+        eof (Object.)
+        options {:eof eof :read-cond :allow :features #{:clj}}]
+    (binding [*read-eval* false
+              *data-readers* {}
+              *default-data-reader-fn* tagged-literal]
+      (loop [forms [] namespace-name 'user aliases {}]
+        (let [form (binding [*reader-resolver* (reify clojure.lang.LispReader$Resolver
+                                                 (currentNS [_] namespace-name)
+                                                 (resolveClass [_ _] nil)
+                                                 (resolveAlias [_ symbol-alias] (get aliases symbol-alias))
+                                                 (resolveVar [_ _] nil))]
+                     (read options reader))]
+          (cond
+            (identical? eof form) forms
+
+            (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+            (recur (conj forms (vary-meta form assoc :end-line (.getLineNumber reader) :end-column (.getColumnNumber reader)))
+                   (second form) (require-aliases [form]))
+
+            :else (recur (conj forms form) namespace-name aliases)))))))
 
 (def ^:private no-namespace-context
   "The context of a text with no `ns` form: nothing aliased or referred."
@@ -119,10 +149,10 @@
   {:malli/schema [:=> [:cat :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:maybe :string]]}
   [text forms]
   (when-some [ns-form (first (filter #(and (seq? %) (= 'ns (first %))) forms))]
-    (let [{:keys [end-row end-col]} (meta ns-form)
+    (let [{:keys [end-line end-column]} (meta ns-form)
           line-start (loop [offset 0 row 1]
-                       (if (= row end-row) offset (recur (inc (.indexOf ^String text "\n" (int offset))) (inc row))))]
-      (subs text 0 (+ line-start (dec end-col))))))
+                       (if (= row end-line) offset (recur (inc (.indexOf ^String text "\n" (int offset))) (inc row))))]
+      (subs text 0 (+ line-start (dec end-column))))))
 
 (defn- namespace-contexts
   "The indexer's own alias/refer context for each read text's `ns` form, by path.
@@ -133,14 +163,16 @@
   `seon.fn/namespace-context` on each namespace definition: symbol
   qualification is the indexer's rule, not a copy of it. The analysis writes a
   private clj-kondo cache, so a reconstructed text never answers for the
-  checkout's namespace of the same name in the shared cache. No `ns` form
-  analyses nothing."
+  checkout's namespace of the same name in the shared cache. A text with no
+  `ns` form, or whose contracts name no symbol, analyses nothing."
   {:malli/schema [:=> [:cat [:map-of :string [:map [::text :string] [::forms [:vector [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]]]]] [:map-of :string :map]]}
   [texts]
   (let [paths (into {} (map (fn [path] [(.getCanonicalPath (io/file path)) path]))
                     (keys texts))
+        ;; only a symbol in a contract is qualified through the context
+        names-symbol? (fn [forms] (some #(some symbol? (tree-seq coll? seq (declared-schema %))) (definition-forms forms)))
         prefixes (into {} (keep (fn [[path {::keys [text forms]}]]
-                                  (when-some [prefix (through-ns-form text forms)]
+                                  (when-some [prefix (when (names-symbol? forms) (through-ns-form text forms))]
                                     [(.getCanonicalPath (io/file path)) prefix])))
                        texts)]
     (if (empty? prefixes)
@@ -177,7 +209,7 @@
     (into []
           (keep (fn [form]
                   (when-some [authored (declared-schema form)]
-                    (let [{:keys [row col]} (meta form)
+                    (let [{row :line col :column} (meta form)
                           entry {::path path ::row row ::col col
                                  ::symbol (symbol (str namespace-name)
                                                   (name (second form)))
@@ -196,16 +228,31 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Completeness: every function an edit adds or changes is specified
 
+(defn- generated-symbol?
+  "True for a symbol the reader generates: a `#()` parameter (`p1__12#`) or a
+  syntax-quote gensym (`x__12__auto__`), numbered afresh by every read."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Any source node.", :gen/elements [nil 0 :k [] {}]}]] :boolean]}
+  [node]
+  (boolean (and (simple-symbol? node)
+                (let [text (name node)]
+                  (and (str/includes? text "__")
+                       (or (str/ends-with? text "#") (str/ends-with? text "__auto__")))))))
+
 (defn- same-definition?
   "True when two read definition forms are the same source. A regex literal
-  reads as a `java.util.regex.Pattern`, whose equality is identity, so every
-  function holding one read as changed; patterns compare by their text."
+  reads as a `java.util.regex.Pattern`, whose equality is identity, so patterns
+  compare by their text; reader-generated symbols compare by the `x#` they were
+  generated from."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]
                        [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A definition form is arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]
                   :boolean]}
   [a b]
-  (let [text (fn [form] (walk/postwalk #(if (instance? java.util.regex.Pattern %) (list 're-pattern (str %)) %) form))]
-    (= (text a) (text b))))
+  (let [canonical (fn [form]
+                    (walk/postwalk #(cond (instance? java.util.regex.Pattern %) (list 're-pattern (str %))
+                                          (generated-symbol? %) (symbol (str (subs (name %) 0 (str/index-of (name %) "__")) "#"))
+                                          :else %)
+                                   form))]
+    (or (= a b) (= (canonical a) (canonical b)))))
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private function-heads
@@ -247,7 +294,7 @@
                   (when (and (function-heads (first form))
                              (not (same-definition? form (get before (second form)))))
                     (let [authored (declared-schema form)
-                          {:keys [row col]} (meta form)
+                          {row :line col :column} (meta form)
                           function-symbol (symbol (str namespace-name) (name (second form)))
                           change (if (find before (second form)) "changes" "adds")
                           refusal (fn [problem]
@@ -315,7 +362,8 @@
     (and (seq? tail) (= 'throw (first tail)) (= bound (second tail)))))
 
 (defn- form-sites
-  "Every node of `form` that `site?` selects, each as its row and column and
+  "Every node of `form` that `site?` selects, each as its row and column (a
+  symbol's are those of the list holding it) and
   whether a converting `try` of the same form encloses it (`::converted?`),
   plus `::resurfaced?` for a `throw` of an enclosing catch's own binding and
   `::node` for a selected symbol. The arguments of a call to one of
@@ -331,9 +379,10 @@
                    [:vector :map]]]}
   ([form site?] (form-sites form site? #{}))
   ([form site? runners]
-  (letfn [(walk [node converted? bindings]
-            (let [here (when (site? node)
-                         [(cond-> {::row (:row (meta node)) ::col (:col (meta node))
+  (letfn [(walk [node converted? bindings at]
+            (let [at (if (:line (meta node)) (meta node) at)
+                  here (when (site? node)
+                         [(cond-> {::row (:line at) ::col (:column at)
                                    ::converted? converted?
                                    ::resurfaced? (and (seq? node) (= 'throw (first node))
                                                       (contains? bindings (second node)))}
@@ -345,7 +394,7 @@
                       ;; a same-file runner calls its function argument inside
                       ;; its own converting try: what is handed to it is converted
                       (and (seq? node) (runners (first node)))
-                      (mapcat #(walk % true bindings) (rest node))
+                      (mapcat #(walk % true bindings at) (rest node))
 
                       (and (seq? node) (= 'try (first node)))
                       (let [clause? (fn [head] #(and (seq? %) (= head (first %))))
@@ -355,17 +404,17 @@
                                                      (not (rethrows? bound body))))
                                               catches)]
                         (concat
-                         (mapcat #(walk % (boolean (or converted? converting?)) bindings)
+                         (mapcat #(walk % (boolean (or converted? converting?)) bindings at)
                                  (remove #(or ((clause? 'catch) %) ((clause? 'finally) %)) (rest node)))
                          (mapcat (fn [[_ _ bound & body]]
-                                   (mapcat #(walk % converted? (conj bindings bound)) body))
+                                   (mapcat #(walk % converted? (conj bindings bound) at) body))
                                  catches)
-                         (mapcat #(walk % converted? bindings)
+                         (mapcat #(walk % converted? bindings at)
                                  (mapcat rest (filter (clause? 'finally) (rest node))))))
 
-                      (coll? node) (mapcat #(walk % converted? bindings) (seq node))
+                      (coll? node) (mapcat #(walk % converted? bindings at) (seq node))
                       :else []))))]
-    (walk form false #{}))))
+    (walk form false #{} (meta form)))))
 
 (defn- throw-site?
   "True for a `(throw ...)` form."
@@ -414,21 +463,6 @@
                   :multi (boolean (some #(and (vector? %) (error? (peek %) seen)) children))
                   false))))]
     (error? schema #{})))
-
-(defn- require-aliases
-  "The `:as` aliases the `ns` form among `forms` requires, alias to namespace."
-  {:malli/schema [:=> [:cat [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil 0 :k [] {}]}]]] [:map-of :symbol :symbol]]}
-  [forms]
-  (into {}
-        (for [form forms
-              :when (and (seq? form) (= 'ns (first form)))
-              clause (drop 2 form)
-              :when (and (seq? clause) (= :require (first clause)))
-              spec (rest clause)
-              :when (and (vector? spec) (symbol? (first spec)))
-              [k v] (partition 2 (rest spec))
-              :when (and (= :as k) (symbol? v))]
-          [v (first spec)])))
 
 (defn- form-transaction-functions
   "Every function the read `forms` of one text name as the target of
@@ -558,13 +592,13 @@
                     (when (and (or (seq sites) (seq reached))
                                (or (nil? selected) (selected name-symbol)))
                       {::symbol (symbol (str namespace-name) (name name-symbol))
-                       ::row (:row (meta form))
+                       ::row (:line (meta form))
                        ::sites sites
                        ::escaping (if (escaping name-symbol) (into direct reached) direct)
                        ::declared? declared?
                        ::public? (public? name-symbol)
                        ::caller-converted? (boolean (and (escaping name-symbol) (not (leaves name-symbol))))}))))
-          (sort-by (comp :row meta ::form val) facts)))))
+          (sort-by (comp :line meta ::form val) facts)))))
 
 (defn- test-source?
   "True for a path under a `test` root: the test runner converts its members."
@@ -962,16 +996,36 @@
     (testing "every finding names file, row and definition"
       (is (every? #(and (:row %) (str/starts-with? (:message %) "seon.")) findings)))))
 
+(deftest source-reads-as-the-clojure-reader-reads-it
+  ;; `read-source` is Clojure's own reader: no namespace is loaded, nothing is
+  ;; evaluated, and aliases resolve from the text's own `ns` form.
+  (let [head "(ns a.b (:require [x.y :as y] [z.w :as-alias w]))\n"
+        read-last #(peek (read-source (str head %)))]
+    (are [text value] (= value (read-last text))
+      "[::k ::y/k ::w/k]" [:a.b/k :x.y/k :z.w/k]
+      "[#::{:k 1} #::y{:k 1} #:q{:k 1}]" [{:a.b/k 1} {:x.y/k 1} {:q/k 1}]
+      "[#?(:clj 1 :cljs 2) #?@(:clj [3 4])]" [1 3 4]
+      "#my/tag [1]" (tagged-literal 'my/tag [1])
+      "'x" '(quote x)
+      "#'x" '(var x))
+    (is (= "a+" (str (read-last "#\"a+\""))) "a regex literal reads as its pattern")
+    (is (= {:malli/schema :int} (meta (second (read-last "(def ^{:malli/schema :int} f 1)")))) "name metadata is kept")
+    (is (= {:line 2 :column 1} (select-keys (meta (read-last "(f)")) [:line :column])) "a list carries its position")
+    (is (= (str/trim head) (through-ns-form (str head "(f)") (read-source (str head "(f)")))) "the ns form carries where it ends")
+    (is (thrown? Exception (read-source "#=(+ 1 2)")) "nothing is evaluated")))
+
 (deftest a-new-or-changed-function-needs-a-complete-contract
   ;; Owner 2026-09-27: the edit hook refuses a function an edit adds or
   ;; changes without a complete contract; unchanged functions are untouched.
   (let [baseline "(ns seon.probe)
 (defn legacy [x] x)
 (defn with-regex [x] (re-matches #\"a+\" x))
+(defn with-generated [xs] (map #(list `(let [y# ~%] y#)) xs))
 (defn- kept {:malli/schema [:=> [:cat :int] :int]} [x] x)"
         edited "(ns seon.probe)
 (defn legacy [x] x)
 (defn with-regex [x] (re-matches #\"a+\" x))
+(defn with-generated [xs] (map #(list `(let [y# ~%] y#)) xs))
 (defn- kept {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))
 (defn fresh [x] x)
 (defn- private-fresh [x] x)
@@ -989,6 +1043,7 @@
     (is (every? #(str/includes? (:message %) "registered schema") refused))
     (is (not (named "seon.probe/legacy")) "an unchanged uncontracted function is untouched")
     (is (not (named "seon.probe/with-regex")) "a regex literal does not make an unchanged function read as changed")
+    (is (not (named "seon.probe/with-generated")) "symbols each read generates afresh do not make an unchanged function read as changed")
     (is (not (named "seon.probe/justified")) "a declared polymorphic boundary is complete")
     (testing "without a baseline the corpus check judges compilation only"
       (is (empty? (filter #(= :incomplete-contract (:type %))
