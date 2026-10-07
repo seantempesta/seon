@@ -5,4 +5,14 @@
              :must-read #{seon.task/index-tasks! seon.task/task-basis seon.task/task-handle seon.task/tasks-tx}
              :evidence #{"docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"
                          "docs/research/agent-platform/landing/task-log-2026-09-26.md"
-                         "docs/research/agent-platform/language-requirements-2026-09-24.md"}}]
+                         "docs/research/agent-platform/language-requirements-2026-09-24.md"}}
+#:seon.task{:name "open-tasks-with-all-proofs-green-are-not-flagged"
+             :kind :function
+             :intent "Every bucket-D task in tmp/orchestrator/triage.tsv whose proofs were checked on 2026-10-07 has all proofs green while the task stays open: 0261d4d9bbe6 (2 proofs), bd7cb669b45d, 361088de3d56, 135d92ea1308 (2 proofs), d6e3b775f474 and 18c37812b5bc (my.test/check on branch agent ctx-ex-1 and recorded results on default). Either the work is done and the task should close, or the proof does not test the intent (e.g. d6e3b775f474's intent is a 36x cost, its proof bounds armed work). A green proof on an open task must be visible in the task's view and in the queue, and a task's proof must fail before its fix."
+             :must-read #{seon.task/task-edges seon.test/recorded-result}
+             :evidence #{"tmp/context-examples/README.md"}}
+#:seon.task{:name "tasks-have-no-done-when-and-name-subjects-only-through-must-read"
+             :kind :function
+             :intent "seon.task/task-edges answers :subjects #{} for most tasks: the functions a task is about are on the task's :seon.task/must-read, not on the functions' :seon/tasks. The context producer (seon.agent.loop/task-context) unions both. No :seon.task/done-when exists; under the 2026-10-07 ruling done = the proofs green, so a task without proofs cannot be launched: refuse assignment of a task with no proof test."
+             :must-read #{seon.task/task-edges seon.task/assign!}
+             :evidence #{"tmp/context-examples/README.md"}}]
