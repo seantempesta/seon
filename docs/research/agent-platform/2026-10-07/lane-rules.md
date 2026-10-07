@@ -45,3 +45,15 @@ design or edit. Read the evidence your assignment names end to end before design
   - tasks created or linked;
   - verification limits;
   - whether default needs a restart or reset.
+
+## Guide mistakes to avoid
+
+1. Label every rewrite EQUIVALENT (preconditions checked), BEHAVIOR CHANGE (with its regression) or TARGET (don't write it). Check §0 before shortening: absent vs nil vs false vs empty; `some`/`(:k m)` are truthiness tests, `select-keys`/`find` are presence tests.
+2. Errors: use the INSTALLED constructor `seon.error.refusal/error`. Don't write the spec's target patterns yet (`fail!`, `caught`, the 4-arg constructor). Keep the existing read-refusal unwraps (load-bearing until errors S-reads), add no new one, and don't use `let-ok`. Catch only at the boundary; no catch-to-wrap-and-rethrow. Validation prose comes from Malli (`me/humanize`), not hand-built English.
+3. No new atoms, no `memoize`, no `requiring-resolve`/`defonce delay` to escape a namespace cycle, no new dynamic Vars. A cache is a `seon.cache` kind keyed by content, and only after a profile shows it pays. Prefer the algorithm (work proportional to what's shown or changed) over any cache.
+4. One printer: no `pr-str`/`str` of a value into a message, log, hash or comparison; no character quota or second clip (reference-code.md "Value printing" row). Never describe your fix as "a new printer".
+5. Contracts on everything you add or change, private functions included, written on one line with registry names. Never weaken one to fit, and never restate a registered key inline.
+6. Docstrings: 1-3 lines saying what the function returns. No dates, measurements, history, design argument or `file:line` in source. References are backticked fully qualified names, and tasks are `ns/task-name`.
+7. Tests (clojure-testing): through the agent's entrance, asserting DATA (error `:seon.error/type` plus the one member). Text only in the value printer's own tests. Tables for cases of one behavior. Never `with-redefs`/`alter-var-root`/`intern`. Don't add a test that re-expresses a schema or a wall-clock time.
+8. Read once and pass the value: no db reads in a loop (`pull-many`), no collection walked twice, eager across effects/binding/try.
+9. Today's lane mistakes: running uncommitted code in scratch namespaces in DEFAULT's JVM (use your own agent's SCI branch); shared scratch files crossing commit messages (only scratchpad/<lane>/); unverified tool-limit claims; patching around a wrong design instead of stopping with options; "pre-existing" findings left unrecorded.
