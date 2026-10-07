@@ -1,0 +1,46 @@
+diff --git a/src/datahike/query/logical.cljc b/src/datahike/query/logical.cljc
+index f340fd88..f1969526 100644
+--- a/src/datahike/query/logical.cljc
++++ b/src/datahike/query/logical.cljc
+@@ -37,13 +37,13 @@
+        (contains? rules (:e ci))))
+ 
+ (defn- entity-group-key
+-  "Grouping key for scans: [entity-var source]. Blank/anonymous vars
+-   each get a unique group. Works with both LScan and LOptionalScan
+-   since both expose :e and :source via keyword access."
++  "Grouping key for scans; anonymous entities and added-variable scans stay separate."
+   [scan blank-counter]
+   (let [e-var  (:e scan)
+         source (:source scan)]
+-    (if (analyze/blank-var? e-var)
++    ;; Fused merges compare shared value/tx vars, but not the added field.
++    (if (or (analyze/blank-var? e-var)
++            (analyze/free-var? (get (:clause scan) 4)))
+       [(symbol (str "_anon_" (swap! blank-counter inc))) source]
+       [e-var source])))
+ 
+diff --git a/test/datahike/test/query_planner_temporal_test.clj b/test/datahike/test/query_planner_temporal_test.clj
+index 33618bb1..89275d6c 100644
+--- a/test/datahike/test/query_planner_temporal_test.clj
++++ b/test/datahike/test/query_planner_temporal_test.clj
+@@ -741,3 +741,19 @@
+             (is (= (set legacy) (set planner)))))))
+     (is (= #{[1]} (binding [q/*query-result-cache?* false]
+                     (set (d/q '[:find ?v :where [?e :item/a ?v] [?e :item/b ?v]] (d/history before))))))))
++
++(deftest shared-added-bindings-match-every-joined-datom
++  (let [before (d/db-with (db/empty-db {:item/a {:db/cardinality :db.cardinality/many}
++                                      :item/b {:db/cardinality :db.cardinality/many}}
++                                     {:keep-history? true})
++                          [{:db/id 1 :item/a [1 2] :item/b [1 4 5]}])
++        after (d/db-with before [[:db/retract 1 :item/b 1] [:db/add 1 :item/a 4]])
++        query '[:find ?v ?w ?added
++                :where [?e :item/a ?v ?tx ?added]
++                [?e :item/b ?w ?other-tx ?added]]]
++    (binding [q/*query-result-cache?* false]
++      (doseq [database [after (d/history after) (d/as-of after (:max-tx before))]]
++        (let [{:keys [legacy planner]} (run-both query database)]
++          (is (= (set legacy) (set planner)))))
++      (is (= (set (for [v [1 2 4] w [1 4 5]] [v w true]))
++             (set (d/q query (d/history after))))))))
