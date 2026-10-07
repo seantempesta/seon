@@ -201,3 +201,15 @@ and commit: source +17/-8 (net +9), tests +32/-5 (net +27), total +49/-13 (net +
 is not represented as a tested or committed landing. All started JVMs exited; owned clone removed
 at completion, raw evidence retained. Default needs no restart or reset for this review; installing a
 later accepted fork change remains root's gitlink/adoption work.
+
+## Landing addendum (lane schema-key-land)
+
+Fork commit `e5453d96` (parent `8ed09208`) is the reviewed two-file fix plus both regressions. It is
+fast-forwarded to and pushed on origin `main`, `seon/identity-join-first` and `seon/schema-meta-key`
+(no force). Tests ran with konserve overridden to Seon's checkout (`reference-code/konserve` at
+`8700ca7a`) under the fork's `:test` alias: `schema-meta-key-test` (both tests), `schema-test`,
+`transact-test`, `versioning-test`, `commit-graph-test`, `writer-error-test`, `api-test` gave 81 tests,
+613 assertions, 0 failures, 1 error. The error is `api-test/test-metrics-hht`, a load-order failure
+(`datahike.index.hitchhiker-tree` was not required: no `-flush` implementation for
+`hitchhiker.tree.DataNode`); rerun with that namespace required, `api-test` is 22 tests, 129 assertions,
+0 failures, 0 errors. Not run: `audit-verify-test`, `store-test`. Seon's gitlink is not bumped; root does that.
