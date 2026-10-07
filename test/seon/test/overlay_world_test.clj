@@ -9,6 +9,7 @@
             [seon.cluster.agent :as agent]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
@@ -126,3 +127,20 @@
              (checkpoint-head store branch cluster base))
           "the source record, written last, completes it")
       (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
+
+(deftest ^{:seon/tasks #{'seon.test/one-test-run-costs-seconds-around-a-147-ms-body}}
+  a-request-world-reuses-the-executions-acquired-program
+  ;; The world holds the candidate's program, so its context keeps the
+  ;; execution's acquisition instead of acquiring the whole program again.
+  (support/with-database
+   (fn [connection]
+     (let [handle (support/execution-handle connection)
+           cluster (:seon.cluster/name handle)
+           source (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))
+           acquisition #(:seon.sci.eval/acquisition @(:seon.sci.kernel/program-snapshot %))
+           world (clean-request-handle handle connection cluster (config/effective (db/db connection) cluster))]
+       (try
+         (is (some? (acquisition source)))
+         (is (identical? (acquisition source) (acquisition (:seon.sci.eval/ctx world))))
+         (finally (try (agent/release-context! world)
+                       (finally (store/release-store! (:seon.store/store world))))))))))

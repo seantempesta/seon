@@ -3108,6 +3108,18 @@
                         (remember-program-identity! commit-id acquired)
                         true)))))))))
 
+(defn program-equal!
+  "Returns the program identity `database`'s commit now holds: `source`'s.
+  The caller proved `database` holds `source`'s program, so a context that
+  acquired it acquires `database` at once (`acquired-database?`). Nil when
+  either value has no committed identity."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] [:or :nil :map]]}
+  [database source]
+  (when-let [commit-id (commit-id-of database)]
+    (when-let [identity (program-identity source)]
+      (cache/evict program-identity-cache commit-id)
+      (remember-program-identity! commit-id identity))))
+
 (defonce ^:private refusal-recording-cache
   (cache/lru-cache-factory
    {} :threshold (::program-identity-cache-size program-cache-policy)))

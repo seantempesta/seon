@@ -1888,12 +1888,15 @@
       (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
                        [#(store/release-branch! connection) retire! drop!])))
     (let [database (db/db connection)
+          ;; The overlay makes the world's program the candidate's, so the
+          ;; execution's acquisition of the candidate serves the world: no
+          ;; whole-program acquisition per request.
+          _ (sci.eval/program-equal! database candidate)
           source (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution)
                      (:seon.sci.eval/ctx execution))
           environment (or (env/of execution) (env/of source))
-          ;; Acquired once on a fork (389 ms), never on the execution's own context:
-          ;; each member forks this and finds its program by commit (29 ms), where
-          ;; re-acquiring per member measured 325-581 ms (2026-09-25). The fork
+          ;; Acquired once on a fork, never on the execution's own context:
+          ;; each member forks this and finds its program by commit. The fork
           ;; acquires `database` itself and refuses when its refusals cannot be
           ;; recorded (`seon.sci.eval/fork-cluster-ctx`).
           ctx (try (sci.eval/fork-cluster-ctx source database connection

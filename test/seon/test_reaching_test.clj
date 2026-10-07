@@ -72,6 +72,14 @@
   [test-symbols]
   (count (filter #(= test-symbols (first %)) (keys (seon.cache/retained :seon.test.runner/reach-index)))))
 
+(defn- declaration-reads
+  "The declaration reads the central cache holds for `connection`'s values."
+  {:malli/schema [:=> [:cat :seon.db/connection] :int]}
+  [connection]
+  (let [connection-id (:datahike.cache/connection-id (:cache-context (db/db connection)))]
+    (count (filter #(and (vector? %) (= connection-id (first %)))
+                   (keys (seon.cache/retained :seon.test.runner/reach-declarations))))))
+
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
   (fn [connection]
@@ -95,10 +103,13 @@
        (is (= (get before tb) (get after tb))))))
     ;; A data write leaves every closure's content equal.
     (let [before (runner/reach-digests (db/db connection) [ta tb])
-          derived (derived-digests #{ta tb})]
+          derived (derived-digests #{ta tb})
+          read (declaration-reads connection)]
      (support/transacted! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
-     (is (= derived (derived-digests #{ta tb})) "equal reached content derives nothing"))))))
+     (is (= derived (derived-digests #{ta tb})) "equal reached content derives nothing")
+     (is (pos? read))
+     (is (= read (declaration-reads connection)) "a data write reads no declaration again"))))))
 
 (deftest a-reach-digest-is-its-closures-alone-across-cycles
  ;; Digests compose per call-graph component (Merkle over strongly connected
