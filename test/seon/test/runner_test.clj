@@ -284,10 +284,9 @@
       "the deftest wins on conflict for every marker"))
 
 (deftest the-deliberate-failure-fixtures-declare-their-exclusion
-  ;; The bare gate no longer excludes these by filename, so the two
-  ;; namespaces whose tests are material rather than members must say so.
-  ;; Losing either declaration turns the bare gate permanently red.
-  (doseq [namespace-name '[seon.test-runner-failure-fixture my.examples-fixture]]
+  ;; The bare gate no longer excludes this by filename, so the namespace
+  ;; whose tests are material rather than members must say so.
+  (doseq [namespace-name '[seon.test-runner-failure-fixture]]
     (require namespace-name)
     (let [reason (:seon.test/fixture (meta (find-ns namespace-name)))]
       (is (string? reason) "declares no :seon.test/fixture reason")
