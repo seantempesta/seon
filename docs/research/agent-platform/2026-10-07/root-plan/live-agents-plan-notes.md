@@ -137,6 +137,22 @@ is fine) follow in order:
   reader and never run.
 - "Calls left", if shown, is one key on a final map, not prose.
 
+**One transaction per turn (owner, 2026-10-07): "We should only need one transaction to commit everything that's
+done in a single turn. A fresh DB value is pulled at the start of the turn and we write all changes efficiently at
+the end."**
+- The turn pulls ONE database value at its start.
+- Every database write a form makes (`transact!`, a `defn`'s program entity, a message, a task write) is collected
+  as tx-data. Later forms in the turn read a speculative value (Datahike `with` over the start value), so they see
+  the turn's own writes.
+- At the end, ONE transaction commits all of it: evaluations, program facts, the agent's writes, the provider call
+  row and the agent facts. The writer validates it against the start basis. A conflicting change since then refuses
+  the whole turn, and the refusal is shown to the agent as data.
+- A crash before the commit loses the turn and changes nothing.
+- Effects outside the database (files, shell, provider) happen when the form runs; they are recorded, not buffered.
+
+This replaces the old spec's "a form's write is durable when the form runs" (agent-loop.md §2). S4 designs it:
+which writers buffer, how `with` stays cheap across a long turn, and the measured cost of the one commit.
+
 **Nothing is re-executed (owner, 2026-10-07: "We don't want to keep re-executing forms so we need to cache
 intelligently").** The opening forms (`(help)`, the task's `doc`, each reference's `doc`/`source`) are evaluated
 ONCE, on the agent's first pass for its task, through the one path. They are recorded as ordinary evaluations with
