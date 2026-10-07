@@ -194,3 +194,50 @@
                         (turn.batch/jvm-request {:seon.batch/world world :seon.batch/text "(+ 1 2)"
                                                  :seon.turn.batch/record-call #'seon.turn/record-evaluated-call}))))]
     (is (true? (:seon.batch/applied (:seon.batch/commit batch))))))
+
+(defn- read-spaced
+  "A read stage whose forms are the text's non-whitespace characters, read as
+  symbols, whatever whitespace separates them."
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.batch/read-state] :seon.batch/read-step]}
+  [_ {v :seon.batch/version}]
+  (let [^String text (:seon.batch/text v)
+        p (loop [p (:seon.batch/pos v)]
+            (if (and (< p (count text)) (Character/isWhitespace (.charAt text (int p)))) (recur (inc p)) p))]
+    (if (< p (count text))
+      {:seon.batch/form (symbol (subs text p (inc p))) :seon.batch/start p :seon.batch/end (inc p)
+       :seon.batch/version (assoc v :seon.batch/pos (inc p)) :seon.batch/repairs []}
+      {:seon.batch/eof true :seon.batch/version (assoc v :seon.batch/pos p) :seon.batch/repairs []})))
+
+(defn- platform-allocation
+  "The bytes `f` allocates, run on a joined platform thread with this thread's
+  bindings: HotSpot counts no allocation for a virtual thread, where test
+  bodies run (`seon.batch/allocation-is-unmeasured-on-a-virtual-thread`)."
+  {:malli/schema [:=> [:cat [:=> [:cat] :any]] :int]}
+  [f]
+  (let [threads ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+        allocated (volatile! -1)
+        thread (Thread. ^Runnable (bound-fn [] (let [before (.getCurrentThreadAllocatedBytes threads)]
+                                                 (f)
+                                                 (vreset! allocated (- (.getCurrentThreadAllocatedBytes threads) before)))))]
+    ;; the join is the exit: the volatile is read after it
+    (.start thread)
+    (.join thread)
+    @allocated))
+
+(deftest a-forms-position-costs-the-text-once
+  ;; Each form's line and column are scanned on from the previous form's, so
+  ;; a longer text of the same forms costs its added length once, not once
+  ;; per form.
+  (support/with-database
+   (fn [connection]
+     (let [forms 40
+           text (fn [gap] (apply str (repeat forms (str "a" (apply str (repeat gap \newline))))))
+           fold #(run-with (db/db connection) {:seon.batch/text (text %) :seon.batch/read-next read-spaced})
+           allocation (fn [gap] (fold gap) (platform-allocation #(fold gap)))
+           short-text (allocation 250)
+           long-text (allocation 2000)]
+       (is (= (mapv (fn [k] [(inc (* k 2000)) 1]) (range forms))
+              (mapv (juxt :seon.batch/line :seon.batch/column) (:seon.batch/entries (fold 2000)))))
+       (is (pos? short-text) "the platform thread's allocation counter measures the fold")
+       (is (< (- long-text short-text) (* 4 1024 1024))
+           "70,000 more characters of text cost the fold their length, not 40 times it")))))

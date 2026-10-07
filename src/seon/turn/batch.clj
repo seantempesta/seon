@@ -847,7 +847,7 @@
   [_ {v :seon.batch/version}]
   (let [text (:seon.batch/text v)
         pos (forgive/skip-to text (:seon.batch/pos v))
-        rdr (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. (subs text pos)))
+        rdr (clojure.lang.LineNumberingPushbackReader. (doto (java.io.StringReader. text) (.skip (long pos))))
         eof (Object.)
         [form s] (try (read+string {:eof eof :read-cond :allow} rdr)
                       (catch Throwable t [::error (ex-message t)]))

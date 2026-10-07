@@ -183,13 +183,21 @@
   [batch f]
   (update batch :seon.batch/entries (fn [es] (conj (pop es) (f (peek es))))))
 
-(defn- line-column
-  {:malli/schema [:=> [:cat :string nat-int?] [:tuple pos-int? pos-int?]]}
-  [^String text start]
-  (let [before (subs text 0 start)
-        line (inc (count (filter #(= \newline %) before)))
-        col (inc (- start (inc (.lastIndexOf before "\n"))))]
-    [line col]))
+(defn- line-cursor
+  "The line and column of offset `start` in `text`: scanned on from `cursor`
+  when it is in the same text at or before `start`, else from the text's
+  start, so a batch's positions cost its text once."
+  {:malli/schema [:=> [:cat [:maybe :seon.batch/line-cursor] :string nat-int?] :seon.batch/line-cursor]}
+  [cursor ^String text start]
+  (let [start (long start)
+        {p :seon.batch/pos l :seon.batch/line c :seon.batch/column}
+        (if (and cursor (identical? text (:seon.batch/text cursor)) (<= (long (:seon.batch/pos cursor)) start))
+          cursor
+          {:seon.batch/pos 0 :seon.batch/line 1 :seon.batch/column 1})]
+    (loop [i (long p) l (long l) c (long c)]
+      (if (< i start)
+        (if (= \newline (.charAt text i)) (recur (inc i) (inc l) 1) (recur (inc i) l (inc c)))
+        {:seon.batch/text text :seon.batch/pos i :seon.batch/line l :seon.batch/column c}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; One form
@@ -213,6 +221,8 @@
                                                                  :seon.batch/repairs (:seon.batch/repairs r))
                                                     end (assoc :seon.batch/last-code-end end))))
                 (clock :read t0))
+      (and (nat-int? start) (<= start (count text)))
+      (update :seon.batch/line-cursor line-cursor text start)
       (not in-bounds?)
       (-> (update :seon.batch/diagnostics conj
                   {:seon.error/message (str "read: the read stage answered span [" start ", " end
@@ -222,17 +232,22 @@
 
 (defn- source-of
   "Where the read form came from: its source text and position, known before
-  it is evaluated."
-  {:malli/schema [:=> [:cat :seon.batch/read-step] :map]}
-  [r]
-  (let [text (:seon.batch/text (:seon.batch/version r))]
+  it is evaluated. `cursor` is the read step's position when it is this
+  form's (`read-step`)."
+  {:malli/schema [:=> [:cat :seon.batch/read-step [:maybe :seon.batch/line-cursor]] :map]}
+  [r cursor]
+  (let [text (:seon.batch/text (:seon.batch/version r))
+        start (:seon.batch/start r)]
     (if (:seon.batch/span-invalid? r)
       ;; a span the read stage misreported has no source text: the read
       ;; diagnostic names it and the form itself is the step's value
       {}
-      (let [[l c] (line-column text (:seon.batch/start r))]
-        {:seon.batch/source (str/trimr (subs text (:seon.batch/start r) (:seon.batch/end r)))
-         :seon.batch/line l :seon.batch/column c}))))
+      (let [source (str/trimr (subs text start (:seon.batch/end r)))
+            {l :seon.batch/line c :seon.batch/column}
+            (if (and (identical? text (:seon.batch/text cursor)) (= start (:seon.batch/pos cursor)))
+              cursor
+              (line-cursor nil text start))]
+        {:seon.batch/source source :seon.batch/line l :seon.batch/column c}))))
 
 (defn- allocated-bytes
   "The calling thread's allocated bytes so far (HotSpot's ThreadMXBean)."
@@ -336,7 +351,7 @@
   (let [r (:seon.batch/step batch)
         n (:seon.batch/ordinal batch)
         t0 (System/nanoTime)
-        base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r))
+        base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r (:seon.batch/line-cursor batch)))
         world (form-world request n)
         ;; the stages read the batch's working value from their request
         request (assoc request :seon.batch/world world :seon.batch/working (:seon.batch/working batch))

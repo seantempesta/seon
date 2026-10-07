@@ -48,6 +48,9 @@
  :repairs [:vector :seon.batch/repair]
  :structured? :boolean
  :last-code-end nat-int?
+ :line-cursor [:map {:description "Where the last read form began: its text, offset, line and column. The next form's position is scanned on from here (seon.batch/line-cursor), so a batch's positions cost its text once."}
+               [:seon.batch/text :seon.batch/text] [:seon.batch/pos :seon.batch/pos]
+               [:seon.batch/line pos-int?] [:seon.batch/column pos-int?]]
  :read-state [:map
               [:seon.batch/version :seon.batch/text-version]
               [:seon.batch/repairs :seon.batch/repairs]
