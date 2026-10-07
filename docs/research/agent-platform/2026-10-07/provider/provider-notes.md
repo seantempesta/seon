@@ -20,3 +20,13 @@ schema change, so the lift itself is proven by `an-agent-lifts-no-provider-for-i
 Held against real code. Awkward: the window schema/attributes (`deepseek-off-peak-windows`, window entity attrs in
 `seon.ai.model.edn`, `ai.clj:118,130`) are now unused by shipped data; deletion is in files outside this slice.
 Task files (`resources/seon/tasks/seon.ai.edn`) belong to persist-tasks; the three tasks should be closed there.
+
+## Stop sequence (owner correction) and its visibility
+- Shipped stop is `["user=>"]`, the marker loop-pass uses to introduce each REPL result.
+- Probe (JVM, `seon.ai/complete`, stop ["user=>"], prompt "Write exactly: A user=> B", 3 completion tokens):
+  text "A ", finish-reason "stop", usage only. DeepSeek reports finish_reason "stop" for a stop-sequence cut, the same as a
+  natural stop, and names no matching sequence. The cut is not detectable from the response; the only sign is that the request
+  carried a stop. UNFILED TASK (turn.clj is loop-pass's file; task EDN is persist-tasks'): the turn's evaluation reply should
+  say "reply was requested with stop [\"user=>\"]; finish stop may mean cut at it" when a stop is in the attempt's settings.
+- Pre-existing red: `seon.ai-test/captured-run4-replies-stop-before-fabricated-responses` (reader "Unmatched delimiter: )",
+  task `seon.ai/...captured-run4`); the commit named only the green tests. It still replays with the literal old marker.
