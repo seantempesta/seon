@@ -96,18 +96,10 @@
 (defn- report-value
   "One reported assertion value, rendered for a human reading the gate log.
 
-  A THROWABLE IS A DIAGNOSTIC, NOT AN AGENT PROJECTION. The AI profile's token
-  budget is shared across the whole rendered value, so a large `ex-data`
-  squeezes the exception's own message out of the report: a fixture refusal
-  arrived as `{:seon.print/omitted 3458 :seon.print/prefix \"Fixture write was
-  refused at the write: …\"}` and named less than the runner knew. A check that
-  reports less than it observed is the failure class this project keeps
-  meeting, so the reported throwable is plain text: its whole cause chain with
-  each link's message, ex-data entries and first-party frames, bounded once by
-  the value renderer's floor (`seon.render.value/floor`), never the agent's
-  budget. It is the throwable's BODY, not a whole face: the error face's
-  signature trailer belongs to `report-error!`, which names it once per
-  distinct cause.
+  A throwable is shown as its cause chain (`seon.error.refusal/chain`): per
+  link its class, message, ex-data and first-party frames, as data the value
+  printer bounds, so each link's message is shown beside its data rather
+  than squeezed out by it.
 
   Ordinary values keep the profile: they are the ones that can be a whole
   database value. The unit's required database is the one `options` hands
@@ -115,15 +107,14 @@
   {:malli/schema [:=> [:cat [:map [:seon.db/db {:optional true} :seon.db/database-value]] :seon.schema/value]
                   :string]}
   [options reported-value]
-  (if (instance? Throwable reported-value)
-    (value/floor reported-value)
-    (value/render-ai
-     (cond-> {:seon.render/value reported-value
-              :seon.render.value/root 'seon.test.runner/assertion
-              :seon.render/profile (or (:seon.render/profile options)
-                                       (:seon.render/profile (report-options)))}
-       (:seon.db/db options) (assoc :seon.db/db (:seon.db/db options))
-       (and (not (:seon.db/db options)) db/*conn*) (assoc :seon.db/db (db/db db/*conn*))))))
+  (value/render-ai
+   (cond-> {:seon.render/value (cond-> reported-value
+                                 (instance? Throwable reported-value) seon.error.refusal/chain)
+            :seon.render.value/root 'seon.test.runner/assertion
+            :seon.render/profile (or (:seon.render/profile options)
+                                     (:seon.render/profile (report-options)))}
+     (:seon.db/db options) (assoc :seon.db/db (:seon.db/db options))
+     (and (not (:seon.db/db options)) db/*conn*) (assoc :seon.db/db (db/db db/*conn*)))))
 
 (defn- message-text
   "An assertion's `is` message as shown in the gate log. A string within the
@@ -436,7 +427,7 @@
                   (seq drift) (update :seon.test/error-count (fnil inc 0))
                   (seq drift) (update :seon.test/failure-message
                                       #(str (when % (str % "\n"))
-                                            "Worker-global state changed: " (value/bounded-text drift)))))
+                                            "Worker-global state changed: " (report-value options drift)))))
               results)))))
 
 (defn run-var!
@@ -1135,9 +1126,10 @@
          :seon.test/unknown-error
          {:seon.error/layer :seon.test/reach
           :seon.error/operation 'seon.test.runner/reach-digests
-          :seon.error/message (str "Reach digest unknown: " (count declarations) " declarations have no stored "
-                                   ":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
-                                   "; reached by " (count tests) " tests, first " (pr-str (vec (take 10 tests))) ".")
+          :seon.error/message (str "Reach digest unknown: " (count declarations) " declarations (:seon.error/data)"
+                                   " have no stored :seon.program/definition-digest; reached by " (count tests)
+                                   " tests (:seon.error/offending).")
+          :seon.error/data {::undigested-declarations (vec declarations)}
           :seon.test/unknown "reach digest"
           :seon.error/member :seon.program/definition-digest
           :seon.error/offending tests}))
@@ -2036,7 +2028,7 @@
   terminal error naming `failure`, the throwable that ended its request.
 
   An interrupted member is an obligation, never green: it is recorded red with
-  its cause chain as `seon.render.value/floor` bounds it, so the member is
+  its cause chain as `report-value` shows it, so the member is
   selected again. Members already recorded are left as they are."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/completion :seon.error/throwable]
                   [:or :seon.test/results :seon.db/error-result]]}
@@ -2050,7 +2042,7 @@
                           (captured-symbols (:seon.test.member/symbol %)))
                      members)
         message (str "Interrupted: request " run-id " threw before this member finished.\n"
-                     (value/floor failure))]
+                     (report-value {:seon.db/db (db/db connection)} failure))]
     (if (and (empty? open) (empty? captured))
       []
       (commit-results!
