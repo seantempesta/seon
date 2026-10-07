@@ -3178,3 +3178,40 @@
                             database (str directory "/caller.clj")))
                 "the caller's reanalyzed finding names the value def's entity"))))
       (finally (test-support/delete-recursively! root)))))
+
+(deftest runtime-namespace-source-keeps-only-authored-refers
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            authored {:seon.ns.refer/local 'doc :seon.ns.refer/target-ns 'clojure.repl :seon.ns.refer/target-name 'doc}
+            batch (fn [refers]
+                    (let [source "(defn f [] (doc inc))"
+                          {:seon.fn/keys [analysis function-rows runtime-namespaces] :as result}
+                          (#'seon.fn/runtime-analysis-batch
+                           database [(cond-> {:namespace-name 'sample.refers :form-source source
+                                              :seon.fn/namespace-row {:seon.ns/name 'sample.refers}}
+                                       refers (assoc-in [:seon.fn/namespace-row :seon.ns/refers] refers))])
+                          [first-row last-row] (first (:seon.fn/source-spans result))
+                          context (#'seon.fn/text-context (:seon.fn/source result))
+                          submitted (#'seon.fn/source-analysis analysis first-row last-row)
+                          functions (into (#'seon.fn/first-party-function-symbols analysis) (map :seon.fn/sym) function-rows)
+                          entities (#'seon.fn/analysis-entities-by-file
+                                    submitted functions {"<stdin>" context} {}
+                                    (or (db/carried-projection database)
+                                        (schema/projection-from-database database)))]
+                      {:namespace (first (filter :seon.ns/name (get entities "<stdin>")))
+                       :runtime runtime-namespaces
+                       :function (first (filter :seon.fn/sym (get entities "<stdin>")))}))
+            locals #(into #{} (map :seon.ns.refer/local) (:seon.ns/refers %))
+            plain (batch nil)
+            explicit (batch [authored])]
+        (testing "the analysis resolves the interpreter refers; the stored namespace holds none"
+          (is (contains? (get-in plain [:runtime 'sample.refers :seon.fn/synthetic-refers]) 'doc))
+          (is (empty? (locals (:namespace plain))))
+          (is (not (str/includes? (:seon.ns/source (:namespace plain)) "clojure.repl")))
+          (is (contains? (:seon.fn/calls (:function plain)) 'seon.bootstrap/doc)
+              "the bare doc call keeps its declared target"))
+        (testing "an authored refer survives"
+          (is (= #{'doc} (locals (:namespace explicit))))
+          (is (not (contains? (get-in explicit [:runtime 'sample.refers :seon.fn/synthetic-refers]) 'doc)))
+          (is (str/includes? (:seon.ns/source (:namespace explicit)) "doc")))))))

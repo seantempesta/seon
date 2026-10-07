@@ -202,10 +202,11 @@
   {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map] :map]}
   [projection contexts context entry]
   (let [namespace-name (::analyzer/name entry)
-        {:keys [aliases refers imports requires]} context
+        {:keys [aliases imports requires] synthetic :seon.fn/synthetic-refers} context
+        refers (apply dissoc (:refers context) synthetic)
         entity (cond-> {:seon.ns/name namespace-name
              :seon.fn/file [:seon.fn.file/relative-path (::analyzer/filename entry)]
-             :seon.ns/source (exact-source contexts entry)}
+             :seon.ns/source (or (:seon.ns/source context) (exact-source contexts entry))}
       (::analyzer/doc entry) (assoc :seon.ns/doc (::analyzer/doc entry))
       (true? (:seon.ns/context-relevant? (::analyzer/meta entry)))
       (assoc :seon.ns/context-relevant? true)
@@ -978,9 +979,9 @@
         ;; One namespace form per run of consecutive requests in one
         ;; namespace: a later form then sees the aliases an earlier form of
         ;; the batch required, as SCI evaluates them.
-        {:keys [source spans]}
+        {:keys [source spans namespaces]}
         (reduce
-         (fn [{:keys [source spans]} group]
+         (fn [{:keys [source spans] :as state} group]
            (let [{namespace-name :namespace-name
                   supplied-namespace :seon.fn/namespace-row} (first group)
                  namespace-entity
@@ -992,24 +993,31 @@
                             {:seon.ns/imports [*]}
                             {:seon.ns/refers [*]}]
                           [:seon.ns/name namespace-name]))
+                 referenced (program-namespaces
+                             database namespace-names
+                             (analyzer/referenced-program-namespaces
+                              namespace-name (mapv :form-source group)))
                  namespace-source
-                 (pr-str (runtime-namespace-form
-                          namespace-name
-                          (update namespace-entity :seon.ns/refers
-                                  (fnil into []) interpreter-refers)
-                          (program-namespaces
-                           database namespace-names
-                           (analyzer/referenced-program-namespaces
-                            namespace-name (mapv :form-source group)))))]
-             (reduce (fn [{:keys [source spans]} {form-source :form-source}]
+                 (print/form-text (runtime-namespace-form
+                                   namespace-name
+                                   (update namespace-entity :seon.ns/refers
+                                           (fnil into []) interpreter-refers)
+                                   referenced))
+                 authored (into #{} (map :seon.ns.refer/local) (:seon.ns/refers namespace-entity))]
+             (reduce (fn [{:keys [source spans] :as state} {form-source :form-source}]
                        (let [first-source-row (inc (count (filter #{\newline} source)))]
-                         {:source (str source form-source "\n")
-                          :spans (conj spans [first-source-row
-                                              (+ first-source-row
-                                                 (count (filter #{\newline} form-source)))])}))
-                     {:source (str source namespace-source "\n") :spans spans}
+                         (assoc state
+                                :source (str source form-source "\n")
+                                :spans (conj spans [first-source-row
+                                                    (+ first-source-row
+                                                       (count (filter #{\newline} form-source)))]))))
+                     (-> state
+                         (update :source str namespace-source "\n")
+                         (update :namespaces update namespace-name
+                                 #(or % {:seon.ns/source (print/form-text (runtime-namespace-form namespace-name namespace-entity referenced))
+                                         :seon.fn/synthetic-refers (into #{} (comp (map :seon.ns.refer/local) (remove authored)) interpreter-refers)})))
                      group)))
-         {:source (if (seq prelude) (str prelude "\n") "") :spans []}
+         {:source (if (seq prelude) (str prelude "\n") "") :spans [] :namespaces {}}
          (partition-by :namespace-name requests))
         ;; the expansions each form's evaluation observed, placed at that
         ;; form's first row: a generated definition is analyzed at its call
@@ -1020,14 +1028,16 @@
                       nil
                       (map vector requests spans))
         analysis
-        (with-in-str source
-          (analyzer/analyze (cond-> {::analyzer/paths ["-"]} hooks (assoc ::analyzer/hooks hooks))))
+        (-> (with-in-str source
+              (analyzer/analyze (cond-> {::analyzer/paths ["-"]} hooks (assoc ::analyzer/hooks hooks))))
+            (assoc :seon.fn/runtime-namespaces namespaces))
         analysis (with-dependency-analysis
                    analysis
                    (or dependencies (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis))))]
     {:seon.fn/analysis analysis
      :seon.fn/source source
      :seon.fn/source-spans spans
+     :seon.fn/runtime-namespaces namespaces
      :seon.fn/function-rows
      (resolvable-runtime-function-entities database analysis requests)})))
 
@@ -1472,8 +1482,9 @@
         (into {}
               (map (fn [entry]
                      [(::analyzer/name entry)
-                      (assoc (analyzer/namespace-context entry)
-                             :namespace-meta (::analyzer/meta entry))]))
+                      (merge (analyzer/namespace-context entry)
+                             (get (:seon.fn/runtime-namespaces analysis) (::analyzer/name entry))
+                             {:namespace-meta (::analyzer/meta entry)})]))
               (::analyzer/namespace-definitions analysis))]
     (reduce
      (fn [entities entry]
