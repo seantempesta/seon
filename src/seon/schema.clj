@@ -906,7 +906,8 @@
   {:malli/schema [:=> [:catn [:seon.schema/projection :map] [:seon.schema/definition [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli declarations contain arbitrary literal values and predicates; schema inspection preserves that data, and body wrappers return the caller's result unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:set :keyword]]}
   [projection form]
   (let [forms (:seon.schema.projection/forms projection)
-        canonical (seon.cache/lookup ::canonical-keys forms #(* 3000 (count %)) #(set (keys forms)))
+        names (vec (keys forms))
+        canonical (seon.cache/lookup ::canonical-keys names #(* 96 (count %)) #(set names))
         registry (:seon.schema.projection/registry projection)
         compile-options
         (or (:seon.schema.projection/compile-options projection)
