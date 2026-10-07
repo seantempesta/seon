@@ -70,6 +70,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.route :as route]
             [seon.render.transcript :as transcript]
+            [seon.flow :as seon.flow]
             [seon.print :as print]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
@@ -135,8 +136,10 @@
   [value]
   (satisfies? clojure.core.async/Mult value))
 
+;; The mult's go-loop starts where every Var has its root binding: the delay
+;; may be forced inside an evaluation, whose frame the loop would keep.
 (defonce ^:private generator-mult
-  (delay (async/mult (async/chan (async/sliding-buffer 1)))))
+  (delay (seon.flow/call-with-root-bindings #(async/mult (async/chan (async/sliding-buffer 1))))))
 
 (def mult-generator
   "An honest generator: a real mult over a real channel, created once."
