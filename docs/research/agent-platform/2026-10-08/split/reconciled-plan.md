@@ -1,0 +1,495 @@
+---
+title: Agent-loop split, reconciled plan (S1, S3-S7)
+type: research
+status: proposed to root
+date: 2026-10-08
+lane: split-reconcile
+---
+
+# Agent-loop split: reconciled plan
+
+This plan merges two independent splits of the approved spec (`docs/seon/specs/agent-loop.md`):
+`spec-split-codex-split.md` (Astra) and `spec-split-sol-split.md` (Sol 6.1). They share the same skeleton: Sol revised
+Astra's text and split it further. This plan keeps their row ids. Where they differ, it says which version it took and
+why, and it answers every open question with a recommendation checked against HEAD **39c976b70**. Anchors marked
+"(HEAD)" were re-read with `git show HEAD:` in this lane. The packets' other anchors come from `a4d438dc6`. Re-derive
+them before you assign a row. The packets' budget codes (L, O, H, I, T, D, F) and assignment contract apply unchanged.
+
+Already landed: S1-01 (`f50ef6059`) and S1-02 (`438328b34`). S3-01 is in flight as lane `s3-01`, which holds
+`turn.clj`, `turn/batch.clj`, the eval schema and twelve test files, including `test/seon/turn_test.clj` and
+`test/seon/mcp_entrance_test.clj`. Lane `defn-cost2` holds `db.clj`, `program.cljc`, `call_preparation.clj`,
+`db_test.clj` and `schema_test.clj`. Rows that need those files queue behind the two lanes.
+
+## Evidence gathered in this lane (broken first)
+
+- **Default is behind HEAD.** `bin/seon status` reports pid 89251, source root `a4d438dc6`, health `:faulted`. The
+  open fault is `seon.turn.world/record-fault`: a branch-custody write refusal, 3 occurrences, task `3d2fb1b41dc8`.
+  There are four over-bound warnings. `seon.db/call-with-custody` has a max of 2,986 ms (tasks `5a8b119ea14a`,
+  `3d651884784e`), `seon.cluster/adopt-entities!` 5,624 ms and `seon.fn/index!` 2,813 ms. All of these already have
+  tasks. **RESET NEEDED: no.**
+- **Q17 probe: a world member is supplied to a host function called from SCI.** I ran
+  `(keys (seon.turn.batch/namespace-entity 'user))` through MCP SCI as root. That function declares
+  `[:cat :seon.sci.eval/ctx :symbol]` (HEAD `src/seon/turn/batch.clj:59-64`) and the call omits the ctx. It answered
+  the namespace keys in **3 ms** with **20 armed calls** and no diagnostic (`result/e3ec7d7102288`). The armed wrapper
+  filled the omitted ctx from the evaluation's world. `:seon.sci.eval/ctx` is a declared world member at HEAD
+  (`src/seon/batch.clj:47-61`), and supply runs through `src/seon/call_preparation.clj:824` and `:858`. This settles
+  Q17 without an ambient lookup.
+- **Codex S1-04 has a false caller claim.** `directory-value` does not call `function-doc-map` at HEAD. It calls
+  `program-documentation` and `arglists-reader` (`src/seon/sci/eval.clj:2019-2054`). `function-doc-map`'s only external
+  caller is `documentation-value:2071`. Sol is right.
+- **`program-documentation-selector` must survive S1-07.** `documentation-value` reads it at
+  `src/seon/sci/eval.clj:2062`. `test/seon/db_test.clj:148,186` also reads it in
+  `seon.db-test/supplied-database-pulls-carry-the-projection-across-unbound-reads` and
+  `seon.db-test/uncarried-read-reports-one-projection-fallback-per-call`. Codex's plan to delete it is wrong.
+- **Neither packet lists these direct JVM test callers:**
+  - `test/seon/render/value_test.clj:64,77` calls `directory-value` and `repl/render-directory-ai` in
+    `seon.render.value-test/block-pairs-remain-explicit`.
+  - `value_test.clj:607` calls `documentation-value` with three arguments in
+    `seon.render.value-test/documentation-body-is-whole-or-one-executable-elision`.
+  - `test/seon/sci/documentation_test.clj:25-26` calls both functions in
+    `seon.sci.documentation-test/a-named-private-override-documents-the-jvm-boundary`.
+
+  Outside an evaluation these callers have no world, so `supply-from-world` refuses. They must pass the ctx
+  explicitly. S1-04 and S1-07a below now own these test files.
+- **The stored namespace source of a runtime namespace is built with `pr-str`.** It is
+  `(pr-str (runtime-namespace-form …))` at `src/seon/fn.clj:996`, augmented with interpreter refers at `:999`. That
+  synthetic text becomes `:seon.ns/source` through `exact-source` (`fn.clj:165`, `namespace-entity:201`). This is the
+  producer behind Q1, and it is a printer-law finding. S1-03 owns the file and fixes the producer (see S1-03).
+- **The SCI `clojure.test` adaptations have no `run-test-var`.** `agent-test-namespace` (`src/seon/sci/eval.clj:318`)
+  adapts `test-all-vars`, `test-ns`, `run-tests` and `use-fixtures` only. Task `run-test-var-throws-on-an-sci-test-var`
+  (`resources/seon/tasks/seon.sci.eval.edn:213`) asks that run-test-var "runs one SCI test var and answers its report
+  as data", proved by pass counts. That settles Q15's shape.
+- **A held-context roster exists.** Routing is one atom per execution holding `:seon.agent/contexts`
+  (`src/seon/cluster/agent.clj:615-621`). `acquire-context!` (`:1022`) reserves and settles entries in it. That
+  answers Q9.
+- **Pending writes and the blob permit.** On timeout, `transact-call` returns while the Datahike `pending` is still
+  outstanding (`src/seon/db.clj:5728`). `with-publication!` releases its permit in `finally`
+  (`src/seon/blob.clj:323`). This is Q5's defect.
+- **The call row exists.** The turn entity holds `:seon.turn/reply` (`src/seon/turn.clj:81` contract), `/attempts`,
+  `/disposition`, `/reply-blob` and `/text`, and every evaluation refs it through `:seon.cluster.eval/run`. This is the
+  "call row" that spec §4.1 RECORD already names. It answers Q2.
+- **Effect provenance.** `evaluation-eid` (`src/seon/effect.clj:210`) derives the evaluation from
+  `:seon.effect/run` (a ref to the open run) plus `:seon.effect/form-ordinal`. `open-call:227` then stores the
+  `:seon.effect/eval` ref. This is Q10's seam.
+- **Skills have stale claims.** `.agents/skills/repl/SKILL.md:46-49` cites `fork-for-turn :3320` and
+  `regenerate-agent-context! :3246`, but at HEAD they are at `eval.clj:2813` and `:2703`. `:56` says an uncontracted
+  `defn` is refused, which contradicts CLAUDE.md's REPL-admits-with-warning law. `:68,85` describe the system turn.
+  `.agents/skills/seon-flow-architecture/SKILL.md:60-61` cites `program-cache-policy :3355` (HEAD `eval.clj:2866`),
+  and `:94` cites the three-write turn. CLAUDE.md calls a stale skill a high-priority defect. Neither packet scheduled
+  this fix, so the plan adds slice X-01.
+
+---
+
+## 1. Ready slices
+
+### R0: ready now, no open question, no held file
+
+| Id | One line | Group |
+|---|---|---|
+| S5-03a–j | Ten admission design proofs, one case per lane (notes only, disposable SCI branch) | F (parallel, disjoint notes) |
+| X-01 | Correct the REPL and Flow skills' current claims against HEAD; delete what cannot be verified | G |
+| I-Q4 | Inventory of the prompt, walk and capture caller closure, web/debug included, with each survivor's data entrance | H (notes) |
+| I-Q10 | Inventory of the `*open*`, `open-tx`, `recover-tx`, effect, test-attempt and boot recovery caller closure | H (notes) |
+| I-Q14 | Inventory of the disarm/join/backstop proofs, plus the caller deadline path from MCP to `stop-graph!` | H (notes) |
+
+The three inventories are design-only notes, like S5-03. They turn the "exact caller closure" parts of Q4, Q10 and Q14
+into data, so S4-07, S6-04 and S6-07 can be sized.
+
+### R1: ready once root accepts the ROOT answer below (evidence attached, files free)
+
+| Id | One line | Blocking answer |
+|---|---|---|
+| S1-04 | `doc` reads SCI Var metadata and classifies authored references. `documentation-value` declares a supplied `:seon.sci.eval/ctx` input | Q17 (probe above) |
+| S1-03 | The stored runtime namespace keeps only authored refers and source. The analysis carries the synthetic refers and unaugmented form | Q1 |
+| S7-01 | SCI `clojure.test/run-test-var` adapter beside `run-tests`, returning summary counters as data | Q15 |
+
+S1-04 and S7-01 both edit `src/seon/sci/eval.clj` and `test/seon/sci/documentation_test.clj`, so they run in series.
+S1-04 is on the critical path and goes first.
+
+### R2: specified, waiting only for a file held by a live lane
+
+| Id | Waits for | Then needs |
+|---|---|---|
+| S4-01 | `s3-01` (turn.clj, eval schema, context_selection_test, mcp_entrance_test) and `defn-cost2` (db.clj) | nothing: S3 v2 §6 fully specifies the ordinal writer and read |
+| S5-06 | `s3-01` (turn/batch.clj, mcp_entrance_test) | Q9 (ROOT, answered) |
+| S6-01 | `s3-01` if the producer conversion touches turn.clj (I-Q10 decides) | Q10 key choice (ROOT, answered) |
+| S1-10 | S1-09, then `s3-01` (test/seon/turn_test.clj) | none |
+
+---
+
+## 2. Open questions, merged
+
+The packets' Q1–Q16 are identical text, and Sol adds Q17. They are merged here with the extra sub-questions found in
+the S4 and S6 rows. **ROOT** means an implementation choice within the approved spec. **OWNER** means the choice changes
+or settles approved semantics.
+
+### Q1: Where does the analysis carry the authored namespace source? (S1-03) **ROOT**
+
+- **Decision.** A runtime namespace's stored `:seon.ns/refers` and `:seon.ns/source` must exclude the interpreter refers
+  that `runtime-analysis-batch` adds for analysis (`fn.clj:996-999`). An explicitly authored refer must survive.
+- **Both packets.** Keep the source by span in the existing analysis value. Reject subtracting refers that look equal.
+  They name no key.
+- **Simplest.** Build the analysis form from the augmented entity, as today. Build the stored form from the unaugmented
+  entity.
+- **Recommendation.** `runtime-analysis-batch`'s result map gains one key, `:seon.fn/runtime-namespaces`. It maps each
+  namespace name to `{:seon.ns/source <unaugmented form text> :seon.fn/synthetic-refers #{local …}}`. The synthetic
+  refers are the interpreter refers *added*, meaning those not already in the stored entity's refers, so an authored
+  `[clojure.repl :refer [doc]]` is never listed. `namespace-entity` (`fn.clj:201`) removes exactly those locals and
+  uses that source when its context carries them. Static file analysis carries none, so it is unchanged.
+- **Grounds.** This fixes the producer with no new stored schema. CLAUDE.md "Fix the producer" and "Declare facts at
+  their producer". The same slice replaces the `pr-str` at `:996` with the value printer's code face. If that printer
+  face cannot print a form as loadable code within the slice, the lane returns that as a task naming
+  `seon.fn/runtime-analysis-batch` (CLAUDE.md "exactly ONE printer").
+
+### Q2: What is the durable exchange without an evaluation? Where are the assignment boundary and the opening completion fact? (S4-01..04, S6-03) **ROOT**
+
+- **Decision.** A prose-only reply records "one exchange with the 'no form' refusal and no evaluation" (spec §4.3).
+  History needs that exchange, the assignment it belongs to, and the opening's completion fact.
+- **Both packets.** Extend the existing pass/call record. Do not add a second transcript store or a fake evaluation.
+  Both leave it undecided.
+- **Simplest.** The call row RECORD already writes (§4.1) is the exchange.
+- **Recommendation.**
+  - The pass's call row, today's `:seon.turn/*` entity with `:seon.turn/reply` and `/disposition` (`turn.clj:81`), is
+    the exchange. It carries origin and an assignment ref. A prose-only exchange is a call row with zero evaluations
+    and its "no form" diagnostic.
+  - Evaluations keep `:seon.cluster.eval/run` to it.
+  - The opening's completion fact is an attribute on the opening call row, valued by assignment id plus task revision,
+    written in that pass's one transaction ("beside its evaluations", §4.4).
+  - History acquisition reads the agent's call rows for the active assignment with origin in
+    `#{:opening :input :model}`, each with its evaluations by position.
+  - Agent ordinals stay on evaluations, as S3 v2 §6 decided. A pass is one transaction on one linear branch, so
+    exchange order is commit order.
+  - S6 deletes the open/intent machinery, not this row.
+- **Grounds.** No new entity kind ("no invented entity kinds"). The spec already requires a call row. Datahike owns
+  transaction order.
+
+### Q2b: Does the opening show the must-reads with `doc` or with `source`? (S4-02) **OWNER**
+
+- **Decision.** Spec §1.4 and §4.4 say "references' `doc`/`source`". The S1 design (§4.3) has the agent call `doc` on
+  each must-read.
+- **Both packets.** Unresolved.
+- **Simplest.** `(help)`, then the task's `doc`, then `doc` of each must-read.
+- **Recommendation.** Use `doc` only. `source` stays one form away, and S8's experiments can add it. The choice decides
+  opening size, and the owner reads context (§1.4), so the owner should confirm.
+
+### Q3: What is the input form, and how are delivery identities recorded? (S4-05, S7-02) **ROOT**
+
+- **Decision.** Spec §4.4 leaves the form's name TBD. It requires recorded identities, per-home bases, and no
+  comparison of t across homes.
+- **Both packets.** Reuse one recorded pass with an exact identity set.
+- **Simplest.** The form is one call to a `my.*` input function. The writer validates and stores the identities it
+  returned.
+- **Recommendation.**
+  - The generated form is `(my.agent/inputs)` (new, in `src/my/agent.clj`). With custody supplied, it returns the
+    undelivered messages, errors and proof results, each with its identity and the home basis it was read at.
+  - The pass's settlement request carries those identities. The writer checks that each still exists and is not
+    already delivered to this agent, then stores them as one cardinality-many ref, `:seon.cluster.eval/delivered`, on
+    that evaluation.
+  - "Undelivered" is the identities with no such ref from this agent, read at each home.
+  - With zero items there is no input pass: work is derived only when something is undelivered.
+- **Grounds.** Identities come from their owners. The delivered set is a fact named at its producer, so a restart never
+  redelivers. No high-water t.
+
+### Q4: Which web and debug callers of prompt, walk and capture survive? (S4-04, S4-07) **ROOT**
+
+- **Decision.** The exact caller closure.
+- **Both packets.** Keep HTML over saved exchanges. Delete the AI traversal after its last caller.
+- **Recommendation.** Make it data first through inventory slice I-Q4, then size S4-07. The packets' anchors
+  (`render.clj:1721`, `prompt.clj:171-402`, `context.clj:309-415`) are the starting set.
+
+### Q5: Who owns a pending write and the blob permit until the write's actual outcome? (S5-01) **ROOT**
+
+- **Decision.** Today the outcome is lost on timeout (`db.clj:5728`) and the permit is released in `finally`
+  (`blob.clj:323`). Spec §4.6 says an unknown outcome is owned until known.
+- **Both packets.** Pick one live owner, or price a blocking owner wait as the simpler option.
+- **Simplest.** A blocking owner wait.
+- **Recommendation.**
+  - On timeout, `transact-call` returns its declared result plus a runtime `:seon.db/pending`, the Datahike promise,
+    which is never persisted.
+  - `with-publication!` derefs that pending to its terminal outcome before its `finally` releases the permit.
+  - The owner is the thread already running the pass, which is the agent's proc. The agent is unavailable until the
+    outcome is known, as §4.6 requires.
+  - The MCP caller's own deadline still answers "still running" (§4.8).
+  - A definite refusal returns at once. An unknown outcome is never retried.
+- **Grounds.** No new roster or atom (CLAUDE.md "Atoms are a smell"). It awaits the actual exit ("Bound admission and
+  await actual exit").
+
+### Q6: What does live health show when a digest was not observed since boot? (S5-02) **ROOT**
+
+- **Decision.** The owner already ruled that health reads the live profile (§7.2). What remains is the shape for
+  "unobserved".
+- **Both packets.** A typed unknown.
+- **Recommendation.** `definition-comparisons` takes the live profile snapshot as an explicit argument. A missing
+  parent or current observation is a typed unknown member of `seon.health/regressions`, never a stale stored comparison
+  and never nil. Boot comparison records stay. CLAUDE.md says "missing evidence is a typed unknown".
+
+### Q7: Which admission seam allows one end-of-pass analysis? (S5-04) **OWNER**
+
+- **Decision.** Can later forms in the same pass see earlier forms' facts without per-form analysis?
+  `apply-pending` provides that today (`batch.clj:513`).
+- **Both packets.** Decide only after all ten S5-03 cases. One bounded early admission at a real dependency boundary is
+  simpler than a speculative registry.
+- **Recommendation.** Root assembles the ten case notes into one seam. If any case needs analysis before a later form,
+  the design states its measured cost (§4.1). Spec §5 makes S5 a core slice whose design the owner approves. Price
+  S5-04 into sub-items only after that approval.
+
+### Q8: Which errors-cut version lands with observed-occurrence settlement? (S5-05) **ROOT**
+
+- **Recommendation.** Keep the installed constructor and `record-fault` receipt (`turn/world.clj:136`) until the errors
+  cut converts them. S5-05 passes the pass's observed occurrence identities only. Settlement then reads no window and
+  does no problem-assignment routing. S5-05 is sequenced after the errors spec's own S-reads slice. Loop code never
+  defines error schemas.
+
+### Q9: Which read supplies an already acquired SCI context without acquiring one? (S5-06) **ROOT**
+
+- **Recommendation.** A new contracted read beside `acquire-context!` in `src/seon/cluster/agent.clj`:
+  `held-context [routing agent-id branch] -> ctx | absent-context error`. It reads the settled
+  `:seon.agent/contexts` entry (`agent.clj:615-621`) under the same key `acquire-context!` uses, and never reserves. An
+  entry still `::acquiring`, or no entry, is absent: the JVM handle then answers gone-value with its class. There is
+  one roster, so there is no second one (CLAUDE.md "exactly one roster per scope").
+- **Proof fixture.** The existing harness already acquires through `acquire-context!`, so a test can acquire the SCI
+  context first and then run JVM mode.
+
+### Q10: Which provenance keys replace the run ref, and what is the caller closure? (S6-01, S6-02b, S6-04) **ROOT**
+
+- **Recommendation.**
+  - An effect receipt stores the pass id as a value (today's `:seon.turn/id` string) with
+    `:seon.effect/form-ordinal`, never a ref to an unrecorded run or evaluation.
+  - `evaluation-eid` (`effect.clj:210`) and the `:seon.effect/eval` ref are deleted. A reader that needs the evaluation
+    looks it up by its identity, `id/evaluation(pass-id, ordinal)`, after RECORD.
+  - The exact producer closure comes from I-Q10 before S6-01 is claimed.
+- **Grounds.** "Provenance is pass id + position" (§4.2). Identities are values, refs exist only to living entities.
+
+### Q11: Where do test member pass rows and the request aggregate live? When may the member branch retire? (S5-07e, S6-02a/b, S7-02) **ROOT**
+
+- **Recommendation.**
+  - Member pass rows are written on the member's own branch, its custody, in one member pass.
+  - The request aggregate is written on the requester's recording connection.
+  - Task-home completion is its own write (§4.2, §4.9).
+  - The member branch retires only after the body's actual exit **and** the aggregate's durable commit, through the
+    runner's existing actual-exit owner.
+- **Grounds.** Custody is the default world, and the spec's entrant table already separates member and request.
+
+### Q12: What do the failed-call row, the counting anchor and the work union look like? (S6-05) **ROOT**
+
+- **Recommendation.**
+  - A failed provider or context call writes the call row (Q2) with zero evaluations, its error, and a ref to the
+    outside wake anchor it consumed. The writer counts call rows against that anchor for the cap.
+  - Answeredness moves only on a committed model pass, to the basis it presented.
+  - `next-agent-work` returns the work union with no run situations. With no provider configured, no model work is
+    admitted.
+- **Grounds.** This is derived at the writer from rows with no counter (§4.5, "Decide at the authority").
+
+### Q13: How do the old completion APIs convert, and where is proof eligibility checked? (S6-06a/b, S7-03) **ROOT**
+
+- **Recommendation.**
+  - `my.task/complete!` (new) is the bail and takes a required reason. `my.turn/complete` (`src/my/turn.clj:5`),
+    `my.task/done!` (`src/my/task.clj:163`) and `seon.run/complete` are deleted, and every caller converts in the same
+    commit (CLAUDE.md "new names for changed semantics; retire the old path").
+  - The `assign!` writer checks proof eligibility at the task home, against the home program, through `seon.test/verified?`.
+  - A refactor task whose proofs are all green needs a new failing proof. This already follows from CLAUDE.md ("a test
+    already green before the work does not prove it"), so it is not a new semantic.
+
+### Q14: Which deadline bounds disarm and join once the backstop is gone? (S6-07) **ROOT**
+
+- **Recommendation.** The caller's lifecycle deadline passes explicitly into `disarm!` and `stop-graph!`, as §4.8
+  states. On expiry they return a typed error naming the missing exit and keep the resources. There is no new timer or
+  pool. I-Q14 lists the proofs to convert:
+  - `seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted` (`agent_test.clj:843`)
+  - `…/disarm-has-a-declared-loud-turn-completion-backstop` (`:923`)
+  - `…/disarm-drops-the-route-before-closing-it` (`:793`), which uses `with-redefs` and must convert to injected data
+
+### Q15: Does run-test-var take a Var or a symbol, and what does it return? (S7-01) **ROOT**
+
+- **Both packets.** Prefer a symbol routed into `my.test/check` and recorded as proof.
+- **Recommendation.** It takes a **Var** and returns clojure.test's **summary counters**, exactly as the standard
+  `run-test-var` does. It is an `agent-run-test-var` adapter in `agent-test-namespace` (`eval.clj:318`), copying
+  `agent-test-ns`'s begin line and `test-vars` call.
+- **Grounds.** The task's done-when asks for "one SCI test var… report as data… pass counts"
+  (`seon.sci.eval.edn:213-216`). A proof is recorded only by `my.test/check`. Making run-test-var certify would give it
+  two meanings, so it stays a bounded capture helper like `run-tests`. This is a ~15-line adapter, not a second runner.
+
+### Q16: What does task-home completion validate after a branch proof commits? (S7-03) **ROOT**
+
+- **Recommendation.** One idempotent task-home writer checks assignment id, task revision, and each proof's recorded
+  definition, input and reach digests against the current combined program. Recovery after the crash window reruns the
+  same writer, and a repeat is a no-op by identity (§4.9 "Completion's cross-branch crash window with idempotent
+  recovery"). There is never a latest-green boolean.
+
+### Q17: How does `documentation-value` get the SCI context without an ambient lookup? (S1-04, S1-07a/b, S1-08) **ROOT**
+
+- **Decision.** The S1 design keeps "the same 3-arg signature" and relies on `sci.ctx-store/get-ctx`. HEAD already does
+  so at `eval.clj:2133`, and S1 design claim 3 does too. CLAUDE.md requires passing the world explicitly.
+- **Astra.** S1-04 is ready.
+- **Sol.** Blocked, prefer an explicit argument.
+- **Recommendation.** Each lookup function declares `:seon.sci.eval/ctx` as its first input, a world member
+  (`batch.clj:61`). The macro expansion omits it, and the armed wrapper supplies it from the evaluation's world. Proven
+  above (`result/e3ec7d7102288`, 3 ms). The signature becomes `documentation-value [ctx database authored resolved]`,
+  and the macro keeps passing `(seon.db/db)`. Direct JVM test callers pass ctx explicitly.
+  `stored-source-fn`/`source-fn` drop `sci.ctx-store/get-ctx` in S1-08 by the same rule.
+- **Grounds.** CLAUDE.md "Supply defaults by declared schema name… SCI context… comes from that evaluation's own
+  world".
+
+### Q18: Is an analysis-free `doc` lookup still a `:seon.fn` program edge? (S1-09) **ROOT** (new)
+
+- **Decision.** After retargeting, clj-kondo must record bare and qualified `doc` as calls to `clojure.repl/doc`
+  (S1 design claim 4, unverified).
+- **Recommendation.** S1-09's new `seon.fn-test/lookup-analysis-names-the-installed-repl-vars` is the falsifier. If
+  kondo treats the macro arguments as usages, the lane reports that and does not filter text.
+
+---
+
+## 3. Slice ledger (assuming the recommendations are accepted)
+
+Groups are file-ownership groups:
+
+- **A**: render, bootstrap and help.
+- **B**: `turn.clj` family.
+- **C**: `sci/eval.clj` family.
+- **E**: `db`, `blob`, `health`, `effect`, `test`, `task`.
+- **F, H**: design notes.
+- **G**: skills.
+
+Rows in the same group run in series. Different groups run in parallel once their claimed sets are disjoint. "Q" in the
+dependency column means root must accept that answer first.
+
+### Ready (R0/R1/R2, see §1)
+
+| Id | Change | Files | Proof tests | Budget | Deps | Group |
+|---|---|---|---|---|---|---|
+| X-01 | Re-anchor and correct the REPL and Flow skill claims at HEAD (`fork-for-turn`, regeneration, uncontracted `defn` admission, system turn, cache policy, three-write turn). Delete unverifiable claims | `.agents/skills/repl/SKILL.md`, `.agents/skills/seon-flow-architecture/SKILL.md` | `seon.contracts-compile-test/a-check-of-no-sources-has-no-contract-findings` (commit gate only, docs publish nothing) | D | none | G |
+| I-Q4 | Notes with the exact caller/test closure of `prompt.clj:171-402`, `context.clj:309-415`, `render.clj:1721` walk entry, and each web/debug survivor's data entrance | `docs/research/agent-platform/2026-10-08/inventory/q4-prompt-walk.md` | same gate | D | none | H |
+| I-Q10 | Notes with the closure of `*open*`, `open-tx:697`, `recover-tx:1473`, effect `:seon.effect/run` producers, `test.clj:179-216` attempt writers and boot recovery caller | `…/inventory/q10-open-provenance.md` | same gate | D | none | H |
+| I-Q14 | Notes with the disarm/join/backstop proofs and the deadline path MCP → `disarm!:1465` → `stop-graph!:1508` | `…/inventory/q14-exit-deadline.md` | same gate | D | none | H |
+| S5-03a | Admission design, def → redef → use | `docs/research/agent-platform/2026-10-08/s5-admission/redef-design.md` | specifies `seon.cluster.turn-test/a-pass-records-the-definition-each-form-observed` | O def | none (the S1-03 dependency is dropped: probes read today's behavior) | F |
+| S5-03b | Macro defined, then used | `…/macro-design.md` | `…/a-pass-admits-a-macro-before-its-use` | O | none | F |
+| S5-03c | Unmap and remove-ns | `…/removal-design.md` | `…/a-pass-records-unmap-and-namespace-removal-in-order` | O | none | F |
+| S5-03d | ns and alias changes | `…/alias-design.md` | `…/a-pass-analyzes-aliases-at-their-observed-position` | O | none | F |
+| S5-03e | Nested and cross-namespace definitions | `…/nested-design.md` | `…/a-pass-joins-nested-and-cross-namespace-definitions-once` | O | none | F |
+| S5-03f | Private def | `…/private-design.md` | `…/a-pass-preserves-private-definition-custody` | O | none | F |
+| S5-03g | Schema, then use | `…/schema-design.md` | `…/a-pass-admits-a-schema-before-its-use` | O | none | F |
+| S5-03h | Failed def, then a dependent form | `…/failed-def-design.md` | `…/a-failed-definition-does-not-certify-a-later-dependent-form` | O | none | F |
+| S5-03i | Definition during lazy realization | `…/lazy-design.md` | `…/a-pass-captures-definitions-realized-after-the-form-body` | O | none | F |
+| S5-03j | Prose with a quote before a def | `…/prose-design.md` | `…/a-pass-keeps-original-definition-spans-after-prose` | O | none | F |
+| S1-04 | `reference-in` (new). `documentation-value [ctx database authored resolved]` reads SCI Var doc and arglists and keeps the DB contract and override note. `function-doc-map` takes metadata explicitly and drops its `arglists-reader` re-read. `documentation-unavailable` widens to `authored-reference`. The macro passes authored syntax | `src/seon/sci/eval.clj`, `resources/seon/schemas/seon.sci.eval.edn`, `test/seon/sci/documentation_test.clj`, `test/seon/render/value_test.clj` (direct caller `:607`) | existing `seon.sci.documentation-test/documentation-is-returned-data-without-a-second-printed-copy`, `…/documentation-keeps-named-contracts-and-guarded-result-shapes`, `…/a-named-private-override-documents-the-jvm-boundary`, `seon.render.value-test/documentation-body-is-whole-or-one-executable-elision`. New `seon.sci.documentation-test/doc-classifies-authored-references` | L `(doc seon.task/create!)`, `(doc clojure.set/union)` | Q17 (the S1-03 dependency is dropped: no shared file or data) | C |
+| S1-03 | `runtime-analysis-batch` returns `:seon.fn/runtime-namespaces`. `namespace-entity` drops the added refers and stores the unaugmented source. The `pr-str` producer at `fn.clj:996` is fixed or tasked | `src/seon/fn.clj`, `test/seon/fn_test.clj` | existing `seon.fn-test/an-alias-an-earlier-form-requires-resolves-in-later-forms-of-the-batch`, `…/a-fold-derived-definition-has-static-index-edge-parity`. New `seon.fn-test/runtime-namespace-source-keeps-only-authored-refers` | O def/after-def | Q1 | B′ (fn.clj, disjoint from s3-01) |
+| S7-01 | `agent-run-test-var [var] -> summary counters` in `agent-test-namespace`. Resolves task `run-test-var-throws-on-an-sci-test-var` | `src/seon/sci/eval.clj`, `test/seon/sci/documentation_test.clj`, `resources/seon/tasks/seon.sci.eval.edn` (task closes by proof) | new `seon.sci.documentation-test/run-test-var-answers-one-branch-test-as-data` (branch deftest, pass/fail counts, `:out` holds the report, no host root mutation). Existing `…/clojure-test-at-the-agent-repl-reports-into-the-evaluations-output` | T | Q15, after S1-04 (file) | C |
+| S4-01 | Unique tuple `:seon.cluster.eval/agent-ordinal`, assigned once per ordered writer batch. `seon.db/last-agent-ordinal` (rseek that accepts only the same attribute and agent). `of-agent` reads the tuple range | `src/seon/db.clj`, `src/seon/turn.clj` (`receipt-settle-batch-call`, `record-evaluated-call`), `src/seon/eval.clj`, `resources/seon/schemas/seon.cluster.eval.edn`, `test/seon/context_selection_test.clj` | new `seon.context-selection-test/evaluation-ordinals-follow-writer-order`. Existing `…/selection-references-terminal-evaluations-in-writer-decided-order` | H | S3-01 landed, `defn-cost2` released | B |
+| S5-06 | JVM mode stops acquiring. `seon.cluster.agent/held-context` (new) or gone-value with class | `src/seon/mcp.clj`, `src/seon/turn/batch.clj` (jvm-request/jvm-show), `src/seon/turn/world.clj`, `src/seon/cluster/agent.clj`, `test/seon/mcp_entrance_test.clj` | existing `seon.mcp-entrance-test/a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle` (cold row → gone-value), `…/a-jvm-reply-keeps-its-duration-after-an-earlier-run`. New `…/a-jvm-call-does-not-acquire-an-sci-world` | O/F | S3-01, Q9 | E |
+| S6-01 | Effect receipt stores pass id and form ordinal as values. Delete `evaluation-eid` and the `:seon.effect/eval` ref. Producers converted per I-Q10 | `src/seon/effect.clj`, `resources/seon/schemas/seon.effect.edn`, `test/seon/effect_test.clj` (plus producers I-Q10 names) | existing `seon.effect-test/request-commits-before-io-dispatch-and-settles-once`, `…/guarded-sci-evaluation-supplies-the-effect-identity-context`, `…/effect-refs-its-evaluation-and-handler` (converted to identity values), `…/background-settlement-carries-its-connection-across-a-thread-hop` | F/O | Q10, I-Q10 | E |
+
+### S1 lookups (group C, in series after S1-04; S1-10 and S1-11 in group A)
+
+| Id | Change | Files | Proof tests | Budget | Deps |
+|---|---|---|---|---|---|
+| S1-05 | Schema and namespace branches inside `documentation-value`: `schema-doc`, `namespace-doc` with `:publics`. Check `sci/find-ns` before `dir-fn` | eval.clj, eval schema, documentation_test | existing `seon.sci.documentation-test/an-example-ends-at-the-next-fixed-heading`. Extend `…/doc-classifies-authored-references` | L `(doc :seon.task/intent)`, `(doc seon.task)` | S1-04 |
+| S1-06 | Task branch (one pull at `seon.task/home`, `task.clj:381`) and test branch (`{:sym :recorded :verified?}` through `recorded-result:1425`, `verified?:1562`) | eval.clj, eval schema, documentation_test | new `seon.sci.documentation-test/task-doc-reads-home-declaration-and-branch-proofs`, `…/lookup-does-not-certify-a-stale-test-result` | L (task with must-read, test with a recorded result) | S1-05 |
+| S1-07a | `directory-value [ctx authored] -> var-summaries` from SCI `dir-fn`, no contracts, no DB. Delete `program-documentation`, `arglists-reader` (last caller) and `seon.repl` directory render AI/HTML with its schema. **Keep** `program-documentation-selector` (Sol's version: `eval.clj:2062`, `db_test.clj:148,186`) | eval.clj, eval schema, documentation_test, `src/seon/repl.clj`, `resources/seon/schemas/seon.repl.edn`, **`test/seon/render/value_test.clj`** (`:64,77`) | existing `seon.sci.documentation-test/directory-observes-a-function-installed-after-context-acquisition`, `…/a-named-private-override-documents-the-jvm-boundary` (`:26` caller), `seon.render.value-test/block-pairs-remain-explicit` (directory row removed). New `…/directory-answers-data` | L `(dir seon.task)` | S1-06 |
+| S1-07b | `apropos-value`/`find-doc-value [ctx lookup-pattern]` as qualified SCI Vars | eval.clj, eval schema, documentation_test | new `seon.sci.documentation-test/searches-answer-data`. Existing `…/documentation-is-returned-data-without-a-second-printed-copy` | L `(clojure.repl/apropos "task")`, `(clojure.repl/find-doc "symbol-in")` | S1-07a |
+| S1-08 | `source-value [ctx database authored]`: stored source first, then host `source-fn`, else unavailable. Returns `{:seon.sci.eval/sym :seon.render/ai text}`. `source-fn` drops `sci.ctx-store/get-ctx` (Q17) | eval.clj, eval schema, documentation_test | existing `seon.sci.documentation-test/source-at-the-agent-repl-prints-the-stored-declaration` (converted to data, adds private/test/library/missing rows) | L `(clojure.repl/source seon.id/symbol-in)` | S1-04 (may run before S1-05..07) |
+| S1-09 | Lookups in `sci/init` `clojure.repl` once. `refer-declared-bindings! [ctx projection] -> ctx`. Retarget the binding schema. Delete `install-program-doc!` with its call, the `seon.bootstrap/doc` and `/dir` macros (`bootstrap.clj:161,166`) and the build's hand lists. Constructors become `doc-var`, `dir-var`, `source-var`, `source-fn`. Retarget the `seon.sci.eval.edn:123,190,204` must-reads | eval.clj, `resources/seon/schemas/seon.sci.binding.edn`, documentation_test, `test/seon/fn_test.clj`, `src/seon/bootstrap.clj`, `resources/seon/tasks/seon.sci.eval.edn` | existing `seon.sci.documentation-test/retained-context-receives-the-current-repl-macro-through-its-core-alias`, `…/bare-test-macros-resolve-without-namespace-referrals`, `…/retained-context-receives-new-bare-test-referrals`. New `…/bare-and-qualified-lookups-share-vars`, `seon.fn-test/lookup-analysis-names-the-installed-repl-vars` (Q18 falsifier) | O plus L bare forms | S1-03, S1-07b, S1-08 |
+| S1-10 | `help-value [] -> [help-entry]` literal, no DB, teaching the landed same-line rule. Delete the help render pair and its scanner. `namespace-form` and `usage-form` → `(dir ns)` | `src/seon/bootstrap.clj`, `resources/seon/schemas/seon.help.edn`, `test/seon/help_test.clj`, `src/seon/render/ns.clj` (`namespace-form`, HEAD `:78`), `src/seon/run.clj:58`, `test/my/turn_test.clj`, `test/seon/render/history_test.clj`, `test/seon/turn_test.clj`, `test/seon/render/ns_test.clj`, `resources/seon/tasks/seon.documentation.edn` | new `seon.help-test/help-names-only-installed-forms`. Existing `…/an-agent-identity-offers-help-as-its-operation`. Converted: `my.turn-test/the-usage-test-renders-the-lifecycle-walkthrough`, `seon.render.history-test/form-is-the-third-output-of-the-existing-selection-chain`, `…/a-neighbour-the-walk-reached-renders-by-its-own-shape`, `seon.turn-test/generated-system-runs-grow-only-after-their-settled-prefix`, `seon.render.ns-test/a-namespace-renders-as-one-graph-node` (namespace-form row). Delete `seon.help-test/help-evidence-tracks-its-code-version` | L `(help)` | S1-09, S3-01 released (turn_test) |
+| S1-11 | Delete `my.program` `file-line`/`nearest`/`source` (`program.clj:849-874`) and their two subject tests. Correct the `search`/`declaration-diff` docs. Convert `my/program_test.clj:135` | `src/my/program.clj`, `test/my/program_read_test.clj`, `test/my/program_test.clj`, `resources/seon/tasks/my.program.edn` | existing `my.program-read-test/search-ranks-bounds-and-offers-more`, `…/sizes-list-lines-largest-first`. Standard source proof in S1-08 | D, L source | S1-08, S1-10 |
+
+I take Sol's S1-07a/b split. Astra's single S1-07 carried directory, two searches, deletions and three render or test
+files, which is beyond 150 lines.
+
+### S4 context (group B, in series, after S3-01; S4 is a reset point)
+
+| Id | Change | Files | Proof tests | Budget | Deps |
+|---|---|---|---|---|---|
+| S4-01 | (see Ready, R2) | | | H | S3-01 |
+| S4-02a | Call row gains origin and an assignment ref. The opening completion attribute is on the opening call row, keyed by assignment id plus task revision (Q2). Written by the existing settlement. No producer yet besides the model/outside passes, which write origin and assignment | `src/seon/turn.clj` (plan/settle call row), `resources/seon/schemas/seon.turn.edn`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/a-pass-call-row-names-its-assignment-and-origin` | O | S4-01, Q2 |
+| S4-02b | The opening producer replaces `declared-sources`/`system-turn`'s opening and `seed-tx`: `(help)`, task `doc`, then must-read `doc` (Q2b). Runs once per assignment revision, before the provider | `turn.clj:1719,2024`, `src/seon/bootstrap.clj:312`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/opening-runs-once-per-assignment-revision`. Existing `…/generated-opening-preserves-one-provider-turn-budget` (converted) | I | S4-02a, S1-10, Q2b |
+| S4-03 | History projection reads call rows of the active assignment with origin in `#{:opening :input :model}`, plus evaluations by position, from stored emission units (no re-render, no EDN decode) | `src/seon/render/transcript.clj:246,726`, `src/seon/eval.clj`, `src/seon/repl.clj`, schemas, `test/seon/render/transcript_run_test.clj` | new `seon.render.transcript-run-test/reacquired-history-is-the-finished-exchange`. Existing `…/render-run-selects-only-the-requested-run` | H | S4-02a |
+| S4-04 | The proc holds the transcript (acquired at init or a new assignment, appended per pass). `prompt` validates the token window and refuses when over, with no clipping | `turn.clj` (`call-turn`, `step`), `src/seon/cluster/prompt.clj:349,403`, prompt schema, `test/seon/cluster/prompt_test.clj` | existing `seon.cluster.prompt-test/the-history-path-never-refits-a-rendered-unit`, `…/the-prompt-reads-the-cluster-its-caller-names`. Converted `…/a-budget-smaller-than-the-history-keeps-whole-newest-units` → new `…/an-over-window-transcript-refuses-without-dropping-exchanges` | H/O | S4-03 |
+| S4-05a | `my.agent/inputs` (new) returns undelivered items with identity and home basis | `src/my/agent.clj`, `resources/seon/schemas/my.agent.edn`, `src/seon/context.clj:257`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/inputs-read-each-home-at-its-own-basis` | L | Q3 |
+| S4-05b | Input pass before the model call. The writer validates and stores `:seon.cluster.eval/delivered`. Message-history append retired | `turn.clj` (`delivery-rows:3173`, `step`), eval schema, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/input-records-only-the-items-it-read` | I | S4-05a, S4-04 |
+| S4-06 | Delete the refresh (`turn.clj:1686-2232`, `receipt-read-evidence-tx:1217`) and persisted freshness evidence, keeping runtime observation | `turn.clj`, `src/seon/render.clj` callers, eval schema, `test/seon/turn_test.clj`, `test/seon/turn_error_test.clj` | new `seon.turn-test/settlement-does-not-store-refresh-evidence`. Delete `seon.turn-test/generated-read-evidence-rejects-turn-activity`, `…/a-turn-dependent-generated-form-keeps-its-value-beside-the-fault` | O + read-heavy row | S4-02b, S4-04, S4-05b; root approves the closure |
+| S4-07 | Delete capture, walk composition and the prompt selection closure per I-Q4 | `src/seon/context.clj:309-415`, `prompt.clj:171-402`, the `render.clj` walk entry, tests named by I-Q4 | new `seon.cluster.prompt-test/a-model-call-stores-basis-without-prompt-capture`. Existing `…/identical-context-does-not-depend-on-a-retained-prompt-cache` | O/H | S4-04, S4-06, I-Q4 |
+
+S4-02 and S4-05 are split further than in both packets. Each original row mixed a new fact, a producer and a deletion.
+S4-02a puts the fact on with its first producer (the existing settlement), so it is never a consumerless schema.
+
+### S5 recording
+
+| Id | Change | Files | Proof tests | Budget | Deps | Group |
+|---|---|---|---|---|---|---|
+| S5-01 | `transact-call` returns a runtime `:seon.db/pending` on timeout. `with-publication!` awaits terminal before releasing the permit (Q5) | `src/seon/db.clj:5683`, `src/seon/blob.clj:304`, `resources/seon/schemas/seon.db.write.edn`, `seon.blob.edn`, `test/seon/db_test.clj`, `test/seon/blob_publication_test.clj` | new `seon.db-test/a-write-timeout-keeps-its-pending-completion`, `seon.blob-publication-test/an-unknown-root-commit-keeps-publication-owned`. Existing `seon.db-test/transaction-success-and-refusal-shapes-are-declared`, `seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings` | F/O | Q5, `defn-cost2` released | E |
+| S5-02 | Health reads the live profile snapshot. Delete `significant-tx` and stored measurements | `src/seon/health.clj:460,508`, `src/seon/profile/measurement.clj`, `turn.clj:3505`, `turn/batch.clj:709` call sites, health/profile schemas, `test/seon/health_storage_test.clj`, `test/seon/health_test.clj`, `test/seon/profile/measurement_test.clj` | new `seon.health-storage-test/health-uses-live-profile-without-writing-measurements`. Existing `seon.health-test/a-slower-boot-phase-is-a-regression-until-it-recovers` | O/T | Q6, S3-01 released | E (touches B files: serialize after S3-01) |
+| S5-04 | One analysis and captured facts. **Not a lane.** Root prices sub-items after Q7 | — | — | — | S5-03a–j, Q7 | — |
+| S5-05 | Observed fault occurrences replace `fault-window`/`with-fault-windows` (`turn.clj:3441`) and routing | `turn.clj`, `turn/world.clj:136`, `src/seon/batch.clj`, error schemas, `test/seon/cluster/turn_test.clj` | existing `seon.cluster.turn-test/a-red-form-stays-with-its-author-and-the-fold-continues`. New `…/a-pass-delivers-only-the-errors-it-observed` | F/O | S5-01, Q8 | B |
+| S5-06 | (see Ready, R2) | | | O/F | S3-01, Q9 | E |
+| S5-07a–f | Sol's six serial adapters, unchanged (writer, JVM, SCI, model, member, retire old) | per Sol's table | per Sol's table, sharing new `seon.mcp-entrance-test/every-entrant-keeps-values-through-recording-failure` | O/F/T | S5-01, S5-04, S5-05, S5-06; 07e after S6-02a | B/E serial |
+
+I take Sol's S5-03 (ten rows) and S5-07 (a–f). Astra deferred both, and Sol names exact files and proofs.
+
+### S6 cut (S6 is a reset point)
+
+| Id | Change | Files | Proof tests | Budget | Deps | Group |
+|---|---|---|---|---|---|---|
+| S6-01 | (see Ready, R2) | | | F/O | Q10 | E |
+| S6-02a | Bounded test body through the one fold, member pass on the member branch, aggregate on the requester (Q11) | `src/seon/test.clj` (`member-result:1987`, `bounded-result:216`), `turn/batch.clj:950`, `turn/world.clj:70`, test schemas, `test/seon/test_test.clj` | existing `seon.test-test/interpreted-test-bodies-use-the-sci-interrupt-bound`, `…/recording-preserves-admission-and-refuses-a-deleted-definition`, `…/overlapping-admissions-reserve-complementary-memberships`. New `…/a-member-records-one-pass-before-its-request-aggregate` | T/F | S5-07d, S6-01, Q11 | E |
+| S6-02b | Delete the effect attempt agent/turn preparation | `test.clj:179-216`, test/effect schemas, `test/seon/test_test.clj`, `test/seon/effect_test.clj` | new `seon.test-test/a-test-effect-needs-no-attempt-agent-or-turn`. Existing effect proofs above | T/F | S6-02a, S5-07e, S6-01 | E |
+| S6-03 | One live cursor (`seon.sci.forgive/next-form`) feeds the fold. Delete `segments`, `source-rows`, `submission-open-tx` and the segmenter where no JVM failure-span caller remains. A prose-only reply is a call row with no evaluation (Q2) | `turn.clj`, `src/seon/cluster/agent.clj:644`, `src/seon/sci/forgive.clj:389`, schemas, reader/entrant tests | existing `seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules`, `seon.cluster.turn-test/reply-reading-follows-evaluated-alias-and-dynamic-require-state`, `…/a-prose-only-provider-reply-settles-without-parking-the-turn-proc`. New `…/one-cursor-reads-each-form-in-its-current-world` | O, 28.7 KB corpus | S4-03, S5-07f | B |
+| S6-04 | Delete the intent commit, `recover-tx` and the open/resume/close/generate families per I-Q10 | `turn.clj`, cluster boot recovery caller, turn/run schemas and tests | new `seon.cluster.turn-test/a-crash-before-record-keeps-only-durable-effects`. Retire `…/turn-intent-is-the-complete-crash-falsifier` | O/F | S6-01, S6-02b, S6-03, I-Q10 | B |
+| S6-05 | Writer answeredness to the presented basis, a cap counted per anchor, continuation (Q12) | `turn.clj:2584-2908`, agent/call schemas, `test/seon/turn_work_test.clj` | existing `seon.turn-work-test/a-wake-arriving-mid-turn-opens-the-next-turn`, `…/two-wakes-in-one-transaction-are-one-turn`, `…/only-a-turn-whose-reply-came-from-a-model-attempt-answers`. New `…/model-passes-answer-only-the-basis-they-presented` | O/I/F | S6-04, Q12 | B |
+| S6-06a | `assign!` refuses tasks with no proofs or all-current-green proofs, checked at home (Q13) | `src/seon/task.clj:421,467`, `resources/seon/schemas/seon.task.edn`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/assignment-requires-a-non-green-proof` | F/O | Q13 (independent of S6-05: the task writer shares no file) | E |
+| S6-06b | `my.task/complete!` bail with a required reason. Delete `my.turn/complete`, `my.task/done!` and `seon.run/complete` with their callers | `src/my/task.clj`, `src/my/turn.clj`, `src/seon/run.clj`, task/my.turn/my.task schemas, `test/seon/task_ingestion_test.clj`, `test/my/turn_test.clj` | new `seon.task-ingestion-test/completion-with-a-reason-gives-the-task-back`. Converted `my.turn-test/a-blank-completion-is-an-error-value-not-a-throw`, `…/a-disposition-is-an-ordinary-value` | F/O | S6-06a, S6-05 (disposition settlement) | E |
+| S6-07 | Delete the backstop/parking/permit. Disarm and stop take the caller's deadline and keep resources until exit (Q14) | `turn.clj:5635-5824`, `src/seon/cluster/agent.clj:1368-1508`, config/run schemas, `test/seon/cluster/agent_test.clj` | new `seon.cluster.turn-test/a-timed-out-pass-keeps-ownership-until-it-exits`. Converted `seon.cluster.agent-test/disarm-has-a-declared-loud-turn-completion-backstop`, `…/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted`, `…/disarm-drops-the-route-before-closing-it` (with-redefs removed), `seon.turn-test/a-fired-turn-bound-requests-its-owners-stop-and-settles-its-join-whole` | F/O | S6-04, S6-05, I-Q14, Q14 | B |
+
+I take Sol's S6-02a/b. Astra's single S6-02 created a cycle with S5-07: the test adapter needed the old settlement
+retired, and that retirement needed the test body converted. S6-06a is moved earlier: the assignment writer needs only
+Q13, not S6-05.
+
+### S7 proofs
+
+| Id | Change | Files | Proof tests | Budget | Deps | Group |
+|---|---|---|---|---|---|---|
+| S7-01 | (see Ready, R1) | | | T | Q15 | C |
+| S7-02 | Completed proof results from the task home are delivered as input items (Q3 shape) | `src/seon/test/runner.clj:1546,1971`, `src/my/agent.clj` (inputs), result/input schemas, `test/seon/test_test.clj` | new `seon.test-test/proof-input-delivers-only-completed-current-evidence` | I/T | S4-05b, S6-02b | B/E |
+| S7-03 | Completion only from fresh proofs of the changed reach, by the idempotent home writer (Q16) | `src/seon/task.clj:698`, `src/seon/test.clj:72,1562`, `test/seon/test_test.clj`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/a-task-completes-only-from-fresh-proofs-after-its-change`. Existing `seon.test-test/recording-preserves-admission-and-refuses-a-deleted-definition` | T/F | S7-02, S6-06b, Q16 | E |
+
+### Critical path and parallel launch now
+
+- **In series:** C: S1-04 → S7-01 → S1-05 → S1-06 → S1-07a → S1-07b, with S1-08 between any two C rows after S1-04.
+  Then S1-09 (needs S1-03) → S1-10 → S1-11.
+- **In parallel now:** X-01; I-Q4, I-Q10 and I-Q14; S5-03a–j; S1-03 (after Q1); S1-04 (after Q17).
+- **After `s3-01` lands:** S4-01 (also needs `defn-cost2` released), S5-06 and S6-01.
+
+---
+
+## 4. Disagreements that reveal real spec ambiguity
+
+1. **The `documentation-value` arity and the SCI context (Q17).** The S1 design (§4.3, claim 3) keeps three arguments
+   and an ambient `get-ctx`. CLAUDE.md says pass the world explicitly. Astra called it ready, Sol called it blocked.
+   The world-member supply resolves it without changing what the macro caller writes (probe above).
+2. **The order of the test entrant and the shared settlement (S5-07 vs S6-02).** Spec §5 puts "one settlement owner
+   shared by all entrants" in S5 and test-attempt conversion in S6. Astra's rows were circular. Sol's 02a/02b staging is
+   the consistent reading, and the spec's S5/S6 boundary should say the member adapter lands in S6.
+3. **Admission probes: one lane or ten (S5-03).** Spec §4.1 says "a probe per case, before any code" but does not say
+   one lane per case. Sol's ten rows follow from the cases' different fixture and provenance boundaries.
+4. **The exchange without an evaluation (Q2).** Both packets saw that §4.3 "records one exchange… no evaluation" has no
+   named record. The spec already names "the call row" in §4.1 RECORD, so the ambiguity is wording, not a missing
+   design. Root should fold "the exchange is the pass's call row" into §4.4 in place.
+5. **`doc` vs `source` in the opening (Q2b).** The spec's "references' `doc`/`source`" is ambiguous. Neither packet
+   chose. The owner should confirm.
+6. **The S3 origin enum.** Both packets note that §5 lists `:opening :input :model :outside :test` under S3, while the
+   approved S3 v2 adds only `:model :outside`. The spec's §5 S3 row should be revised in place.
+7. **Total path vs the current MCP refusal assertion.** `mcp_entrance_test.clj:149-153` asserts no unsaved values after
+   a refusal, but §1/CLAUDE.md "The path is total" requires value plus diagnostic. Both packets flag this. It converts
+   in S5-07c, not as a separate slice.
+
+Disagreements on facts, not ambiguity, all resolved for Sol after checking HEAD:
+
+- `function-doc-map`'s callers.
+- Whether to keep `program-documentation-selector`.
+- The blob test file: `test/seon/blob_publication_test.clj` owns the permit proof, not `blob_test.clj`.
+- The task name: `seon.batch/a-jvm-run-answers-evaluated-but-not-recorded`.
+- The long proof name: `seon.loop-proof-test/virtual-loop-end-to-end` (`loop_proof_test.clj:303-305`).
+
+Dependencies I dropped as unsupported by any file or data:
+
+- S1-04 on S1-03.
+- S5-03 on S1-03.
+- S6-06a on S6-05.
