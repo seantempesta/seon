@@ -3,7 +3,7 @@
   included, so a bare printer there prints its value whole on every run: a
   `(pr-str installed)` message holding the schema projection built a 2 GB
   string and killed default (pid 3360, 2026-09-27 21:07). Messages display
-  values through seon.print.value/bounded-text."
+  values: the runner shows them through the value printer."
   (:require [clj-kondo.hooks-api :as api]))
 
 (def ^:private printers
@@ -27,5 +27,5 @@
       (api/reg-finding!
        (assoc (meta call)
               :type :seon/unbounded-assertion-message
-              :message "An is message is evaluated on every assertion: display the value through seon.print.value/bounded-text."))))
+              :message "An is message is evaluated on every assertion: an assertion message is prose and never prints a value; the runner shows the failing value through the value printer."))))
   nil)

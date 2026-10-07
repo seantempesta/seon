@@ -54,25 +54,23 @@
    clojure.core/promise {:message "A promise is a completion without a bound: use the dependency's exit fact or a channel awaited through seon.await/await!."}
    clojure.core/future {:message "A future is a thread nobody joins: submit to the Flow work launcher, or await it through seon.await/await!."}
    clojure.core/locking {:message "A monitor cannot be timed or interrupted: serialize through a Flow proc or an atom."}
-   ;; Printing has one owner per role (AGENTS.md, "Apply presentation
-   ;; limits once"): display is the value printer (seon.print.value/bounded-text,
-   ;; seon.print.value/throwable-text for a Throwable); canonical EDN text and
-   ;; hashing are seon.id/printed and seon.id/id, which stream into their
-   ;; sink. A bare print of a value outside them is unbounded: a pr-str of a
-   ;; failing value holding SCI contexts built a 2 GB string and killed
-   ;; default (2026-09-28 00:07Z). `format` is not listed: 37 of its 50 uses
-   ;; format numbers, and a var-level rule cannot tell `%,d` from `%s`.
-   clojure.core/pr-str {:message "Unbounded print: display through seon.print.value/bounded-text; canonical EDN through seon.id/printed; identity through seon.id/id."}
-   clojure.core/prn-str {:message "Unbounded print: display through seon.print.value/bounded-text; canonical EDN through seon.id/printed."}
-   clojure.core/print-str {:message "Unbounded print: display through seon.print.value/bounded-text."}
-   clojure.core/println-str {:message "Unbounded print: display through seon.print.value/bounded-text."}
-   clojure.core/pr {:message "Unbounded print: display through seon.print.value/bounded-text."}
-   clojure.core/prn {:message "Unbounded print: print (seon.print.value/bounded-text value), or seon.print.value/throwable-text for a Throwable."}
-   clojure.core/print {:message "Unbounded print: print only text the value printer bounded (seon.print.value/bounded-text)."}
-   clojure.core/println {:message "Unbounded print: print only text the value printer bounded (seon.print.value/bounded-text); a Throwable through seon.print.value/throwable-text."}
-   clojure.core/printf {:message "Unbounded print: format numbers, and display values through seon.print.value/bounded-text."}
-   clojure.pprint/pprint {:message "Unbounded print: display through seon.render.value, the value printer."}
-   clojure.pprint/write {:message "Unbounded print: display through seon.render.value, the value printer."}}
+   ;; There is exactly ONE printer, the value printer (AGENTS.md
+   ;; "Presentation"). Any other print of a value is a second printer:
+   ;; values stay data for the value printer to show; identity is a
+   ;; structural digest; comparison uses the data. A pr-str of a failing
+   ;; value holding SCI contexts once built a 2 GB string and killed default
+   ;; (2026-09-28 00:07Z). `format` is not listed: most uses format numbers.
+   clojure.core/pr-str {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/prn-str {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/print-str {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/println-str {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/pr {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/prn {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/print {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/println {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.core/printf {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.pprint/pprint {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}
+   clojure.pprint/write {:message "Never print a value outside the ONE value printer (AGENTS.md Presentation): keep it as data (an error data key, a reply value) for the value printer to show; hash, compare and sort the data itself, never printed text."}}
 
   ;; === INFO LEVEL (suggestions) ===
   ;; These are style suggestions, not problems
