@@ -6,14 +6,14 @@
   The task context is a vector of units. Each unit is a requery form an agent
   can run at its REPL, the value that form answers on this database, and why
   the unit is shown. `context-text` prints the units as REPL exchanges; every
-  value goes through the value printer whole."
+  value goes through the value printer under its budget."
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [seon.ai.tokens :as tokens]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.instruction :as instruction]
             [seon.db :as db]
-            [seon.print :as print]
+            [seon.error.refusal :as refusal]
             [seon.render.value :as render.value]
             [seon.repl :as repl]
             [seon.sci.eval :as sci.eval]
@@ -33,7 +33,8 @@
     (into [(str namespace-name (when summary (str ": " summary)))]
           (for [sym functions
                 :let [{doc :summary example :example} (sci.eval/documentation-value database sym sym)]]
-            (str "  " sym (when doc (str ": " doc)) (when example (str "\n    " (str/replace example "\n" "\n    "))))))))
+            (str "  " sym (when (seq doc) (str ": " doc))
+                 (when (seq example) (str "\n    " (str/replace example "\n" "\n    "))))))))
 
 (defn system-message
   "The system message sent with every model call of `agent-id`.
@@ -119,6 +120,13 @@
         (list 'seon.db/pull '(seon.db/db) [:seon.schema/form] [:seon.schema/key schema-key])
         (db/pull database [:seon.schema/form] [:seon.schema/key schema-key])))
 
+(defn- namespace-unit
+  "A namespace the task names: its public functions and schemas."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :seon.agent.loop/unit]}
+  [database namespace-name]
+  (unit "A namespace the task names: its public functions and schemas."
+        (list 'dir namespace-name) (sci.eval/directory-value database namespace-name true)))
+
 (defn- related-units
   "Other tasks naming the same functions, and recorded errors whose operation
   is one of them; each unit only when it has members."
@@ -136,9 +144,11 @@
         errors (when (seq functions) (db/q errors-query database functions))]
     (cond-> []
       (seq tasks) (conj (unit "Other tasks naming the same functions: work that may overlap or conflict."
-                              (list 'seon.db/q (list 'quote tasks-query) '(seon.db/db) functions handle) (vec tasks)))
+                              (list 'seon.db/q (list 'quote tasks-query) '(seon.db/db) (list 'quote functions) handle)
+                              (vec tasks)))
       (seq errors) (conj (unit "Recorded errors raised by these functions."
-                               (list 'seon.db/q (list 'quote errors-query) '(seon.db/db) functions) (vec errors))))))
+                               (list 'seon.db/q (list 'quote errors-query) '(seon.db/db) (list 'quote functions))
+                               (vec errors))))))
 
 (defn task-context
   "The context task `handle` seeds, as units.
@@ -146,8 +156,9 @@
   The task; its edges (subjects
   and proof tests); each proof's status, recorded failures and source; each
   must-read or subject function's documentation and source; the schemas
-  their contracts name; other tasks and recorded errors touching the same
-  functions.
+  their contracts name; each namespace subject's directory; other tasks and
+  recorded errors touching the same functions. A handle naming no task
+  refuses `:unknown-task`.
 
   Example:
   (seon.agent.loop/task-context (seon.db/db) \"d6e3b775f474\")
@@ -157,32 +168,54 @@
   One task pull and its edges, then per proof two reads and a source query,
   per function a documentation pull and a source query, per schema one pull,
   and two queries over the functions: proportional to what the task names."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:vector :seon.agent.loop/unit]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or [:vector :seon.agent.loop/unit] :seon.task/refused-error :seon.db/error-result]]}
   [database handle]
-  (let [the-task (db/pull database task-selector [:seon.task/id handle])
-        edges (task/task-edges database handle)
-        functions (vec (distinct (concat (:seon.task/must-read the-task) (sort (:seon.task/subjects edges)))))
-        schemas (contract-keys database functions)]
-    (vec (concat
-          [(unit "Your task: what to change and why."
-                 (list 'seon.db/pull '(seon.db/db) task-selector [:seon.task/id handle]) the-task)
-           (unit "The task's edges: the proof tests that define done, the subjects it names, and who must read them."
-                 (list 'seon.task/task-edges '(seon.db/db) handle) edges)]
-          (mapcat #(test-units database %) (sort (:seon.task/proofs edges)))
-          (mapcat #(function-units database %) functions)
-          (map #(schema-unit database %) schemas)
-          (related-units database handle functions)))))
+  (let [the-task (db/pull database task-selector [:seon.task/id handle])]
+    (cond
+      (:seon.error/at the-task) the-task
+      (nil? (:seon.task/id the-task))
+      (refusal/diagnostic (java.util.Date.) :seon.task/ingestion 'seon.agent.loop/task-context
+                          {:seon.error/message (str "No task has the handle " handle ".")
+                           :seon.task/refused :unknown-task :seon.task/holder 'seon.task :seon.error/offending handle})
+      :else
+      (let [edges (task/task-edges database handle)
+            ;; Subjects are functions (qualified) or namespaces (simple symbols).
+            subjects (sort (:seon.task/subjects edges))
+            functions (vec (distinct (filter qualified-symbol?
+                                             (concat (:seon.task/must-read the-task) subjects))))
+            namespaces (vec (distinct (filter simple-symbol? subjects)))
+            schemas (contract-keys database functions)]
+        (vec (concat
+              [(unit "Your task: what to change and why."
+                     (list 'seon.db/pull '(seon.db/db) task-selector [:seon.task/id handle]) the-task)
+               (unit "The task's edges: the proof tests that define done, the subjects it names, and who must read them."
+                     (list 'seon.task/task-edges '(seon.db/db) handle) edges)]
+              (mapcat #(test-units database %) (sort (:seon.task/proofs edges)))
+              (mapcat #(function-units database %) functions)
+              (map #(namespace-unit database %) namespaces)
+              (map #(schema-unit database %) schemas)
+              (related-units database handle functions)))))))
+
+(defn- shown-text
+  "`value` as the value printer shows it under its budget; a printer refusal
+  is itself shown as a value, never stringified."
+  {:malli/schema [:=> [:cat :seon.schema/value :string] :string]}
+  [value root]
+  (let [shown (render.value/render-ai {:seon.render/value value :seon.render.value/root root})]
+    (if (string? shown)
+      shown
+      (let [refusal (render.value/render-ai {:seon.render/value shown :seon.render.value/root (str root "-refusal")})]
+        (if (string? refusal) refusal (:seon.error/message shown))))))
 
 (defn- unit-text
-  "One unit as a REPL exchange: the form, then its value printed whole by the
-  value printer; a string value (source) prints as its text."
+  "One unit as a REPL exchange: the form, then its value as the value
+  printer shows it under its budget, sources included; a cut is read again
+  by running the form."
   {:malli/schema [:=> [:cat :seon.agent.loop/unit :boolean] :string]}
   [{why :seon.agent.loop/why form :seon.agent.loop/form value :seon.agent.loop/value} annotated?]
-  (let [shown (if (string? value)
-                value
-                (render.value/render-ai {:seon.render/value (print/full value)
-                                         :seon.render.value/root (str "context-" (hash form))}))]
-    (str (when annotated? (str ";; why: " why " (~" (tokens/estimate (str shown)) " tokens)\n"))
+  (let [shown (shown-text value (str "context-" (hash form)))]
+    (str (when annotated? (str ";; why: " why " (~" (tokens/estimate shown) " tokens)\n"))
          "user=> " (repl/source-text form) "\n" shown "\n")))
 
 (defn context-text

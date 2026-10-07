@@ -39,6 +39,18 @@ refuse() { echo "LANE REFUSED: $*" >&2; exit 2; }
 
 valid_lane() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || refuse "lane name '$1' must be lowercase letters, digits and dashes"; }
 
+# A path is checkout-relative and literal: claims, the docs/ and lint-root
+# classification and git's pathspec must name the same files, so a `..` or `.`
+# component (docs/../src/x.clj passed as documentation), an absolute path, or
+# pathspec magic and glob characters (src/* sweeping other lanes' files) refuse.
+valid_path() {
+  local path="$1"
+  case "$path" in
+    ''|/*|:*|..|../*|*/..|*/../*|.|*/.|*/./*|*'*'*|*'?'*|*'['*|*\\*|*//*)
+      refuse "path '$path' must be a literal checkout-relative path: no ., .. or empty components, no leading / or :, no * ? [ or \\" ;;
+  esac
+}
+
 # A claim entry covers a path when equal, or when the entry ends with / and prefixes it.
 covers() {
   local entry="$1" path="$2"
@@ -70,6 +82,7 @@ claim() {
   local path owner
   for path in "$@"; do
     path="${path#./}"
+    valid_path "$path"
     if owner="$(owner_of "$path")" && [[ "$owner" != "$lane" ]]; then
       refuse "$path is claimed by lane $owner (one file, one owner)"
     fi
@@ -127,6 +140,34 @@ documentation_only() {
   for path in "$@"; do [[ "$path" == docs/* ]] || return 1; done
 }
 
+# The message belongs to this commit: lanes have built -m from one shared
+# scratch file (`-m "$(cat scratchpad/msg.txt)"`), and bd5e0e8c9 landed lane
+# heap-retained's paths under the message lane error-frames had written there
+# (649829332 the same way). Refused: a first line naming another live lane
+# ("error frames: ..." from lane heap-retained), or one equal to the subject of
+# a commit among the last 200 (a message already used). Keep messages in a
+# lane-named file, never a shared one.
+message_owned() {
+  local lane="$1" first file other prefix subject
+  first="$(printf '%s\n' "$2" | head -1)"
+  first="$(printf '%s' "$first" | tr '[:upper:]' '[:lower:]')"
+  echo "== lane $lane commits: $(printf '%s\n' "$2" | head -1)"
+  for file in "$claims"/*.paths; do
+    [[ -e "$file" ]] || continue
+    other="$(basename "$file" .paths)"
+    [[ "$other" == "$lane" ]] && continue
+    for prefix in "$other" "${other//-/ }"; do
+      case "$first" in
+        "$prefix"|"$prefix:"*|"$prefix "*) refuse "the message begins with lane $other's name ('$(printf '%s\n' "$2" | head -1)'); is it that lane's message, read from a shared file? Write this lane's own message" ;;
+      esac
+    done
+  done
+  subject="$(printf '%s\n' "$2" | head -1)"
+  if git log -200 --format=%s | grep -qxF -- "$subject"; then
+    refuse "a commit among the last 200 already has the subject '$subject'; is this message another commit's, read from a shared or stale file?"
+  fi
+}
+
 # PATH is one of the requested paths or lies under a requested directory.
 requested() {
   local path="$1" entry; shift
@@ -160,17 +201,27 @@ commit() {
     esac
   done
   [[ -n "$message" ]] || refuse "commit needs -m MESSAGE"
+  message_owned "$lane" "$message"
   [[ ${#paths[@]} -gt 0 ]] || refuse "commit needs the exact paths to commit"
   local path owner
   for path in "${paths[@]}"; do
+    valid_path "$path"
     owner="$(owner_of "$path" || true)"
     [[ "$owner" == "$lane" ]] || refuse "$path is not claimed by lane $lane${owner:+ (lane $owner holds it)}"
   done
-  staged_only "${paths[@]}"
+  # The staged-index check runs only under the lock (commit_locked): outside it,
+  # another lane's in-lock `git add` of its new file reads as foreign staging.
 
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/lane-commit.XXXXXX")"
   lint_pid=""
-  trap '[[ -n "$lint_pid" ]] && kill "$lint_pid" 2>/dev/null; rm -rf -- "$scratch"' EXIT
+  # A fatal signal runs no EXIT trap unless trapped: exit through it, so the
+  # scratch directory and the background lint (the subshell and its clj-kondo)
+  # never outlive an interrupted commit.
+  # The lint runs in its own process group (set -m below): killing the group
+  # stops git archive, tar and clj-kondo alike. `|| true`: under errexit a
+  # failing wait would end the trap before the rm.
+  trap 'if [[ -n "$lint_pid" ]]; then kill -- "-$lint_pid" 2>/dev/null || true; wait "$lint_pid" 2>/dev/null || true; fi; rm -rf -- "$scratch"' EXIT
+  trap 'exit 129' HUP; trap 'exit 130' INT; trap 'exit 143' TERM
   local tree began
   began=$SECONDS
   tree="$(candidate_tree "$scratch" "${paths[@]}")" || refuse "the candidate tree could not be written"
@@ -179,8 +230,10 @@ commit() {
     echo "linting took 0ms, errors: 0, (unchanged)" > "$scratch/lint.out"
   else
     echo "== clj-kondo --lint src script test --cache false --parallel (candidate tree ${tree:0:12})"
+    set -m
     lint_candidate "$tree" "$scratch/candidate" > "$scratch/lint.out" 2>&1 &
     lint_pid=$!
+    set +m
   fi
 
   if documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
@@ -203,27 +256,38 @@ commit() {
   printf '%s\n' "$message" > "$scratch/message"
   local git_dir
   git_dir="$(git rev-parse --absolute-git-dir)"
-  perl -MFcntl=:flock -e 'open(my $lock, ">>", shift) or die "lane-commit.lock: $!\n";
+  # The lock descriptor is inherited (close-on-exec cleared), so the commit
+  # holds the lock until it exits even if this perl dies first.
+  perl -MFcntl=:flock,F_SETFD -e 'open(my $lock, ">>", shift) or die "lane-commit.lock: $!\n";
                           flock($lock, LOCK_EX) or die "lane-commit.lock: $!\n";
+                          fcntl($lock, F_SETFD, 0) or die "lane-commit.lock: $!\n";
                           my $status = system(@ARGV); exit($status == -1 ? 2 : ($status >> 8) || ($status & 127 ? 2 : 0));' \
-    "$git_dir/lane-commit.lock" "$root/bin/lane" _commit-locked "$lane" "$scratch/message" "${paths[@]}"
+    "$git_dir/lane-commit.lock" "$root/bin/lane" _commit-locked "$lane" "$scratch/message" "$tree" "${paths[@]}"
 }
 
 # Under .git/lane-commit.lock (held by `commit`): the staged-index check, the
 # new-file add, the commit and its verification, so no two lanes' commits interleave.
 commit_locked() {
-  local lane="$1" message_file="$2"; shift 2
-  local paths=("$@") path added=() before after
+  local lane="$1" message_file="$2" proven="$3"; shift 3
+  local paths=("$@") path added=() before after now
   staged_only "${paths[@]}"
+  # The commit carries the bytes that were linted and checked: the paths'
+  # candidate now (working tree over the current HEAD) must equal the proven
+  # tree's. A path edited during the check refuses; another lane's commit of
+  # other paths meanwhile does not (lanes own disjoint files).
+  mkdir -p "$(dirname "$message_file")/locked"
+  now="$(candidate_tree "$(dirname "$message_file")/locked" "${paths[@]}")" || refuse "the candidate tree could not be rewritten under the lock"
+  git diff --quiet "$proven" "$now" -- "${paths[@]}" ||
+    refuse "$(git diff --name-only "$proven" "$now" -- "${paths[@]}" | tr '\n' ' ')changed after the check; nothing committed, run bin/lane commit again"
   before="$(git rev-parse HEAD)"
-  # A new file the lane names is not yet known to git; --only refuses such a
-  # pathspec, so it is added (alone) first. Nothing else enters the index.
-  for path in "${paths[@]}"; do
-    if [[ -e "$path" ]] && ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
-      git add -- "$path"
-      added+=("$path")
-    fi
-  done
+  # Untracked files under the named paths are in the candidate (`git add -A`)
+  # but `git commit --only` takes tracked files only, so they are added (alone)
+  # first: a new file, or a new file inside a claimed directory that already
+  # holds tracked ones. Nothing else enters the index.
+  while IFS= read -r path; do
+    git add -- "$path"
+    added+=("$path")
+  done < <(git ls-files --others --exclude-standard -- "${paths[@]}")
   if ! git commit --only --cleanup=whitespace -F "$message_file" -- "${paths[@]}"; then
     [[ ${#added[@]} -gt 0 ]] && git reset -q -- "${added[@]}"
     refuse "git commit failed; nothing committed"

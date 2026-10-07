@@ -3,6 +3,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.agent.loop :as loop]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.cluster.instruction :as instruction]
             [seon.db :as db]
@@ -45,3 +46,30 @@
        (is (string? (by-form '(clojure.repl/source-fn 'seon.task/task-edges))) "its stored source is shown")
        (is (some #(= :seon.schema/key (first (nth (:seon.agent.loop/form %) 3 nil))) units)
            "a schema its contract names is shown")))))
+
+(deftest related-task-requeries-quote-the-symbols-they-match
+  (with-context-agent
+   (fn [connection]
+     (let [request {:seon.db/connection connection :seon.agent/id "context" :seon.task/ns 'seon.id
+                    :seon.task/kind :function :seon.task/must-read #{'seon.task/task-edges}}
+           created (task/create! (assoc request :seon.task/name "context fixture" :seon.task/intent "First."))
+           other (task/create! (assoc request :seon.task/name "context neighbour" :seon.task/intent "Second."))
+           units (loop/task-context (db/db connection) (:seon.task/id created))
+           related (some (fn [u] (let [v (:seon.agent.loop/value u)]
+                                   (when (and (vector? v) (some #(= (:seon.task/id other) (:seon.task/id %)) v)) u)))
+                         units)]
+       (is (string? (:seon.task/id other)) "the neighbour task is created")
+       (is (some? related) "the other task naming the same function is shown")
+       (is (= '(quote [seon.task/task-edges]) (nth (:seon.agent.loop/form related) 3))
+           "the offered form matches symbols, not the functions they name")))))
+
+(deftest an-unknown-handle-refuses-by-name
+  (with-context-agent
+   (fn [connection]
+     (is (= :unknown-task (:seon.task/refused (loop/task-context (db/db connection) "000000000000")))))))
+
+(deftest context-text-is-bounded-by-the-value-printer
+  (let [value (vec (for [i (range 3000)] {:seon.task/id (str i) :seon.task/intent (apply str (repeat 50 "x"))}))
+        text (loop/context-text [{:seon.agent.loop/why "a large value" :seon.agent.loop/form '(large)
+                                  :seon.agent.loop/value value}] false)]
+    (is (< (tokens/estimate text) 2000) "a large value is shown within the printer's budget, not whole")))
