@@ -9,8 +9,12 @@ lane: schema-key-review
 
 **FALSIFIED for the original commit.** Datahike `8ed09208b3c41362cad607b3cd271bbc7ece07c3`
 can reuse a key after the schema's content changes. The fix is prepared on `seon/schema-meta-key`;
-it is not committed or promoted while root's central tests are pending. Neither `main` nor
-`seon/identity-join-first` was advanced or pushed. Seon's recorded gitlink remains `dbca76d5`.
+it is not committed or promoted by this lane while root's central tests are pending. This lane
+advanced or pushed no refs. **At handoff, an external concurrent action had nevertheless moved local
+`main` and all three origin branches (`main`, `seon/identity-join-first`, `seon/schema-meta-key`) to the
+unsafe original `8ed09208`.** Verified with `git ls-remote origin` after the initial notes commit;
+local `seon/identity-join-first` still read `dbca76d5`. No attempt was made to reverse another actor's
+ref changes. Seon's recorded gitlink remains `dbca76d5`.
 
 ## Broken things first
 
@@ -188,7 +192,8 @@ also compiled in the disposable JVM. Edited measurement scripts lint with zero e
 
 Other lanes' Seon source/test edits were excluded by archiving HEAD. No foreign sessions or files were
 resumed, messaged or edited. `origin/main` was fetched at `dbca76d5`; rebasing `seon/schema-meta-key`
-onto it was a no-op before editing. No force push, worktree, promotion or gitlink commit occurred.
+onto it was a no-op before editing. This lane made no force push, worktree, promotion or gitlink commit. The externally changed refs
+observed at handoff are recorded at the top of this note.
 
 The fork fix remains a two-file working-tree diff on `seon/schema-meta-key`, for root's central tests
 and commit: source +17/-8 (net +9), tests +32/-5 (net +27), total +49/-13 (net +36) relative to
