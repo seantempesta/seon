@@ -213,69 +213,6 @@
                 :seon.cluster.eval/error error
                 :seon.cluster.eval/at at}))))
 
-(defn form-problem
-  "A routable red evaluation attributed to its namespace owner, or nil.
-  S8 scopes routing to a goal's caused-by chain; X2 additionally excludes
-  process-history failures at or after an interrupted ordinal."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.problems/form-problem-request]
-                  [:maybe :seon.problems/form-problem]]}
-  [db {:keys [:seon.turn/id :seon.cluster.eval/ordinal
-              :seon.sci.eval/evaluation]}]
-  (let [form
-        (db/q '[:find (pull ?form [*]) .
-               :in $ ?run-id ?ordinal
-               :where
-               [?run :seon.turn/id ?run-id]
-               [?form :seon.cluster.eval/run ?run]
-               [?form :seon.cluster.eval/ordinal ?ordinal]]
-             db id ordinal)
-        ordinary-error (:seon.cluster.eval/error evaluation)
-        interrupted? (boolean (:seon.cluster.eval/interrupted-at evaluation))
-        red? (or ordinary-error interrupted?)
-        scoped? (turn/planner-scoped-attempt? db id)
-        artifact? (and red?
-                       (turn/resume-artifact? db id ordinal interrupted?))]
-    (when (and scoped? red? (not artifact?))
-      (let [owner-id (turn/form-owner db form)
-            author-id
-            (db/q '[:find ?author-id .
-                   :in $ ?form
-                   :where
-                   [?form :seon.cluster.eval/run ?run]
-                   [?run :seon.turn/agent ?author]
-                   [?author :seon.agent/id ?author-id]]
-                 db (:db/id form))
-            error (or ordinary-error "The evaluation was interrupted.")]
-        {:seon.problems/id (turn/problem-id id ordinal)
-         :seon.cluster.eval/id (turn/problem-id id ordinal)
-         :seon.turn/id id
-         :seon.cluster.eval/ordinal ordinal
-         :seon.cluster.eval/source
-         (:seon.cluster.eval/source form)
-         :seon.agent/id owner-id
-         :seon.problems/author author-id
-         :seon.cluster.eval/error error}))))
-
-(defn assignment-value
-  "The E3 message value routing one problem to its derived owner.
-
-  Nil when the derived owner is the author: assigning an agent its own
-  red form carries no information, while the problem remains an
-  unrouted-red settlement fact."
-  {:malli/schema [:=> [:cat :seon.problems/form-problem]
-                  [:maybe :my.message/message]]}
-  [problem]
-  (when-not (= (:seon.agent/id problem)
-               (:seon.problems/author problem))
-    {:my.message/to (:seon.agent/id problem)
-     :my.message/assignment (:seon.cluster.eval/id problem)
-     :my.message/content
-     (str "Repair problem " (:seon.problems/id problem)
-          " from run " (:seon.turn/id problem)
-          ", form " (:seon.cluster.eval/ordinal problem)
-          ": " (:seon.cluster.eval/error problem))}))
-
 (defn- deferred-agents
   "Agents whose pending triggers the episode cap is deferring (F1 §7).
   A derivation over derivations — `turn/episode-runs` and

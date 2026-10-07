@@ -149,7 +149,7 @@
  #:seon.task{:name "an-identity-join-scans-the-whole-ref-attribute",
             :kind :namespace,
             :intent
-            "A query [?x :identity-attr ?input] [?y :ref-attr ?x] [?y :a ?v] ... is planned by Datahike as an entity group scanning the whole AEVT range of the ref attribute before the unique lookup binds ?x: work proportional to the store's history, not the answer. One (+ 1 2) visits 54,000 index nodes (run-receipts 19,000; runtime-analysis-batch 11,340; next-ordinal, continuing-reply?, spent-runs, branch-errors, evaluation-terminal-data, entity-emission, form-problem). Passing the identity as a lookup-ref input: run-receipts 19,004 -> 22 visits, 14.7 MB -> 0.9 MB. Root decides: Datahike planner fix (recommended) or caller rewrites. Done when one (+ 1 2) visits a number of nodes independent of the store's evaluation count.",
+            "A query [?x :identity-attr ?input] [?y :ref-attr ?x] [?y :a ?v] ... is planned by Datahike as an entity group scanning the whole AEVT range of the ref attribute before the unique lookup binds ?x: work proportional to the store's history, not the answer. One (+ 1 2) visits 54,000 index nodes (run-receipts 19,000; runtime-analysis-batch 11,340; next-ordinal, continuing-reply?, spent-runs, branch-errors, evaluation-terminal-data, entity-emission, and the since-deleted form-problem). Passing the identity as a lookup-ref input: run-receipts 19,004 -> 22 visits, 14.7 MB -> 0.9 MB. Root decides: Datahike planner fix (recommended) or caller rewrites. Done when one (+ 1 2) visits a number of nodes independent of the store's evaluation count.",
             :must-read
             #{seon.fn/runtime-analysis-batch
               seon.db/q

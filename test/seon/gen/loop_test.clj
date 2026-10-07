@@ -2,11 +2,10 @@
   "Whole-turn execution over a real cluster, with only provider text supplied.
 
   Ruling 67 settles the whole reply as one batch. A failed form leaves
-  its error on its evaluation and later forms still run. A red form whose
-  namespace another agent owns is assigned to that owner
-  (`seon.problems/assignment-value`), so it settles `:routed`; declination
-  is an explicit message protocol, covered by its own tests. Completion
-  prose does not erase failed evaluation evidence."
+  its error on its evaluation and later forms still run. A red form stays
+  with its author (`:unrouted-red`): nothing assigns it to another agent;
+  assignment and declination are an explicit message protocol, covered by
+  its own tests. Completion prose does not erase failed evaluation evidence."
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
@@ -318,9 +317,8 @@
                       (turn/plan-settlement db run-id)))
              "and the facts contradict it — an unsettled evaluation
               keeps the plan open no matter what the reply says")
-         ;; WANTED: each red stays on its own evaluation and is routed to its
-         ;; namespace's owner (alpha, beta), never erased by the prose; the
-         ;; planner is not those namespaces' owner, so neither is unrouted.
-         (is (= #{:routed}
+         ;; WANTED: each red stays on its own evaluation, never erased by the
+         ;; prose, and with its author: no agent is mailed another's error.
+         (is (= #{:unrouted-red}
                 (set (vals (select-keys (states db run-id) [2 5]))))
-             "both failures remain on their original evaluations, routed to their owners"))))))
+             "both failures remain on their original evaluations, unrouted"))))))

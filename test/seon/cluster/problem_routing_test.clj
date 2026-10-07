@@ -1,12 +1,10 @@
 (ns seon.cluster.problem-routing-test
-  "Owner routing and stored evaluation settlement."
+  "Stored evaluation settlement over explicit assignment messages."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.cluster.message :as my.message]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
-            [seon.print :as print]
-            [seon.problems :as problems]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -73,125 +71,6 @@
             (str "assignment-" ordinal)
             (assoc (message/send "alpha" (str "repair " ordinal))
                    :my.message/assignment (str "form-" ordinal))))
-
-(defn- evaluation-error
-  "One failed evaluation, carrying every member `:seon.sci.eval/evaluation`
-  declares — the namespaces it started and ended in, its print options and
-  its complete arm record — exactly as the evaluator returns them. A partial
-  stand-in is a shape the declared contract forbids."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [message]
-  {:seon.sci.admit/value
-   {
-    :seon.error/message message
-    :seon.error/data {}}
-   :seon.eval/shown
-   (pr-str {
-            :seon.error/message message
-            :seon.error/data {}})
-   :seon.cluster.eval/error message
-   :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
-   :seon.sci.eval/ending-ns 'my.gen.alpha
-   :seon.print/options (print/default-options)
-   :seon.sci.admit/record
-   {:seon.eval/fn-entries 1
-    :seon.eval/host-interop-count 0
-    :seon.eval/duration-ms 1
-    :seon.eval/allocated-bytes 1
-    :seon.eval/outcome :error}})
-
-(deftest parse-time-owner-wins-and-absence-falls-back-to-the-author
-  (with-routing-database
-   (fn [connection]
-     (test-support/transacted!
-                  connection
-                  [(receipt-entity 0 {})
-                   (dissoc (receipt-entity 1 {}) :seon.cluster.eval/ns)])
-     (let [failed (evaluation-error "boom")
-           attributed
-           (problems/form-problem
-            @connection
-            {:seon.turn/id run-id
-             :seon.cluster.eval/ordinal 0
-             :seon.sci.eval/evaluation failed})
-           fallback
-           (problems/form-problem
-            @connection
-            {:seon.turn/id run-id
-             :seon.cluster.eval/ordinal 1
-             :seon.sci.eval/evaluation failed})]
-       (is (= "alpha" (:seon.agent/id attributed))
-           "the reader-projected namespace owns the red form")
-       (is (= "planner" (:seon.problems/author attributed)))
-       (is (= "planner" (:seon.agent/id fallback))
-           "pre-reader absence and an unowned namespace both fall back to author")
-       (is (schema/valid-candidate-value? (schema/handed-projection)
-            :seon.problems/form-problem attributed))))))
-
-(deftest an-author-owned-red-form-remains-unsettled-without-self-assignment
-  (with-routing-database
-   (fn [connection]
-     (test-support/transacted!
-                  connection
-                  [(dissoc
-                    (receipt-entity
-                     0
-                     {:seon.eval/shown
-                      (pr-str {})
-                      :seon.cluster.eval/error "self-owned red"
-                      })
-                    :seon.cluster.eval/ns)])
-     (let [problem
-           (problems/form-problem
-            @connection
-            {:seon.turn/id run-id
-             :seon.cluster.eval/ordinal 0
-             :seon.sci.eval/evaluation
-             (evaluation-error "self-owned red")})]
-       (is (= "planner" (:seon.agent/id problem)))
-       (is (= "planner" (:seon.problems/author problem)))
-       (when-let [assignment (problems/assignment-value problem)]
-         (deliver! connection "planner" "self-assignment" assignment))
-       (is (empty?
-            (db/q '[:find ?message
-                   :in $ ?problem-id
-                   :where
-                   [?message :seon.message/assignment ?problem-id]]
-                 @connection
-                 (:seon.problems/id problem)))
-           "the ordinary loop shape emits no author-to-author message")
-       (is (= {:seon.turn.work/form-state :unrouted-red
-               :seon.turn.work/settled? false}
-              (select-keys
-               (turn/form-settlement @connection "form-0")
-               [:seon.turn.work/form-state
-                :seon.turn.work/settled?]))
-           "the red problem still keeps its plan unsettled")))))
-
-(deftest historical-reds-are-outside-the-live-attempt-chain
-  (with-routing-database
-   (fn [connection]
-     (test-support/transacted!
-                  connection
-                  [{:seon.turn/id "historical-run" :seon.turn/agent [:seon.agent/id "planner"] :seon.turn/opened-tx "datomic.tx"}
-                   {:seon.cluster.eval/id "historical-form"
-                    :seon.cluster.eval/run [:seon.turn/id "historical-run"]
-                    :seon.cluster.eval/ordinal 0
-                    :seon.cluster.eval/at #inst "2026-09-06T20:00:00Z"
-                    :seon.cluster.eval/source "(my.store/get :obsolete)"
-                    :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]}])
-     (is (nil?
-          (problems/form-problem
-           @connection
-           {:seon.turn/id "historical-run"
-            :seon.cluster.eval/ordinal 0
-            :seon.sci.eval/evaluation (evaluation-error "Unable to resolve")})))
-     (is (empty?
-          (db/q '[:find ?assignment
-                 :where
-                 [?assignment :seon.message/assignment _]]
-               @connection))
-         "a newly assigned owner has no historical problem to deliver"))))
 
 (deftest stored-evaluations-derive-routing-and-settlement
   (with-routing-database

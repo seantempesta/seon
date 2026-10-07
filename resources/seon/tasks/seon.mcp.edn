@@ -6,7 +6,7 @@
  #:seon.task{:name "observation-reads-the-run-twice"
              :kind :function
              :intent "Every eval_clj reply spends 10-13 ms reading back the run it just settled (warm, default, 2026-09-28): seon.cluster.agent/run-observation runs seon.render.transcript/history-entries (4.4-5 ms, a namespace query plus the candidate history) and then seon.eval.drive/run-receipts (4.4-5.9 ms) over the same evaluations, only for their order and whether one failed, plus seon.config/effective for the result caps. Of a 57-90 ms JVM run this is the largest part after settlement. Done when the observation is one read of the run."
-             :must-read #{seon.cluster.agent/run-observation seon.render.transcript/history-entries seon.eval.drive/run-receipts}
+             :must-read #{seon.mcp/observed seon.render.transcript/history-entries}
              :evidence #{"tmp/mcp-dogfood/probe.clj"}}
  #:seon.task{:name "entrance-profile-counts-the-requested-evaluation"
              :kind :function

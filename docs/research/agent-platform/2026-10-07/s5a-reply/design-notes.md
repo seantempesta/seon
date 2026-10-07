@@ -209,3 +209,51 @@ docstrings, `turn.clj` `receipt-identity` docstring.
 - Regression table (data): ordinary, def `:note`, renderer, `in-ns` `:ns`, `set!` print-length, error,
   not-admitted, completed disposition, faulted, refused settlement (held reply equals the stored response on the
   basis), and JVM `:ms`.
+
+## Landing (implementation of v2)
+
+Design check: v2 held against the code. Awkward points: `settle-batch!`'s commit phase now answers
+`[receipts outcome]` (the fault window must stay inside the phase); the refusal arms detect "saved" from the
+writer's own report (`closed-in?`: this run's `:seon.turn/closed-tx` asserted in `:tx-data`, which rides the same
+`open-run-tx-call` block as the receipts). The held entity carries `:seon.cluster.eval/run [:seon.turn/id id]`, so it
+satisfies the installed `:seon.eval/entity` contract with no contract change; `history-entries` renders held entries
+without a database, which also removes the preview's per-entry `changed?` query (EQUIVALENT: preview ids are unstored).
+JVM: `seon.turn.batch/evaluated-sources` maps the settled entries through `entry-evaluation`, the same pure function
+`evaluation-record` now composes, so the reply holds exactly what was recorded.
+
+Rows not reachable through the MCP entrance today, and why:
+- "not admitted" needs a writer refusal of program facts after the fold accepted them (head moved under a checked
+  basis); no agent form provokes it deterministically. `not-admitted` only rewrites receipts before the retried
+  commit, whose receipts `settle-batch!` answers by construction; unit `seon.turn-test/a-form-whose-facts-are-refused-says-it-was-not-admitted`.
+- "refused settlement" via `ns-unmap` of a referenced helper no longer refuses on HEAD (pre-existing reds in
+  `seon.cluster.evaluate-source-test`, same on HEAD). The regression instead closes its own run from a form, so the
+  settlement refuses and the guarded receipts are skipped: the reply is the refusal alone (red on the parent, which
+  answered an empty text per unsaved form).
+
+Measurement (check JVM, `bin/seon check`, one hosted agent, warm, 3 runs after a warm-up; JVM-wide allocation; profile
+`seon.profile/explain` calls), parent 0c2a12900 vs change, MCP pass of n × `(+ 1 1)`:
+
+| mode n | parent ms | change ms | parent MB | change MB | parent `db/q` | change `db/q` | parent armed calls | change armed calls |
+|---|---|---|---|---|---|---|---|---|
+| sci 1 | 39-48 | 35-50 | 57-79 | 38-51 | 38-40 | 23-24 | 9.6-10.0k | 7.0-7.4k |
+| sci 10 | 90-100 | 59-72 | 150-199 | 89-106 | 94-95 | 58-59 | 38.3-38.8k | 29.9-30.0k |
+| sci 100 | 575-609 | 292-341 | 1,098-1,412 | 539-576 | 634 | 330-331 | 317k | 245k |
+| jvm 1 | 22-25 | 18-23 | 27-33 | 20-24 | 8 | 4-6 | 6.6k | 5.7k |
+| jvm 10 | 53-65 | 43-49 | 90-97 | 55-65 | 26 | 13 | 31.1k | 24.6k |
+| jvm 100 | 366-388 | 247-316 | 716-740 | 424-426 | 206 | 103 | 277k | 219k |
+
+Still over budget (§3: ordinary pass < 200 ms, < 5 MB): a 100-form SCI pass is ~300 ms / ~550 MB. Remaining per-form
+work: settlement's two per-form queries in `evaluation-terminal-data` (task scope S5), `entity-emission` still runs
+once per form (now with no query), and the fold itself.
+
+Reds: every red in `seon.turn-test`, `seon.cluster.turn-test`, `seon.cluster.host-test`, `seon.schema.datahike-test`,
+`seon.cluster.evaluate-source-test`, `seon.cluster.resume-artifact-routing-test` and two `seon.render.transcript-test`
+tests is the same on HEAD (check runs 2318e41ae2a1 / e3b54636427c on HEAD vs 659f66f8104f / 9a4e634452ad on the
+change; same tests, same failing assertions). The extra `host_test.clj:144` and `evaluate_source_test.clj:187-188`
+failures are a fixture flake: task `seon.test-support/task-row-mints-an-unreadable-symbol-for-a-digit-first-handle`
+(cce8dbd3d718). `test/seon/schema/datahike_parity.edn` is a historical oracle with its own copy of the retired
+schema form; it is not a live reference and is left unchanged.
+
+Not done here (root's later request): JVM-mode read error drops the form and every later form
+(task e333444a896c). `jvm-read-next` answers `:seon.batch/unread-from` on any read error, which ends reading; the fix
+is a per-form read error that continues from the advanced cursor (spec §4.3), with a regression over both modes.

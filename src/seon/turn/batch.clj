@@ -608,15 +608,12 @@
       (throw (ex-info (:seon.error/message facts) facts))
       facts)))
 
-(defn- evaluation-record
-  "One entry as the recording writer's terminal evaluation."
-  {:malli/schema [:=> [:cat :string :seon.batch/entry] :map]}
-  [turn-id {:seon.batch/keys [ordinal shown shown-map error facts-error ns-before source duration-ms] :as entry}]
-  (cond-> {:seon.turn/id turn-id
-           :seon.cluster.eval/ordinal ordinal
-           :seon.cluster.eval/at (java.util.Date.)
-           :seon.cluster.eval/source (or source "")
-           :seon.cluster.eval/ns [:seon.ns/name (or ns-before 'user)]}
+(defn- entry-evaluation
+  "One settled entry's terminal facts, as its run records them and its reply
+  prints them."
+  {:malli/schema [:=> [:cat :seon.batch/entry] :seon.turn.loop/evaluation]}
+  [{:seon.batch/keys [shown shown-map error facts-error duration-ms] :as entry}]
+  (cond-> {}
     ;; the reply's :ms, as an SCI evaluation records it
     duration-ms (assoc :seon.eval/duration-ms (Math/round (double duration-ms)))
     shown (assoc :seon.eval/shown shown)
@@ -627,6 +624,34 @@
     facts-error (assoc :seon.cluster.eval/error (str "facts not proposed: " (:seon.error/message facts-error)))
     (and (nil? shown) (not (contains? entry :seon.batch/error)) (nil? facts-error))
     (assoc :seon.eval/shown "nil")))
+
+(defn- admitted-form
+  "The form one entry read, where it ran."
+  {:malli/schema [:=> [:cat :seon.batch/entry] :seon.turn.loop/admitted-form]}
+  [{:seon.batch/keys [source ns-before]}]
+  {:seon.cluster.eval/source (or source "")
+   :seon.cluster.eval/ns [:seon.ns/name (or ns-before 'user)]})
+
+(defn- evaluation-record
+  "One entry as the recording writer's terminal evaluation."
+  {:malli/schema [:=> [:cat :string :seon.batch/entry] :map]}
+  [turn-id {ordinal :seon.batch/ordinal :as entry}]
+  (merge {:seon.turn/id turn-id
+          :seon.cluster.eval/ordinal ordinal
+          :seon.cluster.eval/at (java.util.Date.)}
+         (admitted-form entry)
+         (entry-evaluation entry)))
+
+(defn evaluated-sources
+  "The batch's settled entries as held forms, each with the terminal facts its
+  run recorded (`record-facts`): what the run's reply prints."
+  {:malli/schema [:=> [:cat :seon.batch/batch] :seon.turn.loop/evaluated-sources]}
+  [batch]
+  (mapv (fn [{ordinal :seon.batch/ordinal :as entry}]
+          {:seon.cluster.eval/ordinal ordinal
+           :seon.turn.loop/admitted-form (admitted-form entry)
+           :seon.sci.eval/evaluation (entry-evaluation entry)})
+        (:seon.batch/entries batch)))
 
 (defn record-facts
   "The run and its evaluations, through the recording writer."

@@ -5,10 +5,11 @@
 
   An MCP caller is a Seon agent at its REPL. `eval_clj` runs its code as one
   ordinary run of the named agent (root, or an agent on its own branch) and
-  answers exactly what that agent's next context reads for those
-  evaluations (`seon.cluster.agent/run-observation`): SCI mode through the
-  agent's turn (`evaluate-source!`), JVM mode through the one path's fold
-  (`seon.turn.batch/jvm-request`), recorded as the same agent's run.
+  answers each evaluation the run's settlement saved, printed as that agent's
+  next context reads it (`seon.render.transcript/history-entries` over the held
+  receipts): SCI mode through the agent's turn (`evaluate-source!`), JVM mode
+  through the one path's fold (`seon.turn.batch/jvm-request`), recorded as the
+  same agent's run.
   `runtime_status` prints the cluster's health report
   (`seon.health/report`) through its AI face. Every failure is the one error value, printed by the
   value printer, and a thrown one is recorded as a fault here."
@@ -21,6 +22,7 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal :as refusal]
@@ -28,6 +30,7 @@
             [seon.health :as health]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
+            [seon.render.transcript :as transcript]
             [seon.render.value :as render.value]
             [seon.sci.eval :as eval]
             [seon.turn]
@@ -210,17 +213,25 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- observed
-  "The settled run as the agent's next context reads it: one text per
-  evaluation (its response, else its shown text or error) and whether any
-  evaluation failed."
-  {:malli/schema [:=> [:cat :seon.turn/id :seon.db/database-value :seon.agent/id :string]
+  "The run's saved evaluations as the agent's next context reads them: one
+  text per held form with the receipt its settlement saved (its response,
+  else its shown text or error), printed on the settlement's `database`, and
+  whether any evaluation failed."
+  {:malli/schema [:=> [:cat [:maybe :seon.turn.loop/evaluated-sources] :seon.turn/id :seon.db/database-value
+                       :seon.agent/id :string]
                   [:tuple [:vector :string] :boolean]]}
-  [run-id database agent-id cluster-name]
-  (let [evaluations (agent/run-observation {:seon.turn/id run-id :seon.db/db database} agent-id cluster-name)]
-    [(mapv (fn [{response :seon.repl/response shown :seon.eval/shown error :seon.cluster.eval/error}]
-             (str (or response shown error "")))
-           evaluations)
-     (boolean (some :seon.cluster.eval/error evaluations))]))
+  [sources run-id database agent-id cluster-name]
+  (if (empty? sources)
+    [[] false]
+    (let [entries (transcript/history-entries
+                   {:seon.db/db database :seon.agent/id agent-id :seon.turn/id run-id
+                    :seon.sci.admit/caps (config/result-caps (config/effective database cluster-name))
+                    :seon.turn.loop/evaluated-sources sources})
+          evaluations (mapv :seon.sci.eval/evaluation sources)]
+      [(mapv (fn [{response :seon.render.history/printed-value} {shown :seon.eval/shown error :seon.cluster.eval/error}]
+               (or response shown error ""))
+             entries evaluations)
+       (boolean (some :seon.cluster.eval/error evaluations))])))
 
 (defn- sci-run
   "One ordinary SCI run of the agent (`evaluate-source!`, segmented as code)."
@@ -231,7 +242,8 @@
                   namespace-name (assoc :seon.turn/starting-ns [:seon.ns/name namespace-name])))
         database (:seon.db/db answer)]
     (if (and database (not (:seon.error/at answer)))
-      (cond-> (observed (:seon.turn/id answer) database (:seon.agent/id custody) cluster-name)
+      (cond-> (observed (:seon.turn.loop/evaluated-sources answer) (:seon.turn/id answer) database
+                        (:seon.agent/id custody) cluster-name)
         (:seon.turn.loop/refusal answer)
         (-> (update 0 conj (printed (:seon.turn.loop/refusal answer) code database cluster-name))
             (assoc 1 true)))
@@ -275,7 +287,7 @@
     (pages-changed! mark (keep #(get-in % [:seon.render.web/view :seon.render.web/runtime-eval-channel])
                                (vals @runtime/running-instances)))
     (if-let [after (:seon.batch/after commit)]
-      (observed run-id after agent-id cluster-name)
+      (observed (turn.batch/evaluated-sources batch) run-id after agent-id cluster-name)
       ;; nothing was recorded: the fold's own shown texts, and why
       (let [reply (turn.batch/reply batch)]
         [(conj (mapv :seon.batch/shown (:seon.batch/evaluations reply))

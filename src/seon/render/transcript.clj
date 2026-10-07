@@ -333,14 +333,34 @@
     (throw (ex-info (str (:seon.error/message result "A branch-error read refused.")) result))
     result))
 
+(defn- fault-values
+  "Each referenced error as its agent reads it: the value of its latest fact
+  (`seon.error/value` of `seon.error/latest-fact`) with its occurrence count
+  and origin branch, and its resolution when resolved. A refused read is
+  thrown whole."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector {:min 1} :seon.db/ref]] [:vector {:min 1} :map]]}
+  [db errors]
+  (let [selector (error/observation-selector (db/carried-projection db))]
+    (mapv (fn [error]
+            (let [pulled (read-or-throw (db/pull db selector error))
+                  resolved (read-or-throw (error/resolution db (:seon.error/signature pulled)))
+                  ;; ONE ERROR, SHOWN ONCE: its value (message once, evidence
+                  ;; by blob reference) and what this window adds; the whole
+                  ;; observation stays reachable by :seon.error/id.
+                  fact (error/latest-fact pulled)]
+              (cond-> (merge (error/value fact)
+                             (select-keys fact [:seon.error.occurrence/count
+                                                :seon.error.occurrence/branch]))
+                resolved (assoc :seon.error/resolution resolved))))
+          errors)))
+
 (defn- branch-errors
   "The errors each settled evaluation's settlement saved on it
   (`:seon.cluster.eval/faults`, `seon.turn/fault-window`: the window
   (previous settlement, this settlement], read once by the writer), keyed by
   evaluation entity id, for `:all` of the agent's evaluations or the `shown`
-  set, each as its value (`seon.error/value` of `seon.error/latest-fact`)
-  with its occurrence count, origin branch and resolution when resolved. Nothing is reconstructed from occurrence counters.
-  A refused read is thrown whole."
+  set, each as its `fault-values`. Nothing is reconstructed from occurrence
+  counters. A refused read is thrown whole."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
                        [:or [:= :all] [:set :int]]]
                   [:map-of :int [:vector {:min 1} :map]]]}
@@ -349,27 +369,11 @@
               (db/q '[:find ?e ?error :in $ ?agent-id
                       :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
                       [?e :seon.cluster.eval/run ?run] [?e :seon.cluster.eval/faults ?error]]
-                    db agent-id))
-        selector (when (seq entities) (error/observation-selector (db/carried-projection db)))]
+                    db agent-id))]
     (into {}
           (keep (fn [[eid group]]
                   (when (or (= :all shown) (contains? shown eid))
-                    [eid (mapv (fn [[_ error]]
-                                 (let [pulled (read-or-throw (db/pull db selector error))
-                                       resolved (read-or-throw (error/resolution db (:seon.error/signature pulled)))]
-                                   ;; ONE ERROR, SHOWN ONCE: its value (message
-                                   ;; once, evidence by blob reference) and what
-                                   ;; this window adds. The whole observation
-                                   ;; repeated the message three times (base,
-                                   ;; occurrence, capped data-edn) and printed
-                                   ;; the evidence inline; it stays reachable
-                                   ;; by :seon.error/id.
-                                   (let [fact (error/latest-fact pulled)]
-                                     (cond-> (merge (error/value fact)
-                                                    (select-keys fact [:seon.error.occurrence/count
-                                                                       :seon.error.occurrence/branch]))
-                                       resolved (assoc :seon.error/resolution resolved)))))
-                               group)])))
+                    [eid (fault-values db (mapv second group))])))
           (group-by first entities))))
 
 (defn- history
@@ -554,8 +558,61 @@
    (map html-entries)
    (filter seq [pinned entries])))
 
+(defn- with-errors
+  "`entry` with `errors` printed once, by the value printer, as its
+  `:seon.repl/errors`, rooted at the entry's own identity."
+  {:malli/schema [:=> [:cat :seon.render/unit :map [:vector {:min 1} :map]] :map]}
+  [unit entry errors]
+  (let [text (floor-text (assoc unit :seon.render.value/root (::root entry)) errors)]
+    (if (string? text)
+      (assoc-in entry [::entity :seon.repl/errors] text)
+      (throw (ex-info (str (:seon.error/message text)) text)))))
+
+(defn- held-entry
+  "One evaluation the caller holds (in flight, or the receipt its settlement
+  wrote) with its admitted form, as the transcript entry its stored entity
+  would be: the form's source and comment, the evaluation's namespace else
+  the form's, its run and identity, and its faults' errors."
+  {:malli/schema [:=> [:cat :seon.render/unit [:vector :qualified-keyword] :seon.turn.loop/evaluated-source] :map]}
+  [unit identity-attrs {form :seon.turn.loop/admitted-form
+                        evaluation :seon.sci.eval/evaluation
+                        ordinal :seon.cluster.eval/ordinal}]
+  (let [db (:seon.db/db unit)
+        run-id (:seon.turn/id unit)
+        ;; what the writer stores: the evaluation's namespace overrides the frozen form's
+        namespace-ref (or (:seon.cluster.eval/ns evaluation) (:seon.cluster.eval/ns form))
+        namespace-name (if (map? namespace-ref) (:seon.ns/name namespace-ref) (second namespace-ref))
+        entry (receipt-entry
+               (cond-> (assoc evaluation
+                              :seon.cluster.eval/source (:seon.cluster.eval/source form)
+                              :seon.cluster.eval/id (turn/receipt-identity run-id ordinal)
+                              :seon.cluster.eval/run [:seon.turn/id run-id]
+                              :seon.cluster.eval/ordinal ordinal
+                              :seon.cluster.eval/read-basis-transaction
+                              (or (:seon.cluster.eval/read-basis-transaction evaluation)
+                                  (db/basis-t db)))
+                 namespace-name (assoc :seon.cluster.eval/ns {:seon.ns/name namespace-name})
+                 ;; THE COMMENT IS A FACT OF THE FORM THE AGENT WROTE, and it
+                 ;; travels on the admitted form until settlement moves it to
+                 ;; the evaluation.
+                 (:seon.cluster.eval/comment form)
+                 (assoc :seon.cluster.eval/comment (:seon.cluster.eval/comment form))
+                 ;; The print options the form set: stored they are
+                 ;; `:seon.print/length` / `/level`, in flight they are the
+                 ;; evaluation's `:seon.print/options` map.
+                 (int? (get-in evaluation [:seon.print/options :seon.print/length]))
+                 (assoc :seon.print/length (get-in evaluation [:seon.print/options :seon.print/length]))
+                 (int? (get-in evaluation [:seon.print/options :seon.print/level]))
+                 (assoc :seon.print/level (get-in evaluation [:seon.print/options :seon.print/level]))))
+        entry (assoc entry ::root (entry-root identity-attrs entry))
+        faults (:seon.cluster.eval/faults evaluation)]
+    (if (seq faults)
+      (with-errors unit entry (fault-values db (vec faults)))
+      entry)))
+
 (defn- candidate-history
-  "The shared source of transcript entries, supplied evaluations or stored history."
+  "The shared source of transcript entries: the evaluations the caller holds
+  (`held-entry`), else stored history."
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.agent/id unit)
@@ -564,66 +621,23 @@
                          :seon.config.eval.result/max-nodes)
         evaluated-sources (:seon.turn.loop/evaluated-sources unit)]
     (if (some? evaluated-sources)
-          (mapv
-           (fn [{form :seon.turn.loop/admitted-form
-                 evaluation :seon.sci.eval/evaluation
-                 ordinal :seon.cluster.eval/ordinal}]
-             (receipt-entry
-              (cond-> (assoc evaluation
-                             :seon.cluster.eval/source
-                             (:seon.cluster.eval/source form)
-                             :seon.cluster.eval/id
-                             (turn/receipt-identity
-                              (:seon.turn/id unit) ordinal)
-                             :seon.cluster.eval/ordinal ordinal
-                             :seon.cluster.eval/ns
-                             {:seon.ns/name
-                              (second (:seon.cluster.eval/ns form))}
-                             :seon.cluster.eval/read-basis-transaction
-                             (or (:seon.cluster.eval/read-basis-transaction
-                                  evaluation)
-                                 (db/basis-t db)))
-                ;; THE COMMENT IS A FACT OF THE FORM THE AGENT WROTE, and it
-                ;; travels on the admitted form until settlement moves it to
-                ;; the evaluation. Reading only the evaluation dropped the
-                ;; agent's own prose out of every in-memory render, so the
-                ;; page's preview and the stored history disagreed by a line.
-                (:seon.cluster.eval/comment form)
-                (assoc :seon.cluster.eval/comment
-                       (:seon.cluster.eval/comment form))
-                ;; The same for the print options the form set: stored they
-                ;; are `:seon.print/length` / `/level`, in flight they are
-                ;; the evaluation's `:seon.print/options` map.
-                (int? (get-in evaluation [:seon.print/options
-                                          :seon.print/length]))
-                (assoc :seon.print/length
-                       (get-in evaluation [:seon.print/options
-                                           :seon.print/length]))
-                (int? (get-in evaluation [:seon.print/options
-                                          :seon.print/level]))
-                (assoc :seon.print/level
-                       (get-in evaluation [:seon.print/options
-                                           :seon.print/level])))))
-           evaluated-sources)
-          (let [entries (history db (:seon.turn/id unit) agent-id
-                                 candidate-count (::selected-run-id unit)
-                                 (:seon.context.contribution/evaluations unit))
-                evaluations (into #{} (keep #(when (= :eval (::kind %)) (get-in % [::entity :db/id])))
-                                  entries)
-                ;; a caller rendering many runs derives the agent's windows once
-                errors (cond (::branch-errors unit) (::branch-errors unit)
-                             (seq evaluations) (branch-errors db agent-id evaluations)
-                             :else {})]
-            ;; The branch's new errors are bounded once, by the value renderer.
-            (mapv (fn [entry]
-                    (if-some [found (get errors (get-in entry [::entity :db/id]))]
-                      (let [text (floor-text (assoc unit :seon.render.value/root (::root entry))
-                                             found)]
-                        (if (string? text)
-                          (assoc-in entry [::entity :seon.repl/errors] text)
-                          (throw (ex-info (str (:seon.error/message text)) text))))
-                      entry))
-                  entries)))))
+      (let [identity-attrs (identity-attributes db)]
+        (mapv #(held-entry unit identity-attrs %) evaluated-sources))
+      (let [entries (history db (:seon.turn/id unit) agent-id
+                             candidate-count (::selected-run-id unit)
+                             (:seon.context.contribution/evaluations unit))
+            evaluations (into #{} (keep #(when (= :eval (::kind %)) (get-in % [::entity :db/id])))
+                              entries)
+            ;; a caller rendering many runs derives the agent's windows once
+            errors (cond (::branch-errors unit) (::branch-errors unit)
+                         (seq evaluations) (branch-errors db agent-id evaluations)
+                         :else {})]
+        ;; The branch's new errors are bounded once, by the value renderer.
+        (mapv (fn [entry]
+                (if-some [found (get errors (get-in entry [::entity :db/id]))]
+                  (with-errors unit entry found)
+                  entry))
+              entries)))))
 
 (defn- projection
   [unit]
@@ -729,6 +743,7 @@
   {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
+        held? (some? (:seon.turn.loop/evaluated-sources unit))
         candidates (candidate-history unit)
         entries
         (mapv
@@ -737,7 +752,10 @@
            ;; the debug page's AI column and the provider prompt cannot drift
            ;; apart: there is no second place that decides how an evaluation
            ;; reads.
-           (let [emitted (repl/entity-emission (assoc (::entity entry) :seon.db/db db))]
+           (let [emitted (repl/entity-emission
+                          ;; a held evaluation is this pass's own: nothing to
+                          ;; resolve or compare against stored history
+                          (if held? (::entity entry) (assoc (::entity entry) :seon.db/db db)))]
              {:seon.render.history/call-id
               [:seon.render.transcript/entry (::kind entry) (::id entry)]
               :seon.cluster.eval/ordinal (::ordinal entry)

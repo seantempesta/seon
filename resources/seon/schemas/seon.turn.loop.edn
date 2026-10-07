@@ -44,9 +44,6 @@
                   [:seon.cluster.eval/ordinal
                    :seon.cluster.eval/ordinal]
                   [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]
-                  [:seon.problems/form-problem
-                   {:optional true}
-                   :seon.problems/form-problem]
                   [:seon.message/trigger
                    {:optional true}
                    :seon.message/id]],
@@ -183,7 +180,10 @@
                   [:seon.turn.loop/refusal {:optional true}
                    :seon.turn.loop/refusal]
                   [:seon.turn.loop/basis {:optional true}
-                   :seon.turn.loop/basis]],
+                   :seon.turn.loop/basis]
+                  ; each held form with the receipt the run's settlement saved: its reply
+                  [:seon.turn.loop/evaluated-sources {:optional true}
+                   :seon.turn.loop/evaluated-sources]],
                  ; The database value a run's terminal settlement left: its
                  ; callers read the run's evaluations there, not on a later value.
                  :basis :seon.db/database-value,
@@ -275,7 +275,10 @@
                    :seon.turn.loop/commit-outcome]
                   [:seon.turn.loop/refused-outcome
                    {:optional true}
-                   :seon.error/value]]
+                   :seon.error/value]
+                  [:seon.turn.loop/receipt
+                   {:optional true}
+                   :seon.turn.loop/terminal-request]]
  ; Additive error declaration manifest, 2026-09-18.
 
  :seon.turn.loop/error

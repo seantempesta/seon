@@ -1508,7 +1508,8 @@
                               [_ :seon.cluster.eval/error ?error]]
                             @connection))))))))
 
-(deftest a-red-form-routes-to-its-namespace-owner-and-the-fold-continues
+(deftest ^{:seon/tasks #{'seon.problems/an-agents-own-form-errors-are-assigned-to-another-agent}}
+  a-red-form-stays-with-its-author-and-the-fold-continues
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -1573,14 +1574,10 @@
               "the red form settles as a flat error on its own eval")
           (is (= 42 (edn/read-string (:seon.eval/shown (second receipts))))
               "the sibling in the other namespace still ran and settled")
-          (is (= #{["agent-b" (turn/problem-id route-run 0)]}
-                 (set (db/q '[:find ?to ?problem
-                        :where
-                        [?assignment :seon.message/assignment ?problem]
-                        [?assignment :seon.message/to ?agent]
-                        [?agent :seon.agent/id ?to]]
-                      @connection)))
-              "the red form is routed to its namespace's owner, who can act on it")
+          (is (empty? (db/q '[:find ?assignment
+                              :where [?assignment :seon.message/assignment _]]
+                            @connection))
+              "the red form in agent-b's namespace stays with its author: nothing is mailed to agent-b")
           (is (= 1
                  (db/q '[:find (count ?tx) .
                         :in $ ?run-id

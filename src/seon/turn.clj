@@ -64,10 +64,6 @@
   (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
 (defonce ^:private context-capture-tx
   (delay (requiring-resolve 'seon.context/capture-tx)))
-(defonce ^:private problems-assignment-value
-  (delay (requiring-resolve 'seon.problems/assignment-value)))
-(defonce ^:private problems-form-problem
-  (delay (requiring-resolve 'seon.problems/form-problem)))
 
 
 (defn- result-blob-threshold
@@ -101,13 +97,12 @@
                   :seon.cluster.eval/settle-request]}
   [{:keys [:seon.turn/id
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
-           :seon.problems/form-problem :my.turn/value]
+           :my.turn/value]
     settlement-evaluation :seon.turn.loop/settlement-evaluation}]
   ;; NOTHING AFTER EVALUATION WALKS THE LIVE VALUE (task d1efccd3ab7e): the
   ;; value's only walk is the bounded print inside the evaluation's arm. An
   ;; unbound Var's value is a value, as in Clojure, shown `#object[...]`.
   (let [error (or (:seon.cluster.eval/error evaluation)
-                  (:seon.cluster.eval/error form-problem)
                   ;; A record whose outcome is an error stores that error's
                   ;; shown text, so every reader sees the failure.
                   (when (= :error (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome]))
@@ -532,9 +527,7 @@
                         database agent-id) 0)]))
 
 (defn receipt-identity
-  "The `:seon.cluster.eval/id` of one run's ordinal.
-  Agent-facing: this is the problem identity an owner is asked to repair,
-  and the one `seon.turn/problem-id` returns."
+  "The `:seon.cluster.eval/id` of one run's ordinal."
   {:malli/schema [:=> [:cat ::id :seon.cluster.eval/ordinal]
                   :seon.cluster.eval/id]}
   [run-id ordinal]
@@ -2368,26 +2361,6 @@
             (next-ordinal database run-id))
       []
       (close-call database {::id run-id}))))
-(defn problem-id
-  "The receipt identity naming one form's derived problem."
-  {:malli/schema [:=> [:cat :seon.turn/id
-                       :seon.cluster.eval/ordinal]
-                  :seon.problems/id]}
-  [run-id ordinal]
-  (receipt-identity run-id ordinal))
-
-(defn planner-scoped-attempt?
-  "True when `run-id` belongs to a goal's caused-by message chain.
-
-  A planner attempt's recorded run trigger points at one member of the chain:
-  either the depth-zero goal message itself or a later caused-by message.
-  A triggerless historical run has no membership edge and fails closed."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.turn/id]
-                  :boolean]}
-  [db run-id]
-  (some? (message/trigger db run-id)))
-
 
 (defn red-receipt?
   "True when a terminal receipt is red: error or interruption.
@@ -3182,16 +3155,14 @@
   "The message-family value one completed evaluation asks to deliver."
   [{db :seon.db/db
     settled :seon.turn.loop/settled
-    problem :seon.problems/form-problem
     agent-id :seon.agent/id
     trigger :seon.message/trigger}]
-  (or (when (= :completed (:my.turn/disposition settled))
-        (message/reply
-         db
-         (cond-> {:my.turn/result (:my.turn/result settled)
-                  :seon.agent/id agent-id}
-           trigger (assoc :seon.message/trigger trigger))))
-      (when problem (@problems-assignment-value problem))))
+  (when (= :completed (:my.turn/disposition settled))
+    (message/reply
+     db
+     (cond-> {:my.turn/result (:my.turn/result settled)
+              :seon.agent/id agent-id}
+       trigger (assoc :seon.message/trigger trigger)))))
 
 (defn- delivery-rows
   "Delivery rows and refusal transaction data for one asked value."
@@ -3322,7 +3293,6 @@
     process :seon.db.process/id
     ordinal :seon.cluster.eval/ordinal
     evaluation :seon.sci.eval/evaluation
-    problem :seon.problems/form-problem
     trigger :seon.message/trigger
     batch? :seon.turn.loop/batch?}]
   (let [database (db/db (get cluster :seon.db/connection))
@@ -3378,7 +3348,6 @@
                         :seon.sci.eval/evaluation evaluation
                         :seon.turn.loop/settled settled
                         :seon.agent/id agent-id}
-                 problem (assoc :seon.problems/form-problem problem)
                  trigger (assoc :seon.message/trigger trigger)))
         delivery
         (delivery-rows
@@ -3389,7 +3358,6 @@
                   :seon.turn/id run-id
                   :seon.cluster.eval/ordinal ordinal
                   :seon.turn.loop/now now}
-           problem (assoc :seon.problems/form-problem problem)
            trigger (assoc :seon.message/trigger trigger)))
         [settlement-evaluation _ settlement-stages]
         (settlement-projection cluster evaluation)
@@ -3400,7 +3368,6 @@
                   :seon.cluster.eval/ordinal ordinal
                   :seon.sci.eval/evaluation evaluation
                   :seon.turn.loop/settlement-evaluation settlement-evaluation}
-           problem (assoc :seon.problems/form-problem problem)
            settled (assoc :my.turn/value settled)))
         closing? (closing-settlement? {:seon.turn.loop/undisposed? undisposed?
                                        :seon.turn.loop/settled settled})
@@ -3431,6 +3398,14 @@
      :seon.db/tx-data tx-data}))
 
 (declare settle-batch-refusal! close-escaped-run!)
+
+(defn- closed-in?
+  "True when the committed `outcome` closed run `run-id`: the writer applied
+  the run-dependent half `open-run-tx-call` guards, its receipts included."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report [:maybe ::id]] :boolean]}
+  [outcome run-id]
+  (let [run (when run-id (:db/id (db/pull (:db-after outcome) [:db/id] [::id run-id])))]
+    (boolean (and run (some #(and (= ::closed-tx (:a %)) (= run (:e %)) (:added %)) (:tx-data outcome))))))
 
 (defn- fault-window
   "The references of the errors written on `agent-id`'s branch in this
@@ -3511,7 +3486,9 @@
                           [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]]
      ;; a refused refusal settlement answers its own refusal here
      [:outcome [:or :seon.db/transaction-report :seon.error/value]]
-     [:refused-outcome {:optional true} :seon.error/value]]]}
+     [:refused-outcome {:optional true} :seon.error/value]
+     ;; the receipts the committed transaction wrote, in order
+     [:saved {:optional true} [:vector :seon.cluster.eval/settle-request]]]]}
   [cluster requests {program-request :seon.batch/request program :seon.batch/program changes :seon.batch/changes}]
   (let [connection (:seon.db/connection cluster)
         process (:seon.db.process/id cluster)
@@ -3532,14 +3509,13 @@
         ;; Built inside the committed phase: a refused read of the fault
         ;; window is a refused settlement the arm below closes, never an escape.
         transaction
-        (fn [program prepared]
+        (fn [program prepared receipts]
          (hash-map
           :seon.blob/staged-writes
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
          (-> (cond-> [] (seq program) (conj [:db.fn/call #'turn.batch/program-facts-call program-request program]))
-             (into (receipt-settle-batch-tx
-                    (with-fault-windows (db/db connection) requests (mapv :seon.turn.loop/receipt prepared))))
+             (into (receipt-settle-batch-tx receipts))
              (into (mapcat :seon.db/tx-data) prepared)
              (into measured)
              ;; A settlement that already closes the turn needs no fold.
@@ -3559,10 +3535,14 @@
         ;; it becomes a flat value the refusal arm settles, so the run
         ;; closes and the agent takes its next turn. A failure to record a
         ;; fault may never leave a run open.
+        ;; answers [receipts outcome]: the receipts this attempt's transaction
+        ;; carries, or the phase's refusal value alone
         commit
         (fn [program prepared]
         (phase
-         #(let [transaction (with-submission cluster (transaction program prepared))]
+         #(let [receipts (with-fault-windows (db/db connection) requests (mapv :seon.turn.loop/receipt prepared))
+                transaction (with-submission cluster (transaction program prepared receipts))]
+            [receipts
             (blob/with-publication!
              connection (:seon.blob/staged-writes transaction)
              ;; THE RUN'S ONE SYNCHRONOUS DURABLE TRANSACTION: its caller is
@@ -3574,33 +3554,36 @@
                           outcome (db/transact!
                                    connection {:tx-data (into (vec (:seon.db/tx-data transaction)) folded)})]
                       (when-not (:db-after outcome) (seon.fault/unfold! connection folded))
-                      outcome))))))
-        first-outcome (commit program prepared)
+                      outcome)))])))
+        attempt (fn [program prepared]
+                  (let [answer (commit program prepared)]
+                    (if (vector? answer) answer [nil answer])))
+        [first-receipts first-outcome] (attempt program prepared)
         ;; A REFUSED SETTLEMENT IS ANSWERED FORM BY FORM (OQ1): the last form's
         ;; facts were never validated before the writer (a form's facts are
         ;; validated when a later form reads them), so a refusal revalidates
         ;; each form's change on the head; the forms it now refuses lose their
         ;; facts, logged as their errors, and the rest settle once more.
-        [prepared outcome]
+        [prepared receipts outcome]
         (if (or (:db-after first-outcome) (empty? program))
-          [prepared first-outcome]
+          [prepared first-receipts first-outcome]
           (let [[_ program' entries] (turn.batch/revalidate program-request (db/db connection) (vec changes))
                 refused (into {} (keep (fn [e] (when-let [fe (:seon.batch/facts-error e)]
                                                  [(:seon.batch/ordinal e) fe])))
                               entries)]
             (if (empty? refused)
-              [prepared first-outcome]
+              [prepared first-receipts first-outcome]
               (let [prepared' (mapv (fn [request p]
                                       (if-let [refusal (refused (:seon.cluster.eval/ordinal request))]
                                         (update p :seon.turn.loop/receipt not-admitted refusal)
                                         p))
                                     requests prepared)]
-                [prepared' (commit program' prepared')]))))]
+                (into [prepared'] (attempt program' prepared'))))))]
     ;; SUCCESS IS THE WRITER'S TRANSACTION REPORT (`db/transact!` answers
     ;; `:seon.db/transaction-result` or its refused error); any other value,
     ;; a refused phase included, is the refusal the arm below settles.
     (if (:db-after outcome)
-      {:prepared prepared :outcome outcome}
+      {:prepared prepared :outcome outcome :saved receipts}
       (settle-batch-refusal! cluster requests prepared outcome changes))))
 
 (defn- settle-evaluated!
@@ -3660,7 +3643,8 @@
          [:or :nil :seon.cluster.eval/ordinal]
          [:or :nil :seon.turn.loop/terminal-request] :seon.error/source]
     [:map [:seon.error/value :seon.error/value]
-     [:seon.db/tx-data :seon.store/transaction-data]]]}
+     [:seon.db/tx-data :seon.store/transaction-data]
+     [:seon.turn.loop/receipt {:optional true} :seon.turn.loop/terminal-request]]]}
   [cluster database now agent-id run-id process ordinal receipt source]
   (let [recording
         (error/recording cluster database
@@ -3674,9 +3658,8 @@
         ;; A form that returned a value keeps it: the refusal of its
         ;; settlement is a diagnostic beside it, never its replacement.
         evaluated? (and (:seon.eval/shown receipt) (not (:seon.cluster.eval/error receipt)))
-        receipt-tx
+        settled
         (when ordinal
-          (receipt-settle-tx
            (cond-> {:seon.turn/id run-id
                     :seon.cluster.eval/ordinal ordinal
                     :seon.cluster.eval/error (:seon.error/message value)}
@@ -3687,8 +3670,10 @@
              (not evaluated?)
              (assoc :seon.eval/shown
                     (:seon.eval/shown (final-shown cluster database agent-id
-                                                   (error/reply-value value) structural))))))]
-    {:seon.error/value value
+                                                   (error/reply-value value) structural)))))
+        receipt-tx (when settled (receipt-settle-tx settled))]
+    (cond->
+     {:seon.error/value value
      :seon.blob/staged-writes (:seon.blob/staged-writes recording)
      :seon.db/tx-data
      (into [] cat
@@ -3705,7 +3690,10 @@
                       (close-tx
                        {:seon.turn/id run-id :seon.db.process/id process
                         :seon.turn/closed-tx "datomic.tx"}))]])
-            (:seon.db/tx-data recording)])}))
+            (:seon.db/tx-data recording)])}
+      ;; the receipt this settlement proposes; the writer applies it only
+      ;; while the run is open (`closed-in?`)
+      settled (assoc :seon.turn.loop/receipt settled))))
 
 (defn- deletion-proposals
   "The deletions a refused run settlement's writer named, each associated with
@@ -3783,7 +3771,8 @@
     [:map
      [:prepared [:vector [:map [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]]]]
      [:outcome [:or :seon.db/transaction-report :seon.error/value]]
-     [:refused-outcome :seon.error/value]]]}
+     [:refused-outcome :seon.error/value]
+     [:saved {:optional true} [:vector :seon.cluster.eval/settle-request]]]]}
   [cluster requests prepared refusal changes]
   (let [connection (:seon.db/connection cluster)
         {now :seon.turn.loop/now
@@ -3860,9 +3849,11 @@
                  connection (:seon.blob/staged-writes transaction)
                  #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
     (if (:db-after outcome)
-      {:prepared prepared
-       :outcome outcome
-       :refused-outcome refusal}
+      (cond-> {:prepared prepared
+               :outcome outcome
+               :refused-outcome refusal}
+        ;; the writer applies the receipts only while the run was open
+        (closed-in? outcome run-id) (assoc :saved receipts))
       ;; A REFUSED REFUSAL SETTLEMENT IS A VALUE ON THE REPLY, never a throw
       ;; past it (sweep 2026-09-27 item 1: the caller saw "awaited channel
       ;; closed"). The run closes as for any escaped terminal
@@ -5056,6 +5047,22 @@
   [report outcome]
   (assoc report :seon.turn.loop/basis (:db-after outcome)))
 
+(defn- with-saved
+  "`report` carrying each held form with the receipt its settlement saved
+  (`:seon.turn.loop/evaluated-sources`), which the run's reply prints; a
+  settlement that saved none adds nothing."
+  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report [:map-of :seon.cluster.eval/ordinal :seon.turn.loop/admitted-form]
+                       [:maybe [:vector :seon.cluster.eval/settle-request]]]
+                  :seon.turn.loop/turn-report]}
+  [report forms saved]
+  (let [sources (into [] (keep (fn [{ordinal :seon.cluster.eval/ordinal :as receipt}]
+                                 (when-let [form (get forms ordinal)]
+                                   {:seon.cluster.eval/ordinal ordinal
+                                    :seon.turn.loop/admitted-form form
+                                    :seon.sci.eval/evaluation receipt})))
+                      saved)]
+    (cond-> report (seq sources) (assoc :seon.turn.loop/evaluated-sources sources))))
+
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
   {:malli/schema
@@ -5151,40 +5158,34 @@
         (if (:seon.turn.loop/phase-failed evaluated)
           ;; THE REFUSAL BELONGS ON THE FORM THAT EARNED IT: `settle!`
           ;; carries the ordinal through `refusal-terminal-data`.
-          (settled (settle! {:seon.turn.loop/cluster cluster
-                             :seon.turn.loop/now now
-                             :seon.agent/id agent-id
-                             :seon.turn/id run-id
-                             :seon.cluster.eval/ordinal first-ordinal
-                             :seon.error/value evaluated})
-                   (report :error (count evaluated)))
+          (let [settlement (settle! {:seon.turn.loop/cluster cluster
+                                     :seon.turn.loop/now now
+                                     :seon.agent/id agent-id
+                                     :seon.turn/id run-id
+                                     :seon.cluster.eval/ordinal first-ordinal
+                                     :seon.error/value evaluated})
+                outcome (:seon.turn.loop/outcome settlement)]
+            (with-saved (settled settlement (report :error (count evaluated)))
+              (into {} (comp (filter #(and (:seon.cluster.eval/source %) (:seon.cluster.eval/ns %)))
+                             (map (juxt :seon.cluster.eval/ordinal #(select-keys % [:seon.cluster.eval/source :seon.cluster.eval/ns]))))
+                    evaluations)
+              (when (and (:db-after outcome) (closed-in? outcome run-id))
+                (some-> (:seon.turn.loop/receipt settlement) vector))))
           (let [gated (:seon.turn.loop/evaluated-sources evaluated)
                 program (:seon.turn.loop/program evaluated)
                 requests
                 (mapv
                  (fn [{ordinal :seon.cluster.eval/ordinal evaluation :seon.sci.eval/evaluation}]
-                   (let [problem
-                         ; A reply with no form has no program owner to notify.
-                         ; Its reader error belongs only in the author's history.
-                         (when-not reader-event
-                           (phase
-                            #(@problems-form-problem
-                              database
-                              {:seon.turn/id run-id
-                               :seon.cluster.eval/ordinal ordinal
-                               :seon.sci.eval/evaluation evaluation})))]
-                     (cond->
-                      {:seon.turn.loop/cluster cluster
-                       :seon.turn.loop/now now
-                       :seon.agent/id agent-id
-                       :seon.turn/id run-id
-                       :seon.cluster.eval/ordinal ordinal
-                       :seon.sci.eval/evaluation evaluation}
-                       ;; A run no message caused (a continuation) has no
-                       ;; trigger: stored absence is no key, never nil.
-                       trigger (assoc :seon.message/trigger trigger)
-                       (and problem (not (:seon.turn.loop/phase-failed problem)))
-                       (assoc :seon.problems/form-problem problem))))
+                   (cond->
+                    {:seon.turn.loop/cluster cluster
+                     :seon.turn.loop/now now
+                     :seon.agent/id agent-id
+                     :seon.turn/id run-id
+                     :seon.cluster.eval/ordinal ordinal
+                     :seon.sci.eval/evaluation evaluation}
+                     ;; A run no message caused (a continuation) has no
+                     ;; trigger: stored absence is no key, never nil.
+                     trigger (assoc :seon.message/trigger trigger)))
                  gated)
                 ;; the committed value the settlement is written on: the
                 ;; program-change fast path proves no commit came between
@@ -5196,14 +5197,16 @@
                                                        gated)))
                 outcome (:outcome settlement)
                 prepared (:prepared settlement)
-                last-prepared (peek prepared)]
+                last-prepared (peek prepared)
+                saved #(with-saved % (into {} (map (juxt :seon.cluster.eval/ordinal :seon.turn.loop/admitted-form)) gated)
+                         (:saved settlement))]
             (if-let [refusal (:refused-outcome settlement)]
               ;; a refused settlement keeps every evaluated value (OQ1): the
               ;; live definitions stay private to this fork, nothing restores
               ;; A refused refusal settlement (a concurrent driver closed the
               ;; run first) committed nothing: the report carries no basis.
-              (cond-> (report :error (count gated) refusal)
-                (:db-after outcome) (assoc :seon.turn.loop/basis (:db-after outcome)))
+              (saved (cond-> (report :error (count gated) refusal)
+                       (:db-after outcome) (assoc :seon.turn.loop/basis (:db-after outcome))))
               (let [installations
                     ;; the batch's accepted entities with the Vars its forms
                     ;; bound: what this settlement committed
@@ -5238,8 +5241,8 @@
                         (:seon.turn.loop/undisposed? last-prepared)
                         ;; a folded close (close-folded-call) closed it in the settlement
                         (::closed-tx (db/pull (:db-after outcome) [::closed-tx] [::id run-id])))
-                  (applied (report :closed (count gated)) outcome)
-                  (applied (report :released (count gated)) outcome))))))))))
+                  (saved (applied (report :closed (count gated)) outcome))
+                  (saved (applied (report :released (count gated)) outcome)))))))))))
 (defn- close-turn
   {:malli/schema [:=> [:cat [:map
                             [:seon.turn.loop/cluster :seon.turn.loop/cluster]

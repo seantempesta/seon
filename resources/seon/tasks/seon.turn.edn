@@ -95,8 +95,8 @@
              :evidence #{"docs/research/agent-platform/landing/register-anywhere-diagnosis-2026-09-27.md"}}
  #:seon.task{:name "the-unbound-check-walks-the-live-value-without-a-bound"
              :kind :function
-             :intent "unbound-value? walks the evaluation's live value with (tree-seq coll? seq value) after disarm: no bound, no deadline, no interrupt, and it runs twice per form (problems/form-problem and evaluation-facts). An evaluation returning (range) realized 115.9 M elements (10.2 GB, 93.7% of heap) and killed default pid 63809 with OutOfMemoryError; a finite (map f (range 200000)) is realized in full although 32 are shown. Answer 'contains SCI's unbound marker' from admission's one bounded walk inside the arm (its object-node leaves) and delete the live-value walk at both callers. Class regression: an ordinary run of (range) settles and old gen stays flat."
-             :must-read #{seon.turn/unbound-value? seon.problems/form-problem seon.turn/evaluation-facts seon.sci.admit/admit}
+             :intent "unbound-value? walks the evaluation's live value with (tree-seq coll? seq value) after disarm: no bound, no deadline, no interrupt, and it ran twice per form (in the since-deleted problem routing and in evaluation-facts). An evaluation returning (range) realized 115.9 M elements (10.2 GB, 93.7% of heap) and killed default pid 63809 with OutOfMemoryError; a finite (map f (range 200000)) is realized in full although 32 are shown. Answer 'contains SCI's unbound marker' from admission's one bounded walk inside the arm (its object-node leaves) and delete the live-value walk at both callers. Class regression: an ordinary run of (range) settles and old gen stays flat."
+             :must-read #{seon.turn/unbound-value? seon.turn/evaluation-facts seon.sci.admit/admit}
              :evidence #{"docs/research/agent-platform/landing/oom-63809-2026-09-27.md"}}
  #:seon.task{:name "a-refused-refusal-settlement-throws-past-the-reply"
              :kind :function

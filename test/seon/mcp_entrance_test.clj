@@ -4,14 +4,17 @@
   context reads."
   (:require [clojure.core.async :as async]
             [clojure.data.json :as json]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
-            [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
+            [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
+            [seon.fault :as fault]
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.operator.runtime :refer [running-instances]]
+            [seon.render.transcript :as transcript]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
 
@@ -29,6 +32,18 @@
                :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent] [?run :seon.turn/id ?id ?tx]]
              database agent-id)
        (sort-by second) last first))
+
+(defn- stored-responses
+  "Each evaluation of run `run` as the agent's next context reads it, read back
+  from the connection's current value."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id :seon.turn/id] [:vector [:maybe :string]]]}
+  [connection agent-id run]
+  (let [database (db/db connection)]
+    (mapv :seon.render.history/printed-value
+          (transcript/history-entries
+           {:seon.db/db database :seon.agent/id agent-id
+            :seon.sci.admit/caps (config/result-caps (config/effective database (:seon.cluster/name (support/execution-handle nil))))
+            :seon.render.transcript/selected-run-id run}))))
 
 (deftest tools-derive-each-input-schema-from-its-argument-schema
   (let [tools (json/read-str (mcp/tools))
@@ -57,9 +72,7 @@
      (let [result (answer "eval_clj" {"code" "(+ 1 2) (str \"a\" \"b\")" "agent" agent-id "cluster" running})
            run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get result "isError")))
-       (is (= (mapv :seon.repl/response
-                    (agent/run-observation {:seon.turn/id run :seon.db/db (db/db connection)} agent-id
-                                           (:seon.cluster/name (support/execution-handle nil))))
+       (is (= (stored-responses connection agent-id run)
               (mapv #(get % "text") (get result "content")))
            "one text per evaluation, exactly the agent's own response")))))
 
@@ -73,10 +86,76 @@
            run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get jvm "isError")))
        (is (false? (get dug "isError")))
-       (is (= ["4"] (mapv :seon.eval/shown
-                          (agent/run-observation {:seon.turn/id run :seon.db/db (db/db connection)} agent-id
-                                                 (:seon.cluster/name (support/execution-handle nil)))))
+       (is (= 4 (:seon.repl/value (support/reply (first (stored-responses connection agent-id run)))))
            "the JVM value is bound under its handle in the agent's own context")))))
+
+(defn- core-fault!
+  "Record one core fault on `connection`'s branch through the production writer."
+  {:malli/schema [:=> [:cat :seon.db/connection :string] :seon.fault/recorded]}
+  [connection message]
+  (fault/fault! (env/environment {:seon.boot/cluster-name (:seon.cluster/name (support/execution-handle nil))
+                                  :seon.db/connection connection
+                                  :seon.sci.admit/caps (config/result-caps config/defaults)})
+                (ex-info message {})
+                {:seon.error/layer ::reply :seon.error/operation `core-fault! :seon.db.process/id "mcp-entrance-test"}))
+
+(deftest ^{:seon/tasks #{'seon.mcp/observation-reads-the-run-twice}
+           :seon.test/long "Ten MCP SCI runs on one hosted agent, each one settlement; measured in the s5a-reply landing."
+           :seon.test/long-ms 30000}
+  an-sci-reply-is-what-the-run-saved
+  ;; The reply is printed from the receipts the settlement saved, never by
+  ;; reading the run back; it reads as the stored run reads.
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [agent-ns (str "my.agents." agent-id)]
+       ;; each row: the code, the reply key its last evaluation is about, and
+       ;; what happens before it runs
+       (doseq [[label code about before]
+               [["ordinary" "(+ 1 2)\n[nil false \"\"]" :seon.repl/value]
+                ["def keeps its note" "(def held-value 7)" :seon.repl/note]
+                ["declared renderer" "#'clojure.core/inc" :seon.repl/value]
+                ["in-ns" (str "(in-ns 'scratch.held-reply)\n(in-ns '" agent-ns ")") :seon.repl/ns]
+                ["set! print-length" "(set! *print-length* 2)\n(range 5)" :seon.repl/value]
+                ["error" "(/ 1 0)\n:after" :seon.repl/value]
+                ["completed disposition" "(my.turn/complete {:my.turn/result \"done\"})" :seon.repl/value]
+                ["faulted" "(+ 2 2)" :seon.repl/errors #(core-fault! connection "raised before the faulted row")]
+                ["defn" "(defn held-inc \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                 :seon.repl/value]]]
+         (testing label
+           (when before (before))
+           (let [texts (mapv #(get % "text") (get (answer "eval_clj" {"code" code "agent" agent-id "cluster" running})
+                                                  "content"))
+                 saved (stored-responses connection agent-id (latest-run-in (db/db connection) agent-id))]
+             (is (seq saved) "the run saved its evaluations")
+             (is (= saved (subvec texts 0 (min (count texts) (count saved))))
+                 "each evaluation's reply is its saved response")
+             (is (contains? (support/reply (nth texts (dec (count saved)))) about)
+                 "the row's evaluation answers the key it is about"))))
+       (testing "a settlement the writer refused saved no receipt: the reply is its refusal alone"
+         ;; the form closes its own open run, so the settlement's receipts
+         ;; refuse and the refusal's guarded receipts are skipped at the writer
+         (let [code (str
+                     ;; a durable write opens the run first
+                     (pr-str (list 'seon.db/transact! (list 'quote {:tx-data [(support/task-row "abcdef123456" "opens the run")]})))
+                     "\n(let [run (seon.db/q '[:find ?run . :in $ ?id :where [?a :seon.agent/id ?id]"
+                     " [?run :seon.turn/agent ?a] (not [?run :seon.turn/closed-tx _])] (seon.db/db) \"" agent-id "\")]"
+                     " (seon.db/transact! {:tx-data [{:db/id run :seon.turn/closed-tx \"datomic.tx\"}]}) run)")
+               result (answer "eval_clj" {"code" code "agent" agent-id "cluster" running})
+               saved (stored-responses connection agent-id (latest-run-in (db/db connection) agent-id))]
+           (is (every? nil? saved) "the run stored no terminal receipt")
+           (is (true? (get result "isError")))
+           (is (= 1 (count (get result "content"))) "only the refusal is answered, never an unsaved value")))))))
+
+(deftest a-jvm-reply-keeps-its-duration-after-an-earlier-run
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (answer "eval_clj" {"code" "(+ 1 1)" "agent" agent-id "cluster" running "mode" "jvm"})
+     (let [result (answer "eval_clj" {"code" "(+ 1 2)" "agent" agent-id "cluster" running "mode" "jvm"})
+           data (support/reply (get-in result ["content" 0 "text"]))]
+       (is (false? (get result "isError")))
+       (is (= 3 (:seon.repl/value data)))
+       (is (contains? data :seon.repl/ms)
+           "a second JVM run's reply carries its time, as the first one's does")))))
 
 (deftest only-a-run-that-changed-loaded-code-signals-pages
   (let [signal (fn [body]

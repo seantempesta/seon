@@ -1,11 +1,10 @@
 (ns seon.cluster.resume-artifact-routing-test
-  "X2 keeps interrupted process history out of namespace-owner routing."
+  "X2 keeps interrupted process history out of a routed settlement."
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.cluster.message :as my.message]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
-            [seon.problems :as problems]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -59,13 +58,6 @@
                     :seon.cluster.eval/source "prefix-def"
                     :seon.cluster.eval/ns [:seon.ns/name 'my.gen.alpha]
                     :seon.cluster.eval/at now}])
-     (is (nil?
-          (problems/form-problem
-           @connection
-           {:seon.turn/id run-id
-            :seon.cluster.eval/ordinal 1
-            :seon.sci.eval/evaluation failed}))
-         "one X2 clause prevents process-history breakage becoming owner blame")
      (test-support/transacted! connection
                              [[:db/add [:seon.cluster.eval/id "resume-receipt-1"]
                                :seon.eval/shown

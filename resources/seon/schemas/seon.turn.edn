@@ -123,9 +123,6 @@
              [:seon.sci.eval/evaluation :seon.turn.loop/evaluation]
              [:seon.turn.loop/settlement-evaluation
               :seon.turn.loop/evaluation]
-             [:seon.problems/form-problem
-              {:optional true}
-              :seon.problems/form-problem]
              [:my.turn/value {:optional true} :my.turn/value]],
             :system-request
             [:map

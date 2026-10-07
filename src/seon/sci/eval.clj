@@ -3719,9 +3719,8 @@
   produces one comes through a constructor that fills its required keys. The
   arm this replaced hand-built four keys of that value inside the loop, so the
   submission backstop's own report — a run cut when its evaluation reached its
-  time limit — arrived at `seon.problems/form-problem` missing
-  `:seon.cluster.eval/ns`, `:seon.sci.eval/ending-ns` and
-  `:seon.print/options`. The durable evidence of the interruption
+  time limit — arrived at its settlement missing `:seon.cluster.eval/ns`,
+  `:seon.sci.eval/ending-ns` and `:seon.print/options`. The durable evidence of the interruption
   became a contract violation from the recorder: the diagnostic lied about
   what happened, which is the one thing a diagnostic may never do.
 

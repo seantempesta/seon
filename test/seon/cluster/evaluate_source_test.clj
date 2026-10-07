@@ -102,30 +102,32 @@
                                                          :seon.cluster.reply/text "1"))]
               (is (= :seon.agent/segmenter (:seon.error/member refused)))
               (is (= before (runs)))))
-          (testing "the answer carries the value its settlement left; the MCP observation reads it there"
+          (testing "the answer carries the value its settlement left and the receipts it saved"
             ;; eval-path cut 1 (audit M4, task branch-eval-answers-no-events):
             ;; the bridge re-read the connection and could answer no events.
-            (let [observe #(agent/run-observation % agent-id cluster-name)
-                  shown-of #(mapv (fn [e] (or (:seon.eval/shown e) (:seon.cluster.eval/error e))) (observe %))
+            (let [saved #(mapv :seon.sci.eval/evaluation (:seon.turn.loop/evaluated-sources %))
                   value (code "(inc 1)")
                   failed (code "(throw (ex-info \"a form's own error\" {}))")]
               (is (some? (:seon.db/db value)))
-              (is (= ["2"] (shown-of value)) "a successful value, from the settlement's own value")
-              (is (= [0] (mapv :seon.cluster.eval/ordinal (observe value))))
-              (is (some? (:seon.cluster.eval/error (first (observe failed))))
-                  "a returned error value is its run's observation")
-              (is (string? (:seon.repl/response (first (observe failed)))))
-              (support/transacted! connection (support/agent-tx @connection (str agent-id "-later")))
-              (is (< (db/basis-t (:seon.db/db value)) (db/basis-t (db/db connection)))
-                  "a later commit moves the connection, not the reply's basis")
-              (is (= ["2"] (shown-of value)) "and the reply's observation is unchanged")))
-          (testing "a refused settlement answers its run's observation on the refusal's own value"
+              (is (= ["2"] (mapv :seon.eval/shown (saved value))) "a successful value, as its settlement saved it")
+              (is (= [0] (mapv :seon.cluster.eval/ordinal (saved value))))
+              (is (= ["(inc 1)"] (mapv (comp :seon.cluster.eval/source :seon.turn.loop/admitted-form)
+                                       (:seon.turn.loop/evaluated-sources value)))
+                  "each saved receipt travels with the form it settled")
+              (is (some? (:seon.cluster.eval/error (first (saved failed))))
+                  "a returned error value is its run's saved receipt")
+              (is (= (shown connection value) (mapv :seon.eval/shown (saved value)))
+                  "what the answer holds is what the run stored")))
+          (testing "a refused settlement answers what its refusal saved"
             (code "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
             (code "(defn refused-caller \"Call.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
-            (let [result (code (str "(ns-unmap '" (str "my.agents." agent-id) " 'refused-helper)"))
-                  observed (agent/run-observation result agent-id cluster-name)]
+            (let [result (code (str "(ns-unmap '" (str "my.agents." agent-id) " 'refused-helper)"))]
               (is (some? (:seon.db/db result)))
-              (is (re-find #"surviving referrers" (str (:seon.cluster.eval/error (first observed)))))))
+              (is (re-find #"surviving referrers"
+                           (str (:seon.cluster.eval/error (:seon.sci.eval/evaluation (first (:seon.turn.loop/evaluated-sources result)))))))
+              (is (= (shown connection result)
+                     (mapv (comp :seon.eval/shown :seon.sci.eval/evaluation) (:seon.turn.loop/evaluated-sources result)))
+                  "the refusal's saved receipts are the stored ones")))
           (testing "a refused multi-form settlement answers its refusal beside every evaluated value (task a-refused-multi-form-settlement-returns-nothing)"
             ;; WANTED: the direct caller of an opened run keeps the refusal;
             ;; each form's value and the refusal's diagnostic are its receipts.
