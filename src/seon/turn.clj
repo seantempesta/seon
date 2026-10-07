@@ -3011,11 +3011,16 @@
   forgiving stage in `mode` (`seon.sci.forgive/segments`): each form's one
   semantic read happens when it is evaluated, after the forms before it ran.
   An unreadable rest is one more source, whose read answers its error once;
-  text with no form is the no-forms refusal."
-  {:malli/schema [:=> [:cat :seon.cluster.reply/text :seon.ns/name :seon.batch/mode :string]
+  text over `max-source` characters is read no further, as one source whose
+  read answers the reader's bound; text with no form is the no-forms refusal."
+  {:malli/schema [:=> [:cat :seon.cluster.reply/text :seon.ns/name :seon.batch/mode
+                       :seon.config.eval.result/max-source :string]
                   [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
-  [text namespace-name mode no-form-message]
-  (let [{segments :seon.batch/segments unread :seon.batch/unread} (forgive/segments text mode)
+  [text namespace-name mode max-source no-form-message]
+  (let [{segments :seon.batch/segments unread :seon.batch/unread}
+        (if (> (count text) max-source)
+          {:seon.batch/segments [] :seon.batch/unread text}
+          (forgive/segments text mode))
         sources (cond-> (mapv (fn [{source :seon.batch/source c :seon.batch/comment}]
                                 (cond-> {:seon.cluster.eval/source source :seon.ns/name namespace-name}
                                   c (assoc :seon.cluster.eval/comment c)))
@@ -3038,8 +3043,8 @@
          [:namespace-name :seon.ns/name]
          [:max-source :seon.config.eval.result/max-source]]
     [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
-  [text namespace-name _max-source]
-  (segmented-sources text namespace-name :reply
+  [text namespace-name max-source]
+  (segmented-sources text namespace-name :reply max-source
                      (if (str/blank? text)
                        "Your reply began with a response; send a form."
                        "Your reply had no form; only comments/prose. Send a form.")))
@@ -3054,8 +3059,8 @@
          [:namespace-name :seon.ns/name]
          [:max-source :seon.config.eval.result/max-source]]
     [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
-  [text namespace-name _max-source]
-  (segmented-sources text namespace-name :code "Your evaluation had no form. Send a form."))
+  [text namespace-name max-source]
+  (segmented-sources text namespace-name :code max-source "Your evaluation had no form. Send a form."))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pure turn
