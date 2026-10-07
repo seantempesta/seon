@@ -1,0 +1,12 @@
+Review commit 3071fef19 in /Users/sean/src/seon (lane growth: seon.error.refusal post-order walk folds a value met again by identity once; new test test/seon/error/shared_data_test.clj). Read docs/research/agent-platform/2026-10-07/lane-rules.md first and follow it. Read `git show 3071fef19`, docs/research/agent-platform/2026-10-07/growth/growth-notes.md, AGENTS.md "Failure and execution", .agents/skills/data-oriented-clojure/SKILL.md §3 and §12, .agents/skills/clojure-testing/SKILL.md.
+
+The change is NOT installed on default (default runs 42e569d9d): evaluate the committed code only on your OWN agent's SCI branch (MCP eval_clj, agent = your lane name, a scratch namespace), never in default's JVM.
+
+Verify / falsify:
+1. Result equivalence: does folding by identity change any error's data (identity vs equality: two equal-but-distinct values, a value that appears under different parents, records, metadata, lazy seqs realized once, mutable Java objects)? Is the "same result" claim true for every input the contract admits? Label EQUIVALENT or BEHAVIOR CHANGE with a case.
+2. Cost: is the walk now proportional to distinct data? Any new memory held (identity map lifetime), any super-linear path left (wide 10k-key maps, 300 problems x 10k-deep shared value, cycles via mutable objects)? Measure parent vs change on the same probe (ms, allocated bytes).
+3. The growth notes' other claims: item 2 (the StackOverflow faults predate fixes 77c9f5459/7a6878374) and item 4 (cause chain linear): spot-check one each.
+4. Test: one behavior, data assertions, right entrance, deterministic, within its bound?
+5. Rules: contracts, docstring 1-3 lines without measurements, no new atoms (is the identity map a local in a fold, or state?).
+
+FIX what you verify (claim files with `bin/lane claim REVIEWER PATHS`; if held by another lane put the patch in your notes). Commit through `bin/lane commit REVIEWER -m "..." --test NS... PATHS` naming reaching tests. Write docs/research/agent-platform/2026-10-07/growth/<your-lane>-notes.md and commit it. Release claims. No model/provider calls; never stop/reset default.
