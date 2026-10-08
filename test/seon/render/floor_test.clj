@@ -3,6 +3,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.ai.tokens :as tokens]
             [seon.render.value :as render.value]))
 
 (def ^:private throwable-text
@@ -142,3 +143,19 @@
                 {:seon.render.data/path (lazy-seq (throw (ex-info (apply str (repeat 100000 \x)) {})))}}]
       (is (< (count (render.value/text unit)) 8300))
       (is (< (count (pr-str (render.value/html unit))) 9000)))))
+
+(deftest one-printer-budget-includes-diagnostics
+  ;; PR-01: the value, its diagnostic and its cuts share the one budget; a
+  ;; refused unit no longer prints the value and its diagnostic under two.
+  (let [budget (tokens/estimate-chars 1000)
+        unit {:seon.render/value {:probe/rows (vec (range 5000))
+                                  :probe/text (apply str (repeat 20000 \y))}}
+        text (render.value/text unit)]
+    (is (str/includes? text ":rows") "the value stands")
+    (is (= 1 (count (re-seq #":seon.render.value/failure" text))) "one diagnostic")
+    (is (<= (count text) budget) "value and diagnostic within the core's one budget"))
+  (testing "the projection-free terminal charges its diagnostic first"
+    (let [projection (#'render.value/plain-projection (vec (range 100000))
+                                                      (ex-info "floor failed" {}) [])]
+      (is (<= (count (:seon.render.value/text projection)) (tokens/estimate-chars 1000)))
+      (is (str/includes? (:seon.render.value/text projection) "floor failed")))))

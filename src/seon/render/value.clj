@@ -234,7 +234,8 @@
 
 (defn core-text
   "`value` printed by the value printer's core: its structural selection under
-  a fixed budget, with no render, database or config. A Throwable is shown as
+  a fixed budget, less `reserve` characters another part of the same unit
+  already spent, with no render, database or config. A Throwable is shown as
   its cause chain (`shown-chain`). Total: if the selection itself fails, the
   projection-free text of the value, and if that fails, its class and
   identity.
@@ -245,8 +246,10 @@
     budget is fixed.
   - A Throwable whose `getCause`, `getMessage` or `getStackTrace` throws
     prints its class and the failure, never the throw."
-  {:malli/schema [:=> [:cat :seon.schema/value] :string]}
-  [value]
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] :string]
+                  [:=> [:cat :seon.schema/value :int] :string]]}
+  ([value] (core-text value 0))
+  ([value reserve]
   (let [throwable? (instance? Throwable value)
         last-resort #(try (if throwable? (throwable-text value) (bounded-text value))
                           (catch Throwable _ (opaque value)))]
@@ -260,9 +263,9 @@
                             :seon.render.value/root 'seon.render.value/core
                             :seon.render/profile core-profile
                             :seon.render.value/options {:seon.render.value/structural? true}}
-                           :seon.render/ai))]
+                           :seon.render/ai reserve))]
         (if (string? text) text (last-resort)))
-      (catch Throwable _ (last-resort)))))
+      (catch Throwable _ (last-resort))))))
 
 (defn core-html
   "`value` printed by the core (`core-text`) as preformatted hiccup."
@@ -299,7 +302,9 @@
   (let [shown (try (render-ai unit) (catch Throwable failure failure))]
     (if (string? shown)
       shown
-      (str (core-text (:seon.render/value unit)) "\n" (::text (unavailable unit shown))))))
+      ;; One budget: the diagnostic's text is charged before the value's.
+      (let [diagnostic (::text (unavailable unit shown))]
+        (str (core-text (:seon.render/value unit) (inc (count diagnostic))) "\n" diagnostic)))))
 
 (defn html
   "The value printer's TOTAL HTML entry: `unit` through `render-html`, or,
@@ -1370,7 +1375,9 @@
                (and (pos? offset) (#{:map :coll} (:kind root)))
                (-> (assoc :base offset) (update :pending #(seq (drop offset %))))
                true (as-> node (assoc node :flat (flat-width node))))
-        state {:nodes {0 (assoc root :level 0)} :queue (sorted-map) :seq 0 :next-id 1 :extras 0 :reserve 0}
+        ;; What the unit's other parts already spent of the one budget.
+        state {:nodes {0 (assoc root :level 0)} :queue (sorted-map) :seq 0 :next-id 1 :extras 0
+               :reserve (:reserve context 0)}
         state (settle {:nodes {}} state 0 (:width context))
         ;; The root is mandatory.
         root-charge (charge state)]
@@ -1544,13 +1551,16 @@
 (defn- plain-projection
   "The value printer's last answer: `value` as plain bounded Clojure text, with
   the diagnostic naming the failure that stopped the structural selection,
-  both projection-free (`bounded-text`): this terminal never re-enters selection."
+  both projection-free (`bounded-text`) under the core's one budget, the
+  diagnostic charged first: this terminal never re-enters selection."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.error/throwable :seon.render.data/path]
                   :seon.render.value/projection]}
   [value failure path]
-  (let [value-text (bounded-text value 8192)
+  (let [budget (tokens/estimate-chars (:seon.render.profile/token-budget core-profile))
         diagnostic (bounded-text [{:seon.render.data/path path
-                                   :seon.render.value/failure (compact-failure failure)}])
+                                   :seon.render.value/failure (compact-failure failure)}]
+                                 budget)
+        value-text (bounded-text value (max 1 (- budget (count diagnostic) 1)))
         text (str value-text "\n" diagnostic)]
     {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
      :seon.render.value/options (print/default-options)
@@ -1564,11 +1574,17 @@
 
 (defn- project
   "The projection `prepare` answers, for a unit that may carry no database:
-  the core prints with none, and a database present is read, never supplied."
-  {:malli/schema [:=> [:cat :seon.render.value/unit :seon.render/output]
-                  [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
-                   :seon.render.value/insufficient-floor-budget-error]]}
-  [unit output]
+  the core prints with none, and a database present is read, never supplied.
+  `reserve` is the characters of the one budget the unit's diagnostics take."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.render.value/unit :seon.render/output]
+                   [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+                    :seon.render.value/insufficient-floor-budget-error]]
+                  [:=> [:cat :seon.render.value/unit :seon.render/output :int]
+                   [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
+                    :seon.render.value/insufficient-floor-budget-error]]]}
+  ([unit output] (project unit output 0))
+  ([unit output reserve]
    (let [path (vec (get-in unit [:seon.render.data/cursor
                                 :seon.render.data/path] []))]
      (try
@@ -1602,6 +1618,7 @@
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
                       :width (:seon.print/width options)
                       :budget (tokens/estimate-chars (:seon.render.profile/token-budget profile))
+                      :reserve reserve
                       :max-children (cond-> (:seon.render.profile/max-children profile)
                                       (int? length) (min length))
                       :max-depth (cond-> (:seon.render.profile/max-depth profile)
@@ -1624,9 +1641,20 @@
          ;; The selection answers its node state or its budget refusal.
          (if-not (:nodes state)
            state
+       (let [failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
+             ;; Shown once, beside the value, each failure with its path as
+             ;; data, inside the value's one budget.
+             diagnostics (mapv (fn [node] {:seon.render.data/path (:path node)
+                                           :seon.render.value/failure (:diagnostic node)})
+                               failed)
+             shown-diagnostics (when (seq diagnostics) (diagnostics-shown diagnostics))
+             needed (if shown-diagnostics (inc (count (::text shown-diagnostics))) 0)]
+         (if (and (< reserve needed) (not full?))
+           ;; Only the root is offered a render, so selecting again under
+           ;; the smaller budget meets the same failures.
+           (project unit output needed)
        (let [state (update state :nodes fold-collapsed-tail)
              cut? (boolean (some more? (vals (:nodes state))))
-             failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
              ;; Render data's cuts name no handle (`select-nodes`).
              context (assoc context :requery (:requery state))
              selected (cond-> (tree (:nodes state) context)
@@ -1636,13 +1664,7 @@
              ;; NO LEGEND (owner 2026-09-27): each cut carries the form that
              ;; reads its rest, which says what `…N` means at every cut.
              text (:seon.print/text emitted)
-             limit (charge state)
-             ;; Shown once, beside the value and outside its budget, each
-             ;; failure with its path as data.
-             diagnostics (mapv (fn [node] {:seon.render.data/path (:path node)
-                                           :seon.render.value/failure (:diagnostic node)})
-                               failed)
-             shown-diagnostics (when (seq diagnostics) (diagnostics-shown diagnostics))]
+             limit (- (charge state) (:reserve state))]
          ;; The charge is the laid-out length (design §3d), declared render
          ;; text included; a longer text is the allocator's defect, never a
          ;; second attempt.
@@ -1673,7 +1695,7 @@
            (assoc :seon.render.call/selected-producer
                   (:seon.render.call/selected-producer selected))
            (:seon.render.call/source-output? selected)
-           (assoc :seon.render.call/source-output? true)))))))
+           (assoc :seon.render.call/source-output? true)))))))))
        (catch Throwable failure
          (if (get-in unit [:seon.render.value/options :seon.render.value/structural?])
            (plain-projection (:seon.render/value unit) failure path)
@@ -1682,10 +1704,12 @@
            ;; the value keeps its cuts and its whole-size estimate (LARGE
            ;; VALUE reads it). The failure is the one diagnostic beside it;
            ;; only a value printer that fails structurally too prints plain text.
-           (let [projection (project (assoc-in unit [:seon.render.value/options
+           (let [entry {:seon.render.data/path path :seon.render.value/failure failure}
+                 {shown-text ::text shown-html ::html} (diagnostics-shown [entry])
+                 ;; One budget: the failure's text is charged before the value's.
+                 projection (project (assoc-in unit [:seon.render.value/options
                                                      :seon.render.value/structural?] true)
-                                     output)
-                 entry {:seon.render.data/path path :seon.render.value/failure failure}]
+                                     output (+ reserve (inc (count shown-text))))]
              ;; A structural projection carries diagnostics only when the
              ;; value printer itself failed (it runs no declared render): print plain
              ;; text once, with the value printer's own distinct failures recorded.
@@ -1695,14 +1719,13 @@
                        :seon.render.value/diagnostics into
                        (remove #(= (ex-message (:seon.render.value/failure %)) (ex-message failure)))
                        (:seon.render.value/diagnostics projection))
-               (let [{shown-text ::text shown-html ::html} (diagnostics-shown [entry])]
-                 (-> projection
-                     (assoc :seon.render.value/value-text
-                            (or (:seon.render.value/value-text projection)
-                                (:seon.render.value/text projection)))
-                     (update :seon.render.value/text str "\n" shown-text)
-                     (update :seon.render.value/html conj shown-html)
-                     (update :seon.render.value/diagnostics (fnil conj []) entry))))))))))
+               (-> projection
+                   (assoc :seon.render.value/value-text
+                          (or (:seon.render.value/value-text projection)
+                              (:seon.render.value/text projection)))
+                   (update :seon.render.value/text str "\n" shown-text)
+                   (update :seon.render.value/html conj shown-html)
+                   (update :seon.render.value/diagnostics (fnil conj []) entry))))))))))
 
 (defn prepare
   "Select the value under its render profile (design one-render-path §3) and
