@@ -59,4 +59,8 @@
  #:seon.task{:name "a-restart-prunes-the-program-classes-a-starting-check-uses"
              :kind :function
              :intent "On 2026-10-09 a `bin/seon start --head` that filled classes for a changed dependency (reference-code/sci) pruned a program-classes directory (target/dev-program-classes/8c25a8da…) while a `bin/seon check` was starting from it; the check's throwaway JVM failed with NoSuchFileException on instaparse/gll$sub_sequence.class and refused the lane commit (retry passed). The prune must never delete classes a starting or live check holds (`seon.operator/prune-program-classes!` and the hold markers of LR-SHARED)."
-             :must-read #{seon.operator/check!}}]
+             :must-read #{seon.operator/check!}}
+ #:seon.task{:name "one-test-check-takes-74-seconds"
+             :kind :function
+             :intent "`seon.operator/check!` (`bin/seon check --test NS/NAME`) took 74-95 s per run in fan-out 9 (2026-10-09, 995b01c2d) for a handful of named tests whose bodies run in milliseconds; a throwaway JVM is ready in about 10 s with cached classes (`bin/seon start --head` ready-ms 10158). The cost must follow the tests requested: a check of one test costs JVM readiness plus loading the namespaces that test reaches plus the test, not whole-program publication, adoption rehearsal, full lint or whole-program load. Measure each phase of `seon.operator/check!` first (lane platform-step-card, docs/seon/schedule/cards/PLATFORM-STEP.md), then remove or narrow every phase not proportional to the requested tests. The same path serves the platform test step (an agent's host-bound change runs its affected tests in a throwaway JVM), so its floor sets how fast platform work can iterate."
+             :must-read #{seon.operator/check! seon.operator/operator-check-bound-ms}}]
