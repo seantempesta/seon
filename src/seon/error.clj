@@ -843,8 +843,13 @@
         schema-type (m/type schema)
         child (when (#{:set :vector :sequential} schema-type)
                 (first (m/children schema)))
-        value (:value problem)]
-    (when (and child (coll? value))
+        value (:value problem)
+        matches-kind? (case schema-type
+                        :sequential (sequential? value)
+                        :vector (vector? value)
+                        :set (set? value)
+                        false)]
+    (when (and child matches-kind? (coll? value))
       (when-let [[member]
                  (reduce (fn [_ member]
                            (when-not (m/validate child member)
@@ -878,13 +883,16 @@
                              (m/children (m/deref-all (:schema problem)))))
         problem (cond-> problem entry-schema (assoc :schema entry-schema))
         schema-type (m/type (m/deref-all (:schema problem)))
+        expected-form (if (#{:= :enum} schema-type)
+                        (into [schema-type] (m/children (m/deref-all (:schema problem))))
+                        (m/form (:schema problem)))
         described-problem (cond-> problem missing? (dissoc :type))
         message (or (me/error-message described-problem {:unknown false})
                     "the declared schema")
         expected (schema-expectation described-problem)]
     (cond-> {:seon.error/path (vec path)
      :seon.error/argument argument
-     :seon.error/expected (m/form (:schema problem))
+     :seon.error/expected expected-form
      :seon.error/expected-description
      (cond
        missing? (str "the required key " (pr-str (last path)) " with " expected)
