@@ -3061,7 +3061,7 @@
 
 (deftest ^{:seon/tasks #{'seon.db/the-missing-connection-refusal-has-no-fix-key}}
   a-missing-connection-refusal-carries-its-fix-as-data
-  (let [refusal (#'db/missing-connection-error "a database value")]
-    (is (str/includes? (:seon.error/fix refusal) "seon.cluster.boot/connection"))
-    (is (not (str/includes? (:seon.error/message refusal) "seon.cluster.boot/connection"))
+  (let [refusal (#'seon.db/missing-connection-error "a database value")]
+    (is (clojure.string/includes? (str (:seon.error/fix refusal)) "seon.cluster.boot/connection"))
+    (is (not (clojure.string/includes? (:seon.error/message refusal) "seon.cluster.boot/connection"))
         "the message says what was refused; the fix is its own key")))

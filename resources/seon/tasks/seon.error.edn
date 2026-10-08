@@ -102,7 +102,7 @@
             #{seon.error/resolution seon.task/task-resolution}}
  #:seon.task{:name "an-unresolved-symbol-shows-an-empty-neighbour-list"
              :kind :function
-             :intent "(undefined-sym 1) answers `:seon.error/in-namespace` {user []} (default 2026-10-08): reply-value adds the key whenever a name is missing, even with no near names. Done when the key is absent for an empty list, asserted through MCP."
+             :intent "`seon.error/reply-value` adds `:seon.error/in-namespace` whenever a name is missing, even when its namespace declares no near names: (`seon.error/reply-value` database {:seon.program/not-found 'nosuch.zz/undefined-sym}) answers {:seon.error/in-namespace {nosuch.zz []}} (default 97f2b2ac3, 2026-10-09). Done when `:seon.error/in-namespace` is absent for an empty name list and still present with its names when the namespace declares near names (seon.db/pul answers seon.db's pull first)."
              :must-read #{seon.error/reply-value}
              :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
  #:seon.task{:name "fault-window-derives-the-error-selector-when-no-error-occurred"

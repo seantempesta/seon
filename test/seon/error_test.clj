@@ -1687,3 +1687,14 @@
                                            :seon.instrument.arity/max 2}}})]
       (is (= '([a b]) (:seon.instrument/arglists reply)))
       (is (not (contains? reply :seon.instrument/declared-arities))))))
+
+(deftest ^{:seon/tasks #{'seon.error/an-unresolved-symbol-shows-an-empty-neighbour-list}}
+  a-missing-name-with-no-near-names-has-no-namespace-list
+  (let [database (seon.db/db)]
+    (is (not (contains? (seon.error/reply-value database {:seon.error/message "Could not resolve symbol: nosuch.zz/undefined-sym"
+                                                          :seon.program/not-found 'nosuch.zz/undefined-sym})
+                        :seon.error/in-namespace))
+        "an empty name list is no key")
+    (is (= 'pull (first (get-in (seon.error/reply-value database {:seon.error/message "Could not resolve symbol: seon.db/pul"
+                                                                  :seon.program/not-found 'seon.db/pul})
+                                [:seon.error/in-namespace 'seon.db]))))))
