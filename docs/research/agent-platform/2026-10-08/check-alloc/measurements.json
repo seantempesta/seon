@@ -1,0 +1,111 @@
+{
+  "small": {
+    "args": {
+      "agent": "check-alloc-astra",
+      "cluster": "default",
+      "mode": "sci",
+      "code": "(my.test/check {:seon.test/changed ['seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol 'seon.id-test/identity-is-a-function-of-the-values-structure]})"
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/eca7733f5f449, :ms 824, :value {:seon.test.run/id \"eef5a73d7356\",\n :seon.test/passed? true,\n :seon.test/elapsed-ms 821.609458,\n :seon.render.test/test 2,\n :seon.render.test/pass 35,\n :seon.render.test/fail 0,\n :seon.render.test/error 0}}"
+        },
+        {
+          "type": "text",
+          "text": "{:seon.turn.loop/tests\n   {:seon.turn/id \"8156608f73a8\",\n    :seon.source/commit-id #uuid \"6ac77dd3-3dd8-5e3d-8e54-2af4f0f90228\",\n    :seon.turn.loop/reaching\n      {:seon.test/passed? false,\n       :seon.turn.loop/red\n         [bt.slug-test/slug-lowers\n          live.text-test/slug-joins-lower-case-words]}}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "defn": {
+    "args": {
+      "agent": "check-alloc-astra",
+      "cluster": "default",
+      "mode": "sci",
+      "code": "(in-ns 'scratch.check-alloc-astra)\n(defn bump \"Return the next integer.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e4899c15110be, :ns scratch.check-alloc-astra, :ms 0, :value #namespace[scratch.check-alloc-astra]}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/eaa40bd221514, :ms 1, :value {:seon.render.var/symbol scratch.check-alloc-astra/bump}}"
+        },
+        {
+          "type": "text",
+          "text": "{:seon.turn.loop/tests\n   {:seon.turn/id \"68f096073969\",\n    :seon.source/commit-id #uuid \"6ac77de0-537d-5f01-9b05-7888312f15b4\",\n    :seon.turn.loop/reaching\n      {:seon.test/passed? false,\n       :seon.turn.loop/red\n         [bt.slug-test/slug-lowers\n          live.text-test/slug-joins-lower-case-words]}}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "smallDense": {
+    "args": {
+      "agent": "check-alloc-astra",
+      "cluster": "default",
+      "mode": "sci",
+      "code": "(my.test/check {:seon.test/changed ['seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol 'seon.id-test/identity-is-a-function-of-the-values-structure]})"
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e897f5e88cadf, :ms 17, :value {:seon.test.run/id \"a3cb2ce65580\",\n :seon.test/passed? true,\n :seon.test/elapsed-ms 17.448666,\n :seon.render.test/test 2,\n :seon.render.test/pass 35,\n :seon.render.test/fail 0,\n :seon.render.test/error 0}}"
+        },
+        {
+          "type": "text",
+          "text": "{:seon.turn.loop/tests\n   {:seon.turn/id \"dc5720b04fb9\",\n    :seon.source/commit-id #uuid \"6ac77ed0-3b2c-558f-a382-2814262ee500\",\n    :seon.turn.loop/reaching\n      {:seon.test/passed? false,\n       :seon.turn.loop/red\n         [bt.slug-test/slug-lowers\n          live.text-test/slug-joins-lower-case-words]}}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "speculative": {
+    "args": {
+      "agent": "check-alloc-astra",
+      "cluster": "default",
+      "mode": "jvm",
+      "code": "(let [connection (seon.cluster.boot/connection \"default\") db @connection candidate (seon.db/call-with-custody {:seon.db/connection connection} #(seon.db/with db [])) before (:cache-context db) after (:cache-context candidate)] {:candidate? (seon.db/database-value? candidate) :committed? (:datahike.cache/committed? after) :same-revisions? (= (dissoc before :datahike.cache/commit-id :datahike.cache/committed?) (dissoc after :datahike.cache/commit-id :datahike.cache/committed?)) :connection-id (:datahike.cache/connection-id before) :installed-speculative (seon.test.runner/program-revisions candidate)})"
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/ea6f3fc1162b2, :ms 2, :value {:candidate? true,\n :committed? false,\n :same-revisions? true,\n :connection-id\n   [#uuid \"224560ae-b0ba-3d5c-b6db-6d7415ad66e7\" :cluster-default],\n :installed-speculative nil}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "defnDense": {
+    "args": {
+      "agent": "check-alloc-astra",
+      "cluster": "default",
+      "mode": "sci",
+      "code": "(in-ns 'scratch.check-alloc-astra)\n(defn bump \"Return an integer plus one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+    },
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e2e10c0beabc8, :ns scratch.check-alloc-astra, :ms 0, :value #namespace[scratch.check-alloc-astra]}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e6594662ac83f, :ms 24, :value {:seon.render.var/symbol scratch.check-alloc-astra/bump}}"
+        },
+        {
+          "type": "text",
+          "text": "{:seon.turn.loop/tests\n   {:seon.turn/id \"38534077c66a\",\n    :seon.source/commit-id #uuid \"6ac78160-14e3-551f-9c52-48a13bc9516e\",\n    :seon.turn.loop/reaching\n      {:seon.test/passed? false,\n       :seon.turn.loop/red\n         [bt.slug-test/slug-lowers\n          live.text-test/slug-joins-lower-case-words]}}}"
+        }
+      ],
+      "isError": false
+    }
+  }
+}

@@ -1237,11 +1237,12 @@
         cluster-entity (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
         cluster-id (:db/id cluster-entity)
         branch (get-in (db/schema-database database) [:config :branch])
-        ;; The writer's value has no commit id, so the digest memo cannot name it;
-        ;; with no program write since the tested basis its digest is the tested one.
-        ;; The caller found the tested revisions unchanged at a basis; at that same
-        ;; basis nothing has been written since, else the history decides.
+        ;; Speculative revisions retain untouched program attributes at the writer.
+        ;; A present matching digest proves the tested program still holds;
+        ;; without that evidence, the existing basis/history checks decide.
         digest (if (or snapshot?
+                       (some-> (:seon.test.run/program-revisions run)
+                               (= (runner/program-revisions-digest database)))
                        (= (:seon.test.run/unchanged-through-t request) (db/basis-t database))
                        (false? (runner/program-written-since? database (:seon.test.run/basis-t run))))
                  (:seon.test.run/program-digest run)

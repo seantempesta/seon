@@ -1,0 +1,50 @@
+events=8 weighted_bytes=8380288 truncated=8 largest_sample=1047552 first=2026-10-08T11:52:47.158168542Z last=2026-10-08T11:52:47.169047417Z
+NEAREST
+0.003143 GB	seon.db$write_owned_values_error
+0.002095 GB	seon.test_support$armed_counts
+0.001048 GB	seon.db$with
+0.001048 GB	seon.db$encode_query_request
+0.001047 GB	seon.db$vector_query_call
+CALLER
+0.004190 GB	seon.test.admission_digest_test$fn__595711
+0.002095 GB	seon.test_support$armed_counts
+0.002095 GB	seon.test$admit_run
+INCLUSIVE_NOT_ADDITIVE
+0.008380 GB	seon.test_support$with_branched_database
+0.008380 GB	seon.test_support$armed_calls
+0.008380 GB	seon.test_support$run_database_body
+0.008380 GB	seon.call_preparation$preparing
+0.008380 GB	seon.test.admission_digest_test$fn__595711
+0.008380 GB	seon.test_support$with_database
+0.008380 GB	seon.schema$call_with_projection_state
+0.008380 GB	seon.db$call_with_custody
+0.006285 GB	seon.db$with
+0.005238 GB	seon.test.runner$run_selected_tests
+0.005238 GB	seon.test.runner$run_vars_BANG_
+0.003143 GB	seon.db$write_report_error
+0.003143 GB	seon.db$prepared_write
+0.003143 GB	seon.db$validate_write_report
+0.003143 GB	seon.schema$call_with_projection
+0.003143 GB	seon.db$write_owned_values_error
+0.002095 GB	seon.test$with_test_loader
+0.002095 GB	seon.sci.eval$call_detecting_program_change
+0.002095 GB	seon.test.runner$run_var_BANG_
+0.002095 GB	seon.test_support$armed_counts
+0.002095 GB	seon.test$bounded_result
+0.002095 GB	seon.test$admit_run
+0.002095 GB	seon.db$jdk_integers__GT_long
+0.002095 GB	seon.schema.datahike$encode_call_output_in
+0.002095 GB	seon.db$with_declarations
+0.002095 GB	seon.db$q
+0.001048 GB	seon.db$encode_query_request
+0.001047 GB	seon.db$vector_query_call
+THREAD
+0.008380 GB	959:seon-test-body
+LEAF
+0.002095 GB	clojure.lang.PersistentHashMap$ArrayNode$Seq
+0.001048 GB	clojure.lang.PersistentVector
+0.001048 GB	clojure.lang.PersistentHashMap
+0.001048 GB	clojure.lang.ArraySeq
+0.001048 GB	java.util.AbstractCollection
+0.001048 GB	clojure.lang.ChunkBuffer
+0.001047 GB	datahike.query.lower$scan__GT_classified

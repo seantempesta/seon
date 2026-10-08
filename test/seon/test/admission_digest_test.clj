@@ -1,42 +1,45 @@
 (ns seon.test.admission-digest-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.id :as id]
+            [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
-(def ^:private observed (atom {}))
-
-(defn observe-program-write
-  "A transaction function recording what the writer's in-transaction value answers."
-  [database tag basis-t]
-  (swap! observed assoc tag (runner/program-written-since? database basis-t))
-  [])
-
-(deftest an-admission-confirms-the-tested-digest-without-deriving-the-program
-  ;; admit-run reads the writer's in-transaction value, which carries no commit
-  ;; id, so the digest memo cannot name it; it derived the whole program there
-  ;; (9.6 s per admission on default, 2026-09-23). A value with no program
-  ;; write since the tested basis has the tested digest.
+(deftest ^{:seon/tasks #{'seon.test.runner/admission-filters-the-whole-program-history}}
+  an-admission-confirms-the-tested-digest-without-deriving-the-program
   (support/with-database
-    (fn [connection]
-      (reset! observed {})
-      (support/transacted!
-       connection
-       [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/id] {:seon.fn/doc "A changed declaration."})])
-      (let [tested (db/db connection)
-            basis (db/basis-t tested)
-            digest (runner/program-digest tested)]
-        (support/transacted!
-         connection
-         [[:db/add [:seon.test/sym 'seon.id-test/data-shape-and-explicit-length-determine-identity]
-           :seon.test/pass-count 1]])
-        (support/transacted! connection [[:db.fn/call #'observe-program-write ::result-write basis]])
-        (is (string? digest))
-        (is (false? (::result-write @observed)) "a result write is no program write")
-        (support/transacted!
-         connection
-         [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/digest] {:seon.fn/doc "Another changed declaration."})
-          [:db.fn/call #'observe-program-write ::program-write basis]])
-        (is (true? (::program-write @observed))
-            "a program write earlier in the same transaction is seen")
-        (is (not= digest (runner/program-digest (db/db connection))))))))
+   (fn [connection]
+     (support/seed-cluster! connection "admission-revisions")
+     (let [input (id/digest 64 [::inputs])]
+       (support/transacted!
+        connection [{:seon.source/digest
+                     (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+                     :seon.source/test-input-digest input}])
+       (let [database (db/db connection)
+             provenance (runner/provenance database)
+             request {:seon.test.run/provenance provenance
+                      :seon.test.run/cluster [:seon.cluster/name "admission-revisions"]
+                      :seon.test.run/input-digest input
+                      :seon.test.run/policy :incremental
+                      :seon.test.run/include-long? false
+                      :seon.test.run/members []}
+             result-write [:db/add [:seon.test/sym 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol]
+                           :seon.test/pass-count 1]
+             program-write (support/revision database [:seon.fn/sym 'seon.id/id]
+                                             {:seon.fn/doc "Changed before admission."})]
+         (doseq [[label writes] [[:unchanged []] [:result-write [result-write]]]]
+           (testing (name label)
+             (let [[after calls]
+                   (support/armed-calls
+                    #{'seon.test.runner/program-written-since?}
+                    #(db/with database (conj writes [:db.fn/call sut/admit-run request])))]
+               (is (db/database-value? after))
+               (is (some? (db/pull after [:seon.test.run/id]
+                                  [:seon.test.run/id (:seon.test.run/id provenance)])))
+               (is (zero? (get calls 'seon.test.runner/program-written-since?))))))
+         (doseq [recorded [provenance (dissoc provenance :seon.test.run/program-revisions)]]
+           (let [refused (db/with database [program-write
+                                           [:db.fn/call sut/admit-run
+                                            (assoc request :seon.test.run/provenance recorded)]])]
+             (is (= :seon.test/program-mismatch (:seon.test/admission-refusal refused))))))))))

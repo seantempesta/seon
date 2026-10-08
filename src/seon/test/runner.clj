@@ -1215,15 +1215,16 @@
     (if (seon.error.refusal/error? written) written (some? written))))
 
 (defn program-revisions
-  "Datahike's revisions of every attribute a program row carries, with the
-  value's connection, generation and conservative revision
-  (`datahike.db/advance-cache-context`, `reference-code/datahike/src/datahike/db.cljc:423`):
-  equal keys name equal program rows, whatever else was written between them.
-  Nil for a value with no committed context."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:vector :seon.schema/value]]]}
+  "Datahike's revisions of the program attributes, including speculative values.
+  Equal keys prove equal program rows within one connection generation;
+  nil when the value carries no complete revision context."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :nil [:tuple :seon.db/connection-id :uuid :uuid [:map-of :qualified-keyword :uuid]]]]}
   [database]
   (let [context (:cache-context database)]
-    (when (:datahike.cache/committed? context)
+    (when (and (:datahike.cache/connection-id context)
+               (:datahike.cache/generation context)
+               (:datahike.cache/conservative-revision context))
       (let [projection (db/carried-projection database)]
         [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
          (:datahike.cache/conservative-revision context)
@@ -1233,8 +1234,7 @@
                        #(program-digest-read-attributes projection)))]))))
 
 (defn program-revisions-digest
-  "The digest of `database`'s `program-revisions`, or nil for a value with no
-  committed context."
+  "The revision digest, or nil when the database has no revision authority."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.test.run/program-revisions]]}
   [database]
   (some->> (program-revisions database) (id/digest 64)))

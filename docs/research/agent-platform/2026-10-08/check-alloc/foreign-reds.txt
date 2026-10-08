@@ -1,0 +1,146 @@
+SEON check FAILED (exit 1): The candidate ade6e305919add23890098150bab1f5753618b62 is red: run b52a37796348 / executed 2 / reused 0 / pass 12 / fail 1 / error 1 / 3677 ms / passed? false DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261008T205654.521.edn
+run b52a37796348 / executed 2 / reused 0 / pass 12 / fail 1 / error 1 / 3677 ms / passed? false
+red seon.test-test/recording-distinguishes-run-replay-from-a-new-event: fail test/seon/test_test.clj:190
+a refused read is never evidence of an existing run or an identity collision
+expected: (=
+ (dissoc read-refusal :seon.error/data)
+ (select-keys refused (keys (dissoc read-refusal :seon.error/data))))
+actual: (not
+ (=
+  {:seon.db/invalid-read true,
+   :seon.db/refused-read-operation seon.db/pull,
+   :seon.error/at #inst "2026-10-08T11:56:51.272Z",
+   :seon.error/layer :seon.db/database-read,
+   :seon.error/offending
+     #:seon.db{:attribute :seon.test.run/id, :value 42},
+   :seon.error/operation seon.db/pull,
+   :seon.error/type :seon.db/invalid-read-error,
+   :seon.error/message
+     "seon.db/pull received a value (:seon.error/offending) for :seon.test.run/id that does not match its installed value type :db.type/string.",
+   :seon.error/expected
+     #:db{:ident :seon.test.run/id,
+      :valueType :db.type/string,
+      :cardinality :db.cardinality/one,
+      :unique :db.unique/identity}}
+  {:seon.db/invalid-read true,
+   :seon.db/refused-read-operation seon.db/pull,
+   :seon.error/at #inst "2026-10-08T11:56:51.272Z",
+   :seon.error/layer :seon.db/database-read,
+   :seon.error/offending
+     #:seon.db{:attribute :seon.test.run/id, :value 42},
+   :seon.error/operation seon.db/pull,
+   :seon.error/type :seon.db.write/validation-refusal,
+   :seon.error/message
+     "seon.db/pull received a value (:seon.error/offending) for :seon.test.run/id that does not match its installed value type :db.type/string.",
+   :seon.error/expected
+     #:db{:ident :seon.test.run/id,
+      :valueType :db.type/string,
+      :cardinality :db.cardinality/one,
+      :unique :db.unique/identity}}))
+red seon.test-test/resolution-follows-admitted-source-and-acquisition: error
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :message
+    "seon.program/declaration-row refused argument 1 `event`: expected a map, got nil. Fix: Supply a map. Called from seon.test-test (test_test.clj:54).",
+  :data
+    {:seon.error/at #inst "2026-10-08T11:56:51.908Z",
+     :seon.error/layer :seon.instrument/invocation,
+     :seon.error/location {:seon.error.location/length 0},
+     :seon.error/member :seon.fn.arity/input,
+     :seon.error/operation seon.program/declaration-row,
+     :seon.error/type :seon.instrument/contract-error,
+     :seon.instrument/arity 4,
+     :seon.instrument/arm :input,
+     :seon.instrument/check :input,
+     :seon.instrument/fn seon.program/declaration-row,
+     :seon.instrument/malli :malli.core/invalid-input,
+     :seon.instrument/problem-count 1,
+     :seon.error/expected-shape
+       "a552f272a00658f4ce7e8da0c41a3ee064e2ec786d7a0cf71b11a50f9ea1bc43",
+     :seon.error/message
+       "seon.program/declaration-row refused argument 1 `event`: expected a map, got nil. Fix: Supply a map. Called from seon.test-test (test_test.clj:54).",
+     :seon.instrument/caller "seon.test-test (test_test.clj:54)",
+     :seon.instrument/digest
+       "1fa6a5833b1031945719bf315da87a61ff63c7df28830b1777c3e73b085b4eb3",
+     :seon.error/expected
+       [:cat
+        :seon.schema/projection
+        :map
+        [:enum :all :contracted]
+        :seon.schema.admission/source],
+     :seon.error/offending
+       [#:seon.schema.projection{:fingerprint -1047929377,
+         :fingerprint-version 4}
+        nil
+        :all
+        :agent],
+     :seon.error/problems
+       [#:seon.error{:path [],
+         :argument "argument 1 `event`",
+         :expected :map,
+         :expected-description "a map",
+         :offending nil,
+         :actual-description "nil",
+         :fix "Supply a map.",
+         :schema-path [1]}],
+     :seon.instrument/arglists
+       ([projection event function-policy admission-source]),
+     :seon.render/operations [(doc seon.program/declaration-row)]},
+  :frames
+    [[seon.test_test$fn__562517$fn__562518 invoke "test_test.clj" 54]
+     [seon.test_support$run_database_body$fn__562393$fn__562394 invoke
+      "test_support.clj" 856]
+     [seon.schema$call_with_projection_state invokeStatic "schema.clj"
+      1141]
+     [seon.schema$call_with_projection_state invoke "schema.clj" 1134]
+     [seon.test_support$run_database_body$fn__562393 invoke
+      "test_support.clj" 851]
+     [seon.db$call_with_custody invokeStatic "db.clj" 459]
+     [seon.db$call_with_custody invoke "db.clj" 431]
+     [seon.test_support$run_database_body invokeStatic
+      "test_support.clj" 849]
+     [seon.test_support$run_database_body invoke "test_support.clj" 842]
+     [seon.test_support$with_branched_database invokeStatic
+      "test_support.clj" 907]
+     [seon.test_support$with_branched_database invoke "test_support.clj"
+      894]
+     [seon.test_support$with_database invokeStatic "test_support.clj"
+      935]
+     [seon.test_support$with_database invoke "test_support.clj" 910]
+     [seon.test_support$with_database invokeStatic "test_support.clj"
+      931]
+     [seon.test_support$with_database invoke "test_support.clj" 910]
+     [seon.test_test$fn__562517 invokeStatic "test_test.clj" 35]
+     [seon.test_test$fn__562517 invoke "test_test.clj" 34]
+     [seon.test.runner$run_selected_tests invokeStatic "runner.clj" 496]
+     [seon.test.runner$run_selected_tests invoke "runner.clj" 465]
+     [seon.test.runner$run_vars_BANG_$fn__17065$fn__17066 invoke
+      "runner.clj" 415]
+     [seon.db$call_with_custody invokeStatic "db.clj" 459]
+     [seon.db$call_with_custody invoke "db.clj" 431]
+     [seon.test.runner$run_vars_BANG_$fn__17065 invoke "runner.clj" 414]
+     [seon.test.runner$run_vars_BANG_ invokeStatic "runner.clj" 406]
+     [seon.test.runner$run_vars_BANG_ invoke "runner.clj" 383]
+     [seon.test.runner$run_var_BANG_ invokeStatic "runner.clj" 462]
+     [seon.test.runner$run_var_BANG_ invoke "runner.clj" 427]
+     [seon.test$bounded_result$fn__20052$fn__20053$fn__20054$fn__20055$fn__20056
+      invoke "test.clj" 281]
+     [seon.test$with_test_loader$fn__20023 invoke "test.clj" 118]
+     [seon.test$with_test_loader invokeStatic "test.clj" 118]
+     [seon.test$with_test_loader invoke "test.clj" 111]
+     [seon.test$with_test_loader invokeStatic "test.clj" 112]
+     [seon.test$with_test_loader invoke "test.clj" 111]
+     [seon.test$bounded_result$fn__20052$fn__20053$fn__20054$fn__20055
+      invoke "test.clj" 268]
+     [seon.test$bounded_result$fn__20052$fn__20053$fn__20054 invoke
+      "test.clj" 266]
+     [seon.sci.eval$call_detecting_program_change$fn__18018 invoke
+      "eval.clj" 1095]
+     [seon.sci.eval$call_detecting_program_change invokeStatic
+      "eval.clj" 1094]
+     [seon.sci.eval$call_detecting_program_change invoke "eval.clj" 1056]
+     [seon.test$bounded_result$fn__20052$fn__20053 invoke "test.clj" 251]
+     [seon.db$call_with_custody invokeStatic "db.clj" 459]
+     [seon.db$call_with_custody invoke "db.clj" 431]
+     [seon.test$bounded_result$fn__20052 invoke "test.clj" 249]]}]

@@ -1,0 +1,11 @@
+SEON check FAILED (exit 1): The candidate e60a9a10d40694eb1897fd98e242912acd7b6f53 is red: run 89327c9b7e54 / executed 1 / reused 0 / pass 6 / fail 2 / error 0 / 3756 ms / passed? false DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261008T203525.861.edn
+run 89327c9b7e54 / executed 1 / reused 0 / pass 6 / fail 2 / error 0 / 3756 ms / passed? false
+red seon.test.admission-digest-test/an-admission-confirms-the-tested-digest-without-deriving-the-program: fail test/seon/test/admission_digest_test.clj:40
+unchanged
+expected: (zero? (get calls 'seon.test.runner/program-written-since?))
+actual: (not (zero? 1))
+
+fail test/seon/test/admission_digest_test.clj:40
+result-write
+expected: (zero? (get calls 'seon.test.runner/program-written-since?))
+actual: (not (zero? 1))
