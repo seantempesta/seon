@@ -55,7 +55,7 @@
              :evidence #{"docs/research/agent-platform/red-triage-r6-2026-09-27.md"}}
  #:seon.task{:name "schema-registration-rechecks-the-whole-program-per-key"
              :kind :function
-             :intent "Registering schema keys in an evaluation costs about 300 ms per key of whole-program work, measured 2026-09-28 on default's branches through seon.schema/register! in SCI: 3 keys 951 ms (106,692 armed calls), 10 keys 2,661-2,974 ms (319,316-354,837 calls), 13 keys 3,884 ms (461,456 calls). The calls are seon.schema/contract-references (11,256 to 48,672 calls, 824 to 3,372 ms), structural-schema, compilable-form and widen-component-children: every registration re-derives the references of every contract rather than those naming the registered keys. Done when a registration's cost follows the keys it registers and the contracts that reference them (one key under 100 ms on default), with the timing in the reply."
+             :intent "Registering schema keys in an evaluation costs about 300 ms per key of whole-program work, measured 2026-09-28 on default's branches through seon.schema/register! in SCI: 3 keys 951 ms (106,692 armed calls), 10 keys 2,661-2,974 ms (319,316-354,837 calls), 13 keys 3,884 ms (461,456 calls). The calls are seon.schema/contract-references (11,256 to 48,672 calls, 824 to 3,372 ms), structural-schema, compilable-form and widen-component-children: every registration re-derives the references of every contract rather than those naming the registered keys. Remeasured 2026-10-08 (schema-design.md): one register! now takes 666-2,869 ms, about 32,300 armed calls, and about 10,200 structural-schema calls per key. Done when a registration's cost follows the keys it registers and the contracts that reference them (one key under 100 ms on default), with the timing in the reply."
              :must-read #{seon.schema/register! seon.schema/contract-references}
              :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}
  #:seon.task{:name "contract-check-on-three-files-exceeds-one-second",
@@ -63,4 +63,9 @@
             :intent
             "Review static check of seon.print, seon.render.value and value-test against packaged resources at 0daf87818 took 1301.291 ms after external JVM replacement; earlier same-class checks took 168.540 and 222.844 ms. Measure which installed contract-check operations repeat and preserve correctness; no causal ranking yet. Required full-tree clj-kondo --cache false on the archive also took 10739 ms over 494 files (0 errors/1488 warnings); that run is explicitly requested review work proportional to the whole tree, not an ordinary print. Record gate acquisition separately from warm execution; do not turn a timing observation into a wall-clock regression test.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+ #:seon.task{:name "a-registration-refusal-carries-an-error-type"
+  :kind :function
+  :intent "register! of [:maybe :int] returns a flat map with layer and member but no :seon.error/type (registration-refusal, schema.clj:1643). Every error is one flat map with :seon.error/type extending :seon.error/base, built by the installed constructor seon.error.refusal/error. Proof: schema-design.md probe 3 answers a map whose :seon.error/type is a registered variant."
+  :must-read #{seon.schema/registration-refusal}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}]

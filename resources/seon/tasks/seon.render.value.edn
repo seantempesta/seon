@@ -102,4 +102,9 @@
             "seon.render.value/make-node cuts a root render's AI text longer than the budget at a character (`kept`), mid-line, ending `(+ 1 2…+1666` with no continuation form, and the cut is invisible to whole-size accounting: as SCI agent printer-text on default (ec5f13d2f), {:sym 'my/f :seon.render/ai (apply str (repeat 800 \"(+ 1 2)\\n\"))} replied with :seon.eval/value-tokens 1500 equal to shown-tokens. Correct: the render text is cut at its last line end inside the budget, the cut names its rest, and omitted-characters counts the cut. Remaining after printer-fix: a render value that cannot carry seon.print/full's mark (a Var whose render returns text) has no dig form, only a requery refusal; no shipped renderer reaches it. Proof: seon.render.value-test/a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form.",
             :must-read #{seon.render.value/make-node},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/printer-code/review-diff-astra-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/printer-code/review-diff-astra-notes.md"}}
+ #:seon.task{:name "transacted-passes-a-basis-descriptor-to-stored-collection"
+  :kind :function
+  :intent "Showing (seon.db/pull (seon.db/db) '[*] [:seon.cluster.eval/id \"af9da2066437\"]) through the printer records the diagnostic \"seon.db/stored-collection :malli.core/invalid-schema-at-call ... Don't know how to create ISeq from: clojure.lang.Keyword\" at render/value.clj:358 (producer seon.render.value/transacted). The offending call is [{:db-name .. :t .. :datahike/commit-id ..} :seon.cluster.eval/read-evidence ()], a basis descriptor where :seon.db/database-value is expected. Correct: transacted reads from a database value (or its connection), never a descriptor. Evidence: result e497d4c908865. Proof: showing that pull yields no stored-collection diagnostic."
+  :must-read #{seon.render.value/transacted seon.db/stored-collection}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}]

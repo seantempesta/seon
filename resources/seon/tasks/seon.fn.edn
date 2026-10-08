@@ -118,4 +118,19 @@
   :kind :function
   :intent "runtime-require-specs (fn.clj:814) emits :refer [target-name] only and drops the local name of a :rename, so a renamed refer is invisible to analysis. Probe (probe.alias7): (require '[clojure.set :refer [union] :rename {union upper-case}]) then (defn r2 [] (upper-case ...)) stores calls [defn] with no edge to clojure.set/union. Correct: the analysis ns form carries :rename so the call resolves to clojure.set/union. Proof: that pair of forms stores clojure.set/union in r2's calls."
   :must-read #{seon.fn/runtime-require-specs}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}
+ #:seon.task{:name "private-flag-disagrees-with-the-var-for-computed-metadata"
+  :kind :function
+  :intent "(defn ^{:private (> 1 2)} falsy-meta [] 1) has Var :private false while the stored row says :seon.fn/private? true (fn.clj:746 reads clj-kondo's flag); the reverse holds for alter-meta! after the defn. Low severity. Correct: the row's private flag agrees with the Var's, or the source-derived privacy is stated as the rule. Proof: that form stores private? false."
+  :must-read #{seon.fn/runtime-analysis-batch}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/private-design.md"}}
+ #:seon.task{:name "a-dependent-keeps-no-edge-to-a-callee-defined-after-it"
+  :kind :function
+  :intent "(defn bad1 [x] (nosuch-fn x)) then (defn dep1 [x] (bad1 x)), then in a later pass a working bad1; and (declare later) (defn early [] (later)) (defn later [] 1): early and dep1 keep calls [clojure.core/defn] and gain no edge when the callee is defined. Related: seon.turn.batch/a-declared-var-call-stores-no-edge (the declare half). Correct: a caller's edge to a callee appears once the callee has an entity, without re-evaluating the caller. Proof: the last table row of failed-def-design.md (probe 7)."
+  :must-read #{seon.fn/runtime-analysis-batch}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}
+ #:seon.task{:name "contract-facts-row-names-no-schema-in-its-refusal"
+  :kind :function
+  :intent "A defn whose contract names an unregistered schema refuses as \"derive: :malli.core/invalid-schema\" and its diagnostic never names :my.s5-03h/nosuch; the key is only in the cause chain (fn.clj:3151). Correct: the refusal carries Malli's humanized problems (malli.error/humanize) naming the missing schema key. Proof: that defn's diagnostic data contains :my.s5-03h/nosuch."
+  :must-read #{seon.fn/contract-facts-row}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}]

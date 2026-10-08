@@ -213,4 +213,9 @@
   :kind :function
   :intent "On default's health, the profile cell for seon.db/transact-call reports a maximum of 5.3 s (runtime_status, 2026-10-08). An ordinary write is expected under 100 ms (settlement) and every operation over one second must name the armed function responsible. Correct: find the call shape that produces the maximum (caller, transaction size, contention), measure it, and fix the producer; related fault-write-bound-is-wall-clock-under-contention. Proof: a profiled probe of that shape stays sub-second."
   :must-read #{seon.db/transact-call}
-  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
+ #:seon.task{:name "a-refused-write-names-the-undeclared-key-among-the-registered-candidates"
+  :kind :function
+  :intent "The refusal of seon.db/transact! carries :seon.db/registered-candidates listing keys that are already installed ([:scratch.schema/count :scratch.schema/label]) and omits the key that was undeclared (:scratch.schema/size), so it reads as a candidate list of the wrong set. Correct: the hint lists registered keys near the refused key and includes the refused key. Proof: schema-design.md probe 2 answers a hint naming :scratch.schema/size. Producer: the seon.db refusal builder."
+  :must-read #{seon.db/transact!}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}]

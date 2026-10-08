@@ -59,4 +59,9 @@
             "Every SCI def reply carries the same :note sentence (about 60 tokens: 'x lives only in your SCI context and is lost when the JVM restarts...'), from seon.repl/def-note; one scratch session of 25 defs carried it 25 times, the largest repeated text in the context. Done when the note is shown once per agent session (or once per conversation) and later def replies carry no note, asserted on reply data.",
             :must-read #{seon.repl/response},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
+ #:seon.task{:name "a-fn-valued-def-is-told-nothing-is-persisted"
+  :kind :function
+  :intent "(def ^:private fnA (fn [x] (inc x))) replies \"Nothing defined with def is persisted\" while the pass admitted a program row for it (rows for fv, fnA and pv exist). def-note sniffs the source text for def; the pass already knows the truth in :seon.batch/private (:not-a-function for a non-function value). Correct: the note follows what the pass admitted. Related tasks: seon.repl/every-def-repeats-the-same-persistence-note, seon.repl/a-jvm-def-is-told-it-lives-in-sci (one note, decided from the pass). Proof: a fn-valued def through the agent entrance replies without the not-persisted note, and a value def keeps it."
+  :must-read #{seon.repl/def-note}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/private-design.md"}}]
