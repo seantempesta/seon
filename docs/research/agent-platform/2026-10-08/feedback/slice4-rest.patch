@@ -1,0 +1,245 @@
+diff --git a/resources/seon/schemas/seon.config.eval.edn b/resources/seon/schemas/seon.config.eval.edn
+index afe6cb8a4..18943c515 100644
+--- a/resources/seon/schemas/seon.config.eval.edn
++++ b/resources/seon/schemas/seon.config.eval.edn
+@@ -9,8 +9,13 @@
+                     [:seon.eval/duration-ms
+                      {:optional true
+                       :seon.repl/finding :slow
+-                      :seon.repl/fix "Over one second in the evaluation you asked for: find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time."}
++                      :seon.repl/fix "Over one second in the evaluation you asked for: the request's :seon.cost/top names the armed functions that spent it by self time; find what the work is proportional to (the store? the program? the call count?) and remove it."}
+                      [:<= 1000]]
++                    [:seon.cost/ms
++                     {:optional true
++                      :seon.repl/finding :slow
++                      :seon.repl/fix "Over one second for this eval request: :seon.cost/top names the armed functions that spent it by self time and :seon.cost/stages the stage; find what the work is proportional to (the store? the program? the call count?) and remove it."}
++                     [:<= 1000.0]]
+                     [:seon.eval/value-tokens
+                      {:optional true
+                       :seon.repl/finding :large-value
+diff --git a/resources/seon/schemas/seon.cost.edn b/resources/seon/schemas/seon.cost.edn
+index abc855ecc..b70bcf847 100644
+--- a/resources/seon/schemas/seon.cost.edn
++++ b/resources/seon/schemas/seon.cost.edn
+@@ -18,12 +18,16 @@
+  :seon.cost/unmeasured
+  [:map-of {:description "A measure the request could not take, by its key, and why: :unmeasured-arm (a form's arm ran where HotSpot keeps no count), :no-form (nothing evaluated)."}
+   :qualified-keyword :keyword]
++ :seon.cost/top
++ [:vector {:description "The request's definitions with the most self time, [sym self-ms calls], from its one call sink; shown past the request's :slow bound."}
++  [:tuple :qualified-symbol :double :int]]
+  :seon.cost/counts
+  [:map [:seon.cost/calls :seon.cost/calls] [:seon.cost/reads :seon.cost/reads]
+   [:seon.cost/transactions :seon.cost/transactions]
+   [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
+   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
+-  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]
++  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]
++  [:seon.cost/top {:optional true} :seon.cost/top]]
+  :seon.cost/request
+  [:map {:description "What one eval request cost, every number this request's own; a measure that is unavailable is absent."}
+   [:seon.cost/ms :seon.cost/ms]
+@@ -33,4 +37,5 @@
+   [:seon.cost/transactions {:optional true} :seon.cost/transactions]
+   [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
+   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
+-  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]}
++  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]
++  [:seon.cost/top {:optional true} :seon.cost/top]]}
+diff --git a/src/seon/mcp.clj b/src/seon/mcp.clj
+index e522894cb..1de0d519f 100644
+--- a/src/seon/mcp.clj
++++ b/src/seon/mcp.clj
+@@ -33,6 +33,7 @@
+             [seon.operator.runtime :as runtime]
+             [seon.render.transcript :as transcript]
+             [seon.render.value :as render.value]
++            [seon.repl :as repl]
+             [seon.sci.eval :as eval]
+             [seon.turn]
+             [seon.turn.batch :as turn.batch]
+@@ -318,6 +319,7 @@
+                true]))]
+       [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))
+        (merge (profile/sink-counts (:seon.batch/sink world))
++              {:seon.cost/top (profile/sink-top (:seon.batch/sink world) 5)}
+               (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch))))])))
+ 
+ ;;; ---------------------------------------------------------------------------
+@@ -340,6 +342,18 @@
+                                         (:errors explanation)))
+       value)))
+ 
++(defn- request-reply
++  "The eval request's cost as its reply item: the cost and, past a declared
++  bound (`:seon.config.eval/bounds`), its findings and the request's top
++  definitions by self time."
++  {:malli/schema [:=> [:cat :seon.cost/request] [:map [:seon.repl/request :seon.cost/request]
++                                                  [:seon.repl/findings {:optional true} :seon.repl/findings]]]}
++  [request]
++  (let [found (repl/findings request)]
++    (if (seq found)
++      {:seon.repl/request request :seon.repl/findings found}
++      {:seon.repl/request (dissoc request :seon.cost/top)})))
++
+ (defn- eval-clj
+   "`eval_clj`: the texts and whether any failed. The last text is the eval
+   request's cost (`:seon.repl/request`), measured from this entrance."
+@@ -360,7 +374,7 @@
+           [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {} nil]
+           (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
+           :else (sci-run custody code namespace-name cluster-name))]
+-    [(conj texts (printed {:seon.repl/request (seon.batch/request-cost started (merge stages run-stages) counts)}
++    [(conj texts (printed (request-reply (seon.batch/request-cost started (merge stages run-stages) counts))
+                           code nil cluster-name))
+      failed?]))
+ 
+diff --git a/src/seon/profile.clj b/src/seon/profile.clj
+index b0fa43bc3..9378a3e8d 100644
+--- a/src/seon/profile.clj
++++ b/src/seon/profile.clj
+@@ -654,13 +654,26 @@
+   transactions (`transaction-entrances`)."
+   {:malli/schema [:=> [:cat :seon.batch/sink] :seon.cost/counts]}
+   [sink]
+-  (reduce-kv (fn [counts sym n]
+-               (cond-> (update counts :seon.cost/calls + n)
++  (reduce-kv (fn [tally sym n]
++               (cond-> (update tally :seon.cost/calls + n)
+                  (read-entrances sym) (update :seon.cost/reads + n)
+                  (transaction-entrances sym) (update :seon.cost/transactions + n)))
+              {:seon.cost/calls 0 :seon.cost/reads 0 :seon.cost/transactions 0}
+              (seon.batch/calls sink)))
+ 
++(defn sink-top
++  "A call sink's `n` definitions with the most self time, each
++  `[sym self-ms calls]`, its executed digests summed."
++  {:malli/schema [:=> [:cat :seon.batch/sink pos-int?] :seon.cost/top]}
++  [^ConcurrentHashMap sink n]
++  (->> sink
++       (reduce (fn [by-sym [[sym _] ^AtomicLongArray c]]
++                 (let [[self calls] (get by-sym sym [0 0])]
++                   (assoc by-sym sym [(+ self (.get c 2)) (+ calls (.get c 0))])))
++               {})
++       (sort-by (comp - first val))
++       (into [] (comp (take n) (map (fn [[sym [self calls]]] [sym (seon.batch/tenths (/ self 1e6)) calls]))))))
++
+ (defn measure
+   "Call `f` once and return its value beside what the call cost, read from
+   JVM counters, so compiled work inside it counts: wall ms, allocated bytes,
+diff --git a/src/seon/repl.clj b/src/seon/repl.clj
+index 86cef9c18..53fdedb5c 100644
+--- a/src/seon/repl.clj
++++ b/src/seon/repl.clj
+@@ -297,7 +297,7 @@
+   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
+   []
+   (let [{measures ::measures named ::named} @bounds]
+-    (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct))
++    (into [] (comp (remove #(#{"seon.repl" "seon.cost"} (namespace %))) (distinct))
+           (concat measures named [:seon.eval/value-class]))))
+ 
+ (defn cost
+diff --git a/src/seon/sci/kernel.clj b/src/seon/sci/kernel.clj
+index a5e409eae..775acffc9 100644
+--- a/src/seon/sci/kernel.clj
++++ b/src/seon/sci/kernel.clj
+@@ -22,6 +22,7 @@
+             [sci.impl.utils :as sci.utils]
+             [sci.impl.vars :as sci.vars]
+             [seon.batch]
++            [seon.profile :as profile]
+             [sci.interrupt :as sci.interrupt]
+             [seon.db :as db]
+             [seon.error.refusal :as error.refusal]
+@@ -460,7 +461,9 @@
+   bindings, after the worker's actual exit. The caller is one agent's serial
+   pass, so each agent holds at most one worker. An interrupt of this thread is
+   passed to the worker and the wait continues until the worker exits; the
+-  interrupt is then restored on this thread."
++  interrupt is then restored on this thread. The armed calls the worker counted
++  join this thread's callee time (`seon.profile/callee-frame`), so the caller's
++  self time is not the worker's."
+   {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "The body determines its return type; the handoff preserves that exact result."
+@@ -469,11 +472,18 @@
+   (let [exited (CountDownLatch. 1)
+         ^AtomicReference worker (AtomicReference.)
+         ^AtomicBoolean interrupt (AtomicBoolean. false)
++        ^AtomicLong counted (AtomicLong. 0)
+         body (sci.vars/binding-conveyor-fn
+               (bound-fn* (fn []
+                            (.set worker (Thread/currentThread))
+                            (when (.get interrupt) (.interrupt (Thread/currentThread)))
+-                           (try (f) (finally (.countDown exited))))))
++                           (let [^longs frame (.get ^ThreadLocal profile/callee-frame)
++                                 saved (aget frame 0)]
++                             (aset frame 0 0)
++                             (try (f)
++                                  (finally (.set counted (aget frame 0))
++                                           (aset frame 0 saved)
++                                           (.countDown exited)))))))
+         ^Future task ((flow/futurize body :exec :mixed))]
+     (loop [stopped? false]
+       (if (try (.await exited) true
+@@ -481,7 +491,9 @@
+                  (.set interrupt true)
+                  (some-> ^Thread (.get worker) .interrupt)
+                  false))
+-        (do (when stopped? (.interrupt (Thread/currentThread)))
++        (let [^longs frame (.get ^ThreadLocal profile/callee-frame)]
++            (aset frame 0 (+ (aget frame 0) (.get counted)))
++            (when stopped? (.interrupt (Thread/currentThread)))
+             (try (.get task)
+                  (catch ExecutionException failure (throw (.getCause failure)))))
+         (recur true)))))
+diff --git a/test/seon/request_cost_test.clj b/test/seon/request_cost_test.clj
+index 803ee1b87..2f315e00c 100644
+--- a/test/seon/request_cost_test.clj
++++ b/test/seon/request_cost_test.clj
+@@ -60,3 +60,19 @@
+        (is (pos? (.get made)))
+        (is (= (:seon.cost/reads ping) (:seon.cost/reads noisy))
+            "another thread's reads are not this request's")))))
++
++(deftest ^{:seon/tasks #{'seon.repl/a-slow-reply-names-nothing 'seon.repl/the-slow-fix-ranks-the-whole-process}}
++  a-slow-request-names-what-spent-it
++  (support/with-running-agent
++   (fn [running agent-id _]
++     (let [_ (answer running agent-id "sci" "(defn nap {:malli/schema [:=> [:cat] :int]} [] (Thread/sleep 1100) 1)")
++           quick (support/mcp-request-item (answer running agent-id "sci" "(+ 1 2)"))
++           slow (support/mcp-request-item (answer running agent-id "sci" "(nap)"))
++           [[top-sym top-ms top-calls]] (get-in slow [:seon.repl/request :seon.cost/top])]
++       (is (not (contains? quick :seon.repl/findings)) "within the bound the request is its cost alone")
++       (is (not (contains? (:seon.repl/request quick) :seon.cost/top)))
++       (is (= [:slow] (mapv :seon.repl/finding (:seon.repl/findings slow))))
++       (is (<= 1000.0 (:seon.cost/ms (first (:seon.repl/findings slow)))))
++       (is (= "nap" (name top-sym)) "the function that slept leads by self time")
++       (is (<= 1100.0 top-ms 1500.0))
++       (is (= 1 top-calls))))))
+diff --git a/test/seon/test_support.clj b/test/seon/test_support.clj
+index d4a27b2ed..b955303d0 100644
+--- a/test/seon/test_support.clj
++++ b/test/seon/test_support.clj
+@@ -825,11 +825,19 @@
+   [result]
+   (first (peek (mcp-evaluation-items result))))
+ 
++(defn mcp-request-item
++  "The eval request's reply item of a parsed MCP `eval_clj` result: its cost
++  (`:seon.repl/request`) and any findings on it."
++  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
++  [result]
++  (some #(when (and (map? (second %)) (contains? (second %) :seon.repl/request)) (second %))
++        (mcp-parsed result)))
++
+ (defn mcp-request
+   "The eval request's cost (`:seon.repl/request`) of a parsed MCP `eval_clj` result."
+   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+   [result]
+-  (some #(:seon.repl/request (second %)) (mcp-parsed result)))
++  (:seon.repl/request (mcp-request-item result)))
+ 
+ (defn mcp-reply
+   "The REPL reply map of a parsed MCP `eval_clj` result, never the test step."

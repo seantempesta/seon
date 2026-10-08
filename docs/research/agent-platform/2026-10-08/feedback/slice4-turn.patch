@@ -1,0 +1,41 @@
+diff --git a/src/seon/turn.clj b/src/seon/turn.clj
+index da481a9d3..aaf0775cc 100644
+--- a/src/seon/turn.clj
++++ b/src/seon/turn.clj
+@@ -4181,7 +4181,10 @@
+         world (cond-> {:seon.boot/cluster-name (:seon.cluster/name cluster)
+                        :seon.db/connection connection :seon.db/writer db/transact!
+                        :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms limit
+-                       :seon.render/profile profile :seon.batch/sink (seon.batch/sink)
++                       :seon.render/profile profile
++                       ;; the pass's one sink (`seon.cluster.agent/turn-step`), so the request's
++                       ;; calls are counted once, whatever world they entered in
++                       :seon.batch/sink (or (:seon.batch/sink seon.batch/*world*) (seon.batch/sink))
+                        :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))
+                        :seon.agent/id agent-id}
+                 run-id (assoc :seon.turn/id run-id)
+@@ -4244,8 +4247,7 @@
+            (:seon.batch/entries batch))
+      :seon.turn.loop/program {:seon.batch/request request :seon.batch/program (:seon.batch/program batch {})}
+      :seon.batch/timings (:seon.batch/timings batch {})
+-     :seon.cost/counts (merge (profile/sink-counts (:seon.batch/sink world))
+-                              (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch))))}))
++     :seon.cost/counts (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch)))}))
+ 
+ (defn preview-sources
+   "Evaluate authored source once in the assigned agent's fork, persisting nothing.
+@@ -5314,10 +5316,11 @@
+                               (async/offer! reply (cond-> (merge report pending-commit)
+                                                     park (assoc :seon.turn.loop/refusal park)
+                                                     tests (assoc :seon.turn.loop/tests tests)
+-                                                    ;; the pass's own calls (its proc world's sink,
+-                                                    ;; `seon.cluster.agent/turn-step`) beside its batch's
++                                                    ;; the pass's calls: its one sink (`seon.cluster.agent/turn-step`)
+                                                     (and (:seon.cost/counts report) (:seon.batch/sink seon.batch/*world*))
+-                                                    (update :seon.cost/counts #(merge-with + % (profile/sink-counts (:seon.batch/sink seon.batch/*world*)))))))]
++                                                    (update :seon.cost/counts merge
++                                                            (profile/sink-counts (:seon.batch/sink seon.batch/*world*))
++                                                            {:seon.cost/top (profile/sink-top (:seon.batch/sink seon.batch/*world*) 5)}))))]
+                ;; Run closure is an armer wake because first-agent
+                ;; supervision is derived from closed-run and root-idle facts.
+                ;; The signal is disposable: the armer re-derives the complete
