@@ -120,4 +120,12 @@
              :kind :function
              :intent "(`my.program/ns-unmap!` 'seon.help-test 'help-teaches-how-a-deftest-names-its-task), the two-argument call of `clojure.core/ns-unmap`, answered \"refused argument 0 `context`: expected :my.program/context (a map), got a symbol seon.help-test\" with the world's whole context schema as its problem (fanout-3 run, default 324461975, 2026-10-09); the call that works takes one qualified symbol. Done when a two-symbol call either unmaps that namespace's name as Clojure does or is refused as an arity error naming the one-symbol form."
              :must-read #{my.program/ns-unmap!}}
+ #:seon.task{:name "write-back-refuses-a-file-whose-unchanged-functions-reindex-differently"
+             :kind :function
+             :intent "(`my.program/write-branch!` {:seon.fn/root \"/Users/sean/src/seon\"}) on three fanout-4 agent branches (default 97f2b2ac3, 2026-10-09), each changing one function, answered \"The reindexed candidate does not declare exactly the accepted program.\" naming functions the branch never changed: seon.db/pull, seon.db/q, seon.db/datoms and seon.db/pull-many for a change to seon.db/missing-connection-error; seon.error/scalar-text and the seon.error namespace for a change to seon.error/reply-value (scalar-text's definition digest is the same on main and the branch), also with :seon.program/identities naming only the changed function. Each refusal allocated 0.8-1.5 GB. Root landed the three fixes through the check instead (137ff2bff). Done when write-back of a branch that changed one function of seon.db or seon.error writes that file, and an unchanged function never counts as a difference."
+             :must-read #{my.program/write-branch! seon.cluster.source/write-back!}}
+ #:seon.task{:name "a-repl-alias-stays-on-the-namespace-row-after-ns-unalias"
+             :kind :function
+             :intent "Agent fan4-empty (fanout-4, default 97f2b2ac3, 2026-10-09) added the alias string for clojure.string in seon.error at its REPL; the alias joined the stored seon.error namespace row (its definition digest changed), and (`clojure.core/ns-unalias` 'seon.error 'string) left the row unchanged, so `my.program/diff` kept listing the namespace as changed and `my.program/write-branch!` refused the file. Done when an alias removed with ns-unalias leaves the namespace row as it was, or the diff names the alias as the change and offers the form that removes it."
+             :must-read #{my.program/diff my.program/write-branch!}}
 ]

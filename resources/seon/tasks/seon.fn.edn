@@ -148,4 +148,9 @@
              :kind :function
              :intent "`seon.fn-test/submitted-declarations-share-the-dependency-analysis-join` (test/seon/fn_test.clj, the `analysis-entities-by-file` call) passes `(schema/handed-projection)` as both the schema-targets and the projection argument; `seon.fn/analysis-entities-by-file` refuses it at its contract (argument 3 `schema-targets` expected [:set :qualified-symbol]) in the throwaway JVM of `bin/lane commit` (unloaded-names lane, 2026-10-08, HEAD af1d204d7 plus a diff touching only `shared-dependency-analysis`). Done when the test supplies the declared schema-targets set and is green."
              :must-read #{seon.fn/analysis-entities-by-file}
-             :evidence #{"docs/research/agent-platform/2026-10-08/files/files-opus.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/files/files-opus.md"}}
+ #:seon.task{:name "the-signature-reader-refuses-text-sci-evaluated"
+             :kind :function
+             :intent "Agent fan4-empty (fanout-4, default 97f2b2ac3, 2026-10-09) sent a 7,518-character defn of seon.error/reply-value whose code carried escaped quotes, (not= \\\"clojure.lang.ExceptionInfo\\\" (str class)); SCI read and evaluated it and bound the Var, then derive refused it as \"derive: Unsupported character: \\\"clojure.lang.ExceptionInfo\" (producer seon.fn.signature/read-source, which reads the source again with clojure.core/read), naming neither the form's line nor the cause, so the agent spent two more defns and a probe namespace finding it. A form is read once: the evaluated form and the derived facts must come from the same read. Done when text SCI cannot read the same way as the program facts is refused once, at read, naming its line and the character."
+             :must-read #{seon.fn.signature/function-signatures seon.fn.signature/declaration-metadata}}
+]
