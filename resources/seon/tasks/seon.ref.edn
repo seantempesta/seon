@@ -15,4 +15,8 @@
              :kind :function
              :intent "seon.ref-test/a-doc-section-reads-with-its-headings-below-and-size took 18,404 ms against its 5,000 ms bound on default 795a770c2 (fanout-2 run, 2026-10-08) and errs on every run, so any request reaching seon.ref-test holds a live thread for it past the step's time limit (see `seon.test.runner/a-timed-out-unrelated-test-restarts-in-every-eval-request`). Done when it passes within its bound, with the measured cost of the (my.fs/section \"AGENTS.md#data-and-contracts\") read it runs through a running agent."
              :must-read #{my.fs/section seon.test-support/with-running-agent}}
+ #:seon.task{:name "a-task-target-reads-as-an-unresolved-reference"
+             :kind :function
+             :intent "A typed task names the function the agent must create in backticks (`comp.geo/area` in `seon.competency/area-is-contracted-typed`, `:comp.order/qty` in `seon.competency/quantity-schema-then-function-typed`), and `seon.ref/references` answers it as `:problem-kind :unresolved`, the same problem a broken reference gets: the block tells the agent its task is defective exactly where the task is correct. Done when a reference the task's intent names as its target (a name in the task's own subject namespace, or one the intent marks as to be defined) reads as a target to create, distinct from an unresolved reference."
+             :must-read #{seon.ref/references seon.context/current-state}}
 ]

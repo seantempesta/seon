@@ -22,4 +22,8 @@
              :kind :function
              :intent "`seon.test-support/assign-task!` returns nil whatever `seon.task/create!` and `seon.task/assign!` answer, so a refused assignment is silent. Given an agent's branch connection, it declares its proof on that branch while `seon.task/assign!` reads the proofs at the task home (`seon.task/home`), refuses :no-proofs, and the test continues unassigned (lane a1-home, 2026-10-08: the first draft of `seon.turn-work-test/a-branch-agent-assigned-after-its-fork-opens-its-model-turn` failed for this reason). Correct: the helper declares the proof where the task lives and fails the test on any refusal value. Done when a call that `seon.task/assign!` refuses fails loudly at the helper."
              :must-read #{seon.test-support/assign-task! seon.test-support/declare-proof! seon.task/assign! seon.task/home-connection}}
+ #:seon.task{:name "a-running-agent-world-has-no-task-home"
+             :kind :function
+             :intent "`seon.test-support/with-running-agent` stands up a cluster whose root row names no `:seon.agent/branch`, so `seon.task/home` answers nil there: a task assigned to an agent hosted on its own branch (as `seon.mcp` hosts a new agent id) is written on the member's branch after the agent forked, the agent reads none and never opens a model turn. A running cluster's root row names its own branch (default: :cluster-default). `seon.competency-grade-test/a-launch-grades-each-run` writes the row itself (`home-root!`). Done when the running-agent world carries root's home row as a booted cluster does and that test's local helper is deleted."
+             :must-read #{seon.test-support/with-running-agent seon.task/home seon.cluster.host/home-call}}
 ]
