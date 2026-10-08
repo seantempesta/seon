@@ -449,13 +449,26 @@ green.
 | MA-14b (M12) | Close a merge request with a reason | `close-merge-request!` with a reason that messages the source agent | `src/my/program.clj`, `src/seon/task.clj`, `test/my/program_test.clj` | `my.program-test/a-closed-merge-request-tells-its-agent` | D | MA-11 | M | ready |
 | MA-17 (R-01) | A model root resolves a stopped merge | Competency T16: a model root resolves a stopped merge with ordinary tools | `test/seon/competency_oracle_test.clj` | `seon.competency-oracle-test/t16-root-resolves-a-stopped-merge` | model run: as C8 | MA-5b, X1 | K | ready after its deps |
 
-### 3.11 Competency suite (C, A, D, B, X, Q, R; design: `competency/competency-spec.md` §1-§8)
+### 3.11 Competency suite and context bench (C, BENCH, A, D, B, X, Q; design: `competency/competency-spec.md` §1-§6; cards [README-bench](cards/README-bench.md))
+
+The bench measures how context presentation affects outcomes (owner 2026-10-08 night): a standard task set written as
+really good tasks (typed references, red proofs, oracles), one grade per run read from the agent's branch, and one
+presentation strategy per experiment, each a dial in `seon.config.context` (wire format in `seon.config.ai`). The
+first experiment (E1, task wording: prose against typed, T1-T4 × 5) needs only BENCH-2 and BENCH-3.
 
 | Id | Title | Change | Files | Proof | Budget | Deps | Group | Status |
 |---|---|---|---|---|---|---|---|---|
-| C2 | Tasks two to four | T2-T4 setups, proofs, oracles | `test/seon/competency_oracle_test.clj`, `resources/seon/tasks/seon.competency.edn` | `seon.competency-oracle-test/t2-…` to `t4-…` | T: oracles run without a provider | C1 | K | ready |
-| C3 | Tasks five to eight | T5-T8 | same as C2 | `…/t5-…` to `t8-…` | T: oracles run without a provider | C2 | K | ready |
-| C4 | Score table | `seon.competency/scores` with merge outcome, review time and bail columns | `test/seon/competency_test.clj`; the namespace of the new `seon.competency/scores` is the slice's choice | `seon.competency-test/scores-read-an-oracle-run` | T: oracles run without a provider | C1 | K | ready |
+| BENCH-1 (C4 grade half) | A run's grade from the database | `seon.competency/grade [database agent-id task]`: green, proof counts, model calls and calls to green, forms, agent and platform errors, no-form calls, repeated forms, tokens, wall time | `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | `seon.competency-grade-test/a-fixture-model-run-grades-green` | T: reads the agent's call rows, evaluations and its proofs' member rows; warm 5 ms | C1 | K | landed `bb89f96c8` |
+| BENCH-2 (C2) | Core tasks in two wordings | T1's typed twin; T2-T4 as `…-prose` and `…-typed` sharing one proof each; setups; oracles red to green; typed references resolve in the block · card: [README-bench](cards/README-bench.md) | `resources/seon/tasks/seon.competency.edn`, `test/seon/competency_test.clj`, `test/seon/competency_oracle_test.clj` | `seon.competency-oracle-test/t2-goes-red-to-green`, `…/t3-…`, `…/t4-…` | T: oracles run without a provider | C1 | K | ready |
+| C3 | Tasks five to eight | T5-T8 in both wordings (T7 is the reference-depth task for E3) | same as BENCH-2 | `…/t5-…` to `t8-…` | T: oracles run without a provider | BENCH-2 | K | ready |
+| BENCH-3 (C4 table half, C7) | Launch one run, and the table | `seon.competency/launch! {task variant n}` (fresh agent per run, variant dials and provider through the agent's own settings until RESPEC R-9, assign at the home, one outside message, wait, grade, retire the branch); `seon.competency/table`; `grade` gains the variant · card: [README-bench](cards/README-bench.md) | `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | `seon.competency-grade-test/a-launch-grades-each-run` | T: fixture provider; grading reads stored facts only | BENCH-1 | K | ready |
+| BENCH-4 (C8 smoke) | The first experiments: E0 baseline, E1 task wording | Root runs E0 (T1 typed × 5) and E1 (T1-T4 × {prose, typed} × 5) on DeepSeek flash and commits the table with run ids, HEAD and dials | `docs/research/agent-platform/<date>/competency/bench-E1.md` | the committed table | paid: under US$0.10, deliberate | BENCH-2, BENCH-3 | K | ready after its deps (root: before or after C0, spec §5) |
+| BENCH-6 | Reference depth is a dial | `:seon.config.context/references` `:summary` (default) · `:names` · `:source` read by `seon.context/current-state` into `seon.ref/references` | `resources/seon/schemas/seon.config.context.edn`, `config/default.edn`, `src/seon/context.clj`, `src/seon/ref.clj`, `test/seon/context_test.clj` | `seon.context-test/each-reference-depth-shows-its-fields` | L | none | D | ready |
+| BENCH-7 | Block placement is a dial | `:seon.config.context/block-at` `:last` (default) · `:first` | `seon.config.context.edn`, `src/seon/context.clj` (with CX-12: `src/seon/ai.clj`), test | `seon.context-test/the-block-sits-where-its-dial-says` | L | BENCH-6 (schema file) | D | ready |
+| BENCH-8 | Help has a short variant | `:seon.config.context/help` `:full` (default) · `:short`; both line sets are data in `seon.bootstrap/help-value` | `src/seon/bootstrap.clj`, `seon.config.context.edn`, test | `seon.bootstrap-test/short-help-names-only-installed-forms` | L | BENCH-6 | H | ready |
+| BENCH-9 | History length is a dial | `:seon.config.context/history` `:all` (default) or N; dropped exchanges named with the requery form | `src/seon/context.clj`, `seon.config.context.edn`, test | `seon.context-test/a-history-window-names-what-it-dropped` | H | BENCH-6, CX-13 | D | ready after its deps |
+| BENCH-10 | Proof presentation is a dial | `:seon.config.context/proofs` `:source` (default) · `:names` | `src/seon/context.clj`, `seon.config.context.edn`, test | `seon.context-test/proof-names-hide-the-test-source` | L | BENCH-6 | D | ready |
+| BENCH-11 | Paging columns in the grade | followed-cut, re-ran and guessed from `:seon.cluster.eval/result-reads` | `test/seon/competency.clj`, test | `seon.competency-grade-test/a-followed-cut-is-graded` | T | D1, D2 | K | ready after its deps |
 | D1 | Record which results a form read | `:seon.cluster.eval/result-reads` from the read forms, recorded by the current settlement owner | `src/seon/turn/batch.clj` (the current recording owner), `resources/seon/schemas/seon.cluster.eval.edn`, `test/seon/cluster/turn_test.clj` | `seon.cluster.turn-test/a-form-naming-a-handle-records-its-result-read` | O | none | B | ready |
 | D2 | Reading a held result past a cut | T14, T14s, T14n | `test/seon/competency_oracle_test.clj` | `seon.competency-oracle-test/t14-reads-the-held-result-past-the-cut` and siblings | T: oracles run without a provider | D1 | K | ready |
 | D3 | Continue a cut set | T14q (a set cut continues) | `test/seon/competency_oracle_test.clj` | `…/t14q-continues-rather-than-re-runs` | T: oracles run without a provider | D2, PR-02 | K | ready |
@@ -465,8 +478,7 @@ green.
 | Q1 | A research task answered from data | T15 seeded orders, `comp.price`, oracle | `test/seon/competency_oracle_test.clj`, `resources/seon/tasks/seon.competency.edn` | `seon.competency-oracle-test/t15-answers-from-a-query-and-source` | T: oracles run without a provider | A1, F6 | K | ready after its deps |
 | X1-X4 | Conflicting-refactor tasks | T10, T10c, T11, T12 (merges when the agent names its norm, stops without one), T13 conflict drivers and oracles | `test/seon/competency_oracle_test.clj`, `resources/seon/tasks/seon.competency.edn` | `…/t10-stops-on-a-dangling-caller` and siblings | T: oracles run without a provider | MA-6, MA-7, MA-8c, MA-9, MA-11 | K | ready after its deps |
 | C0 | Gate: a model pass costs an ordinary pass | `seon.pass-probe/run-model` model pass within the owner's 20-40 MB, never GB, and no 10× owner left against RP-0's expectations | `test/seon/pass_probe.clj`, `test/seon/pass_probe_test.clj` | `seon.pass-probe-test` model row | O: a model pass within the owner's 20-40 MB, never GB | PB-02b, PB-03, PB-04, RP-10, RP-14, RP-15a (CX-3, CX-10 landed) | K | ready |
-| C7 | Launch a competency run | Launch function `{task variant n}` with the meanwhile step | `test/seon/competency_test.clj` and the launch function's namespace | `seon.competency-test/a-fixture-provider-run-scores-green` | scoring reads stored facts only, no provider call | C0, C4 | K | ready |
-| C8 | Smoke run, then the matrix | Smoke T1 on DeepSeek flash (A × REPL), then the matrix | `docs/research/agent-platform/<date>/competency/` (the score table) | the committed score table | paid: one deliberate DeepSeek flash run first | see §5 | K | ready |
+| C8 | The experiments after E1 | E2 (wire format, after CX-12) … E8 (paging), one strategy at a time, 5 repetitions per cell, widened to 10 when a difference is within noise (spec §5); conflict tasks with a model root last | `docs/research/agent-platform/<date>/competency/` (one table per experiment) | the committed tables | paid: about US$1 for E0-E7 | BENCH-4; each experiment its dial; the full matrix after C0 | K | ready after its deps |
 
 ### 3.12 Process memory and retention (MEM; the one-test cost is F1, EN-6, EN-7 and LR-CACHEb)
 
@@ -1075,9 +1087,12 @@ in the step but red at the agent's REPL (SCI-2, SCI-3).
    errors recorded once per signature and a new signature asks its steward or root (TX-3 → RT-12, after RESPEC R-4).
    **Reset point.**
 10. **Gate:** a model eval request costs no more than an ordinary one (C0).
-11. **Suite, smoke, matrix:** the remaining competency tasks, conflicting-refactor tasks, a model root resolves a
-    stopped merge, a competency run; the smoke run on DeepSeek flash ending in the real merge flow; then the matrix
-    (wire formats, the data entrance, conflict tasks with a model root, research and give-back tasks).
+11. **The context bench, early and then widening** (owner 2026-10-08 night: test presentation strategies rather than
+    pick one): a run's grade (landed) → core tasks in two wordings → launch and table → the first experiments E0
+    (baseline) and E1 (task wording), under US$0.10 and runnable once those two land, beside steps 1-3; then one
+    experiment per presentation dial as each lands (wire format after CX-12, reference depth, block placement, help,
+    history, proof presentation), five repetitions per cell; paging after D1; give-back and answer tasks after F7, A1
+    and F6; conflict tasks with a model root last. The full matrix waits on C0.
 
 **File order on the path.** Three files carry most rows; a row on one of them waits for the one before it.
 - `src/seon/turn.clj` (group B): a1-home (in flight) → F4d → F11 → LR-PROOFREAD → CX-13 → CX-11 (after TX-0) →
@@ -1103,7 +1118,8 @@ in the step but red at the agent's REPL (SCI-2, SCI-3).
 9. (R-1) TX-0 → the re-derived RP, EN, TX, S5, S6 order (today's cards: `cards/README-recording.md`); (R-4) TX-3 →
    RT-12; then CN-7, CN-11, CN-20, CN-21. **Reset.**
 10. C0.
-11. X1-X4, B1b, Q1, Q2, D2, D3; MA-17; C2-C4, C7; C8 smoke; C8 matrix (CX-12, CS-03c, RP-16, MA-17).
+11. BENCH-1 (landed) → BENCH-2 → BENCH-3 → BENCH-4 (E0, E1); then CX-12 → E2, BENCH-6 + C3 → E3, BENCH-7, BENCH-8,
+    BENCH-9, BENCH-10 (C8); D1 → D2 → BENCH-11; X1-X4, B1b, Q1, Q2, D3; MA-17.
 
 **The lanes-as-agents rows** (run beside the path; each removes friction our own lanes hit): CS-05b; CS-01c3 →
 TASK-CHECK → REF-2; LR-HOOK; LR-BRANCHRESTART; RF-3 (owner route); CS-02; S1-06 → S1-07a → S1-07b, S1-08 → S1-09.
