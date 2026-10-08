@@ -293,6 +293,11 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 ## 11. Process and lanes
 
+- **Root sets defaults; we mine and tweak from there (owner 2026-10-08).** "I trust your judgement so let's use it to get
+  to a default state and then we can mine and tweak from there." Root's defaults so far: the display budget starts at
+  2,000 tokens (to be tuned by the followed-cut feedback, PR-30); a docstring-only change reuses green test evidence and
+  reruns no test (lane doc-reach). Root records each default here with its evidence; the owner revises from data.
+
 - **Good solutions, not fast ones (owner 2026-10-08).** "We need good solutions not fast solutions for all of these so we
   need to either iterate and find solutions from experience and/or research agents and thinking longer ... Identify
   square peg and round hole issues and when we need to step back and ask me." Hard problems get iteration from real
