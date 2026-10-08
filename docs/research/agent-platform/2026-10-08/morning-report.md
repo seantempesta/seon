@@ -267,3 +267,7 @@ of two each).
   struggling agent's calls went to context friction: escaped-string source copied into a defn, `slurp` unbound with no alternative
   (14 times), `(my.program/diff {})` refused (lane context-4). Costs now visible: test step 3.6 s, write-branch! 763 MB, proofs read
   2 GB for 3 tasks, closure interpretation ~1 GB (lane lazy-callers).
+- **Context round 4** (`f5eaac1f4`): `source` shows code as code, unbound IO functions name their Seon tool, map arguments get world
+  members supplied (LR-SUPPLYMAP). **Lazy callers** (`30be17208`, `0fad0ceee`): affected callers are interpreted on first call;
+  a 322-caller redefinition 574 ms / 1.14 GB → 20 ms / 33 MB, a hub 3.0 s / 6.5 GB → 58 ms / 105 MB, a whole redefining eval request
+  2.8 s → 1.06 s (the test step is most of the rest).
