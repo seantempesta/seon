@@ -441,3 +441,12 @@
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]
                          (db/db connection)))
            "the refused admission reserved nothing")))))
+
+(deftest a-refused-request-names-the-test-it-refused
+  ;; `bin/seon check` prints only the tally: an ineligible test must be named.
+  (is (str/ends-with? (sut/tally {:seon.error/at (java.util.Date.)
+                                  :seon.error/layer :seon.test/selection
+                                  :seon.error/operation 'seon.test/select
+                                  :seon.error/message "The requested test is not eligible."
+                                  :seon.error/offending 'my.ns-test/a-new-test})
+                      "not eligible. my.ns-test/a-new-test")))

@@ -2881,7 +2881,10 @@
   {:malli/schema [:=> [:cat [:or :seon.test/run-result :seon.error/value]] :string]}
   [result]
   (if (:seon.error/at result)
-    (str "test request refused: " (:seon.error/message result))
+    (let [offending (:seon.error/offending result)]
+      ;; A refusal naming one test or namespace says which.
+      (str "test request refused: " (:seon.error/message result)
+           (when (symbol? offending) (str " " offending))))
     (let [results (:seon.test/results result)
           red (remove green? results)]
       (str "run " (:seon.test.run/id result)
