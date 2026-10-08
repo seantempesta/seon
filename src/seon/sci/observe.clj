@@ -19,7 +19,9 @@
 (defn observe
   "Run `thunk` (one evaluation) under the producer observer, handing each
   write to `on-write`. The observer bindings are handed to `thunk` as its
-  scope, so the evaluation's world carries them to any thread it moves to."
+  scope, so the evaluation's world carries them to any thread it moves to. The
+  thunk runs with `ctx` as the current SCI context, so a definition made while
+  the show stage realizes a lazy value is observed too."
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value [:=> [:cat :seon.batch/write] :boolean] [:=> [:cat :seon.batch/scope] :seon.batch/value]] :seon.batch/value]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working on-write thunk]
   (let [env (:env ctx)
@@ -31,7 +33,7 @@
         ;; (a test body's thread, an acquisition installing a program into
         ;; another context) runs under them; only the evaluating context's own
         ;; writes and expansions are this evaluation's (SCI binds the
-        ;; evaluating context in `sci.ctx-store/*ctx*` for each eval).
+        ;; evaluating context in `sci.ctx-store/*ctx*`).
         own? (fn [] (identical? env (some-> sci.ctx-store/*ctx* :env)))
         scope {#'sci.lang/*expansion-observer*
                (fn [call expansion]
@@ -52,7 +54,7 @@
                    (when (or (not= :bind (:op w)) (:ns (meta (:var w))))
                      (on-write (arm/write-event armed))))))}]
     (try
-      (with-bindings scope (thunk scope))
+      (with-bindings scope (sci.ctx-store/with-ctx ctx (thunk scope)))
       (finally
         (doseq [n (arm/changed-namespaces before (:namespaces @env))]
           (on-write {:seon.batch/op :namespace :seon.batch/ns n}))))))

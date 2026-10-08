@@ -296,3 +296,18 @@
        (is (= [2 nil 4] (mapv :seon.batch/value jvm)) "JVM: the forms around the failed read run")
        (is (= :seon.sci.reader/form
               (:seon.error/member (:seon.batch/error-value (ex-data (:seon.batch/error (second jvm)))))))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.observe/a-definition-realized-while-showing-a-lazy-value-is-observed}}
+  a-pass-captures-definitions-realized-after-the-form-body
+  (with-armed-agent
+   (fn [{:keys [connection agent-id code]}]
+     (let [namespace-name (str "my.agents." agent-id)
+           source-of (fn [sym]
+                       (:seon.fn/source (db/pull (db/db connection) '[:seon.fn/source]
+                                                 [:seon.fn/sym (symbol namespace-name (name sym))])))]
+       (testing "a definition made while the printer realizes the returned lazy value is a program entity"
+         (code "(map (fn [_] (defn lazy-f [x] (inc x)) 0) [1])")
+         (is (= "(defn lazy-f [x] (inc x))" (source-of 'lazy-f))))
+       (testing "a print-time redefinition supersedes the body-time one"
+         (code "(do (defn lazy-r [x] 1) (map (fn [_] (defn lazy-r [x] 2) 0) [1]))")
+         (is (= "(defn lazy-r [x] 2)" (source-of 'lazy-r))))))))

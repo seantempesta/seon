@@ -1,0 +1,5 @@
+[#:seon.task{:name "a-definition-realized-while-showing-a-lazy-value-is-observed"
+             :kind :function
+             :intent "A function defined while the value printer realizes a lazy value a form returned (for example (map (fn [_] (defn f [x] x) 0) [1])) is live in its Var but never becomes a program entity, and a print-time redefinition leaves the stored entity at the earlier body. Cause: seon.sci.observe/observe admits a write only when sci.ctx-store/*ctx* is bound to the evaluating context, which SCI binds during eval-form alone; the show stage runs later inside the same observation scope. Correct: the observation scope runs its thunk under the evaluating context. Proof: seon.cluster.evaluate-source-test/a-pass-captures-definitions-realized-after-the-form-body."
+             :must-read #{seon.sci.observe/observe}
+             :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/lazy-design.md"}}]
