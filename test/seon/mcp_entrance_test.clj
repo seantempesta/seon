@@ -19,6 +19,7 @@
             [seon.render.transcript :as transcript]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]
+            [seon.test :as seon-test]
             [seon.turn :as turn]))
 
 (defn- answer
@@ -335,3 +336,21 @@
         failure (mcp/call-failure request (ex-info "boom" {}))]
     (is (= request (:seon.mcp/request failure)))
     (is (= 'seon.mcp/call (:seon.error/operation failure)))))
+
+(deftest ^{:seon.test/subject "seon.test/reaching"} a-test-written-at-the-repl-reaches-the-function-it-calls
+  ;; A deftest an agent writes at its REPL carries the call edges a
+  ;; file-loaded one does: after the agent changes the callee, its caller's
+  ;; test is the callee's reaching test.
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [namespace-name (symbol (str "reach.probe" (id/id)))
+           callee (symbol (str namespace-name) "callee")
+           evaluate #(answer "eval_clj" {"code" % "agent" agent-id "cluster" running})
+           replies [(evaluate (str "(ns " namespace-name ")"
+                               " (defn callee {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 1))"
+                               " (defn caller {:malli/schema [:=> [:cat :int] :int]} [x] (callee x))"
+                               " (clojure.test/deftest caller-check (clojure.test/is (= 3 (caller 2))))"))
+                    (evaluate "(defn callee {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")]]
+       (is (every? #(false? (get % "isError")) replies))
+       (is (= [(symbol (str namespace-name) "caller-check")]
+              (seon-test/reaching {:seon.db/db (db/db connection) :seon.test/changed [callee]})))))))
