@@ -206,3 +206,9 @@ of two each).
   "the change", so each request redoes gate walks, reach digests and covered-by writes for every earlier branch test (+20 reads,
   +3-4k calls per request) and re-runs unrelated reds. Root ruled: narrow the automatic step to changes since its last run.
   reach-attribute holds 197 MB (38% of cache) of per-revision copies: derive-and-drop for branch revisions.
+- **Write-back path fixed** (`a50842c56` digests keep only aliases and refers the source spells; `665ac1c10` a REPL require or
+  ns-unalias edits the stored ns form): fan4-near's exact refusal now writes the file and reindexes equal (regression through
+  `seon.mcp/call`). **Step narrowing** (`da1210491`): the automatic step selects only what changed since its last run; an unrelated
+  defn no longer re-runs an unrelated red; reach memory flat (one revision per branch and attribute; the lane's measured
+  departure from root's option (a) accepted: not caching would add 130-200 ms per request). Restart plus reset next (digests
+  re-derive), then fan-out 5 tests write-back end to end.
