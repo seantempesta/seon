@@ -109,4 +109,9 @@
              :kind :function
              :intent "seon.error/occurred-since computes observation-selector whenever its query answers a vector, even an empty one; the selector is held per projection, so the first pass after any declaration write rederives it over the whole registry: 12-13 MB and 13.5 ms of the 94 MB pass after a defn (defn-why, 2026-10-08). Derive the selector only when the window holds an error, and hold it by the schema forms it reads (as seon.program/program-attributes now is), not by the projection value. Done when the pass after a defn allocates nothing in observation-selector with no errors in its window."
              :must-read #{seon.error/occurred-since seon.error/observation-selector}
-             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
+ #:seon.task{:name "commit-tx-stored-the-whole-admitted-data-edn-over-the-fitted-one"
+             :kind :function
+             :intent "seon.error/prepare returned the observation carrying the whole admitted data-edn as :seon.error/source, and seon.error/commit-tx stores the source's declared members over the fact's, so a map-sourced fault stored 300 KB inline while its fitted fact held 52 bytes (lane fault-data-edn, b233d838f). Fixed: the source keeps the data-edn the fact kept. Done when seon.error-evidence-test/a-capped-turn-fault-says-it-is-capped asserts the stored data-edn fits :seon.config.error/max-evidence-bytes (b233d838f). SP-1a (cards/SP-1a.md) deletes :seon.error/data-edn and this fix with it: the task is then done by deletion of its producer."
+             :must-read #{seon.error/prepare seon.error/commit-tx}
+             :evidence #{"b233d838f"}}]

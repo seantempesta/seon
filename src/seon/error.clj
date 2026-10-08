@@ -551,7 +551,8 @@
   normalization-error; missing declaration evidence never selects it.
   The two declared transient validation refusals are normalized to this owner's
   explicit stored write/schema error members before identity is derived."
-  {:malli/schema [:=> [:cat :seon.error/prepare-request]
+  {:seon/tasks #{'seon.error/commit-tx-stored-the-whole-admitted-data-edn-over-the-fitted-one}
+   :malli/schema [:=> [:cat :seon.error/prepare-request]
                   :seon.error/prepared]}
   [{:seon.error/keys [source at process basis-t declared-schema]
     evidence-bytes :seon.config.error/max-evidence-bytes
