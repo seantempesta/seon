@@ -106,3 +106,14 @@
      (let [text (str/join "\n" (:seon.help/lines (bootstrap/help-value @connection "help")))]
        (is (not (re-find #"in-ns '(my|user)[. ]" text)) "no placeholder or real namespace prefix is taught")
        (is (str/includes? text "the namespace that owns it") "the owner's namespace is the lesson")))))
+
+(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-a-placeholder-checkout-path}}
+  help-teaches-no-placeholder-value
+  (with-help-agent
+   (fn [connection]
+     (let [lines (:seon.help/lines (bootstrap/help-value @connection "help"))
+           forms (mapcat taught-forms lines)]
+       (is (not-any? #(re-find #"/path/to|\"\.\.\.\"|<[a-z -]+>" %) lines)
+           "no line carries a placeholder path, ellipsis or angle-bracket slot")
+       (is (not-any? #(= 'my.program/write-branch! (first %)) forms)
+           "write-back is root's step, not a call help teaches a worker")))))
