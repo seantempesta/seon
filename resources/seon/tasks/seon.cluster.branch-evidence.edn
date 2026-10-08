@@ -17,4 +17,12 @@
  #:seon.task{:name "agent-identity-prints-its-id-into-the-message"
              :kind :function
              :intent "seon.agent/identity builds :seon.error/message with (pr-str agent-id), a second printer; the id is already the :seon.agent/no-such-agent member. No test reaches seon.agent/identity, so the branch-evidence gate refuses its change as unreached. Done when the message is fixed text and a test reaches the function."
-             :must-read #{seon.agent/identity}}]
+             :must-read #{seon.agent/identity}}
+ #:seon.task{:name "the-branch-evidence-commit-is-dominated-by-whole-tree-lint"
+             :kind :function
+             :intent "The first --branch-evidence commit (e11bb03b9, 2026-10-08) took 10.8 s wall: the gate answered in 175 ms and clj-kondo over the whole candidate tree (src script test, --cache false) took 9.6 s for a one-line change. Done when a one-file branch-evidence commit lints only what the change can affect (the changed files, with the cached analysis of the rest) and finishes under 2 s."
+             :must-read #{seon.cluster.branch-evidence/branch-evidence}}
+ #:seon.task{:name "a-lane-branch-does-not-survive-a-default-restart"
+             :kind :function
+             :intent "After default restarted on e3b7bae3a (2026-10-08), agent impl-rf2-dogfood held no branch on cluster default: its defn of seon.agent/archived? and green evidence were gone, so bin/lane evidence answered unavailable (85 ms) until the defn was evaluated again (its automatic test step re-ran the reaching test green). Done when a lane agent's branch and evidence survive a restart that keeps the store, or the restart's reset of agents is stated and bin/lane names it."
+             :must-read #{seon.cluster.branch-evidence/branch-evidence}}]

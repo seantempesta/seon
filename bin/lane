@@ -405,7 +405,11 @@ commit() {
   echo "== proved in $((SECONDS - began)) s; committing under .git/lane-commit.lock"
 
   printf '%s\n' "$message" > "$scratch/message"
-  if [[ -n "$proven_by_branch" ]]; then printf '\n' >> "$scratch/message"; cat "$scratch/trailer" >> "$scratch/message"; fi
+  # The evidence joins the message's trailer block (Co-Authored-By ...) when it ends in one.
+  if [[ -n "$proven_by_branch" ]]; then
+    [[ "$(printf '%s\n' "$message" | tail -1)" =~ ^[A-Za-z-]+:\  ]] || printf '\n' >> "$scratch/message"
+    cat "$scratch/trailer" >> "$scratch/message"
+  fi
   local git_dir
   git_dir="$(git rev-parse --absolute-git-dir)"
   # The lock descriptor is inherited (close-on-exec cleared), so the commit
