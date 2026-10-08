@@ -6,6 +6,8 @@ date: 2026-10-08
 lane: printer-rules-opus
 ---
 
+> **Slices moved 2026-10-08.** Part 3's slices S1-S20 are rows `PR-` of [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) §3.3 (their old ids collided with the agent-loop S1-S8). The census and the rules R1-R14 stay as evidence.
+
 # Printer rules: census, general rules, enforcement and slices (lane printer-rules-opus)
 
 The value printer is `seon.sci.admit` (projection to print nodes) → `seon.render.value` (selection under one budget,

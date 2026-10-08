@@ -1,5 +1,7 @@
 # Agent-loop split — spec-split-codex
 
+> **Superseded 2026-10-08** by [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) (via the reconciled plan). Dated evidence only; do not launch from it.
+
 The installed owners already provide an interleaved batch fold, two recording entrances and a per-agent Flow proc. Split by those owners: make the lookup changes independently, retain the approved atomic origin conversion, then replace each context/recording/lifecycle family in place. Do not launch S4–S7 as their present §5 rows.
 
 This is a specification and root decision packet, not an implementation or a claim that the target APIs exist. **Ready** means the change is specified below; **blocked** means the named question must be answered and its contract/proof closure reviewed before an implementation lane starts. A blocked row is deliberately not advertised as a fifteen-minute implementation. No prototype ran in default.

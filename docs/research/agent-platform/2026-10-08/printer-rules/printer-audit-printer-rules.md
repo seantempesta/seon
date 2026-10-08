@@ -1,5 +1,7 @@
 # One value printer: census, rules, enforcement and conversion slices
 
+> **Slices moved 2026-10-08.** The ordered slices of this audit (P01-P08, E01-E04, Appendix A/B) are rows `PR-` of [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) §3.3, deduplicated against the Opus printer rules and the message audits. The census and the fifteen rules stay as evidence.
+
 Seon already selects a node tree in `seon.render.value` and emits its AI and HTML faces in `seon.print`. The smallest design is to finish that composition: immutable values → optional render data → one budgeted selection → two emissions. Delete outside display allocation and printed logical copies; retain parsing, explicit query limits and necessary wire encodings.
 
 This is a design and static audit, not a printer implementation or an installation claim. Owner instruction of 2026-10-08 and CLAUDE.md's complete Presentation section govern it. The older clipping survey's recommendation to delete the token budget is superseded: **one budget belongs inside the printer**. The October 7 inventory's exemptions for small scalar messages are also too broad for this instruction: values embedded in error prose belong in data members regardless of size.

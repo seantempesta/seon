@@ -6,6 +6,8 @@ date: 2026-10-08
 lane: messages-opus
 ---
 
+> **Slices moved 2026-10-08.** Part 4's slices S1-S12 are rows `MS-` of [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) §3.4, deduplicated (S2 → PR-02, S5 → P10, S6 → H-01, S9 → S1-06/S1-07a, S10 → PR-07; S1 and the same-pass part of S11 wait on `redo/pass-and-recording.md`; S7 keeps the test value and moves the summary into its render). The census and the rules stay as evidence.
+
 # Agent-facing messages: census, rules, rewrites, slices (lane messages-opus)
 
 Owner, 2026-10-08: every message Seon shows an AI agent should be optimal Clojure, short, and in the

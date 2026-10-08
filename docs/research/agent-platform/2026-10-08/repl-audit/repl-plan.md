@@ -1,10 +1,12 @@
 ---
 title: REPL plan, merged from the Opus and Astra audits
 type: research
-status: proposed; policy questions in section 4 await root or owner
+status: approved by the owner 2026-10-08; §5 superseded by the agent-loop ledger
 date: 2026-10-08
 lane: repl-plan
 ---
+
+> **§5 superseded 2026-10-08.** The owner approved this plan's policies (now laws in [agent-loop.md](../../../../seon/specs/agent-loop.md) §1 and §3.3). Its slices P0-P14 live in [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md): P0-P6, P7a and P11 landed; P7 and P14 are the ledger's CUR and ONE rows, and P7-P9, P12-P14 wait on `redo/pass-and-recording.md`, which also resolves the P7 → P14 → S6-03 → P7 cycle. §1-§4 stay as evidence.
 
 # REPL plan: a real SCI REPL with light forgiveness and one recording transaction
 

@@ -1,10 +1,12 @@
 ---
 title: S5-04 admission design, assembled from the ten S5-03 probes
 type: research
-status: revised to the owner's ruling (Q7), two questions open (section 4)
+status: superseded 2026-10-08: evidence for redo/pass-and-recording.md
 date: 2026-10-08
 lane: admission-design
 ---
+
+> **Superseded 2026-10-08.** Both plan reviews ordered the admission boundary redone (its K2 contract refusal, `rebase` refusal path and guarded-deletion refusal contradict the REPL law and the installed P4). The redesign is `../redo/pass-and-recording.md`; its §7 rows are held in [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) as P8 (blocked-on-redo). The ten case notes in this directory stay as evidence.
 
 # S5-04 admission: serial REPL semantics, captured writes, one analysis, final state
 

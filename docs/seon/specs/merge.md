@@ -1,6 +1,6 @@
 ---
 type: spec
-status: proposed (2026-10-08, lane spec-merge)
+status: proposed (2026-10-08); §3-§5 under redesign
 tags: [spec, merge, root]
 ---
 # Merge: root reviews and takes an agent's branch
@@ -13,13 +13,22 @@ transaction onto root's head. The approach stays: functions of database values, 
 and Datahike commits with merge parents. This spec makes it easy and adds review, repair and auto-acceptance.
 
 Root is whoever holds a merge task: the orchestrator through MCP or a Seon model agent. It is an ordinary task done
-through the ordinary REPL in root's own context. Nothing here is a second entrance. The competency suite
-(`docs/research/agent-platform/2026-10-08/competency/competency-spec.md` §1-2, slices M0-M6) uses this mechanism;
-this spec owns it, and the slice ids below match.
+through the ordinary REPL in root's own context. Nothing here is a second entrance, and a Seon agent must find root's
+job easy. The competency suite (`docs/research/agent-platform/2026-10-08/competency/competency-spec.md` §1-2) uses
+this mechanism; this spec owns it. Order and status of the M slices: [the ledger](../schedule/agent-loop-ledger.md)
+§3.10.
+
+**Under redesign** (`docs/research/agent-platform/2026-10-08/redo/merge-acceptance.md`): §3-§5 below. Both reviews
+found that prepare refuses a conflict before any repair world exists, that a data migration on S never reaches the
+head, that acceptance checks only the carried rows' digests although a new caller or data row can arrive on the head
+after prepare, that `:no-new-red` treats unknown head evidence as green, that no execution owner runs the policy on
+a provider-less root, and that installed accept gates on reaching members, which CLAUDE.md forbids. The diff value
+(§2), identity selection, digest checks and proof execution stay.
 
 Owner rulings this spec applies (2026-10-08): an agent may make any REPL-valid change on its branch, conflicting
-ones included (redefinitions, refactors, renames, schema changes); its branch never refuses them (repl-plan P8,
-TARGET). Integrity is judged at root's diff and merge. Acceptance is automatic when root's criteria pass.
+ones included (redefinitions, refactors, renames, schema changes); its branch never refuses them. Integrity is
+judged at root's diff and merge. Acceptance is automatic when root's criteria pass. Only the task's proofs run during
+the agent's work; the regressions reaching the change run once here, on the combined program.
 
 ## 1. The merge task
 
@@ -106,7 +115,8 @@ Installed (`seon.cluster.source/accept-merge!`, source.clj:941):
 - the named run was recorded on S and every task proof is green there;
 - S's program is unwritten since the run;
 - every function the merge carries has a complete `:malli/schema`;
-- every added or replaced function reaches a green member of the run;
+- every added or replaced function reaches a green member of the run (an installed defect: CLAUDE.md shows
+  reaching-test counts and never gates on them; removed by the acceptance redesign);
 - no task handle the program names is missing on the target (`seon.task/candidate-dangling`, task.clj:360);
 - the writer refuses, before any datom lands, a carried row whose digest on the head moved since prepare
   (`declarations-held-tx`, source.clj:795);
@@ -146,8 +156,8 @@ Shown, not gated: the whole run's tally and its red non-proof members. TARGET ad
 |---|---|---|---|
 | Rename vs new caller | `f` renamed `g`, callers updated, `f` removed | new `k` calls `f` | three-way clean; `:dangling [{:caller k :calls f}]`; policy holds `#{:no-dangling}`; root repairs `k` on S to call `g`, re-runs, accepts |
 | Contract change vs body change | `f`'s `:malli/schema` changed | `f`'s body changed | one declaration digest each side: `:conflict` on `f`; root writes the combined `defn` on S; accept refuses until the run is fresh |
-| Schema evolution vs target data | `:a/line` narrowed | stored rows using `:a/line` | `:schema [{:refused n …}]`; holds `#{:schema-holds}`; root migrates data on S or declines |
-| Two agents, one namespace | A adds `f`, B adds `g` in `ns` | A accepted first | per-declaration three-way: `f`, `g` disjoint, B clean. **Today false conflict**: every `defn` rewrites the namespace row (doc, file link, task edges dropped, aliases re-minted), so B conflicts on `[:seon.ns/name ns]`, and an accept strips the target's ns doc (task `seon.turn.batch/a-defn-rewrites-its-namespace-row`) |
+| Schema evolution vs target data | `:a/line` narrowed | stored rows using `:a/line` | `:schema [{:refused n …}]`; holds `#{:schema-holds}`; root's outcome (a target-side migration or a decline) is under redesign: a migration on S does not reach the head |
+| Two agents, one namespace | A adds `f`, B adds `g` in `ns` | A accepted first | per-declaration three-way: `f`, `g` disjoint, B clean (a definition keeps its namespace row since `76daa8fd5`) |
 | Same function, two agents | both change `f` | A accepted first | B `:conflict` on `f`; held; root takes one or writes the combination |
 
 ## 7. What exists and what is missing
@@ -171,34 +181,16 @@ Missing or broken, found by the dogfood (§8):
 | G3 | the proof run cannot see a branch-registered schema, so propose fails | `seon.test/check-fails-on-agent-registered-schemas` |
 | G4 | propose and prepare throw instead of returning their error | `my.program/merge-tools-throw-instead-of-returning` |
 | G5 | a test-only new namespace throws entity-id/missing at prepare | `seon.cluster.source/a-test-only-namespace-throws-at-prepare` |
-| G6 | every `defn` rewrites its namespace row: false conflicts, ns doc stripped on accept | `seon.turn.batch/a-defn-rewrites-its-namespace-row` |
+| G6 | every `defn` rewrote its namespace row: false conflicts, ns doc stripped on accept (fixed `76daa8fd5`, M8) | `seon.turn.batch/a-defn-rewrites-its-namespace-row` |
 | G7 | root cannot diff a proposal from its own context | `my.program/root-cannot-diff-a-proposal` |
 | G8 | accept cannot retire a hosted proposer's branch (open fault) | `my.program/accept-cannot-retire-a-hosted-proposers-branch` |
 | G9 | a red or refused prepare leaks S | `seon.cluster.source/a-red-prepare-leaks-its-candidate-branch` |
 | G10 | prepare costs seconds | `my.program/the-merge-prepare-costs-three-seconds-and-400k-calls` |
 | G11 | no kept S, take/drop, dangling, schema check, policy, decline with reason, `:seon.task/target` | slices below |
 
-**Slices** (about 15 minutes each; proofs assert data through MCP `eval_clj`, the real entrance; a disposable target
-branch or the `competency` cluster, never default's program):
-
-| # | Slice | Proof test |
-|---|---|---|
-| M7 | G1: a new function arms on S | `seon.cluster.source-test/a-new-function-in-a-new-namespace-prepares-green` |
-| M8 | G6: a pass that changes no ns form keeps the namespace row and digest | `seon.turn.batch-test/a-defn-keeps-its-namespace-row` |
-| M9 | G4, G5: returning tools return; a test-only namespace prepares | `my.program-test/merge-tools-return-their-errors` |
-| M10 | G2, G3: schema keys in compare and diff; proof runs see branch schemas | `my.program-test/a-branch-schema-shows-in-the-diff` |
-| M3 | G7: `diff` and `declaration-diff` for `{:seon.task/merge m}` from root's context | `my.program-test/root-reads-a-proposals-declaration-diff` |
-| M4 | kept S named on the task; conflicts stay on S; S retires when the task closes (G9) | `seon.cluster.source-test/a-conflict-stays-on-the-merge-branch` |
-| M11 | `take!` and `drop!` on the kept S | `my.program-test/take-and-drop-move-one-identity` |
-| M5 | dangling callers in the diff value; `:no-dangling` | `seon.cluster.source-test/a-renamed-callee-names-its-surviving-caller` |
-| M6 | schema keys against head data and readers; `:schema-holds` | `seon.cluster.source-test/a-retracted-attribute-names-the-head-data-and-readers` |
-| M1 | `review!`, the dial, `:accepted-by`, `:held`, `:review-run` | `seon.merge-policy-test/auto-accepts-green-and-holds-red` |
-| M2 | `:no-new-red` | `seon.merge-policy-test/a-head-test-turned-red-holds` |
-| M12 | `decline!` with a reason that messages the agent; `:seon.task/target` | `my.program-test/a-declined-merge-tells-its-agent` |
-| M13 | G8: accept releases a hosted proposer and retires its branch | `my.program-test/accepting-a-hosted-proposal-retires-its-branch` |
-
-Order: M7, M8, M9 first (without them no ordinary proposal merges live), then M10, M3, M4, M11, M5, M6, M1, M2, M12,
-M13.
+**Slices.** The M ids (M0, M1-M7, M9-M13) are rows of [the ledger](../schedule/agent-loop-ledger.md) §3.10, with
+their proofs, order and status; M8 landed in `76daa8fd5`. Proofs assert data through MCP `eval_clj`, on a disposable
+target branch or the `competency` cluster, never default's program.
 
 ## 8. Costs, measured 2026-10-08
 

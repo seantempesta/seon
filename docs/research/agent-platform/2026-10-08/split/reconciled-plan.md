@@ -1,10 +1,12 @@
 ---
 title: Agent-loop split, reconciled plan (S1, S3-S7)
 type: research
-status: proposed to root
+status: superseded 2026-10-08 by the agent-loop ledger
 date: 2026-10-08
 lane: split-reconcile
 ---
+
+> **Superseded 2026-10-08.** The one ordered slice list is now [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md); the laws and the folded Q answers are in [agent-loop.md](../../../../seon/specs/agent-loop.md). This file is dated evidence: its row ids (S1, S3-S7, PB, CS, AR, Q1-Q18) survive only as ledger ids or aliases, and its "ready" tiers, Q3 input-pass text and S5-04/Q7 rows are stale. Do not launch from it.
 
 # Agent-loop split: reconciled plan
 

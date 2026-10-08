@@ -1,10 +1,12 @@
 ---
 title: Agent-loop bounded split, independent Sol review
 type: research
-status: proposed; decisions explicitly blocked
+status: superseded 2026-10-08 by the agent-loop ledger
 date: 2026-10-08
 lane: spec-split-sol
 ---
+
+> **Superseded 2026-10-08** by [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md). Its S5-07a-f table is held there as one row blocked on `redo/pass-and-recording.md`. Dated evidence only; do not launch from it.
 
 # Agent-loop split — spec-split-sol
 

@@ -6,6 +6,8 @@ date: 2026-10-08
 lane: render-audit
 ---
 
+> **Fixes moved 2026-10-08.** §5's violators are rows PR-06, PR-12, PR-13, PR-15, PR-16 and MS-08 of [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) §3.3-§3.4.
+
 # Render audit (lane render-audit)
 
 Owner, 2026-10-08: "We shouldn't be dumping in a ton of garbage to begin with. The whole point of the render functions

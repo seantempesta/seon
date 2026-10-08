@@ -1,10 +1,12 @@
 ---
 title: Agent competency suite
 type: research
-status: proposed (design only; no code); revised in place 2026-10-08 with root review, auto-acceptance, bail and conflict tasks
+status: design data (tasks, proofs, scoring); slices in the agent-loop ledger
 date: 2026-10-08
 lane: competency-spec
 ---
+
+> **Slices moved 2026-10-08.** §1-§8 stay the competency suite's design data. Its §9 slice table is superseded by [the agent-loop ledger](../../../../seon/schedule/agent-loop-ledger.md) §3.11 (C5 became CS-03b, C6 the DATA row, H1 the H-01 row, M0-M6 merge.md's M ids); C1 landed in `c6ae8875d`. Completion, answers and bail follow `../redo/task-finish.md`; conflict handling and root review `../redo/merge-acceptance.md`.
 
 # Agent competency suite
 
@@ -25,7 +27,7 @@ query; no harness, runner, store or printer.
 Owner ruling 2026-10-08: no world accepts 926-945 MB and 536-568 ms per model pass through the fixture provider
 (`seon.pass-probe/run-model running 1 #{}`, test/seon/pass_probe.clj:328; an MCP SCI pass of the same form costs about
 23 MB). **No model run of this suite starts until `run-model` reports a model pass inside the ordinary-pass budget
-(agent-loop §3: < 200 ms, 20-40 MB transient and never GB, no base-context rebuild, 1 machinery transaction, Seon's work only).** The planned S4 slices plus the base-context slice (reconciled plan) own that cut.
+(agent-loop §3: < 200 ms, 20-40 MB transient and never GB, no base-context rebuild, 1 machinery transaction, Seon's work only).** The agent-loop ledger's PB, S4, recording and cut rows own that cut (its row C0).
 Slices marked "today" in section 9 need no model pass; everything else waits.
 
 ## 1. Merge target and root review
@@ -92,7 +94,7 @@ and merge. The conflict tasks (T10-T13) exercise exactly that boundary.
 
 ## 3. Instructions: how an agent ends its session
 
-`(help)` today (src/seon/bootstrap.clj:17-63) teaches `(my.agent/done)` and `turns-left`, which S1-10 drops. S1-10
+`(help)` today (src/seon/bootstrap.clj:17-63) teaches `(my.agent/done)` and `turns-left`, which the ledger's H-01 drops. H-01
 makes `help-value` constant data, `[{:seon.help/says "…" :seon.help/forms [quoted forms]}]`
 (docs/research/agent-platform/2026-10-07/s1-lookups/design-notes.md §4.5), and its class regression resolves every
 form's head. Entries this suite needs, in that shape:
@@ -123,9 +125,10 @@ form's head. Entries this suite needs, in that shape:
 | `my.turn/wait` | exists, src/my/turn.clj:17 |
 | the per-wake call cap and `:capped` disposition | TARGET S6 (agent-loop §4.5); today `:seon.config.run/max-episode-runs` (config/default.edn:287) caps an episode |
 
-The task opening (agent-loop §4.4: `(help)`, the task's `doc`, its must-reads' `doc`) shows the same rule once more
-in `task-ai`: the proof symbols, then "Done when these pass, then `(my.program/propose-merge! {})`; if impossible,
-`(my.task/complete! …)`." Slice H1 adds both; T1-T9 cannot be scored for bail correctness before S6-06b lands.
+There is no task opening: the agent sees its task, proofs and status in the current-state block (agent-loop §3.4).
+The session-end and completion entries above (who proposes, what a question task does, the one bail form) are decided
+by `../redo/task-finish.md`; ledger row H-01 installs them. T1-T9 cannot be scored for bail correctness before the
+bail lands.
 
 ## 4. The tasks
 
@@ -133,7 +136,8 @@ Task file `resources/seon/tasks/seon.competency.edn`; proofs, setups and oracles
 (lane comp-c1 owns both now; T9-T13 are added after it releases them). Each run is a fresh agent on its own branch of
 the competency cluster. A proof is a JVM deftest run as its member (`kernel/*host-world*`, src/seon/test.clj:277),
 reaching the agent's SCI definitions through `support/agent-value` (test/seon/test_support.clj:465) in
-`(kernel/world-ctx)`: the helper `v` below. The namespace is `:seon.test/fixture` so bulk selection skips it.
+`(kernel/world-ctx)`: the helper `v` below. The namespace carries `:seon.test/long` metadata, so the bulk tier skips it
+and it runs by identity (a `:seon.test/fixture` namespace could not be named explicitly).
 
 ```clojure
 (defn- v "The value `code` answers in this member's world." [code] (support/agent-value (kernel/world-ctx) code))
@@ -360,13 +364,13 @@ Score (T15x):
 
 | Axis | Values |
 |---|---|
-| Message wrapping | **A** `:transcript`: one user message, the REPL transcript (today). **B** `:chat`: the opening and inputs as user messages, each form text as an assistant message, its envelope as the next user message. **C** `:prefix`: B plus a final assistant message `{"prefix": true}` (`comp.geo=> ` for REPL, `{:forms [` for DATA); DeepSeek beta only (`https://api.deepseek.com/beta`); Anthropic refuses prefill on Claude 4.6 and later (docs/prds/next-turn/research/token-level.md:58) |
+| Message wrapping | **A** `:transcript`: one user message, the REPL transcript (today). **B** `:chat`: the static prefix as the system message, each form text as an assistant message, its envelope as the next user message, the current-state block in the last user message. **C** `:prefix`: B plus a final assistant message `{"prefix": true}` (`comp.geo=> ` for REPL, `{:forms [` for DATA); DeepSeek beta only (`https://api.deepseek.com/beta`); Anthropic refuses prefill on Claude 4.6 and later (docs/prds/next-turn/research/token-level.md:58) |
 | Agent input | **REPL**: text read by the reply reader (agent-loop §4.3). **DATA**: one EDN map `{:ns comp.geo :forms […]}`, envelopes shown as maps with `:form` (agent-loop §4.4) |
 | Model | `deepseek-flash`, thinking `:disabled` (config/default.edn:402, :429); `deepseek-v4-pro` once flash's table is read |
 
 Six cells × 21 tasks (T1-T8, T9, T9h, T10, T10c, T11, T12, T13 with two agents, T14, T14s, T14n, T14q, T15, T15x) × 3
 repetitions = 378 runs per model.
-Every run: call cap 5 per wake, stop sequence absent, temperature absent, the same opening.
+Every run: call cap 5 per wake, stop sequence absent, temperature absent, the same static prefix.
 
 ## 6. Scoring per run, read from the database
 
@@ -395,29 +399,28 @@ per-cell summary (green share, median passes, accepted/held/bailed counts, token
 | Need | Exists | Missing | Slice | Waits for |
 |---|---|---|---|---|
 | Competency cluster | `bin/seon start NAME` in a live root (operator.clj:1673-1676) | proof it hosts agents, tasks and reset | M0 | — |
-| Wrapping dial | No | `:seon.config.ai/wrapping`; `seon.ai/messages [wrapping opening exchanges]`; `request-body` takes exchanges | C5 | pure today; used after S4 |
+| Wrapping dial | No | `:seon.config.ai/wrapping`; `seon.ai/messages [wrapping prefix exchanges block]`; `request-body` takes exchanges | CS-03a-c | pure today; used after S4 |
 | Exchanges | evaluation rows hold source and shown text | the proc-held transcript (S4) | — | S4 |
-| Data entrance | read stage is a value (src/seon/sci/batch.clj:19-23), modes `:reply`, `:code` | `:data` mode and `:seon.config.ai/entrance` | C6 | repl-plan P7 |
+| Data entrance | read stage is a value (src/seon/sci/batch.clj:19-23), modes `:reply`, `:code` | `:data` mode and `:seon.config.ai/entrance` | DATA | the pass redo |
 | Launch N runs | settings overlay, branch per agent, `assign!`, `my.message/send`, episode cap | one function per run `{task variant n}` incl. the meanwhile step | C7 | §0 |
 | Review policy | prepare/accept/decide | `review!`, the dial, accepted-by/held facts | M1, M2 | — |
 | Conflict views | three-way digests | kept merge branch, dangling callers, schema vs head data, root-side declaration diff | M3-M6 | — |
 | Bail | none | `my.task/complete!` | S6-06b | S6 |
-| Help | `help-value` with DB reads | the entries of section 3 | H1 | S1-10, S6-06b |
+| Help | `help-value` with DB reads | the entries of section 3 | H-01 | the task-finish redo |
 | Answers | none | the three attributes and `answer!`/`answer` | A1 | — |
 | Held-result reads | handles bound per evaluation (src/seon/sci/eval.clj:579) | `:seon.cluster.eval/result-reads` | D1 | — |
 | Results | No | `seon.competency/scores` and render | C4 | — |
 
 **Today's loop versus the cut.** Runnable today without a model pass: tasks, proofs, oracle regressions, the merge
 slices (M0-M6, driven by oracle agents through MCP), the score query, the wrapping adapter. No model run: the pass
-costs 926-945 MB (§0), and today's context is the system-turn refresh S4 deletes. Order: §0's cut → one A × REPL smoke
-run of T1 → S4 and S6-06b → full matrix.
+costs 926-945 MB (§0), and today's context is the system-turn refresh S4 deletes. Order: the agent-loop ledger's critical path (§5).
 
 ## 8. Run budget (DeepSeek flash)
 
 Prices per million tokens, off-peak: miss 0.15, hit 0.003, output 0.60 (config/default.edn:537-541, read back live;
 provider page in docs/research/agent-platform/2026-10-07/deepseek/findings.md). Peak (weekdays 01-04 and 06-10 UTC)
 doubles everything. Calibration: live run 1, 11 calls, 124,157 prompt tokens (86% hits), 3,555 completion, ~US$0.005.
-Assuming a ~3k-token opening, ~1.4k appended and ~400 completion tokens per pass: ~US$0.0016 per 3-pass run, ~US$0.0026
+Assuming a ~3k-token static prefix, ~1.4k appended and ~400 completion tokens per pass: ~US$0.0016 per 3-pass run, ~US$0.0026
 per 5-pass run. **378 runs: ~US$0.60 typical, ~US$0.98 all capped, ≤ US$2.00 at peak.** With no cache hits, ~US$2.10. T14 runs carry
 held-result reads of ~1.5k tokens each, so they cost about twice a T1 run; included in the capped figure.
 Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. Wall time 5-25 s per run.
