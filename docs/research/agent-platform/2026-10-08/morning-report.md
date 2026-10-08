@@ -212,3 +212,8 @@ of two each).
   defn no longer re-runs an unrelated red; reach memory flat (one revision per branch and attribute; the lane's measured
   departure from root's option (a) accepted: not caching would add 130-200 ms per request). Restart plus reset next (digests
   re-derive), then fan-out 5 tests write-back end to end.
+- **Per-request cost after narrowing** (`48860802d`): the test step no longer grows with branch tests (509-551 ms flat on
+  requests 3-10; was 483 → 946); reach memory per request 7 → 0.7 MB; a `:ping` 173 ms (test step 107 ms with nothing to test). A
+  trivial test still costs ~500 ms of step (~50× its work): six durable commits at ~50 ms each (commit-cost pattern; CC cards),
+  11 `declaration-content-key` calls per changed definition (PB-08), 144 queries. Running: fan-out 5 (write-back end to end), PB-08,
+  CC-3/CC-4 (smaller branch heads in our Datahike fork).
