@@ -185,3 +185,9 @@ of two each).
   cache-weight error is a root cause of the variance that sent three lanes after the wrong owner; lane cache-weight is
   fixing the weighers first, then everything gets re-measured. Lesson for the plan: measure with a cache that tells the
   truth before ranking cost owners.
+- **Fan-out 4** (`137ff2bff`, 176 tests, 0 fail; frictions `35a5cb284`): all 3 fixes landed after root review (one agent's
+  `sort-by` recomputed distances on every comparison, 8 GB down to 0.5 GB; a docstring and a hidden refusal restored). Only 1 of 3
+  went green on its own branch: 2 misses were root's (redefining existing file-derived proofs at root left them without an
+  executable Var; rule recorded: never redefine an existing proof at root). Agents needed 21-24 calls with 16-31 repeated
+  forms. Platform blockers found: `write-branch!` refused all three branches (unchanged functions "reindex differently", 0.8-1.5 GB
+  per refusal; lane writeback fixing); the call cap counts per wake, not per run (agents reached 24 under a cap of 16; AE-5).
