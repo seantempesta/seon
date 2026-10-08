@@ -25,6 +25,13 @@ The successor to `../2026-10-08/overnight-plan.md`. Lane rules, stop conditions 
 | A7 | One agent's `retire-branch!` error is not delivered in another agent's reply | `seon.cluster.registry/a-retire-branch-error-repeats-in-every-reply` | next |
 | A8 | An agent's own contract error is delivered, not recorded as a core fault (it turns health `:faulted`) | found by what-broke | next |
 
+| A9 | A test the candidate or branch adds runs in the check (the template store was built from the base commit, so a new deftest is "not eligible") | `seon.operator/a-test-the-candidate-adds-is-not-run-by-the-check`, `seon.test.platform/a-test-the-branch-adds-is-not-eligible-in-the-check` | lane check-new-tests |
+| A10 | Test namespaces have their publics and aliases in an agent's SCI context, so a proof can be written at the REPL | `seon.sci.eval/a-test-namespace-is-empty-in-an-agents-context` | lane test-ns-context |
+| A11 | A host-bound redefinition runs its reaching tests through `check-platform`, not in SCI. The SCI run took 10.5 s for 115 tests, meant nothing, and drove heap to 3.2 GB. A platform check returns to the REPL past `eval_clj`'s 32 s, and a refusal names its diagnostic. | `seon.turn/a-host-bound-redefinition-runs-its-reaching-tests-in-sci`, `seon.mcp/eval-clj-advertises-no-timeout`, `seon.test.platform/a-refused-platform-check-names-no-diagnostic` | lane platform-route |
+| A12 | A declaration's stored source can be transformed at the REPL (rewrite-clj), not retyped whole | to file | next |
+
+The first acceptance run (lane repl-only-a5) broke at A9, A10 and A11; tasks are in 9cb8aa8fb. A5 takes option (b): declare `slurp`/`spit`/`file-seq` as `:seon.sci.binding/target` entries and delete `seon.sci.kernel/host-function-tools`. Its candidate sits on branch `a5-io`.
+
 **Done when** one platform task from wave B is taken from red to committed by a lane working only through `eval_clj`, `write-branch!`, `my.test/check-platform` and `bin/lane commit --branch-evidence`. Every friction met on the way becomes a task.
 
 ## Wave B: known platform fixes (through the REPL once A lands)
