@@ -39,7 +39,8 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: `:chat` is the default wire format (E2: success tied 36/40 vs 35/40; chat had fewer repeated forms
+Root defaults taken: the reply's `:seon.cost/transactions` counts every durable commit the request caused, the test
+world's throwaway-branch commit included, counted by distinct commit ids (CC-1 follow-up). `:chat` is the default wire format (E2: success tied 36/40 vs 35/40; chat had fewer repeated forms
 31 vs 86 and 16% fewer prompt tokens; a weak preference, a dial per agent). Proofs and reaching tests run as one test request (CC Q2: one admission and one completion instead
 of two each).
 
@@ -129,3 +130,6 @@ of two each).
   the rule at 10 runs); chat favoured on repeated forms and tokens, so chat is the default (lane chat-default). CX-4
   removed prompt copying completely (`user=>` lines 44/322 → 0/244). Platform defects found: H1, a Markdown reply read as
   121 forms (lane h1-prose); H3, a deftest over an earlier contracted defn is refused (lane h3-contract).
+- **CC-0** (`9df647b67`): a small commit on a fresh production-config store costs p50 13.4 ms, 2-6 files, ~10 KB, with a 3-4 KB
+  head. Default's head is ~88 KB with 30-41 node files per commit, so commit cost grows with the store (CC-3/CC-4 target
+  it). **CC-1** partial (`745f32362`): JVM requests now count their commit; counting by commit ids is the follow-up.
