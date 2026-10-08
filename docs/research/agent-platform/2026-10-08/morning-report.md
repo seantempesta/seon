@@ -149,3 +149,10 @@ of two each).
 - **Fan-out 3** launched on 324461975 (all of tonight's fixes live) to re-measure the end-to-end rate on real tasks.
 - **Process note:** lane sci-fn-ctx ran `git stash` inside the SCI fork submodule (forbidden); it held only its own changes and
   was popped at once. No one else's work was touched.
+- **Fan-out 3** (`8b0efd5d7` landed; frictions `a0216de96`): 1 of 3 green (batch 1: 2/3; batch 2: 0/3), and **0 platform
+  errors**: both misses were model mistakes (a fix key in the wrong map; forms written as `;;` comments, then `sort-by` used
+  as a transducer). Help's "write every sentence as a ;; comment" encourages commented forms (context task filed). Costs
+  seen: reading one task's proofs allocated 887 MB; a two-test check 1.4 GB (pattern P1, cards CO-3..CO-5).
+- **SCI-5** bumped (`ea6fa74ef`, fork f8a2542d A1). Seon's proof is still partly red (raw thread and executor read the first
+  definition; future is right): the integration risk the card flagged. Lane sci5-seon is diagnosing which context the
+  fn captures.
