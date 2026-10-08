@@ -606,3 +606,23 @@
             (is (.exists marker) "the opted-in test executed its body")
             (is (seq (runner/latest-results (db/db connection) [test-symbol])))))))))
 
+
+(deftest ^{:seon/tasks #{'seon.fn/call-reach-seeks-once-per-changed-declaration}}
+  selection-reads-each-declared-edge-attribute-once
+ ;; Selection for a change of many declarations read each declared-edge
+ ;; attribute once per changed declaration; it reads each once, and only the
+ ;; caller seeks follow the change. Seeds no function calls add no frontier.
+ (support/with-database
+  (fn [connection]
+   (let [database (db/db connection)
+         uncalled (vec (take 20 (sort (db/q '[:find [?s ...]
+                                             :where [_ :seon.fn/sym ?s] (not [_ :seon.fn/calls ?s])]
+                                           database))))
+         reads (fn [seeds]
+                 (let [sink (atom [])]
+                   (binding [db/*read-evidence-sink* sink]
+                     (functions/gate-sets {:seon.db/db database :seon.fn/seeds (set seeds)}))
+                   (count @sink)))]
+    (is (= 20 (count uncalled)))
+    (is (= 19 (- (reads uncalled) (reads (take 1 uncalled))))
+        "one caller seek per further seed, every other read once")))))

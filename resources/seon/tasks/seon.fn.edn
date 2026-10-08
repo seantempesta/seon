@@ -133,4 +133,9 @@
   :kind :function
   :intent "A defn whose contract names an unregistered schema refuses as \"derive: :malli.core/invalid-schema\" and its diagnostic never names :my.s5-03h/nosuch; the key is only in the cause chain (fn.clj:3151). Correct: the refusal carries Malli's humanized problems (malli.error/humanize) naming the missing schema key. Proof: that defn's diagnostic data contains :my.s5-03h/nosuch."
   :must-read #{seon.fn/contract-facts-row}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}
+ #:seon.task{:name "call-reach-seeks-once-per-changed-declaration"
+  :kind :function
+  :intent "seon.fn/call-reach seeks :avet once per seed for :seon.fn/calls, once per frontier name for :seon.test/subject, and seon.fn/declared-callers seeks once per requested value for each indexed declared-edge attribute (:seon.render/ai, :seon.render/html, :seon.render/form, :seon.schedule.task/function, :seon.effect/capability), although those attributes hold at most a few hundred datoms. A my.test/check whose seon.test/changes holds thousands of identities therefore makes seven reads per changed declaration: (seon.fn/gate-sets {:seon.db/db db :seon.fn/seeds <all 5,672 function symbols>}) on default at 953efe25d made 39,713 seon.db/datoms reads, 595,936 armed calls, 632 ms and 1.19 GB; root's one-test check after a restart counted 20,042 reads and 2,931 ms. Correct: each declared-edge attribute and the subject attribute is read once by a walk; only the caller seeks stay per target. Proof: seon.test-reaching-test/selection-reads-each-declared-edge-attribute-once."
+  :must-read #{seon.fn/call-reach seon.fn/declared-callers}
+  :evidence #{"docs/research/agent-platform/2026-10-07/led-cache/reach-key-notes.md"}}]

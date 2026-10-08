@@ -1820,15 +1820,13 @@
              held
              (into {}
                    (map (fn [attribute]
-                          (let [properties (get installed attribute)
-                                symbolic? (= :db.type/symbol (:db/valueType properties))
-                                values (when requested (into #{} (map (if symbolic? :seon.fn/sym :db/id)) requested))
-                                indexed? (or (:db/index properties) (:db/unique properties)
-                                             (= :db.type/ref (:db/valueType properties)))
-                                rows (if (and values indexed?)
-                                       (mapcat #(datoms :avet attribute %) values)
-                                       (datoms :aevt attribute))]
-                            [attribute (into [] (if values (filter #(values (:v %))) identity) rows)])))
+                          ;; One walk per declared-edge attribute, whatever
+                          ;; the target count: the attribute is read once,
+                          ;; never once per changed declaration.
+                          (let [symbolic? (= :db.type/symbol (get-in installed [attribute :db/valueType]))
+                                values (when requested (into #{} (map (if symbolic? :seon.fn/sym :db/id)) requested))]
+                            [attribute (into [] (if values (filter #(values (:v %))) identity)
+                                             (datoms :aevt attribute))])))
                    attributes)
              capabilities (get held :seon.effect/capability)
              referred (mapcat held referring)
@@ -1946,18 +1944,25 @@
     (let [read! read-or-throw!
           named (fn [entities] (identity-names read! database entities))
           declared #(declared-callers read! database %)
-          ;; Entities naming each target by `attribute`, one index read per pair.
-          referrers (fn [attribute targets]
-                      (into #{} (mapcat #(map :e (read! (db/datoms database :avet attribute %)))) targets))
-          seed-callers (into (referrers :seon.fn/calls seeds) (mapcat val (declared seeds)))
+          ;; Callers of each target: one index seek per target, proportional
+          ;; to the change.
+          callers-of (fn [targets]
+                       (into #{} (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %)))) targets))
+          ;; Tests whose subject is a target: one walk of the few subject
+          ;; datoms, never a seek per frontier name.
+          subjects-of (fn [targets]
+                        (let [targets (set targets)]
+                          (into #{} (keep #(when (targets (:v %)) (:e %)))
+                                (read! (db/datoms database :aevt :seon.test/subject)))))
+          seed-callers (into (callers-of seeds) (mapcat val (declared seeds)))
           callers (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.fn/sym attribute) symbol)))
                         (named seed-callers))
           added (remove (set seeds) callers)
           frontier (into (set seeds) callers)
           reaching (-> seed-callers
-                       (into (referrers :seon.fn/calls added))
+                       (into (callers-of added))
                        (into (mapcat val (declared added)))
-                       (into (referrers :seon.test/subject frontier)))]
+                       (into (subjects-of frontier)))]
       (vec (sort (into (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.test/sym attribute) symbol)))
                              (named reaching))
                        (keep :seon.test/sym
