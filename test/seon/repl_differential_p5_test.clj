@@ -1,5 +1,6 @@
 (ns seon.repl-differential-p5-test
-  "P5 rows: printed output answers through the value printer's budget, with a dig form that reads the rest."
+  "P5 rows: printed output answers through the value printer's budget, with an elision form that reads the rest
+  from the live output handle."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
             [seon.ai.tokens :as tokens]
@@ -20,13 +21,13 @@
   (support/with-running-agent
    (fn [running agent-id _]
      (let [text (reply-text (str "(dotimes [i " lines "] (println i))") agent-id running)
-           dig (re-find #"\(subs \(:seon\.cluster\.eval/output \(seon\.db/pull [^\n]*?\]\)\) (\d+)\)" text)
+           dig (re-find #"\(subs (result/o[0-9a-f]+) (\d+)\)" text)
            total (reduce + (map #(inc (count (str %))) (range lines)))]
-       (is (< (tokens/estimate text) 2000))
+       (is (<= (tokens/estimate text) 2000) "the whole reply is one budget")
        (is (some? dig))
        (when dig
          (let [rest-count (reply-text (str "(count " (first dig) ")") agent-id running)]
-           (is (= (- total (parse-long (second dig)))
+           (is (= (- total (parse-long (nth dig 2)))
                   (:seon.repl/value (support/reply rest-count))))))))))
 
 (deftest println-output-answers-bounded-with-its-dig-form-and-no-diagnostics
@@ -35,7 +36,7 @@
   (support/with-running-agent
    (fn [running agent-id _]
      (let [text (reply-text "(do (dotimes [i 3000] (println i)) :done)" agent-id running)]
-       (is (< (tokens/estimate text) 2000))
-       (is (some? (re-find #"\(subs \(:seon\.cluster\.eval/output " text)) "the dig form")
+       (is (<= (tokens/estimate text) 2000) "the whole reply is one budget")
+       (is (some? (re-find #"\(subs result/o[0-9a-f]+ \d+\)" text)) "the elision form")
        (is (not (re-find #"seon\.render\.value/diagnostics" text)))
        (is (not (re-find #"#error" text)))))))

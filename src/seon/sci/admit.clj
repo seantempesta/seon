@@ -699,6 +699,13 @@
   [evaluation-id]
   (id/symbol-in "result" \e evaluation-id))
 
+(defn output-handle
+  "The symbol naming one evaluation's printed output while its context lives:
+  `result/o<evaluation id>`, beside the value's `result/e<evaluation id>`."
+  {:malli/schema [:=> [:cat :seon.cluster.eval/id] :qualified-symbol]}
+  [evaluation-id]
+  (id/symbol-in "result" \o evaluation-id))
+
 (declare admit-walk)
 
 (defn- missing-bound-refusal

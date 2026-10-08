@@ -1594,6 +1594,20 @@
                                [:pre {:class "seon-data-panel seon-core-value"} diagnostic]]]
      :seon.render.value/diagnostics [{:seon.render.data/path path :seon.render.value/failure failure}]}))
 
+(defn- beside-share
+  "The characters of the one budget held back for the reply's other parts:
+  what they already took (`:seon.render.value/spent`) plus, for parts printed
+  later, at most half the budget of what they would take whole
+  (`:seon.render.value/beside`), so two parts that both overflow split it
+  and one that fits shows whole. A quarter of the budget always stays for the
+  value's own root and cut."
+  {:malli/schema [:=> [:cat :map :int] :int]}
+  [unit budget]
+  (let [spent (:seon.render.value/spent unit 0)
+        beside (:seon.render.value/beside unit 0)]
+    (min (+ (if (pos-int? spent) spent 0) (if (pos-int? beside) (min beside (quot budget 2)) 0))
+         (- budget (quot budget 4)))))
+
 (defn- project
   "The projection `prepare` answers, for a unit that may carry no database:
   the core prints with none, and a database present is read, never supplied.
@@ -1641,7 +1655,7 @@
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
                       :width (:seon.print/width options)
                       :budget (tokens/estimate-chars budget-tokens)
-                      :reserve reserve
+                      :reserve (+ reserve (beside-share unit (tokens/estimate-chars budget-tokens)))
                       ;; THE BUDGET BOUNDS THE MEMBERS: no count cap of its own.
                       ;; A shown member costs at least one character and one
                       ;; separator, so a seq is stepped no further than half

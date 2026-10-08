@@ -4804,7 +4804,9 @@
                                ;; the form's working value: its render reads what it read
                                :seon.db/db working)
                   ;; the form prints under its own evaluation's print options
-                  (:seon.print/options evaluation) (assoc :seon.print/options (:seon.print/options evaluation)))
+                  (:seon.print/options evaluation) (assoc :seon.print/options (:seon.print/options evaluation))
+                  ;; its printed output shares the reply's one budget
+                  (:seon.cluster.eval/output evaluation) (assoc :seon.cluster.eval/output (:seon.cluster.eval/output evaluation)))
         record (:seon.sci.admit/record evaluation)
         shown (kernel/with-arm
                ctx limit

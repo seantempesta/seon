@@ -5,16 +5,23 @@
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
             [clojure.walk :as walk]
+            [seon.ai.tokens :as tokens]
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
+
+(defn- reply-text
+  "The reply text of one `eval_clj` of `code` as `agent-id`."
+  {:malli/schema [:=> [:cat :string :string :string] :string]}
+  [code agent-id running]
+  (support/mcp-text
+   (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                             "arguments" {"code" code "agent" agent-id "cluster" running}})))))
 
 (defn- reply
   "The reply map of one `eval_clj` of `code` as `agent-id`."
   {:malli/schema [:=> [:cat :string :string :string] :map]}
   [code agent-id running]
-  (support/mcp-reply
-   (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
-                                             "arguments" {"code" code "agent" agent-id "cluster" running}})))))
+  (support/reply (reply-text code agent-id running)))
 
 (defn- core-only?
   "True when `form` names only `clojure.core` functions and result handles."
@@ -69,3 +76,25 @@
              kept (second form)]
          (is (core-only? form) "the elision form names clojure.core only")
          (is (continued? form (walk/postwalk-replace {'N kept 'H handle} expected) agent-id running)))))))
+
+(deftest the-out-elision-form-reads-the-live-output
+  ;; Printed output, a large value and findings share the reply's one budget;
+  ;; each cut continues from its own live source.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [printing "(dotimes [i 3000] (println \"line\" i \"of the printed output\"))"
+           text (reply-text (str "(do " printing " (vec (range 2000)))") agent-id running)
+           [_ out-handle out-offset] (re-find #"\(subs (result/o[0-9a-f]+) (\d+)\)" text)
+           [_ value-offset value-handle] (re-find #"\(drop (\d+) (result/e[0-9a-f]+)\)" text)]
+       (is (<= (tokens/estimate text) 2000) "one budget covers value, output and findings")
+       (is (re-find #":findings" text))
+       (is (and out-handle value-handle) "both parts are cut, each with its own source")
+       (when (and out-handle value-handle)
+         (is (continued? (list 'subs (symbol out-handle) (parse-long out-offset))
+                         (list 'subs (list 'with-out-str (read-string printing)) (parse-long out-offset))
+                         agent-id running))
+         (is (continued? (list 'drop (parse-long value-offset) (symbol value-handle))
+                         (list 'drop (parse-long value-offset) (list 'vec (list 'range 2000)))
+                         agent-id running))))
+     (let [small (reply "(do (println \"hi\") 1)" agent-id running)]
+       (is (= ["hi\n" 1] [(:seon.repl/out small) (:seon.repl/value small)]) "a small reply is whole")))))

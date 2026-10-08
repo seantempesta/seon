@@ -599,6 +599,19 @@
       (sci/intern ctx namespace-name intern-name value))
     handle))
 
+(defn- bind-output!
+  "Bind one evaluation's printed output in the fork under its output handle
+  (`admit/output-handle`), beside its value's `handle`, so the reply's cut of
+  `:out` reads the live text."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :string] :qualified-symbol]}
+  [ctx handle output]
+  (let [output-handle (admit/output-handle (subs (name handle) 1))]
+    (binding [sci.lang/*write-observer* nil]
+      (when-not (sci/find-ns ctx 'result)
+        (sci/add-namespace! ctx 'result {}))
+      (sci/intern ctx 'result (symbol (name output-handle)) output))
+    output-handle))
+
 (defn- binding-rows
   "Project SCI's effective resolver inputs into namespace components."
   [{aliases :seon.sci.reader/aliases
@@ -3770,22 +3783,28 @@
                   ;; `*print-level*` (its `set!`s), held by the agent's fork.
                   (and (not (contains? request :seon.print/options)) (some-> ctx ::print-session deref seq))
                   (assoc :seon.print/options @(::print-session ctx)))
-        ;; The render's forms read the value by its handle.
+        ;; The render's forms read the value by its handle; the form's
+        ;; printed output is live beside it, so a cut of `:out` reads it.
+        output (:seon.cluster.eval/output request)
         _ (when (and ctx handle) (bind-result! ctx handle value))
+        _ (when (and ctx handle (seq output)) (bind-output! ctx handle output))
         ;; A preparation or print the render stage refuses (a unit it cannot
         ;; build, a refusal its own contract rejects) is one diagnostic; the
         ;; value then shows as bounded plain Clojure printing.
         [projection shown]
         (try
           (let [projection (render.value/prepare
-                            (cond-> (assoc request
+                            (cond-> (assoc (dissoc request :seon.cluster.eval/output)
                                            :seon.render/value value
                                            :seon.render.call/id
                                            [:seon.cluster.eval/source
                                             (:seon.cluster.eval/source request)])
                               (and ctx (:seon.sci.eval/time-limit-ms request) (:seon.sci.admit/caps request)
                                    (not (::rendering? request)))
-                              (assoc :seon.sci.eval/evaluate-source (partial evaluated-source request))))]
+                              (assoc :seon.sci.eval/evaluate-source (partial evaluated-source request))
+                              ;; ONE BUDGET PER REPLY: the output printed beside
+                              ;; the value holds its share of the value's budget.
+                              (seq output) (assoc :seon.render.value/beside (+ 2 (count output)))))]
             [projection
              (if (contains? projection :seon.render.value/root-description) projection
                  (or (:seon.render.value/value-text projection)

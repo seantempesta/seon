@@ -176,21 +176,31 @@
   (delay (requiring-resolve 'seon.config/defaults)))
 
 (defn- shown-output
-  "The evaluation's printed output as the value printer shows it: under the
-  agent profile's one budget, a cut carrying the form that reads the rest from
-  the stored evaluation (`subs` over its `:seon.cluster.eval/output`)."
-  {:malli/schema [:=> [:cat :string [:maybe :string]] :string]}
-  [output evaluation-id]
-  (let [profile (@render-agent-render-profile @@config-defaults)]
-    (value/text
-     (cond-> {:seon.render/value output
-              :seon.render.value/root [:seon.cluster.eval/output evaluation-id]
-              :seon.render/profile profile}
-       evaluation-id
-       (assoc-in [:seon.render/profile :seon.print/requery-id]
-                 (list :seon.cluster.eval/output
-                       (list 'seon.db/pull ''[:seon.cluster.eval/output]
-                             [:seon.cluster.eval/id evaluation-id])))))))
+  "The evaluation's printed output as the value printer shows it, under the
+  agent profile's one budget less the `spent` characters the reply's other
+  entries took: a cut carries the form that reads the rest from the live
+  output handle (`subs` over `result/o…`)."
+  {:malli/schema [:=> [:cat :string [:maybe :string] :int] :string]}
+  [output evaluation-id spent]
+  (value/text
+   {:seon.render/value output
+    :seon.render/profile (@render-agent-render-profile @@config-defaults)
+    :seon.render.value/spent spent
+    ;; an evaluation never recorded has no handle; its cut says so
+    :seon.render.value/root (if evaluation-id (admit/output-handle evaluation-id) :seon.repl/out)}))
+
+(declare reply-map)
+
+(defn- entries-in-order
+  "The present entries of `by-key`, in the reply's declared order."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword [:maybe :string]]]
+                  [:vector [:tuple :qualified-keyword :string]]]}
+  [by-key]
+  (into []
+        (keep (fn [response-key]
+                (when-some [text (get by-key response-key)]
+                  [response-key text])))
+        response-order))
 
 (defn- response-entries
   "The response's present keys, in declared order, each already text.
@@ -240,7 +250,6 @@
                 ;; simply its absence, so nothing here re-decides what the
                 ;; binding already settled.
                 :seon.repl/result (some-> handle str)
-                :seon.repl/out (when (seq output) (shown-output output (:seon.cluster.eval/id emission)))
                 ;; ALREADY TEXT: the value renderer bounded it once.
                 :seon.repl/errors (:seon.repl/errors emission)
                 :seon.repl/note (when-not failed?
@@ -265,11 +274,14 @@
                                               (some (comp #{:slow} :seon.repl/finding) found))
                                       ;; Ties by name, so the text is a function of the calls, not of the set's iteration order.
                                       (value/core-text (vec (sort-by (juxt (comp - second) first) repeated))))}]
-    (into []
-          (keep (fn [response-key]
-                  (when-some [text (get by-key response-key)]
-                    [response-key text])))
-          response-order)))
+    (entries-in-order
+     (cond-> by-key
+       ;; ONE BUDGET PER REPLY: the output shows in what the reply's other
+       ;; entries left of it (the value held back the output's share).
+       (seq output)
+       (assoc :seon.repl/out
+              (shown-output output (:seon.cluster.eval/id emission)
+                            (+ (count ":out ") (count (reply-map (entries-in-order by-key))))))))))
 
 (defn- ends-in-comment?
   "True when `text`'s last line could hold a line comment, so the reply map
