@@ -264,6 +264,10 @@ statistics and weighted occupancy. The per-kind cumulative split is an additiona
 its aggregate stats answer automatically. Byte counters are also asynchronously decremented by the removal
 listener; a concurrent status read is an observation, not an exact retained-heap balance.
 
+Enabling `recordStats` alone does not report the load duration of Seon's manually completed futures: that work
+must enter Caffeine's supported loading operation for its load statistics to apply. Preserve this distinction
+when converting the adapter; do not relabel incomplete aggregate counters as complete accounting.
+
 Caffeine's `AsyncCache.get` owns per-key computation and failed-entry removal, but explicitly disallows its
 mapping function updating other mappings of the same cache. Seon's derivations intentionally call other kinds
 (`src/seon/cache.clj:121-158,160-180`). Replacing `claim` with a synchronous recursive mapping function would
@@ -508,6 +512,17 @@ That existing var checks the status data used in this audit; it does not prove t
 is appropriate for research prose (testing skill §1). A successful commit is conditional on this command's
 candidate check. Broad tiers belong to root. No pre-existing red is asserted without a stored test result.
 
+**Completed:** commit `bd0bfcbf1` added this note (586 lines, source/test delta 0). Candidate check
+`5aedfa7010f0af17588124b40d40c138c90aec44`, run `ea5227ed23ff`: executed 1, reused 0,
+3 assertions passed, 0 failures, 0 errors, passed true. Runner total 5,929 ms; operator test phase 6,171 ms.
+Whole check 181,258 ms: slot wait 62,386 ms, prepare 73,327 ms, boot 62,779 ms (ready 55,976 ms),
+publication 10,158 ms, adoption 866 ms. These phases overlap or nest and must not be summed.
+The check's source publication reported 138 adopted identities from its HEAD candidate; this is not a claim that
+the documentation itself defines program entities. The installed check waited for its two-JVM limit
+(`script/seon/operator.clj:1516-1555`), a foreign scheduling boundary; no other lane was inspected or interrupted.
+The check owns disposal of its throwaway JVM and root and returned successfully. No lane-owned JVM was launched
+outside that command. The follow-up recording these results changes only prose; the same program proof is reused.
+
 Measurement corrections, not product defects: one malformed local let was refused by the reader
 (result/ec3e62931589f); an initial count treated an unknown-attribute refusal map as ten rows, so those counts
 were discarded and the corrected census intersects installed schema attributes (result/ef9baa4505395).
@@ -516,6 +531,12 @@ discarded. The corrected lookup recovered all 50 binaries (result/e19f15136b9c5)
 No missing measurement is reported as zero. Probe forms below preserve reproducibility without installing code.
 
 ## Exact read-only measurement forms
+
+### Corrected installed digest census — result/ef9baa4505395
+
+```clojure
+(let [connection (seon.cluster.boot/connection "default") database (seon.db/db connection) start (System/nanoTime) attributes (filter #(contains? (:schema database) %) (#'seon.cluster.registry/blob-digest-attributes database))] {:basis (:max-tx database) :rows (mapv (fn [a] (let [rows (seon.db/q database '[:find ?e ?v :in $ ?a :where [?e ?a ?v]] a)] [a (if (map? rows) rows (count rows)) (get-in (:schema database) [a :db/noHistory] false)])) (sort attributes)) :ms (/ (- (System/nanoTime) start) 1e6)})
+```
 
 Each was submitted as root/default/JVM. The physical-key census is slow: do not put it in a routine view or rerun it without an explicit maintenance budget. Saved result ids below refer to this JVM and are not durable object handles after restart.
 
