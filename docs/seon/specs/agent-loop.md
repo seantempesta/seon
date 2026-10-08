@@ -134,7 +134,8 @@ static prefix and the history are cache hits on every call after their first (`:
 
 **Model eval request owners and their end state.** Base-context construction: zero in any eval request (one shared incremental base,
 an overlay per agent branch advanced by changed definitions, one fork advanced in place). Context projection,
-prompt and refresh: deleted by the three-part context (held history appended per eval request, block rendered per call).
+prompt, capture and refresh: deleted (`55ede54a9`, `94df1f74a`); the history is read per model call from the agent's call
+rows and the block rendered per call (§3.4).
 Seven machinery commits: one. The surviving writer's floor (13-14 MB) and the armer, provider and query residual
 (3-7 MB) are accepted as measured. Work derivation: once per eval request. No competency model run starts until
 `seon.pass-probe/run-model` reports a model eval request within the owner's 20-40 MB with no owner 10× over its expectation.
@@ -303,9 +304,11 @@ transaction, after the writer checks it still exists and is not already delivere
 RECORD or a failed provider call delivers nothing, so the item shows again. An item cut by the budget stays unread
 until it is shown. A change in what the assigner wants is a task revision, not a message.
 
-**History.** An exchange is an eval request's call row and its evaluations with source and shown text. The proc holds the
-assignment's exchanges as values and appends each finished exchange; it reads ordered history once, at proc start or
-a new assignment. Only exchanges whose call row carries a model attempt reach the model; there is no origin tag
+**History.** An exchange is an eval request's call row and its evaluations with source and shown text.
+`seon.context/model-context` reads the agent's exchanges from its call rows at each model call (CX-1); the text of
+an unchanged exchange is never re-derived: whether the proc holds the exchanges or their text is cached by content is
+the ledger's RESPEC R-7 (today each call re-renders every exchange, about 0.7 ms per evaluation). The history starts at
+the current assignment (ledger CX-13). Only exchanges whose call row carries a model attempt reach the model; there is no origin tag
 (ledger §3.15). Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
 Live results are held in `seon.cache` as a kind (`:seon.repl/result`, keyed by evaluation id) under its configured
 byte budget, with no count limit, evicted by Caffeine's own policy (W-TinyLFU, which approximates LRU); an evicted result's handle answers gone-value data with its saved shown
@@ -363,12 +366,13 @@ reaches is answered from that record, so an eval request that changed nothing co
 definitions an earlier form of the same eval request made answers `:my.test/after-recording`: those tests run in this
 step, right after the one recording transaction, and their results are in the same reply; nothing tests uncommitted
 values and the recording stays one transaction. A change no test reaches answers `:seon.test/unreached` with no
-`:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (a cluster configuration dial, default 10 s): proofs always
+`:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (the cluster dial `:seon.config.test/step-time-limit-ms`, default 10 s): proofs always
 first, reaching tests after; when the bound fires, a started member runs to its actual exit and records, and the
 tests not yet run continue at the next eval request's step and show as pending. A newer eval request's change supersedes the queued
 tests of the older program (the last version wins). A member whose recorded green still holds for the program it now
 reaches is answered from the record. At proc start, tests left unfinished are
-derived from stored evidence. The test requests' own writes and merge-request bookkeeping never trigger the step.
+derived from stored evidence; how a waiting agent's pending tests run (no next eval request follows a wait) is the
+ledger's RESPEC R-6. The test requests' own writes and merge-request bookkeeping never trigger the step.
 There is no proof proc and no running or dirty state.
 
 - A committed model reply advances answered to the basis its context presented and records the delivery of the unread

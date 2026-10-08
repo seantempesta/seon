@@ -14,7 +14,8 @@ reports, a separate "fault" vocabulary for Seon's own failures and a 4,735-line 
 suppressed edges cycle-safely and keeps each link's data whole. Data flow after this spec: a producer builds ONE error
 map with ONE validating constructor; it returns the map when answering is its job, else throws it as `ex-info` data;
 the entrant boundary takes it back once; Seon's own errors are recorded once per signature at the task home with a
-count and one notification to root, and an agent or root files the task; every occurrence rides the evaluation or call where it happened and
+count and one question task, assigned to the producing function's steward if one is held, else to root (the
+assignment is the one notification, §6; ledger RT-12), whose decision files the owner task; every occurrence rides the evaluation or call where it happened and
 reaches the agent that caused it in that reply. There is no separate fault concept. Principal approach: Malli's own
 shapes (`:multi` on a type key, the instrument report, cached explainers, `malli.error`) and Clojure's (`ex-info`).
 

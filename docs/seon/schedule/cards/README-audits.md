@@ -152,7 +152,7 @@ rejected branch definition never becomes a shared dependency fact.
 2. Expose an immutable dependency-analysis input in our clj-kondo fork.
 3. Keep the mirrors.
 
-**Deferred (owner): asked after its deleting row lands.** **AU-Q15. Neighborhood reads for rendering (`render/walk.clj:189-538`, `:675-838`).** We pick neighbors by schema
+**Askable now (CX-10 landed `94df1f74a`; ledger §6 Q3): `render.walk/neighborhood` survives for pages (`seon.render`, `seon.render.web`).** **AU-Q15. Neighborhood reads for rendering (`render/walk.clj:189-538`, `:675-838`).** We pick neighbors by schema
 links and distance; Datahike's pull follows a selector. The S4 context rows delete the model-context caller
 (`declared-sources`, `render.walk/neighborhood`), so ask after S4-07b3.
 1. **(recommended)** Compile one selector from those choices and use Datahike's pull.

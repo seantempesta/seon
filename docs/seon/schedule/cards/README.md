@@ -79,25 +79,25 @@ assign proofless tasks too.
 | Row | Card | State |
 |---|---|---|
 | CS-01b | [CS-01b](CS-01b.md) | landed `88bfd19cb` |
-| CS-01c1 | [CS-01c1](CS-01c1.md) | in flight (impl-cs01c1) |
-| CS-01c2 | [CS-01c2](CS-01c2.md) | ready after CS-01c1 |
-| CS-01c3 | [CS-01c3](CS-01c3.md) | ready after REF-1, CS-01c5 |
-| CS-01c5 | [CS-01c5](CS-01c5.md) | ready after REF-1 |
-| REF-1 | [REF-1](REF-1.md) | ready after CS-01c2 |
+| CS-01c1 | [CS-01c1](CS-01c1.md) | landed `3e4d57067` |
+| CS-01c2 | [CS-01c2](CS-01c2.md) | landed `106e8c25e` |
+| CS-01c3 | [CS-01c3](CS-01c3.md) | ready |
+| CS-01c5 | [CS-01c5](CS-01c5.md) | landed `c9a496d6f` |
+| REF-1 | [REF-1](REF-1.md) | landed `a807ec0b4` |
 | TASK-CHECK | [TASK-CHECK](TASK-CHECK.md) | ready after REF-1, CS-01c3 |
 | REF-2 | [REF-2](REF-2.md) | ready after TASK-CHECK |
-| CS-01c4 | [CS-01c4](CS-01c4.md) | ready after CS-01c1, S4-05a |
+| CS-01c4 | [CS-01c4](CS-01c4.md) | landed `381953f92` (today's inbox rule; S4-05a extends it) |
 | CS-01d | [CS-01d](CS-01d.md) | ready after CS-01b, F4b |
 | CS-02 | [CS-02](CS-02.md) | ready after its deps (PR-11) |
-| S4-05a | [S4-05a](S4-05a.md) | ready |
-| F4a | [F4a](F4a.md) | in flight (f4a) |
-| F4b | [F4b](F4b.md) | ready after F4a |
-| F4c | [F4c](F4c.md) | ready after F4b |
-| F4d | [F4d](F4d.md) | ready after F4c |
-| S6-06a | [S6-06a](S6-06a.md) | in flight (s606a) |
-| A1 | [A1](A1.md) | ready after led-cacheb, s606a release `my/agent.clj`, `seon.task.edn` |
+| S4-05a | [S4-05a](S4-05a.md) | ready (extend `inbox`, Q-D; the block already reads it) |
+| F4a | [F4a](F4a.md) | landed `09f86c000` |
+| F4b | [F4b](F4b.md) | landed `34dac2655` |
+| F4c | [F4c](F4c.md) | landed `aa0b47ab9` |
+| F4d | [F4d](F4d.md) | ready after ledger RESPEC R-6 (a waiting agent's pending tests) |
+| S6-06a | [S6-06a](S6-06a.md) | landed `d9789e22e` |
+| A1 | [A1](A1.md) | ready; amend by RT-6 first (the answer lives on the assignment) |
 | F6 | [F6](F6.md) | ready after A1 |
-| F7 | [F7](F7.md) | F7a ready after S6-06a; F7b after F7a; F7c after F7b |
+| F7 | [F7](F7.md) | F7a ready; F7b after F7a; F7c after F7b |
 
 ## Common to every card
 

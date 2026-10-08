@@ -75,7 +75,7 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 - **Context is dynamic, not an infinite append.** "This is not a system where we just infinitely append everything.
   So the task is always current." Context = static prefix (`(help)`) + append-only history of only the agent's own
   forms and results + one current-state block rendered fresh at every model call from stored facts, never stored,
-  each item once. No opening pass, no input pass. Lives in: agent-loop.md §1.4, §3.4; ledger §3.7 (S4, CS rows).
+  each item once. No opening pass, no input pass. Lives in: agent-loop.md §1.4, §3.4; ledger §3.7 (CX and CS rows; CX-1, CX-2 and the deletions landed 2026-10-08).
 - **Agents see the actual proof tests** (current source) and their status, plus broken tests, in the block. Lives in:
   agent-loop.md §3.4; ledger CS-01b (landed), CS-01d.
 - **The block is built from what the task names**: Seon symbols, library symbols and namespaces, and
@@ -83,9 +83,9 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 - **Unread messages extend `my.message/inbox`** (no new `my.agent/inputs`). Lives in: agent-loop.md §3.4; ledger
   S4-05a, CS-01c4.
 - **One debug view**: the context exactly as sent, from the same assembly function, printed by the value printer's
-  HTML face. Lives in: agent-loop.md §3.4; ledger DBG-01.
+  HTML face. Lives in: agent-loop.md §3.4; ledger CX-7 (landed in `55ede54a9`).
 - **Wire formats are experiments**: transcript, chat turns and prefix continuation are adapters over stored exchanges
-  chosen by configuration; measure provider token counts, never assume. Lives in: agent-loop.md §3.4; ledger CS-03a-c.
+  chosen by configuration; measure provider token counts, never assume. Lives in: agent-loop.md §3.4; ledger CX-12, CS-03c.
 
 - **Every REPL evaluation is its own context unit; no block budget (owner 2026-10-08).** "each eval can output 2000
   tokens btw not the entire context ... a hairy task should pull in a lot of helpful references" and "No block budget.
@@ -117,7 +117,7 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   §3.5; competency-spec.md §4.5; ledger F6, A1.
 - **A code task with no change** (proofs green, no change against main) is done after checking main still holds the
   tested program; nothing merges. Lives in: agent-loop.md §3.5; ledger F5.
-- **A call row stores its assignment key as a value**, read once per eval request. Lives in: ledger S4-02a.
+- **A call row stores its assignment key as a value**, read once per eval request. Lives in: ledger CX-13.
 - **The competency suite is the whole-system test.** Every run ends in the real merge flow that root reviews; it
   includes an impossible task (early bail with a reason), a research question and an unanswerable one, and realistic
   refactors that conflict with the moving target (rename plus new caller, contract vs body change, schema evolution

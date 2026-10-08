@@ -18,6 +18,12 @@ own forms as someone else's and advised itself; it learned its proof was red onl
 
 ## Order (each card about 15 minutes; group B is `turn.clj`, so B cards run in series)
 
+State at HEAD `6d3c22dbb` (ledger §2): CX-1 (`ade6e3059`) and CX-2 (`7e39aeed3`) landed; CX-3, CX-6, CX-7, CX-8 and
+CX-9 landed in one rip (`55ede54a9`), CX-10 in `94df1f74a` and `0de932400`, both resets done. Left: CX-4, CX-5 (its
+card's `seon.cluster.prompt/window-check` moves to `seon.context`: the namespace is deleted), CX-11, CX-12, CX-13.
+Run 3 found two defects in landed rows: CX-2 reads the assignment on the agent's branch instead of the task home, and
+the system message is the help map printed unrendered (ledger §5 step 1).
+
 1. **CX-1** the model sees help, its own exchanges, and its block last (first; the next live run's main change).
 2. **CX-2** a model turn only with an assignment; a reply with no form waits.
 3. **CX-3** no system turn before a model pass (and no stored read evidence written).
@@ -45,7 +51,7 @@ Storage: SR-H → SR-I; SR-E after SR-D; SR-C any time in group C order; SR-F af
 
 ## Owner questions
 
-**Open (context cut, 2026-10-08).**
+**Answered (context cut, 2026-10-08).**
 
 **Q-CX1 (CX-4). The `user=>` prompt in the history.** ANSWERED (owner 2026-10-08): drop the prompt from the history. The transcript prints `<ns>=> ` before each form; the model
 copies it, and a copied prompt is read as the symbol `user=>` (one error beside each form, probed 2026-10-08).
@@ -96,7 +102,7 @@ compression saves").
 - The blob-konserve work sits uncommitted in the shared tree inside files claimed by `led-storage` (`src/seon/blob.clj`)
   and with an unclaimed untracked schema (`resources/seon/schemas/seon.config.blob.edn`); `deps.edn` (claimed by
   `dials-16gb`) still pins the old konserve sha while the submodule points at `e4334756`. BLOB-K lands it.
-- `seon.sci.eval/rendered-evaluation`'s only caller is inside `system-turn`: CX-8 deletes both.
+- `seon.sci.eval/rendered-evaluation`'s only caller is inside `system-turn`: both deleted (`55ede54a9`, `87326e203`).
 - Health at carding time (default, 2026-10-08 evening): `:faulted`; `seon.schema/call-with-projection-state` 78 calls,
   9.4 s mean, 171 s max; `seon.sci.kernel/acquire-arm` refused new evaluations under memory pressure (4 occurrences);
   the cache at 509 of 512 MB.
@@ -106,4 +112,5 @@ compression saves").
 - `clojure.test/run-test-var` at an SCI agent's REPL still throws `sci.lang.Namespace cannot be cast to
   clojure.lang.Symbol` (live run, three model passes spent on it): task `seon.sci.eval/run-test-var-throws-on-an-sci-test-var`.
 - Exchange text through `seon.repl/text` costs about 0.7 ms per evaluation (27-40 ms for 38 evaluations, 17 K
-  characters): 10× what copying stored text should cost; CX-1 measures it at 200 exchanges.
+  characters): 10× what copying stored text should cost; CX-1 landed re-rendering every exchange per call, so this is
+  ledger RESPEC R-7.
