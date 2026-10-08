@@ -58,4 +58,9 @@
              :kind :function
              :intent "JVM-mode (undefined-jvm-sym) through MCP answers :seon.error/message \"Syntax error compiling at (1:1).\" twice (top and first chain link) with the cause, Unable to resolve symbol, last in :chain (default 2026-10-08). clojure.main/err->msg (ex-triage + ex-str) is Clojure's own message for this. Done when the reply's message is the triaged cause and a regression asserts it."
              :must-read #{seon.turn.batch/jvm-request}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "a-core-unmap-with-a-surviving-caller-is-silently-undone"
+             :kind :function
+             :intent "On an agent's own branch (default, MCP SCI, agent plan-review-opus-probe, 2026-10-08): (defn pa [x] x) (defn pb [x] (pa x)) then (ns-unmap *ns* 'pa), in the same pass or a later one, answers nil with no diagnostic, yet [:seon.fn/sym scratch.prv/pa] stays stored and the next pass resolves #'scratch.prv/pa again: the unmap is undone. Cause: removal-facts returns my.program's deletion refusal when referrers survive, the pass keeps the rest of the facts, and acquisition reinstalls the stored row. The P1 commit (ded5e35de) says the write observer already stores the final state; true only with no surviving referrer. Correct (owner REPL law, repl-plan P8): store the final state (pa retracted, pb kept with its calls edge) and deliver one finding naming pb beside the value; integrity is judged at merge (merge.md M5). Proof: a seon.repl-differential test row asserting pa absent from the store and the finding present after the pass."
+             :must-read #{seon.turn.batch/removal-facts seon.turn.batch/form-facts}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/plan-review-opus-plan-review.md"}}]
