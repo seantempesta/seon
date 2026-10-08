@@ -63,6 +63,8 @@ Default JVM, read-only, loaded commit `32ca5f2e5` (archive extract `data/source/
 | `my.fs/section` in SCI | "Unable to resolve symbol": default runs `32ca5f2e5`, which predates `c9a496d6f`; not a defect, the next batched restart installs it |
 | `git blame -s -L :newQuestion <pin> -- src/clm/static/app.js` in `reference-code/CLM` | lines 141–153, the whole JS function, 16 ms, at the pinned revision with no checkout change |
 | `git log -1 -L :git:<file>.py` (a top-level `def git`) | lines 13–15, 53 ms, no `.gitattributes` needed |
+| Same rule on an indented Python method and a shell function (scratch repo) | default rule: `fatal: -L parameter 'save' … no match`; with `-c core.attributesFile=<f>` holding `*.py diff=python`: found at line 7, but the range runs to the line before the next funcname match (here end of file, swallowing a following shell function); `*.sh diff=bash` finds `deploy()` lines 5–7 exactly; an absent name is the same `fatal … no match` |
+| FILE-1 prototype (a `let` in JVM mode: kondo cache entry, then the form at its row by edamame) | `rewrite-clj.paredit/slurp-backward` rows 484–506 + first doc line, `malli.dev.pretty/explain` rows 186–190, `seon.operator/check!` rows 1750–1790, arglist `[request]`, doc first line; 5 names 7.7 ms; the 1,790-line operator.clj parse alone 11 ms (cache by digest, as `seon.ref/document` does). Shape note: a `.clj` namespace's cache entry is flat (vars at top level beside `:filename`), a `.cljc` one is keyed by `:clj`/`:cljs` |
 | Tools on this machine | `git`, `rg`, `clj-kondo`, `tree-sitter` CLI 0.25.6 with **no grammars configured**; no `shellcheck`, `ruff`, `prettier`, universal-ctags |
 | File types in the repo (tracked, outside reference-code) | 2,458 md, 960 clj, 720 edn, 398 txt, 197 json, 145 py, 105 patch, 75 html, 23 sh, 22 cjs. In reference-code: clj 2,142, json 791, cljc 702, css 548, md 387, cljs 380, java 320, js 275 |
 
@@ -95,6 +97,14 @@ members, special forms, ClojureScript) has no current consumer (`references.md` 
 needed: a classpath scan. A name is looked up, never enumerated; the 239 ms scan above was a census, and the 11.3 s
 variant shows why `"."` on the classpath must never be walked.
 
+Java classes are addressable by name too (`clojure.lang.RT`), but only as bytecode: `~/.m2` holds no `-sources.jar`
+(0 found). Source exists only where a pinned project carries it: `reference-code/clojure` is pinned at tag
+`clojure-1.12.5`, the same version as the Clojure jar on the classpath, with 185 `.java` files
+(`src/jvm/clojure/lang/RT.java`); http-kit 92, datahike 16, nrepl 10. So a Java class is referenced by its based
+path in the pinned project (`reference-code/clojure/src/jvm/clojure/lang/RT.java#methodName`, anchored by FILE-6's
+`diff=java` rule), and `seon.ref` keeps reading unqualified dotted symbols as prose. Mapping class names to pinned
+source paths automatically is Orchard's Java half; adopt it only when an agent needs it.
+
 A square peg worth naming: `"."` on the classpath makes every file of the extract an `io/resource`
 (`(io/resource "AGENTS.md")` and `(io/resource "reference-code/malli/README.md")` both resolve). Resolving based
 paths through `io/resource` would therefore work by accident; `seon.ref/locate` correctly resolves them against
@@ -123,9 +133,11 @@ seam: one fragment slot, one resolver, a rule per file type.
 Why git's funcname rule before tree-sitter: it is already installed, already language-aware for the languages in
 this repo (built-in drivers for Python, Java, bash, CSS, HTML, Markdown, Rust, Ruby, C/C++, Go, …; JavaScript has no built-in driver and uses the default rule),
 works **at a pinned revision without checking anything out** (the submodule repos hold the objects), and returns a
-line range, which is all an anchor needs. Its limits: the default rule only sees definitions that start at column 0
-(indented Python methods need `diff=python` in a `.gitattributes`, which the submodule repos may lack; Seon can pass
-`-c core.attributesFile=<seon's>`), and it matches the first line containing the name. A symbol table
+line range, which is all an anchor needs. Its limits, probed: the default rule only sees definitions that start at
+column 0 (indented Python methods need `diff=python`; the submodule repos may lack a `.gitattributes`, so Seon
+passes `-c core.attributesFile=<one Seon file mapping extensions to drivers>`); the start is exact but the end is
+"the line before the next funcname match", so it over-includes trailing top-level code; and it matches the first
+line containing the name. For an anchor the start line is what matters; the section shown is bounded by the end. A symbol table
 (tree-sitter's `tags.scm` queries, `@definition.function` + `@name`, as GitHub code navigation uses) is the precise
 upgrade, kept for when a measured miss needs it (square peg C).
 
@@ -157,7 +169,12 @@ Two defects follow from the table. **First, `my.fs` and `my.edit` write into the
 input every JVM boots from and `seon.ref`/`seon.fs/source-directory` read references from. An agent's edit there
 reaches no checkout, no git history and no later commit, and silently changes what the running JVM considers the
 loaded source. (`seon.fs/source-directory`'s docstring calls that directory "the checkout directory".) The read half
-is filed as `my.fs/archive-file-reads-have-no-explicit-source-world`; the write half is worse and is FILE-3.
+is filed as `my.fs/archive-file-reads-have-no-explicit-source-world`; the write half is worse and is FILE-3. The
+configuration's own comment says "the process working directory is not an undeclared fallback"
+(`config/default.edn`, above `:seon.config.fs/working-root "."`), yet `"."` is exactly that directory. The
+checkout is already known to the JVM: `bin/seon` exports `SEON_CHECKOUT` and the launched JVM inherits it
+(`(System/getenv "SEON_CHECKOUT")` → `/Users/sean/src/seon`, probed), so bootstrap can bind the working root from
+it with aero's `#env`, the way configuration names other environment inputs.
 **Second, there are three atomic installers** (`seon.fs.jvm/write`, `seon.cluster.source/install!`,
 `seon.fs/write-edn-atomically!`), only one of which compares a digest at the move.
 
@@ -273,10 +290,10 @@ owner now asks for general file editing, which `exact!` is.
 
 | Row | What becomes true | Owner (files) | Proof | Relates to |
 |---|---|---|---|---|
-| FILE-1 | `seon.ref` resolves an unloaded namespace's var from clj-kondo's dependency cache: file, row, arglists, pin; the 11 Babashka script namespaces and 849 unloaded dependency namespaces stop answering `:unresolved` | `src/seon/ref.clj` (`library-name`), `resources/seon/schemas/seon.ref.edn` | a row in `test/seon/ref_test.clj`: `` `seon.operator/check!` `` and `` `rewrite-clj.paredit/slurp-backward` `` resolve with a positive row and the rewrite-clj pin (red today, probed) | `references.md` "22 do not resolve"; CS-01c2 |
+| FILE-1 | `seon.ref` resolves an unloaded namespace's var from clj-kondo's dependency cache: file, row, arglists, pin; the 11 Babashka script namespaces and 849 unloaded dependency namespaces stop answering `:unresolved` | `src/seon/ref.clj` (`library-name`), `resources/seon/schemas/seon.ref.edn` | a row in `test/seon/ref_test.clj`: `` `seon.operator/check!` `` and `` `rewrite-clj.paredit/slurp-backward` `` resolve with a positive row and the rewrite-clj pin (red today, probed) | filed as `seon.ref/unloaded-library-names-answer-unresolved`; `references.md` "22 do not resolve"; CS-01c2 |
 | FILE-2 | an unloaded var's doc and source are readable by reading its form at the cached row (edamame), offered as an operation | `src/seon/ref.clj`, `src/my/fs.clj` (`section` accepting `#name` on a `.clj` path) | `(my.fs/section "reference-code/rewrite-clj/src/rewrite_clj/paredit.cljc#slurp-backward")` answers rows 484–506 | FILE-6 |
-| FILE-3 | `my.fs` and `my.edit` resolve relative paths against a checkout named by bootstrap or by the call (as `write-branch!` takes `:seon.fn/root`), never the archive extract; `seon.fs/source-directory`'s docstring says "the loaded commit's extract" | `src/seon/fs/jvm.clj` (`path-plan`), `config/default.edn`, `resources/seon/schemas/seon.config.fs.edn`, `src/seon/fs.clj` | a `my.fs/stat` of a file that differs between checkout and extract answers the checkout's size | extends `my.fs/archive-file-reads-have-no-explicit-source-world`; new task for the write half |
-| FILE-4 | decision A option 2: `lines!` and `form!` deleted with their schemas and tests; `exact!` refuses a program declaration's file with the `defn` fix; a write into the shared checkout checks the `bin/lane` claim ledger | `src/my/edit.clj`, `src/seon/edit.clj`, `src/seon/edit/jvm.clj`, schemas, `test/my/edit_test.clj`, `test/seon/edit_test.clj` | `exact!` on `src/seon/ref.clj` answers the refusal; on a Markdown file it edits | revises `my.edit/file-edit-tools-bypass-write-back` |
+| FILE-3 | `my.fs` and `my.edit` resolve relative paths against the checkout (`:seon.config.fs/working-root` bound at bootstrap from `SEON_CHECKOUT`, or a root the call names, as `write-branch!` takes `:seon.fn/root`), never the archive extract; `seon.fs/source-directory`'s docstring says "the loaded commit's extract" | `src/seon/fs/jvm.clj` (`path-plan`), `config/default.edn`, `resources/seon/schemas/seon.config.fs.edn`, `src/seon/fs.clj` | a `my.fs/stat` of a file that differs between checkout and extract answers the checkout's size | filed as `my.fs/fs-writes-land-in-the-archive-extract`; the read half is `my.fs/archive-file-reads-have-no-explicit-source-world` |
+| FILE-4 | decision A option 2: `lines!` and `form!` deleted with their schemas and tests; `exact!` refuses a program declaration's file with the `defn` fix; a write into the shared checkout checks the `bin/lane` claim ledger (today plain files, `tmp/orchestrator/lanes/<lane>.paths`; a Seon agent's claim is its agent id as the lane) | `src/my/edit.clj`, `src/seon/edit.clj`, `src/seon/edit/jvm.clj`, schemas, `test/my/edit_test.clj`, `test/seon/edit_test.clj` | `exact!` on `src/seon/ref.clj` answers the refusal; on a Markdown file it edits | revises `my.edit/file-edit-tools-bypass-write-back` |
 | FILE-5 | one table of checks by file type, called by `bin/seon-hook` and by `exact!`/`write!`, findings as data in the reply; unknown or missing tool answers a typed finding | new owner namespace for the table (or `seon.dev.markdown`'s neighbour), `bin/seon-hook` | an `exact!` that breaks a Markdown reference answers an `:unresolved` finding in the same reply | REF-2, TASK-CHECK |
 | FILE-6 | `seon.ref/section` gives a non-Markdown file's `#name` its range by git's funcname rule at the file's revision, and a `#:~:text=` quote by unique match; a miss names the nearest definitions | `src/seon/ref.clj` | the CLM `app.js#newQuestion` row answers lines 141–153 at the CLM pin | CS-01c3, CS-01c5 |
 | FILE-7 | one digest-checked atomic install: `write-back!`'s `install!` and `write-edn-atomically!` call `seon.fs.jvm/write` with an expected digest | `src/seon/cluster/source.clj`, `src/seon/fs.clj` | existing write-back tests stay green; a concurrent change between proof and install answers `:stale-digest` | — |

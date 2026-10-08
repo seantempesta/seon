@@ -1,4 +1,9 @@
 [#:seon.task{:name "references-resolves-each-name-with-its-own-pulls"
              :kind :function
              :intent "`seon.ref/references` over `docs/seon/schedule/agent-loop-ledger.md` (262 KB, 1193 distinct candidates) on default (2026-10-08, pid 9276, warm, `seon.profile/measure`): 102 ms and 125 MB allocated, of which parsing and candidates are 28 ms and 30 MB (a cache hit plus one edamame read per span). The rest is 1372 `seon.db/pull` calls from `seon.ref/resolve-name`, one function pull then one test pull per name, each about 69 KB allocated through the read-evidence and declaration path. Propose: resolve all names of one call in one Datalog query over `:seon.fn/sym` and `:seon.test/sym` with the names as a collection binding, so the read cost follows the number of names once instead of per name. Done when the ledger measurement allocates under 40 MB with the same answers, as a regression on allocation."
-             :must-read #{seon.ref/references seon.db/pull}}]
+             :must-read #{seon.ref/references seon.db/pull}}
+ #:seon.task{:name "unloaded-library-names-answer-unresolved"
+             :kind :function
+             :intent "`seon.ref/references` answers `:unresolved` for a var whose namespace is on the classpath but not loaded: `seon.operator/check!` (Babashka script) and `rewrite-clj.paredit/slurp-backward` both did on default (2026-10-08, loaded commit 32ca5f2e5), because `library-name` requires `find-ns`. clj-kondo's dependency cache, which boot fills (`seon.fn.analyzer/ensure-dependency-analysis!`), holds each var's row and arities with the file in its pinned extract; `clj-kondo.impl.cache/from-cache-1` reads one namespace in under 1 ms. Done when an unloaded name resolves from that cache with its row, arglists, first doc line (read from the form at the row with edamame) and pin, and an absent one stays unresolved; a row in `seon.ref-test` covers both names."
+             :must-read #{seon.ref/references seon.fn.analyzer/ensure-dependency-analysis! clj-kondo.impl.cache/from-cache-1}
+             :evidence #{"docs/research/agent-platform/2026-10-08/files/files-opus.md"}}]
