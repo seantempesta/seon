@@ -324,4 +324,15 @@ fully specified in the ledger and its card is this lane's next batch.
 | DIAL-8 (absorbs DIAL-13) | [DIAL-8](DIAL-8.md) | after dials-16gb, led-nk1 |
 | DIAL-17 | [DIAL-17](DIAL-17.md) | after dials-16gb (AU-Q24 answered: 10 GiB) |
 | AT-8 | [AT-8](AT-8.md) | after SR-H, SR-J (AU-Q6 answered) |
-| DIAL-2, DIAL-4, DIAL-6, DIAL-7, DIAL-9 … DIAL-12, DIAL-14 … DIAL-16, DIAL-18 | — | each row's Deps; carded when their files free |
+| DIAL-2 | [DIAL-2](DIAL-2.md) | after dials-16gb |
+| DIAL-4 | [DIAL-4](DIAL-4.md) | after EN-4 |
+| DIAL-6 | [DIAL-6](DIAL-6.md) | after DIAL-3 |
+| DIAL-7 | [DIAL-7](DIAL-7.md) | after SR-S, PB-12 |
+| DIAL-9 | [DIAL-9](DIAL-9.md) | after PB-10 (dropped if it deletes the check) |
+| DIAL-10a, b, c | [DIAL-10](DIAL-10.md) | after RO-10; c after S5-02 or dropped |
+| DIAL-11 | [DIAL-11](DIAL-11.md) | after RO-4, RO-11 |
+| DIAL-12 | [DIAL-12](DIAL-12.md) | after UL-7, PR-19 |
+| DIAL-14 | [DIAL-14](DIAL-14.md) | after C0 |
+| DIAL-15 | [DIAL-15](DIAL-15.md) | after DIAL-5, SP-3 |
+| DIAL-16 | [DIAL-16](DIAL-16.md) | after S4-07b3 or dropped |
+| DIAL-18 | [DIAL-18](DIAL-18.md) | after dials-16gb, DIAL-1 |
