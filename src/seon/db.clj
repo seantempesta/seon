@@ -3361,6 +3361,62 @@
                       'seon.db/committed-value-identity
                       database)))
 
+;;; Content revisions: Datahike names each attribute revision by the commit that
+;;; wrote it and opens a connection with its opening commit as the conservative
+;;; revision (`datahike.db/advance-cache-context`), so an attribute's revision,
+;;; else the conservative one, names a commit whose datoms of that attribute equal
+;;; the value's. A branch connection opens at its source's commit; resolving that
+;;; commit through the source's recorded revisions makes two branches of one
+;;; program name the same commits.
+
+(defn- committed-context
+  "The cache context of a committed raw `database` that names its conservative revision, else nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map [:datahike.cache/commit-id :uuid] [:datahike.cache/conservative-revision :uuid] [:datahike.cache/attribute-revisions {:optional true} [:map-of :qualified-keyword :uuid]]]]]}
+  [database]
+  (when (and (instance? DB database) (some? (datahike.db/committed-value-identity database)))
+    (let [context (:cache-context database)]
+      (when (:datahike.cache/conservative-revision context) context))))
+
+(defn- recorded-revisions
+  "The revisions recorded for `commit` (`remember-revisions!`), else nil."
+  {:malli/schema [:=> [:cat :uuid] [:or :nil [:map [:datahike.cache/commit-id :uuid] [:datahike.cache/conservative-revision :uuid] [:datahike.cache/attribute-revisions {:optional true} [:map-of :qualified-keyword :uuid]]]]]}
+  [commit]
+  (seon.cache/lookup ::commit-revisions commit (constantly 0) (constantly nil) some?))
+
+(defn remember-revisions!
+  "Records `database`'s revisions under its commit, first value wins; nil.
+  A branch's owner records its source so the branch resolves through it."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :nil]}
+  [database]
+  (when-let [context (committed-context database)]
+    (seon.cache/lookup ::commit-revisions (:datahike.cache/commit-id context)
+                       #(* 64 (+ 4 (count (:datahike.cache/attribute-revisions %))))
+                       #(select-keys context [:datahike.cache/commit-id :datahike.cache/conservative-revision
+                                              :datahike.cache/attribute-revisions])))
+  nil)
+
+(defn- content-revision
+  "The commit whose datoms of `attribute` equal those of the value `context` describes."
+  {:malli/schema [:=> [:cat [:map [:datahike.cache/commit-id :uuid] [:datahike.cache/conservative-revision :uuid] [:datahike.cache/attribute-revisions {:optional true} [:map-of :qualified-keyword :uuid]]] :qualified-keyword] :uuid]}
+  [context attribute]
+  (loop [{:datahike.cache/keys [attribute-revisions conservative-revision]} context]
+    (or (get attribute-revisions attribute)
+        (let [prior (recorded-revisions conservative-revision)]
+          ;; a recorded opening context names its own commit: nothing older to follow
+          (if (and prior (not= conservative-revision (:datahike.cache/conservative-revision prior)))
+            (recur prior)
+            conservative-revision)))))
+
+(defn content-revisions
+  "Each of `attributes` to the commit whose datoms of it equal `database`'s.
+  Comparable across connections and branches; nil for a value with no
+  committed revisions."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-keyword]]
+                  [:or :nil [:map-of :qualified-keyword :uuid]]]}
+  [database attributes]
+  (when-let [context (committed-context database)]
+    (into {} (map (juxt identity #(content-revision context %))) attributes)))
+
 (defn history
   "Historical view of an explicit or current database value."
   {:malli/schema

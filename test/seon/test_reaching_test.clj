@@ -4,6 +4,7 @@
             [clojure.test :as t :refer [deftest is]]
             [malli.instrument]
             [seon.cache]
+            [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.config]
             [seon.sci.eval]
@@ -73,13 +74,12 @@
   [test-symbols]
   (count (filter #(= test-symbols (first %)) (keys (seon.cache/retained :seon.test.runner/reach-index)))))
 
-(defn- declaration-reads
-  "The declaration reads the central cache holds for `connection`'s values."
-  {:malli/schema [:=> [:cat :seon.db/connection] :int]}
-  [connection]
-  (let [connection-id (:datahike.cache/connection-id (:cache-context (db/db connection)))]
-    (count (filter #(and (vector? %) (= connection-id (first %)))
-                   (keys (seon.cache/retained :seon.test.runner/reach-declarations))))))
+(defn- retained-declarations
+  "The content key of `database`'s declaration read when the central cache holds it, else nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
+  [database]
+  (let [content (#'runner/reach-revision-key database)]
+    (when (contains? (seon.cache/retained :seon.test.runner/reach-declarations) content) content)))
 
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
@@ -105,12 +105,34 @@
     ;; A data write leaves every closure's content equal.
     (let [before (runner/reach-digests (db/db connection) [ta tb])
           derived (derived-digests #{ta tb})
-          read (declaration-reads connection)]
+          read (retained-declarations (db/db connection))]
      (support/transacted! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
      (is (= derived (derived-digests #{ta tb})) "equal reached content derives nothing")
-     (is (pos? read))
-     (is (= read (declaration-reads connection)) "a data write reads no declaration again"))))))
+     (is (some? read))
+     (is (= read (retained-declarations (db/db connection))) "a data write reads no declaration again"))))))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/reach-declarations-misses-on-every-branch}}
+  two-branches-of-one-program-share-reach-declarations
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (let [ta 'reach.fixture/a-test
+         parent (db/db connection)
+         digests (runner/reach-digests parent [ta])
+         content (retained-declarations parent)
+         child (agent/acquire-context! (support/execution-handle connection) nil {:seon.agent/isolate? true})
+         branch (:seon.db/connection child)]
+    (try
+     (is (some? content) "the parent's check derived the declarations once")
+     (is (= content (retained-declarations (db/db branch))) "a new branch's first check finds them")
+     (is (= digests (runner/reach-digests (db/db branch) [ta])))
+     (support/transacted! branch [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
+     (is (= content (#'runner/reach-revision-key (db/db branch))) "an unrelated write keeps the key")
+     (define! branch '[:seon.fn/sym reach.fixture/a]
+              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
+     (is (not= content (#'runner/reach-revision-key (db/db branch))) "a changed reach input misses")
+     (finally (agent/release-context! child)))))))
 
 (deftest a-reach-digest-is-its-closures-alone-across-cycles
  ;; Digests compose per call-graph component (Merkle over strongly connected

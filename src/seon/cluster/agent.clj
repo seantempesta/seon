@@ -1092,6 +1092,7 @@
                        (registry/branch!
                         {:seon.store/store held-store
                          :seon.store/branch branch
+                         :seon.db/db database
                          :seon.cluster.registry/from
                          (or (:seon.cluster.registry/from options)
                              (db/commit-id database))}))

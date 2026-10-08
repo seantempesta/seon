@@ -220,15 +220,19 @@
   the roster — including when Datahike's own
   `:branch-already-exists` (`versioning.cljc:233-235`) refuses a lost
   race, which is idempotence, not a failure.
-  Refuses `::source-absent` (`::from` names no branch or commit)."
+  An optional `:seon.db/db`, the source's value, has its revisions recorded
+  first (`seon.db/remember-revisions!`) so the branch's revisions resolve
+  through it. Refuses `::source-absent` (`::from` names no branch or commit)."
   {:malli/schema [:=> [:cat :seon.cluster.registry/branch-request]
                   :seon.cluster.registry/branch-result]}
   [{:keys [:seon.store/store :seon.store/branch]
     source :seon.cluster.registry/from
+    source-value :seon.db/db
     reachability-permit :datahike.gc-guard/reachability-permit}]
   (if (contains? (roster store) branch)
     {:seon.store/branch branch :seon.cluster/created? false}
     (try
+      (some-> source-value db/remember-revisions!)
       (if reachability-permit
         (d/branch! (:seon.store/connection-object store)
                    source

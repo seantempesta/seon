@@ -133,7 +133,8 @@
     :else
     (let [source @connection
           from (db/commit-id source)
-          result (registry/branch! {:seon.store/store store :seon.store/branch lane :seon.cluster.registry/from from})]
+          result (registry/branch! {:seon.store/store store :seon.store/branch lane :seon.cluster.registry/from from
+                                    :seon.db/db source})]
       (if (:seon.cluster/created? result)
         (assoc result :seon.cluster.registry/from from :seon.db/basis-t (db/basis-t source))
         (branch-refusal `create-branch! "The branch already exists; retire it or name another." {:seon.store/branch lane})))))

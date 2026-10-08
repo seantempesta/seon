@@ -788,18 +788,13 @@
    [:seon.fn/spec false] [:seon.test/subject false]])
 
 (defn- reach-revision-key
-  "The revisions of every attribute `reach-declarations` reads on a committed
-  `database`, or nil. Datahike advances an attribute's revision exactly when a
-  commit touches it, so a commit writing only test results keeps the key."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe [:tuple :seon.db/connection-id :uuid [:maybe :uuid] :map]]]}
+  "Each attribute `reach-declarations` reads to the commit whose datoms of it
+  equal `database`'s (`seon.db/content-revisions`), or nil. Equal on every
+  branch of one program; a commit writing only test results keeps it."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
   [database]
-  (let [{:datahike.cache/keys [connection-id generation conservative-revision attribute-revisions committed?]}
-        (:cache-context database)]
-    (when (and committed? connection-id generation)
-      [connection-id generation conservative-revision
-       (select-keys attribute-revisions
-                    (into [:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key :seon.schema/form]
-                          (map first) reach-fact-attributes))])))
+  (db/content-revisions database (into [:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key :seon.schema/form]
+                                       (map first) reach-fact-attributes)))
 
 (defn- reach-facts
   "Each reach attribute's values by entity: calls, references and keywords as
