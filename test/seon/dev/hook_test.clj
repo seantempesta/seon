@@ -93,7 +93,8 @@
                    :current-source {:root "." :cluster "default"}}
            event (json/generate-string {:hook_event_name "PostToolUse" :tool_name "Edit"
                                         :tool_input {:file_path path}})
-           run (fn [endpoint]
+           ns-form (:text (namespace-declaration (file-analysis path)))
+           run (fn [endpoint branch-ns]
                  (reset! requests [])
                  (with-redefs [load-config (constantly config)
                                entrance-lane (constantly "probe-lane")
@@ -103,17 +104,23 @@
                                  (swap! requests conj
                                         (if (str/starts-with? form "(seon.mcp/call")
                                           (get-in (json/parse-string (second (read-string form)) true)
-                                                  [:arguments :code])
+                                                  [:arguments])
                                           form))
                                  (if (= 1 (count @requests))
-                                   {(:sym unchanged) {:source (:text unchanged) :host-bound? false}
-                                    (:sym changed) {:source "(defn changed [x] x)" :host-bound? false}}
+                                   {:vars {(:sym unchanged) {:source (:text unchanged) :host-bound? false}
+                                           (:sym changed) {:source "(defn changed [x] x)" :host-bound? false}}
+                                    :ns branch-ns}
                                    (json/generate-string {:content [{:type "text" :text "the reply"}]})))]
                    (binding [*in* (java.io.StringReader. event)]
                      (let [reply (with-out-str (-main))]
                        {:requests @requests :reply reply}))))]
-       (prn {:seon.probe/live (run {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1})
-             :seon.probe/down (run nil)
+       (prn {:seon.probe/live (run {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1}
+                                   {:requires #{} :aliases #{}})
+             :seon.probe/new-ns (run {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1} nil)
+             :seon.probe/other-requires (run {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1}
+                                             {:requires #{'clojure.string} :aliases #{}})
+             :seon.probe/ns-form ns-form
+             :seon.probe/down (run nil nil)
              :seon.probe/changed-text (:text changed)
              :seon.probe/unchanged-text (:text unchanged)}))))
 
@@ -127,14 +134,24 @@
     (when (zero? (:seon.operator.subprocess/exit result))
       (let [observed (edn/read-string (:seon.operator.subprocess/output result))
             live (:seon.probe/live observed)
-            [state-form define-request test-request] (:requests live)]
+            [state-form define-request test-request] (:requests live)
+            define-code (:code define-request)
+            ns-form (:seon.probe/ns-form observed)]
         (is (= 3 (count (:requests live))) "state read, definitions, reaching tests")
         (is (str/includes? state-form "my.program/source"))
-        (is (str/includes? define-request (:seon.probe/changed-text observed))
+        (is (str/includes? define-code (:seon.probe/changed-text observed))
             "the changed form is sent")
-        (is (not (str/includes? define-request (:seon.probe/unchanged-text observed)))
+        (is (not (str/includes? define-code (:seon.probe/unchanged-text observed)))
             "the form the branch already holds is not sent")
-        (is (str/includes? test-request "my.test/check"))
+        (is (= "seon.dev.hook-entrance-fixture" (:namespace define-request))
+            "the namespace argument starts the run there")
+        (is (not (str/includes? define-code "in-ns")) "no in-ns form is prepended")
+        (is (not (str/includes? define-code ns-form)) "the ns form the branch holds is not sent")
+        (is (str/includes? (:code test-request) "my.test/check"))
+        (doseq [probe [:seon.probe/new-ns :seon.probe/other-requires]]
+          (let [code (:code (second (:requests (get observed probe))))]
+            (is (str/starts-with? code ns-form) (str probe ": the ns form is sent first"))
+            (is (str/includes? code (:seon.probe/changed-text observed)))))
         (is (str/includes? (:reply live) "the reply"))
         (is (empty? (:requests (:seon.probe/down observed))) "no root is asked")
         (is (str/includes? (:reply (:seon.probe/down observed)) "default unavailable: lint only"))))))

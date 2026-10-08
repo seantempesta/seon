@@ -222,7 +222,8 @@
 
 (def ^:private clj-kondo-definition-output-config
   (str "{:output {:format :edn} "
-       ":analysis {:var-usages true :var-definitions true}}"))
+       ":analysis {:var-usages true :var-definitions true "
+       ":namespace-definitions true :namespace-usages true}}"))
 
 (def ^:private shared-kondo-cache-v1-directory
   (root-file ".clj-kondo/.cache/v1"))
@@ -1207,45 +1208,74 @@
                        (update (dec (count slice)) subs 0 (dec end-col))
                        (update 0 subs (dec col))))))
 
+(defn- file-analysis
+  "kondo's analysis of the file at `absolute-path`, with its source lines."
+  [absolute-path]
+  {:analysis (:analysis (uncached-definition-analysis {:seon.hook/file-path absolute-path}))
+   :lines (vec (str/split (slurp absolute-path) #"\n" -1))})
+
 (defn- top-level-definitions
   "The file's outermost var definitions as {:sym :text}, in file order."
-  [absolute-path]
-  (let [definitions (->> (get-in (uncached-definition-analysis
-                                  {:seon.hook/file-path absolute-path})
-                                 [:analysis :var-definitions])
-                         (filter :end-row)
-                         (sort-by (juxt :row :col)))
-        lines (vec (str/split (slurp absolute-path) #"\n" -1))
-        within? (fn [inner outer]
-                  (and (not (identical? inner outer))
-                       (<= (:row outer) (:row inner)) (<= (:end-row inner) (:end-row outer))
-                       (or (< (:row outer) (:row inner)) (<= (:col outer) (:col inner)))
-                       (or (< (:end-row inner) (:end-row outer)) (<= (:end-col inner) (:end-col outer)))))]
-    (->> definitions
-         (remove (fn [definition] (some #(within? definition %) definitions)))
-         (mapv (fn [{definition-ns :ns definition-name :name :as definition}]
-                 {:sym (symbol (str definition-ns) (str definition-name))
-                  :text (span-text lines definition)})))))
+  ([absolute-path] (top-level-definitions absolute-path (file-analysis absolute-path)))
+  ([_ {:keys [analysis lines]}]
+   (let [definitions (->> (:var-definitions analysis)
+                          (filter :end-row)
+                          (sort-by (juxt :row :col)))
+         within? (fn [inner outer]
+                   (and (not (identical? inner outer))
+                        (<= (:row outer) (:row inner)) (<= (:end-row inner) (:end-row outer))
+                        (or (< (:row outer) (:row inner)) (<= (:col outer) (:col inner)))
+                        (or (< (:end-row inner) (:end-row outer)) (<= (:end-col inner) (:end-col outer)))))]
+     (->> definitions
+          (remove (fn [definition] (some #(within? definition %) definitions)))
+          (mapv (fn [{definition-ns :ns definition-name :name :as definition}]
+                  {:sym (symbol (str definition-ns) (str definition-name))
+                   :text (span-text lines definition)}))))))
+
+(defn- namespace-declaration
+  "The file's `ns` form as {:name :text :requires :aliases}, from kondo's
+  namespace definition and the usages that namespace makes; nil without one."
+  [{:keys [analysis lines]}]
+  (when-let [{ns-name :name :as declaration} (some #(when (:end-row %) %) (:namespace-definitions analysis))]
+    (let [usages (filter #(= ns-name (:from %)) (:namespace-usages analysis))]
+      {:name ns-name
+       :text (span-text lines declaration)
+       :requires (into #{} (map :to) usages)
+       :aliases (into #{} (keep #(when (:alias %) [(:alias %) (:to %)])) usages)})))
 
 (defn- branch-state-form
-  "Form answering, for each of `syms`, the lane branch's recorded source and
-  host-bound status (the cluster head's when the lane has no branch yet)."
-  [cluster lane syms]
+  "Form answering the lane branch's recorded state (the cluster head's when
+  the lane has no branch yet): `:vars` maps each of `syms` to its recorded
+  source and host-bound status, `:ns` is namespace `ns-name`'s declared
+  requires and aliases, absent when the branch holds no declaration of it."
+  [cluster lane ns-name syms]
   (str "(let [db (seon.db/db (seon.cluster.boot/connection " (pr-str cluster) "))"
        " branch (:seon.agent/branch (seon.db/pull db [:seon.agent/branch] [:seon.agent/id " (pr-str lane) "]))"
-       " bdb (or (some->> branch (seon.db/branch-database db)) db)]"
-       " (into {} (map (fn [s] [s {:source (:source (my.program/source bdb s))"
+       " bdb (or (some->> branch (seon.db/branch-database db)) db)"
+       " n (seon.db/pull bdb '[*] [:seon.ns/name (quote " (pr-str ns-name) ")])]"
+       " {:vars (into {} (map (fn [s] [s {:source (:source (my.program/source bdb s))"
        " :host-bound? (boolean (:seon.fn/host-bound? (seon.db/pull bdb [:seon.fn/host-bound?] [:seon.fn/sym s])))}]))"
-       " (quote " (pr-str syms) ")))"))
+       " (quote " (pr-str syms) "))"
+       " :ns (when (:seon.program/definition-digest n)"
+       " {:requires (set (:seon.ns/requires n))"
+       " :aliases (set (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns) (:seon.ns/aliases n)))})})"))
+
+(defn- ns-form-to-send
+  "The file's `ns` form text when the branch lacks the namespace or holds other
+  requires or aliases, else nil."
+  [declaration branch-ns]
+  (when (and declaration
+             (not= (select-keys declaration [:requires :aliases])
+                   (select-keys branch-ns [:requires :aliases])))
+    (:text declaration)))
 
 (defn- eval-request
-  "The `seon.mcp/call` form evaluating `code` as `lane` in `namespace-name`."
+  "The `seon.mcp/call` form evaluating `code` as `lane`, starting in `namespace-name`."
   [lane namespace-name code]
   (pr-str (list 'seon.mcp/call
                 (json/generate-string
                  {:name "eval_clj"
-                  :arguments {:code (str "(in-ns '" namespace-name ")\n" code)
-                              :agent lane}}))))
+                  :arguments {:code code :agent lane :namespace (str namespace-name)}}))))
 
 (defn- entrance-one
   "The advisory for one edited file: what the lane branch evaluated and the
@@ -1268,23 +1298,30 @@
       "REPL entrance: default unavailable: lint only"
 
       :else
-      (let [definitions (top-level-definitions absolute-path)
-            namespace-name (some-> definitions first :sym namespace)]
-        (when (seq definitions)
+      (let [analysis (file-analysis absolute-path)
+            definitions (top-level-definitions absolute-path analysis)
+            declaration (namespace-declaration analysis)
+            namespace-name (or (:name declaration) (some-> definitions first :sym namespace symbol))]
+        (when (and namespace-name (or declaration (seq definitions)))
           (let [state (operator/prepl-value!
                        endpoint
-                       (branch-state-form cluster lane (mapv :sym definitions))
+                       (branch-state-form cluster lane namespace-name (mapv :sym definitions))
                        bound-ms nil bound-ms)
-                host-bound (filterv #(get-in state [(:sym %) :host-bound?]) definitions)
-                changed (filterv #(and (not (get-in state [(:sym %) :host-bound?]))
-                                       (not= (:text %) (get-in state [(:sym %) :source])))
+                vars (:vars state)
+                host-bound (filterv #(get-in vars [(:sym %) :host-bound?]) definitions)
+                changed (filterv #(and (not (get-in vars [(:sym %) :host-bound?]))
+                                       (not= (:text %) (get-in vars [(:sym %) :source])))
                                  definitions)
+                ;; sent first: the aliases and requires the changed forms resolve through
+                ns-form (ns-form-to-send declaration (:ns state))
+                forms (cond->> (mapv :text changed) ns-form (cons ns-form))
                 heading (str "REPL entrance (lane " lane
-                             ", " (count definitions) " forms, " (count changed) " changed): ")
+                             ", " (count definitions) " forms, " (count changed) " changed"
+                             (when ns-form ", ns form") "): ")
                 host-note (when (seq host-bound)
                             (str "host-bound, throwaway check at commit: "
                                  (str/join " " (map :sym host-bound))))]
-            (if (empty? changed)
+            (if (empty? forms)
               (str heading "no changed forms to send (the branch holds the rest)."
                    (when host-note (str "\n" host-note)))
               ;; a defn records at settlement, so the reaching tests are a
@@ -1297,9 +1334,10 @@
                             (map #(get % "text")
                                  (get (json/parse-string reply) "content"))))
                     texts (concat
-                           (ask (str/join "\n\n" (map :text changed)))
-                           (ask (str "(my.test/check {:seon.test/changed (quote "
-                                     (pr-str (mapv :sym changed)) ")})")))]
+                           (ask (str/join "\n\n" forms))
+                           (when (seq changed)
+                             (ask (str "(my.test/check {:seon.test/changed (quote "
+                                       (pr-str (mapv :sym changed)) ")})"))))]
                 (log! "REPL_ENTRANCE" lane relative
                       (str "changed=" (count changed))
                       (str "ms=" (quot (- (System/nanoTime) started) 1000000)))
