@@ -1,0 +1,1542 @@
+{
+  "cases": [
+    {
+      "id": "add",
+      "code": "(+ 1 1)",
+      "namespace": "audit.repl.c0"
+    },
+    {
+      "id": "tag-inst",
+      "code": "#inst \"2020-01-01T00:00:00.000-00:00\"",
+      "namespace": "audit.repl.c1"
+    },
+    {
+      "id": "tag-uuid",
+      "code": "#uuid \"00000000-0000-0000-0000-000000000001\"",
+      "namespace": "audit.repl.c2"
+    },
+    {
+      "id": "tag-unknown",
+      "code": "#audit/tag 1",
+      "namespace": "audit.repl.c3"
+    },
+    {
+      "id": "nan",
+      "code": "##NaN",
+      "namespace": "audit.repl.c4"
+    },
+    {
+      "id": "conditional",
+      "code": "#?(:clj :yes :cljs :no)",
+      "namespace": "audit.repl.c5"
+    },
+    {
+      "id": "discard",
+      "code": "#_ (throw (ex-info \"discard\" {})) (+ 2 3)",
+      "namespace": "audit.repl.c6"
+    },
+    {
+      "id": "nested-discard",
+      "code": "#_ #_ 1 2 3",
+      "namespace": "audit.repl.c7"
+    },
+    {
+      "id": "regex",
+      "code": "(boolean (re-find #\"a\\(b\" \"a(b\"))",
+      "namespace": "audit.repl.c8"
+    },
+    {
+      "id": "chars",
+      "code": "[\\( \\) \\` \\newline \\u0041]",
+      "namespace": "audit.repl.c9"
+    },
+    {
+      "id": "syntax-quote",
+      "code": "`(map ~inc [1 2])",
+      "namespace": "audit.repl.c10"
+    },
+    {
+      "id": "multiline",
+      "code": "\"a (\n```\n) b\"",
+      "namespace": "audit.repl.c11"
+    },
+    {
+      "id": "comments",
+      "code": "; a (\n(+ 1 ; )\n 2)",
+      "namespace": "audit.repl.c12"
+    },
+    {
+      "id": "metadata",
+      "code": "(meta ^{:audit/x 3} [1])",
+      "namespace": "audit.repl.c13"
+    },
+    {
+      "id": "def",
+      "code": "(def x 4)\nx",
+      "namespace": "audit.repl.c14"
+    },
+    {
+      "id": "defn",
+      "code": "(defn f [x] (inc x))\n(f 2)",
+      "namespace": "audit.repl.c15"
+    },
+    {
+      "id": "redefine",
+      "code": "(defn f [x] x)\n(defn f [x y] (+ x y))\n(f 2 3)",
+      "namespace": "audit.repl.c16"
+    },
+    {
+      "id": "macro",
+      "code": "(defmacro twice [x] `(+ ~x ~x))\n(twice 3)",
+      "namespace": "audit.repl.c17"
+    },
+    {
+      "id": "require",
+      "code": "(require '[clojure.string :as s])\n(s/upper-case \"hi\")",
+      "namespace": "audit.repl.c18"
+    },
+    {
+      "id": "alias-refer",
+      "code": "(alias 'c 'clojure.core)\n(refer 'clojure.core :only '[inc] :rename '{inc up})\n[(c/inc 1) (up 2) ::c/k]",
+      "namespace": "audit.repl.c19"
+    },
+    {
+      "id": "ns",
+      "code": "(ns audit.repl.ns-case (:require [clojure.string :as s]))\n(s/join \",\" [1 2])",
+      "namespace": "audit.repl.c20"
+    },
+    {
+      "id": "in-ns",
+      "code": "(in-ns 'audit.repl.moved)\n(clojure.core/refer 'clojure.core)\n(def x 7)\nx",
+      "namespace": "audit.repl.c21"
+    },
+    {
+      "id": "unmap",
+      "code": "(def x 1)\n(ns-unmap *ns* 'x)\n(resolve 'x)",
+      "namespace": "audit.repl.c22"
+    },
+    {
+      "id": "remove-ns",
+      "code": "(create-ns 'audit.repl.gone)\n(remove-ns 'audit.repl.gone)\n(find-ns 'audit.repl.gone)",
+      "namespace": "audit.repl.c23"
+    },
+    {
+      "id": "atom",
+      "code": "(def a (atom 0))\n(swap! a inc)\n@a",
+      "namespace": "audit.repl.c24"
+    },
+    {
+      "id": "binding",
+      "code": "(def ^:dynamic *x* 1)\n(binding [*x* 2] *x*)\n*x*",
+      "namespace": "audit.repl.c25"
+    },
+    {
+      "id": "lazy",
+      "code": "(map inc (range 4))",
+      "namespace": "audit.repl.c26"
+    },
+    {
+      "id": "exception",
+      "code": "(throw (ex-info \"audit exception\" {:audit/k 1}))\n(+ 4 5)",
+      "namespace": "audit.repl.c27"
+    },
+    {
+      "id": "caught",
+      "code": "(try (/ 1 0) (catch Exception e :caught))",
+      "namespace": "audit.repl.c28"
+    },
+    {
+      "id": "letfn",
+      "code": "(letfn [(f [x] (if (zero? x) 0 (g (dec x)))) (g [x] (f x))] (f 3))",
+      "namespace": "audit.repl.c29"
+    },
+    {
+      "id": "record",
+      "code": "(defprotocol P (p [x]))\n(defrecord R [x] P (p [_] x))\n(p (->R 9))",
+      "namespace": "audit.repl.c30"
+    },
+    {
+      "id": "multimethod",
+      "code": "(defmulti mm identity)\n(defmethod mm :x [_] 7)\n(mm :x)",
+      "namespace": "audit.repl.c31"
+    },
+    {
+      "id": "print-length",
+      "code": "(binding [*print-length* 2] (pr-str (range 5)))",
+      "namespace": "audit.repl.c32"
+    },
+    {
+      "id": "print-length-set",
+      "code": "(set! *print-length* 2)\n(range 5)",
+      "namespace": "audit.repl.c33"
+    },
+    {
+      "id": "reserved-map",
+      "code": "{:seon.repl/value 2}",
+      "namespace": "audit.repl.c34"
+    },
+    {
+      "id": "read-eval",
+      "code": "#=(+ 1 2)",
+      "namespace": "audit.repl.c35"
+    },
+    {
+      "id": "nested-def",
+      "code": "(let [a 3] (defn closed [x] (+ a x)))\n(closed 4)",
+      "namespace": "audit.repl.c36"
+    },
+    {
+      "id": "intern",
+      "code": "(intern *ns* 'x 9)\nx",
+      "namespace": "audit.repl.x0"
+    },
+    {
+      "id": "alter-root",
+      "code": "(def x 1)\n(alter-var-root #'x inc)\nx",
+      "namespace": "audit.repl.x1"
+    },
+    {
+      "id": "unalias",
+      "code": "(alias 'c 'clojure.core)\n(ns-unalias *ns* 'c)\n(contains? (ns-aliases *ns*) 'c)",
+      "namespace": "audit.repl.x2"
+    },
+    {
+      "id": "unmap-function",
+      "code": "(defn f [x] x)\n(ns-unmap *ns* 'f)\n(resolve 'f)",
+      "namespace": "audit.repl.x3"
+    },
+    {
+      "id": "bad-contract",
+      "code": "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (str x))\n(f 1)",
+      "namespace": "audit.repl.x4"
+    },
+    {
+      "id": "changed-contract-arity",
+      "code": "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(defn f [x y] (+ x y))\n(f 1 2)",
+      "namespace": "audit.repl.x5"
+    },
+    {
+      "id": "malformed-contract",
+      "code": "(defn f {:malli/schema [:bogus]} [x] x)\n(f 1)",
+      "namespace": "audit.repl.x6"
+    },
+    {
+      "id": "reader-binding",
+      "code": "(binding [*data-readers* {'audit/tag inc}] (read-string \"#audit/tag 1\"))",
+      "namespace": "audit.repl.x7"
+    },
+    {
+      "id": "set-readers",
+      "code": "(set! *data-readers* {'audit/tag inc})\n#audit/tag 1",
+      "namespace": "audit.repl.x8"
+    },
+    {
+      "id": "println",
+      "code": "(println \"audit output\")\n42",
+      "namespace": "audit.repl.x9"
+    },
+    {
+      "id": "ns-after-throw",
+      "code": "(do (in-ns 'audit.repl.after-throw) (throw (ex-info \"stop\" {})))\n(ns-name *ns*)",
+      "namespace": "audit.repl.x10"
+    },
+    {
+      "id": "redefine-same-form",
+      "code": "(do (defn f [x] x) (defn f [x y] (+ x y)))\n(f 1 2)",
+      "namespace": "audit.repl.x11"
+    },
+    {
+      "id": "reserved-computed",
+      "code": "(hash-map :seon.repl/value 2)",
+      "namespace": "audit.repl.x12"
+    },
+    {
+      "id": "nan-nested",
+      "code": "[##NaN ##Inf ##-Inf]",
+      "namespace": "audit.repl.x13"
+    },
+    {
+      "id": "discard-eof",
+      "code": "#_ 1",
+      "namespace": "audit.repl.x14"
+    },
+    {
+      "id": "record-literal",
+      "code": "(defrecord R [x])\n(:x #audit.repl.recordliteral.R{:x 8})",
+      "namespace": "audit.repl.recordliteral"
+    },
+    {
+      "id": "regex-value",
+      "code": "#\"a\\(b\"",
+      "namespace": "audit.repl.regex"
+    },
+    {
+      "id": "mutation-setup",
+      "code": "(defn f [x] x)",
+      "namespace": "audit.repl.mutation"
+    },
+    {
+      "id": "mutation-after-commit",
+      "code": "(alter-var-root #'f (constantly (fn [x] (inc x))))\n(f 1)",
+      "namespace": "audit.repl.mutation",
+      "setup": "(defn f [x] x)"
+    }
+  ],
+  "results": [
+    {
+      "id": "add",
+      "code": "(+ 1 1)",
+      "namespace": "audit.repl.c0",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ed6567ead552e, :ms 0, :value 2}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 371
+    },
+    {
+      "id": "tag-inst",
+      "code": "#inst \"2020-01-01T00:00:00.000-00:00\"",
+      "namespace": "audit.repl.c1",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e2079b5c86149, :ms 0, :value #inst \"2020-01-01T00:00:00Z\"}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 816
+    },
+    {
+      "id": "tag-uuid",
+      "code": "#uuid \"00000000-0000-0000-0000-000000000001\"",
+      "namespace": "audit.repl.c2",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0a228a075769, :ms 0, :value #uuid \"00000000-0000-0000-0000-000000000001\"}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 622
+    },
+    {
+      "id": "tag-unknown",
+      "code": "#audit/tag 1",
+      "namespace": "audit.repl.c3",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e043556e00233, :error #:seon.error{:offending \"#audit/tag 1\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/tag,\n :message\n   \"Reader tag is not accepted; supply an explicitly declared reader.\"}\n}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 398
+    },
+    {
+      "id": "nan",
+      "code": "##NaN",
+      "namespace": "audit.repl.c4",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ed3451f449a14, :ms 0, :value ##NaN}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 606
+    },
+    {
+      "id": "conditional",
+      "code": "#?(:clj :yes :cljs :no)",
+      "namespace": "audit.repl.c5",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee30970ccc248, :ms 0, :value :yes}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 569
+    },
+    {
+      "id": "discard",
+      "code": "#_ (throw (ex-info \"discard\" {})) (+ 2 3)",
+      "namespace": "audit.repl.c6",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/edb9ebd5b79b0, :ms 0, :value 5}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 578
+    },
+    {
+      "id": "nested-discard",
+      "code": "#_ #_ 1 2 3",
+      "namespace": "audit.repl.c7",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e3a3303db738f, :ms 0, :value 3}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 593
+    },
+    {
+      "id": "regex",
+      "code": "(boolean (re-find #\"a\\(b\" \"a(b\"))",
+      "namespace": "audit.repl.c8",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e26a6fdbf5cdf, :ms 0, :value true}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 622
+    },
+    {
+      "id": "chars",
+      "code": "[\\( \\) \\` \\newline \\u0041]",
+      "namespace": "audit.repl.c9",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e5f2cafb70bda, :ms 0, :value [\\( \\) \\` \\newline \\A]}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 553
+    },
+    {
+      "id": "syntax-quote",
+      "code": "`(map ~inc [1 2])",
+      "namespace": "audit.repl.c10",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ed998e0e8a3c6, :ms 0, :value (clojure.core/map #object[clojure.core/inc 0xf16646b] [1 2])}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 540
+    },
+    {
+      "id": "multiline",
+      "code": "\"a (\n```\n) b\"",
+      "namespace": "audit.repl.c11",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e2ad913242e6e, :ms 0, :value \"a (\n```\n) b\"}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 550
+    },
+    {
+      "id": "comments",
+      "code": "; a (\n(+ 1 ; )\n 2)",
+      "namespace": "audit.repl.c12",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e241aee8b5714, :ms 0, :value 3}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 529
+    },
+    {
+      "id": "metadata",
+      "code": "(meta ^{:audit/x 3} [1])",
+      "namespace": "audit.repl.c13",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eed0654454120, :ms 3, :value {:audit/x 3}}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 559
+    },
+    {
+      "id": "def",
+      "code": "(def x 4)\nx",
+      "namespace": "audit.repl.c14",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e8567d53e6b6a, :note \"x lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database.\", :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.c14/x}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e8146bdd5777c, :ms 0, :value 4}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 608
+    },
+    {
+      "id": "defn",
+      "code": "(defn f [x] (inc x))\n(f 2)",
+      "namespace": "audit.repl.c15",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e5e2c2e80d3c3, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.c15/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e2daca104ae8d, :ms 0, :value 3}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 841
+    },
+    {
+      "id": "redefine",
+      "code": "(defn f [x] x)\n(defn f [x y] (+ x y))\n(f 2 3)",
+      "namespace": "audit.repl.c16",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e708ca12d48ec, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.c16/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0ec83a694089, :ms 3, :calls 8, :value #:seon.render.var{:contract :missing,\n :symbol audit.repl.c16/f,\n :example (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e18f5dc5c9f23, :ms 0, :value 5}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 683
+    },
+    {
+      "id": "macro",
+      "code": "(defmacro twice [x] `(+ ~x ~x))\n(twice 3)",
+      "namespace": "audit.repl.c17",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ecf4cfc35c846, :ms 4, :calls 8, :value {:seon.render.var/symbol audit.repl.c17/twice}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e031394ca67c7, :ms 0, :value 6}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 621
+    },
+    {
+      "id": "require",
+      "code": "(require '[clojure.string :as s])\n(s/upper-case \"hi\")",
+      "namespace": "audit.repl.c18",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee794a4cc5394, :ms 0, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e720c076008a8, :ms 0, :value \"HI\"}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 555
+    },
+    {
+      "id": "alias-refer",
+      "code": "(alias 'c 'clojure.core)\n(refer 'clojure.core :only '[inc] :rename '{inc up})\n[(c/inc 1) (up 2) ::c/k]",
+      "namespace": "audit.repl.c19",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e9a66c146aea1, :ms 0, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e89d38efef441, :ms 1, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ef5778639a6db, :ms 0, :value [2 3 :clojure.core/k]}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 585
+    },
+    {
+      "id": "ns",
+      "code": "(ns audit.repl.ns-case (:require [clojure.string :as s]))\n(s/join \",\" [1 2])",
+      "namespace": "audit.repl.c20",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e944f5a3d0bc2, :ns audit.repl.ns-case, :ms 0, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee39d0b250904, :ms 0, :value \"1,2\"}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 567
+    },
+    {
+      "id": "in-ns",
+      "code": "(in-ns 'audit.repl.moved)\n(clojure.core/refer 'clojure.core)\n(def x 7)\nx",
+      "namespace": "audit.repl.c21",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ebea1fef10fe6, :ns audit.repl.moved, :ms 0, :value #namespace[audit.repl.moved]}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e255ec4c0f63c, :ms 0, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e77c7a3869f48, :note \"x lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database.\", :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.moved/x}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e2dcf7b75f0e7, :ms 0, :value 7}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 551
+    },
+    {
+      "id": "unmap",
+      "code": "(def x 1)\n(ns-unmap *ns* 'x)\n(resolve 'x)",
+      "namespace": "audit.repl.c22",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6c0ffc2d8ef3, :note \"x lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database.\", :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.c22/x}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ed32c5d143aa3, :ms 3, :calls 1, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/efc41400a521e, :ms 0, :value nil}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 542
+    },
+    {
+      "id": "remove-ns",
+      "code": "(create-ns 'audit.repl.gone)\n(remove-ns 'audit.repl.gone)\n(find-ns 'audit.repl.gone)",
+      "namespace": "audit.repl.c23",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee0a7c618b10a, :ms 0, :value #namespace[audit.repl.gone]}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e852747d4f32f, :ms 1, :calls 178, :value {:seon.error/at #inst \"2026-10-08T00:53:55.910Z\",\n :seon.error/layer :seon.program/write,\n :seon.error/operation my.program/native-call-refusal,\n :seon.program/native-operation clojure.core/remove-ns,\n :seon.program/advised-operation my.program/remove-ns!,\n :seon.error/offending [audit.repl.gone],\n :seon.error/message\n   \"Use my.program/remove-ns! so program facts decide before SCI changes.\",\n :seon.error/data\n   {:seon.error/at #inst \"2026-10-08T00:53:55.910Z\",\n    :seon.error/data {:seon.db/basis-t 536871652},\n    :seon.error/expected [:seon.ns/name],\n    :seon.error/layer :seon.program/read,\n    :seon.error/operation my.program/locate,\n    :seon.program/not-found audit.repl.gone,\n    :seon.error/message \"No program declaration names audit.repl.gone.\",\n    :seon.error/world\n      {:seon.agent/id \"repl-auditor\",\n       :seon.turn/id \"36970f454e6a\",\n       :seon.cluster.eval/id \"852747d4f32f\"}}}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e1d5b1f03bade, :ms 0, :value #namespace[audit.repl.gone]}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 550
+    },
+    {
+      "id": "atom",
+      "code": "(def a (atom 0))\n(swap! a inc)\n@a",
+      "namespace": "audit.repl.c24",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ea9d72c44982a, :note \"a lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database.\", :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.c24/a}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ea04dcc0a2441, :ms 0, :value 1}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6a87e868be4c, :ms 0, :value 1}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 547
+    },
+    {
+      "id": "binding",
+      "code": "(def ^:dynamic *x* 1)\n(binding [*x* 2] *x*)\n*x*",
+      "namespace": "audit.repl.c25",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e7d63d9c3bc45, :note \"*x* lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database.\", :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.c25/*x*}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eb882b557263d, :ms 5, :value 2}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ea375522b1345, :ms 0, :value 1}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 543
+    },
+    {
+      "id": "lazy",
+      "code": "(map inc (range 4))",
+      "namespace": "audit.repl.c26",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ecae5621a430d, :ms 5, :value (1 2 3 4)}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 849
+    },
+    {
+      "id": "exception",
+      "code": "(throw (ex-info \"audit exception\" {:audit/k 1}))\n(+ 4 5)",
+      "namespace": "audit.repl.c27",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e074f23f72e81, :ms 3, :error {:seon.error/message \"audit exception\",\n :seon.error/chain\n   [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\",\n     :message \"audit exception\",\n     :data {:audit/k 1}}],\n :seon.sci.eval/stacktrace [[audit.repl.c27 1 1]]}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eb88cc321137e, :ms 0, :value 9}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 525
+    },
+    {
+      "id": "caught",
+      "code": "(try (/ 1 0) (catch Exception e :caught))",
+      "namespace": "audit.repl.c28",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0837661647af, :ms 3, :value :caught}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 508
+    },
+    {
+      "id": "letfn",
+      "code": "(letfn [(f [x] (if (zero? x) 0 (g (dec x)))) (g [x] (f x))] (f 3))",
+      "namespace": "audit.repl.c29",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e5c52b882b7d5, :ms 2, :calls 30, :value 0}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 518
+    },
+    {
+      "id": "record",
+      "code": "(defprotocol P (p [x]))\n(defrecord R [x] P (p [_] x))\n(p (->R 9))",
+      "namespace": "audit.repl.c30",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eb29c7efb7166, :ms 4, :calls 18, :value P}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e046a3d843580, :ms 7, :calls 30, :value audit.repl.c30.R}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e260f288c644e, :ms 0, :value 9}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 640
+    },
+    {
+      "id": "multimethod",
+      "code": "(defmulti mm identity)\n(defmethod mm :x [_] 7)\n(mm :x)",
+      "namespace": "audit.repl.c31",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e010ae562a6a8, :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.c31/mm}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eacd6f2fab435, :ms 0, :value #object[clojure.lang.MultiFn 0x47b53a83]}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6414804357e6, :ms 0, :value 7}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 547
+    },
+    {
+      "id": "print-length",
+      "code": "(binding [*print-length* 2] (pr-str (range 5)))",
+      "namespace": "audit.repl.c32",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e4e30fa464742, :ms 1, :value \"(0 1 ...)\"}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 511
+    },
+    {
+      "id": "print-length-set",
+      "code": "(set! *print-length* 2)\n(range 5)",
+      "namespace": "audit.repl.c33",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6f62ba767deb, :ms 2, :value 2}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e3dbb479a0ce7, :ms 0, :value (0 1 …? (drop 2 result/e3dbb479a0ce7))}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 518
+    },
+    {
+      "id": "reserved-map",
+      "code": "{:seon.repl/value 2}",
+      "namespace": "audit.repl.c34",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e859d40af295c, :error #:seon.error{:offending \"{:seon.repl/value 2}\",\n :message\n   \"Only the REPL writes responses: this form was not evaluated; send forms and wait for their results.\"}\n}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 373
+    },
+    {
+      "id": "read-eval",
+      "code": "#=(+ 1 2)",
+      "namespace": "audit.repl.c35",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e09063b985130, :error #:seon.error{:offending \"#=(+ 1 2)\",\n :expected :seon.sci.reader/accepted-source,\n …2 result/e09063b985130}}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 362
+    },
+    {
+      "id": "nested-def",
+      "code": "(let [a 3] (defn closed [x] (+ a x)))\n(closed 4)",
+      "namespace": "audit.repl.c36",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e964a44db8a22, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.c36/closed}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e50eb30ee391a, :ms 0, :value 7}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 566
+    },
+    {
+      "id": "intern",
+      "code": "(intern *ns* 'x 9)\nx",
+      "namespace": "audit.repl.x0",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e28b00d398e7c, :ms 0, :calls 234, :value {:seon.render.var/symbol audit.repl.x0/x}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e4c8c44ae59b1, :ms 0, :value 9}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 382
+    },
+    {
+      "id": "alter-root",
+      "code": "(def x 1)\n(alter-var-root #'x inc)\nx",
+      "namespace": "audit.repl.x1",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ea101ba0c84af, :note \"x lives only in your SCI context and is lost when the JVM restarts. Nothing defined with def is persisted, atoms included; they are for temporary data-modeling experiments. To keep something, write a function, schema, or test, or transact the data into the database.\", :ms 0, :calls 6, :value {:seon.render.var/symbol audit.repl.x1/x}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eb047fc394c4c, :ms 1, :calls 234, :value 2}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e773781415129, :ms 0, :value 2}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 554
+    },
+    {
+      "id": "unalias",
+      "code": "(alias 'c 'clojure.core)\n(ns-unalias *ns* 'c)\n(contains? (ns-aliases *ns*) 'c)",
+      "namespace": "audit.repl.x2",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee00dcdadfcab, :ms 0, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e69da21135d8b, :ms 0, :calls 175, :value {:seon.error/at #inst \"2026-10-08T00:55:00.588Z\",\n :seon.error/layer :seon.program/write,\n :seon.error/operation my.program/native-call-refusal,\n :seon.program/native-operation clojure.core/ns-unalias,\n :seon.program/advised-operation my.program/ns-unalias!,\n :seon.error/offending [#namespace[audit.repl.x2] c],\n :seon.error/message\n   \"Use my.program/ns-unalias! so program facts decide before SCI changes.\",\n :seon.error/data\n   {:seon.error/at #inst \"2026-10-08T00:55:00.588Z\",\n    :seon.error/data {:seon.db/basis-t 536871669},\n    :seon.error/expected [:seon.ns/name],\n    :seon.error/layer :seon.program/read,\n    :seon.error/operation my.program/locate,\n    :seon.program/not-found audit.repl.x2,\n    :seon.error/message \"No program declaration names audit.repl.x2.\",\n    :seon.error/world\n      {:seon.agent/id \"repl-auditor\",\n       :seon.turn/id \"7c5cb2b84c73\",\n       :seon.cluster.eval/id \"69da21135d8b\"}}}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e42bf9c454f88, :ms 3, :value true}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 574
+    },
+    {
+      "id": "unmap-function",
+      "code": "(defn f [x] x)\n(ns-unmap *ns* 'f)\n(resolve 'f)",
+      "namespace": "audit.repl.x3",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e2c8a3790d24f, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.x3/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ebe86cf63cb76, :ms 0, :calls 1, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6abdcd96eef3, :ms 0, :value nil}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 715
+    },
+    {
+      "id": "bad-contract",
+      "code": "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (str x))\n(f 1)",
+      "namespace": "audit.repl.x4",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e1cca630fa55c, :ms 3, :calls 354, :value {:seon.render.var/symbol audit.repl.x4/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e1160c704e305, :ms 12, :calls 1, :error {:seon.error/message\n   \"audit.repl.x4/f refused its result: expected an integer, got a string. Fix: Change audit.repl.x4/f to return an integer.\",\n :seon.error/problems\n   [#:seon.error{:path [], :offending \"1\", :expected :int, :example 0}],\n :seon.sci.eval/stacktrace [[audit.repl.x4/f 1 1] [audit.repl.x4 1 1]]}}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 546
+    },
+    {
+      "id": "changed-contract-arity",
+      "code": "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)\n(defn f [x y] (+ x y))\n(f 1 2)",
+      "namespace": "audit.repl.x5",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e2e7315a8c6fb, :ms 1, :calls 223, :value {:seon.render.var/symbol audit.repl.x5/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6e126a5972e4, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.x5/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e157adc630afb, :ms 0, :value 3}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 827
+    },
+    {
+      "id": "malformed-contract",
+      "code": "(defn f {:malli/schema [:bogus]} [x] x)\n(f 1)",
+      "namespace": "audit.repl.x6",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e7b5370c021a6, :ms 1, :calls 225, :diagnostics [{:seon.batch/ordinal 0,\n  :seon.error/at #inst \"2026-10-08T00:55:03.285Z\",\n  :seon.error/exception-class clojure.lang.ExceptionInfo,\n  :seon.error/layer :seon.batch/derive,\n  :seon.error/operation seon.batch/derive-step,\n  :seon.error/producer seon.schema/contract-product,\n  :seon.error/world {:seon.agent/id \"repl-auditor\"},\n  :seon.error/message\n    \"Not admitted to the program: its program facts were refused, so any Var it bound exists in your SCI context only and my.program/history has no such declaration. derive: :malli.core/invalid-schema\",\n  :seon.error/producer-digest\n    \"c8f76d54d9dcaef82eb5db5782b0e9e91f3b2973ee714e5988e887d8275ad610\",\n  :seon.error/chain\n    [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\",\n      :message \":malli.core/invalid-schema\",\n      :data\n        {:type :malli.core/invalid-schema,\n         :message :malli.core/invalid-schema,\n         :data {:schema :bogus, :form :bogus}},\n      :frames\n        [[seon.schema$contract_product invokeStatic \"schema.clj\" 4098]\n         [seon.schema$contract_product invoke \"schema.clj\" 4072]\n         [seon.program$contract_facts invokeStatic \"program.cljc\" 1155]\n         [seon.program$contract_facts invoke \"program.cljc\" 1129]\n         [seon.program$with_contract_facts invokeStatic \"program.cljc\"\n          1217]\n         [seon.program$with_contract_facts invoke \"program.cljc\" 1198]\n         [seon.fn$contract_facts_row invokeStatic \"fn.clj\" 3153]\n         [seon.fn$contract_facts_row invoke \"fn.clj\" 3142]\n         [seon.turn.batch$write_entity invokeStatic \"batch.clj\" 273]\n         [seon.turn.batch$write_entity invoke \"batch.clj\" 241]\n         [seon.turn.batch$derive_form$fn__20230 invoke \"batch.clj\" 333]\n         [seon.turn.batch$derive_form invokeStatic \"batch.clj\" 331]\n         [seon.turn.batch$derive_form invoke \"batch.clj\" 304]\n         [seon.batch$derive_step invokeStatic \"batch.clj\" 559]\n         [seon.batch$derive_step invoke \"batch.clj\" 543]\n         [seon.batch$form_step$fn__2964 invoke \"batch.clj\" 609]\n         [seon.batch$guard invokeStatic \"batch.clj\" 171]\n         [seon.batch$guard invoke \"batch.clj\" 166]\n         [seon.batch$form_step invokeStatic \"batch.clj\" 609]\n         [seon.batch$form_step invoke \"batch.clj\" 587]\n         [seon.batch$evaluate_batch$body__3005$fn__3006 invoke\n          \"batch.clj\" 717]\n         [seon.batch$guard invokeStatic \"batch.clj\" 171]\n         [seon.batch$guard invoke \"batch.clj\" 166]\n         [seon.batch$evaluate_batch$body__3005 invoke \"batch.clj\" 717]\n         [seon.sci.batch$around invokeStatic \"batch.clj\" 47]\n         [seon.sci.batch$around invoke \"batch.clj\" 42]\n         [seon.batch$evaluate_batch$fn__3010 invoke \"batch.clj\" 725]\n         [seon.batch$evaluate_batch invokeStatic \"batch.clj\" 725]\n         [seon.batch$evaluate_batch invoke \"batch.clj\" 687]\n         [seon.turn$evaluate_sources invokeStatic \"turn.clj\" 5002]\n         [seon.turn$evaluate_sources invoke \"turn.clj\" 4910]\n         [seon.turn$resume_turn$fn__21659 invoke \"turn.clj\" 5200]\n         …21]}],\n  :seon.error/frame\n    [seon.schema$contract_product invokeStatic \"schema.clj\" 4098]}], :value {:seon.render.var/symbol audit.repl.x6/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0715b1eb488a, :ms 0, :error {:seon.error/message\n   \"audit.repl.x6/f is unavailable: its contract did not arm; the cause says why.\",\n :seon.error/chain\n   [#:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\",\n     :data\n       {:seon.fn/sym audit.repl.x6/f, :seon.error/member :seon.fn/spec},\n     :message\n       \"audit.repl.x6/f is unavailable: its contract did not arm; the cause says why.\"}\n    #:seon.error{:throwable-class \"clojure.lang.ExceptionInfo\",\n     :message \":malli.core/invalid-schema\",\n     :data\n       {:type :malli.core/invalid-schema,\n        :message :malli.core/invalid-schema,\n        :data {:schema :bogus, :form :bogus}}}],\n :seon.sci.eval/stacktrace [[audit.repl.x6/f 1 1] [audit.repl.x6 1 1]]}}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 469
+    },
+    {
+      "id": "reader-binding",
+      "code": "(binding [*data-readers* {'audit/tag inc}] (read-string \"#audit/tag 1\"))",
+      "namespace": "audit.repl.x7",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ec7a353ebda11, :ms 0, :value 2}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 513
+    },
+    {
+      "id": "set-readers",
+      "code": "(set! *data-readers* {'audit/tag inc})\n#audit/tag 1",
+      "namespace": "audit.repl.x8",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e76380729fe53, :ms 0, :error #:seon.error{:exception-class java.lang.IllegalStateException,\n :message\n   \"Can't change/establish root binding of #'clojure.core/*data-readers* with set\"}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e93e70306d9e4, :error #:seon.error{:offending \"#audit/tag 1\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/tag,\n :message\n   \"Reader tag is not accepted; supply an explicitly declared reader.\"}\n}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 370
+    },
+    {
+      "id": "println",
+      "code": "(println \"audit output\")\n42",
+      "namespace": "audit.repl.x9",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ec10d96c51af9, :out \"audit output\n\", :ms 0, :value nil}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e5802e418bc70, :ms 0, :value 42}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 511
+    },
+    {
+      "id": "ns-after-throw",
+      "code": "(do (in-ns 'audit.repl.after-throw) (throw (ex-info \"stop\" {})))\n(ns-name *ns*)",
+      "namespace": "audit.repl.x10",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6aaad676a20d, :ms 0, :error {:seon.error/message \"stop\",\n :seon.sci.eval/stacktrace [[audit.repl.after-throw 1 37]]}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e5caeb4262893, :ms 0, :value audit.repl.x10}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 379
+    },
+    {
+      "id": "redefine-same-form",
+      "code": "(do (defn f [x] x) (defn f [x y] (+ x y)))\n(f 1 2)",
+      "namespace": "audit.repl.x11",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee9d2cdbb964d, :ms 0, :calls 16, :value {:seon.render.var/symbol audit.repl.x11/f}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e7dcd7809150a, :ms 0, :value 3}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 618
+    },
+    {
+      "id": "reserved-computed",
+      "code": "(hash-map :seon.repl/value 2)",
+      "namespace": "audit.repl.x12",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e93fc0140e6fa, :ms 0, :value {:seon.repl/value 2}}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 515
+    },
+    {
+      "id": "nan-nested",
+      "code": "[##NaN ##Inf ##-Inf]",
+      "namespace": "audit.repl.x13",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e208142c59c0a, :ms 0, :value [##NaN ##Inf ##-Inf]}"
+          }
+        ],
+        "isError": false
+      },
+      "wall_ms": 516
+    },
+    {
+      "id": "discard-eof",
+      "code": "#_ 1",
+      "namespace": "audit.repl.x14",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.error{:expected :seon.cluster.reply/sources,\n :message \"Your evaluation had no form. Send a form.\"}"
+          }
+        ],
+        "isError": true
+      },
+      "wall_ms": 143
+    },
+    {
+      "id": "record-literal",
+      "code": "(defrecord R [x])\n(:x #audit.repl.recordliteral.R{:x 8})",
+      "namespace": "audit.repl.recordliteral",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/eb8d05a6d8534, :ms 2, :calls 24, :value audit.repl.recordliteral.R}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e6cb68bbefbfd, :error #:seon.error{:expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/tag,\n :message\n   \"Reader tag is not accepted; supply an explicitly declared reader.\",\n :offending \"(:x #audit.repl.recordliteral.R{:x 8})\"}}"
+          }
+        ],
+        "isError": true
+      }
+    },
+    {
+      "id": "regex-value",
+      "code": "#\"a\\(b\"",
+      "namespace": "audit.repl.regex",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ef24ce556b861, :ms 0, :value #object[java.util.regex.Pattern 0x35354738]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "mutation-setup",
+      "code": "(defn f [x] x)",
+      "namespace": "audit.repl.mutation",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ef7b7362ca94d, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.mutation/f}}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "mutation-after-commit",
+      "code": "(alter-var-root #'f (constantly (fn [x] (inc x))))\n(f 1)",
+      "namespace": "audit.repl.mutation",
+      "setup": "(defn f [x] x)",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ecd1498a5511b, :ms 40, :calls 1379, :value {:seon.error/at #inst \"2026-10-08T00:57:59.683Z\",\n :seon.error/layer :seon.program/write,\n :seon.error/operation my.program/native-call-refusal,\n :seon.program/native-operation clojure.core/alter-var-root,\n :seon.program/advised-operation my.program/define!,\n :seon.error/offending\n   [#'audit.repl.mutation/f\n    #object[clojure.core/constantly/fn--5761 0x6517fd74]],\n :seon.error/message\n   \"Use my.program/define! so program facts decide before SCI changes.\",\n :seon.error/data\n   {:seon.program/subject audit.repl.mutation/f,\n    :seon.program/kind :seon.fn/sym,\n    :seon.db/basis-t 536871692,\n    :seon.program/unknown\n      [#:seon.program{:gap :outside-graph,\n        :message\n          \"This supplied database value answers; callers outside its program graph are unknown.\"}\n       #:seon.program{:gap :dispatch-not-modelled,\n        :message\n          \"Protocol and multimethod implementations have no independent program entity.\"}\n       #:seon.program{:gap :arity-unknown-sites,\n        :count 0,\n        :message\n          \"Calls without recorded argument counts, including apply, cannot be checked for arity.\"}\n       #:seon.program{:gap :macro-mediated,\n        :message\n          \"Macro expansions can introduce calls absent from the indexed caller relation.\"}\n       #:seon.program{:gap :unresolvable-callers,\n        :message\n          \"Runtime-computed targets cannot be attributed to this subject by static analysis.\"}]}}}"
+          },
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ed9d5381d7099, :ms 0, :value 1}"
+          }
+        ],
+        "isError": false
+      }
+    }
+  ],
+  "model": [
+    {
+      "id": "model-multiline",
+      "code": "(str \"a (\n```\n) b\")",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"(str \\\"a (\\n```\\n) b\\\")\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e230165a1ecf7, :ms 109, :value [[\"#:seon.repl{:result result/e077eebdc4054, :error #:seon.error{:offending \\\"(str \\\\\\\"a (\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form,\n :message \\\"EOF while reading, expected \\\\\\\" to match \\\\\\\" at [1,6]\\\"}}\"\n  \"#:seon.repl{:result result/ee3b5b9b0c38a, :error #:seon.error{:message \\\"Unmatched delimiter: )\\\",\n :offending \\\")\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form}}\"\n  \"#:seon.repl{:result result/e4d63c21aff6c, :ms 0, :error #:seon.error{:message \\\"Unable to resolve symbol: b\\\", :offending b}}\"\n  \"#:seon.repl{:result result/ea44277df6c33, :error #:seon.error{:offending \\\"\\\\\\\")\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form,\n :message \\\"EOF while reading, expected \\\\\\\" to match \\\\\\\" at [1,1]\\\"}}\"]\n true]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-fenced-multiline",
+      "code": "```clj\n(str \"a (\n```\n) b\")\n```",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"```clj\\n(str \\\"a (\\n```\\n) b\\\")\\n```\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e22277944bc55, :ms 47, :value [[\"#:seon.repl{:result result/ef2793af1198d, :error #:seon.error{:offending \\\"(str \\\\\\\"a (\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form,\n :message \\\"EOF while reading, expected \\\\\\\" to match \\\\\\\" at [1,6]\\\"}}\"]\n true]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-prose",
+      "code": "Here is the answer.\n(+ 1 1)\nDone.",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"Here is the answer.\\n(+ 1 1)\\nDone.\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0d433c90c500, :ms 41, :value [[\"#:seon.repl{:result result/e9c7f264063c4, :ms 0, :value 2}\"] false]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-nan",
+      "code": "##NaN",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"##NaN\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ea0a6c7aa37fc, :ms 1, :value {:seon.error/message\n   \"Your reply had no form; only comments/prose. Send a form.\"}\n}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-syntax-quote",
+      "code": "`(+ 1 2)",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"`(+ 1 2)\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ed11e69fc9d43, :ms 1, :value {:seon.error/message\n   \"Your reply had no form; only comments/prose. Send a form.\"}\n}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-char",
+      "code": "\\newline",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"\\\\newline\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ee3ded024fef7, :ms 1, :value {:seon.error/message\n   \"Your reply had no form; only comments/prose. Send a form.\"}\n}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-conditional",
+      "code": "#?(:clj :yes :cljs :no)",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"#?(:clj :yes :cljs :no)\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e7f9c2348b425, :ms 39, :value [[\"#:seon.repl{:result result/ed244f6800cd9, :ms 0, :value :yes}\"]\n false]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-regex",
+      "code": "#\"a\\(b\"",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"#\\\"a\\\\(b\\\"\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e8dd2c5add655, :ms 40, :value [[\"#:seon.repl{:result result/e9d95fd2277ec, :ms 0, :value #object[java.util.regex.Pattern 0xadf7fca]}\"]\n false]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-number",
+      "code": "42",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"42\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e11eaf8661039, :ms 1, :value {:seon.error/message\n   \"Your reply had no form; only comments/prose. Send a form.\"}\n}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "model-fenced-literals",
+      "code": "```clj\n42\n##NaN\n`(+ 1 2)\n```",
+      "namespace": "audit.repl.model",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model] :seon.cluster.reply/text \"```clj\\n42\\n##NaN\\n`(+ 1 2)\\n```\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0d62df668c89, :ms 44, :value [[\"#:seon.repl{:result result/e10415ab65f12, :ms 0, :value 42}\"\n  \"#:seon.repl{:result result/e4f737969701d, :ms 0, :value ##NaN}\"\n  \"#:seon.repl{:result result/ed97c8f05c8b5, :ms 0, :value (clojure.core/+ 1 2)}\"]\n false]}"
+          }
+        ],
+        "isError": false
+      }
+    },
+    {
+      "id": "record-literal",
+      "code": "(defrecord R [x])\n(:x #audit.repl.recordliteral.R{:x 8})",
+      "namespace": "audit.repl.recordliteral",
+      "driver": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\ncustody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.recordliteral)\nanswer (seon.cluster.agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources :seon.turn/starting-ns [:seon.ns/name 'audit.repl.recordliteral] :seon.cluster.reply/text \"(defrecord R [x])\\n(:x #audit.repl.recordliteral.R{:x 8})\"))]\n(if-let [db (:seon.db/db answer)] (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\") (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+      "seon": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/e0049ecfe4bf0, :ms 133, :value [[\"#:seon.repl{:result result/e3b2b79bac7c3, :ms 0, :calls 24, :value audit.repl.recordliteral.R}\"\n  \"#:seon.repl{:result result/e4e6179b339c7, :error #:seon.error{:expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/tag,\n :message\n   \\\"Reader tag is not accepted; supply an explicitly declared reader.\\\",\n :offending \\\"(:x #audit.repl.recordliteral.R{:x 8})\\\"}}\"]\n true]}"
+          }
+        ],
+        "isError": false
+      }
+    }
+  ],
+  "bench": {
+    "code": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\n      custody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.bench)\n      cluster (:seon.turn.loop/cluster custody)\n      held (seon.cluster.agent/acquire-context! cluster \"repl-auditor\")\n      p (promise)\n      thread (.unstarted (Thread/ofPlatform)\n                (fn []\n                  (deliver p\n                    (try\n                      (let [mx (java.lang.management.ManagementFactory/getThreadMXBean)\n                            tid (.threadId (Thread/currentThread))\n                            run (fn [source]\n                                  (let [b (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean mx tid)\n                                        t (System/nanoTime)\n                                        sources (seon.turn/code-sources source 'audit.repl.bench 100000)\n                                        answer (seon.turn/evaluate-sources\n                                                  {:seon.turn.loop/cluster cluster\n                                                   :seon.db/db @(:seon.db/connection cluster)\n                                                   :seon.sci.eval/ctx (:seon.sci.eval/ctx held)\n                                                   :seon.agent/id \"repl-auditor\"\n                                                   :seon.cluster.eval/ordinal 0\n                                                   :seon.cluster.reply/sources sources\n                                                   :seon.ns/name 'audit.repl.bench})]\n                                    {:ms (/ (- (System/nanoTime) t) 1e6)\n                                     :MB (/ (- (.getThreadAllocatedBytes ^com.sun.management.ThreadMXBean mx tid) b) 1e6)\n                                     :shown (mapv #(get-in % [:seon.sci.eval/evaluation :seon.eval/shown])\n                                                  (:seon.turn.loop/evaluated-sources answer))}))]\n                        {:virtual (.isVirtual (Thread/currentThread))\n                         :samples (mapv (fn [source] (run source) {:code source :measurements (mapv (fn [_] (run source)) (range 5))})\n                                        [\"(+ 1 1)\" \"(defn f [x] (inc x))\"])})\n                      (catch Throwable t {:error (ex-message t) :data (ex-data t)})))))]\n  (.start thread)\n  (.join thread)\n  @p)",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/ecc1ca8f00e7b, :ms 386, :value {:virtual false,\n :samples\n   [{:code \"(+ 1 1)\",\n     :measurements\n       [{:ms 1.756959, :MB 2.115336, :shown [\"2\"]}\n        {:ms 1.766959, :MB 2.11828, :shown [\"2\"]}\n        {:ms 1.594209, :MB 2.112056, :shown [\"2\"]}\n        {:ms 2.059042, :MB 2.111944, :shown [\"2\"]}\n        {:ms 1.769292, :MB 2.112232, :shown [\"2\"]}]}\n    {:code \"(defn f [x] (inc x))\",\n     :measurements\n       [{:ms 20.80775,\n         :MB 8.583696,\n         :shown [\"{:seon.render.var/symbol audit.repl.bench/f}\"]}\n        {:ms 9.812,\n         :MB 8.5848,\n         :shown [\"{:seon.render.var/symbol audit.repl.bench/f}\"]}\n        {:ms 14.3265,\n         :MB 9.78936,\n         :shown [\"{:seon.render.var/symbol audit.repl.bench/f}\"]}\n        {:ms 9.791916,\n         :MB 8.59384,\n         :shown [\"{:seon.render.var/symbol audit.repl.bench/f}\"]}\n        {:ms 9.612625,\n         :MB 8.638264,\n         :shown [\"{:seon.render.var/symbol audit.repl.bench/f}\"]}]}]}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "initial_model": {
+    "code": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\n      custody (#'seon.mcp/execution instance \"repl-auditor\" 'audit.repl.model)\n      answer (seon.cluster.agent/evaluate-source!\n               (assoc custody :seon.agent/segmenter 'seon.turn/planned-sources\n                      :seon.turn/starting-ns [:seon.ns/name 'audit.repl.model]\n                      :seon.cluster.reply/text \"(str \\\"a (\\n```\\n) b\\\")\"))]\n  (if-let [db (:seon.db/db answer)]\n    (#'seon.mcp/observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) db \"repl-auditor\" \"default\")\n    (select-keys answer [:seon.error/message :seon.turn.loop/refusal])))",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e37d93fae6d0e, :ms 314, :value [[\"#:seon.repl{:result result/ef882bb758c1b, :error #:seon.error{:offending \\\"(str \\\\\\\"a (\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form,\n :message \\\"EOF while reading, expected \\\\\\\" to match \\\\\\\" at [1,6]\\\"}}\"\n  \"#:seon.repl{:result result/e9fd45ff5f57d, :error #:seon.error{:message \\\"Unmatched delimiter: )\\\",\n :offending \\\")\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form}}\"\n  \"#:seon.repl{:result result/e24bcf74400ad, :ms 0, :error #:seon.error{:message \\\"Unable to resolve symbol: b\\\", :offending b}}\"\n  \"#:seon.repl{:result result/eeaaeae91c70a, :error #:seon.error{:offending \\\"\\\\\\\")\\\",\n :expected :seon.sci.reader/accepted-source,\n :member :seon.sci.reader/form,\n :message \\\"EOF while reading, expected \\\\\\\" to match \\\\\\\" at [1,1]\\\"}}\"]\n true]}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "mcp_bench": {
+    "code": "(let [run (fn [source]\n            (let [request (clojure.data.json/write-str {\"name\" \"eval_clj\" \"arguments\" {\"agent\" \"repl-auditor\" \"cluster\" \"default\" \"mode\" \"sci\" \"namespace\" \"audit.repl.wirebench\" \"code\" source}})\n                  t (System/nanoTime)\n                  reply (seon.mcp/call request)]\n              {:ms (/ (- (System/nanoTime) t) 1e6)\n               :reply (clojure.data.json/read-str reply)}))]\n   (mapv (fn [source] {:code source :first (run source) :samples (mapv (fn [_] (run source)) (range 5))})\n         [\"(+ 1 1)\" \"(defn f [x] (inc x))\"]))",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:findings [{:seon.repl/finding :slow,\n  :seon.eval/duration-ms 1314,\n  :seon.repl/fix\n    \"Over one second in the evaluation you asked for: find what the work is proportional to (the store? the program? the call count?) and remove it; (seon.profile/summary (seon.profile/cells) 5) ranks the armed functions by time.\"}], :result result/e395d5ab97094, :ms 1314, :value [{:code \"(+ 1 1)\",\n  :first\n    {:ms 140.936542,\n     :reply\n       {\"content\"\n          [{\"type\" \"text\",\n            \"text\"\n              \"#:seon.repl{:result result/ee03f7e3ef62d, :ms 0, :value 2}\"}],\n        \"isError\" false}},\n  :samples\n    [{:ms 281.294291,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/eb39dcdb0828b, :ms 0, :value 2}\"}],\n         \"isError\" false}}\n     {:ms 41.997417,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/e7c3f0aa12a16, :ms 0, :value 2}\"}],\n         \"isError\" false}}\n     {:ms 43.785208,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/e8ce4da800e3f, :ms 0, :value 2}\"}],\n         \"isError\" false}}\n     {:ms 40.899958,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/eb9aa529258f3, :ms 0, :value 2}\"}],\n         \"isError\" false}}\n     {:ms 41.255,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/ebf8ce19a1571, :ms 0, :value 2}\"}],\n         \"isError\" false}}]}\n {:code \"(defn f [x] (inc x))\",\n  :first\n    {:ms 113.490375,\n     :reply\n       {\"content\"\n          [{\"type\" \"text\",\n            \"text\"\n              \"#:seon.repl{:result result/e24fa0e802ac3, :ms 0, :calls 8, :value {:seon.render.var/symbol audit.repl.wirebench/f}}\"}],\n        \"isError\" false}},\n  :samples\n    [{:ms 290.393292,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/e2524a7749bb8, :ms 0, :calls 8, :value #:seon.render.var{:contract :missing,\n :symbol audit.repl.wirebench/f,\n :example (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)}}\"}],\n         \"isError\" false}}\n     {:ms 78.208959,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/e251d1a5dae92, :ms 0, :calls 8, :value #:seon.render.var{:contract :missing,\n :symbol audit.repl.wirebench/f,\n :example (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)}}\"}],\n         \"isError\" false}}\n     {:ms 86.820083,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/eddd0bbf41844, :ms 0, :calls 8, :value #:seon.render.var{:contract :missing,\n :symbol audit.repl.wirebench/f,\n :example (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)}}\"}],\n         \"isError\" false}}\n     {:ms 77.577833,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/e37606c6bbafe, :ms 0, :calls 8, :value #:seon.render.var{:contract :missing,\n :symbol audit.repl.wirebench/f,\n :example (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)}}\"}],\n         \"isError\" false}}\n     {:ms 75.682875,\n      :reply\n        {\"content\"\n           [{\"type\" \"text\",\n            \"text\"\n            \"#:seon.repl{:result result/e8258548dd6ea, :ms 0, :calls 8, :value #:seon.render.var{:contract :missing,\n :symbol audit.repl.wirebench/f,\n :example (defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)}}\"}],\n         \"isError\" false}}]}]}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "persistence": {
+    "code": "[(audit.repl.c36/closed 4) (audit.repl.c16/f 4 5) @audit.repl.c24/a]\n(my.agent/branch)",
+    "result": {
+      "content": [
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/e1e7e5d9e2c29, :ms 0, :value [7 9 1]}"
+        },
+        {
+          "type": "text",
+          "text": "#:seon.repl{:result result/ef2f3529806c5, :ms 3, :calls 117, :value #:seon.agent{:branch :agent-625009cf3e07, :mode :live}}"
+        }
+      ],
+      "isError": false
+    }
+  },
+  "cleanup": {
+    "self_retirement": {
+      "content": [
+        {
+          "type": "text",
+          "text": "{:seon.error/message \"run transition refused: admission-closed\"}"
+        }
+      ],
+      "isError": true
+    },
+    "final": {
+      "code": "(let [instance (#'seon.mcp/instance @seon.operator.runtime/running-instances \"default\")\n      handle (:seon.turn.loop/cluster instance)\n      context {:seon.store/store (:seon.store/store instance)\n               :seon.db/connection (:seon.db/connection handle)\n               :seon.agent/routing (:seon.agent/routing handle)}]\n  (mapv (fn [branch] (my.agent/retire-branch! {:seon.store/branch branch} context))\n        [:agent-625009cf3e07 :agent-3ff3dd07ffc3]))",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "#:seon.repl{:result result/ea6f82d44d692, :ms 101, :value [{:seon.store/branch :agent-625009cf3e07, :my.agent/retired? true}\n {:seon.store/branch :agent-3ff3dd07ffc3, :my.agent/retired? true}]}"
+          }
+        ],
+        "isError": false
+      }
+    }
+  }
+}
