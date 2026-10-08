@@ -110,7 +110,9 @@
                values (mapv #(get-in % [:seon.sci.eval/evaluation :seon.sci.admit/value]) outcomes)]
            (is (= 7 (count outcomes)))
            (is (nil? (first values)))
-           (is (= [3 4 nil] (subvec values 2 5)))
+           ;; a form omitting its database reads the world's connection at the call: it
+           ;; sees the deliberate concurrent write, while the run's basis stays the opening one
+           (is (= [3 4 {:seon.agent/id "later-agent"}] (subvec values 2 5)))
            (is (= (apply str (repeat 50000 "x")) (nth values 5)))
            (is (string? (get-in (last outcomes) [:seon.sci.eval/evaluation :seon.cluster.eval/error])))
            (is (= (range 7) (map :seon.cluster.eval/ordinal outcomes)))

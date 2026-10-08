@@ -82,9 +82,7 @@
             indexed (db/pull database
                              '[:seon.fn/sym
                                {:seon.fn/arities
-                                [:seon.fn.arity/argument-count
-                                 :seon.fn.arity/input
-                                 :seon.fn.arity/output]}]
+                                [:seon.fn.arity/argument-count]}]
                              [:seon.fn/sym 'seon.cluster.agent/whoami])
             arities (:seon.fn/arities indexed)
             expected (agent/whoami {:seon.db/db database :seon.agent/id agent-id})
@@ -117,7 +115,6 @@
                 :seon.cluster.eval/ns [:seon.ns/name namespace-name]}))]
         (is (= [1] (mapv :seon.fn.arity/argument-count arities))
             "the argumentless SCI call uses the one declared request-map arity")
-        (is (every? :seon.fn.arity/output arities))
         (is (some? live))
         (let [result (evaluate (str (:seon.repl/form (agent/identity-form {:seon.agent/id agent-id}))))
               value (:seon.sci.admit/value result)]

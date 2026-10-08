@@ -1072,8 +1072,8 @@
                 "and so is a change nothing currently depends on")
             (is (every? #(nil? (:seon.cluster.eval/error %)) evaluations)
                 "no form was refused")
-            (is (= (pr-str (assoc (seon.run/complete "refined") :my.turn/delivered-to :outside))
-                   (get-in evaluations [4 :seon.eval/shown]))
+            (is (= (assoc (seon.run/complete "refined") :my.turn/delivered-to :outside)
+                   (read-string (get-in evaluations [4 :seon.eval/shown])))
                 "the run stayed open through the change and completed")))))))
 
 (deftest runtime-schema-unregister-removes-one-unused-global-schema
@@ -2756,8 +2756,8 @@
                                        [?e :seon.ai.attempt/ordinal _]]
                                      @connection)))
                     "ONE attempt entity for the one paid call")
-                (is (= (pr-str (assoc (seon.run/complete "streamed home") :my.turn/delivered-to :outside))
-                       (:seon.eval/shown (first (agent-evaluations @connection))))
+                (is (= (assoc (seon.run/complete "streamed home") :my.turn/delivered-to :outside)
+                       (read-string (:seon.eval/shown (first (agent-evaluations @connection)))))
                     "the terminal evaluation saved the exact completion"))
 
               (testing "the settled reply's text equals the fold's final

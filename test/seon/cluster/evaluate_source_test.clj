@@ -107,13 +107,14 @@
                                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
                               (is (not-any? :seon.cluster.eval/error receipts))
                               (shown connection result)))]
-              (is (= [(str "#'" namespace-name "/run-inc") "nil"]
-                     (settled (str defn-source "\n(require '[malli.core :as m])"))))
-              (is (= ["nil" (str "#'" namespace-name "/run-inc2")]
-                     (settled (str "(require '[clojure.set :as set])\n"
-                                   (str/replace defn-source "run-inc " "run-inc2 ")))))))
-          (testing "the reply planner stays the default: a bare number is prose there"
-            (is (:seon.cluster.reply/no-forms (agent/evaluate-source! (assoc request :seon.cluster.reply/text "1")))))
+              (is (= [{:seon.render.var/symbol (symbol namespace-name "run-inc")} nil]
+                     (mapv read-string (settled (str defn-source "\n(require '[malli.core :as m])"))))
+                  "a defn shows its Var as the Var render's symbol, the require nil")
+              (is (= [nil {:seon.render.var/symbol (symbol namespace-name "run-inc2")}]
+                     (mapv read-string (settled (str "(require '[clojure.set :as set])\n"
+                                                     (str/replace defn-source "run-inc " "run-inc2 "))))))))
+          (testing "a bare number line is code on the default planner too (reader-fix: only prose becomes comments)"
+            (is (= ["1"] (shown connection (agent/evaluate-source! (assoc request :seon.cluster.reply/text "1"))))))
           (testing "a segmenter without the planner's contract refuses by name before any run"
             (let [runs #(count (db/q '[:find ?r :in $ ?id :where [?a :seon.agent/id ?id] [?r :seon.turn/agent ?a]]
                                      (db/db connection) agent-id))
@@ -138,38 +139,17 @@
                   "a returned error value is its run's saved receipt")
               (is (= (shown connection value) (mapv :seon.eval/shown (saved value)))
                   "what the answer holds is what the run stored")))
-          (testing "a refused settlement answers what its refusal saved"
-            (code "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-            (code "(defn refused-caller \"Call.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
-            (let [result (code (str "(ns-unmap '" (str "my.agents." agent-id) " 'refused-helper)"))]
-              (is (some? (:seon.db/db result)))
-              (is (re-find #"surviving referrers"
-                           (str (:seon.cluster.eval/error (:seon.sci.eval/evaluation (first (:seon.turn.loop/evaluated-sources result)))))))
-              (is (= (shown connection result)
-                     (mapv (comp :seon.eval/shown :seon.sci.eval/evaluation) (:seon.turn.loop/evaluated-sources result)))
-                  "the refusal's saved receipts are the stored ones")))
-          (testing "a refused multi-form settlement answers its refusal beside every evaluated value (task a-refused-multi-form-settlement-returns-nothing)"
-            ;; WANTED: the direct caller of an opened run keeps the refusal;
-            ;; each form's value and the refusal's diagnostic are its receipts.
-            (let [result (code (str "(+ 1 2)\n(ns-unmap 'my.agents." agent-id " 'refused-helper)\n(+ 3 4)"))
-                  receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
-              (is (:seon.error/message (:seon.turn.loop/refusal result)))
-              (is (= ["3" "nil" "7"] (mapv :seon.eval/shown receipts)))
-              ;; `drive/run-receipts` selects no diagnostics, so the stored
-              ;; receipts are read on the settlement's own value
-              (is (= #{0 1 2} (set (db/q '[:find [?ordinal ...] :in $ ?id
-                                           :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
-                                           [?receipt :seon.cluster.eval/ordinal ?ordinal]
-                                           [?receipt :seon.cluster.eval/diagnostics _]]
-                                         (:seon.db/db result) (:seon.turn/id result))))
-                  "the refusal is delivered beside each value")))
-          (testing "an agent's refused settlements never park it: its next run settles (sweep 2026-09-27 item 2)"
-            ;; A third refused run in a row reached the write-refusal bound (3):
-            ;; the proc parked and the next ordinary run answered "awaited
-            ;; channel closed" until restart (stabfix-a, 2026-09-27).
-            (let [refused (code (str "(ns-unmap 'my.agents." agent-id " 'refused-helper)"))]
-              (is (:seon.turn.loop/refusal refused)))
-            (is (= ["3"] (shown connection (code "(+ 1 2)")))))
+          (testing "a deletion with surviving referrers answers its refusal as the form's value; plain ns-unmap deletes nothing"
+            (let [namespace-name (str "my.agents." agent-id)]
+              (code "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+              (code "(defn refused-caller \"Call.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
+              (let [result (code (str "(-> (my.program/ns-unmap! '" namespace-name "/refused-helper)"
+                                      " :seon.error/offending :seon.program/callers)"))]
+                (is (some? (:seon.db/db result)))
+                (is (= [#{(symbol namespace-name "refused-caller")}]
+                       (mapv read-string (shown connection result)))
+                    "the refusal names the surviving referrers; nothing was deleted"))
+              (is (= ["3"] (shown connection (code "(+ 1 2)"))) "the refusal parks nothing: the next run settles")))
           (testing "a nested in-ns settles: both values return and the namespace SCI moved into exists (task a318b2d38)"
             (let [target (symbol (str "my.agents." agent-id ".nested"))
                   result (code (str "(do (in-ns '" target ") 1)\n(+ 1 2)"))]
@@ -201,8 +181,13 @@
             ;; settlement, and every write a form made refused "Nothing found
             ;; for entity id [:seon.cluster.eval/id ...]" (task c9e0cde3edb3).
             (let [task-id (id/id)
-                  result (code (pr-str (list 'seon.db/transact!
-                                             (list 'quote {:tx-data [(support/task-row task-id "written by a form")]}))))
+                  ;; the fixture symbol's name is the hex id, which may start with a digit: no
+                  ;; reader accepts that token, so the form builds the symbol
+                  row (let [row (support/task-row task-id "written by a form")]
+                        (assoc row
+                               :seon.task/sym (list 'symbol "fixture.tasks" task-id)
+                               :seon.task/ns (list 'quote (:seon.task/ns row))))
+                  result (code (pr-str (list 'seon.db/transact! {:tx-data [row]})))
                   receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
               (is (not-any? :seon.cluster.eval/error receipts))
               (is (= (receipt-id-of result)
