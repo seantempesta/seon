@@ -318,3 +318,39 @@
        (is (= [(list :seon.program/gating (list 'my.program/breaks {:seon.program/subject (list 'quote 'seon.db/pull)}))]
               (:seon.render/operations gating))
            "a cut group offers the form that lists it")))))
+
+(defn- shown-value
+  "The reply of one `eval_clj` of `code` as `agent-id`: its :seon.repl/value and :seon.repl/error."
+  {:malli/schema [:=> [:cat :string :string :string] :map]}
+  [code agent-id running]
+  (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                         "arguments" {"code" code "agent" agent-id "cluster" running}})))]
+    (select-keys (support/mcp-reply result) [:seon.repl/value :seon.repl/error])))
+
+(deftest ^{:seon/tasks #{'my.program/diff-with-a-map-argument-is-refused-as-a-context}}
+  a-map-argument-lacking-world-members-is-filled-from-the-world
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [plain (shown-value "(my.program/diff)" agent-id running)
+           with-map (shown-value "(my.program/diff {})" agent-id running)]
+       (is (not (contains? plain :seon.repl/error)) "the supplied call answers")
+       (is (not (contains? with-map :seon.repl/error)) "a map missing world members is not refused as a context")
+       (is (= plain with-map) "it answers the same difference")))))
+
+(deftest ^{:seon/tasks #{'my.program/source-shows-code-as-an-escaped-string}}
+  a-declarations-source-is-shown-as-code-not-as-a-string
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [shown (:seon.repl/value (shown-value "(my.program/source 'my.program/source)" agent-id running))]
+       (is (not (string? shown)) "the reply is not the source as one escaped string literal")
+       (is (and (seq? shown) (= 'defn (first shown))) "it reads as the definition's own code")
+       (is (= 'source (second shown)))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-unbound-io-function-names-no-alternative}}
+  an-unbound-host-io-function-names-the-seon-tool
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [error (:seon.repl/error (shown-value "(slurp \"project.clj\")" agent-id running))]
+       (is (= 'slurp (:seon.error/offending error)))
+       (is (clojure.string/includes? (str (:seon.error/fix error)) "my.fs/read")
+           "the refusal's fix names the entrance that reads a file")))))

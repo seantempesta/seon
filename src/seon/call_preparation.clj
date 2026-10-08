@@ -597,7 +597,17 @@
                                                                  own))))
                                  {:seon.fn.argument/index position :seon.call-preparation/entries own})]
                          :when slot]
-                     slot))]
+                     slot))
+        ;; A map argument whose declared schema is itself supplied (a world
+        ;; member such as :my.program/context): the caller's map keeps its
+        ;; entries and the supplied value fills the required ones it lacks.
+        merges (vec (for [{position :seon.fn.argument/index rest? :seon.fn.argument/rest?
+                           schema-key :seon.call-preparation/schema-key map-entries ::map-entries} arguments
+                          :let [candidate (get index schema-key)
+                                required (into [] (keep (fn [[entry-key optional? _]] (when-not optional? entry-key)))
+                                               map-entries)]
+                          :when (and candidate (not rest?) (seq required))]
+                      (assoc (slot-of candidate position) :seon.call-preparation/required required)))]
     (cond-> {:seon.fn.arity/order (:seon.fn.arity/order arity)
              :seon.fn.arity/min (long (:seon.fn.arity/min arity))
              :seon.fn.arity/argument-count (:seon.fn.arity/argument-count arity)
@@ -606,6 +616,7 @@
              (boolean (some #(and (:seon.fn.argument/rest? %) (get index (:seon.call-preparation/schema-key %)))
                             arguments))
              :seon.call-preparation/slots slots
+             :seon.call-preparation/merges merges
              :seon.call-preparation/entries entries}
       (and (not variadic?) (> (count slots) 1))
       (assoc :seon.call-preparation/argument-validators (mapv (comp m/validator ::argument-schema) arguments)))))
@@ -680,6 +691,7 @@
                               {:seon.call-preparation/ambiguous? false
                                :seon.fn.arity/order (:seon.fn.arity/order arity)
                                :seon.call-preparation/inserts []
+                               :seon.call-preparation/merges (:seon.call-preparation/merges arity)
                                :seon.call-preparation/entries
                                (:seon.call-preparation/entries arity)}))
                     {}
@@ -700,6 +712,7 @@
                            {:seon.call-preparation/ambiguous? false
                             :seon.fn.arity/order (:seon.fn.arity/order arity)
                             :seon.call-preparation/inserts slots
+                            :seon.call-preparation/merges (:seon.call-preparation/merges arity)
                             :seon.call-preparation/entries
                             (:seon.call-preparation/entries arity)}))))
              {}
@@ -1012,6 +1025,7 @@
                          {:seon.call-preparation/ambiguous? false
                           :seon.fn.arity/order (:seon.fn.arity/order arity)
                           :seon.call-preparation/inserts inserts
+                          :seon.call-preparation/merges (:seon.call-preparation/merges arity)
                           :seon.call-preparation/entries
                           (:seon.call-preparation/entries arity)})
                        (partial-insertions arity arguments))))
@@ -1089,7 +1103,8 @@
                       (:seon.call-preparation/inserts answer))]
           (if (map? with-inserts)
             with-inserts
-            (reduce (fn [args entry]
+            (let [with-entries
+                  (reduce (fn [args entry]
                       (let [position (:seon.fn.argument/index entry)
                             entry-key (:seon.call-preparation/entry-key entry)
                             target (nth args position nil)]
@@ -1102,7 +1117,20 @@
                               (reduced? produced) produced
                               :else (assoc args position (assoc target entry-key produced)))))))
                     with-inserts
-                    (:seon.call-preparation/entries answer))))))))
+                    (:seon.call-preparation/entries answer))]
+            (if (map? with-entries)
+              with-entries
+              (reduce (fn [args {position :seon.fn.argument/index required :seon.call-preparation/required :as slot}]
+                        (let [target (nth args position nil)]
+                          (if (or (not (map? target)) (every? #(contains? target %) required))
+                            args
+                            (let [produced (value-for slot)]
+                              (cond
+                                (reduced? produced) produced
+                                (map? produced) (assoc args position (merge produced target))
+                                :else args)))))
+                      with-entries
+                      (:seon.call-preparation/merges answer))))))))))
 
 (defn preparing
   "Compose the supplied-default step outside one armed contract wrapper.

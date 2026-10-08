@@ -92,6 +92,19 @@
 
  :slots [:vector :seon.call-preparation/slot],
 
+ ;; A slot whose schema is a map the world supplies, with the required keys
+ ;; the caller's own map of that schema must carry; the supplied value fills
+ ;; what it lacks (caller wins).
+ :required [:vector :qualified-keyword],
+ :merge
+ [:map
+  [:seon.fn.argument/index :seon.fn.argument/index]
+  [:seon.call-preparation/key :seon.call-preparation/key]
+  [:seon.call-preparation/supplier-symbol
+   :seon.call-preparation/supplier-symbol]
+  [:seon.call-preparation/required :seon.call-preparation/required]],
+ :merges [:vector :seon.call-preparation/merge],
+
  ;; An omitted map is constructible only when every required entry has an
  ;; admitted supplier. Its entries are filled by the same caller-wins step.
  :insertion
@@ -118,6 +131,7 @@
   [:seon.call-preparation/variadic? :seon.call-preparation/variadic?]
   [:seon.call-preparation/rest-slot? :seon.call-preparation/rest-slot?]
   [:seon.call-preparation/slots :seon.call-preparation/insertions]
+  [:seon.call-preparation/merges :seon.call-preparation/merges]
   [:seon.call-preparation/argument-validators
    {:optional true} :seon.call-preparation/argument-validators]
   [:seon.call-preparation/entries :seon.call-preparation/slots]],

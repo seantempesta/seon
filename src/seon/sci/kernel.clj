@@ -871,6 +871,13 @@
       (recur (ex-cause throwable))
       throwable)))
 
+(def ^:private host-function-tools
+  "A host function unbound in an agent's context, by name, to the fix naming the
+  Seon tool that does its job."
+  {'slurp "slurp is not bound in an agent's context: read a file with (my.fs/read {:my.fs/path \"src/seon/error.clj\" :my.fs/max-bytes 65536}), see (doc my.fs/read)."
+   'spit "spit is not bound in an agent's context: write a file with my.fs/write!, see (doc my.fs/write!)."
+   'file-seq "file-seq is not bound in an agent's context: list files with my.fs/glob, see (doc my.fs/glob)."})
+
 (defn failure-value
   "The minimal complete error for a failure of an agent's evaluation, the
   way `clojure.main` reports it (`ex-triage`/`ex-str`, main.clj:219-300):
@@ -959,6 +966,9 @@
          ;; (`seon.error`'s unresolved-symbol fix).
          failing-symbol
          (assoc :seon.error/data {:seon.sci.eval/symbol failing-symbol})
+         ;; A host function agents reach through a Seon tool names the tool.
+         (get host-function-tools failing-symbol)
+         (assoc :seon.error/fix (get host-function-tools failing-symbol))
          ;; The deadline guard fired: its observation is the evidence.
          timed-out?
          (assoc :seon.sci.kernel/guard-observation

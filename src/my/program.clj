@@ -833,7 +833,7 @@
   (my.program/source 'seon.task/create!)
   Errors: an unknown symbol returns a not-found error naming the nearest symbols."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
-                  [:or :map :seon.program/not-found-error]]}
+                  [:or :my.program/declaration-source :seon.program/not-found-error]]}
   [database sym]
   (let [entity (declaration database sym)]
     (if (::kind entity)
@@ -849,6 +849,15 @@
           {:seon.error/message (str "No program declaration names " sym ". Nearest: " (str/join ", " near))
            :seon.program/not-found sym
            :seon.error/expected near})))))
+
+(defn render-source-ai
+  "A declaration's source as its own text: the code an agent can copy into a `defn`
+  unchanged, under a one-line location comment. The reply's other keys stay on the
+  live result."
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  [unit]
+  (let [{:keys [source file line]} (:seon.render/value unit)]
+    (if file (str ";; " file ":" line "\n" source) source)))
 
 (defn- sources
   "Every program declaration's [sym source kind], functions before tests."

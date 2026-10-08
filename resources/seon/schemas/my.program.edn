@@ -6,6 +6,11 @@
   [:seon.store/store {:optional true} :seon.store/store]
   [:seon.agent/routing {:optional true} :seon.agent/routing]
   [:seon.env/environment {:optional true} :seon.env/environment]]
+ :my.program/declaration-source
+ [:map {:description "One declaration's source and where it lives: shown as its code text." :seon.render/ai my.program/render-source-ai}
+  [:sym :qualified-symbol] [:kind :keyword] [:source :string]
+  [:line {:optional true} :int] [:file {:optional true} :string] [:doc {:optional true} :string]
+  [:contract {:optional true} :seon.schema/value]]
  :my.program/read-request [:map [:seon.db/db :seon.db/database-value]]
  :my.program/subject-request
  [:map [:seon.db/db :seon.db/database-value]
