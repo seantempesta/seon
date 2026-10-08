@@ -108,3 +108,17 @@
          (is (false? (get reply "isError")) "the redefinition is admitted, not refused")
          (is (= expected (stored (db/db connection)))
              "the stored row is the second definition's, without the first one's contract"))))))
+
+(deftest ^{:seon/tasks #{'my.program/write-back-refuses-a-file-whose-unchanged-functions-reindex-differently}}
+  a-rewritten-namespace-row-stores-the-digest-of-what-it-keeps
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (is (= {} (select-keys (db/transact! connection [kept]) [:seon.error/message :seon.error/problems])))
+     (eval! "(in-ns 'merge-m8.fixture) (require '[clojure.set :as merge-m8-set]) (ns-unalias 'merge-m8.fixture 'merge-m8-set)"
+            agent-id running)
+     (let [database (db/db connection)
+           {id :db/id digest :seon.program/definition-digest doc :seon.ns/doc}
+           (db/pull database [:db/id :seon.program/definition-digest :seon.ns/doc] [:seon.ns/name 'merge-m8.fixture])]
+       (is (= "A documented namespace." doc) "the pass keeps the namespace's doc")
+       (is (= (db/namespace-digest-of database id {}) digest)
+           "the stored digest is the digest of the stored row, doc and tasks included")))))

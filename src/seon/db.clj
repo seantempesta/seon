@@ -5281,6 +5281,17 @@
     entity-map)
    (some-> namespace-entity (@stored-namespace-context))))
 
+(defn namespace-digest-of
+  "The definition digest of namespace `entity-id` as `database` stores it
+  with `row`'s attributes in place of its own: what a partial replacement of
+  the namespace (its resolver context, keeping its doc and tasks) must store."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int :map] :seon.program/definition-digest]}
+  [database entity-id row]
+  (@program-definition-digest
+   (merge (dissoc (declaration-value database (identity-attributes database) entity-id)
+                  :seon.program/definition-digest)
+          (dissoc row :seon.program/definition-digest))))
+
 (defn behavior-digest
   "`seon.program/behavior-digest` of the function or test `entity-id` on
   `database`: its definition without documentation, from the canonical row

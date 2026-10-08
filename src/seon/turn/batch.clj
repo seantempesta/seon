@@ -508,8 +508,10 @@
                                                      (#'eval/reader-context ctx n) true)]
           (if-let [stored (dbu/entid db [:seon.ns/name n])]
             ;; a stored namespace changes only the attributes the context row
-            ;; carries: its doc, file, tasks and admission source stay
-            (let [row (dissoc row :seon.schema.admission/source)]
+            ;; carries: its doc, file, tasks and admission source stay, so its
+            ;; digest is the digest of the row as it is left stored
+            (let [row (dissoc row :seon.schema.admission/source)
+                  row (assoc row :seon.program/definition-digest (db/namespace-digest-of db stored row))]
               (program/exact-replacement-tx (select-keys (db/pull db '[*] stored) (cons :db/id (keys row))) row))
             (entity-facts db row))))
       []))
