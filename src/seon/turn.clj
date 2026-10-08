@@ -5030,7 +5030,7 @@
                             :seon.test/check-time-limit-ms limit-ms}))))
 
 (defn- run-reaching
-  "Run the tests reaching the branch's change, after the proofs, as one request bounded by `limit-ms`; nil when the branch equals its base."
+  "Run the tests reaching what the branch changed since this request's previous run (its whole change before the first), after the proofs, as one request bounded by `limit-ms`; nil when the branch equals its base."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int?]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
   [execution limit-ms]
@@ -5040,7 +5040,7 @@
           (:seon.error/at changed) changed
           :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
                             :seon.test/policy :named :seon.test/changed (vec changed)
-                          :seon.test/check-time-limit-ms limit-ms}))))
+                            :seon.test/since-previous-run? true :seon.test/check-time-limit-ms limit-ms}))))
 
 (defn- pending-syms
   "The tests a run left unrun: never started, or started and still live at its bound."

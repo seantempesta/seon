@@ -9,6 +9,7 @@
             [seon.config]
             [seon.sci.eval]
             [seon.program]
+            [seon.profile]
             [seon.fn :as functions]
             [seon.id :as id]
             [seon.instrument]
@@ -743,3 +744,55 @@
      (is (= [[:seon.fn/sym 'reach.fixture/a] [:seon.fn/sym 'reach.fixture/b]] (sut/changes child branch))
          "a program write derives the set again")
      (finally (agent/release-context! child)))))))
+
+(deftest ^{:seon/tasks #{'seon.test/the-reaching-step-selects-every-branch-test-again}}
+  a-reaching-request-selects-what-changed-since-its-previous-run
+  ;; The automatic step names the branch's whole change every eval request; narrowed
+  ;; to what changed since its previous run, an unrelated change neither selects the
+  ;; tests it does not reach nor executes a red it does not reach.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection [(support/namespace-entity (db/db connection) 'my.agents.narrow)])
+     (let [define-agent! (fn [& identity-sources]
+                           (support/transacted!
+                            connection
+                            (mapv (fn [[declaration source]]
+                                    (support/program-entity (db/db connection) declaration source
+                                                            {:seon.schema.admission/source :agent}))
+                                  (partition 2 identity-sources))))
+           _ (define-agent! '[:seon.fn/sym my.agents.narrow/p] "(defn p {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+                            '[:seon.fn/sym my.agents.narrow/q] "(defn q {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+           _ (define-agent! '[:seon.test/sym my.agents.narrow/q-test] "(deftest q-test (is (= 1 (q 1))))"
+                            '[:seon.test/sym my.agents.narrow/red-test] "(deftest red-test (is (= 2 (q 1))))")
+           change '[my.agents.narrow/p my.agents.narrow/q my.agents.narrow/q-test my.agents.narrow/red-test]
+           request #(changed-request connection (conj change 'my.agents.narrow/p-test)
+                                     {:seon.test/policy :named :seon.test/since-previous-run? true})
+           executed (fn [run] (set (keep #(when-not (:seon.test/unchanged %) (:seon.test/sym %)) (:seon.test/results run))))
+           selected (fn [run] (set (map :seon.test/sym (:seon.test/results run))))]
+       (is (= '#{my.agents.narrow/q-test my.agents.narrow/red-test}
+              (executed (changed-request connection change {:seon.test/policy :named :seon.test/since-previous-run? true})))
+           "without an earlier run the whole change is reached")
+       (define-agent! '[:seon.test/sym my.agents.narrow/p-test] "(deftest p-test (is (= 1 (p 1))))")
+       (is (= '#{my.agents.narrow/p-test} (selected (request)))
+           "an unrelated change selects only what it reaches: the red is not executed again")
+       (is (= #{} (selected (request))) "nothing changed since the previous run selects nothing")
+       (define-agent! '[:seon.fn/sym my.agents.narrow/q] "(defn q {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+       (is (= '#{my.agents.narrow/q-test my.agents.narrow/red-test} (executed (request)))
+           "a change reaching the red executes it")
+       ;; Cost follows the change: each request adding one function and its test
+       ;; digests the same reach and holds the same attribute maps, however many
+       ;; tests the branch already has.
+       (let [step (fn [i]
+                    (let [f (symbol "my.agents.narrow" (str "f" i)) t (symbol "my.agents.narrow" (str "f" i "-test"))]
+                      (define-agent! [:seon.fn/sym f] (str "(defn f" i " {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+                                     [:seon.test/sym t] (str "(deftest f" i "-test (is (= 1 (f" i " 1))))"))
+                      (let [m (seon.profile/measure #(changed-request connection (into change [f t])
+                                                                     {:seon.test/policy :named :seon.test/since-previous-run? true}))]
+                        [(selected (:seon.profile/value m))
+                         (seon.profile/calls-of m 'seon.test.runner/test-reach-digest)
+                         (count (seon.cache/retained :seon.test.runner/reach-attribute))])))
+             steps (mapv step (range 3))]
+         (is (= (mapv #(hash-set (symbol "my.agents.narrow" (str "f" % "-test"))) (range 3)) (mapv first steps))
+             "each request selects only its new test")
+         (is (apply = (map second steps)) "reach digests per request do not grow with the branch's tests")
+         (is (apply = (map last (rest steps))) "retained attribute maps do not grow with the branch's revisions"))))))

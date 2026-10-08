@@ -154,4 +154,17 @@
  #:seon.task{:name "a-malformed-task-tag-stops-the-whole-check"
              :kind :function
              :intent "A malformed `:seon/tasks` value on one deftest stopped a whole `bin/seon check` with an exception (lane h1-prose, 2026-10-09) instead of returning an error on that one test beside the others' results (AGENTS.md: nothing crashes; errors are data)."
-             :must-read #{seon.test/run}}]
+             :must-read #{seon.test/run}}
+ #:seon.task{:name "the-reaching-step-selects-every-branch-test-again"
+             :kind :function
+             :intent "The automatic test step's reaching request (`seon.turn/run-reaching`) names the branch's whole change since its fork every eval request, so `seon.test/select` walks, reach-digests and re-admits (`:seon.test.run/covered-by`) every earlier branch test: on default `dc79b069f` an agent adding one defn and one deftest per request read 20 more rows per request (493 to 573 over five requests) and about 3,000 more armed calls, and an unrelated defn re-executed an unrelated branch red. Done when the step's request selects only what changed since its previous completed run (`:seon.test/since-previous-run?`), the whole change before the first, while `my.test/check` keeps listing every reached test."
+             :must-read #{seon.test/select seon.turn/run-reaching seon.test/changes}}
+ #:seon.task{:name "changed-definition-symbols-scans-whole-attributes-since-the-last-run"
+             :kind :function
+             :intent "`seon.test/changed-definition-symbols` reads the changes since the previous run through `seon.db/since` over history, whose attribute-bound clauses still walk each attribute's whole index filtered by transaction, plus two as-of `seon.test/definition-digests` reads: 123-160 ms of every automatic test step on default `dc79b069f` (agent step-growth-1, one defn and one deftest per request), proportional to the program, not to the request's one or two changed rows. Done when the identities changed since a run come from the transactions written since it (the branch commits after the run's basis, or the recording transaction's report the step holds), at a cost proportional to those datoms, with a regression counting reads through `seon.profile/measure`."
+             :must-read #{seon.test/changed-definition-symbols seon.test/select seon.db/since}}
+ #:seon.task{:name "reach-attribute-advances-from-the-recording-report"
+             :kind :function
+             :intent "`seon.test.runner/reach-attribute` derives a whole attribute map (about 66 ms to read the eleven reach attributes' 188,000 datoms on default) for every new content revision a branch writes; `seon.test.runner/retire-replaced-revision!` bounds the retained maps to one per branch and attribute, but each eval request still re-reads and rebuilds the attributes it wrote. Done when the test step is handed the eval request's recording transaction report and advances the previous revision's map by its `:tx-data` only when the cached revision equals the report's `:db-before` revision of that attribute (cost-design D1's contiguity check), deriving otherwise, with a regression showing a one-defn request's reach acquisition reads only the datoms it wrote."
+             :must-read #{seon.test.runner/reach-attribute seon.turn/test-step seon.db/content-revisions}
+             :evidence #{"docs/research/agent-platform/2026-10-08/cost-design/merged.md"}}]

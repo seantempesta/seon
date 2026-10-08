@@ -359,12 +359,12 @@
                     (:seon.program/analyzed-source-digest
                      (db/pull (db/db right) [:seon.program/analyzed-source-digest] [:seon.fn/sym target]))))
           (is (= (content left) (content right)))
-          (is (= #{target} (#'sut/changed-definition-symbols (db/db left) left-basis)
-                          (#'sut/changed-definition-symbols (db/db right) right-basis)))
+          (is (= #{target} (apply into (#'sut/changed-definition-symbols (db/db left) left-basis))
+                          (apply into (#'sut/changed-definition-symbols (db/db right) right-basis))))
           (let [basis (db/basis-t (db/db right))]
             (install-selection-program! right "(defn branch-leaf [] 2)")
             (is (not= (content left) (content right)))
-            (is (= #{target} (#'sut/changed-definition-symbols (db/db right) basis))))))))))
+            (is (= #{target} (apply into (#'sut/changed-definition-symbols (db/db right) basis)))))))))))
 
 (deftest fileless-sci-tests-use-the-same-selection
   (support/with-database

@@ -828,12 +828,30 @@
                                         :seon.schema/key :seon.schema/form]
                                        (map first) reach-fact-attributes)))
 
+(defn- retire-replaced-revision!
+  "Evict the attribute map `database`'s branch derived for its previous revision of `attribute`
+  when this branch has just derived `revision`, and remember `revision` as the branch's own: a
+  branch keeps one map per attribute it writes, never one per revision it wrote. nil."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword [:enum :by-value :by-entity :many] :uuid] :nil]}
+  [database attribute shape revision]
+  (let [head [(get-in (db/schema-database database) [:config :branch]) attribute shape]
+        previous (cache/lookup ::reach-attribute-head head (constantly 64) (constantly nil))]
+    (when (not= previous revision)
+      (when previous
+        (cache/evict! ::reach-attribute [attribute shape previous])
+        (cache/evict! ::reach-attribute-head head))
+      (cache/lookup ::reach-attribute-head head (constantly 64) (constantly revision)))
+    nil))
+
 (defn- reach-attribute
   "One attribute's datoms on `database` in `shape`: `:by-value` maps value to
   entity, `:by-entity` entity to value and `:many` entity to its value set.
   Cached under the attribute's content revision (`revisions`), which names
   its datoms exactly on every branch, so a change re-reads only the
-  attributes it wrote, never the whole program."
+  attributes it wrote, never the whole program. A branch that derives a new
+  revision retires the one it derived before (`retire-replaced-revision!`):
+  revisions it shares with other branches stay one entry, and its own writes
+  hold one map per attribute, not one per eval request."
   {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil [:map-of :qualified-keyword :uuid]]
                        :qualified-keyword [:enum :by-value :by-entity :many]]
                   [:map-of :seon.schema/value :seon.schema/value]]}
@@ -846,10 +864,13 @@
                                                  (assoc! by-entity e (conj (get by-entity e #{}) v)))
                                                (transient {}) datoms))))]
     (if-let [revision (get revisions attribute)]
-      (cache/lookup ::reach-attribute [attribute shape revision]
-                    (fn [by] (+ (* reach-map-entry-bytes (count by))
-                                (if (= :many shape) (* reach-set-element-bytes (transduce (map count) + 0 (vals by))) 0)))
-                    derive)
+      (let [derived? (volatile! false)
+            by (cache/lookup ::reach-attribute [attribute shape revision]
+                             (fn [by] (+ (* reach-map-entry-bytes (count by))
+                                         (if (= :many shape) (* reach-set-element-bytes (transduce (map count) + 0 (vals by))) 0)))
+                             #(do (vreset! derived? true) (derive)))]
+        (when @derived? (retire-replaced-revision! database attribute shape revision))
+        by)
       (derive))))
 
 (defn- reach-declarations

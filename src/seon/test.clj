@@ -608,9 +608,10 @@
              (db/behavior-digest database))))
 
 (defn- changed-definition-symbols
-  "Read assertion and retraction identities in the same lineage, including namespace bindings."
+  "The definitions changed since `basis` in the same lineage, as two sets: those whose own behavior changed, and
+  the declarations of namespaces whose bindings changed."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
-                  [:set :qualified-symbol]]}
+                  [:tuple [:set :qualified-symbol] [:set :qualified-symbol]]]}
   [database basis]
   (let [history (db/history database)
         changes (db/since history basis)
@@ -661,7 +662,7 @@
                                      (or [?entity :seon.fn/ns ?ns] [?entity :seon.test/ns ?ns])
                                      (or [?entity :seon.fn/sym ?symbol] [?entity :seon.test/sym ?symbol])]
                                    history namespaces)) [])]
-    (into (set direct) namespace-symbols)))
+    [(set direct) (set namespace-symbols)]))
 
 (defn- selection-seeds
   "Resolve supplied definition and namespace identities in this database."
@@ -874,10 +875,32 @@
                                       result (members run)))
                             {} (if last-green (drop-while #(<= (one % :seon.test.run/selection-tx)
                                                                 (one last-green :seon.test.run/selection-tx)) runs) runs))
-            observed-changed (if (and changes-since (not proof-request?))
-                               (changed-definition-symbols database changes-since)
-                               #{})
-            requested-changed (selection-read! (selection-seeds database (vec (:seon.test/changed request))))
+            [observed-direct observed-bound] (if (and changes-since (not proof-request?))
+                                               (changed-definition-symbols database changes-since)
+                                               [#{} #{}])
+            observed-changed (into observed-direct observed-bound)
+            ;; The recorded evidence was earned by the program its JVM loaded. When
+            ;; the JVM loaded source the cluster's program entities do not describe
+            ;; (a restart from changed files, before adoption), the entities cannot
+            ;; vouch for what executes: unknown, so nothing is reused.
+            ;; The adopted commit whose loaded, armed definitions agree with
+            ;; its record (`seon.sci.eval/loaded-identity`): base provenance.
+            recorded (when cluster-id
+                       (:seon.source/commit-id
+                        (selection-read! (db/pull database [:seon.source/commit-id] cluster))))
+            loaded-drift? (when-let [loaded (:seon.test/loaded-source request)]
+                            (not= loaded recorded))
+            ;; Narrowed to what changed since this shape's previous completed run:
+            ;; a named change it already answered seeds nothing, a definition changed
+            ;; since seeds even when the branch no longer differs from its base (a
+            ;; revert), and a namespace binding change stays a seed while named.
+            narrow? (and (:seon.test/since-previous-run? request) comparison (not rerun?) (not loaded-drift?))
+            named-changes (cond->> (vec (:seon.test/changed request))
+                            narrow? (into (vec (sort observed-direct))
+                                          (filter (fn [change]
+                                                    (let [[attribute value] (if (vector? change) change [:seon.fn/sym change])]
+                                                      (or (= :seon.ns/name attribute) (observed-direct value)))))))
+            requested-changed (selection-read! (selection-seeds database (vec (distinct named-changes))))
             changed (into observed-changed requested-changed)
             schema-changes (when (and changes-since (= :incremental policy) (not first-run?))
                              (selection-read!
@@ -1021,17 +1044,6 @@
                                               (not (one % :seon.test.run/tested-branch))
                                               (= input-digest (one % :seon.test.run/input-digest))
                                               (one % :seon.test.run/selection-tx)) run-ids)))
-            ;; Recorded evidence was earned by the program its JVM loaded. When
-            ;; the JVM loaded source the cluster's program entities do not describe
-            ;; (a restart from changed files, before adoption), the entities cannot
-            ;; vouch for what executes: unknown, so nothing is reused.
-            ;; The adopted commit whose loaded, armed definitions agree with
-            ;; its record (`seon.sci.eval/loaded-identity`): base provenance.
-            recorded (when cluster-id
-                       (:seon.source/commit-id
-                        (selection-read! (db/pull database [:seon.source/commit-id] cluster))))
-            loaded-drift? (when-let [loaded (:seon.test/loaded-source request)]
-                            (not= loaded recorded))
             reuse-candidates (cond
                                (or loaded-drift? rerun?) {}
                                (and (= :incremental policy) (not work?)) eligible
@@ -2451,6 +2463,7 @@
                                 :seon.test.run/policy policy
                                 :seon.test/include-long? (true? (:seon.test/include-long? request))}
                          (:seon.test/rerun? request) (assoc :seon.test/rerun? true)
+                         (:seon.test/since-previous-run? request) (assoc :seon.test/since-previous-run? true)
                          (seq identities) (assoc :seon.test/identities (set identities))
                          (seq namespaces) (assoc :seon.test/namespaces (set namespaces))
                          (seq (:seon.test/changed request))
