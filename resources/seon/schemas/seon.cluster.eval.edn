@@ -94,6 +94,7 @@
                      [:seon.eval/unstored {:optional true} :seon.eval/unstored]
                      [:seon.eval/value-class {:optional true} :seon.eval/value-class]
                      [:seon.eval/full {:optional true} :seon.eval/full]
+                     [:seon.eval/budget-override {:optional true} :seon.eval/budget-override]
                      [:seon.eval/uncontracted {:optional true} :seon.eval/uncontracted]
                      [:seon.eval/uncontracted-count {:optional true} :seon.eval/uncontracted-count]
                      [:seon.eval/print-length
@@ -102,6 +103,7 @@
                      [:seon.eval/print-level
                       {:optional true}
                       :seon.eval/print-level]
+                     [:seon.eval/print-budget {:optional true} :seon.eval/print-budget]
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
@@ -216,7 +218,8 @@
                       :seon.eval/print-length]
                      [:seon.eval/print-level
                       {:optional true}
-                      :seon.eval/print-level]],
+                      :seon.eval/print-level]
+                     [:seon.eval/print-budget {:optional true} :seon.eval/print-budget]],
                     :at [:and {:seon.wake/context-inert true} :inst],
                     :read-evidence-entity
                     [:map

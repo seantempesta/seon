@@ -1,5 +1,6 @@
 #:seon.render.profile{:id :qualified-keyword,
                       :token-budget [:int {:min 1}],
+                      :token-ceiling [:int {:min 1 :description "The hard ceiling in tokens no display-budget override passes: the model's prompt window."}],
                       :max-depth [:int {:min 0}],
                       :max-children [:int {:min 0}],
                       :max-string-length [:int {:min 0}],
@@ -11,6 +12,8 @@
                         :seon.render.profile/id]
                        [:seon.render.profile/token-budget
                         :seon.render.profile/token-budget]
+                       [:seon.render.profile/token-ceiling {:optional true}
+                        :seon.render.profile/token-ceiling]
                        [:seon.render.profile/max-depth
                         :seon.render.profile/max-depth]
                        [:seon.render.profile/max-children

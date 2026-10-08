@@ -253,6 +253,14 @@
   [value path]
   (reduce #(path-step %1 %2 nil) value path))
 
+(def ^:dynamic *budget*
+  "The session's display budget in tokens, or nil for the render profile's.
+  `(set! seon.print/*budget* 4000)` widens every later reply of the session
+  up to the profile's ceiling; `:seon.print/budget` metadata widens one value
+  (`(vary-meta v assoc :seon.print/budget 4000)`). A `binding` cannot widen its
+  own form's result: the result prints after the binding ends."
+  nil)
+
 (defn full
   "`value`, marked to print whole as this evaluation's shown text: no token
   budget and no member, depth or string bound, for this one evaluation only

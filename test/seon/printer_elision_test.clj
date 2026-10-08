@@ -6,6 +6,7 @@
             [clojure.test :refer [deftest is]]
             [clojure.walk :as walk]
             [seon.ai.tokens :as tokens]
+            [seon.config :as config]
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
 
@@ -98,3 +99,43 @@
                          agent-id running))))
      (let [small (reply "(do (println \"hi\") 1)" agent-id running)]
        (is (= ["hi\n" 1] [(:seon.repl/out small) (:seon.repl/value small)]) "a small reply is whole")))))
+
+(defn- shown-members
+  "How many of `(vec (range 3000))`'s members a reply shows."
+  {:malli/schema [:=> [:cat :map] :int]}
+  [reply]
+  (count (filter int? (:seon.repl/value reply))))
+
+(defn- override-finding
+  "The reply's budget-override finding, or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [reply]
+  (some #(when (= :budget-override (:seon.repl/finding %)) %) (:seon.repl/findings reply)))
+
+(deftest a-budget-override-widens-one-form
+  ;; :seon.print/budget metadata widens one value; a session set! of
+  ;; seon.print/*budget* widens every later reply until it is set back.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [plain (reply "(vec (range 3000))" agent-id running)
+           widened (reply "(with-meta (vec (range 3000)) {:seon.print/budget 4000})" agent-id running)
+           _ (reply "(set! seon.print/*budget* 4000)" agent-id running)
+           session (reply "(vec (range 3000))" agent-id running)
+           _ (reply "(set! seon.print/*budget* nil)" agent-id running)
+           restored (reply "(vec (range 3000))" agent-id running)]
+       (is (< (shown-members plain) (shown-members widened)) "metadata widens the value")
+       (is (= 4000 (:seon.eval/budget-override (override-finding widened))) "the finding names its token count")
+       (is (nil? (override-finding plain)))
+       (is (= (shown-members widened) (shown-members session)) "the session's set! widens the next form")
+       (is (= (shown-members plain) (shown-members restored)) "set! nil restores the profile's budget")))))
+
+(deftest an-override-past-the-ceiling-is-capped-with-a-finding
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [_ (reply "(set! seon.print/*budget* 100000000)" agent-id running)
+           capped (reply "[1 2 3]" agent-id running)]
+       (reply "(set! seon.print/*budget* nil)" agent-id running)
+       (is (= [1 2 3] (:seon.repl/value capped)))
+       (is (= (:seon.config.ai/prompt-token-budget config/defaults)
+              (:seon.eval/budget-override (override-finding capped)))
+           "the model's prompt window caps the override")))))

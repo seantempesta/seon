@@ -28,6 +28,11 @@
                       :seon.repl/with [:seon.eval/uncontracted]
                       :seon.repl/fix "Contract every function you define: put {:malli/schema [:=> [:cat :int] :int]} (your own input and output schemas) after the docstring or name, e.g. (defn inc2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2)). Uncontracted definitions are refused at merge."}
                      [:<= 0]]
+                    [:seon.eval/budget-override
+                     {:optional true
+                      :seon.repl/finding :budget-override
+                      :seon.repl/fix "This reply printed past the display budget. (set! seon.print/*budget* nil) returns the session to it."}
+                     [:<= 0]]
                     [:seon.repl/out-tokens
                      {:optional true
                       :seon.repl/finding :large-output

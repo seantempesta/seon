@@ -290,6 +290,7 @@
                         :gen/elements [nil 0 1 8 32]}
                :seon.print/level]]
               [:seon.print/width {:optional true} :seon.print/width]
+              [:seon.print/budget {:optional true} :seon.print/budget]
               [:seon.print/namespace-maps?
                {:optional true}
                :seon.print/namespace-maps?]
@@ -309,6 +310,7 @@
              [:sequential {:description "Executable Clojure form retrieving the omitted value."}
               :seon.schema/value],
              :requery-refusal [:string {:min 1}],
+             :budget [:int {:min 1 :description "A display budget in tokens: the session's seon.print/*budget* (set!), or metadata on one value; it replaces the render profile's budget up to the profile's ceiling."}],
              :full [:boolean {:description "Metadata seon.print/full puts on a value: this evaluation prints it whole, with no budget and no structural bound."}],
              :continuation
              [:or {:description "The copyable plain-Clojure form (seon.print/continuation) that reads what one cut omitted from its next offset, e.g. (drop 32 result/e7b3); printed after the cut's marker. A whole collection at the root is the handle symbol itself (result/e7b3)."}

@@ -117,6 +117,7 @@
                  [:seon.eval/elisions {:optional true} :seon.eval/elisions]
                  [:seon.eval/value-class {:optional true} :seon.eval/value-class]
                  [:seon.eval/full {:optional true} :seon.eval/full]
+                 [:seon.eval/budget-override {:optional true} :seon.eval/budget-override]
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                  [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]
                  [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]],

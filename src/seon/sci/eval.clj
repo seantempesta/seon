@@ -2894,6 +2894,19 @@
                              db agent-id attribute))]
     (second (last (sort-by first rows)))))
 
+(defn- latest-print-budget
+  "The `seon.print/*budget*` the agent's latest evaluation ended with: a
+  session `set!` back to nil records none, so absence there means none."
+  [db agent-id]
+  (when-let [latest (ffirst (db/q '[:find (max ?evaluation)
+                                     :in $ ?agent-id
+                                     :where
+                                     [?agent :seon.agent/id ?agent-id]
+                                     [?run :seon.turn/agent ?agent]
+                                     [?evaluation :seon.cluster.eval/run ?run]]
+                                   db agent-id))]
+    (:seon.eval/print-budget (db/pull db [:seon.eval/print-budget] latest))))
+
 (defn- session-print-options
   "The print options this agent's session is already in effect with.
 
@@ -2906,10 +2919,12 @@
   [db agent-id]
   (when agent-id
     (let [length (latest-print-fact db agent-id :seon.eval/print-length)
-          level (latest-print-fact db agent-id :seon.eval/print-level)]
+          level (latest-print-fact db agent-id :seon.eval/print-level)
+          budget (latest-print-budget db agent-id)]
       (cond-> {}
         (int? length) (assoc :seon.print/length length)
-        (int? level) (assoc :seon.print/level level)))))
+        (int? level) (assoc :seon.print/level level)
+        (pos-int? budget) (assoc :seon.print/budget budget)))))
 
 (defn- base-bindings
   "Snapshot program roots to distinguish the entering private layer."
@@ -3834,6 +3849,8 @@
       (and (:seon.sci.admit/caps request) (not (::rendering? request)))
       (assoc :seon.eval/value-class (if (nil? value) "nil" (.getName (class value))))
       (:seon.render.value/full? projection) (assoc :seon.eval/full true)
+      (int? (:seon.render.value/budget-override projection))
+      (assoc :seon.eval/budget-override (:seon.render.value/budget-override projection))
       (:seon.render.call/selected-producer projection)
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       (seq failures)
@@ -3858,13 +3875,15 @@
                             record)]
     (when (and ctx handle) (bind-result! ctx handle error))
     (-> (apply dissoc shown [:seon.eval/value-tokens :seon.eval/shown-tokens
-                             :seon.eval/elisions :seon.eval/full :seon.eval/value-class])
+                             :seon.eval/elisions :seon.eval/full :seon.eval/value-class
+                             :seon.eval/budget-override])
         (assoc :seon.sci.admit/value error))))
 
 (def ^:private value-size-keys
   "The shown value's recorded size, carried from `shown-result` to the
   evaluation and settled onto its receipt."
-  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full :seon.eval/value-class])
+  [:seon.eval/value-tokens :seon.eval/shown-tokens :seon.eval/elisions :seon.eval/full :seon.eval/value-class
+   :seon.eval/budget-override])
 
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
@@ -4355,6 +4374,10 @@
           (let [form (::form request)
             execution-ctx evaluation-ctx
             ;; Runs `evaluate!` on this form's ctx inside its REPL frame.
+            ;; the session's display budget: the agent's `set!` of
+            ;; seon.print/*budget* lasts like its `*print-length*`
+            budget-var (let [v (sci/resolve execution-ctx 'seon.print/*budget*)]
+                         (when (sci.utils/var? v) v))
             eval-in-form!
             (fn [evaluate!]
               (sci/binding [sci/ns namespace-object
@@ -4368,6 +4391,7 @@
                                                  @sci/print-level)
                             sci/print-namespace-maps true
                             sci/print-readably true]
+               (sci/with-bindings (if budget-var {budget-var (get @print-session :seon.print/budget)} {})
                 (try
                   ;; Read evidence is what the form read: the request's sink
                   ;; is bound here and around its shown result, never around
@@ -4401,10 +4425,11 @@
                     ;; remains and the agent's choice is unrecoverable. The
                     ;; session carrier takes the same ending value, which is
                     ;; what the NEXT form opens with.
-                    (let [ending {:seon.print/length @sci/print-length
-                                  :seon.print/level @sci/print-level}]
+                    (let [ending (cond-> {:seon.print/length @sci/print-length
+                                          :seon.print/level @sci/print-level}
+                                   (and budget-var (pos-int? @budget-var)) (assoc :seon.print/budget @budget-var))]
                       (vreset! print-options ending)
-                      (reset! print-session ending))))))
+                      (reset! print-session ending)))))))
             eval-form! #(eval-in-form! (fn [ctx] (sci/eval-form ctx form)))
             ;; evaluated once, the value kept the moment SCI returns
             evaluated-value (let [v (eval-form!)] (vreset! raw v) v)

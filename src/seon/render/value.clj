@@ -532,6 +532,25 @@
       :else (assoc profile :seon.print/requery-refusal
                    "the value has no result handle"))))
 
+(defn- display-budget
+  "The token budget a value prints under: `override` (the value's own
+  `:seon.print/budget` metadata, else the session's `seon.print/*budget*`),
+  never past the profile's ceiling, else the profile's budget."
+  {:malli/schema [:=> [:cat :map [:maybe :int]] :int]}
+  [profile override]
+  (let [ceiling (:seon.render.profile/token-ceiling profile)]
+    (if (pos-int? override)
+      (cond-> override (int? ceiling) (min ceiling))
+      (:seon.render.profile/token-budget profile))))
+
+(defn- budget-override
+  "The value's own `:seon.print/budget` metadata, else the session's."
+  {:malli/schema [:=> [:cat :map :seon.schema/value] [:maybe :int]]}
+  [unit value]
+  (some #(when (pos-int? %) %)
+        [(when (instance? clojure.lang.IMeta value) (::print/budget (meta value)))
+         (get-in unit [:seon.print/options ::print/budget])]))
+
 ;;; THE VALUE PRINTER'S SELECTION (design one-render-path §3a–§3d). Every
 ;;; reached object is classified by its EXACT class into a row of permitted
 ;;; operations before anything else touches it; an unlisted class is opaque.
@@ -1079,6 +1098,10 @@
                (:diagnostic answer) (assoc :diagnostic (:diagnostic answer))
                render-data? (assoc :render-data? true
                                    :producer (:seon.render.call/selected-producer face))
+               ;; a render may widen its own data (`:seon.print/budget` metadata)
+               (and render-data? (instance? clojure.lang.IMeta value)
+                    (pos-int? (::print/budget (meta (::print/value face)))))
+               (assoc :own-budget (::print/budget (meta (::print/value face))))
                ;; The source a cut's continuation form reads from.
                (and (not render-data?) (get-in context [:requery ::print/requery-id]))
                (assoc :requery-id (get-in context [:requery ::print/requery-id])))
@@ -1379,7 +1402,10 @@
         context (cond-> context
                   (:render-data? root)
                   (assoc :requery {::print/requery-refusal
-                                   "render data; read the value itself through its result handle"}))
+                                   "render data; read the value itself through its result handle"})
+                  (and (:own-budget root) (not= Long/MAX_VALUE (:budget context)))
+                  (as-> c (let [own (display-budget (:profile c) (:own-budget root))]
+                            (assoc c :budget-tokens own :budget (tokens/estimate-chars own)))))
         text-key (if (= :name (:kind root)) :text :value)
         ;; A continuation starts the root at its absolute offset (design
         ;; §3g): a string or name at its character, a collection at its
@@ -1417,7 +1443,7 @@
                         (fill-strings state context))))]
         (if (and (:first-refused state) (zero? (get-in state [:nodes 0 :n])))
           (insufficient-budget context (:first-refused state))
-          (assoc state :requery (:requery context)))))))
+          (assoc state :requery (:requery context) :budget-tokens (:budget-tokens context)))))))
 
 (defn- cut-node
   "The one tail cut of a node that shows less than it holds."
@@ -1643,7 +1669,7 @@
              (merge (select-keys (:seon.render.value/options unit) [:seon.print/length :seon.print/level])
                     (select-keys (:seon.print/options unit) [:seon.print/length :seon.print/level]))
              database (:seon.db/db unit)
-             budget-tokens (:seon.render.profile/token-budget profile)
+             budget-tokens (display-budget profile (budget-override unit (:seon.render/value unit)))
              ;; Nested selection reads the one profile this value prints
              ;; under and the one viewer, derived here once per value.
              selecting? (and (:seon.sci.eval/ctx unit)
@@ -1669,6 +1695,7 @@
                       :length (when (int? length) length)
                       :level (when (int? level) level)
                       :max-string (or (:seon.render.profile/max-string-length profile) Long/MAX_VALUE)
+                      :budget-tokens budget-tokens
                       :offset (max 0 (long (get-in unit [:seon.render.data/cursor :seon.render.data/offset] 0)))
                       :root-path path}
              ;; THE EXPLICIT OPT-IN (`seon.print/full`): this one value prints
@@ -1729,6 +1756,9 @@
                            (:seon.print/hiccup emitted)]
                     shown-diagnostics (conj (::html shown-diagnostics)))}
            full? (assoc :seon.render.value/full? true)
+           ;; a budget past the profile's is reported with its token count
+           (and (not full?) (> (:budget-tokens state 0) (:seon.render.profile/token-budget profile)))
+           (assoc :seon.render.value/budget-override (:budget-tokens state))
            (seq failed)
            (assoc :seon.render.value/diagnostics diagnostics
                   :seon.render.value/value-text text)

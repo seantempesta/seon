@@ -160,7 +160,7 @@
       (assoc :seon.eval/allocated-bytes (:seon.eval/allocated-bytes evaluation))
       ;; The shown value's size (whole estimate, shown, cuts, full opt-in).
       :always (merge (select-keys evaluation [:seon.eval/value-tokens :seon.eval/shown-tokens
-                                              :seon.eval/elisions :seon.eval/full
+                                              :seon.eval/elisions :seon.eval/full :seon.eval/budget-override
                                               :seon.eval/value-class
                                               :seon.eval/uncontracted :seon.eval/uncontracted-count]))
       ;; A FORM'S OWN `set!` OF *print-length* / *print-level*. Captured
@@ -172,6 +172,9 @@
       (int? (get-in evaluation [:seon.print/options :seon.print/level]))
       (assoc :seon.eval/print-level
              (get-in evaluation [:seon.print/options :seon.print/level]))
+      (int? (get-in evaluation [:seon.print/options :seon.print/budget]))
+      (assoc :seon.eval/print-budget
+             (get-in evaluation [:seon.print/options :seon.print/budget]))
       value (assoc :my.turn/value value))))
 
 (defn settlement-projection
@@ -1205,11 +1208,13 @@
    :seon.eval/shown-tokens
    :seon.eval/elisions
    :seon.eval/full
+   :seon.eval/budget-override
    :seon.eval/value-class
    :seon.eval/uncontracted
    :seon.eval/uncontracted-count
    :seon.eval/print-length
-   :seon.eval/print-level])
+   :seon.eval/print-level
+   :seon.eval/print-budget])
 
 (defn- receipt-reference-assertions
   "One assertion per reference of the settlement window's faults, targeting

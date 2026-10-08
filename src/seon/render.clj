@@ -78,7 +78,8 @@
           (:seon.db/invalid-read effective)
           (:seon.schema/expected-value effective))
     effective
-    {:seon.render.profile/id :seon.render.profile/agent
+    (cond->
+     {:seon.render.profile/id :seon.render.profile/agent
       :seon.render.profile/token-budget
       (:seon.config.render.agent/token-budget effective)
       :seon.render.profile/max-depth
@@ -86,7 +87,10 @@
       :seon.render.profile/max-children
       (:seon.config.render.agent/max-children effective)
       :seon.render.profile/composition
-      (:seon.config.render.agent/composition effective)}))
+      (:seon.config.render.agent/composition effective)}
+      ;; no display-budget override passes the model's prompt window
+      (int? (:seon.config.ai/prompt-token-budget effective))
+      (assoc :seon.render.profile/token-ceiling (:seon.config.ai/prompt-token-budget effective)))))
 
 (def ^:private default-agent-profile
   (delay (agent-render-profile config/defaults)))
