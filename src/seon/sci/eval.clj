@@ -1457,9 +1457,10 @@
   basis); and the report's `:db-after` ends at its own transaction (Datahike's
   writer hands every report of a batch the batch's final value,
   datahike/writer.cljc:229-264). Then the report's datoms name every change,
-  and each changed component's owning parents join through the history index
-  from those few children. Anything else is not covered: the next acquisition
-  derives from the head, as for any unknown change. Cost: proportional to the
+  and each changed component's owning parents join from those few children
+  in the final value (a parent that lost a child is itself in the datoms).
+  Anything else is not covered: the next acquisition derives from the head, as
+  for any unknown change. Cost: proportional to the
   settlement's datoms, never to the store's history (task 361088de3d56)."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/transaction-report
                        [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection]
@@ -1474,7 +1475,6 @@
           identities (set (map (comp program/row-identity :seon.program/row)
                                installations))
           shapes (program/shapes-in projection)
-          history (db/history after)
           components (into []
                            (keep (fn [[attribute properties]]
                                    (when (:db/isComponent properties) attribute)))
@@ -1486,7 +1486,7 @@
                       (let [incoming (db/q '[:find [?parent ...]
                                              :in $ [?child ...] [?attribute ...]
                                              :where [?parent ?attribute ?child]]
-                                           history frontier components)]
+                                           after frontier components)]
                         (when-not (or (:seon.db/invalid-read incoming) (:seon.schema/expected-value incoming))
                           (recur (vec (remove seen incoming)) (into seen incoming))))))]
       (when parents
