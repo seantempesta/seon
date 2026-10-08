@@ -305,6 +305,24 @@
     (let [result (refusal (example-database projection [(entity :same digest-a)]))]
       (is (= :seon.program/history result)))))
 
+(deftest ^{:seon/tasks #{'seon.program/an-in-ns-namespace-blocks-diff-and-write-branch}}
+  a-removed-namespace-whose-stub-returns-is-retracted-not-undigested
+  (let [projection (schema/handed-projection)
+        base (example-database projection [{:seon.fn/sym 'kept/f :seon.program/definition-digest digest-a}] true)
+        with #(vary-meta (:db-after (d/with %1 %2)) assoc :seon.schema/projection projection)
+        bound {:seon.program/max-datoms 100}
+        declared (with base [{:seon.ns/name 'scratch :seon.program/definition-digest digest-a}])
+        ;; removed, then an evaluation that ran in it writes its identity alone
+        stub (-> declared
+                 (with [[:db/retractEntity [:seon.ns/name 'scratch]]])
+                 (with [{:seon.ns/name 'scratch}]))
+        scope (program/changed-identities declared stub bound)]
+    (is (= #{[:seon.ns/name 'scratch]} scope))
+    (is (= {} (program/digest-map stub (assoc bound :seon.program/identities scope)))
+        "the stub is no declaration: absent, as the removal left it")
+    (is (= {[:seon.fn/sym 'kept/f] digest-a} (program/digest-map stub bound))
+        "the whole map omits it too")))
+
 (deftest three-way-classifies-every-base-branch-head-state
   (let [states [:seon.program/absent digest-a digest-b digest-c]
         cases (for [base states branch states head states]

@@ -34,4 +34,9 @@
             :intent
             "On default 42e569d9d, copied contracted defn- declarations in own SCI namespace review.growth return their Vars but program settlement refuses definition-digest: expected and offending differ. Six scratch declarations remained private, not adopted. entries additionally refuses its existing bare nilable return under a renamed namespace. Probe evidence includes exact source transformations and result handles; preserve admitted declaration source and writer digest agreement.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"}}
+ #:seon.task{:name "an-in-ns-namespace-blocks-diff-and-write-branch"
+             :kind :function
+             :intent "After `my.program/remove-ns!` removes the namespace an agent stands in, its next evaluation writes the namespace back as its identity alone (`seon.turn/namespace-rows`), and `seon.program/digest-map` refused that undigested row, so `my.program/diff` and `my.program/write-branch!` refused on the branch for good. Done when an undigested namespace row is no declaration (`seon.program/namespace-stub?`): absent from the digest map, as the removal left it. Proof: `seon.program-test/a-removed-namespace-whose-stub-returns-is-retracted-not-undigested`, `seon.turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering`."
+             :must-read #{seon.program/digest-map seon.program/changed-identities my.program/write-branch!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}]

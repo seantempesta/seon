@@ -541,6 +541,14 @@
                 :seon.program/unclassified-families #{}}
                (keys (shapes-in projection)))))))
 
+(defn- namespace-stub?
+  "Whether an undigested row of identity attribute `a` is no declaration: a
+  namespace row the turn writes as its identity alone, for the evaluations
+  that ran in it (`seon.turn/namespace-rows`), until a fold declares it."
+  {:malli/schema [:=> [:cat :qualified-keyword] :boolean]}
+  [a]
+  (= :seon.ns/name a))
+
 #?(:clj
    (defn digest-map
      "Read every compared program declaration and its stored definition digest.
@@ -550,7 +558,8 @@
   and lint rows, derived from bytes and analysis) are not compared. Incomplete
   evidence answers a typed refusal, never a partial map: an unclassified
   family, an unreadable index page, a compared declaration without its digest,
-  or more than `:seon.program/max-datoms` index datoms. Supplied
+  or more than `:seon.program/max-datoms` index datoms. A namespace stub
+  (`namespace-stub?`) is absent, as a removed namespace is. Supplied
   `:seon.program/identities` (`changed-identities`) read only those."
      {:malli/schema
       [:=> [:cat :seon.db/database-value
@@ -627,6 +636,10 @@
                             (into {} (q '[:find ?e ?d :in $ [?e ...] :where
                                           [(get-else $ ?e :seon.program/definition-digest "") ?d]]
                                         database (mapv peek entities))))
+                   ;; a namespace row without a digest is a turn's reference
+                   ;; stub, not a declaration: absent from the map
+                   entities (if (:seon.error/at stored) entities
+                              (remove (fn [[a _ e]] (and (= "" (stored e)) (namespace-stub? a))) entities))
                    missing (when-not (:seon.error/at stored)
                              (into #{} (keep (fn [[a v e]] (when (= "" (stored e)) [a v]))) entities))]
                (cond
@@ -656,7 +669,8 @@
                  ranges
                  (let [digests (into {} (map (juxt :e :v))
                                      (get-in ranges [:ranges :seon.program/definition-digest]))
-                       identities (mapcat #(get-in ranges [:ranges %]) (sort compared))
+                       identities (remove #(and (namespace-stub? (:a %)) (not (contains? digests (:e %))))
+                                          (mapcat #(get-in ranges [:ranges %]) (sort compared)))
                        missing (into #{} (comp (remove #(contains? digests (:e %)))
                                                (map (juxt :a :v)))
                                      identities)]
