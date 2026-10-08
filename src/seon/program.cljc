@@ -37,19 +37,12 @@
         #?(:clj (schema.edn/packaged-forms)
            :cljs (schema/registered-schemas))))
 
-(defn program-attributes
-  "Attributes declared by program entity schemas in this compiled projection.
-   Other writers' entries are excluded. Schema-row properties come from the
-   same bridge that projects them onto stored schema declarations."
-  {:seon/tasks #{'seon.program/program-attributes-trust-any-partition}
-   :malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+(defn- derived-program-attributes
+  "The attributes program entity schemas in `projection` declare, derived
+  from every schema form."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
-  ;; A function of the projection value, derived once per projection
-  ;; (~50 ms each over the packaged population).
-  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
-   projection ::program-attributes
-   (fn []
-    (let [registry (:seon.schema.projection/registry projection)
+  (let [registry (:seon.schema.projection/registry projection)
         forms (:seon.schema.projection/forms projection)
         definitions (map #(mr/schema registry %) (keys forms))
         program (filter #(= :seon.program
@@ -67,7 +60,27 @@
         (when properties?
           (let [project (requiring-resolve 'seon.schema.datahike/storable-properties-in)]
             (mapcat #(keys (project projection %)) (keys forms))))
-        :cljs []))))))
+        :cljs []))))
+
+(defn program-attributes
+  "Attributes declared by program entity schemas in this compiled projection.
+   Other writers' entries are excluded. Schema-row properties come from the
+   same bridge that projects them onto stored schema declarations."
+  {:seon/tasks #{'seon.program/program-attributes-trust-any-partition}
+   :malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  [projection]
+  ;; Held by the projection, then by its schema forms and admissions: the
+  ;; derivation reads only schema declarations, so a write that changes only
+  ;; function contracts (every contracted defn) builds a new projection with
+  ;; equal forms and reuses the answer instead of walking every schema again.
+  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+   projection ::program-attributes
+   #?(:clj #(seon.cache/lookup ::program-attributes
+                               [(:seon.schema.projection/forms projection)
+                                (:seon.schema.projection/schema-admissions projection)]
+                               (fn [attributes] (* 64 (count attributes)))
+                               (fn [] (derived-program-attributes projection)))
+      :cljs #(derived-program-attributes projection))))
 
 (defn- edn-symbol-text?
   "Whether `s` reads with clojure's EDN reader as one symbol token

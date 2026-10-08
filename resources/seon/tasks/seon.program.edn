@@ -9,6 +9,11 @@
              :intent "program-attributes takes every partitioned schema's entries, not only :seon.db/attributes entities; a report schema marked with a partition put four uninstalled attributes into root's reads and stopped root's graph (fixed at the schema in 367871c45). Read only entity schemas, as seon.schema/assert-entity-partition! does."
              :must-read #{seon.program/program-attributes}
              :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
+ #:seon.task{:name "a-contract-write-rederives-program-attributes"
+             :kind :function
+             :intent "Every contracted defn writes a function contract, which builds a new projection; program-attributes was held only by the projection value, so the pass after (and often the defn pass itself) re-walked all 3,403 schema forms through storable-properties-in: 24.9 MB and 25.6 ms per derivation on default (defn-why, 2026-10-08). Its answer reads only schema forms and admissions; reuse it across projections whose schema forms are equal. Done when two projections with equal schema forms answer the identical attribute set."
+             :must-read #{seon.program/program-attributes seon.schema.datahike/storable-properties-in}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
  #:seon.task{:name "a-defn-scans-every-projection-form-per-call"
              :kind :function
              :intent "An agent defn on a branch takes 1.7 s p50 and allocates 1.57 GB JVM-wide with 182,000 armed calls per form (10 x (inc 1) on the same branch: 168 ms, 160 MB, 6,700 calls). The top counts are whole-projection walks: seon.program/source-family? 38,000 per defn (shapes-in and the families classification filter every key of :seon.schema.projection/forms, ~3,500, on each call), seon.schema.internal/reference-id 32,000, entity-maps 28,000, schema.datahike/compiled-storage 12,000, storable-attribute-in? 9,300. The family set and shapes are functions of the projection alone; derive them once per projection (the projection's own cache seam) and find which caller rebuilds per defn."

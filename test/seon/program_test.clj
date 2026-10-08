@@ -1246,6 +1246,23 @@
     (is (schema/valid-candidate-value? projection :seon.program/identity-attribute :example/id))
     (is (schema/valid-candidate-value? projection :seon.program/source-attribute :example/source))))
 
+(deftest ^{:seon/tasks #{'seon.program/a-contract-write-rederives-program-attributes}}
+  equal-schema-forms-share-one-program-attribute-derivation
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (db/carried-projection @connection)
+           ;; another projection value with the same schema forms, as a
+           ;; contract-only write builds; no holder, so nothing is held by it
+           rebuilt (dissoc projection :seon.schema.projection/compiled)
+           attributes (program/program-attributes projection)]
+       (is (contains? attributes :seon.fn/sym))
+       (is (identical? attributes (program/program-attributes rebuilt))
+           "equal schema forms answer the one derivation")
+       (is (not (contains? (program/program-attributes
+                            (update rebuilt :seon.schema.projection/forms dissoc :seon.fn/fn))
+                           :seon.fn/sym))
+           "different schema forms derive their own answer")))))
+
 (deftest program-partition-selects-roots-and-components-with-one-query
   (test-support/with-database
     (fn [connection]
