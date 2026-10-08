@@ -91,12 +91,12 @@
                      [:seon.eval/unadmitted {:optional true} :seon.eval/unadmitted]
                      [:seon.eval/replaced {:optional true} :seon.eval/replaced]
                      [:seon.eval/ungeneratable {:optional true} :seon.eval/ungeneratable]
-                     [:seon.print/length
+                     [:seon.eval/print-length
                       {:optional true}
-                      :seon.print/length]
-                     [:seon.print/level
+                      :seon.eval/print-length]
+                     [:seon.eval/print-level
                       {:optional true}
-                      :seon.print/level]
+                      :seon.eval/print-level]
                      [:seon.sci.eval/ending-ns
                       {:optional true}
                       :seon.sci.eval/ending-ns]
@@ -206,12 +206,12 @@
                      [:seon.eval/duration-ms
                       {:optional true}
                       :seon.eval/duration-ms]
-                     [:seon.print/length
+                     [:seon.eval/print-length
                       {:optional true}
-                      :seon.print/length]
-                     [:seon.print/level
+                      :seon.eval/print-length]
+                     [:seon.eval/print-level
                       {:optional true}
-                      :seon.print/level]],
+                      :seon.eval/print-level]],
                     :at [:and {:seon.wake/context-inert true} :inst],
                     :read-evidence-entity
                     [:map

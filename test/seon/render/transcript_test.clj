@@ -1296,11 +1296,11 @@
              ;; under a different name, so no per-form print option ever
              ;; reached a response.
              (let [setter (db/pull stored-db
-                                   [:seon.print/length :seon.print/level]
+                                   [:seon.eval/print-length :seon.eval/print-level]
                                    [:seon.cluster.eval/id
                                     (turn/receipt-identity
                                      "one-grammar-stored" 3)])]
-               (is (= 2 (:seon.print/length setter))
+               (is (= 2 (:seon.eval/print-length setter))
                    "the evaluation that set *print-length* stores what it set"))
              ;; AND THE SESSION KEEPS IT. An agent's context IS a REPL
              ;; session, so a `set!` holds until the agent changes it; the
@@ -1310,12 +1310,12 @@
              ;; inherited — the binding is real, and SCI's own printing
              ;; inside the form runs under it.
              (let [follower (db/pull stored-db
-                                     [:seon.print/length]
+                                     [:seon.eval/print-length]
                                      [:seon.cluster.eval/id
                                       (turn/receipt-identity
                                        "one-grammar-stored" 4)])
                    clipped (nth stored-bytes 4)]
-               (is (= 2 (:seon.print/length follower))
+               (is (= 2 (:seon.eval/print-length follower))
                    "the following form inherits the session's print length")
                (is (str/includes? clipped "(vec (range 40))"))
                ;; BUT PRESENTATION IS BOUNDED ONCE, BY THE RENDER PROFILE.

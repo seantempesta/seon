@@ -143,8 +143,8 @@
               {:optional true}
               :seon.eval/duration-ms]
              [:seon.repl/value {:optional true} :seon.repl/value]
-             [:seon.print/length {:optional true} :seon.print/length]
-             [:seon.print/level {:optional true} :seon.print/level]
+             [:seon.eval/print-length {:optional true} :seon.eval/print-length]
+             [:seon.eval/print-level {:optional true} :seon.eval/print-level]
              [:seon.print/options {:optional true} :seon.print/options]
              [:seon.repl/handle {:optional true} :seon.repl/handle]
              [:seon.repl/errors {:optional true} :seon.repl/errors]],

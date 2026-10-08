@@ -2692,8 +2692,8 @@
   shipped default stands."
   [db agent-id]
   (when agent-id
-    (let [length (latest-print-fact db agent-id :seon.print/length)
-          level (latest-print-fact db agent-id :seon.print/level)]
+    (let [length (latest-print-fact db agent-id :seon.eval/print-length)
+          level (latest-print-fact db agent-id :seon.eval/print-level)]
       (cond-> {}
         (int? length) (assoc :seon.print/length length)
         (int? level) (assoc :seon.print/level level)))))

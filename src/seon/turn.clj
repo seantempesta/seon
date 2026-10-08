@@ -173,10 +173,10 @@
       ;; while sci's binding is still installed (`sci/eval.clj` print-options
       ;; volatile), it is what the response must print the value under.
       (int? (get-in evaluation [:seon.print/options :seon.print/length]))
-      (assoc :seon.print/length
+      (assoc :seon.eval/print-length
              (get-in evaluation [:seon.print/options :seon.print/length]))
       (int? (get-in evaluation [:seon.print/options :seon.print/level]))
-      (assoc :seon.print/level
+      (assoc :seon.eval/print-level
              (get-in evaluation [:seon.print/options :seon.print/level]))
       value (assoc :my.turn/value value))))
 
@@ -1207,8 +1207,8 @@
    :seon.eval/full
    :seon.eval/value-class
    :seon.eval/replaced
-   :seon.print/length
-   :seon.print/level])
+   :seon.eval/print-length
+   :seon.eval/print-level])
 
 (defn- receipt-reference-assertions
   "One assertion per reference of the settlement window's faults, targeting

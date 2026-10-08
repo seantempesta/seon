@@ -201,7 +201,7 @@
          (answer "eval_clj" {"code" "(set! *print-length* 2)\n(range 5)" "agent" agent-id "cluster" running})
          (is (= #{2} (set (db/q '[:find [?length ...] :in $ ?id
                                   :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
-                                  [?receipt :seon.print/length ?length]]
+                                  [?receipt :seon.eval/print-length ?length]]
                                 (db/db connection) (latest-run-in (db/db connection) agent-id))))))
        (testing "a settlement the writer refused saved no receipt: the reply is its refusal alone"
          ;; the form closes its own open run, so the settlement's receipts

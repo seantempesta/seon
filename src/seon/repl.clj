@@ -558,8 +558,8 @@
                              ;; Reading `:seon.print/options` here left every
                              ;; per-form `set!` of *print-length* / *print-level*
                              ;; out of the response it was recorded for.
-                             :seon.print/length
-                             :seon.print/level
+                             :seon.eval/print-length
+                             :seon.eval/print-level
                              :seon.print/options
                              ;; ALREADY TEXT: the history assembly bounded the
                              ;; branch's new errors once and set them here.

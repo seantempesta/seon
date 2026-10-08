@@ -33,6 +33,8 @@
               {:optional true}
               :inst]],
             :duration-ms [:and {:seon.wake/context-inert true} :int],
+            :print-length [:int {:min 0 :seon.wake/context-inert true :description "The *print-length* a form ended with; the agent's session opens its next form under the latest one set."}],
+            :print-level [:int {:min 0 :seon.wake/context-inert true :description "The *print-level* a form ended with; the agent's session opens its next form under the latest one set."}],
             :acquisition-ms [:int {:min 0 :seon.wake/context-inert true :description "Milliseconds of Seon's own SCI program acquisition inside one evaluation's arm, excluded from :seon.eval/duration-ms (the agent's reply time) and recorded beside it."}],
             :fn-entries [:and {:seon.wake/context-inert true} :int],
             :allocated-bytes [:and {:seon.wake/context-inert true} :int],
