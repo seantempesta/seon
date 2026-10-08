@@ -140,9 +140,10 @@ public `my.*` examples, deleted (removed in `819a8ed4b`). A public `my.*` behavi
 through its entrance; an example that no longer runs is a docstring defect fixed where it is touched.
 
 **2.12 A test that proves a task names it.** `(deftest ^{:seon/tasks #{…}} a-refused-settlement-is-the-forms-refusal
-…)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`). TARGET (agent-loop §4,
-P5; owner ruling): the task cannot be assigned without them, nor when they are all green already, and after a pass
-that changes code they reach, all green completes the task. Installed `seon.task/assign!` checks neither. Metadata
+…)`: the deftests naming a task are its success tests (`seon.task/task-edges` `:proofs`). Installed
+(`d9789e22e`): `seon.task/assign!` (src/seon/task.clj:482) refuses a task with no proofs (`:no-proofs`, :505) or whose
+proofs are all green (`:proofs-green`, :507). TARGET (agent-loop.md §1.7, §3.5): after any eval request that evaluated
+a form, the proofs and the tests reaching the change run on the agent's branch, and all green completes the task. Metadata
 placed after the test name is refused (`:metadata-after-test-name`). Today the set holds the task's derived handle
 (`seon.task/task-handle` of namespace, name and kind; never hand-type it); TARGET (lane task-tags): it holds the
 `ns/task-name` symbol. A new behavior or bug regression fails before the work and passes after it. A behavior-preserving refactor names

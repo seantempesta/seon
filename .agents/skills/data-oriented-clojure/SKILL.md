@@ -488,8 +488,12 @@ protocols that hide information.
 
 ## 8. State
 
-**8.1 Law: use the existing owner first (database facts, the Flow proc's state, the SCI context); an atom needs a
-stated reason. If one is needed, colocate state that must agree in one atom changed by pure functions.**
+**8.1 Law: use the existing owner first (database facts, the Flow proc's state, the SCI context, `seon.cache`).
+Mutable state is at most one validated state map per process and one per cluster: an atom of a fully specced map
+whose `set-validator!` is a Malli validator, so every write is checked or refused, changed by pure functions. The
+only other mutable cells are the per-function profile counters, the SCI interrupt flag, the running Thread and
+clojure.test's report counter; cache counters are Caffeine's `recordStats`. Any other atom needs a reason the owner
+accepts (owner 2026-10-08; ledger §3.19, AT-1..8).**
 
 GOOD: `clj-reload/src/clj_reload/core.clj:54-55` keeps one private `*state` atom, changed by `swap!` (`:313`,
 `:322-325`) under its own lock (`with-lock`, `:60-65`). Remember that `scan` is not pure (§1.2).
