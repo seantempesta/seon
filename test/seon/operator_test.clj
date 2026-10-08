@@ -152,6 +152,18 @@
              (xmx {:seon.operator/managed-root "/root"
                    :seon.config/manifest {:seon.config.operator/heap-max-bytes 1073741824}}))))))
 
+(deftest ^{:seon/tasks #{'my.fs/fs-writes-land-in-the-archive-extract}}
+  a-launched-jvm-binds-the-agents-working-root-to-the-checkout
+  (let [root (fn [request] (get-in (operator/boot-request request "/checkout")
+                                   [:seon.config/environment :seon.config.fs/working-root]))]
+    (testing "the checkout is the working root, not the archive the JVM runs in"
+      (is (= "/checkout" (root {:seon.operator/managed-root "/root" :seon.operator/command :start}))))
+    (testing "a request that decides the dial keeps its decision"
+      (is (= "/archive" (root {:seon.operator/managed-root "/root" :seon.operator/command :start
+                               :seon.config/environment {:seon.config.fs/working-root "/archive"}})))
+      (is (nil? (root {:seon.operator/managed-root "/root" :seon.operator/command :start
+                       :seon.config/manifest {:seon.config.fs/working-root "/elsewhere"}}))))))
+
 (deftest check-slots-are-granted-in-ticket-order
   ;; One slot, a holder, then three waiters filed 150 ms apart (the first behind
   ;; a ticket whose process is dead): they must acquire in filing order.
