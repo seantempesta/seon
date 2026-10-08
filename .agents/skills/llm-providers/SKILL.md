@@ -35,17 +35,9 @@ program; read them with
   attributes; readers query those facts rather than decoding usage EDN again.
   The retained provider document also contains fields without declared count
   equivalents, such as reported cost.
-- Capture and reuse the exact rendered prompt. The loop commits the capture
-  before calling the provider and passes only that string as `:seon.ai/prompt`
-  (`src/seon/turn.clj:4866-4899`, prompt placed at `:4899`;
-  `resources/seon/schemas/seon.context.capture.edn:1-37`).
-- Historical evaluations render their saved shown text unchanged; system turns
-  append changed reads and compaction regenerates the opening
-  (`value-text`, `src/seon/repl.clj:143-147`; `system-turn`,
-  `src/seon/turn.clj:2227`; `compact!`, `:2430`). Verify the provider prompt
-  against those exact stored bytes, including handles and timing, as
-  `test/seon/loop_proof_test.clj:489-541` does. Never strip timing or preserve old
-  evaluations across compaction to manufacture stability.
+- The prompt is the rendered `seon.context/current-state` block, built when the
+  model call is made and passed as `:seon.ai/prompt` (`seon.context/model-context`);
+  no capture is stored, so the provider call and its attempt facts are the record.
 - Omit an unverified endpoint, model identifier, field, or default. A missing
   provider fact is a research boundary, not permission to infer a value.
 

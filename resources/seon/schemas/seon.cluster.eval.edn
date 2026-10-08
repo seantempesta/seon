@@ -23,9 +23,6 @@
                             :description "Whether :seon.cluster.eval/executed is all this evaluation ran: :complete; :unknown when a definition it entered had no known digest where it ran; :pending when work it owned had not exited when it was recorded. Absent (recorded before the one path) is unknown."}
                      :complete :unknown :pending],
                     :error [:and {:seon.wake/context-inert true} :string],
-                    :read-evidence
-                    [:vector #:seon.db{:component true :seon.db/component-schema :seon.cluster.eval/read-evidence-entity :seon.wake/context-inert true
-                                       :description "Retiring with no writer since CX-10: kept only so a store holding it adopts; deleted after the reset."} :seon.db/ref],
                     :source
                     [:string {:min 1, :seon.db/no-history? true :seon.wake/context-inert true}],
                     :author
@@ -129,9 +126,6 @@
                      [:seon.cluster.eval/output
                       {:optional true}
                       :seon.cluster.eval/output]
-                     [:seon.cluster.eval/read-evidence
-                      {:optional true}
-                      :seon.cluster.eval/read-evidence]
                      [:seon.cluster.eval/read-basis-transaction
                       {:optional true}
                       :seon.cluster.eval/read-basis-transaction]
@@ -221,21 +215,4 @@
                       {:optional true}
                       :seon.eval/print-level]
                      [:seon.eval/print-budget {:optional true} :seon.eval/print-budget]],
-                    :at [:and {:seon.wake/context-inert true} :inst],
-                    :read-evidence-entity
-                    [:map
-                     #:seon.db{:attributes true}
-                     [:seon.db/source-argument-position
-                      :seon.db/source-argument-position]
-                     [:datahike.read/dependency-plan
-                      :seon.db/read-dependency-plan]
-                     [:datahike.read/revision
-                      :seon.db/dependency-revision]
-                     [:seon.db/read-request
-                      {:optional true
-                       :description "Retiring: no longer produced (stored evidence references its read, never copies the request; seon.db/read-evidence). Deleted in the next adoption."}
-                      :seon.db/read-request]
-                     [:seon.db/read-result-digest
-                      {:optional true
-                       :description "Retiring: no longer produced for stored evidence (only process-local retained evidence replays). Deleted in the next adoption."}
-                      :seon.db/read-result-digest]]}
+                    :at [:and {:seon.wake/context-inert true} :inst]}
