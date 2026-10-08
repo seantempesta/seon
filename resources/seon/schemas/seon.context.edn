@@ -87,16 +87,28 @@
                [:map {:description "Model calls left against the current wake and the held task's status."}
                 [:my.agent/turns-left :my.agent/turns-left]
                 [:seon.task/status {:optional true} :seon.task/status]],
+:proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
+               :proof-failure [:map {:description "A red proof's first failing report as data."}
+                               [:test :seon.test/sym] [:expected {:optional true} :string]
+                               [:actual {:optional true} :string] [:message {:optional true} :string]]
+               :proof [:map [:seon.test/sym :seon.test/sym] [:seon.test/source :seon.test/source]
+                       [:seon.context/proof-status :seon.context/proof-status]
+                       [:seon.context/proof-failure {:optional true} :seon.context/proof-failure]]
+               :proofs [:map {:description "Counts by status, then each proof in symbol order."}
+                        [:seon.context/counts [:map-of :seon.context/proof-status [:int {:min 1}]]]
+                        [:seon.context/proof-list [:vector :seon.context/proof]]]
                :current-state
                [:map {:description "The current-state block's data, derived at each model call from stored facts and never stored; sections are absent when empty."
                       :seon.render/ai seon.context/current-state-ai}
                 [:seon.context/task {:optional true} :seon.context/task]
+                [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/turns :seon.context/turns]],
                :current-state-view
                [:map {:description "The block as the AI face shows it: the task without its handle."}
                 [:seon.context/task {:optional true}
                  [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
+                [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/turns :seon.context/turns]],
                :selection-refused-error
                [:and :seon.error/base

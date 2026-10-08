@@ -44,6 +44,7 @@
   (:require [seon.error.refusal]
             [seon.ai.tokens :as tokens]
             [seon.task :as task]
+            [seon.test.runner :as runner]
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.id :as id]
@@ -310,6 +311,55 @@
 (def ^:private task-selector
   [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/must-read])
 
+;; A proof's first failing report as the spec's unqualified keys; each present only when the report has it.
+(defn- proof-failure
+  {:malli/schema [:=> [:cat :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]]
+                  [:or :nil :seon.context/proof-failure]]}
+  [sym result]
+  (when-let [report (first (:seon.test.failure/reports result))]
+    (cond-> {:test sym}
+      (:seon.test.failure/expected report) (assoc :expected (:seon.test.failure/expected report))
+      (:seon.test.failure/actual report) (assoc :actual (:seon.test.failure/actual report))
+      (:seon.test.failure/message report) (assoc :message (:seon.test.failure/message report)))))
+
+(defn- proof-status
+  "A proof's status from its latest result and its current reach digest."
+  {:malli/schema [:=> [:cat [:or :nil :seon.test/result :seon.test/result-unknown] [:or :nil :seon.test/reach-digest]]
+                  :seon.context/proof-status]}
+  [result current]
+  (cond
+    (or (nil? result) (:seon.error/at result) (nil? current)
+        (not= current (:seon.test.member/reach-digest result))) :pending
+    (and (pos? (:seon.test/pass-count result))
+         (zero? (+ (:seon.test/fail-count result) (:seon.test/error-count result)))) :green
+    :else :red))
+
+(defn proofs
+  "The proofs section for the task `sym` on `database` (the agent's branch): counts first, then each proof."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym]
+                  [:or :nil :seon.context/proofs :seon.error/value]]}
+  [database sym]
+  (let [edges (task/task-edges database sym)
+        names (when-not (:seon.error/at edges) (vec (sort (:seon.task/proofs edges))))]
+    (if (empty? names)
+      (when (:seon.error/at edges) edges)
+      (let [digests (runner/reach-digests database names)
+            results (runner/latest-results database names)
+            sources (when-not (or (:seon.error/at digests) (:seon.error/at results))
+                      (into {} (db/q database '[:find ?s ?src :in $ [?s ...] :where [?t :seon.test/sym ?s] [?t :seon.test/source ?src]]
+                                     names)))]
+        (or (some #(when (:seon.error/at %) %) [sources digests results])
+            (let [by-sym (into {} (map (juxt #(or (:seon.test/sym %) (:seon.test/error-test-symbol %)) identity)) results)
+                  entries (mapv (fn [s]
+                                  (let [result (by-sym s)
+                                        status (proof-status result (get digests s))]
+                                    (cond-> {:seon.test/sym s :seon.test/source (sources s) :seon.context/proof-status status}
+                                      (= :red status) (as-> entry (if-let [f (proof-failure s result)]
+                                                                    (assoc entry :seon.context/proof-failure f) entry)))))
+                                names)]
+              {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
+               :seon.context/proof-list entries}))))))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status. Sections are
@@ -324,11 +374,13 @@
   (let [home (if-let [connection (task/home database)] (db/db connection) database)
         handle (task/agent-task home agent-id)
         held (when (string? handle) (db/pull home task-selector [:seon.task/id handle]))
-        left (turn/turns-left database agent-id)]
-    (or (some #(when (:seon.error/at %) %) [handle held left])
+        left (turn/turns-left database agent-id)
+        proven (when held (proofs database (:seon.task/sym held)))]
+    (or (some #(when (:seon.error/at %) %) [handle held left proven])
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (if (zero? left) :capped :working)))}
-          held (assoc :seon.context/task held)))))
+          held (assoc :seon.context/task held)
+          proven (assoc :seon.context/proofs proven)))))
 
 (defn current-state-ai
   "The block as the agent reads it: the task by symbol and declaration, without its handle."
