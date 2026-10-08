@@ -15,7 +15,7 @@ The smallest composition is Datahike's `datahike.db/speculative-cache-context` t
 
 Cost changes from scanning the histories of every program attribute to selecting and hashing their held revision entries: O(program attribute count), independent of datom/history population. The rejected alternative is caching the history query, which retains that scan on every basis change. Instrumentation remains fully enabled. The current `unchanged-through-t` input remains compatible; a basis comparison alone is not the new proof.
 
-The existing proof `seon.test.admission-digest-test/an-admission-confirms-the-tested-digest-without-deriving-the-program` is converted from a global observation atom and stale test identity to the real admitted writer entrance. It covers empty/result-only prior writes with zero history calls, and prior program writes with present/missing revision evidence refusing admission. Additional existing admission/replay and selection proofs will run by Var through the candidate gate.
+The existing proof `seon.test.admission-digest-test/an-admission-confirms-the-tested-digest-without-deriving-the-program` is converted from a global observation atom and stale test identity to the real admitted writer entrance. It covers empty/result-only prior writes with zero history calls, and prior program writes with present/missing revision evidence refusing admission. Additional existing admission/replay and selection proofs ran by Var through the candidate gate; parent failures and the final passing selection are recorded below.
 
 Initial health: default PID 61758, start 2026-10-08T11:01:39.584Z, source archive `6cc5dbbb406d27850820525fd727aca278d8a9fe`; faulted with memory-pressure refusals, live heap about 0.91 GB, central cache weight 507/512 MB. No restart, reset or instrumentation change. First SCI form was `(seon.context/current-state)` as agent `check-alloc-astra`. Its automatic step named existing reds `bt.slug-test/slug-lowers` and `live.text-test/slug-joins-lower-case-words`.
 
@@ -102,6 +102,22 @@ The first commit gate ran ten named Vars on candidate `dcd76ac5aab02af69c31b80b2
 - `seon.test-test/recording-distinguishes-run-replay-from-a-new-event`: a read-refusal assertion expects `:seon.db/invalid-read-error`, but the writer answers `:seon.db.write/validation-refusal`.
 - `seon.test-test/resolution-follows-admitted-source-and-acquisition`: the test passes the absent legacy `:seon.program/row` to `seon.program/declaration-row`, whose map contract refuses nil. The retired-row defect class is already recorded by `seon.sci.branch-execution-test/branch-proof-expects-a-retired-evaluation-row`.
 
-These tests and their owners were not edited. The next gate names the eight other relevant Vars individually, using the owner's explicit authorization for pre-existing reds. No broad acceptance is claimed.
+These tests and their owners were not edited. The final gate named the eight other relevant Vars individually, using the owner's explicit authorization for pre-existing reds. No broad acceptance is claimed.
 
 All profiling JVM PIDs 71784, 76608, 77395, 78111 and 79296 had exited; current default reported no JFR recordings. Retiring the owned scratch branch with `(my.agent/retire-branch! {:seon.store/branch :agent-60ca10519381})` as `check-alloc-astra` returned the bare error `{:seon.error/message "run transition refused: admission-closed"}`. This is the existing `my.agent/retire-branch-refuses-a-finished-agent-as-admission-closed` defect; successful retirement is not claimed. The uncertain branch is preserved for root to resolve. No other lane's session, branch, root or file was modified.
+
+### Accepted slice
+
+Landed through `bin/lane commit` as **`44cce8fe471c2b5255c4e3fa5352ea6bcccf4337`**, candidate `ef2d0d17fbddd650b51e6c4c470694b5761eb219`, run `f5a70a807605`: **8 executed, 0 reused, 90 assertions passed, 0 failed, 0 errors, 7878 ms**. [Exact command and gate output](landing-proof.txt) names all eight Vars. Candidate lint: **5435 ms, 0 errors, 1493 warnings**. No claimed path remained dirty after this commit.
+
+| Publication clock | ms |
+|---|---:|
+| Publish | 2406 |
+| Adopt | 462 |
+| Ready | 33575 |
+| Boot | 37651 |
+| Queue wait | 14122 |
+| Test phase | 7967 |
+| Whole gate | 76273 |
+
+These overlapping phases are not summed. The gate passed publication, adoption, fresh boot and the selected behavior proofs. It did not install these host-bound changes in default, prove broad integration, fix the two parent reds, or reach the assignment's final tens-of-MB target. Retained allocation was not measured for the disposable gate; default's observed live heap and JFR's transient allocation are reported separately above. Root owns broad tiers and deliberate default adoption. This outcome is a documentation-only follow-up, with no rerun of unchanged proofs.
