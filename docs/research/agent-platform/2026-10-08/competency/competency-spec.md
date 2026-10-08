@@ -239,10 +239,10 @@ repair (outside the agent's score) then accepts on re-review.
 
 ### 4.4 Using cut results (T14, T14s, T14n, T14q)
 
-The value printer shows each value within one budget and ends every cut with a runnable continuation form on the
+The value printer shows each value within one budget and ends every cut with a runnable elision form on the
 value's handle. Probed live on default (agent `comp-spec-probe`, SCI, 2026-10-08):
 
-| Value | What the agent sees | Continuation |
+| Value | What the agent sees | Elision form |
 |---|---|---|
 | 3,000-map vector (19,865 tokens) | 32 maps, then `…2968 (drop 32 result/ed6eff552942f)`, plus a `:large-value` finding | runnable, continues |
 | 24,000-character string (7,513 tokens) | 4,758 characters, then `"…"…+19242 (subs result/e85a40f9971b7 4758)` | runnable, continues |
@@ -253,7 +253,7 @@ So T14 and T14q depend on lane printer-rules: every cut must carry a form that c
 query variant waits for the set fix; the other three run on today's printer.
 
 Each task's producer is **one-shot**: it returns the data once and empties its source, so re-running it answers
-nothing and the only way to the answer is the held value (`result/…`) or the printed continuation. The data is
+nothing and the only way to the answer is the held value (`result/…`) or the printed elision form. The data is
 generated from a seed derived from the agent id, so the answer differs per run and guessing or copying an earlier
 run fails; the proof recomputes the expected answer from the same seed in the JVM (`seon.competency-test/needle`).
 The agent's instruction names the question and that the answer must be a defined value, nothing else.
@@ -277,8 +277,8 @@ The agent's instruction names the question and that the answer must be a defined
 ```
 
 A value (a `def`) or a zero-argument function both pass: the proof reads `comp.find/x`, and slice D2 accepts either.
-Score, from the stored evaluations of the run (section 6): dug (an evaluation that read the producer's handle or ran
-its continuation), passes to the answer, guessed (the answer defined with no dig and no narrowing query before it),
+Score, from the stored evaluations of the run (section 6): read a held result or ran an elision form (an evaluation that read the producer's `result/…`
+handle or ran the elision form printed at the cut), passes to the answer, guessed (the answer defined with no held-result read, no elision form run and no narrowing query before it),
 fabricated (an imitation note), re-ran (an evaluation repeating the producer's form after it was cut; for the one-shot
 tasks it answers empty, and the score records it).
 
@@ -309,7 +309,7 @@ A run is its agent: the variant is its settings overlay, the task its assignment
 | Cost | usage × the model row's prices (live: 0.15 / 0.003 / 0.60) | none off-peak; peak counted from `at` |
 | Merge outcome | `:seon.task/outcome` `:accepted`/`:declined` (resources/seon/schemas/seon.task.edn:65); open = held | `:seon.task/accepted-by`, `:seon.task/held` (section 2) |
 | Root review time | the proposal's transaction instant to the outcome datom's transaction instant, from history; no fact needed | none |
-| Used cut results (T14) | evaluation rows hold the source text and the shown text; nothing records which earlier values a form read | `:seon.cluster.eval/digs`, refs to the evaluations whose `result/…` handles the evaluated form names, taken by walking the READ form (data, not text) for symbols in namespace `result` (`seon.sci.admit/result-handle` src/seon/sci/admit.clj:690). Consumers: this score; a handle's gone-value answer naming who read it. Re-ran: derived at query time, a later evaluation whose read form equals the producer's form; no fact |
+| Used cut results (T14) | evaluation rows hold the source text and the shown text; nothing records which earlier values a form read | `:seon.cluster.eval/result-reads`, refs to the evaluations whose `result/…` handles the evaluated form names, taken by walking the READ form (data, not text) for symbols in namespace `result` (`seon.sci.admit/result-handle` src/seon/sci/admit.clj:690). Consumers: this score; a handle's gone-value answer naming who read it. Re-ran: derived at query time, a later evaluation whose read form equals the producer's form; no fact |
 | Bail correctness | not recordable: no bail exists | TARGET S6-06b: disposition `:bailed` with `:seon.task/reason`. Score: bailed on T9 (yes), not on T9h; passes before the bail; the reason names a proof symbol of the task (a backticked or bare symbol resolving to one of `:seon.task/proofs`); no `propose-merge!` call and no `my.turn/complete` success on a bail run |
 
 `seon.competency/scores` takes a database and answers one map per run; its AI render is one row per run plus a
@@ -328,7 +328,7 @@ per-cell summary (green share, median passes, accepted/held/bailed counts, token
 | Conflict views | three-way digests | kept merge branch, dangling callers, schema vs head data, root-side declaration diff | M3-M6 | — |
 | Bail | none | `my.task/complete!` | S6-06b | S6 |
 | Help | `help-value` with DB reads | the entries of section 3 | H1 | S1-10, S6-06b |
-| Dig evidence | handles bound per evaluation (src/seon/sci/eval.clj:579) | `:seon.cluster.eval/digs` | D1 | — |
+| Held-result reads | handles bound per evaluation (src/seon/sci/eval.clj:579) | `:seon.cluster.eval/result-reads` | D1 | — |
 | Results | No | `seon.competency/scores` and render | C4 | — |
 
 **Today's loop versus the cut.** Runnable today without a model pass: tasks, proofs, oracle regressions, the merge
@@ -343,7 +343,7 @@ provider page in docs/research/agent-platform/2026-10-07/deepseek/findings.md). 
 doubles everything. Calibration: live run 1, 11 calls, 124,157 prompt tokens (86% hits), 3,555 completion, ~US$0.005.
 Assuming a ~3k-token opening, ~1.4k appended and ~400 completion tokens per pass: ~US$0.0016 per 3-pass run, ~US$0.0026
 per 5-pass run. **342 runs: ~US$0.55 typical, ~US$0.89 all capped, ≤ US$1.80 at peak.** With no cache hits, ~US$1.90. T14 runs carry
-digs of ~1.5k tokens each, so they cost about twice a T1 run; included in the capped figure.
+held-result reads of ~1.5k tokens each, so they cost about twice a T1 run; included in the capped figure.
 Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. Wall time 5-25 s per run.
 
 ## 9. Slices (each about 15 minutes)
@@ -366,8 +366,8 @@ Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. W
 | X2 | T11 | `…/t11-holds-on-a-same-entity-conflict` | after M1, M4 |
 | X3 | T12 | `…/t12-holds-on-head-data-using-a-retracted-attribute` | after M6 |
 | X4 | T13, two oracle agents | `…/t13-first-accepts-second-holds` | after M1, M4 |
-| D1 | `:seon.cluster.eval/digs` at the pass's recording, from the read forms | `seon.cluster.turn-test/a-form-naming-a-handle-records-its-dig` | today (MCP SCI pass) |
-| D2 | T14, T14s, T14n: one-shot producers, seeded `needle`, oracles that dig through the continuation | `seon.competency-oracle-test/t14-digs-past-the-cut`, `…/t14s-…`, `…/t14n-…` (each asserts the oracle's answer evaluation records a dig) | after D1 |
+| D1 | `:seon.cluster.eval/result-reads` at the pass's recording, from the read forms | `seon.cluster.turn-test/a-form-naming-a-handle-records-its-result-read` | today (MCP SCI pass) |
+| D2 | T14, T14s, T14n: one-shot producers, seeded `needle`, oracles that run the elision form | `seon.competency-oracle-test/t14-reads-the-held-result-past-the-cut`, `…/t14s-…`, `…/t14n-…` (each asserts the oracle's answer evaluation records its result read) | after D1 |
 | D3 | T14q, after printer-rules gives a set cut a continuing form | `…/t14q-continues-rather-than-re-runs` | after printer-rules |
 | H1 | Help entries (section 3) and `task-ai`'s done/bail line | `seon.help-test/help-names-only-installed-forms` (S1-10's, extended to these forms) | after S1-10, S6-06b |
 | C4 | `seon.competency/scores` with merge outcome, review time and bail columns | `seon.competency-test/scores-read-an-oracle-run` (non-fixture ns) | today |
@@ -378,7 +378,7 @@ Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. W
 
 ## Limits
 
-Read, not run: the dig score depends on D1, and the set-cut gap above is one live probe. Also read, not run: a proof body reaching branch SCI definitions through `world-ctx` (C1 probes it); the competency
+Read, not run: the held-result score depends on D1, and the set-cut gap above is one live probe. Also read, not run: a proof body reaching branch SCI definitions through `world-ctx` (C1 probes it); the competency
 cluster hosting agents in the running JVM (M0); root's wake running `review!` (M1); whether a head test reaching a
 retracted callee runs at prepare (M2/M5). Costs are estimates from one live run's token profile. Live reads on default:
 the flash price row, the attempt count and `seon.program/identity-attributes` (`:seon.fn/sym :seon.fn.file/relative-path
