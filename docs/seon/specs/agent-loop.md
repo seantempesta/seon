@@ -9,7 +9,8 @@ tags: [spec, agent-loop, repl, one-path]
 # The agent loop: one pass for every entrant
 
 Status: APPROVED by the owner 2026-10-07 (v4.1), revised in place 2026-10-08 with the owner's REPL law, the approved
-reader rules, wire formats, the competency suite, session end and the model-pass end state. Installed claims cite HEAD
+reader rules, wire formats, the competency suite, session end, the model-pass end state, the three-part context with
+its current-state block, and automatic proof runs. Installed claims cite HEAD
 `81020da6a`; everything not installed is marked TARGET.
 
 Evidence and ledgers (not normative): v4.1 research and reviews in `docs/research/agent-platform/2026-10-07/root-plan/`
@@ -33,16 +34,22 @@ ledger, root answers Q1-Q18), [competency suite](../../research/agent-platform/2
    pipeline (§4.2, §4.3).
 3. **Light forgiveness for model text only** (§4.3): prose becomes comments and one scan balances delimiters. Valid
    Clojure passes through byte for byte. Code (MCP, tests, generated) is read as is.
-4. **Context is forms that ran** (§4.4):
-   - the opening (`(help)`, the task's `doc`, references' `doc`) once per assignment;
-   - inputs (messages, errors, proof results) each delivered by a recorded form;
-   - the agent's own forms with their real results.
-   - Nothing is re-executed or re-rendered. History is whole for now. No `;; =>`.
+4. **Context is three parts, in this order** (§4.4; owner 2026-10-08: "This is not a system where we just infinitely
+   append everything"):
+   - the **static prefix**: `(help)` and the fixed instructions; it changes only with the loaded commit and is cached;
+   - the **history**: only what the agent did, its own forms with their real results, append-only, whole for now;
+   - the **current-state block**: rendered fresh at every model call from stored facts, never stored, never repeated.
+     Each item appears once, in its current version: the task's current declaration, its proof tests (names and
+     current source), proof status with red results as data, the must-reads' signatures, unread messages and errors,
+     calls left and the task's status. A task revised by root or the user shows its new version on the next call,
+     the old one gone from view.
+   - Nothing in the history is re-executed or re-rendered. No `;; =>`.
 5. **Exchanges are data; wire formats are adapters** (§4.4). A per-model dial selects the format; the default stays
    one transcript message until the competency suite measures otherwise.
 6. **Standard lookups** return data, on SCI's `clojure.repl`.
-7. **Success is proofs green, then propose** (§4.5). `my.task/complete!` only bails, with a required reason. A task
-   needs proofs before launch.
+7. **Success is proofs green, then propose** (§4.5). After a pass that changes definitions, their reaching tests
+   (the task's proofs among them) run automatically off the pass; the agent reads their status in the current-state
+   block. `my.task/complete!` only bails, with a required reason. A task needs proofs before launch.
 8. **Budgets** (§3). A model pass costs no more than an ordinary pass (provider call excluded). Over 1 s or 10 MB of
    Seon work is stop-and-fix in the turn it is seen. A number that gets worse blocks the slice.
 9. Delete before adding. Reuse libraries. Understand before designing. Dual reviews. The owner approves core
@@ -59,7 +66,7 @@ ledger, root answers Q1-Q18), [competency suite](../../research/agent-platform/2
 | MCP one-line `defn` | 110-135 ms, 159-162 MB | REPL plan §1 |
 | `(+ 1 1)` after `(set! *print-length* 50)` | 170-231 ms, 341-534 MB (lane `repl-p11`) | REPL plan §1 |
 | reply read, 28.7 KB reply, armed | 10.5 ms, 4.09 MB | S2b-1 (`84a3c5e4d`) |
-| one-test `my.test/check` | warm 126 ms / 191 MB; cold 584-702 ms / 817 MB | test-cost |
+| one-test `my.test/check` | warm 126 ms / 191 MB; cold 584-702 ms / 817 MB; one red test in a new SCI test namespace on a fresh MCP agent branch: 769 ms, 74,244 checked calls (lane `spec-tail`, HEAD `666c767f7`) | test-cost; `spec-tail` probe |
 | store per small commit | ~150 KB (root copies 36%, index nodes 64%); accepted by the owner | r-record |
 | reset | 6-13 s; hosting an agent 1.4-1.6 s, ~100 MB | reset-leak |
 
@@ -76,7 +83,8 @@ checked calls, transactions attempted and durable, store bytes, tokens.
 | ordinary (no definitions), **model passes included** (excluding the provider call) | < 200 ms | 20-40 MB transient, garbage collected; never GB (owner 2026-10-08) | 1 |
 | definition (one-line `defn`) | < 300 ms | < 30 MB | 1 |
 | the pass after a definition | < 150 ms | < 10 MB | 1 |
-| opening or input pass | < 200 ms | < 5 MB | 1 each |
+| current-state block, rendered at each model call (§4.4) | < 10 ms | < 2 MB | 0 (read only) |
+| proof scheduling inside a pass that changed definitions (reach read and one offer; the run is off the pass) | < 5 ms | < 1 MB | 0 |
 | reply forgiveness scan, per 28.6 KB reply | ≤ 3 ms | ≤ 8 MB | — |
 | context append (each pass) | < 10 ms | ≤ 3× the appended text | — |
 | cold history acquisition (proc start / new assignment) at 1/10/200 exchanges | measured | measured, then a budget set from evidence | — |
@@ -86,13 +94,19 @@ checked calls, transactions attempted and durable, store bytes, tokens.
 Store: ~150 KB for an ordinary small pass, as observed. The definition-pass and test-check targets exceed the 10 MB
 stop-and-fix line (owner decision §7.5). S0 uses the HTTP fixture for the model entrant; other entrants use their real
 entrances. S0 workload: histories of 1, 10 and 200 exchanges at 2 KB of shown text each; one ordinary pass, one `defn`
-pass and the pass after it; one opening and one input; cold acquisition and warm execution reported separately; each
-wire format during S8. The window refusal (§4.4) bounds larger histories.
+pass and the pass after it; the current-state block's render time, allocation and estimated tokens (green and quiet,
+one red proof, over budget); cold acquisition and warm execution reported separately; each wire format during S8. The
+window refusal (§4.4) bounds larger histories.
+
+**Context tokens.** The current-state block is never prefix-cached (it follows the growing history), so its size is a
+per-call cost: ≤ 2,000 estimated tokens, the value printer's budget for the block (§4.4). Typical: 300-1,200 (task,
+steps, one to three proof sources, a green status line). Each red proof adds ≤ 150 tokens. The static prefix and the
+history are cache hits on every call after their first (measured from `:seon.ai.usage/cached-tokens`).
 
 ### 3.1 Model-pass end state
 
-A model pass costs no more than an ordinary pass of the same forms, excluding the provider call; opening and input
-passes have their own rows. Today's 926-945 MB pass is a defect, not a baseline. What removes it, by owner:
+A model pass costs no more than an ordinary pass of the same forms plus the current-state block's row, excluding the
+provider call. Today's 926-945 MB pass is a defect, not a baseline. What removes it, by owner:
 
 | Owner (first-pass MB) | Removed by |
 |---|---|
@@ -151,8 +165,10 @@ once per pass:
             completion and the blob permit until an unknown outcome is known (S5-01)
     FINISH  each reply envelope = its shown result + diagnostics accumulated through RECORD,
             composed by the value printer from already-printed units. Diagnostics that arise
-            after the commit are delivered immediately to the caller, and durably through the
-            error/input path, so the next context sees them as an input
+            after the commit are delivered immediately to the caller, and durably as recorded
+            errors, so the next current-state block shows them as unread (§4.4)
+    SCHEDULE when the pass changed definitions: one offer of the changed set to the agent's
+            proof proc (§4.5); never awaited by the pass
 ```
 
 **Same-pass admission** is settled by the ten S5-03 case notes and the revised
@@ -178,7 +194,7 @@ the pass; a successful evaluation is never marked failed.
 
 | Entrant | Read stage | Eval | Serialized by | Machinery transactions |
 |---|---|---|---|---|
-| model, REPL entrance | reply: forgiveness, then SCI read (§4.3) | SCI | the agent's proc | 1 per pass, plus opening/input passes |
+| model, REPL entrance | reply: forgiveness, then SCI read (§4.3) | SCI | the agent's proc | 1 per pass |
 | model, DATA entrance (TARGET, competency C6) | data: the reply is one EDN map `{:ns sym :forms [form …]}`, read once with locations; `:ns` is the pass's start namespace (the seam MCP's `namespace` argument uses); each `:forms` element is evaluated at its span; the reply is envelope maps (the DATA presentation) | SCI | the agent's proc | 1 per pass |
 | MCP SCI | code: text as is | SCI | the agent's proc (request port) | 1 |
 | MCP JVM | code: host read | host | **not serialized.** Each host invocation is owned until its exit. Its result is bound into the agent's SCI result owner only when that context is already held; otherwise its handle answers gone-value data with the class (S5-06). Never changes the agent's current namespace or answeredness | 1 |
@@ -244,45 +260,111 @@ with no forms (`#_ 1`, only comments) answers `nil` without an error (P12).
 - Printed output answers within the value printer's budget with a dig form (installed P5).
 - A form that throws does not stop the pass; later forms run, as at a serial REPL.
 
-### 4.4 Context, inputs and wire formats
+### 4.4 Context: static prefix, history, current state
 
-- **Opening pass** (origin `:opening`): runs once per assignment revision, an ordinary pass through the proc and the
-  fold, recorded in its own transaction before any model call. Its completion fact is on the opening call row, keyed by
-  assignment id + task revision. A changed task declaration or a new assignment id causes a new opening; reassigning an
-  unchanged task does not. A crash mid-opening reruns it.
-- **Input pass** (origin `:input`): runs when a wake carries something not yet delivered (a message, an error
-  delivered to this agent, a proof result). One generated form (`(my.agent/inputs)`, TARGET S4-05a) runs as its own
-  recorded pass before the model call. The writer validates the identities it read and records them on the evaluation,
-  so a restart never appends an input twice. Task-home items are read at the task home with per-home basis evidence. It
-  reads at a captured basis, which the model call carries as its presented basis.
-- **Exchanges are data.** An exchange is a pass's call row and its evaluations with source and shown text. The proc
-  holds the assignment's exchanges as values and appends each pass's finished exchanges; it reads ordered history once,
-  at proc start or a new assignment, with one narrow read of `:opening`, `:input` and `:model` exchanges. Origins:
-  installed `:model :outside` (`resources/seon/schemas/seon.cluster.eval.edn:36-41`); `:opening`, `:input` and `:test`
-  are added by the slices that first produce them (S4-02b, S4-05b, S6-02a). `:outside` and `:test` exchanges are not
-  shown to the model.
-- **Wire formats** (TARGET, competency C5). One pure adapter, `seon.ai/messages [wrapping opening exchanges] →
-  messages`, with one branch per wire format; `request-body` takes exchanges when present.
-  - **A `:transcript`**: one user message holding the transcript. This is today's shape: `request-body` sends an
-    optional system message plus one user message (`src/seon/ai.clj:572-575`).
-  - **B `:chat`**: the opening and each input as user messages, each form text as an assistant message, its envelope as
-    the next user message.
-  - **C `:prefix`**: B plus a final assistant message the model continues from (`ns=> ` for REPL, `{:forms [` for
-    DATA), only where the provider supports prefix continuation (DeepSeek's beta endpoint).
+A model call's context is three parts, in this order (owner ruling 2026-10-08, §7.12). Only the history is stored;
+the other two are derived at the call. Provider prefix caching covers the static prefix and the history, because both
+are byte-identical from one call to the next until the end of the history.
 
-  The dial `:seon.config.ai/wrapping` (`:transcript :chat :prefix`) lives on the model row with an agent overlay; the
-  default stays `:transcript` until the competency table is read. A format the table shows losing everywhere is
-  deleted with its branch.
+| Part | What | Changes when | Stored |
+|---|---|---|---|
+| **Static prefix** | `(help)`'s value (it teaches only what is installed in its commit, §4.7) and the fixed instructions | the loaded commit changes | no; derived per loaded commit, cached in `seon.cache` by commit |
+| **History** | only what the agent did: its own forms and their envelopes, in agent order | a pass appends | yes: the pass's call row and evaluations (§4.1 RECORD) |
+| **Current-state block** | each current-state item once, in its current version (below) | any stored fact it reads changes | **never**; rendered at every model call, never appended to the history |
+
+**There is no opening pass and no input pass.** What the opening used to put into the history once (the task, its
+references) is current state and lives only in the block, so an update shows on the next call with no stale copy left
+behind. What an input pass used to record (messages, errors, proof results) is either current state (proof status) or
+an unread item shown in the block, whose delivery the model pass records (below). `(help)` is the static prefix, not a
+recorded form.
+
+**The current-state block** (TARGET, slices CS-01..CS-06 in the reconciled plan). One value,
+`seon.context/current-state [database agent-id] → :seon.context/current-state`, read at the call from stored facts,
+rendered by its declared AI render pair and printed by the value printer under one budget. Read only: it gets a
+database value, never a connection. Sections, each absent when empty:
+
+- **Task**: the task's current declaration (`:seon.task/intent`, `:seon.task/must-read`, its ordered steps), read at
+  the task home's current head. The declaration's identity is `seon.task/task-revision` (`src/seon/task.clj:249-256`,
+  a digest over the declaration); the assignment row carries the revision root reviewed (`:seon.task/revision`, read
+  by `seon.task/assignment`, `src/seon/task.clj:496-519`). Installed today: a revised declaration makes `assignment`
+  refuse `:revised-since-assignment` until root reassigns. TARGET (CS-05): root's or the user's task update is a review,
+  so the task-update writer advances the assignment's `:seon.task/revision` in the same transaction; the block always
+  shows the current declaration and never an older one.
+- **Proofs**: each proof test by name with its current source, printed as code through the value printer (whole for an
+  ordinary deftest), and its status. Proofs are the deftests whose `:seon.task/tasks` holds the task, read by
+  `seon.task/task-edges` (`src/seon/task.clj:321-338`, `:seon.task/proofs`; probe: 62 tasks at HEAD have proofs). The
+  source is the stored declaration source the program index holds (installed lookup:
+  `(clojure.repl/source comp.geo-test/area)` prints a stored deftest whole as `:out` in SCI; probed at HEAD). Status
+  per proof: `:green`, `:red`, `:pending` (no result whose basis holds the proof's current reach) or `:running`. A
+  result counts only when its tested program holds the current definitions the proof reaches: the basis rule of
+  `seon.render.var/status` (`src/seon/render/var.clj:85-127`) and the reach evidence of `seon.test/verified?`
+  (`src/seon/test.clj:1562`), never a latest-green boolean. Each red proof adds data, never text: `{:test sym
+  :expected … :actual … :message …}` from the stored failure report (`:seon.test.failure/expected`, `/actual`,
+  `/message`, `resources/seon/schemas/seon.test.report.edn:7-24`; probe: a red member recorded `["(= 9 (c/area 3))" "(not
+  (= 9 12))" ""]`). Counts head the section: `{:green n :red n :pending n :running n}`.
+- **Must-reads**: each must-read reference's current arglists, contract and first docstring line, with
+  `(doc sym)` and `(clojure.repl/source sym)` as operations. Recommended over whole docs: they reflect current code
+  (an agent that changes a must-read sees the new signature on the next call), and the block's uncached tokens stay
+  small. The agent's own `doc` or `source` call lands in its history as its own form.
+- **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model pass, each with
+  its identity, shown through the value printer; beyond the budget, a count and the elision form `(my.agent/inputs)`.
+- **Turns**: model calls left against the current outside wake (the cap, §4.5) and the task's status (assigned,
+  proposed, accepted, bailed).
+
+When everything is green and quiet the status sections collapse to one line (`{:proofs {:green 3} :calls-left 7}`);
+the task and proof sources are always shown, because they are the definition of done.
+
+**Budget and growth.** The block is printed by the one value printer with a budget of 2,000 estimated tokens (§3,
+"Context tokens"). The printer spreads it across the block's shape: the counts and red data first, then the task, then
+the proof sources, then must-reads, then unread items. A cut leaves its elision form as data (`(clojure.repl/source
+sym)`, `(my.agent/inputs)`, `(doc sym)`), which the agent may run; what it runs lands in its history as its own form.
+Nothing else clips the block. Render cost: § 3 row (< 10 ms, < 2 MB).
+
+**Delivery identities (durable).** Proof status needs none: it is recomputed from results. Each unread item the block
+SHOWED is delivered by the model pass whose context presented it: its identities are recorded on that pass's call
+row as `:seon.cluster.eval/delivered` (cardinality many, a ref per item) inside the pass's one transaction, after the
+writer checks each still exists and is not already delivered to this agent. "Unread" is the items with no such ref
+from this agent, read at each home's basis (no t comparison across homes). A crash before RECORD or a failed provider
+call delivers nothing, so the items show again on the next call (at least once, §4.6). An item cut by the budget is
+not delivered until it is shown, or until the agent's own `(my.agent/inputs)` evaluation shows it, which records it
+the same way. Once delivered, an item leaves the block; the agent re-reads it with `(my.agent/inputs {:my.agent/delivered
+true})`. A change in what the assigner wants is a task revision (shown as current state), not a message.
+
+**History.**
+- An exchange is a pass's call row and its evaluations with source and shown text. The proc holds the assignment's
+  exchanges as values and appends each pass's finished exchange; it reads ordered history once, at proc start or a new
+  assignment, with one narrow read of the active assignment's `:model` exchanges. Origins: installed `:model :outside`
+  (`resources/seon/schemas/seon.cluster.eval.edn:36-41`); `:test` is added by S6-02a. `:outside` and `:test` exchanges
+  are not shown to the model. No `:opening` or `:input` origin is added.
+- Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
+- **Window:** when static prefix + whole history + block exceed the provider's window, the call refuses with an error
+  the owner sees. No clipping.
+
+**Wire formats** (TARGET, competency C5). One pure adapter, `seon.ai/messages [wrapping prefix exchanges block] →
+messages`, with one branch per wire format; `request-body` takes exchanges when present. In every format the block is
+the LAST content before the model's turn, so the cached prefix runs to the end of the history.
+- **A `:transcript`**: the static prefix as the system message; one user message holding the transcript, then the
+  block at its end. Today `request-body` sends an optional system message plus one user message
+  (`src/seon/ai.clj:572-575`).
+- **B `:chat`**: the static prefix as the system message; each form text as an assistant message and its envelope as
+  the next user message; the block is a second content part of the last user message (never a separate consecutive
+  user message), or the only user message before the first form. The cache covers everything before that last message.
+- **C `:prefix`**: B plus a final assistant message the model continues from (`ns=> ` for REPL, `{:forms [` for DATA),
+  after the block, only where the provider supports prefix continuation (DeepSeek's beta endpoint).
+
+The dial `:seon.config.ai/wrapping` (`:transcript :chat :prefix`) lives on the model row with an agent overlay; the
+default stays `:transcript` until the competency table is read. A format the table shows losing everywhere is deleted
+with its branch.
+
 - **Token measurement.** Every model call records the provider-reported prompt, completion and cached tokens on its
   attempt row (installed: `seon.ai/normalize-usage`, `src/seon/ai.clj:864-875`, maps `cached_tokens` and DeepSeek's
-  `prompt_cache_hit_tokens` to `:seon.ai.usage/cached-tokens`). Misses are prompt − cached. A provider that reports no
-  usage records a typed unknown, never zero. TARGET: `:seon.ai.attempt/latency-ms` from the value `complete` returns.
+  `prompt_cache_hit_tokens` to `:seon.ai.usage/cached-tokens`). Misses are prompt − cached; with the block last, a warm
+  call's misses are about the block plus the newest exchange. A provider that reports no usage records a typed unknown,
+  never zero. TARGET: `:seon.ai.attempt/latency-ms` from the value `complete` returns, and the block's estimated tokens
+  on the attempt row.
 - **Presentations.** REPL (the REPL entrance) is the form as sent, then its envelope. DATA (the DATA entrance) is the
   envelope map including `:form`. Both are composed by the value printer at FINISH from already-printed units.
-- **Handles** keep their identity across restarts and answer gone-value data after their runtime is lost.
-- **Window:** when whole history exceeds the provider's window, the call refuses with an error the owner sees. No
-  clipping.
-- **Cost of a wake cycle** = opening (once) + input pass + model pass, each 1 transaction, measured as a cycle.
+- **Cost of a wake cycle** = the model pass (1 transaction) + the block render (0 transactions).
 
 ### 4.5 Work, continuation, session end
 
@@ -293,13 +375,48 @@ with no forms (`#_ 1`, only comments) answers `nil` without an error (P12).
 | no form (prose only), or only read errors | disposition `:wait`; the original wake is answered |
 | provider failure or context refusal | counted call, no evaluations, answeredness unchanged, terminal reply |
 | call cap reached | disposition `:capped`; one message to the assigner; the next outside wake resumes |
-| the task's proofs green on the agent's branch | **success**: the agent proposes its branch (§4.10). The task completes when root's acceptance runs the proofs green on the combined program, written by the idempotent task-home writer (TARGET S7-03) |
+| the task's proofs all green at their current reach | **success**, from the proof proc's recording (below), never from a model call: on the agent's own branch the agent's branch is proposed (§4.10), which opens the merge task; on root's merge branch, all green on the combined program plus root's acceptance completes the task, written by the idempotent task-home writer (TARGET AR-02, Q16) |
+| a proof result recorded red after the agent's answered basis | work: the agent is woken (even after `:wait`) and the next block shows the red data (TARGET AR-03) |
 | `(my.task/complete! {… reason})` | **bail** (TARGET S6-06b): disposition `:bailed`, reason required, the task goes back to the assigner, who is notified. `my.turn/complete` (`src/my/turn.clj:5`), `my.task/done!` and `seon.run/complete` are deleted with it |
 | a newer outside wake | answered by the next pass, whatever the disposition |
 
-- Proofs run after a pass that changed code they reach (TARGET S7); their results arrive as input items (S7-02).
-- A committed model reply advances answered to the basis its context presented. Opening, input, outside and test
-  passes never answer.
+**Proofs run automatically** (TARGET AR-01; CLAUDE.md: "a defn's batch schedules its reaching test agents; the Var
+render only reads their status").
+- **What runs.** After a pass whose settlement changed definitions (program facts added, changed or removed), the
+  tests reaching that changed set, the task's proofs among them, run as ONE request through the one test entrance,
+  `seon.test/run` (`src/seon/test.clj:2225`) with `:seon.test/policy :named` and `:seon.test/changed` the pass's changed
+  set: the same request `my.test/check` makes (`src/my/test.clj:6-29`). A member whose recorded green still holds is
+  answered from the record without execution, so the work is proportional to the reaching tests whose reach changed.
+- **Scheduling.** The pass never waits. At SCHEDULE (§4.1) it offers its changed set to the agent's **proof proc**, a
+  `:compute` proc in the agent's own Flow graph. The proc holds the pending changed set in its state and unions each
+  offer into it; when idle it starts one request with the union and clears it. One request per agent is in flight; a
+  started request runs to its actual exit and records (§4.8), and changes that arrive meanwhile wait in the union for
+  the next request, so nothing is dropped and nothing overlaps. Results are recorded on the agent's recording
+  connection; members run on their own branches (Q11).
+- **Bound.** In the pass: < 5 ms, < 1 MB (one changed-set offer; §3). Off the pass: the request's
+  `:seon.test/check-time-limit-ms` (`src/seon/test.clj:2246-2285`) and the per-member §3 row (< 150 ms warm, < 20 MB
+  of Seon work per one-test check; measured 769 ms / 74,244 calls on a fresh MCP agent branch, which AR-01's budget row
+  must bring inside).
+- **Reading.** The next model call's block shows each proof's status, `:running` while its request is in flight and
+  `:pending` when no result holds its current reach. The model is not held for the run: it acts on what the block
+  shows, and a red result recorded after it waits wakes it.
+
+**Today (HEAD `666c767f7`).** Installed: the Var render reads reaching-test status (pending, newly red, newly green)
+and offers `(my.test/check {:seon.test/changed [sym]})` (`src/seon/render/var.clj:85-139`); `my.test/check` runs the
+reaching tests through `seon.test/run` and records member results and failure reports with expected, actual and
+message (`resources/seon/schemas/seon.test.report.edn:7-24`); task proofs are read by `seon.task/task-edges`
+(`src/seon/task.clj:321-338`). **Not installed:** no pass schedules reaching tests. The only callers of
+`seon.test/run` are `my.test/check`, `my.test/run-owned` (`src/my/test.clj:26,51`), `my.program/propose-merge!`
+(`src/my/program.clj:448`) and root's candidate gate (`src/seon/cluster.clj:2621-2640`). Probe on a fresh MCP agent
+branch: after `(defn area …)` was redefined, `seon.render.var/status` answered `{:pending [tailprobe.core-test/area-squares]}`
+and no member row existed, also after a later pass; the Var render's namespace docstring
+(`src/seon/render/var.clj:11-12`) claims the batch schedules them (task `seon.render.var/reaching-tests-are-never-run-and-a-first-red-is-silent`).
+After an explicit `my.test/check` recorded the test red, `status` answered `{}`: a red with no earlier result is
+neither pending nor newly red, so the Var render shows nothing (same task). `(doc <task-symbol>)` refuses with
+`:seon.sci.eval/documentation-unavailable`.
+
+- A committed model reply advances answered to the basis its context presented, and records the delivery of the
+  unread items its block showed (§4.4). Outside and test passes never answer.
 - The cap: installed as `:seon.config.run/max-episode-runs` (`src/seon/turn.clj:2692`). TARGET (S6-05): call rows
   counted at the writer against the outside wake whose anchor they consumed. Root's messages are outside wakes. A
   self-wake or MCP retry never refills the cap.
@@ -378,10 +495,10 @@ the diff; S0 numbers; root restarts or resets per the §6 manifest.
 | S1 | Lookups and help (§4.7) | standard lookups |
 | S2a, S2b-1 | Landed: dead debug views deleted (`25bb94be0`); reader rules in the shared stepper (`84a3c5e4d`) | — |
 | S3 | Landed: S3-01, origin `:model :outside` (`2bf3e10db`) | facts exist |
-| S4 | Context: opening and input passes, exchanges held by the proc, the prompt seam. Deletes the system turn, its seed, the old prompt, walk and capture. **Reset point** | the model sees forms that ran |
+| S4 | Context: static prefix, history of the agent's own exchanges held by the proc, the current-state block (CS-01..CS-06) and the prompt seam. Deletes the system turn, its seed, the opening, the old prompt, walk and capture. **Reset point** | the model sees what it did plus the current state |
 | S5 | One writer shared by all entrants (S5-01..07; S5-04 is P8) | one writer |
 | S6 | The cut: one cursor (S6-03 after P7), `*open*`/`open-tx`/`recover-tx` and effect provenance converted, run machinery, permits, backstop, parking and episodes deleted; §4.5 work rules; §4.6 failure; §4.8 bounds; launch and bail. **Reset point** | one machinery transaction per pass |
-| S7 | Proof results as input passes; SCI `run-test-var`; completion from fresh proofs | test-based completion |
+| S7 | Automatic proof runs off the pass (AR-01), success from all-green proofs (AR-02), a red result wakes (AR-03); SCI `run-test-var` (S7-01) | test-based completion |
 | X-perf | TARGET: acquisition and context retention; writer floor; residual (§3.1) | model pass inside the ordinary row |
 | S8 | The [competency suite](../../research/agent-platform/2026-10-08/competency/competency-spec.md) (C0-C8): eight tasks with proof deftests, the task × wrapping × entrance × model matrix (3 × 2 × 8 × 3 repetitions per model, DeepSeek flash first), scores read from the database. Model runs wait for C0 (§3.1); the full matrix waits for S4 | owner reads the table |
 
@@ -427,6 +544,15 @@ store BEFORE its slice lands.
 11. **Memory** (§3.2): many simultaneous agents on a 16 GB machine; transient allocation may be collected, never GB per
     operation.
 
+12. **Context is dynamic for current state** (§1.4, §4.4): "This is not a system where we just infinitely append
+    everything. So the task is always current and if root or the user requests an update the agent would see the
+    current version every turn with no repeating." The context is the static prefix, the agent's own history and one
+    current-state block rendered at each call. The opening and input passes are deleted. The agent needs "the actual
+    tests that they are expected to pass": the block shows each proof by name with its current source and status.
+13. **Proofs run after every pass that changes code they reach** (§4.5), off the pass, and their status reaches the
+    agent only through the current-state block, never repeated in the history.
+
 Open:
 - **Subtree counts** (dh-fix): child counts in branch nodes, counting at each split, or a recount job.
-- **Opening must-reads** (reconciled Q2b): `doc` only, as written in §1.4, unless the owner adds `source`.
+- **Must-reads in the block** (reconciled Q2b, superseded): recommended signatures plus the first docstring line, with
+  `doc` and `source` as operations; whole docs only if the competency table shows agents missing them.

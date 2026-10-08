@@ -186,10 +186,11 @@ or settles approved semantics.
   face cannot print a form as loadable code within the slice, the lane returns that as a task naming
   `seon.fn/runtime-analysis-batch` (CLAUDE.md "exactly ONE printer").
 
-### Q2: What is the durable exchange without an evaluation? Where are the assignment boundary and the opening completion fact? (S4-01..04, S6-03) **ROOT**
+### Q2: What is the durable exchange without an evaluation? Where is the assignment boundary? (S4-01..04, S6-03) **ROOT**
 
 - **Decision.** A prose-only reply records "one exchange with the 'no form' refusal and no evaluation" (spec §4.3).
-  History needs that exchange, the assignment it belongs to, and the opening's completion fact.
+  History needs that exchange and the assignment it belongs to. (The opening's completion fact is gone with the
+  opening: owner ruling 2026-10-08, spec §4.4, §7.12.)
 - **Both packets.** Extend the existing pass/call record. Do not add a second transcript store or a fake evaluation.
   Both leave it undecided.
 - **Simplest.** The call row RECORD already writes (§4.1) is the exchange.
@@ -198,26 +199,36 @@ or settles approved semantics.
     the exchange. It carries origin and an assignment ref. A prose-only exchange is a call row with zero evaluations
     and its "no form" diagnostic.
   - Evaluations keep `:seon.cluster.eval/run` to it.
-  - The opening's completion fact is an attribute on the opening call row, valued by assignment id plus task revision,
-    written in that pass's one transaction ("beside its evaluations", §4.4).
-  - History acquisition reads the agent's call rows for the active assignment with origin in
-    `#{:opening :input :model}`, each with its evaluations by position.
+  - History acquisition reads the agent's call rows for the active assignment with origin `:model`, each with its
+    evaluations by position. There is no opening or input origin: the task, its proofs and unread items are the
+    current-state block, rendered at each call and never stored (spec §4.4).
   - Agent ordinals stay on evaluations, as S3 v2 §6 decided. A pass is one transaction on one linear branch, so
     exchange order is commit order.
   - S6 deletes the open/intent machinery, not this row.
 - **Grounds.** No new entity kind ("no invented entity kinds"). The spec already requires a call row. Datahike owns
   transaction order.
 
-### Q2b: Does the opening show the must-reads with `doc` or with `source`? (S4-02) **OWNER**
+### Q2b: How does the current-state block show the must-reads? (CS-01) **OWNER** (superseded the opening question)
 
-- **Decision.** Spec §1.4 and §4.4 say "references' `doc`/`source`". The S1 design (§4.3) has the agent call `doc` on
-  each must-read.
-- **Both packets.** Unresolved.
-- **Simplest.** `(help)`, then the task's `doc`, then `doc` of each must-read.
-- **Recommendation.** Use `doc` only. `source` stays one form away, and S8's experiments can add it. The choice decides
-  opening size, and the owner reads context (§1.4), so the owner should confirm.
+- **Decision.** The owner ruled 2026-10-08 that the task and its proofs are current state (spec §4.4). Must-reads
+  reflect current code, so they are current state too; the question is only how much of each the block shows.
+- **Simplest.** Each must-read's arglists, contract and first docstring line, with `(doc sym)` and
+  `(clojure.repl/source sym)` as operations.
+- **Recommendation.** The simplest form. The block is never prefix-cached (it follows the history), so whole docs on
+  every call cost uncached tokens; an agent that needs more runs `doc` or `source`, which lands in its own history.
+  S8 measures whether agents miss them.
 
-### Q3: What is the input form, and how are delivery identities recorded? (S4-05, S7-02) **ROOT**
+### Q3: How do unread items reach the agent, and how are delivery identities recorded? (S4-05, CS-04) **ROOT**
+
+**Revised 2026-10-08 (owner rulings, spec §4.4): there is no input pass and no generated input form.** Messages and
+errors delivered to the agent are shown in the current-state block until delivered; proof results are current state
+(status recomputed at each call) and need no delivery. The block's shown unread items are delivered by the model pass
+whose context presented them: the pass's settlement carries their identities, the writer checks each still exists and
+is not already delivered to this agent, and stores them as `:seon.cluster.eval/delivered` on that pass's call row in
+the pass's one transaction. A crash or failed provider call delivers nothing, so they show again. `my.agent/inputs`
+survives only as the agent's own lookup and elision form. What stays durable: the delivered identities, so a restart
+never drops or re-shows a delivered item. The text below is the earlier input-pass recommendation, kept for its
+grounds; its form and pass are retired.
 
 - **Decision.** Spec §4.4 leaves the form's name TBD. It requires recorded identities, per-home bases, and no
   comparison of t across homes.
@@ -511,18 +522,36 @@ files, which is beyond 150 lines.
 | Id | Change | Files | Proof tests | Budget | Deps |
 |---|---|---|---|---|---|
 | S4-01 | (see Ready, R2) | | | H | S3-01 |
-| S4-02a | Call row gains origin and an assignment ref. The opening completion attribute is on the opening call row, keyed by assignment id plus task revision (Q2). Written by the existing settlement. No producer yet besides the model/outside passes, which write origin and assignment | `src/seon/turn.clj` (plan/settle call row), `resources/seon/schemas/seon.turn.edn`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/a-pass-call-row-names-its-assignment-and-origin` | O | S4-01, Q2 |
-| S4-02b | The opening producer replaces `declared-sources`/`system-turn`'s opening and `seed-tx`: `(help)`, task `doc`, then must-read `doc` (Q2b). Runs once per assignment revision, before the provider | `turn.clj:1719,2024`, `src/seon/bootstrap.clj:312`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/opening-runs-once-per-assignment-revision`. Existing `…/generated-opening-preserves-one-provider-turn-budget` (converted) | I | S4-02a, S1-10, Q2b |
-| S4-03 | History projection reads call rows of the active assignment with origin in `#{:opening :input :model}`, plus evaluations by position, from stored emission units (no re-render, no EDN decode) | `src/seon/render/transcript.clj:246,726`, `src/seon/eval.clj`, `src/seon/repl.clj`, schemas, `test/seon/render/transcript_run_test.clj` | new `seon.render.transcript-run-test/reacquired-history-is-the-finished-exchange`. Existing `…/render-run-selects-only-the-requested-run` | H | S4-02a |
+| S4-02a | Call row gains origin and an assignment ref (Q2). Written by the existing settlement for the model/outside passes. No opening completion attribute (retired with the opening) | `src/seon/turn.clj` (plan/settle call row), `resources/seon/schemas/seon.turn.edn`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/a-pass-call-row-names-its-assignment-and-origin` | O | S4-01, Q2 |
+| S4-02b | **Static prefix** replaces `declared-sources`/`system-turn`'s opening and `seed-tx` (`turn.clj:1751,2056`): `(help)`'s value per loaded commit, in a `seon.cache` kind keyed by commit, sent as the system message. No pass, no recorded form, no opening origin | `turn.clj`, `src/seon/bootstrap.clj:312`, `src/seon/ai.clj` (`request-body:572`), `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/the-static-prefix-is-byte-identical-across-calls-of-one-commit` (two calls' system messages `=`; no evaluation row). Existing `…/generated-opening-preserves-one-provider-turn-budget` deleted with the opening | I | S4-02a, S1-10 |
+| S4-03 | History projection reads call rows of the active assignment with origin `:model`, plus evaluations by position, from stored emission units (no re-render, no EDN decode) | `src/seon/render/transcript.clj:246,726`, `src/seon/eval.clj`, `src/seon/repl.clj`, schemas, `test/seon/render/transcript_run_test.clj` | new `seon.render.transcript-run-test/reacquired-history-is-the-finished-exchange`. Existing `…/render-run-selects-only-the-requested-run` | H | S4-02a |
 | S4-04 | The proc holds the transcript (acquired at init or a new assignment, appended per pass). `prompt` validates the token window and refuses when over, with no clipping | `turn.clj` (`call-turn`, `step`), `src/seon/cluster/prompt.clj:349,403`, prompt schema, `test/seon/cluster/prompt_test.clj` | existing `seon.cluster.prompt-test/the-history-path-never-refits-a-rendered-unit`, `…/the-prompt-reads-the-cluster-its-caller-names`. Converted `…/a-budget-smaller-than-the-history-keeps-whole-newest-units` → new `…/an-over-window-transcript-refuses-without-dropping-exchanges` | H/O | S4-03 |
-| S4-05a | `my.agent/inputs` (new) returns undelivered items with identity and home basis | `src/my/agent.clj`, `resources/seon/schemas/my.agent.edn`, `src/seon/context.clj:257`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/inputs-read-each-home-at-its-own-basis` | L | Q3 |
-| S4-05b | Input pass before the model call. The writer validates and stores `:seon.cluster.eval/delivered`. Message-history append retired | `turn.clj` (`delivery-rows:3173`, `step`), eval schema, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/input-records-only-the-items-it-read` | I | S4-05a, S4-04 |
-| S4-06 | Delete the refresh (`turn.clj:1686-2232`, `receipt-read-evidence-tx:1217`) and persisted freshness evidence, keeping runtime observation | `turn.clj`, `src/seon/render.clj` callers, eval schema, `test/seon/turn_test.clj`, `test/seon/turn_error_test.clj` | new `seon.turn-test/settlement-does-not-store-refresh-evidence`. Delete `seon.turn-test/generated-read-evidence-rejects-turn-activity`, `…/a-turn-dependent-generated-form-keeps-its-value-beside-the-fault` | O + read-heavy row | S4-02b, S4-04, S4-05b; root approves the closure |
+| S4-05a | `my.agent/inputs` (new) returns undelivered items with identity and home basis; the block's Unread section and its elision form read it (Q3 revised) | `src/my/agent.clj`, `resources/seon/schemas/my.agent.edn`, `src/seon/context.clj:257`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/inputs-read-each-home-at-its-own-basis` | L | Q3 |
+| S4-05b | **Retired** (owner 2026-10-08): no input pass. Its delivery write moves to CS-04 and its message-history append retirement to CS-04 | | | | |
+| S4-06 | Delete the refresh (`turn.clj:1686-2232`, `receipt-read-evidence-tx:1217`) and persisted freshness evidence, keeping runtime observation | `turn.clj`, `src/seon/render.clj` callers, eval schema, `test/seon/turn_test.clj`, `test/seon/turn_error_test.clj` | new `seon.turn-test/settlement-does-not-store-refresh-evidence`. Delete `seon.turn-test/generated-read-evidence-rejects-turn-activity`, `…/a-turn-dependent-generated-form-keeps-its-value-beside-the-fault` | O + read-heavy row | S4-02b, S4-04, CS-04; root approves the closure |
 | S4-07a | Move `:seon.ai.tokens/characters` onto the model call's attempt or basis row, written by the existing settlement. `calibration-for` reads it there; `recorded-usage-tx` stops writing capture rows. Move `message-custody` out of the capture section of `context.clj` | `src/seon/cluster/prompt.clj:74-104`, `src/seon/context.clj:257`, `src/seon/turn.clj` (settlement), attempt/call schema, `test/seon/cluster/prompt_test.clj` (`recorded-usage-tx:354`) | existing `seon.cluster.prompt-test/calibration-uses-the-agents-recent-attempts-and-config-prior`, `…/an-unread-usage-history-is-not-an-empty-one`, `seon.context-test/message-custody-accepts-an-absent-run-when-instrumented` | O | S4-04 |
 | S4-07b | Delete capture, the agent-owned selection and compaction code, walk composition and the prompt selection closure (Q4). The debug Context view renders saved exchanges through the proc's pure transcript function. Delete the web context-action POST together with `change-context`, `system-turn`, `virtual-turn!` and `compact!` (root: the approved spec deletes system turns, context is rendered live) | `src/seon/context.clj:76-250,309-415` (`message-custody` already moved by S4-07a), `prompt.clj:171-402` (`calibration-for:74-104` reads the new row), `render.clj:1721,1731-1733,49-50`, `render/web.clj:2410-2520,3185-3207,3390`, `walk.clj:840`, `turn.clj:3124,4559-4580,65-66`, `render/transcript.clj:617`, schemas `seon.context.capture.edn`, `seon.context.contribution.edn`, `seon.context.edn`, `seon.cluster.prompt.edn`, tests per I-Q4 §5: delete `context_capture_test`, `context_capture_history_test`, `context_selection_test` (all four deftests; S4-01 moved its ordinal proof to `seon.turn-test`), the compaction transcript test `seon.render.transcript-test/selected-evaluations-project-only-their-stored-source-and-result` (`:967`: deleted if it tests only the deleted selection code, otherwise converted), the prompt-test deftests that price retained history (`:93,208,260,281,293,329,493`); convert `turn_loop_test:307`, `web_debug_test:93`, `web_context_test` (four deftests), the survivors listed in I-Q4 §5, and the `with-redefs` of `prompt/prompt` in `agent_test` | new `seon.cluster.prompt-test/a-model-call-stores-basis-without-prompt-capture`. Existing `…/identical-context-does-not-depend-on-a-retained-prompt-cache`, `…/calibration-uses-the-agents-recent-attempts-and-config-prior` (still green), `seon.context-test/message-custody-accepts-an-absent-run-when-instrumented`, `seon.render.web-context-test/the-context-view-is-computed-only-when-opened` | O/H (split further by file group, web then prompt then context, if the closure exceeds about 15 minutes) | S4-07a, S4-06, Q4 |
 
 S4-02 and S4-05 are split further than in both packets. Each original row mixed a new fact, a producer and a deletion.
 S4-02a puts the fact on with its first producer (the existing settlement), so it is never a consumerless schema.
+
+### CS current-state block (group B for `turn.clj`/`ai.clj` rows, E for task rows; spec §4.4)
+
+The block is one read-only value rendered at each model call, placed last before the model's turn, never stored. Each
+row is about 15 minutes and asserts data, never printed text.
+
+| Id | Change | Files | Proof tests (data) | Budget | Deps |
+|---|---|---|---|---|---|
+| CS-01a | `seon.context/current-state [database agent-id] → :seon.context/current-state` (new, schema in `seon.context.edn`): the Task section (current declaration and steps read at the task home through `seon.task/assignment`, `task.clj:496`) and Turns (calls left, task status) | `src/seon/context.clj`, `resources/seon/schemas/seon.context.edn`, `test/seon/context_test.clj` | new `seon.context-test/current-state-shows-the-current-task-declaration`: revise the task's intent at the home; the next value holds the new intent and no key holds the old | L | S4-02a |
+| CS-01b | Proofs section: each proof from `seon.task/task-edges` (`task.clj:321`) with its stored source, status by the basis rule of `seon.render.var/status` and reach of `seon.test/verified?` (`test.clj:1562`), counts, and each red as `{:test :expected :actual :message}` from the stored report (`seon.test.report.edn:7-24`) | `src/seon/context.clj`, its schema, `test/seon/context_test.clj` | new `seon.context-test/a-red-proof-shows-expected-actual-and-message-as-data` (value keys asserted, no text); new `…/a-proof-result-before-the-latest-reached-definition-is-pending` | L | CS-01a |
+| CS-01c | Must-reads (arglists, contract, first doc line, `doc`/`source` operations; Q2b) and Unread (items from `my.agent/inputs` with identities) | `src/seon/context.clj`, its schema, `test/seon/context_test.clj` | new `seon.context-test/unread-shows-each-undelivered-item-once-with-its-identity` | L | CS-01a, S4-05a |
+| CS-02 | The block's declared AI render pair and print budget: 2,000 estimated tokens through the value printer, cut order (counts and red data, task, proof sources, must-reads, unread), elision forms as data | `src/seon/context.clj` (render), `resources/seon/schemas/seon.context.edn`, `test/seon/context_test.clj`, `test/seon/pass_probe.clj` (block row) | new `seon.context-test/an-over-budget-block-offers-its-elision-forms` (render data holds `(clojure.repl/source sym)` and `(my.agent/inputs)` for the cut parts). **Budget row** in `seon.pass-probe`: block render < 10 ms, < 2 MB; estimated tokens recorded for green-and-quiet, one red, over budget | L | CS-01b, CS-01c |
+| CS-03a | Placement, wire format A: `seon.ai/messages` puts the static prefix in the system message, the transcript, then the block at the end of the one user message | `src/seon/ai.clj` (`request-body:572-575`), `test/seon/ai_test.clj` | new `seon.ai-test/transcript-ends-with-the-block-and-keeps-its-prefix`: for two successive calls, request 2's user text up to the end of request 1's history equals request 1's; the block appears exactly once and last | L | CS-02, S4-04 |
+| CS-03b | Placement, format B: the block as a second content part of the last user message (or the only user message before the first form) | `src/seon/ai.clj`, `test/seon/ai_test.clj` | new `seon.ai-test/chat-puts-the-block-in-the-last-user-message`: no two consecutive user messages; messages before the last are `=` across calls | L | CS-03a, competency C5 |
+| CS-03c | Placement, format C: B plus the assistant prefix after the block, only where the provider declares prefix continuation | `src/seon/ai.clj`, `test/seon/ai_test.clj` | new `seon.ai-test/prefix-continues-after-the-block` | L | CS-03b |
+| CS-04 | Delivery: the model pass's settlement records `:seon.cluster.eval/delivered` for the unread items its block showed (writer checks existence and not-yet-delivered); the message-history append is retired | `turn.clj` (`delivery-rows:3173`, settlement), `resources/seon/schemas/seon.cluster.eval.edn`, `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/a-committed-model-pass-delivers-what-its-block-showed`; new `…/a-failed-provider-call-delivers-nothing` (fixture provider; the next block shows the same identities) | I | CS-01c, S4-04, S5 settlement |
+| CS-05 | A task update by root or the user advances the assignment's `:seon.task/revision` in the same transaction, so `assignment` (`task.clj:496-519`) never refuses `:revised-since-assignment` for a reviewed update and the next block shows it | `src/seon/task.clj`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/a-revised-task-shows-on-the-next-call-without-reassignment` | L | CS-01a |
+| CS-06 | Delete the opening: `system-turn`'s opening units, `declared-sources` (`turn.clj:1751`), `seed-tx` and their tests | `turn.clj`, `src/seon/bootstrap.clj`, tests | existing callers converted; `seon.cluster.turn-test/the-static-prefix-is-byte-identical-across-calls-of-one-commit` stays green | O | S4-02b, CS-03a |
 
 ### S5 recording
 
@@ -561,8 +590,11 @@ Q13, not S6-05.
 | Id | Change | Files | Proof tests | Budget | Deps | Group |
 |---|---|---|---|---|---|---|
 | S7-01 | (see Ready, R1) | | | T | Q15 | C |
-| S7-02 | Completed proof results from the task home are delivered as input items (Q3 shape) | `src/seon/test/runner.clj:1546,1971`, `src/my/agent.clj` (inputs), result/input schemas, `test/seon/test_test.clj` | new `seon.test-test/proof-input-delivers-only-completed-current-evidence` | I/T | S4-05b, S6-02b | B/E |
-| S7-03 | Completion only from fresh proofs of the changed reach, by the idempotent home writer (Q16) | `src/seon/task.clj:698`, `src/seon/test.clj:72,1562`, `test/seon/test_test.clj`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/a-task-completes-only-from-fresh-proofs-after-its-change`. Existing `seon.test-test/recording-preserves-admission-and-refuses-a-deleted-definition` | T/F | S7-02, S6-06b, Q16 | E |
+| S7-02 | **Retired** (owner 2026-10-08): proof results reach the agent as current state in the block (CS-01b), not as input items. No delivery identity is needed for a status | | | | | |
+| AR-01 | Automatic proof runs (spec §4.5). The pass's SCHEDULE offers its changed set to the agent's proof proc (`:compute`, in the agent's Flow graph), which unions offers in its state and runs one `seon.test/run` (`test.clj:2225`, `:named`, `:changed` the union) at a time, to actual exit. Resolves task `seon.render.var/reaching-tests-are-never-run-and-a-first-red-is-silent` (scheduling half) | `turn.clj` (settlement hands the changed set), the agent graph's proc table, `src/seon/test.clj` (none expected), `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/a-defn-reaching-a-proof-records-its-result-without-a-check-call`: after one model pass with a `defn` (fixture provider), a member row for the proof has `:seon.test.member/completed-tx`, and the pass's reply was answered before it (reply commit tx < member completed tx). New `…/changes-during-a-run-are-checked-by-the-next-run` (no change lost, no overlap). **Budget row**: in-pass < 5 ms / < 1 MB; one-test request < 150 ms warm, < 20 MB Seon work (today 769 ms / 74,244 calls) | T/I | S6 (agent graph), S7-01 |
+| AR-02 | Success from all-green proofs at current reach: on an agent's branch, the proof proc's recording proposes the branch (`my.program/propose-merge!`'s writer, `program.clj:425-460`); on root's merge branch, acceptance completes the task through the idempotent task-home writer (Q16) | `src/seon/task.clj:698`, `src/seon/test.clj:72,1562`, `test/seon/test_test.clj`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/a-task-completes-only-from-fresh-proofs-after-its-change`; new `…/all-green-proofs-propose-once` (a repeat recording is a no-op by identity). Existing `seon.test-test/recording-preserves-admission-and-refuses-a-deleted-definition` | T/F | AR-01, S6-06b, Q16 |
+| AR-03 | A proof result recorded red after the agent's answered basis is work: the work union wakes a waiting agent | `turn.clj` (`next-agent-work`), `test/seon/cluster/turn_test.clj` | new `seon.cluster.turn-test/a-red-proof-after-wait-wakes-the-agent` (disposition `:wait`, then a red recording; the work union names it) | I | AR-01, S6-05 |
+| AR-04 | The Var render names a red reaching test with no earlier result (today `status` answers `{}` for it) and its namespace docstring states what runs. Resolves the rest of task `seon.render.var/reaching-tests-are-never-run-and-a-first-red-is-silent` | `src/seon/render/var.clj`, `test/seon/render/var_test.clj` (new file) | new `seon.render.var-test/a-first-red-reaching-test-is-named` | L | none (independent of AR-01) |
 
 ### PB pass budget (group C; Opus: acquisition is boot-critical)
 
@@ -600,13 +632,13 @@ long-lived agent's settlement passes 40 MB or 100 ms, that task becomes a slice.
 
 ### Pass budget after all slices (projection, owner by owner)
 
-Warm ordinary model pass after opening/input, excluding the provider call. Estimates come from measured surviving work
+Warm ordinary model pass, excluding the provider call. Estimates come from measured surviving work
 (profile tables and this lane's probes). They are not measurements of the end state; the PB and S budget rows measure it.
 
 | Owner | Today, first / warm (MB, ms) | Removed by | Projected after all slices (MB, ms) |
 |---|---|---|---|
 | Base construction | 428 / 0 on a hit; a miss on every new agent, settings write or `defn` (648–1,360 MB passes) | PB-01, PB-02, PB-03 | **0** in any pass. A `defn`'s next pass pays only its overlay delta (est. 5–20 MB). Adoption pays a base advance outside passes |
-| Context projection, render, prompt | 405 / 350; 190–200 ms | S4-02b, S4-03, S4-04, S4-06, S4-07b | 3–10 MB, < 10 ms (held transcript append; provider request serialization still ∝ transmitted history) |
+| Context projection, render, prompt | 405 / 350; 190–200 ms | S4-02b, S4-03, S4-04, S4-06, S4-07b, CS-06 (the block adds its own < 10 ms / < 2 MB row) | 3–10 MB, < 10 ms (held transcript append; provider request serialization still ∝ transmitted history) |
 | Checked writer (seven commits) | 97–125; 140–175 ms | S4-06/07b, S5, S6-04, P14 | **accepted** one commit: 10–18 MB, 15–30 ms |
 | Evaluate/record remainder | 8–18; 2–24 ms | P6/P7/P8/P13, S5-05/07, S6-03 | 2–8 MB, 5–15 ms |
 | Refresh bookkeeping | 12–17; inside 165–357 ms | S4-06 | 0 |
@@ -640,8 +672,8 @@ Warm ordinary model pass after opening/input, excluding the provider call. Estim
 4. **The exchange without an evaluation (Q2).** Both packets saw that §4.3 "records one exchange… no evaluation" has no
    named record. The spec already names "the call row" in §4.1 RECORD, so the ambiguity is wording, not a missing
    design. Root should fold "the exchange is the pass's call row" into §4.4 in place.
-5. **`doc` vs `source` in the opening (Q2b).** The spec's "references' `doc`/`source`" is ambiguous. Neither packet
-   chose. The owner should confirm.
+5. **Must-reads (Q2b).** Superseded by the owner's 2026-10-08 ruling: no opening; must-reads are current state in
+   the block, shown as signatures with `doc`/`source` operations (recommended).
 6. **The S3 origin enum.** Both packets note that §5 lists `:opening :input :model :outside :test` under S3, while the
    approved S3 v2 adds only `:model :outside`. The spec's §5 S3 row should be revised in place.
 7. **Total path vs the current MCP refusal assertion.** `mcp_entrance_test.clj:149-153` asserts no unsaved values after
