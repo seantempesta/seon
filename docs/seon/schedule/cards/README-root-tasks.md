@@ -98,7 +98,7 @@ CX-1). RT-5 and RT-6 follow F6 and A1. RT-9 … RT-13 ride the rows they amend a
 
 ## Owner questions
 
-**Q-RT1 (RT-3). How an agent stops holding a task.** F5 says a task's status is derived, never stored. Root accumulates
+**Q-RT1 (RT-3). How an agent stops holding a task.** ANSWERED (owner 2026-10-08): holding is the assignment's presence; completion or give-back retracts it. F5 says a task's status is derived, never stored. Root accumulates
 one assignment per merge request and question; deriving "open" over every assignment root ever held is lifetime work.
 1. **(recommended)** Holding is the assignment's presence: the transaction that records a task complete (its proofs'
    green in the eval request's recording, the merge transaction) or given back retracts the assignment; history keeps
@@ -108,7 +108,7 @@ one assignment per merge request and question; deriving "open" over every assign
    cost grows with root's history.
 3. A stored `:seon.task/status` on the assignment. Contradicts F5.
 
-**Q-RT2 (RT-12). Every new error signature asks.** A question per new signature opens a root model turn each (8
+**Q-RT2 (RT-12). Every new error signature asks.** ANSWERED (owner 2026-10-08): one question per new signature; repeats only count. A question per new signature opens a root model turn each (8
 signatures on default today; repeats only count).
 1. **(recommended)** One question per signature, to the steward if any, else root; root may decide one owner task for
    several (its decision names the other signatures it covers, so their questions close too).
@@ -120,7 +120,7 @@ signatures on default today; repeats only count).
 **Q-RT3 (RT-8). Root's instructions.** ANSWERED (owner 2026-10-08): no kinds and no root help; root's guidance comes
 through its tasks' references (templates of data, RT-8).
 
-**Q-RT4 (RT-6). Where an answer lives.** A1 (not landed) puts the answer on the agent (`:seon.agent/answer`), one per
+**Q-RT4 (RT-6). Where an answer lives.** ANSWERED (owner 2026-10-08): on the assignment, so root answers several questions at once. A1 (not landed) puts the answer on the agent (`:seon.agent/answer`), one per
 agent; root answers several questions at once. 1. **(recommended)** On the assignment (`:seon.task/answer`, a
 component of the assignment, which is agent × task); `my.agent/answer!` finds the held task as today. 2. Keep A1's agent
 answer and allow root one open question at a time (questions queue). 3. One root-side agent per question

@@ -1097,8 +1097,6 @@ without a merge (F5); subtree counts are kept on every write, after verifying th
    (recommended) or wait for the competency matrix; Q-CX3, a root model turn needs an assigned root task
    (recommended) or root is exempt.
 
-4. **Root's work as tasks** (`cards/README-root-tasks.md`): Q-RT1, holding a task is its assignment's presence and
-   completion or give-back retracts it (recommended) or keep every assignment and derive open per pass; Q-RT2, one
-   question per new error signature (recommended), one standing triage task, or questions batched per producer
-   namespace; Q-RT3 answered (no root help: root's tasks carry its guidance as references); Q-RT4, answers on the assignment (recommended), root answers one question at a time, or one
-   root-side agent per question.
+4. **Root's work as tasks** (`cards/README-root-tasks.md`): all answered (owner 2026-10-08): Q-RT1 holding is the
+   assignment's presence, retracted on completion or give-back; Q-RT2 one question per new error signature; Q-RT3 no
+   root help (root's tasks carry its guidance as references); Q-RT4 answers live on the assignment.
