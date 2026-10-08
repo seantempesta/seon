@@ -1989,22 +1989,29 @@
   (try
     (let [read! read-or-throw!
           seeds (vec seeds)
-          declared #(declared-callers read! database %)
+          ;; every declared edge in one walk, read per level by target
+          declared (declared-callers read! database)
+          ;; one indexed query per level, never a pull per caller entity
           functions (fn [entities]
-                      (into #{} (keep (fn [[_ [attribute named]]]
-                                        (when (= :seon.fn/sym attribute) named)))
-                            (identity-names read! database entities)))
+                      (if (empty? entities)
+                        #{}
+                        (into #{} (map second)
+                              (read! (db/q '[:find ?entity ?symbol :in $ [?entity ...]
+                                             :where [?entity :seon.fn/sym ?symbol]]
+                                           database (vec entities))))))
           present (into #{} (keep :seon.fn/sym)
                         (read! (db/pull-many database [:seon.fn/sym]
                                             (mapv #(vector :seon.fn/sym %) seeds))))
           affected
-          (loop [frontier seeds seen (set seeds) affected present]
+          ;; a caller entity named once is never resolved again
+          (loop [frontier seeds seen (set seeds) entities #{} affected present]
             (if (empty? frontier)
               affected
-              (let [callers (into (into #{} (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %)))) frontier)
-                                  (mapcat val (declared frontier)))
+              (let [callers (into #{} (remove entities)
+                                  (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
+                                          (mapcat declared frontier)))
                     fresh (vec (remove seen (functions callers)))]
-                (recur fresh (into seen fresh) (into affected fresh)))))
+                (recur fresh (into seen fresh) (into entities callers) (into affected fresh)))))
           tests (read! (call-reach database seeds))]
       {:seon.fn/affected affected :seon.fn/tests tests})
     (catch clojure.lang.ExceptionInfo failure

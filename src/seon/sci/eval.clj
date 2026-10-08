@@ -2705,7 +2705,8 @@
   "Interpret the overlay `plan` on `ctx`: its overrides, its namespaces and its
   tests now, and bind the compiled Vars of the functions it adds; its reverse
   closure (functions, and the tests reaching them as interpreted tests) is
-  bound lazily (`bind-lazy-members!`), from `::closure` and `::closure-tests`
+  bound lazily (`bind-lazy-members!`) but for its host-bound members, which
+  keep the compiled Vars `ctx` binds, from `::closure` and `::closure-tests`
   when the plan carries them, else walked from the overrides. The acquisition
   advanced from the base's. What `ctx` already interprets, and the plan's
   `::evaluated` definitions it holds as evaluated, are not installed again."
@@ -2725,11 +2726,11 @@
         interpreted (into overridden (:seon.fn/affected closure))
         tests (into [] (remove (comp already-tests first)) tests)
         callers (into [] (remove #(or (already %) (contains? overridden %))) (sort (:seon.fn/affected closure)))
-        interpretable (interpretable-functions database callers)
-        ;; a host-bound caller keeps its compiled Var, decided now (`install-row!`)
-        eager (into (bind-lazy-members! ctx database (filter interpretable callers))
-                    (remove interpretable) callers)
-        function-rows (function-rows-in database (into (vec (remove already overridden)) eager))
+        ;; A host-bound caller keeps the compiled Var the context binds; only
+        ;; the macros among the rest are interpreted now.
+        macros (bind-lazy-members! ctx database
+                                   (filter (interpretable-functions database callers) callers))
+        function-rows (function-rows-in database (into (vec (remove already overridden)) macros))
         added-rows (function-rows-in database (remove interpreted added))
         selected (into (into #{} (map :seon.ns/name) namespaces) (map #(nth % 2)) function-rows)
         new-namespaces (into #{} (comp (map #(nth % 2)) (remove (:namespaces snapshot)) (remove selected))

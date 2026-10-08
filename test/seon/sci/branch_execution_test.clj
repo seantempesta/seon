@@ -523,7 +523,7 @@
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
              _ (support/transacted! connection (agent-revision-tx before [changed]))
-             acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
+             _ (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
              view (acquisition-view ctx)
              ;; Callers in class-value's current closure (the indexed program,
              ;; 2026-09-27): derive-page reads the private def stream-strip-id,
@@ -535,11 +535,7 @@
              ;; The indexer marks handler and serve! host-bound: a branch never
              ;; changes the platform, so unchanged host-bound callers keep
              ;; their compiled roots and are never an SCI definition.
-             host-bound-callers '[seon.render.web/handler seon.cluster/serve!]
-             load-states (fn [syms]
-                           (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
-                                            (when (some #{sym} syms) [sym state])))
-                                 (:seon.sci.eval/load-results (:value acquired))))]
+             host-bound-callers '[seon.render.web/handler seon.cluster/serve!]]
          (is (every? (:interpreted view) (concat callers host-bound-callers [changed]))
              "the changed helper's closure reaches each caller")
          ;; A caller interprets on its first call (`seon.sci.eval/interpret-affected!`).
@@ -547,7 +543,8 @@
              "each caller is analyzed against its private def, referred defonce and dependency alias")
          (is (not-any? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) callers)
              "and runs as an SCI definition")
-         (is (= (zipmap host-bound-callers (repeat :jvm)) (load-states host-bound-callers)))
+         (is (every? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) host-bound-callers)
+             "each host-bound caller keeps its compiled root")
          (is (nil? (refusal-of ctx 'seon.render.web/handler)) "a compiled root refuses nothing by name")
          ;; A caller expanding a JVM macro that reads &env (async/go-loop in a
          ;; loaded test namespace) still refuses: the host-bound classification

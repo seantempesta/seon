@@ -74,8 +74,8 @@ binding each member to a stub that interprets on first call; landed, see Lazy pr
 
 Interpreting the whole closure eagerly made a first redefinition cost per caller (3.5 MB, ~1 ms each) whether
 or not anything called it, twice. Now `seon.sci.eval/interpret-overlay!` interprets only the overrides (and the
-closure's host-bound members, which keep their compiled Var, and its macros, which run at their callers'
-analysis) and binds every other closure member's Var, in that context only (SCI-1's per-context binding), to
+closure's macros, which run at their callers' analysis), leaves its host-bound members on the compiled Var the
+context binds, and binds every other closure member's Var, in that context only (SCI-1's per-context binding), to
 `seon.sci.eval/lazy-root`: its first call interprets the member from stored source in the context executing it
 (`seon.sci.eval/promote-member!`, through `install-selected!`) and then calls what that context binds; a member
 that cannot interpret ends bound to a root refusing by name. A member whose namespace the context lacks gets a new
@@ -85,7 +85,7 @@ callers actually called. Settlement no longer walks again: `seon.sci.eval/carry-
 the closure the turn fork holds beyond it (walking only for a definition the fork never promoted). Interpreted
 callers then deref the Var directly; a lazy root stays on the path only where its value was captured.
 
-Measured in check JVMs (HEAD bb934b396 vs this change, `seon.profile/measure` per thread, fresh `base-ctx` each):
+First slice (30be17208), measured in check JVMs (HEAD bb934b396 vs it, `seon.profile/measure` per thread, fresh `base-ctx` each):
 
 | seed | callers | walk | first promotion before | after | first call through a caller |
 |---|---|---|---|---|---|
@@ -93,11 +93,26 @@ Measured in check JVMs (HEAD bb934b396 vs this change, `seon.profile/measure` pe
 | `seon.error/collection-member-problem` | 322 | 197 ms / 589 MB | 574 ms / 1.14 GB | 63 ms / 119 MB | - |
 | `seon.id/digest` | 2,401 | 284 ms / 661 MB | 3,027 ms / 6.46 GB | 234 ms / 482 MB | 3.9 ms / 3.9 MB |
 
-A redefining eval request through MCP: `first-doc-line` 2,290 ms / 260 MB (settle 541, evaluate 183) before,
-1,627 ms / 28 MB (settle 324, evaluate 75) after; `collection-member-problem` 2,816 ms / 977 MB (settle 554,
-evaluate 405) before, 1,109 ms / 111 MB (settle 111, evaluate 70) after. What remains is the test step
-(0.8-1.0 s, running the reaching tests) and the closure walk itself (`seon.fn/reverse-closure`, about 0.1-0.4 ms and
-0.3 MB per caller, mostly `seon.db/pull-many` of identity names per BFS level), the next slice.
+The closure walk (`seon.fn/reverse-closure`) then dominated: per BFS level it re-read every declared edge for the
+frontier (`declared-callers` with targets, lookup-ref pulls) and pulled the identity names of every caller entity,
+seen ones included. It now reads the declared edges once (`declared-callers` with no targets, one walk per
+attribute), resolves only unseen caller entities, by one query per level; equivalent on 60 random seeds, a
+multi-seed set and the hub (default JVM). Host-bound members are no longer installed at all: the context already
+binds their compiled Var.
+
+Second slice, same check-JVM probe (warm JVM; the first promotion after boot, `seon.id/digest`, 181 ms / 425 MB):
+
+| seed | walk | first promotion | first call through a caller |
+|---|---|---|---|
+| `seon.render.ns/first-doc-line` | 16 ms / 27 MB | 11 ms / 17 MB | `render-ai` 10 ms / 8 MB |
+| `seon.error/collection-member-problem` | 23 ms / 38 MB | 20 ms / 33 MB | - |
+| `seon.id/digest` | 45 ms / 77 MB | 58 ms / 105 MB | `render-ai` 11 ms / 4 MB |
+
+A redefining eval request through MCP, before (HEAD bb934b396) and after both slices: `first-doc-line` 2,290 ms /
+260 MB (evaluate 183, settle 541, test step 1,363) to 1,534 ms / 32 MB (evaluate 57, settle 298, test step 1,006);
+`collection-member-problem` 2,816 ms / 977 MB (evaluate 405, settle 554, test step 1,697) to 1,063 ms / 60 MB
+(evaluate 39, settle 110, test step 773). What remains over budget is the test step (running the reaching tests)
+and, for the leaf, settlement's other work, neither the closure.
 
 ## As landed (769c4a843) and what SCI-3 then deletes
 

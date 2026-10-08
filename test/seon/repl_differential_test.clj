@@ -273,7 +273,7 @@
            widely (promoted 'seon.error/collection-member-problem)
            hub (promoted 'seon.id/digest)]
        (is (< 200 (:callers widely)) "the seed is widely called")
-       (is (< (:seon.profile/alloc-bytes widely) (* (:callers widely) 1024 1024))
+       (is (< (:seon.profile/alloc-bytes widely) (* (:callers widely) 512 1024))
            "promoting allocates far less than interpreting each caller")
        (is (< 2000 (:callers hub)) "the hub is called from most of the program")
        (is (< (:seon.profile/ms hub) 1000) "promoting a hub's closure is sub-second")))))
