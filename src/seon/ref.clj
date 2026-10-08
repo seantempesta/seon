@@ -190,7 +190,9 @@
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
   (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved}
-        operations [(list 'doc reference) (list 'clojure.repl/source reference)]]
+        ;; a program declaration's source is answered by my.program/source, a value;
+        ;; clojure.repl/source only prints and answers nil
+        operations [(list 'doc reference) (list 'my.program/source (list 'quote reference))]]
     (if (qualified-keyword? reference)
       (let [found (lookup/schema-documentation database reference reference)]
         (cond
