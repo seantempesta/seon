@@ -837,16 +837,26 @@
                                             (not-join [?file] [?file :seon.fn.file/relative-path])]
                                    database (db/since (db/history database) changes-since))))
             first-run? (and (= :incremental policy) (or (nil? last-green) (seq removed-files)))
+            ;; A request naming identities and no change is a proof request: it
+            ;; runs those identities and reuses by reach digest, so it neither
+            ;; scans the changes since the last run nor inherits another
+            ;; member's outstanding obligation.
+            proof-request? (and (= :named policy) (seq identities) (empty? (:seon.test/changed request)))
             pending (reduce (fn [result run]
                               (reduce (fn [result member]
                                         (let [symbol (one member :seon.test.member/symbol)]
-                                          (if (green? member) (dissoc result symbol)
+                                          (cond
+                                            (and proof-request? (not (identities symbol))) result
+                                            (green? member) (dissoc result symbol)
+                                            :else
                                             (update result symbol (fnil into #{})
                                                     (get-in facts [member :seon.test.member/reasons])))))
                                       result (members run)))
                             {} (if last-green (drop-while #(<= (one % :seon.test.run/selection-tx)
                                                                 (one last-green :seon.test.run/selection-tx)) runs) runs))
-            observed-changed (if changes-since (changed-definition-symbols database changes-since) #{})
+            observed-changed (if (and changes-since (not proof-request?))
+                               (changed-definition-symbols database changes-since)
+                               #{})
             requested-changed (selection-read! (selection-seeds database (vec (:seon.test/changed request))))
             changed (into observed-changed requested-changed)
             schema-changes (when (and changes-since (= :incremental policy) (not first-run?))

@@ -552,3 +552,34 @@
        (is (= 1 (:seon.test/reused-count second-run)) "the second request reuses the first's green")
        (is (zero? (get first-scans 'seon.test.runner/program-written-since?)))
        (is (= {'seon.test/changed-definition-symbols 0 'seon.test.runner/program-written-since? 0} second-scans))))))
+
+(deftest a-proof-request-runs-only-its-proofs
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "proof-selection")
+     (install-namespace! connection 'selection.fixture)
+     (install-selection-program!
+      connection
+      "(defn leaf [] 1)
+       (clojure.test/deftest proof (clojure.test/is (= 1 (leaf))))
+       (clojure.test/deftest bystander (clojure.test/is (= 1 (leaf))))")
+     (let [seal (or (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
+                    (apply str (repeat 64 "a")))
+           _ (support/transacted! connection
+               [{:seon.source/digest seal :seon.source/test-input-digest (apply str (repeat 64 "b"))}])
+           proof (fixture-symbol "proof")
+           bystander (fixture-symbol "bystander")
+           base {:seon.test.run/cluster [:seon.cluster/name "proof-selection"]
+                 :seon.test.run/policy :named
+                 :seon.test/identities #{proof}}
+           select! #(sut/select (assoc % :seon.db/db (db/db connection)))
+           symbols #(set (map :seon.test/sym (:seon.test.run/members %)))
+           reaching (assoc base :seon.test/changed [(fixture-symbol "leaf")])]
+       (is (= #{proof bystander} (symbols (select! reaching)))
+           "a reaching request still selects the tests reaching the change (the merge gate)")
+       ;; The reaching request is admitted and never completed: its bystander
+       ;; stays pending under the same identities.
+       (support/transacted! connection
+         [[:db.fn/call sut/admit-run (sut/selection-admission (assoc reaching :seon.db/db (db/db connection)))]])
+       (is (= #{proof} (symbols (select! base)))
+           "a request naming only its proofs runs those, never the pending reaching test")))))
