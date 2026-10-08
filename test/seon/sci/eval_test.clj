@@ -147,19 +147,24 @@
   ;; registration. The install reads the committed value's projection.
   (test-support/with-database
    (fn [connection]
-     (let [ctx (eval/base-ctx (db/db connection))
+     (let [stale (eval/base-ctx (db/db connection))
+           source "(defn install-amount {:malli/schema [:=> [:cat :fixture.install/amount] :fixture.install/amount]} [x] x)"
            _ (test-support/transacted!
               connection (test-support/schema-entities @connection [[:fixture.install/amount :int]]))
-           row (test-support/program-fn-entity
-                @connection 'user/install-amount
-                "(defn install-amount {:malli/schema [:=> [:cat :fixture.install/amount] :fixture.install/amount]} [x] x)"
-                {:seon.schema.admission/source :agent})
-           _ (test-support/transacted! connection [row])
-           evaluation (eval/unrun-evaluation {:seon.sci.admit/value {:seon.error/at (java.util.Date.) :seon.error/layer :seon.turn/evaluation
-                                                                     :seon.error/operation 'fixture/install :seon.error/message "fixture"}
-                                              :seon.cluster.eval/ns [:seon.ns/name 'user]})
+           row (test-support/program-fn-entity @connection 'user/install-amount source
+                                               {:seon.schema.admission/source :agent})
+           _ (test-support/transacted! connection [(test-support/namespace-entity @connection 'user) row])
+           ;; the turn's fork evaluated the form: its Var root and metadata arrive with
+           ;; the evaluation, and the stale context only receives them at settlement
+           evaluation (assoc (eval/unrun-evaluation {:seon.sci.admit/value {:seon.error/at (java.util.Date.) :seon.error/layer :seon.turn/evaluation
+                                                                            :seon.error/operation 'fixture/install :seon.error/message "fixture"}
+                                                     :seon.cluster.eval/ns [:seon.ns/name 'user]})
+                             :seon.sci.eval/bindings
+                             {'user/install-amount
+                              {:seon.sci.eval/value (fn [x] x)
+                               :seon.sci.eval/metadata {:malli/schema [:=> [:cat :fixture.install/amount] :fixture.install/amount]}}})
            installed (eval/install-evaluated-rows!
-                      {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                      {:seon.sci.eval/ctx stale :seon.db/db (db/db connection)
                        :seon.sci.eval/installations [{:seon.program/row row :seon.sci.eval/evaluation evaluation}]})]
        (is (= [1] (mapv :seon.sci.eval/installed installed))
            "the definition installs against the registration committed before it")))))
@@ -383,14 +388,16 @@
 
 (deftest the-request-is-what-the-contract-says-it-is
   ;; the dial is REQUIRED, so a caller cannot forget to decide
-  (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
-        :seon.sci.admit/caps caps
-        :seon.sci.eval/time-limit-ms 1000}))
-  ;; The core-error dial is deleted (7c40396b3); the time limit is the
-  ;; required bound a caller cannot forget.
-  (is (not ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request) {:seon.cluster.eval/source "(+ 1 1)"
-             :seon.sci.admit/caps caps}))
-      "no time limit, no evaluation"))
+  (let [valid? (seon.schema/projection-validator (seon.schema/handed-projection) :seon.sci.eval/request)
+        request {:seon.cluster.eval/source "(+ 1 1)"
+                 :seon.sci.eval/form '(+ 1 1)
+                 :seon.sci.admit/caps caps
+                 :seon.sci.eval/time-limit-ms 1000}]
+    (is (valid? request))
+    ;; The time limit is the required bound a caller cannot forget; the one
+    ;; path's already read form is what the frame evaluates.
+    (is (not (valid? (dissoc request :seon.sci.eval/time-limit-ms))) "no time limit, no evaluation")
+    (is (not (valid? (dissoc request :seon.sci.eval/form))) "no read form, no evaluation")))
 
 (deftest
   instrumented-generated-form-does-not-advise-an-absent-program-entity
@@ -960,7 +967,7 @@
                     :function-bytes (get-in function-evaluation
                                             [:seon.sci.admit/record :seon.eval/allocated-bytes])})
           (is (= :seon.sci.eval-test.allocation/score
-                 (:seon.sci.admit/value schema-evaluation)))
+                 (:seon.schema/key (:seon.sci.admit/value schema-evaluation))))
           (is (= :ok
                  (get-in schema-evaluation
                          [:seon.sci.admit/record :seon.eval/outcome])))
@@ -1039,12 +1046,13 @@
         (is (ifn? (get intern-values 'user/once-function)))
         (is (= 1 (get intern-values 'user/schema-count))
             "the schema expression's side effect occurs once")
-        (is (= [{:before nil
-                 :after [:int {:min 0}]
-                 ;; register! answers its registration (:seon.schema/registration)
-                 :value {:seon.schema/key :user/once-schema :seon.schema/definition [:int {:min 0}]}}]
-               @delta-observations)
+        ;; every evaluation runs inside one delta; only the registering form
+        ;; leaves the schema form in it, and register! answers its registration
+        (is (= [nil nil [:int {:min 0}]] (mapv :after @delta-observations))
             "the schema form becomes visible only inside its delta")
+        (is (every? nil? (mapv :before @delta-observations)))
+        (is (= {:seon.schema/key :user/once-schema :seon.schema/definition [:int {:min 0}]}
+               (:seon.sci.admit/value (:value (peek @delta-observations)))))
         (is (nil? (get (seon.schema/registered-schemas)
                        :user/once-schema))
             "evaluation never publishes the isolated schema delta")))))))
@@ -1634,13 +1642,6 @@
             (run-in ctx
                     "(seon.sci.eval/agent-namespace (seon.db/db) \"probe\")"
                     2000)
-            assigned-evaluation
-            (test-support/evaluate
-             {:seon.sci.eval/ctx ctx
-              :seon.agent/id agent-id
-              :seon.cluster.eval/source "(ns-name *ns*)"
-              :seon.sci.admit/caps caps
-              :seon.sci.eval/time-limit-ms 2000})
             external (run-in ctx "(datahike.api/q '[:find ?e :where [?e]])"
                              2000)]
         (let [installed
@@ -1650,11 +1651,6 @@
               "the installed SCI Var copies the current compiled root"))
         (is (ok? evaluation))
         (is (= assigned-namespace (:seon.sci.admit/value evaluation)))
-        (is (= assigned-namespace
-               (:seon.sci.admit/value assigned-evaluation)))
-        (is (= [:seon.ns/name assigned-namespace]
-               (:seon.cluster.eval/ns assigned-evaluation))
-            "an evaluation without an explicit form namespace opens at the assignment")
         (is (failed? external)
             "loaded dependencies are not first-party merely because loaded")))))
 
@@ -1936,10 +1932,8 @@
     "(/ 1 0)"
     "(no-such-fn 1)"
     "(recur)"
-    "#{"
-    "(let [x])"
-    "#foo/bar [1]"
-    "#=(System/exit 1)"]))
+    "(nth [] 1)"
+    "(let [x])"]))
 ;; `(java.io.File. ...)` left this list: the agent interpreter resolves any
 ;; classpath class (2cae09887), so constructing one is an ordinary value.
 

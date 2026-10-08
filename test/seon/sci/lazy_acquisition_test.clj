@@ -31,7 +31,9 @@
          (is (= (db/committed-value-identity database)
                 (db/committed-value-identity (:seon.db/db acquired))))
          (evaluation/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)})
-         (is (identical? acquired @(::kernel/program-snapshot ctx)))
+         ;; the same program advances to the supplied database value; nothing is derived again
+         (is (identical? (:seon.sci.eval/acquisition acquired)
+                         (:seon.sci.eval/acquisition @(::kernel/program-snapshot ctx))))
          (is (identical? environment @(:env ctx))))
        (support/seed-cluster! connection "lazy-acquisition")
        (let [changed (db/db connection)

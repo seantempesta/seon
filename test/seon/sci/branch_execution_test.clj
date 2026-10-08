@@ -29,14 +29,12 @@
     result))
 
 (defn- declare!
-  "The evaluator's analyzed entity goes through the turn's declaration writer."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection :symbol :string] :seon.program/row]}
-  [ctx connection namespace-name source]
-  (let [result (evaluate! ctx connection namespace-name source)
-        entity (:seon.program/row result)]
-    (when-not entity (throw (ex-info "No declaration was produced." result)))
-    (support/transacted! connection
-      (#'turn/row-tx (db/db connection) {} entity))
+  "Transact one analyzed agent declaration through the turn's declaration writer."
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol :string] :seon.program/row]}
+  [connection function-symbol source]
+  (let [entity (support/program-fn-entity (db/db connection) function-symbol source
+                                          {:seon.schema.admission/source :agent})]
+    (support/transacted! connection (#'turn/row-tx (db/db connection) {} entity))
     entity))
 
 (defn- on-branch
@@ -113,7 +111,7 @@
            (fn [b]
              (let [a-ctx (eval/fork-cluster-ctx live (db/db a) a)
                    b-ctx (eval/fork-cluster-ctx live (db/db b) b)
-                   _ (declare! a-ctx a 'seon.sci.eval-test edited)
+                   _ (declare! a 'seon.sci.eval-test/cut? edited)
                    acquisition (measured #(eval/acquire!
                                            {:seon.sci.eval/ctx a-ctx :seon.db/db (db/db a)}))
                    _ (eval/acquire! {:seon.sci.eval/ctx b-ctx :seon.db/db (db/db b)})
@@ -147,7 +145,7 @@
                           :a-direct a-direct :a-indirect a-indirect :b-calls b-calls
                           :interpreted-count (:seon.sci.eval/interpreted-count (:value acquisition))
                           :function-count (count (db/q '[:find [?s ...] :where [_ :seon.fn/sym ?s]] captured))}))
-               (let [host-entity (declare! a-ctx a 'seon.env
+               (let [host-entity (declare! a 'seon.env/->Environment
                                 "(defn ^{:malli/schema [:=> [:cat :map] :map]} ->Environment [members] members)")
                      refused (eval/install-row! {:seon.sci.eval/ctx a-ctx
                                                  :seon.db/db (db/db a)
@@ -533,9 +531,9 @@
              ;; reaches class-value.
              callers '[seon.render.web/derive-page seon.cluster.boot/request!
                        seon.cluster/arm-agents!]
-             ;; The indexer marks handler and serve! host-bound: unchanged
-             ;; host-bound callers install a root that refuses by name when
-             ;; called (be96a64ba), never an SCI definition.
+             ;; The indexer marks handler and serve! host-bound: a branch never
+             ;; changes the platform, so unchanged host-bound callers keep
+             ;; their compiled roots and are never an SCI definition.
              host-bound-callers '[seon.render.web/handler seon.cluster/serve!]
              load-states (fn [syms]
                            (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
@@ -545,8 +543,8 @@
              "the changed helper's closure reaches each caller")
          (is (= (zipmap callers (repeat :interpreted)) (load-states callers))
              "each caller is an SCI definition, analyzed against its private def, referred defonce and dependency alias")
-         (is (= (zipmap host-bound-callers (repeat :unavailable)) (load-states host-bound-callers)))
-         (is (= 'seon.render.web/handler (:seon.sci.eval/refused-function (refusal-of ctx 'seon.render.web/handler))))
+         (is (= (zipmap host-bound-callers (repeat :jvm)) (load-states host-bound-callers)))
+         (is (nil? (refusal-of ctx 'seon.render.web/handler)) "a compiled root refuses nothing by name")
          ;; A caller expanding a JVM macro that reads &env (async/go-loop in a
          ;; loaded test namespace) still refuses: the host-bound classification
          ;; gap recorded in the affected-callers issue, not an unbound name.

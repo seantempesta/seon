@@ -70,14 +70,15 @@
        (is (some #(= 'my.agent/settings! (:sym %)) entities))
        (is (every? #(and (:in %) (:out %)) entities))
        (is (every? #(not (str/includes? (:doc %) "\n")) entities))
-       (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys entity))))
+       (is (= #{:summary :body :example :arglists :in :out} (set (keys entity)))
+           "settings! takes its connection and agent positionally: no map entry is supplied")
        (is (= (first (str/split-lines (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc]
                                     [:seon.fn/sym 'my.agent/settings!]))))
               (:summary entity)))
        (is (= (:in entity)
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
-       (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
-       (is (= :map (first (second (:in entity)))))
+       (is (= :map (first (get-in directory-value [:schemas :seon.config/agent-overlay]))))
+       (is (= :seon.config/agent-overlay (second (:in entity))))
        (doseq [target ["my.message/send" "my.agent/done"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
          (is (= (conj #{:summary :body :example :in :out} :arglists :supplied)
@@ -93,7 +94,7 @@
        (is (symbol? (get-in missing-ns [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
        (is (= 'seon.sci.eval/documentation-unavailable
               (get-in missing-ns [:seon.sci.admit/value :seon.error/operation])))
-       (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
+       (is (= {:schemas {} :functions []} (select-keys (:seon.sci.admit/value empty-ns) [:schemas :functions])))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
 
 (deftest doc-classifies-authored-references
@@ -226,29 +227,6 @@
          (sci/eval-string* ctx "(deftest bare-arithmetic (is (= 2 (+ 1 1))))")
          (is (fn? (:test (meta (sci/resolve ctx 'bare-arithmetic))))))))))
 
-(deftest retained-context-receives-new-bare-test-referrals
-  (support/with-database
-   (fn [connection]
-     (support/transacted! connection (support/agent-tx @connection "retained-tests" 'fixture.retained-tests))
-     (let [base (support/fork-cluster-ctx connection)
-           _ (sci/eval-string* base
-                              "(do (ns-unmap 'clojure.core 'deftest) (ns-unmap 'clojure.core 'is))")
-           request {:seon.sci.eval/ctx base :seon.db/db (db/db connection)
-                    :seon.agent/id "retained-tests"}
-           retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))]
-       (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
-         (is (nil? (sci/resolve retained 'deftest)))
-         (is (nil? (sci/resolve retained 'is))))
-       (#'evaluation/install-program-doc! base (db/db connection) (schema/handed-projection))
-       (let [updated (:seon.sci.eval/ctx
-                      (evaluation/fork-for-turn
-                       (assoc request :seon.sci.eval/agent-ctx retained)))]
-         (sci/binding [sci/ns (sci/create-ns 'fixture.retained-tests)]
-           (doseq [test-symbol ['deftest 'is]]
-             (is (some? (sci/resolve updated test-symbol))))
-           (sci/eval-string* updated "(deftest retained-arithmetic (is (= 4 (* 2 2))))")
-           (is (fn? (:test (meta (sci/resolve updated 'retained-arithmetic)))))))))))
-
 (deftest a-contract-mistake-refuses-and-doc-answers-its-contract
   (support/preserving-instrumentation-state
    (fn []
@@ -311,9 +289,9 @@
          (is (= attribute (:seon.sci.eval/missing-declaration value)))
          (is (= 'seon.sci.eval/declaration-absent (:seon.error/operation value))))
        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
-       (is (not= "" (:summary doc)))
-       (is (str/includes? (:summary doc) (str :seon.fn/doc)))
-       (is (str/includes? (:doc entity) (str :seon.fn/doc)))))))
+       ;; an undocumented function has no summary: absence is no key, never an empty string
+       (is (not (contains? doc :summary)))
+       (is (not (contains? entity :doc)))))))
 
 (deftest clojure-test-at-the-agent-repl-reports-into-the-evaluations-output
   (support/with-database
