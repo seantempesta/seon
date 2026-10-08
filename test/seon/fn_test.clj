@@ -3215,3 +3215,17 @@
           (is (= #{'doc} (locals (:namespace explicit))))
           (is (not (contains? (get-in explicit [:runtime 'sample.refers :seon.fn/synthetic-refers]) 'doc)))
           (is (str/includes? (:seon.ns/source (:namespace explicit)) "doc")))))))
+
+(deftest runtime-analysis-batch-spans-address-each-form-in-the-analyzed-source
+  (test-support/with-database
+    (fn [connection]
+      (let [forms ["(defn a [] 1)" "(defn b\n  []\n  2)" "(defn c [] 3)"]
+            requests (map-indexed (fn [i form] {:namespace-name (if (< i 2) 'sample.spans 'sample.spans-other)
+                                                :form-source form
+                                                :seon.fn/namespace-row {:seon.ns/name 'sample.spans}})
+                                  forms)
+            {:seon.fn/keys [source source-spans]} (#'seon.fn/runtime-analysis-batch @connection (vec requests))
+            lines (str/split source #"\n" -1)]
+        (is (= forms
+               (mapv (fn [[from to]] (str/join "\n" (subvec lines (dec from) to))) source-spans))
+            "each span covers exactly its form's lines")))))

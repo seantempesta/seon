@@ -979,9 +979,9 @@
         ;; One namespace form per run of consecutive requests in one
         ;; namespace: a later form then sees the aliases an earlier form of
         ;; the batch required, as SCI evaluates them.
-        {:keys [source spans namespaces]}
+        {:keys [chunks spans namespaces]}
         (reduce
-         (fn [{:keys [source spans] :as state} group]
+         (fn [state group]
            (let [{namespace-name :namespace-name
                   supplied-namespace :seon.fn/namespace-row} (first group)
                  namespace-entity
@@ -1004,21 +1004,23 @@
                                            (fnil into []) interpreter-refers)
                                    referenced))
                  authored (into #{} (map :seon.ns.refer/local) (:seon.ns/refers namespace-entity))]
-             (reduce (fn [{:keys [source spans] :as state} {form-source :form-source}]
-                       (let [first-source-row (inc (count (filter #{\newline} source)))]
-                         (assoc state
-                                :source (str source form-source "\n")
-                                :spans (conj spans [first-source-row
-                                                    (+ first-source-row
-                                                       (count (filter #{\newline} form-source)))]))))
+             (reduce (fn [{:keys [lines] :as state} {form-source :form-source}]
+                       (let [form-lines (count (filter #{\newline} form-source))]
+                         (-> state
+                             (update :chunks conj form-source "\n")
+                             (assoc :lines (+ lines form-lines 1))
+                             (update :spans conj [(inc lines) (+ (inc lines) form-lines)]))))
                      (-> state
-                         (update :source str namespace-source "\n")
+                         (update :chunks conj namespace-source "\n")
+                         (update :lines + (count (filter #{\newline} namespace-source)) 1)
                          (update :namespaces update namespace-name
                                  #(or % {:seon.ns/source (print/form-text (runtime-namespace-form namespace-name namespace-entity referenced))
                                          :seon.fn/synthetic-refers (into #{} (comp (map :seon.ns.refer/local) (remove authored)) interpreter-refers)})))
                      group)))
-         {:source (if (seq prelude) (str prelude "\n") "") :spans [] :namespaces {}}
+         (let [opening (if (seq prelude) (str prelude "\n") "")]
+           {:chunks [opening] :lines (count (filter #{\newline} opening)) :spans [] :namespaces {}})
          (partition-by :namespace-name requests))
+        source (apply str chunks)
         ;; the expansions each form's evaluation observed, placed at that
         ;; form's first row: a generated definition is analyzed at its call
         hooks (reduce (fn [acc [request [first-row _]]]
