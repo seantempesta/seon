@@ -1,6 +1,6 @@
 (ns seon.config-test
   "Acceptance proofs for the one manifest compiler and config apply."
-  (:require [malli.core] [clojure.edn :as edn]
+  (:require [malli.core] [malli.registry] [clojure.edn :as edn]
             [datahike.api]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -15,6 +15,7 @@
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.internal :as internal]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent TimeUnit]))
 
@@ -530,6 +531,47 @@
        (is (= (:seon.config/default (malli.core/properties (schema/structural-schema declared)))
               (get effective dial)))
        (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
+
+(deftest a-row-written-before-any-required-dial-existed-reads-its-shipped-decision
+  ;; Class regression (dial-adopt, 2026-10-08): heap-max-bytes and check-slots
+  ;; were added as required dials whose decision lives only in the shipped
+  ;; document, and every agent branch forked earlier answered every eval request
+  ;; "requires a matching cluster entity with every required dial". Each
+  ;; required dial, removed from an applied row as a branch written before it
+  ;; would lack it, reads its shipped decision; a missing row names the dials.
+  (test-support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "older-branch"
+                     :seon.config/manifest {:seon.config.eval/time-limit-ms 4321}})
+     (let [database (db/db connection)
+           row (db/pull database '[*] [:seon.config/cluster "older-branch"])
+           projection (schema/declaration-projection (schema.edn/packaged-forms))
+           required (internal/map-required-attrs
+                     (malli.registry/schema (:seon.schema.projection/registry projection) :seon.config/effective))
+           older (:db-after (datahike.api/with
+                             database
+                             (vec (for [dial required :when (some? (get row dial))
+                                        :when (not= dial :seon.config.eval/time-limit-ms)
+                                        ;; a cardinality-many dial retracts each value
+                                        value (let [held (get row dial)] (if (coll? held) held [held]))]
+                                    [:db/retract [:seon.config/cluster "older-branch"] dial value]))))
+           effective (config/effective older "older-branch")]
+       (is (contains? (set required) :seon.config.operator/heap-max-bytes))
+       (is (= :seon.config.operator/heap-max-bytes
+              (some #{:seon.config.operator/heap-max-bytes}
+                    (keys (db/pull database '[*] [:seon.config/cluster "older-branch"]))))
+           "the applied row holds the dial")
+       (is (nil? (:seon.config.operator/heap-max-bytes
+                  (db/pull older '[*] [:seon.config/cluster "older-branch"])))
+           "the older row genuinely lacks it")
+       (is (nil? (:seon.error/type effective)))
+       (is (= (select-keys config/defaults (disj (set required) :seon.config.eval/time-limit-ms))
+              (select-keys effective (disj (set required) :seon.config.eval/time-limit-ms))))
+       (is (= 4321 (:seon.config.eval/time-limit-ms effective)) "a held decision still reads as held")
+       (let [absent-row (config/effective database "no-such-cluster")]
+         (is (= :seon.config/error (:seon.error/type absent-row)))
+         (is (= "no-such-cluster" (:seon.config/missing-effective absent-row))
+             "a missing row is named as data"))))))
 
 (deftest zero-overlay-compilation-resolves-every-registered-config-attribute
   (let [compiled (config/compile-manifest {:seon.boot/cluster-name "default"})

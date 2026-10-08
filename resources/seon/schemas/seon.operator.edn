@@ -28,6 +28,7 @@
                  [:seon.config/manifest
                   {:optional true}
                   :seon.config/manifest]
+                 [:seon.config/path {:optional true} :seon.config/path]
                  [:seon.operator/force? {:optional true} :boolean]
                  [:seon.operator/verbose? {:optional true} :boolean]
                  [:seon.operator/development-cluster

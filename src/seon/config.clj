@@ -923,12 +923,15 @@
   declares (a branch-local dial included) and every dial this JVM declares
   ([[declared-projection]], whose `:seon.config/effective` contract the answer
   is checked against). A required dial the row lacks because an older program
-  wrote it takes its declared default by schema name: a dial added later
-  requires nothing of rows written before it (accretion). Boot's applied row
+  wrote it takes its shipped decision ([[defaults]]), whether the schema or
+  the shipped document declares it: a dial added later requires nothing of
+  rows written before it (accretion), so an agent branch forked before the
+  dial existed reads it at its first read. Boot's applied row
   holds the dials the checkout added before the branch adopts their
   declarations (`apply-compiled!` installs the attribute), so they are read
-  from the row, never from the default. A required dial with no declared
-  default still refuses."
+  from the row, never from the default. A missing row refuses, naming the
+  cluster in `:seon.config/missing-effective`; a required dial no decision
+  covers is named in `:seon.error/offending`."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
     [:or :seon.config/effective :seon.config/error
@@ -953,7 +956,11 @@
       entity
       (let [required (required-dial-attributes declared)
             config-effective
-            (merge (select-keys (registration-defaults declared) required)
+            ;; A required dial the row lacks was never decided for it: it
+            ;; reads the shipped decision, what `apply!` writes for an
+            ;; undecided dial, so a dial added after the row was written
+            ;; exists at its first read on every branch.
+            (merge (select-keys defaults required)
                    (select-keys entity (into (dial-attributes declared) (dial-attributes projection))))
             missing (vec (sort (set/difference required (set (keys config-effective)))))]
         (if (and entity (empty? missing))
@@ -966,10 +973,12 @@
             (if (:seon.db/invalid-read available)
               available
             (seon.error.refusal/error :seon.config/error
+             (cond->
              {:seon.error/layer :seon.config/read
               :seon.error/operation 'seon.config/effective-in
               :seon.config/error-key :seon.config/cluster
               :seon.error/expected-key :seon.config/effective
               :seon.config/missing-effective cluster-name
               :seon.error/message "Effective configuration requires a matching cluster entity with every required dial."
-              :seon.error/data {::missing missing ::available (vec (sort available))}}))))))))
+              :seon.error/data {::missing missing ::available (vec (sort available))}}
+              (seq missing) (assoc :seon.error/offending missing))))))))))

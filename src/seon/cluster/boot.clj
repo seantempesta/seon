@@ -746,8 +746,8 @@
                    :seon.operator/process-exit? (empty? @running-instances)})
         :config-apply
         (let [result (config/apply! {:seon.db/connection (connection (or name "default"))
-                                    :seon.boot/cluster-name (or name "default")
-                                    :seon.config/manifest (:seon.config/manifest request)})]
+                                    :seon.boot/cluster-name (or name "default")}
+                                   (:seon.config/path request))]
           (if (:seon.error/at result) result
               {:seon.boot/cluster-name (or name "default") :seon.reconcile/result result}))
         ;; Will a candidate program boot? Its publication and this cluster's

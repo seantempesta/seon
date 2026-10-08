@@ -230,6 +230,9 @@
                                      [(:seon.error/message value)
                                       (get-in value [:data :seon.error/message])
                                       (:cause value)]))
+                             ;; io-prepl answers an exception as its printed
+                             ;; `ex-str`: that text is the cause.
+                             (when (string? value) value)
                              "PREPL evaluation failed.")
                           (cond-> event
                             (nil? cause) (assoc :val value)
@@ -1824,7 +1827,11 @@
                                 (fail! "Use config apply [NAME] PATH." request))
                   manifest (edn/read-string (slurp path))]
               (when-not (map? manifest) (fail! "Manifest must be an EDN map." request))
-              (assoc request :seon.boot/cluster-name (valid-name name) :seon.config/manifest manifest))
+              ;; The JVM reads the document itself (`seon.config/apply!`'s path
+              ;; arity): the shipped document applies as itself, its smart and
+              ;; initialization decisions included, which no manifest admits.
+              (assoc request :seon.boot/cluster-name (valid-name name)
+                     :seon.config/path (.getCanonicalPath (io/file path))))
             :check (let [stray (first (filter #(and (seq (:seon.operator/tests request))
                                                     (not (.exists (io/file %)))
                                                     (not-any? (fn [extension] (str/ends-with? % extension))
