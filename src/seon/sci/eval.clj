@@ -3691,6 +3691,7 @@
     output-prefix :seon.sci.eval/output-prefix
     printed :seon.sci.eval/printed
     namespace-name :seon.sci.eval/namespace-name
+    ending-namespace :seon.sci.eval/ending-namespace
     print-options :seon.print/options
     record :seon.sci.admit/record
     value :seon.sci.admit/value
@@ -3698,7 +3699,7 @@
     :as request}]
   (cond-> (cond-> {:seon.print/options print-options
                    :seon.cluster.eval/ns [:seon.ns/name namespace-name]
-                   :seon.sci.eval/ending-ns namespace-name
+                   :seon.sci.eval/ending-ns (or ending-namespace namespace-name)
                    :seon.cluster.eval/error (failure-text value)
                    :seon.sci.admit/record record}
             (contains? admitted :seon.sci.admit/value)
@@ -4114,6 +4115,7 @@
                     :seon.sci.admit/caps caps
                     :seon.sci.eval/printed printed
                     :seon.sci.eval/namespace-name namespace-name
+                    :seon.sci.eval/ending-namespace @ending-namespace
                     :seon.print/options @print-options
                     :seon.sci.admit/record record
                     :seon.sci.admit/value value}
@@ -4174,9 +4176,10 @@
                                 (evaluate!
                                  (assoc execution-ctx :main-thread-id
                                         (.getId (Thread/currentThread)))))]
-                    (vreset! ending-namespace (sci/ns-name @sci/ns))
                     value)
                   (finally
+                    ;; kept after a throw too: `in-ns` before it stands, as in SCI
+                    (vreset! ending-namespace (sci/ns-name @sci/ns))
                     ;; `set!` mutates SCI's current dynamic print binding.
                     ;; Capture it while that binding is still installed;
                     ;; after `sci/binding` unwinds only the host/default face
