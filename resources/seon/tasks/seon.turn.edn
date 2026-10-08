@@ -237,4 +237,8 @@
              :kind :function
              :intent "When the automatic test step throws a non-refusal (a NullPointerException inside seon.test/changes while lane test-step worked, 2026-10-09), seon.turn/test-step answers only {:seon.error/message \"The automatic test step threw; the pass's values stand.\" :seon.error/exception-class \"java.lang.NullPointerException\"}: no cause chain, no throw site, so the agent and root cannot tell which owner failed without a debug build. A deliberate translation keeps the cause. Done when the step's error carries the cause chain (`:seon.error/chain`) of the thrown exception and a reply test asserts it names the throwing function."
              :must-read #{seon.turn/test-step seon.error.refusal/diagnostic}}
-]
+ #:seon.task{:name "the-turn-loop-stops-on-prose-and-runs-past-green"
+             :kind :function
+             :intent "Bench E0-E1 (65 deepseek-flash runs, cap 6, default d384bb0c4, 2026-10-09): 97 of 322 model calls came after the run's proofs were green and 26 of 45 green runs hit the cap, because `seon.turn/continuing-reply?` continues while each reply evaluates a form, though `seon.bootstrap/help-value` says green proofs finish the task; agents invent a stop (run bench-defaults-area-is-contracted-typed-a9752a-2 sent `:seon.context/complete` five times after going green on call 1). The other way, 9 of 65 runs ended unfinished after 1-3 calls because one reply evaluated no form (forms written as ;; comments, or the single word \"Assess\") and nothing woke them again. Done when all-green proofs end the run and a no-form reply is answered with its diagnostic in the next call instead of ending the work."
+             :must-read #{seon.turn/continuing-reply? seon.bootstrap/help-value}
+             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]

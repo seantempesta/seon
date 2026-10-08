@@ -236,4 +236,9 @@
  #:seon.task{:name "uninstalled-attribute-candidates-are-alphabetical"
              :kind :function
              :intent "The \"uninstalled attribute\" error's ::registered-candidates lists the first attributes alphabetically (datahike.budget/*), not the names nearest the requested one, so a model cannot act on it. Done when seon.db/registered-attribute-candidates returns the nearest names by edit distance (Malli's public edit distance after FK-MALLI), with a regression on a near-miss attribute."
-             :must-read #{seon.db/transact!}}]
+             :must-read #{seon.db/transact!}}
+ #:seon.task{:name "a-deftest-after-a-same-request-refer-is-refused-by-digest"
+             :kind :function
+             :intent "Bench run bench-defaults-slug-has-a-passing-test-prose-35d2a9-2 (2026-10-09), namespace comp.text-test on an agent branch: one eval request evaluated (require '[clojure.test :refer [deftest is]]) and then (deftest slug-lowercases (is (= \"hello-world\" (ct/slug \"Hello World\"))) (is (= \"foo-bar-baz\" (ct/slug \"  Foo   Bar Baz  \")))); the deftest was answered \"The stored definition digest of [:seon.test/sym comp.text-test/slug-lowercases] is not the one its definition produces\", so its proof never saw a declaration although the test ran 2 passes at the REPL. Unlike `seon.db/a-cross-pass-alias-retarget-leaves-dependant-digests-stale`, the refer was added, not retargeted. Done when a reproduction of this request on a branch admits the deftest, or refuses its form with the resolver cause as data."
+             :must-read #{seon.db/prepared-write}
+             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]

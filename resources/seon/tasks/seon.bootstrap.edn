@@ -33,4 +33,9 @@
              :must-read #{seon.bootstrap/help-value my.program/write-branch!}} #:seon.task{:name "the-help-reply-is-not-data"
              :kind :function
              :intent "(help) answered #:seon.repl{.. :value You are an agent ..}: its AI render joined the help lines into one string, spliced raw into :value, so the reply did not read as EDN (context corpus row 1, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when the render returns the lines as data and the (help) reply reads as one form whose value is the help lines."
-             :must-read #{seon.bootstrap/render-help-ai seon.context/model-context}}]
+             :must-read #{seon.bootstrap/render-help-ai seon.context/model-context}}
+ #:seon.task{:name "help-teaches-no-schema-registration"
+             :kind :function
+             :intent "Given the prose task \"Register the schema :comp.order/qty as a positive integer\", bench agents (E1 T2 prose, 1 of 5 green, 2026-10-09) searched `dir seon.schema` (about a hundred entries), unrelated docs and regex filters over ns-publics; bench-defaults-quantity-schema-then-function-prose-76167b-4 found `seon.schema/register!` on its sixth and last call. The help names no schema registration form, while the typed wording, which names it, went 4 of 5 green. Done when the help teaches the installed registration form in one line and a prose schema task finds it from the help alone."
+             :must-read #{seon.bootstrap/help-value seon.schema/register!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]

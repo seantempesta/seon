@@ -41,4 +41,9 @@
  #:seon.task{:name "a-contract-with-an-fn-ifn-cannot-arm-on-a-sci-branch"
              :kind :function
              :intent "A contract containing [:fn clojure.core/ifn?] cannot arm on a SCI branch (\"No reader function for tag object\"): how the spec is stored and read back (my-program-reads lane, 67b4d420b). Done when a stored spec with a registered named predicate arms on a branch and the failing form is a regression."
-             :must-read #{seon.schema/register!}}]
+             :must-read #{seon.schema/register!}}
+ #:seon.task{:name "a-refusal-of-a-database-argument-cannot-be-built"
+             :kind :function
+             :intent "In JVM mode on default (2026-10-09), (seon.db/transact! (seon.db/db (seon.cluster.boot/connection \"default\")) [{:seon.ns/sym 'scratch.bench/none}]) answers \"seon.db/transact! :malli.core/invalid-input: the refusal could not be built: class datahike.datom.Datom cannot be cast to class java.util.Map$Entry\": the input refusal walks the database value passed where a connection belongs as a map. A bench agent hit it the same way. Done when that call answers the ordinary argument-0 refusal naming the expected connection schema."
+             :must-read #{seon.instrument/compiled-wrapper}
+             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]
