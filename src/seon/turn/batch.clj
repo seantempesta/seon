@@ -223,14 +223,32 @@
                           (assoc w :seon.batch/call-span (into (relative [l c]) (relative [el ec]))))))
           writes)))
 
+(defn- stored-namespace-row
+  "The namespace fact a form's transaction leaves stored for `namespace-name`:
+  SCI's live bindings when the form changed its resolver state (`changed`) or
+  `db` holds no row for it, else the row `db` holds (`namespace-facts` writes a
+  stored namespace only when its resolver state changed). The writer digests a
+  definition under this row, so its producer must too."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:set :symbol] :symbol] :map]}
+  [ctx db changed namespace-name]
+  (or (when-not (contains? changed namespace-name)
+        (when (dbu/entid db [:seon.ns/name namespace-name])
+          (db/pull db [:seon.ns/name :seon.ns/requires
+                       {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
+                       {:seon.ns/refers [:seon.ns.refer/local :seon.ns.refer/target-ns :seon.ns.refer/target-name]}
+                       {:seon.ns/imports [:seon.ns.import/local :seon.ns.import/target-class]}]
+                   [:seon.ns/name namespace-name])))
+      (namespace-entity ctx namespace-name)))
+
 (defn- analyze-form
   "One clj-kondo analysis of `source` in `namespace-name`, every Var the batch has
-  bound declared, with its entities."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :symbol :string [:vector :qualified-symbol]
+  bound declared, with its entities; `namespace-row` names the namespace fact
+  each namespace resolves through (`stored-namespace-row`)."
+  {:malli/schema [:=> [:cat [:=> [:cat :symbol] :map] :seon.db/database-value :symbol :string [:vector :qualified-symbol]
                        [:vector :seon.batch/write]] :map]}
-  [ctx db namespace-name source declared expansions]
+  [namespace-row db namespace-name source declared expansions]
   (let [req (cond-> {:namespace-name namespace-name :form-source source
-                     :seon.fn/namespace-row (namespace-entity ctx namespace-name)
+                     :seon.fn/namespace-row (namespace-row namespace-name)
                      :seon.fn/declared declared}
               ;; the evaluation's observed expansions: the analyzer's hooks
               ;; (analyzer-expansion-hooks patch) analyze a generated definition at its call
@@ -241,8 +259,8 @@
 (defn- write-entity
   "The program row of one joined definition write, or the reason it has none.
   Its contract facts read `projection`, the one the write was armed under."
-  {:malli/schema [:=> [:cat :map :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
-  [ctx db projection entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
+  {:malli/schema [:=> [:cat [:=> [:cat :symbol] :map] :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
+  [namespace-row db projection entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
   (let [coords (entry-coords analysis entry)
         first-row (:first-row coords)
         source (:seon.batch/source entry)
@@ -254,7 +272,7 @@
                    (captured-locals source [(inc (- r first-row)) c (inc (- er first-row)) ec]))
         row (when (and d (empty? captured))
               (if (:seon.batch/other-namespace j)
-                (first (vals (:entities (analyze-form ctx db (symbol (namespace sym)) (definition-source analysis d) declared []))))
+                (first (vals (:entities (analyze-form namespace-row db (symbol (namespace sym)) (definition-source analysis d) declared []))))
                 (get entities [0 (local-offset source first-row [r c]) (name sym)])))
         contract (:malli/schema (meta v))]
     (cond
@@ -271,7 +289,7 @@
       ;; the schema usage guard and arity checks read them
       row {:seon.batch/row (if (and contract (fn? @v))
                              (sfn/contract-facts-row projection
-                                                     (namespace-entity ctx (symbol (namespace sym)))
+                                                     (namespace-row (symbol (namespace sym)))
                                                      (assoc row :seon.fn/spec (pr-str contract)))
                              row)}
       :else {:seon.batch/private (-> j (dissoc :seon.batch/definition) (assoc :seon.batch/sym sym))})))
@@ -322,15 +340,17 @@
                                                 (= :root (:seon.batch/kind w)))
                                          (assoc m (:seon.batch/var w) w) m))
                              {} writes))
+        namespaces (into #{} (comp (filter #(= :namespace (:seon.batch/op %))) (map :seon.batch/ns)) writes)
+        namespace-row (partial stored-namespace-row ctx working namespaces)
         analyzed (when (and (seq finals) (:seon.batch/source entry))
-                   (analyze-form ctx working (:seon.batch/ns-before entry) (:seon.batch/source entry) declared
+                   (analyze-form namespace-row working (:seon.batch/ns-before entry) (:seon.batch/source entry) declared
                                  (form-relative-expansions entry writes)))
         ;; the projection each write was armed under (`seon.sci.arm/arm!`):
         ;; it holds a schema this form registered before the batch applies it
         projection (when analyzed (arm/arming-projection request working))
         by-var (into {} (map (fn [w] [(:seon.batch/var w)
                                       (if analyzed
-                                        (write-entity ctx working projection entry analyzed w declared)
+                                        (write-entity namespace-row working projection entry analyzed w declared)
                                         {:seon.batch/private {:seon.batch/sym (:seon.batch/sym w)
                                                               :seon.batch/join :unanalyzed
                                                               :seon.batch/reason :no-source}})]))
@@ -357,7 +377,6 @@
                                              (assoc n [:removed-ns])))
                             m))
                         {} writes)
-        namespaces (into #{} (comp (filter #(= :namespace (:seon.batch/op %))) (map :seon.batch/ns)) writes)
         removed-ns (into #{} (keep (fn [[k [tag]]] (when (= :removed-ns tag) k))) program)
         entities (vec (keep (fn [[_ [tag x]]] (when (= :entity tag) x)) program))
         schema-keys (changed-schema-keys request working)

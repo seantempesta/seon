@@ -63,4 +63,9 @@
              :kind :function
              :intent "On an agent's own branch (default, MCP SCI, agent plan-review-opus-probe, 2026-10-08): (defn pa [x] x) (defn pb [x] (pa x)) then (ns-unmap *ns* 'pa), in the same pass or a later one, answers nil with no diagnostic, yet [`:seon.fn/sym` scratch.prv/pa] stays stored and the next pass resolves #'scratch.prv/pa again: the unmap is undone. Cause: removal-facts returns my.program's deletion refusal when referrers survive, the pass keeps the rest of the facts, and acquisition reinstalls the stored row. The P1 commit (ded5e35de) says the write observer already stores the final state; true only with no surviving referrer. Correct (owner REPL law, repl-plan P8): store the final state (pa retracted, pb kept with its calls edge) and deliver one finding naming pb beside the value; integrity is judged at merge (merge.md M5). Proof: a seon.repl-differential test row asserting pa absent from the store and the finding present after the pass."
              :must-read #{seon.turn.batch/removal-facts seon.turn.batch/form-facts}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/plan-review-opus-plan-review.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/plan-review-opus-plan-review.md"}}
+ #:seon.task{:name "a-repl-deftest-in-a-file-backed-test-namespace-is-refused"
+             :kind :function
+             :intent "Every `deftest` an agent evaluated in a file-backed test namespace (`my.program-test`, `seon.id-test`) was refused by `seon.db`'s write-digest check: the batch digested the row under SCI's live namespace bindings, which lack the namespace's stored refers (`clojure.test/deftest`, `is`), while the writer digests under the row the transaction leaves stored. Done when the producer digests under that row (`seon.turn.batch/stored-namespace-row`). Proof: `seon.turn.batch-test/a-deftest-in-a-namespace-with-stored-refers-is-admitted`."
+             :must-read #{seon.turn.batch/derive-form seon.db/definition-digest-of}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}]

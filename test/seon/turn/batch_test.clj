@@ -49,3 +49,26 @@
          (is (= (dissoc before :seon.ns/source :seon.program/definition-digest)
                 (dissoc after :seon.ns/aliases :seon.ns/requires :seon.ns/source :seon.program/definition-digest))
              "a require changes only the require attributes"))))))
+
+(deftest ^{:seon/tasks #{'seon.turn.batch/a-repl-deftest-in-a-file-backed-test-namespace-is-refused}}
+  a-deftest-in-a-namespace-with-stored-refers-is-admitted
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (is (= {} (select-keys (db/transact! connection
+                                          [{:seon.ns/name 'merge-m8.test-fixture
+                                            :seon.ns/refers #{{:seon.ns.refer/local 'deftest
+                                                               :seon.ns.refer/target-ns 'clojure.test
+                                                               :seon.ns.refer/target-name 'deftest}
+                                                              {:seon.ns.refer/local 'is
+                                                               :seon.ns.refer/target-ns 'clojure.test
+                                                               :seon.ns.refer/target-name 'is}}}])
+                            [:seon.error/message :seon.error/problems])))
+     (eval! "(in-ns 'merge-m8.test-fixture) (deftest merge-m8-probe-test (is (= 1 1)))" agent-id running)
+     (is (some? (:seon.test/sym (db/pull (db/db connection) [:seon.test/sym]
+                                         [:seon.test/sym 'merge-m8.test-fixture/merge-m8-probe-test])))
+         "the deftest is admitted to the program under the namespace's stored refers")
+     (is (= #{'deftest 'is}
+            (into #{} (map :seon.ns.refer/local)
+                  (:seon.ns/refers (db/pull (db/db connection) [{:seon.ns/refers [:seon.ns.refer/local]}]
+                                            [:seon.ns/name 'merge-m8.test-fixture]))))
+         "the namespace keeps its refers"))))
