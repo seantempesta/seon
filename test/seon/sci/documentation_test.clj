@@ -356,7 +356,9 @@
                                             [:seon.fn/sym 'my.agent/settings!]))
            qualified (run "(clojure.repl/source my.agent/settings!)")
            aliased (run "(do (require '[my.agent :as agent]) (clojure.repl/source agent/settings!))")
+           library (run "(clojure.repl/source clojure.string/join)")
            missing (run "(clojure.repl/source fixture.missing/nothing)")]
+       (is (str/includes? (:seon.cluster.eval/output library) "(defn ^String join"))
        (is (string? stored))
        (is (= (str stored "\n") (:seon.cluster.eval/output qualified)))
        (is (= (str stored "\n") (:seon.cluster.eval/output aliased)))

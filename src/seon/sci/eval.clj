@@ -101,6 +101,7 @@
             [datahike.api :as d]
             [edamame.core :as edamame]
             [clojure.java.io :as io]
+            [clojure.repl :as repl]
             [clojure.string :as str]
             [clojure.walk :as walk]
             [clojure.test]
@@ -2178,12 +2179,15 @@
 (defn- stored-source-fn
   "`clojure.repl/source-fn` for the evaluating context: SCI's `source` macro
   calls it (`reference-code/sci/src/sci/impl/namespaces.cljc:2436`); the
-  symbol resolves in the calling SCI namespace and the stored row answers."
+  symbol resolves in the calling SCI namespace; the stored row answers, else
+  the host's loaded Var reads its pinned file from the classpath."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [requested]
   (let [resolved (sci/resolve (sci.ctx-store/get-ctx) requested)
-        {var-ns :ns var-name :name} (meta resolved)]
-    (stored-source (db/db) (if resolved (symbol (str var-ns) (str var-name)) requested))))
+        {var-ns :ns var-name :name} (meta resolved)
+        qualified (if resolved (symbol (str var-ns) (str var-name)) requested)]
+    (or (stored-source (db/db) qualified)
+        (when (namespace qualified) (repl/source-fn qualified)))))
 
 (defn- install-program-doc!
   "Install REPL macros without capturing program facts or a database value."
