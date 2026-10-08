@@ -47,6 +47,15 @@ world's throwaway-branch commit included, counted by distinct commit ids (CC-1 f
 31 vs 86 and 16% fewer prompt tokens; a weak preference, a dial per agent). Proofs and reaching tests run as one test request (CC Q2: one admission and one completion instead
 of two each).
 
+5. **Should "tests reaching a change" decide green reuse (reach-reverse option 3)?** Today a recorded green is reused when
+   the test's forward-closure digest is unchanged (`reach-digests`, which costs 178 ms / 322 MB right after a defn). The
+   alternative: a recorded member is current when no name changed since its recorded commit reaches it (a reverse walk), so
+   digests are computed only for tests that run. Faster, but it changes what green reuse means across branches. Root is
+   doing the safe options first (cheap datom checks, then advancing cached reach by the change).
+6. **Two reach relations disagree.** Test selection (`seon.fn/gate-sets`) stops at direct callers (60 tests for
+   `seon.id/hex`); reach digests use the full transitive closure (2,327). Deliberate today; should selection and reuse share
+   one relation?
+
 ## Pending ledger edits
 
 - From lane agent-entity: R-8 is answered by AE-5 and R-9 by AE-1 to AE-3. §6 question 2 is answered. New §3.31 holds AE-1 to AE-7. In §5, "R-9's row" becomes AE-1 to AE-3. Applied in `08a2aa871`.
@@ -166,3 +175,7 @@ of two each).
   W-24; CO-5's forward closure walk measured 4× worse. The real owner is `seon.test.runner/tests-reaching` rebuilding the whole
   program reach graph per change (task `d21ac7dd1`). Root chose the reverse walk from changed names (lane reach-reverse). The
   check's other large cost is arming every contract per test world (677 MB): a separate card.
+- **Reverse walk proven equal but not adopted** (lane reach-reverse, no commit): it gives today's answer, but the cost the
+  expensive cases pay is in `reach-digests` (178 ms / 322 MB after a defn, 115 ms of it the armed `seon.db/datoms` output contract
+  checking every datom of 11 whole-attribute reads). Root reversed its own earlier pick and chose cheap datom checks first
+  (lane datom-check, P2), then advancing cached reach by the change (P1).
