@@ -461,7 +461,7 @@ first experiment (E1, task wording: prose against typed, T1-T4 × 5) needs only 
 | BENCH-1 (C4 grade half) | A run's grade from the database | `seon.competency/grade [database agent-id task]`: green, proof counts, model calls and calls to green, forms, agent and platform errors, no-form calls, repeated forms, tokens, wall time | `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | `seon.competency-grade-test/a-fixture-model-run-grades-green` | T: reads the agent's call rows, evaluations and its proofs' member rows; warm 5 ms | C1 | K | landed `bb89f96c8` |
 | BENCH-2 (C2) | Core tasks in two wordings | T1's typed twin; T2-T4 as `…-prose` and `…-typed` sharing one proof each; setups; oracles red to green; typed references resolve in the block · card: [README-bench](cards/README-bench.md) | `resources/seon/tasks/seon.competency.edn`, `test/seon/competency_test.clj`, `test/seon/competency_oracle_test.clj` | `seon.competency-oracle-test/t2-goes-red-to-green`, `…/t3-…`, `…/t4-…` | T: oracles run without a provider | C1 | K | ready |
 | C3 | Tasks five to eight | T5-T8 in both wordings (T7 is the reference-depth task for E3) | same as BENCH-2 | `…/t5-…` to `t8-…` | T: oracles run without a provider | BENCH-2 | K | ready |
-| BENCH-3 (C4 table half, C7) | Launch one run, and the table | `seon.competency/launch! {task variant n}` (fresh agent per run, variant dials and provider through the agent's own settings until RESPEC R-9, assign at the home, one outside message, wait, grade, retire the branch); `seon.competency/table`; `grade` gains the variant · card: [README-bench](cards/README-bench.md) | `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | `seon.competency-grade-test/a-launch-grades-each-run` | T: fixture provider; grading reads stored facts only | BENCH-1 | K | ready |
+| BENCH-3 (C4 table half, C7) | Launch one run, and the table | `seon.competency/launch! {task variant n}` (fresh agent per run, variant dials and provider through the agent's own settings until AE-2 lands R-9, assign at the home, one outside message, wait, grade, retire the branch); `seon.competency/table`; `grade` gains the variant · card: [README-bench](cards/README-bench.md) | `test/seon/competency.clj`, `test/seon/competency_grade_test.clj` | `seon.competency-grade-test/a-launch-grades-each-run` | T: fixture provider; grading reads stored facts only | BENCH-1 | K | ready |
 | BENCH-4 (C8 smoke) | The first experiments: E0 baseline, E1 task wording | Root runs E0 (T1 typed × 5) and E1 (T1-T4 × {prose, typed} × 5) on DeepSeek flash and commits the table with run ids, HEAD and dials | `docs/research/agent-platform/<date>/competency/bench-E1.md` | the committed table | paid: under US$0.10, deliberate | BENCH-2, BENCH-3 | K | ready after its deps (root: before or after C0, spec §5) |
 | BENCH-6 | Reference depth is a dial | `:seon.config.context/references` `:summary` (default) · `:names` · `:source` read by `seon.context/current-state` into `seon.ref/references` | `resources/seon/schemas/seon.config.context.edn`, `config/default.edn`, `src/seon/context.clj`, `src/seon/ref.clj`, `test/seon/context_test.clj` | `seon.context-test/each-reference-depth-shows-its-fields` | L | none | D | ready |
 | BENCH-7 | Block placement is a dial | `:seon.config.context/block-at` `:last` (default) · `:first` | `seon.config.context.edn`, `src/seon/context.clj` (with CX-12: `src/seon/ai.clj`), test | `seon.context-test/the-block-sits-where-its-dial-says` | L | BENCH-6 (schema file) | D | ready |
@@ -957,6 +957,28 @@ saw the inherited test green in the step but red at the agent's REPL, so SCI-2's
 | SCI-3 | Delete the copy-induced re-analysis and the test-world interim | delete `stale-reach`, `reinterpret-reach!`, `reinterpret-inherited-callers!`, `inherited?`, the pre-copy in `install-selected!`, the `arm!` arm, and `167e89b0d`'s interim in `seon.test/clean-request-handle`; LR-STALE3 (its reverse-closure walk) goes with them. Sonnet · card: [SCI-3](cards/SCI-3.md) | `src/seon/sci/eval.clj`, `src/seon/sci/arm.clj`, `src/seon/test.clj`, `resources/seon/tasks/seon.sci.eval.edn` | the card's four `seon.repl-differential-test`/`seon.sci.eval-test` rows plus an effect counter of 1 | D: zero calls on the deleted path; a redefinition re-evaluates no caller source | SCI-2 | C | ready after SCI-2 |
 | SCI-4 | Dense per-context Var slots | a lineage slot per Var and an object array of bindings per context, so a forked-written Var reads in ~1 ns instead of +10-15 ns. Astra, dual review · card: [SCI-4](cards/SCI-4.md) | `reference-code/sci` (fork), gitlink | the fork's `sci.vars-bench` and suite | expected ~1 ns per read of a written Var | SCI-3; profiles showing the per-context read path (owner: correct now, fast later) | C | waits on a profile |
 
+### 3.31 The agent entity (AE; design and order: [README-agent-entity](cards/README-agent-entity.md), cards `cards/AE-*.md`)
+
+Owner (2026-10-08): "an agent has their own entity and the task should be ref'ed there. Everything about the agent
+should live there." One rule: addressed to the agent, written at the task home; done by the agent, written on its
+branch; the writer refuses the wrong side. Answers RESPEC R-8 and R-9; amends RT-1, RT-3, RT-6 and RT-13. Root
+default, owner to review: assignments as components of the agent (Q-AE1), a grant-anchored cap (Q-AE2), the design
+kept as the ref `design/agent-entity` (Q-AE3), messages at the home (Q-AE4).
+
+| Id | Title | Change | Files | Proof | Budget | Deps | Group | Status |
+|---|---|---|---|---|---|---|---|---|
+| AE-1 | `seon.agent/record`: the one read of an agent | `seon.agent/home` (moved from `seon.task/home`) and `seon.agent/record [database agent-id]`: one pull at the home with a selector derived from the agent schema (settings component, today's assignments); unknown agent answers `:seon.agent/no-such-agent`. Sonnet · card: [AE-1](cards/AE-1.md) | `src/seon/agent.clj`, `src/seon/task.clj`, `resources/seon/schemas/seon.agent.edn`, `test/my/agent_test.clj` | `my.agent-test/a-branch-agent-reads-its-record-at-the-home` (new) | expected one pull, about 1 ms | none | B | ready |
+| AE-2 | Settings written and read at the home; the writer refuses the wrong side | `seon.agent/settings!` writes at the home from any branch; every settings read goes through the record; `:seon.agent/written-at` `:home`/`:branch` on each agent attribute, refused as `:seon.agent/written-at-refusal`. Fixes R-9. Opus · card: [AE-2](cards/AE-2.md) | `src/seon/agent.clj`, `src/seon/ai.clj`, `src/seon/turn.clj`, `src/seon/bootstrap.clj`, `src/seon/db.clj`, `resources/seon/schemas/seon.agent.edn` | `my.agent-test/root-settings-reach-an-agent-on-its-branch` (new; tagged `my.agent/settings-root-writes-on-main-never-reach-an-agent-on-its-branch`) | expected one home transaction per write, as before | AE-1 | B | ready after AE-1 |
+| AE-3 | Every reader of agent facts calls the record once per eval request | the record travels in the world as `:seon.agent/record`; delete the seven hand-written home lookups, `seon.task/agent-task` and `seon.task/home`. Sonnet · card: [AE-3](cards/AE-3.md) | `src/seon/context.clj`, `src/seon/render/ns.clj`, `src/seon/turn.clj`, `src/seon/turn/world.clj`, `src/my/task.clj`, `src/my/program.clj`, `src/seon/cluster/status.clj`, `src/seon/task.clj` | `seon.turn-work-cost-test/an-eval-request-reads-the-agent-record-once` (new, measured) | expected one record read in place of three to five lookups | AE-1, AE-2 | B | ready after AE-2 |
+| AE-4 | Assignments are components of the agent and ref their task (RESET POINT) | `:seon.agent/assignments` (component, many, `:home`); `:seon.task/task` ref; `:seon.task/agent` and `:seon.task/assigned` deleted; the component edge wakes the entity (`:seon.wake/listen :entity`). Replaces RT-1's schema change; amends RT-3, RT-6. Opus · card: [AE-4](cards/AE-4.md) | `resources/seon/schemas/seon.agent.edn`, `resources/seon/schemas/seon.task.edn`, `resources/seon/schemas/seon.wake.edn`, `src/seon/task.clj`, `src/seon/cluster/wake.clj` | `seon.turn-work-test/an-assignment-is-a-wake`, `seon.task-ingestion-test/an-agent-holds-several-assignments-oldest-first` | expected assignment write unchanged; one more `:eavt` seek per entity-side wake attribute | AE-3 | E | ready after AE-3 (reset: dump assignments and settings first) |
+| AE-5 | The call cap is anchored on the assignment's grant | `assign-tx` mints `:seon.task/grant`; each call row records it; `:seon.agent/calls-left` = cap minus call rows on the grant; delete `outside-wake-t`, `spent-runs`. Answers R-8; amends RT-13, S6-05. Opus · card: [AE-5](cards/AE-5.md) | `resources/seon/schemas/seon.task.edn`, `src/seon/task.clj`, `src/seon/turn.clj`, `src/seon/agent.clj` | `seon.turn-work-test/the-call-cap-counts-calls-on-the-grant` (renamed from the outside-wake test), `seon.turn-work-test/a-capped-task-resumes-when-reassigned`, `seon.turn-work-test/a-message-from-root-does-not-refill-the-cap` | expected one `:avet` count; removes the O(wakes) walk | AE-4, CX-13 | B | ready after AE-4 and CX-13 |
+| AE-6 | Messages to an agent are written at the home | `seon.cluster.message/send!` targets the home, not the recipient's branch; `:seon.message/to` is `:home`; inbox and `unanswered-wakes` read the home. Opus · card: [AE-6](cards/AE-6.md) | `src/seon/cluster/message.clj`, `src/seon/turn.clj` | `my.message-test/a-message-to-a-branch-agent-is-read-at-the-home` (new) | expected one home transaction, as before | AE-4 | B | ready after AE-4 |
+| AE-7 | The answered basis is a stored home `t` on the agent | the model eval request's one recording transaction writes `:seon.agent/answered-t` (`:branch`); `unanswered-wakes` seeks the home's listened datoms after it. Implements agent-loop.md §3.5. Opus · card: [AE-7](cards/AE-7.md) | `src/seon/turn.clj`, `src/seon/agent.clj`, `resources/seon/schemas/seon.agent.edn` | `seon.turn-work-test/answeredness-is-the-turns-own-transaction` (rewritten to the stored basis) | expected one datom per model eval request; wake derivation O(wakes after the basis) | AE-4, AE-6 | B | ready after AE-4 and AE-6 |
+
+Order: AE-1 → AE-2 → AE-3 need nothing unlanded and fix the live R-9 defect; AE-4 is the reset point (launch RT-2 after
+it, or RT-2 first and AE-4 converts it); AE-5 follows AE-4 and CX-13; AE-6 and AE-7 follow AE-4 and change the wake
+path.
+
 ## 4. Retired and merged ids
 
 | Old id | Now |
@@ -1046,7 +1068,7 @@ in the step but red at the agent's REPL (SCI-2, SCI-3).
 1. **Run 3's blockers, then run 4 (now).** The assignment is read at the task home (a1-home) and the system message is
    the rendered help (b2-help), in flight; then the stub-Var task, then arm once in the base → delete the copy-induced
    re-analysis (SCI-2 → SCI-3, which also retires LR-STALE3 and unblocks the acquisition reds); the settings route
-   after its respec. Then one live run on the same task shape, `:transcript` and `:chat` side by side once CX-12
+   as AE-1 → AE-2 → AE-3 (R-9). Then one live run on the same task shape, `:transcript` and `:chat` side by side once CX-12
    lands.
 2. **Tasks finish without a merge** (after RESPEC R-2): a task whose proofs are green is done, its assignment
    retracted in the recording transaction (Q-RT1); answers are data on the assignment (A1 as amended by RT-6) → a
@@ -1104,8 +1126,8 @@ in the step but red at the agent's REPL (SCI-2, SCI-3).
   → GV-5 → F5's merge half → RT-9; LR-ASSIGNWRITER and LR-OWNTASK fold into RT-2.
 
 **The same path by row id.**
-1. a1-home, b2-help (in flight); the stub-Var task (`seon.turn.batch`); SCI-2 → SCI-3; R-9's row after its respec.
-2. (R-2) completion slice; A1 + RT-6 → F6 → RT-5; F7a → F7b → F7c; RT-1, RT-2 → RT-4 → RT-3.
+1. a1-home, b2-help (in flight); the stub-Var task (`seon.turn.batch`); SCI-2 → SCI-3; AE-1 → AE-2 → AE-3 (R-9, §3.31).
+2. (R-2) completion slice; A1 + RT-6 → F6 → RT-5; F7a → F7b → F7c; AE-4 (reset; replaces RT-1's schema change), RT-2 → RT-4 → RT-3; then AE-6 → AE-7 (wake path).
 3. F12; F11; F4d (R-6); CS-01d; LR-PROOFREAD; LR-PROOFSTATUS; CO-0 → CO-1 → CO-2 → CO-3; CO-4 (W-24 re-measured) →
    CO-5; CO-6; CO-7 → CO-8; CO-9 → CO-10; CO-11 (restart batch); CO-12.
 4. RED-8; RED-2 (after SCI-3); RED-4; RED-5 (high); RED-6; RED-7.
@@ -1114,7 +1136,7 @@ in the step but red at the agent's REPL (SCI-2, SCI-3).
 6. (R-2, R-3) MA-3 → MA-14a → F5 (merge half) → RT-9; RT-7 → RT-8; RT-13.
 7. MA-5a → MA-5b; MA-6 → MA-7 → MA-11 + RT-10 → MA-14b; MA-15; MA-12 + RT-11; RT-14; MA-16a's owner rows; NK-8a →
    NK-8b (reset); then MA-8a → MA-8b → MA-8c → MA-9 (before X1-X4).
-8. CX-4; CX-12 → CS-03c; CX-13; CX-5; S4-05a → CS-04; CX-11 after TX-0; R-7's row.
+8. CX-4; CX-12 → CS-03c; CX-13 → AE-5 (answers R-8; amends RT-13); CX-5; S4-05a → CS-04; CX-11 after TX-0; R-7's row.
 9. (R-1) TX-0 → the re-derived RP, EN, TX, S5, S6 order (today's cards: `cards/README-recording.md`); (R-4) TX-3 →
    RT-12; then CN-7, CN-11, CN-20, CN-21. **Reset.**
 10. C0.
@@ -1155,9 +1177,13 @@ and dual review, owner approval where it changes a ruling) answering the questio
   states the choice.
 - **R-8 The call cap after CX-2 (S6-05, RT-13, W-4).** agent-loop.md §3.5 counts model calls against the outside
   wake; with an assignment as the only thing that opens a model turn, is the cap's anchor the assignment, and does
-  `episode-runs`/`turns-left` (W-4) become a count of call rows since it?
+  `episode-runs`/`turns-left` (W-4) become a count of call rows since it? **Answered (2026-10-08, AE-5):** the cap
+  is the count of call rows carrying the current assignment's grant; only a new assignment (RT-13's re-assignment)
+  mints a new grant and refills it; `outside-wake-t` and `spent-runs` are deleted.
 - **R-9 Where an agent's settings live (runs 2 and 3; task `my.agent` "root's settings for an agent never reach its
-  branch").** Read at the home like assignments, or written on the branch? No row exists yet.
+  branch").** Read at the home like assignments, or written on the branch? **Answered (2026-10-08, AE-1 to AE-3):** agent
+  facts are written and read at the task home through `seon.agent/record`, and the writer refuses a fact on the
+  wrong side (`:seon.agent/written-at`).
 
 Off the path but scheduled: Clojure's words, validated state and vectors (none is needed for the smoke run; each row
 lands only after the rows that rewrite its files, so most land late): AT-1, AT-2, AT-3 (after SR-H),
@@ -1179,8 +1205,11 @@ patterns' Q1-Q2, a nested `defn` saved from its own span (RP-9), a code task wit
 1. **Re-approve the recording design after the rip?** RESPEC R-1 (§5) re-derives the RP, EN and TX cards from the
    post-rip code. Recommended: root re-derives and the owner re-approves only if a row's behavior changes, not for
    rows that merely became smaller or moot.
-2. **Where an agent's settings live** (RESPEC R-9): read at the home like assignments (recommended: one place root
-   writes, the branch agent reads it like its assignment), or written on each branch.
+2. **Where an agent's settings live** (RESPEC R-9). Answered by the owner (2026-10-08): "an agent has their own
+   entity and the task should be ref'ed there. Everything about the agent should live there." Design and rows:
+   [README-agent-entity](cards/README-agent-entity.md), §3.31. Root took the four AE questions' recommended options
+   on the owner's behalf (assignments as components of the agent, a grant-anchored cap, messages at the home, the
+   design kept as the ref `design/agent-entity`): root default, owner to review.
 3. **Neighborhood reads for rendering** (AU-Q15, `cards/README-audits.md`), now askable because CX-10 landed: compile
    one Datahike pull selector from the schema links (recommended), plain pull selectors as the contract, or keep ours
    for distance and continuation only. AU-Q17 waits on UL-1d.
