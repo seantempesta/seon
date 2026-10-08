@@ -2134,155 +2134,161 @@
          vec)))
 
 (defn contract-findings
-  "Rank incomplete function contracts by their number of current callers.
+  "Incomplete function contracts ranked by their number of current callers:
+  every function row, private included, or only `:seon.fn.contract/selected`.
 
   The existing schema-admission checker owns permissive-position
   classification. This query adds graph-only evidence that admission cannot
   supply: missing specs, current caller counts, and registered attributes the
-  Datahike bridge cannot store. Every function row participates, private
-  included."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.fn.contract/report :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
-  [database]
-  (let [function-symbols (db/q '[:find [?symbol ...]
-                                 :where
-                                 [_ :seon.fn/sym ?symbol]]
-                               database)
-        specs (db/q '[:find ?symbol ?spec
-                      :where
-                      [?function :seon.fn/sym ?symbol]
-                      [?function :seon.fn/spec ?spec]]
-                    database)
-        caller-counts (db/q '[:find ?target (count ?caller)
-                              :where
-                              [?caller :seon.fn/sym]
-                              [?caller :seon.fn/calls ?target]]
-                            database)
-        projection (or (db/carried-projection database)
-                       (schema/projection-from-database database))]
-    (or
-     (when (db/read-refusal? function-symbols) function-symbols)
-     (when (db/read-refusal? specs) specs)
-     (when (db/read-refusal? caller-counts) caller-counts)
-     (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
-           ;; A compiled slot carries the callables its predicates were bound to
-           ;; (`schema/compilable-form`); a finding records the AUTHORED form, so
-           ;; each bound callable reads back as the symbol it was bound from.
-           predicate-names (into {} (map (fn [[predicate callable]] [callable predicate]))
-                                 (schema/predicate-functions-in projection))
-           authored (fn [form]
-                      (walk/postwalk
-                       (fn [value]
-                         (cond (var? value) (symbol value)
-                               (and (fn? value) (contains? predicate-names value)) (get predicate-names value)
-                               :else value))
-                       form))
-           specs (into {} specs)
-           caller-counts (into {} caller-counts)
-           structural-findings
-           (fn [slot]
-             (schema.internal/fold-walk
-              slot
-              (fn [node _path]
-                (cond
-                  (and (= :map (m/type node)) (empty? (m/children node)))
-                  [[:seon.fn.contract.finding/bare-map (m/form node)]]
-                  (= :maybe (m/type node))
-                  [[:seon.fn.contract.finding/maybe (m/form node)]]
-                  :else []))
-              {}))
-           permissive-findings
-           (fn [slot guarded?]
-             (into []
-                   (comp
-                    (remove :seon.schema/justified?)
-                    (keep
-                     (fn [{kind :seon.schema.finding/type
-                           form :seon.schema/definition}]
-                       (let [finding
-                             (case kind
-                               :seon.schema.finding/any
-                               :seon.fn.contract.finding/any
-                               :seon.schema.finding/some
-                               :seon.fn.contract.finding/some
-                               :seon.schema.finding/bare-value
-                               :seon.fn.contract.finding/bare-value
-                               :seon.schema.finding/value-tail
-                               :seon.fn.contract.finding/bare-value
-                               :seon.schema.finding/unguarded-tail
-                               (when-not guarded?
-                                 :seon.fn.contract.finding/unguarded-variadic)
-                               nil)]
-                         (when finding [finding form])))))
-                   (schema.internal/permissive-positions
-                    {:seon.schema/compiled slot})))
-           slot-findings
-           (fn [slot position guarded?]
-             (let [permissive (permissive-findings slot guarded?)
-                   structural (structural-findings slot)
-                   unguarded
-                   (when (and (not guarded?)
-                              (#{:* :+ :repeat} (m/type slot))
-                              (not-any? #(= :seon.fn.contract.finding/unguarded-variadic
-                                            (first %))
-                                        permissive))
-                     [[:seon.fn.contract.finding/unguarded-variadic (m/form slot)]])
-                   unstorable
-                   (schema.internal/fold-walk
-                    slot
-                    (fn [node _path]
-                      (let [reference (when (m/-ref-schema? node) (m/-ref node))]
-                        (if (and (stored-attributes reference)
-                                 (not (schema.datahike/storable-attribute-in? projection reference)))
-                          [[:seon.fn.contract.finding/unstorable-attribute reference]]
-                          [])))
-                    {})]
-               (mapv (fn [[finding form]]
-                       {:seon.fn.contract/position position
-                        :seon.fn.contract/form (authored form)
-                        :seon.fn.contract/finding finding})
-                     (concat permissive structural unguarded unstorable))))
-           arity-findings
-           (fn [contract]
-             (into []
-                   (mapcat
-                    (fn [arity]
-                      (let [{:keys [input output guard]} (m/-function-info arity)
-                            guarded? (some? guard)
-                            slots (if (= :catn (m/type input))
-                                    (mapv peek (m/children input))
-                                    (m/children input))]
-                        (concat
-                         (mapcat (fn [index slot]
-                                   (slot-findings slot [:seon.fn.contract.position/input index] guarded?))
-                                 (range) slots)
-                         (slot-findings output :seon.fn.contract.position/output guarded?)))))
-                   (m/-function-schema-arities contract)))]
-       (->> function-symbols
-            (mapcat
-             (fn [function-symbol]
-               (let [caller-count (long (get caller-counts function-symbol 0))
-                     spec-string (get specs function-symbol)
-                     findings
-                     (if spec-string
-                       (arity-findings (mr/schema (:seon.schema.projection/registry projection) function-symbol))
-                       [{:seon.fn.contract/position
-                         :seon.fn.contract.position/contract
-                         :seon.fn.contract/form :seon.fn.contract/missing
-                         :seon.fn.contract/finding
-                         :seon.fn.contract.finding/missing-spec}])]
-                 (map #(assoc %
-                              :seon.fn/sym function-symbol
-                              :seon.fn.contract/caller-count caller-count)
-                      findings))))
-            distinct
-            (sort-by (juxt (comp - :seon.fn.contract/caller-count)
-                           :seon.fn/sym
-                           :seon.fn.contract/position
-                           :seon.fn.contract/finding
-                           :seon.fn.contract/form)
-                     print/compare-values)
-            vec)))))
+  Datahike bridge cannot store."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value]
+                   [:or :seon.fn.contract/report :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]]
+                  [:=> [:cat :seon.db/database-value [:map [:seon.fn.contract/selected {:optional true} [:set :seon.fn/sym]]]]
+                   [:or :seon.fn.contract/report :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]]]}
+  ([database]
+   (contract-findings database {}))
+  ([database {selected :seon.fn.contract/selected}]
+   (let [;; `selected` binds the symbol collection, so each read is proportional to it.
+         [in-clause inputs] (if selected
+                              [[:in '$ '[?symbol ...]] [(vec selected)]]
+                              [[] []])
+         function-symbols (apply db/q (into (into [:find '[?symbol ...]] in-clause)
+                                            '[:where [_ :seon.fn/sym ?symbol]])
+                                 database inputs)
+         specs (apply db/q (into (into [:find '?symbol '?spec] in-clause)
+                                 '[:where [?function :seon.fn/sym ?symbol]
+                                   [?function :seon.fn/spec ?spec]])
+                      database inputs)
+         caller-counts (apply db/q (into (into [:find '?symbol '(count ?caller)] in-clause)
+                                         '[:where [?caller :seon.fn/sym]
+                                           [?caller :seon.fn/calls ?symbol]])
+                              database inputs)
+         projection (or (db/carried-projection database)
+                        (schema/projection-from-database database))]
+     (or
+      (when (db/read-refusal? function-symbols) function-symbols)
+      (when (db/read-refusal? specs) specs)
+      (when (db/read-refusal? caller-counts) caller-counts)
+      (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
+            ;; A compiled slot carries the callables its predicates were bound to
+            ;; (`schema/compilable-form`); a finding records the AUTHORED form, so
+            ;; each bound callable reads back as the symbol it was bound from.
+            predicate-names (into {} (map (fn [[predicate callable]] [callable predicate]))
+                                  (schema/predicate-functions-in projection))
+            authored (fn [form]
+                       (walk/postwalk
+                        (fn [value]
+                          (cond (var? value) (symbol value)
+                                (and (fn? value) (contains? predicate-names value)) (get predicate-names value)
+                                :else value))
+                        form))
+            specs (into {} specs)
+            caller-counts (into {} caller-counts)
+            structural-findings
+            (fn [slot]
+              (schema.internal/fold-walk
+               slot
+               (fn [node _path]
+                 (cond
+                   (and (= :map (m/type node)) (empty? (m/children node)))
+                   [[:seon.fn.contract.finding/bare-map (m/form node)]]
+                   (= :maybe (m/type node))
+                   [[:seon.fn.contract.finding/maybe (m/form node)]]
+                   :else []))
+               {}))
+            permissive-findings
+            (fn [slot guarded?]
+              (into []
+                    (comp
+                     (remove :seon.schema/justified?)
+                     (keep
+                      (fn [{kind :seon.schema.finding/type
+                            form :seon.schema/definition}]
+                        (let [finding
+                              (case kind
+                                :seon.schema.finding/any
+                                :seon.fn.contract.finding/any
+                                :seon.schema.finding/some
+                                :seon.fn.contract.finding/some
+                                :seon.schema.finding/bare-value
+                                :seon.fn.contract.finding/bare-value
+                                :seon.schema.finding/value-tail
+                                :seon.fn.contract.finding/bare-value
+                                :seon.schema.finding/unguarded-tail
+                                (when-not guarded?
+                                  :seon.fn.contract.finding/unguarded-variadic)
+                                nil)]
+                          (when finding [finding form])))))
+                    (schema.internal/permissive-positions
+                     {:seon.schema/compiled slot})))
+            slot-findings
+            (fn [slot position guarded?]
+              (let [permissive (permissive-findings slot guarded?)
+                    structural (structural-findings slot)
+                    unguarded
+                    (when (and (not guarded?)
+                               (#{:* :+ :repeat} (m/type slot))
+                               (not-any? #(= :seon.fn.contract.finding/unguarded-variadic
+                                             (first %))
+                                         permissive))
+                      [[:seon.fn.contract.finding/unguarded-variadic (m/form slot)]])
+                    unstorable
+                    (schema.internal/fold-walk
+                     slot
+                     (fn [node _path]
+                       (let [reference (when (m/-ref-schema? node) (m/-ref node))]
+                         (if (and (stored-attributes reference)
+                                  (not (schema.datahike/storable-attribute-in? projection reference)))
+                           [[:seon.fn.contract.finding/unstorable-attribute reference]]
+                           [])))
+                     {})]
+                (mapv (fn [[finding form]]
+                        {:seon.fn.contract/position position
+                         :seon.fn.contract/form (authored form)
+                         :seon.fn.contract/finding finding})
+                      (concat permissive structural unguarded unstorable))))
+            arity-findings
+            (fn [contract]
+              (into []
+                    (mapcat
+                     (fn [arity]
+                       (let [{:keys [input output guard]} (m/-function-info arity)
+                             guarded? (some? guard)
+                             slots (if (= :catn (m/type input))
+                                     (mapv peek (m/children input))
+                                     (m/children input))]
+                         (concat
+                          (mapcat (fn [index slot]
+                                    (slot-findings slot [:seon.fn.contract.position/input index] guarded?))
+                                  (range) slots)
+                          (slot-findings output :seon.fn.contract.position/output guarded?)))))
+                    (m/-function-schema-arities contract)))]
+        (->> function-symbols
+             (mapcat
+              (fn [function-symbol]
+                (let [caller-count (long (get caller-counts function-symbol 0))
+                      spec-string (get specs function-symbol)
+                      findings
+                      (if spec-string
+                        (arity-findings (mr/schema (:seon.schema.projection/registry projection) function-symbol))
+                        [{:seon.fn.contract/position
+                          :seon.fn.contract.position/contract
+                          :seon.fn.contract/form :seon.fn.contract/missing
+                          :seon.fn.contract/finding
+                          :seon.fn.contract.finding/missing-spec}])]
+                  (map #(assoc %
+                               :seon.fn/sym function-symbol
+                               :seon.fn.contract/caller-count caller-count)
+                       findings))))
+             distinct
+             (sort-by (juxt (comp - :seon.fn.contract/caller-count)
+                            :seon.fn/sym
+                            :seon.fn.contract/position
+                            :seon.fn.contract/finding
+                            :seon.fn.contract/form)
+                      print/compare-values)
+             vec))))))
 
 (defn functions-using
   "Function symbols whose indexed source reads `keyword` literally.

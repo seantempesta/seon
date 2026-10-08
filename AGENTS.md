@@ -293,7 +293,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   and reaching tests. Compile touched contracts against the packaged projection; use declared schemas or registered
   named predicates, never anonymous contract functions or incomplete forms. Justify polymorphic boundaries. Every
   bug fix adds or tightens the contract at the producer of the bad value, so that class of bug is refused at its
-  source from then on; a contract is not proof of a body's error union, its regression is. Existing uncontracted code is not back-filled wholesale: much of it is headed for deletion.
+  source from then on; a contract is not proof of a body's error union, its regression is. Existing uncontracted
+  functions are back-filled as generated tasks (`seon.contracts/task`, the [contracts guide](docs/seon/architecture/contracts-guide.md)),
+  skipping those with a pending deletion task or no live use.
   A new or changed function without a complete contract: the edit hook refuses it; the REPL admits it with a
   warning beside its value that grows as the agent's uncontracted definitions accumulate; merge acceptance refuses
   a proposal that carries one.

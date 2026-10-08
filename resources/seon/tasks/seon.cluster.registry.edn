@@ -11,4 +11,9 @@
  #:seon.task{:name "a-retire-branch-error-repeats-in-every-reply"
              :kind :function
              :intent "Every eval_clj reply of agent context-refine-2 carried :errors [{:seon.error/operation seon.cluster.registry/retire-branch!, :seon.error/message \"Connection has been released.\", :seon.error.occurrence/branch :agent-4beef79d9cf9, :seon.error/signature 759d40be224b...}], a retirement of that agent's own branch (:agent-4beef79d9cf9) the agent never called, shown again in each later reply with a growing occurrence count while its evaluations succeeded (lane context-refine-2, default 795a770c2, 2026-10-08). Done when a retirement's failure is answered to whoever called retire-branch! and recorded once at its task home, never repeated in replies whose evaluations did not cause it."
-             :must-read #{seon.cluster.registry/retire-branch!}}]
+             :must-read #{seon.cluster.registry/retire-branch!}}
+ #:seon.task{:name "contract-cluster-branch"
+             :kind :function
+             :intent "Give `seon.cluster.registry/cluster-branch` a complete Malli contract that checks what its boundary is for, with the cheapest schema that checks it (`docs/seon/architecture/contracts-guide.md`): registered names, every input and output, the error variants it returns. A contract that refuses a real value (a reaching test, a live call, your probe) is a finding, not friction: if the contract misread the value's shape, fix the contract and cite the observed shape; if the producer emits a bad value, keep the contract, file a task on the producer naming `seon.cluster.registry/cluster-branch` in its must-read with the exact form, the refused value's essence and the Malli explain, and say so in your reply. Never widen to :any, [:maybe ...] or :map to go green. Done when `seon.contracts/gaps` answers [] for it and its reaching tests stay green and no slower."
+             :must-read #{seon.cluster.registry/cluster-branch seon.contracts/gaps}
+             :evidence #{"docs/seon/architecture/contracts-guide.md"}}]

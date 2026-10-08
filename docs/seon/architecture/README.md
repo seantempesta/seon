@@ -20,6 +20,7 @@ below distinguishes existing mechanisms from the cuts still requiring proof.
 | [Agent execution](agent-runtime.md) | How a retained SCI context, turn, wake, evaluation and result work together |
 | [Web UI](ui.md) | How the same facts become agent history, namespace pages and bounded delivery |
 | [Data modeling](data-modeling-guide.md) | How to choose identities, refs, components, deletion and observation facts |
+| [Function contracts](contracts-guide.md) | What a complete, cheap contract checks; contract tasks, their proof rows and findings |
 | [Dependency source](reference-code.md) | Which upstream seams supply the guarantees and how to verify their actual revision |
 
 The current specifications include [agent execution](../specs/agent-loop.md),

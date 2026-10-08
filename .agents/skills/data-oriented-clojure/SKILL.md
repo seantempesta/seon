@@ -361,8 +361,9 @@ A contract refusal or core error is not in the tool's union, so step 3 lets it p
 
 ## 4. Contracts
 
-Every function you add or change is contracted, private ones included, and instrumentation arms all of them; legacy
-uncontracted code is not back-filled wholesale. Keep each contract short, never weaker.
+Every function you add or change is contracted, private ones included, and instrumentation arms all of them; existing
+uncontracted functions are back-filled as generated tasks (`seon.contracts/task`, the
+[contracts guide](../../../docs/seon/architecture/contracts-guide.md)). Keep each contract short, never weaker.
 
 **4.1 Write the contract on one line when it fits. Use registry names and naked keys; never restate a registered
 key's schema inline.** Keep optionality, bounds, relationships and exact returning variants.
