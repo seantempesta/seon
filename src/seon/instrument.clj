@@ -412,9 +412,8 @@
                     {inside true outside false} (group-by #(some? (branch %)) problems)
                     branches (group-by branch inside)
                     held (get-in value at)
-                    ;; only a plain map or record is counted by its keys: a Datahike
-                    ;; database is a map to `map?` whose keys are datoms
-                    shared (fn [i] (if (or (record? held) (instance? clojure.lang.APersistentMap held))
+                    ;; a Datahike database is a record whose keys are datoms: never walked
+                    shared (fn [i] (if (and (map? held) (not (db/database-value? held)))
                                      (count (filter (declared-keys (nth (m/children union) i)) (keys held)))
                                      0))]
                 (if (< (count branches) 2)
