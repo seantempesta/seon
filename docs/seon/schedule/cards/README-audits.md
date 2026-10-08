@@ -270,7 +270,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | UL-3a | [UL-3a](UL-3a.md) | ready |
 | UL-3b | — | waits on root's split of eight test conversions |
 | UL-4 | — | blocked (AU-Q9) |
-| UL-5 | card next | waits on fault-data-edn (`error.clj`) |
+| UL-5 | [UL-5](UL-5.md) (UL-5a; UL-5b noted) | ready after PB-07a |
 | UL-6 | [UL-6](UL-6.md) | ready after led-cacheb releases `cluster/agent.clj` |
 | UL-7 | [UL-7](UL-7.md) | ready |
 | UL-8 | card next | waits on led-nk1, led-cacheb |
@@ -293,13 +293,13 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-AUDIT | — | after SR-G2 |
 | SR-HITS | — | after LR-CACHEb |
 | SR-BRANCH | — | after MA-15, F5, F7, MA-14b |
-| PB-07a | card next | waits on fault-data-edn (`error.clj`) |
+| PB-07a | [PB-07a](PB-07a.md) | ready |
 | PB-07b | card next | after PB-07a, led-ul2 |
 | PB-08 | — | waits on led-cacheb (Opus) |
 | PB-09 | — | after S4-01 |
 | PB-10 | — | blocked (AU-Q12) |
 | PB-11 | — | after PB-03 (Opus) |
-| PB-12 | card next | ready once carded |
+| PB-12 | [PB-12](PB-12.md) (PB-12a fork, PB-12b Seon) | ready |
 | PB-13 | — | after PB-07b |
 | PB-14 | card next | ready (diagnosis, Astra) |
 | DH-4a | card next | waits on dials-16gb (`store.clj`) |
