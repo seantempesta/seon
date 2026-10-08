@@ -151,4 +151,7 @@
              :kind :function
              :intent "seon.test/destructive-reach memoizes its walk in a clojure.core.cache LRU (threshold 4) held in the schema projection's cache value, beside seon.cache: a second cache with its own bound and no recordStats, which AGENTS.md refuses. Done when the walk is a seon.cache kind keyed by the same content key and clojure.core.cache.wrapped is no longer required by seon.test."
              :must-read #{seon.test/destructive-reach seon.cache/lookup}}
-]
+ #:seon.task{:name "a-malformed-task-tag-stops-the-whole-check"
+             :kind :function
+             :intent "A malformed `:seon/tasks` value on one deftest stopped a whole `bin/seon check` with an exception (lane h1-prose, 2026-10-09) instead of returning an error on that one test beside the others' results (AGENTS.md: nothing crashes; errors are data)."
+             :must-read #{seon.test/run}}]
