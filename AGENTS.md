@@ -308,6 +308,13 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   resolving to nothing as a problem on that var. No dates,
   measurements, history or `file:line` in source: costs are profile evidence. Known issues reference their task.
   Never author what the call graph already derives.
+- **The right context is the product.** The goal: every agent, ours included, works a task from the context Seon
+  generates at the REPL (its current-state block, then `doc`, `source` and its references, one evaluation each), and
+  that context is complete and correct. References everywhere (task intents, Markdown docs, docstrings) follow one
+  rule and go through one resolver; every tool that pulls them in must do it well. When context is missing, wrong,
+  noisy, slow or misleading (an unresolved reference, a stale line, `passed? false` with nothing run, a reply full of
+  noise), fix it at its producer if it takes about fifteen minutes, otherwise file a task on that producer with the
+  exact form and reply. Never work around bad context silently.
 - **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
   the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
   name; the task is `ns/name`), `:seon.task/intent` (what must become true, short), `:seon.task/must-read` (fully
