@@ -1,0 +1,153 @@
+;; store-writes-opus evidence, 2026-09-28 (~20:10Z). Read-only probes of default unless stated.
+{:store {:du-kb 113495184 :files 692418 :jvm-pid 38182}
+ :default-config {:branching-factor 4096 :diff-buf-size 256 :fuse-index-roots? true :keep-history? true
+                  :crypto-hash? false :commit-graph? :default-true
+                  :source "src/seon/cluster/store.clj:172-201"}
+ :default-indexes {:eavt 993824 :aevt 993824 :avet 364982
+                   :temporal-eavt 1713544 :temporal-aevt 1713544 :temporal-avet 538179
+                   :root-children {:eavt 392 :aevt 383 :avet 135 :temporal-eavt 661 :temporal-aevt 664 :temporal-avet 195}
+                   :root-level 1 :root-slots {:eavt 30 :aevt 13 :avet 11 :temporal-eavt 46 :temporal-aevt 56 :temporal-avet 27}}
+ ;; tree diff of each commit vs its parent: new node addresses, file sizes on disk, mtimes = commit instant
+ :default-last-40-commits {:span ["2026-09-28T19:49:12Z" "2026-09-28T19:59:13Z"]
+                           :commit-record-bytes-mean 372506   ; written twice: cid key (kept) + branch key (overwritten)
+                           :leaf-bytes-mean 3921765 :leaves-rewritten-mean 29.8 :datoms-mean 209
+                           :example-19-datom-commit {:record 373326 :leaves 22 :leaf-bytes 3130322
+                                                     :by-index {:eavt [3 343437] :aevt [8 1677721] :avet [5 328321]
+                                                                :temporal-eavt [2 157856] :temporal-aevt [3 538808] :temporal-avet [1 84179]}
+                                                     :leaf-entries [2521 2504 2660 3360 2107 2094 2689 2055 3843 2387 4077]}}
+ :mechanism {:diff-buf "budget is per Branch, total across slots; clean passthrough slots count against it and are never flushed (persistent-sorted-set 0.4.137 branch.cljs:900-940 mirrors Branch.store) => saturated; touched leaves flushed biggest-first"
+             :fused-roots "each commit record inlines 6 root Branches (separator datoms + addresses + slot diffs) reference-code/datahike/src/datahike/writing.cljc:148-193"
+             :head-writes "commit! writes [cid record] and [branch-key record] writing.cljc:532-536; d/branch! writes a head record too versioning.cljc:263"}
+ ;; throwaway store, Seon creation config, only :index-config varied; 18k-datom base, 16 warm + 12 measured commits of ~22 datoms
+ ;; (local workload: new entity + agent update; understates live scatter)
+ :probe-sweep [{:ic [4096 256] :disk-per-commit 121856 :files 1.4 :ms 12.5 :base-disk 3989504 :load-ms 225}
+               {:ic [4096 0] :disk-per-commit 2804394 :files 19 :ms 14.6 :base-disk 3993600 :load-ms 200}
+               {:ic [512 0] :disk-per-commit 782677 :files 37.8 :ms 21.2 :base-disk 4616192 :load-ms 222}
+               {:ic [128 0] :disk-per-commit 340309 :files 48.8 :ms 29.7 :base-disk 6520832 :load-ms 498}
+               {:ic [64 0] :disk-per-commit 367274 :files 73 :ms 39.4 :base-disk 10723328 :load-ms 1089}
+               {:ic [32 0] :disk-per-commit 408917 :files 93.6 :ms 49.7 :base-disk 20926464 :load-ms 2116}
+               {:ic [128 32] :disk-per-commit 135168 :files 18 :ms 20.1 :base-disk 6488064 :load-ms 607}
+               {:ic [64 64] :disk-per-commit 150869 :files 19.5 :ms 35.5 :base-disk 10747904 :load-ms 1842}]
+ ;; OVER BUDGET (owner limit 50 MB): throwaway stores wrote ~230 MB cumulative (base loads 68 MB + commits ~143 MB + first
+ ;; control ~20 MB), each deleted right after its run, peak ~25 MB; plus ~13 recorded eval_clj runs on default (~4 MB each, kept).
+ :probe-bytes-written-total-mb 230
+ :writes-by-mtime-utc {"19:20-19:30" [108096 17672] ; files, MB — default restart onto c537242c0
+                       "19:35-20:00" [131472 18658] ; ~750 MB/min, central rounds stopped
+                       :last-24h [497969 79186]}
+ :branches {:roster 14 :moved-24h 12}
+ ;; Fresh store after root's nuke (20:10Z boot): 554k current / 231k temporal datoms, same config.
+ :fresh-store {:boot-mb 103.0 :at-20:17:58Z-mb 111.7 :growth-mb-per-min 1.16 :near-idle-gb-per-day 1.7
+               :record-bytes-first-commits [1628 4536 72384 77284 54970 62418 64326 75785 76718 79207 88190 86663 88590 89487 89696 99390 96943]}
+ ;; Exact replay: default's 6 indexes rebuilt in memory at each setting, rewound past the last 29 real commits,
+ ;; replayed in order; each flush Fressian-serialized by a counting IStorage (nothing written). Buffer pre-saturated
+ ;; with 400 random removals per index. Calibration: 4096/256 cold replay 421 KB/commit vs 400 KB real files;
+ ;; 6 inlined roots serialize to 118,520 B vs a 115,925 B record file. disk = 4 KiB blocks of (bytes + 200).
+ :retune-replay {:small-commits {:n 26 :mean-datoms 38}
+                 :bulk-commits {:n 3 :mean-datoms 9270}
+                 :rows [{:ic [4096 256] :small-disk 973902 :bulk-disk 2781184}
+                        {:ic [4096 0] :small-disk 1328364 :bulk-disk 2745685}
+                        {:ic [1024 64] :small-disk 636455 :bulk-disk 2517674}
+                        {:ic [512 64] :small-disk 485848 :bulk-disk 2654208}
+                        {:ic [512 0] :small-disk 450087 :bulk-disk 2587306}
+                        {:ic [256 32] :small-disk 310665 :bulk-disk 2603690}
+                        {:ic [256 0] :small-disk 322796 :bulk-disk 2591402}
+                        {:ic [128 32] :small-disk 184320 :bulk-disk 3123882 :small-bytes 141102}
+                        {:ic [64 0] :cold-mean-disk 630360 :note "block rounding: 115 nodes/commit"}]
+                 ;; old store scatter (read-only rank replay of 40 commits, 209 datoms mean): distinct leaves per commit
+                 :old-store-leaves-touched {4096 37.5 1024 52.7 512 63.0 256 72.3 128 80.9 64 96.1 32 123.2}}
+ :overlay-prototype {:config "stock :tiered, :frontend-only/:frontend-first, tiny throwaway base"
+                     :base-before {:files 10 :bytes 72170} :base-after-20-member-commits {:files 10 :bytes 72170}
+                     :member-sees 220 :base-sees 200 :base-roster #{:db} :member-commit-ms 0.48
+                     :fork-seams ["no populate on connect (store.cljc:91-103 copies the whole backend)"
+                                  "private unregistered frontend (konserve memory registry by id, tiered ids must match)"
+                                  "distinct connection-id (store.cljc:43-54 is [store-id branch])"]
+                     :patch "tmp/store-writes/patches/datahike/overlay-store.patch"}
+ :knobs {:writer-commit-wait-time "writer.cljc:81-83,239,295 default 0; runtime (not creation-only); batches queued txs per commit; unmeasured"
+         :index-config "creation-only: connector.cljc:364-376 adopts the stored :index-config on reopen"
+         :fuse-index-roots "roots inline into the record, record written at cid (kept) and branch key (overwritten) writing.cljc:532-536"
+         :keep-history "temporal indexes: 3 of 6 indexes; ~40% of rewritten leaves in the old-store sample"}
+ :correction "record-exit! (test.clj:2410) only fires for bodies that outlived their bound (member-result :watched?).
+              The 5,277 member-only commits cluster in 2026-09-27 15-21h CST rounds, before 73f311e8d batched outcomes
+              (2026-09-28 10:44 CST); not re-verifiable after the nuke."
+ :default-writers-24h ;; transactions on default's own lineage by shape (stamps are new since 4207874c4)
+ [{:writer "seon.test.member only (record-exit!, src/seon/test.clj:2410-2425 -> runner.clj:1924)" :txs 5277 :datoms 50263}
+  {:writer "seon.test/failure/member/report (commit-results!)" :txs 527 :datoms 23185}
+  {:writer "seon.test.member + seon.test.run (admission)" :txs 414 :datoms 31018}
+  {:writer "seon.turn/record-evaluated-call" :txs 156 :datoms 3662}
+  {:writer "seon.test.* + seon.db.vector" :txs 67 :datoms 8025}
+  {:writer "my.plan/seon.agent/seon.config/seon.runtime" :txs 50 :datoms 500}
+  {:writer "seon.error + seon.turn" :txs 43 :datoms 2622}
+  {:writer "seon.agent" :txs 42 :datoms 84}
+  {:total-txs 6984}]}
+
+;; ---- follow-up after root landed 4d1f147a7 (128/32, retention-cutoff, 1 h window) ----
+{:fresh-128-32 {:created "2026-09-28T20:29:28Z" :base {:kb 183068 :files 28404}
+                :base-4096-256-for-comparison {:kb 111632 :files 902}
+                :small-commits {:n 36 :mean-datoms 41 :record-bytes 67298 :nodes 15 :node-bytes 130332 :disk-with-4k-blocks 230286}
+                :vs-4096-256-saturated-replay 973902}
+ :overlay {:datahike "05a02804 (seantempesta/datahike main), seon pin 29e9d597a"
+           :regression "datahike.test.overlay-test: 11 assertions, shared store bytes/files unchanged after branch + 21 commits + delete"
+           :adjacent-suites "connector-release, delete-database, api, config, versioning: 57 tests; 2 fail + 1 error identical without the change (pre-existing)"
+           :seon "a78bfc2a2 store/open-overlay!, release-store! overlay arm, registry/active-branch-connection from the store value's config"
+           :pending-patches ["patches/root/open-branch-configuration.patch (edit hook refuses open-branch! until its refuse! throws are error values; 60+ callers)"
+                             "patches/astra-fixer/test-request-overlay.patch (request branch + members through one overlay per request)"]
+           :static-proof "git archive HEAD + a78bfc2a2 + both patches: clj-kondo --cache false 0 errors"}
+ :pss-stale-slot {:patch "patches/pss/stale-slot-eviction.patch (Branch.java at 0.4.137: dirty children fit the budget alone, then settled slots evicted biggest-first)"
+                  :workload "200k elements, 300 commits x 38 changes (10 appends, 10 hot of 40, 18 scattered), EDN bytes"
+                  :before {[128 0] [103436 51.6] [128 32] [145605 36.4] [128 128] [181819 22.4] [4096 256] [124670 5.26]}
+                  :after {[128 0] [103961 51.8] [128 32] [151340 32.7] [128 128] [181240 22.3] [4096 256] [122932 5.19]}
+                  :verdict "puts -10% at 128/32, bytes +4%: not worth a fork"}}
+{:growth-128-32 {:samples [["20:32:26" 183068 28404] ["20:32:59" 184160 28491] ["20:33:32" 186992 28678] ["20:34:03" 189556 28870] ["20:34:33" 192716 29067] ["20:35:04" 193492 29126]]
+                 :rate-mb-per-min 4.0
+                 :window-20:30:30-20:34:17 {:txs 32 :per-min 8.5
+                                            :ops {seon.turn/record-evaluated-call 15 seon.turn/close-call 3 seon.cluster.host/home-call 3
+                                                  seon.turn/append-generated-call 2 seon.turn.batch/program-facts-call 2 seon.turn/plan-call 2
+                                                  seon.db/transact! 2 seon.turn/open-call 2 seon.error/commit-call 1}}
+                 :branches-moved-5min [:cluster-default :agent-0903beb16c1c :agent-78839e1c53e6 :agent-e7061e23d5d1 :current-src]
+                 :verdict "no idle writer: every commit is turn/evaluation recording by active agents (astra lane running, my own runs); a run commits open + plan + record + close separately (~4 x 230 KB)"}
+ :commit-wait-time {:probe "throwaway store, 3000-entity base, 80 one-entity txs"
+                    :rows [{:writers :sequential :wait 0 :commits 80 :disk-kb 1796 :ms-per-tx 11.6}
+                           {:writers :sequential :wait 20 :commits 80 :disk-kb 1796 :ms-per-tx 35.7}
+                           {:writers 4 :wait 0 :commits 40 :disk-kb 1668 :ms-per-tx 6.3}
+                           {:writers 4 :wait 20 :commits 20 :disk-kb 576 :ms-per-tx 9.1}]
+                    :verdict "not adopted: saves only concurrent writers, triples sequential latency (+24 ms/tx)"}}
+
+;; ---- store-bytes-opus, 2026-09-28 ~21:40Z: live attribution on default (128/32, HEAD 588897b17) ----
+;; Method: read-only walk (scratchpad attrib.clj): mark instant, then each commit reachable from a branch head
+;; with a record file newer than the mark; per index walk-addresses from the fused root, descending only into
+;; node files newer than the mark; nodes a commit shares with its in-window parent are the parent's.
+;; Residue (files neither node, record nor head): 0. One eval_clj run = one commit (window 1: 2 runs, 2 commits).
+{:live-attribution
+ {:window-2-runs {:files 93 :bytes 835371 :disk 1024000 :commits 2 :residue 0}
+  :cluster-default-commits ; datoms, distinct attrs, nodes, node bytes, node disk (4 KiB blocks), record bytes
+  [{:datoms 37 :attrs 19 :nodes 41 :node-bytes 251697 :node-disk 335872 :record 88160
+    :by-index {:eavt 5 :aevt 11 :avet 5 :temporal-eavt 3 :temporal-aevt 10 :temporal-avet 7}}
+   {:datoms 32 :attrs 22 :nodes 35 :node-bytes 261995 :node-disk 331776 :record 88160
+    :by-index {:eavt 2 :aevt 13 :avet 4 :temporal-eavt 2 :temporal-aevt 10 :temporal-avet 4}}
+   {:datoms 30 :attrs 30 :nodes 41 :node-bytes 260832 :node-disk 335872 :record 88160
+    :by-index {:eavt 5 :aevt 12 :avet 6 :temporal-eavt 3 :temporal-aevt 9 :temporal-avet 6}}
+   {:datoms 19 :attrs 19 :nodes 30 :node-bytes 179908 :node-disk 233472 :record 88160
+    :by-index {:eavt 4 :aevt 9 :avet 5 :temporal-eavt 1 :temporal-aevt 7 :temporal-avet 4}}
+   {:datoms 19 :attrs 19 :nodes 32 :node-bytes 201850 :node-disk 266240 :record 88160
+    :by-index {:eavt 4 :aevt 10 :avet 4 :temporal-eavt 2 :temporal-aevt 6 :temporal-avet 6}}]
+  :per-commit-summary {:nodes "30-41 (avg 6.3 KB each)" :aevt+temporal-aevt-share "55-65% of nodes"
+                       :temporal-share "~40% of node bytes" :block-floor-waste "~25% of node disk"
+                       :record 88160 :head-copy "88 KB rewritten per commit (bytes written, not growth)"
+                       :disk-growth "320-425 KB" :bytes-written "440-520 KB"}
+  :hypotheses {:a-4k-block-floor "partly: ~25% of node disk, not the dominant term"
+               :b-path-copy-six-indexes "yes: AEVT scatter = distinct attributes; ~40% temporal"
+               :c-record-twice "yes: 88 KB record + 88 KB head copy (written, not grown)"
+               :d-more-than-one-commit "no: one commit per eval_clj run; other commits in the window were other writers (checkpoint branch, test failures)"
+               :e-commit-wait-time "measured earlier (above): saves only concurrent writers"}
+  :lz4-on-live-files {:n 274 :raw 2677646 :lz4 1381790 :raw-disk 3211264 :lz4-disk 1990656 :records [12 1072262 454952]}
+  :lz4-block-size {:n 2000 :raw 8102092 :compressed-both 3565586
+                   :decode-ms {:4MiB 193.4 :64KiB 14.2} :encode-ms {:4MiB 136.6 :64KiB 9.6}}
+  :lz4-proof-throwaway {:script "tmp/store-writes/lz4_proof.clj" :konserve "c73cbde"
+                        :parent {:bytes 145906 :disk 197290 :files 26.3 :commit-ms 21.7 :cold-scan-ms [183 134 122] :base-disk 18558976}
+                        :lz4    {:bytes 72387 :disk 132437 :files 25.5 :commit-ms 22.7 :cold-scan-ms [160 124 132] :base-disk 14077952}
+                        :answers-equal [338 3035 88]}
+  :mixed-store-proof "store created uncompressed, reopened with seon datahike-configuration (lz4): headers {0 317, 1 273}; count 3000, as-of old value, history 5000, d/branch! sides independent, gc-storage removed 103, data intact"
+  :subtree-counts {:default {:eavt -1 :aevt -1 :avet 233196 :temporal-eavt -1 :temporal-aevt -1 :temporal-avet -1}
+                   :throwaway "tmp/store-writes/subtree_counts.clj: fresh and reopened stores have counts on all six at 128/0 and 128/32; 50 upserts at 128/0 lost AVET's"
+                   :cause "PSS 0.4.137 Branch.java: an unknown child count makes the parent -1 on mutation, serialized, never recomputed"}
+  :probe-bytes-written-mb "~100 (OVER the 50 MB budget: two 42 MB parent+lz4 throwaway pairs, mixed 5, counts ~10); every probe dir deleted"}}

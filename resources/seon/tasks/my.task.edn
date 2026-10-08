@@ -2,12 +2,12 @@
              :kind :function
              :intent "After (`my.task/claim!` {`:seon.task/assigned` \"cb07d384b078\"}) by agent e1-probe on its branch (2026-09-28), (`my.task/open`) on that branch still offers cb07d384b078: claim! writes the assignment to the task home (`seon.task/home-connection`), while open reads the branch's database, whose copy of the task has no assignment. One queue for every agent means open reads where claims are written. The same call costs 3,529 armed calls for 7 tasks (`seon.db/database-value?` 774x). Done when a claimed task leaves the queue read from the claimant's branch, with a regression."
              :must-read #{my.task/open my.task/claim! seon.task/home-connection}
-             :evidence #{"tmp/health-loop-proof/evidence.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/health-loop-proof--evidence.md"}}
  #:seon.task{:name "no-per-function-health-view-and-open-misses-over-bound-tasks"
              :kind :function
              :intent "There is no per-function health view (its tasks and faults on one function), and `my.task/open` misses over-bound function tasks. `my.task/open` also repeats fault resolution once per task that shares a signature (D30) and answers about 954 tokens. Done when one call answers a function's tasks, open faults and over-bound warnings together, `my.task/open` includes over-bound function tasks, resolves each shared fault signature once, and its token size and time are asserted."
              :must-read #{my.task/open seon.task/open-tasks}
-             :evidence #{"tmp/repl-audit/read.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--read.md"}}
  #:seon.task{:name "task-creation-is-not-an-agent-call"
              :kind :function
              :intent "my.task (the agent-facing API) exposes open, plan!, step! and done! but not task creation: `seon.task/create!` (task.clj:353) creates a runtime task from a declaration, yet (dir my.task) does not list it, so an agent cannot find how to file a finding as a task and root wrote task files by hand. Done when my.task has a thin create! (or a name grounded in the API) over `seon.task/create!` with the agent's world supplied, listed by (dir my.task), documented with an example, and a regression creates a task from an agent's evaluation."

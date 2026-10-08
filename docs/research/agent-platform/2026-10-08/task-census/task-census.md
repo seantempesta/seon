@@ -28,7 +28,7 @@ task made moot by a ruling. This census is the one-off sweep; §5 proposes the s
 
 ## 2. Counts
 
-Before: 571 tasks in 79 files. After the deletions: 544; with the four friction tasks of §6: 547 (one of them a revision of an existing task, so three new entries).
+Before: 571 tasks in 79 files. After the deletions: 544; with the friction tasks of §6: 550 (seven items: six new entries and one revised task).
 
 | Class | Count | Action |
 | --- | --- | --- |
@@ -137,13 +137,44 @@ written". Result: 7 tasks name an existing deftest (10 links). Tagged now, in fr
 remaining 438 tasks need a proof written first; `proofs.clj` prints them as `needs-proof`. A tagged existing test is
 often already green, so S6-06a's `assign!` still refuses such a task until the proof is red for the defect.
 
-**Bare names to references.** [`backtick.clj`](backtick.clj) backticks, inside `:intent` strings only, each bare token
+**Bare names to references.** [`refs.clj`](refs.clj) `backtick` backticks, inside `:intent` strings only, each bare token
 that resolves exactly to a var in `src`/`test`/`script` or a registered schema key, expanding a short alias
 (`host/host!`) only when one namespace ending in that segment defines the name; text already in backticks, file paths
 and everything unresolved stay prose. Applied: 851 references in 68 files. Left for their holders: `seon.turn.edn` (92,
-lane f4b) and `seon.config.edn` (8, lane dial-adopt); `backtick.clj --apply --files <file>` finishes each.
+lane f4b) and `seon.config.edn` (8, lane dial-adopt); `refs.clj backtick --apply <file>` finishes each.
 
-## 6. REPL friction from lane impl-hook (RF-4, `3c15a3434`)
+## 5b. The reference migration (references.md, owner-adopted at `432138ee6`)
+
+[`refs.clj`](refs.clj) runs the five steps over `resources/seon/tasks/*.edn`, rewriting only the free files
+(`seon.turn.edn`, lane f4b, and `seon.config.edn`, lane dial-adopt, are listed as held):
+
+1. `backtick`: above.
+2. `lines`: a `file.clj:N` mention is dropped where the intent already names the definition whose current span holds
+   line N (15 dropped). The other 88 stay as prose: their lines predate the current files, and mapping them blindly
+   put wrong symbols in (e.g. `flow.clj:260` now lands in `seon.flow/proc-world`, while the intent means
+   `seon.flow/in-world`). Hand work, listed by `refs.clj lines`.
+3. `tmp`: 89 `tmp/` evidence entries in free files now point at copies under [`evidence/`](evidence/) (37 files,
+   636 KB); one over 1 MB (`tmp/waste-rank/class-histogram-live.txt`, 2 MB) was dropped. 6 remain in `seon.turn.edn`.
+4. Proofs: `proofs.clj` (§5). The remaining resolvable links are in held test files; one candidate
+   (`seon.sci.reader/schema-entities-lose-their-declaring-namespace` to `seon.loop-proof-test/virtual-loop-end-to-end`)
+   was not tagged: that test is not a proof of the defect and loses its compaction step in S4-07b3.
+5. `problems`: the static ingestion check, one problem per line in [`problems.tsv`](problems.tsv): 13 must-reads
+   naming deleted vars (§2's kept list plus the held obsolete tasks), 11 evidence entries that are not paths (prose,
+   commit ids) or name missing files, 6 untracked `tmp/` paths (held file). No backticked `seon.*`/`my.*` name is
+   unresolved; library names are CS-01c2's. Not a live re-ingestion: the lane commit's check publishes and adopts
+   the task files on a disposable store (568 identities adopted), which proves they ingest.
+
+| Count | Before (`b054ad84b^`) | After |
+| --- | --- | --- |
+| Tasks | 570 | 551 (20 net removed, 7 filed; includes f4b's working `seon.turn.edn`) |
+| Must-reads resolving | 925 of 958 | 909 of 922 |
+| Backticked references (resolving) | 11 (9) | 870 (868) |
+| Bare resolvable names | 976 | 105 (92 held in `seon.turn.edn`, 8 in `seon.config.edn`, 5 in new text) |
+| `file.clj:N` mentions | 104 | 88 |
+| `tmp/` evidence | 95 | 6 (held) |
+| Tasks with a linked proof (deftest tag) | 82 | 74 (13 done tasks deleted with their tags, 4 added) |
+
+## 6. REPL friction from lanes impl-hook (RF-4, `3c15a3434`) and RF-1 (`24e8cc2df`)
 
 - `my.test/a-check-no-test-reaches-reads-as-a-failure`: new.
 - The same-pass check: `my.test/check-in-the-defining-pass-says-the-test-does-not-exist` already existed with a
@@ -154,6 +185,9 @@ lane f4b) and `seon.config.edn` (8, lane dial-adopt); `backtick.clj --apply --fi
   Filed as `seon.dev.hook/the-hook-prepends-in-ns-instead-of-passing-the-namespace`.
 - `seon.dev.hook/the-hook-sends-only-forms-with-a-var-definition`: new. UL-1c classifies definitions from clj-kondo; it
   does not decide which changed forms the hook sends, so it does not cover this.
+- RF-1: `my.program/write-branch-writes-files-the-lane-has-not-claimed`,
+  `my.program/diff-answers-empty-after-a-branch-write-back` (cause unknown, so its done-when is the diagnosis) and
+  `seon.test-support/a-test-member-connection-is-not-the-cluster-head`.
 
 ## 7. Proposed standing check (row proposal, not code)
 

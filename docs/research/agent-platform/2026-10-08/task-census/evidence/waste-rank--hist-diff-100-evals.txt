@@ -1,0 +1,26 @@
+total delta MB 22.868864 over 100 (+ 1 2) evaluations
+   10185.1 KB   106953 inst  [Ljava.lang.Object;
+    2407.0 KB    60174 inst  datahike.datom.Datom
+    2361.9 KB    28580 inst  [B
+    1215.2 KB    30380 inst  clojure.lang.PersistentVector
+    1072.8 KB    33525 inst  clojure.lang.PersistentArrayMap
+     972.2 KB    40507 inst  java.lang.Long
+     685.7 KB    28571 inst  java.lang.String
+     560.4 KB    17514 inst  clojure.lang.Symbol
+     484.5 KB    20186 inst  clojure.lang.PersistentHashMap$BitmapIndexedNode
+     260.3 KB     6507 inst  clojure.lang.PersistentTreeMap$BlackBranchVal
+     210.7 KB     5268 inst  org.replikativ.persistent_sorted_set.Slot
+     201.5 KB     6296 inst  org.replikativ.persistent_sorted_set.Leaf
+     180.8 KB     4521 inst  clojure.lang.PersistentTreeMap
+     175.8 KB      -15 inst  [Ljdk.internal.vm.FillerElement;
+     159.8 KB     4994 inst  java.util.UUID
+     154.4 KB     6433 inst  clojure.lang.PersistentVector$Node
+     139.6 KB     4363 inst  clojure.lang.PersistentTreeMap$BlackVal
+     121.5 KB     2531 inst  org.replikativ.persistent_sorted_set.Branch
+     120.4 KB     3010 inst  clojure.lang.PersistentHashMap
+     106.5 KB     6656 inst  java.util.concurrent.atomic.AtomicReference
+      88.4 KB      614 inst  [Lclojure.lang.PersistentHashMap$INode;
+      86.3 KB     3595 inst  java.util.Date
+      79.7 KB     2491 inst  clojure.lang.PersistentHashSet
+      75.3 KB     2352 inst  clojure.lang.PersistentTreeMap$RedVal
+      65.8 KB        8 inst  [C

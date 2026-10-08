@@ -21,6 +21,8 @@ my.program/merge-tools-throw-instead-of-returning	true						GV-4/GV-5 merge requ
 my.program/root-cannot-diff-a-proposal	true						GV-4/GV-5 merge request
 my.program/accept-cannot-retire-a-hosted-proposers-branch	true						E-SDELETE fault into error; GV-4/GV-5 merge request; GV renames
 my.program/breaks-on-a-namespace-subject-takes-five-seconds	true		test/my/program_test.clj	PB-15 W-19	PB-15		
+my.program/write-branch-writes-files-the-lane-has-not-claimed	true						
+my.program/diff-answers-empty-after-a-branch-write-back	true						
 my.task/the-queue-on-an-agent-branch-offers-tasks-claimed-on-the-cluster	true						
 my.task/no-per-function-health-view-and-open-misses-over-bound-tasks	true						E-SDELETE fault into error
 my.task/task-creation-is-not-an-agent-call	true						F8 steps shelved
@@ -102,7 +104,7 @@ seon.competency/area-is-contracted	false		test/seon/competency_test.clj
 seon.config/a-config-read-walks-the-whole-registry	true						
 seon.config/compute-concurrency-dial-has-no-executor	true						
 seon.config/no-provider-cannot-be-lifted-per-agent	true						
-seon.config/an-agent-branch-forked-before-a-new-required-dial-refuses-every-eval-request	true				README-recording		
+seon.config/an-agent-branch-forked-before-a-new-required-dial-refuses-every-eval-request	true		test/seon/config_test.clj		README-recording		
 seon.contracts-compile-test/edit-hook-refuses-a-lawful-throw-of-a-registered-error	true					docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md	
 seon.contracts-compile-test/empty-input-calls-analyzer-with-a-refused-empty-source-map	true						
 seon.contracts-compile-test/corpus-check-allocation-is-floored-by-edamame-per-char-boxing	true		test/seon/contracts_compile_test.clj				
@@ -452,6 +454,7 @@ seon.task/task-text-references-are-never-resolved	true						PR printer rows
 seon.task/a-runtime-created-task-is-never-written-back	true						
 seon.test-support/refusal-data-recognizes-errors-by-at-and-layer	true						
 seon.test-support/evaluate-answers-nil-for-a-refused-form	true						
+seon.test-support/a-test-member-connection-is-not-the-cluster-head	true						
 seon.test.accretion/schema-row-compiles-every-reached-form	true						
 seon.test.cache/dependency-revisions-are-not-test-inputs	true						
 seon.test/a-changed-check-builds-a-world-per-request	true		src/seon/test.clj		EN-7		
@@ -545,4 +548,5 @@ seon.turn/a-pass-reads-its-run-through-whole-branch-queries	true			PB-09 W-10			
 seon.turn/turns-left-allocates-836-kilobytes-per-call	true			W-4			
 seon.turn/the-test-step-results-never-reach-the-eval-reply	true						F8 steps shelved
 seon.turn/an-executed-test-request-allocates-seven-hundred-megabytes-in-the-step	true						F8 steps shelved
+seon.turn/two-branches-share-reach-declarations-is-red-beside-the-turn-tests	true						F8 steps shelved; NK no kinds
 seon.turn.world/fault-recording-refuses-cross-branch-custody	true						EN-1/RP-15a receipts; E-SDELETE fault into error; GV-4/GV-5 merge request

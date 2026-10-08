@@ -1,0 +1,13 @@
+--- a/src/seon/render.clj
++++ b/src/seon/render.clj
+@@ -566,7 +566,9 @@
+       ;; foreign code: a declared record (a Datahike TxReport) selects too.
+       (not (or (render.value/keyword-lookup? value) (instance? clojure.lang.IRecord value))) []
+       :else
+-      (or (some-> (:seon.error/declared-schema (meta value)) vector pairs)
++      ;; a declaration carried in metadata selects only while the value still
++      ;; fits it: select-keys or dissoc keep the metadata of what they derive from
++      (or (some->> (:seon.error/declared-schema (meta value)) vector satisfied not-empty pairs)
+           (when (and function (identical? value (render-value request)))
+             (pairs (satisfied-alternatives projection function value)))
+           (some->> (attribute-identity projection (:seon.render.data/path request))

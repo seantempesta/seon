@@ -26,17 +26,17 @@
              :kind :function
              :intent "`seon.profile/cells` builds a vector of every live cell (2,673) on each call: 2.9 ms, and summing each cell's total counter over it 2.5 ms (default 2026-09-28); a health report reads it live every time (the counters move with the read itself, so no key can hold it). Done when the report's candidates (definitions with a second of inclusive time) are found without touching every cell, e.g. from the stored judgments once they land."
              :must-read #{seon.profile/cells seon.profile/observation}
-             :evidence #{"tmp/health-page/RESUME.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/health-page--RESUME.md"}}
  #:seon.task{:name "no-per-symbol-profile-and-zero-calls-reads-as-unmeasured"
              :kind :function
              :intent "There is no per-symbol profile function for an agent, and zero calls cannot be told from never measured. Done when a my.* call answers one symbol's calls, mean and max, and a symbol with no measurement answers a typed unknown while a measured zero answers zero."
              :must-read #{seon.profile/cell}
-             :evidence #{"tmp/repl-audit/read.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--read.md"}}
  #:seon.task{:name "reading-the-profile-validates-every-cell"
              :kind :function
              :intent "`seon.profile/cells` returns [:vector `:seon.profile/cell`] and its armed output check runs seven predicates (adder? x2, thread-local?, accumulator?, histogram?, throw-counts?, measured-mark?) on every live cell: one call costs 20,497 armed calls and 12 MB with 2,928 cells (default 2026-10-07). begin, explain, explain-slow, top and `seon.health/report` each read cells, so this is the producer of `seon.profile/histogram?` on the health top (4.97 M calls) and of 0.49-0.98 M calls of each sibling predicate in a 50 min session. Fix: the roster's members are cells by construction (cell is the only writer); check the cell once at `cell`, and declare the read's output by a schema that does not re-validate each member's JDK objects. Done when (`seon.profile/cells`) costs under 10 armed calls; regression: a profile test asserting the armed-call count of one cells read."
              :must-read #{seon.profile/cells seon.profile/cell seon.profile/begin}
-             :evidence #{"tmp/waste-rank/plus-1-2-armed-calls.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/waste-rank--plus-1-2-armed-calls.edn"}}
  #:seon.task{:name "transaction-stamps-store-hot-and-repeated-sets-nothing-reads"
              :kind :function
              :intent "`seon.profile/transaction-observation` stamps every transaction over its call/ms threshold with `:seon.db.transaction/hot` (up to 20 [sym digest calls ms] tuples) and `:seon.db.transaction/repeated`; `seon.db/stamp-transaction` attaches them. No src reader exists (only seon.profile-test asserts them). A 17-test run-owned on a branch agent (default, 2026-10-07, db-watch lane) stamped 20+40 hot/repeated datoms (~6 KB of values) on its record-tx and 28 (~2.8 KB) on its request tx. Every stored fact names its consumer or is deleted: delete both attributes and their derivation (the explanation of a slow operation reads the live profile, not stored stamps), or name the consumer. Done when no transaction carries them and the per-test-run datom count (watch.clj :since-basis) drops accordingly."

@@ -1,0 +1,198 @@
+;; Proofs of the test-data-assertions phase-2 conversions, 2026-09-28, run by
+;; tmp/test-data-assertions/proof.clj at default's JVM (loaded commit 29bdfce8d;
+;; src differs from HEAD only in db.clj and turn.clj). Each entry: the
+;; working-tree deftest on an isolated member branch, [pass fail error ms], at
+;; :head and with :broken, a scratch copy of the named owner or observed value
+;; substituted in the body (no Var redefined). A proof is its :broken run
+;; failing on the converted assertion.
+{:transcript-test
+ {stored-evaluations-are-terminal-transcript-values
+  {:head [1 0 0] :broken [0 1 0] :breaker "history-entries drops :out from each response"}
+  error-receipt-without-shown-text-names-its-message
+  {:head [2 0 0] :broken [1 1 0] :breaker "history-entries adds :value nil beside :error"}
+  history-unit-derives-both-projections-from-one-bounded-derivation
+  {:head [6 0 0] :broken [3 1 2] :breaker "render-history-html appends a source leaf"}
+  durable-history-entries-never-invent-executions {:head [2 0 0] :note "removal only: the exact bytes assertion already guards it"}
+  selected-evaluations-project-only-their-stored-source-and-result {:head [11 0 0] :note "removal only: history-entries data guards it"}}
+ :value-test
+ {a-pulled-function-entity-is-its-attributes-not-steering-prose
+  {:head [5 0 0] :broken [4 1 0] :breaker "evaluate shows steering prose"}
+  settings-remain-data-when-block-and-problem-renderers-match
+  {:head [2 0 0] :broken [0 2 0] :breaker "render-ai wraps the value in an ambiguous map"}
+  explicit-structural-results-retain-attributes-through-real-evaluation
+  {:head [68 0 0] :broken [64 4 0] :breaker "prepare wraps html in seon-data-capped"}
+  block-pairs-remain-explicit {:head [8 0 0] :note "removal only"}}
+ :web-test
+ {debug-compatible-candidate-discloses-retained-read-dependencies {:head [1 0 0] :broken [0 1 0]}
+  debug-read-dependencies-distinguishes-empty-from-absent {:head [1 0 0] :broken [0 1 0]}
+  debug-graph-model-preserves-datom-identity-and-direction {:head [8 0 0] :broken [7 1 0] :breaker "model script unescaped"}
+  debug-header-identifies-the-handed-program-and-projection {:head [4 0 0] :broken [3 1 0]}
+  debug-reference-links-select-another-entity-and-preserve-the-view {:head [1 0 0] :broken [0 1 0] :breaker "link carries outgoingCursor"}
+  debug-renderer-definition-accepts-the-acquired-program-entity {:head [2 0 0] :broken [1 1 0]}
+  debug-renderer-definition-uses-retained-program-source {:head [2 0 0] :broken [1 1 0] :breaker "source as hiccup/raw"}
+  debug-selected-renderer-metadata-is-outside-preview {:head [2 0 0] :broken [1 1 0]}
+  applicable-render-functions-list-alternatives-and-hide-rejections
+  {:head [2 0 0] :broken [1 1 0] :note "first conversion was red (link label is [:code sym]); fixed to the link's leaves"}
+  a-request-that-throws-answers-its-error-value-never-a-stack-trace
+  {:head [3 0 0] :broken [2 1 0] :note "red on HEAD before conversion: its partial service map is refused by failure-response's armed contract; now passes the declared service"}
+  a-five-megabyte-value-is-one-bounded-selection-in-both-faces {:head [10 0 0] :broken [9 1 0]}
+  the-feed-opener-is-a-sibling-of-the-morph-targets {:head [2 0 0] :broken [1 1 0]}
+  an-agent-page-is-the-same-mechanism-as-root {:head [2 0 0] :broken [1 1 0]}
+  static-resources-come-off-the-classpath {:head [5 0 0] :broken [4 1 0]}
+  a-get-of-an-unowned-namespace-page-never-writes {:head [6 0 0] :broken [5 1 0]}
+  canonical-debug-inspects-without-creating-a-namespace-owner {:head [7 0 0] :broken [6 1 0]}
+  data-resolves-an-entity-root-and-preserves-it-in-floor-links
+  {:head [5 0 0] :broken [4 1 0] :note "was vacuous: it looked up :seon.cluster.agent/id (not installed) and matched \"alice\" in its own URL; now :seon.agent/id"}
+  data-selects-a-stored-value-artifact-by-digest {:head [4 0 0] :broken [3 1 0]}
+  data-serves-a-five-megabyte-attribute-as-one-page-that-continues {:head [4 0 0] :broken [3 1 0]}
+  debug-algorithm-carries-the-render-evaluation-inputs {:head [5 0 0] :broken [4 1 0]}
+  each-agent-has-an-isolated-debug-route {:head [4 0 0] :broken [3 1 0]}
+  a-refusal-emits-no-morph-test {:head [6 0 0] :broken [5 1 0]}
+  reconnect-is-repaint {:head [6 0 0] :broken [5 1 0]}
+  reconnect-mid-stream-is-a-fact-only-repaint {:head [7 0 0] :broken [6 1 0]}
+  a-terminal-fact-supersedes-a-partial-after-the-lost-clear-ordering {:head [9 0 0] :broken [8 1 0]}
+  canonical-debug-feed-repaints-when-the-subject-changes {:head [2 0 0] :broken [1 1 0]}
+  an-undeclared-incoming-reference-is-reachable-from-the-page {:head [2 0 0] :broken [1 1 0]}
+  reconnect-is-repaint-wire-test {:head [248 0 0 200627] :note "no negative run: 200 s per run (its as-of walk over the window); finding"}
+  a-reconnect-refuses-a-pass-derived-before-it-connected
+  {:head [7 1 0 22773] :note "red in the harness on an assertion this lane did not change (the held pass is not observed in its renderer); unverified"}}
+ :web-debug-test
+ {debug-links-omit-defaults-and-round-trip-every-override {:head [4 0 0] :broken [2 2 0]}
+  reverse-declarations-receive-the-actual-relationship-value {:head [2 0 0] :broken [1 1 0]}
+  the-graph-debug-page-reads-a-named-branch-read-only {:head [6 0 0] :broken [5 1 0]}
+  the-graph-debug-page-shows-both-faces-in-graph-order-at-every-n {:head [40 0 0] :broken [36 4 0]}
+  the-graph-groups-a-many-relationship-into-one-counted-node {:head [4 0 0] :broken [3 1 0]}}
+ :error-test
+ {error-identity-and-occurrences-are-owned-by-the-writer {:head [39 0 0] :broken [36 3 0] :broken-status [38 1 0]}
+  agent-fault-read-is-a-short-call-that-shows-each-recorded-message
+  {:head [6 0 0] :broken [5 1 0] :note "first conversion was red: render-ai of a stored fault is a map; asserts its :seon.error/message"}
+  a-body-on-its-own-branch-is-supplied-that-branchs-database {:head [2 0 0] :broken [1 1 0]}
+  a-contract-violations-fault-keeps-the-value-that-broke-it {:head [6 0 0] :broken [5 1 0]}
+  fault-preparation-bounds-the-fact-and-omits-disposable-flow-state {:head [9 0 0] :broken [7 2 0]}
+  the-default-renderers-accept-an-attribute-shaped-error {:head [4 0 0] :broken [3 1 0]}
+  an-unstored-error-renders-its-own-message {:head [2 0 0] :broken [1 1 0]}
+  a-held-error-observation-renders-as-held-without-a-read {:head [4 0 0] :broken [3 1 0]}
+  a-refused-name-read-is-shown-as-its-refusal {:head [2 0 0] :broken [1 1 0]}
+  specialist-renderers-use-their-declared-evidence {:head [19 0 0] :golden true}}
+ :ai-test
+ {a-missing-credential-is-loud-in-the-value {:head [4 0 0] :broken [2 2 0]}
+  the-deadline-fires-as-an-outcome-not-a-bug-report {:head [3 0 0] :broken [2 1 0]}
+  a-stream-that-ends-before-any-text-is-named-truncation-not-bad-json {:head [3 0 0] :note "removal only: the declared-schema assertion guards it"}}
+ :unverified
+ ;; with-redefs bodies are never run in the shared JVM: their redefinitions
+ ;; reach every thread. They wait on the seam conversion.
+ [seon.render.web-test/selected-ai-experiment-reuses-the-canonical-executed-call
+  seon.render.web-test/data-uses-the-one-floor-and-keeps-the-cursor-in-the-url
+  seon.render.web-test/session-acquisition-failure-replaces-the-loading-panel
+  seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected]
+ :repl-test
+ {printed-output-is-separate-from-the-value {:head [1 0 0] :broken [0 1 0] :breaker "output folded out of the response"}
+  an-error-response-carries-no-value {:head [1 0 0] :broken [0 1 0] :breaker ":value beside :error"}
+  the-namespace-appears-only-when-the-form-changed-it {:head [2 0 0] :broken [0 1 1]}
+  history-preserves-shown-text-without-applying-a-later-profile {:head [4 0 0] :broken [3 1 0]}
+  an-interrupted-evaluation-says-so-as-readable-data {:head [1 0 0] :broken [0 1 0] :breaker "instant printed as a string"}}
+ :mcp-bridge-test
+ {namespace-coordinate-shapes-both-evaluation-modes {:head [4 0 0] :broken [3 1 0]}
+  registrations-use-one-jvm-neutral-server-name {:head [5 0 0] :broken [4 1 0]}
+  bridge-content-has-no-second-truncation-budget {:head [1 0 0] :note "removal only: the whole-value equality guards it"}
+  tool-discovery-advertises-only-live-jvm-operations {:golden true}}
+ :web-test-seams
+ {selected-ai-experiment-reuses-the-canonical-executed-call {:head [3 0 0] :broken [1 2 0] :note "world is data: an agent-authored render function competing with the floor"}
+  a-page-failing-every-pass-records-one-fault-and-the-proc-survives {:head [3 0 0] :broken [1 2 0] :note "failing page is data: a debug registration without its bounds"}
+  the-pass-oracle-awaits-a-held-derivation {:head [5 0 0] :broken [3 2 0] :note "hold is agent code"}
+  a-code-event-drops-an-unwatched-pages-package {:head [1 0 0] :broken [0 1 0] :note "the render state as a value"}
+  data-uses-the-one-floor-and-keeps-the-cursor-in-the-url {:head [6 0 0] :broken [5 1 0] :note "armed counter; the context-identity claim is dropped"}
+  :pending-adoption
+  [accepted-socket-writes-have-a-loud-drain-backstop a-feed-writer-failure-enters-the-cluster-fault-path
+   two-tabs-each-get-their-own-complete-paint failed-ephemeral-bind-preserves-the-bind-failure
+   start-refuses-a-flat-process-write-before-binding an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block
+   runtime-evaluation-cannot-be-displaced-by-a-database-wake]}
+ :render-coverage-test
+ {effect-receipts-render-state-from-attribute-presence {:head [37 0 0] :broken [35 2 0] :golden true :note "HTML face on hiccup; AI prose face is the golden part"}}
+ :oversight-test
+ {absent-pongs-never-become-evidence-of-work {:head [8 0 0] :broken [7 1 0]}
+  oversight-reads-the-handed-routing-and-names-what-it-lacks {:head [14 0 0] :broken [11 3 0]}
+  a-stopped-graph-is-observed-as-stopped {:head [3 0 0] :broken [2 1 0]}
+  a-booted-cluster-tells-its-live-fleet-story {:note "unverified: boots a real cluster (fixture-observation, long)"}}
+ :held-patches
+ {"phase2-instrument-test.patch"
+  {a-wrong-shaped-call-throws-a-flat-error-value {:head [7 0 0] :broken [6 1 0]}
+   a-prepared-call-refusal-names-its-caller-and-the-contract-name {:head [3 0 0] :broken [2 1 0]}
+   a-missing-key-refusal-holds-values-and-names-the-key {:head [6 0 0] :note "removal only"}
+   an-output-refusal-names-the-function-that-returned-it {:head [2 0 0] :note "removal only"}}
+  "phase2-turn-test.patch"
+  {evaluation-ai-is-only-the-repl-session {:head [9 0 0] :broken [7 2 0]}
+   a-refused-generated-form-records-its-refusal {:head [5 0 0] :note "no breaker run"}}
+  "phase2-cluster-turn-test.patch"
+  {:note "shown text read back as EDN; breaker: every read replaced"
+   a-combined-evaluation-projects-every-terminal-receipt-datom {:head [10 0 0] :broken [9 1 0]}
+   a-whole-turn-runs-a-REAL-sci-evaluation-end-to-end {:head [14 0 0] :broken [13 1 0]}
+   contracted-redefinition-exactly-replaces-the-entity {:head [5 0 0] :broken [4 1 0]}
+   evaluation-follows-the-readers-parse-time-namespace {:head [3 0 0] :broken [2 1 0]}
+   mixed-plan-publishes-only-the-contracted-function {:head [4 0 0] :broken [3 1 0]}
+   ns-unmap-retracts-the-owned-function-after-the-terminal-commit {:head [7 0 0] :broken [6 1 0]}
+   runtime-tests-install-run-redefine-and-delete-exactly {:head [7 0 0] :broken [4 3 0]}
+   a-red-form-routes-to-its-namespace-owner-and-the-fold-continues {:head [4 1 0] :broken [3 2 0] :note "head red on an unchanged assertion in this JVM"}
+   import-only-ns-unmap-installs-exactly-after-its-context-commit {:head [3 1 0] :broken [2 2 0] :note "head red on an unchanged assertion in this JVM"}
+   delimiter-repair-is-span-local-and-precedes-intent {:note "unverified: HEAD's seon.sci.forgive/segments is not loaded in this JVM"}}}
+ :my-plan-test
+ {an-empty-plan-renders-in-both-projections {:head [6 0 0] :broken [5 1 0]}
+  the-whole-plan-renders-once-in-both-projections {:head [6 0 0] :broken [5 1 0] :note "first conversion red: the plan is a class token, not an id"}
+  the-example-fixture-shape-installs-and-renders {:head [12 0 0] :broken [11 1 0]}}
+ :db-test-patch
+ {"phase2-db-test.patch"
+  {unique-rejection-names-the-existing-owner-as-data {:head [10 0 0] :broken [7 3 0] :note "red on 52e163bee before conversion: the rejection message is the raw Datahike exception (task a-unique-rejection-message-is-the-raw-exception); the owner is asserted as data"}
+   a-write-naming-another-clusters-branch-is-refused-naming-both {:head [8 0 0] :note "removal only: the branches are asserted as data"}}}
+ :web-test-seams-adopted
+ {:note "default 52e163bee runs the web.clj seams (a516a7c95)"
+  accepted-socket-writes-have-a-loud-drain-backstop {:head [4 0 0] :broken [0 4 0] :breaker "the socket drains at once"}
+  failed-ephemeral-bind-preserves-the-bind-failure {:head [4 0 0] :broken [1 3 0] :breaker "the service's run-server leaf dropped"}
+  start-refuses-a-flat-process-write-before-binding {:head [2 0 0] :broken [0 2 0] :breaker "the service's writer dropped"}
+  runtime-evaluation-cannot-be-displaced-by-a-database-wake {:head [9 0 0] :broken [7 2 0] :breaker "page-result's counter reads zero"}
+  an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block {:head [16 0 0] :broken [15 1 0] :breaker "retained calls dropped at each acquisition"
+   :note "re-derivation is a retained block call whose render basis moved; the root acquisition is its own check"}
+  a-feed-writer-failure-enters-the-cluster-fault-path {:head [2 0 0] :note "was red at 52e163bee: it awaited the fault channel; the failure is now asserted as its recorded fault fact; no breaker run"}
+  two-tabs-each-get-their-own-complete-paint {:head [6 0 0] :note "breaker did not reach the counted leaf; unverified negative"}
+  :with-server-fix "a516a7c95 passed :seon.render.web/http nil to start! when a test named none, so every with-server test without a socket leaf was refused at start!; fixed (present or absent, never nil)"}
+ :page-review-test
+ {turn-headers-and-all-evaluations-have-one-place-each {:head [22 0 1] :broken [19 3 1] :note "the error is pre-existing at 52e163bee after the converted section: 'A declared bound is missing; supply the required cap.'"}}
+ :host-test
+ {:note "not converted: a-refused-settlement-is-its-forms-refusal-and-the-run-closes (head [9 5 0]) and a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it (head [26 8 0]) are red at 52e163bee on their recorded-proposal data, so no conversion of them can be proved"}
+ :ai-stream-fold-test
+ {a-non-2xx-streaming-response-still-reads-its-body {:head [3 0 0] :broken [2 1 0] :breaker "ai/complete result with :seon.ai/body nil"}}
+ :skipped-red-at-head
+ {:render-simplification "selection assertion red at 1be0f7448 before conversion; own edit reverted"
+  :transcript-run "error member assertion red at 1be0f7448; not converted"}
+ :problems-test
+ {configured-models-without-registry-entities-are-derived {:head [8 0 0] :broken [7 1 0] :breaker "html-report -> [:div]"}
+  a-deleted-function-var-is-derived-from-the-loaded-image {:head [8 0 0] :broken [7 1 0] :breaker "html-report -> [:div]"}
+  a-fault-resolves-when-its-function-changes-and-reopens-on-recurrence {:head [15 0 0] :broken [14 1 0] :breaker "html-report over signatures without :seon.error/resolution"}
+  an-errored-receipt-is-a-problem-without-being-a-fault {:head [7 0 0] :broken [6 1 0] :breaker "found with each receipt error suffixed"}
+  the-block-derives-at-the-units-own-database-value {:head [3 0 0] :broken [2 1 0] :breaker "block always shows a failed run"}
+  six-hundred-failed-tests-render-within-the-profile-bound {:golden "ai-prose is printer text; task ai-prose-returns-printed-text-not-data"}}
+ :loop-proof-test
+ {:note "not converted: red at 1be0f7448 before any edit: running-fixture-settles-its-seeded-wake [40 1 0] (plan/plan source absent), virtual-loop-end-to-end [201 35 5 49.6 s] (help source, plan items, refresh statuses, 5 NPE Object.toString in the body)"}
+ :supplied-documentation-test
+ {invalid-runtime-key-tells-the-agent-to-omit-it {:head [3 0 0] :broken [2 1 0] :breaker "each refusal problem's fix suffixed"}
+  lookup-ref-refusal-names-the-actual-and-accepted-shapes {:head [4 0 0] :broken [2 2 0] :breaker "each refusal problem's fix suffixed"}
+  docs-separate-runtime-keys-and-preserve-callable-examples {:kept-text "(dir ns) shown text: render-directory-ai returns pr-str text the printer clips mid-form (unreadable, EOF); task patch tasks-seon-repl-directory.patch"}
+  missing-runtime-key-is-a-runtime-fault {:note "red at 1be0f7448 [0 3 0]: the failure is a call-preparation unavailable-agent-id error, no :seon.instrument/check, no Runtime fault text; not converted"}}
+ :help-test
+ {:note "red at 1be0f7448 [23 14 5]: the opening's first saved evaluation is not (help), IndexOutOfBounds on the empty reads, fixture write refused; not converted"}
+ :repl-parity-test {:golden "stock-Clojure parity compares printed output"}
+ :sci-documentation-test
+ {documentation-keeps-named-contracts-and-guarded-result-shapes {:head [4 0 0] :broken [3 1 0] :breaker "documentation-value :out carrying a :gen/gen property"}
+  :red-at-head {a-named-private-override-documents-the-jvm-boundary "[0 0 1] fixture write refused (stored definition)"
+                a-contract-mistake-offers-its-documentation-as-a-read "[9 1 0] the refusal's shown text no longer offers (doc my.message/send)"
+                clojure-test-at-the-agent-repl-reports-into-the-evaluations-output "[6 9 0] agent row write refused; the SCI deftest's (= 1 2) reports into the outer run"}}
+ :agent-identity-test
+ {identity-renders-from-current-database-facts {:head [5 0 0] :broken [2 3 0] :breaker "render-identity-html -> empty card"}
+  the-root-agent-renders-as-one-node-without-the-fleet {:head [3 0 0] :broken [[1 2 0] [2 1 0]] :breaker ["empty card" "card plus a seon-root-agents table"]}
+  identity-rendering-keeps-partial-data-and-read-errors-visible {:note "red at 1be0f7448 [0 2 1] (render-identity-html refuses its argument); unconverted"}}
+ :schema-edn-test
+ {a-misplaced-declaration-refuses-with-its-required-filename {:head [3 0 0] :broken [2 1 0] :breaker "load! refusal with its :file replaced"}
+  :message-checks-removed {duplicates-across-files-refuse-with-both-file-names "files already asserted in ex-data" an-empty-resource-directory-refuses-loudly "error key asserted" an-unsafe-key-namespace-refuses-before-placement "error + attribute asserted"}
+  an-unregistered-predicate-refusal-names-its-reload-owner {:note "red at 1be0f7448 [1 3 0]: ex-data lacks :predicate and :predicate-owner; unconverted"}}
+ :refusal-grammar-test
+ {reference-expectations-describe-the-schema-not-the-failure-category {:head [2 0 0] :broken [0 2 0] :breaker "expected-description with the failure category appended"}
+  structured-refusals-share-one-actionable-rendering {:head [12 0 0] :broken [[10 2 0] [10 2 0]] :breaker ["transact! refusal problems describing a missing key as a value" "render-ai output carrying a function object"]}}}

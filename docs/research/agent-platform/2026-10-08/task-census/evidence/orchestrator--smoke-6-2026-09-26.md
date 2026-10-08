@@ -1,0 +1,5 @@
+# smoke-6 (root, 2026-09-26 19:23Z, default b4b90d405, fresh branch, one MCP sci run)
+All 8 forms settled with correct values, result handles and timings:
+ #'user/smoke-inc 111 ms | 2 495 ms | [42 true] 439 ms | {a 1, b 2} 359 ms | nil (require malli) 350 ms | true (m/validate) 346 ms | true (my.plan/current {}) 336 ms | (/ 1 0) error data 284 ms
+Per-evaluation overhead ~280–500 ms for trivial forms (target: single-digit ms).
+(/ 1 0) error DATA (~3 KB): chain [{:throwable-class "java.lang.ArithmeticException" :message "Divide by zero" :frames [30+ seon.sci.eval/kernel/turn/call_preparation/render frames …18 more]}], :seon.error/exception-class clojure.lang.ExceptionInfo (wrapper, beside the real class), :seon.error/data {:seon.sci.eval/throwable "clojure.lang.ExceptionInfo" :seon.sci.admit/record {:fn-entries 0 :host-interop-count 0 :duration-ms 284 :allocated-bytes -1 :outcome :error}}, :seon.error/message "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero", :seon.sci.eval/stacktrace [[clojure.core// 1022 1] [user 1 1]], :seon.sci.kernel/guard-observation {...duration...}, plus the floor legend line.

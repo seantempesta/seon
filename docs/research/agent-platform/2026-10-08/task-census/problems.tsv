@@ -1,0 +1,30 @@
+my.program/an-agent-cannot-see-or-choose-its-change	must-read	my.program/overrides
+seon.call-preparation/the-call-state-is-an-atom	must-read	seon.call-preparation/hook
+seon.cluster/record-jvm-evaluations-on-shared-path	must-read	seon.cluster/mcp-project
+seon.cluster/record-jvm-evaluations-on-shared-path	must-read	seon.cluster/mcp-valf
+seon.contracts-compile-test/edit-hook-refuses-a-lawful-throw-of-a-registered-error	missing	docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md
+seon.db/settlement-transactions-are-stamped-as-absent-call	missing	docs/research/agent-platform/2026-10-07/db-watch/findings.md
+seon.db/a-probe-below-the-seek-break-even-scans-the-attribute	missing	datahike.query.execute/probe-driven-threshold is 2500 (an in-memory cost model: seek 50us vs 20ns/datom). One bound value into an attribute of under 2500 datoms scans and filters the whole attribute: [?run :turn/id ?id] read 9 nodes on a 2,000-run store and 3 on a 20,000-run store.
+seon.db/fork-planner-regression-bench-never-finishes	missing	`clojure -M:bench -m benchmark.planner-regression --assert` at d9121bbb (and with dh-planner's change) prints no shape row within 900 s after 'stores ready' (timeout exit 124).
+seon.db/planner-estimates-load-every-node-of-the-counted-range	missing	persistent-sorted-set 0.4.137 count-slice loads every node under the counted range (a branch stores its own subtree count, not its children's): estimate-pattern of [?x :eval/run ?run] read 239 nodes on a 1.16M-datom file store; planning a 5-clause query on a fresh connection read 790 nodes. Plans are cached per shape, but the key embeds substituted constants, so scalar-input and literal queries re-plan per value. dh-planner notes 2026-10-07.
+seon.dev.mcp/a-live-io-prepl-session-has-no-idle-bound	must-read	seon.dev.mcp/execute-clj-eval
+seon.error/commit-tx-stored-the-whole-admitted-data-edn-over-the-fitted-one	missing	b233d838f
+seon.fn/an-edit-rewrites-every-definition-below-it	missing	docs/research/agent-platform/2026-10-07/db-watch/findings.md
+seon.print.value/a-contract-refusal-prints-a-generated-example-of-the-whole-schema	must-read	seon.print.value/bounded-text
+seon.print.value/printed-copies-stored-or-sent-instead-of-values	must-read	seon.print.value/bounded-text
+seon.print.value/ad-hoc-text-clips-outside-the-printer	must-read	seon.print.value/bounded-text
+seon.profile/transaction-stamps-store-hot-and-repeated-sets-nothing-reads	missing	docs/research/agent-platform/2026-10-07/db-watch/findings.md
+seon.profile.measurement/a-test-run-upserts-three-hundred-measurement-rows	missing	docs/research/agent-platform/2026-10-07/db-watch/findings.md
+seon.program/a-docstring-edit-changes-the-definition-digest	must-read	seon.test.runner/reach-entity
+seon.render.value/an-uncut-string-node-carries-no-total	must-read	seon.cluster/mcp-get-value
+seon.render.value/bounded-text-survives-in-the-render-namespace	must-read	seon.print.value/bounded-text
+seon.sci.eval/live-results-are-held-for-the-contexts-lifetime	missing	docs/research/agent-platform/2026-10-07/db-watch/findings.md
+seon.turn/analyze-settlement-is-unreached	must-read	seon.turn/analyze-settlement
+seon.turn/the-unbound-check-walks-the-live-value-without-a-bound	must-read	seon.turn/unbound-value?
+seon.turn/a-trivial-agent-turn-takes-eleven-seconds	not-tracked	tmp/turn-overhead/proof.clj
+seon.turn/an-mcp-run-of-root-waits-behind-roots-faulting-system-turn	not-tracked	tmp/mcp-entrance/timings.md
+seon.turn/a-deep-value-loses-the-run	not-tracked	tmp/waste-rank/error-replies.txt
+seon.turn/a-deep-value-loses-the-run	not-tracked	tmp/waste-rank/large-values.edn
+seon.turn/each-trivial-evaluation-retains-two-hundred-kilobytes	not-tracked	tmp/waste-rank/hist-diff-100-evals.txt
+seon.turn/each-trivial-evaluation-retains-two-hundred-kilobytes	not-tracked	tmp/waste-rank/class-histogram-live.txt
+seon.turn/read-evidence-rows-are-two-fifths-of-the-stored-bytes	missing	docs/research/agent-platform/2026-10-07/db-watch/findings.md

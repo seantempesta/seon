@@ -39,18 +39,18 @@
              :kind :function
              :intent "MCP eval_clj (JVM mode) of [3.3 (clojure.edn/read-string (slurp \"tmp/related_data/charge-overflow.edn\"))], a 6 KB nested hiccup vector, prints its value as data with the diagnostic \"The value printer's saved text exceeded its charge.\" (default pid 9778, 2026-09-28): the laid-out text outgrew the allocator's charge. The same value prepared under the agent profile prints. Done when a regression over that value prints it under the MCP profile with no diagnostic."
              :must-read #{seon.render.value/prepare seon.render.value/charge}
-             :evidence #{"tmp/related_data/charge-overflow.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/related_data--charge-overflow.edn"}}
  #:seon.task{:name "a-cut-operation-in-render-data-is-not-runnable"
              :kind :function
              :intent "Render data's cuts name no handle, so an offered operation the budget reaches last prints as (`seon.render.walk/related` …1): its request map is cut and the form cannot be run (`seon.test/run`'s related data, 2026-09-28). An operation is a whole form or absent. Done when a `:seon.render/operations` form inside render data prints whole or is dropped whole, with a regression."
              :must-read #{seon.render.value/select-nodes seon.render.walk/related}
-             :evidence #{"tmp/related_data/proof.clj"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/related_data--proof.clj"}}
 
  #:seon.task{:name "short-strings-in-pairs-are-cut"
             :kind :function
             :intent "A 32-row vector of [string long] pairs (a profile summary, strings of 40-60 characters) printed each string cut at 32 characters with a dig form per row, and a java.util.HashMap$Node printed as #object: the budget went to cut markers instead of the text. Done when a small tuple's string prints whole under the budget and a Map.Entry prints as its pair."
             :must-read #{seon.render.value/prepare}
-            :evidence #{"tmp/mcp-dogfood/probe.clj"}}
+            :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/mcp-dogfood--probe.clj"}}
  #:seon.task{:name "bounded-text-survives-in-the-render-namespace"
              :kind :function
              :intent "Render dedup: seon.print.value/bounded-text and throwable-text are the survivors (6618eda17); `seon.render.value/bounded-text` and its floor delegates remain until config.clj, test/runner.clj, cluster/wake.clj and render/var.clj convert, plus three test-fixture subjects and task/doc refs. Also the D1 (context owner out of web), D3, D4, D5 and D8 duplicates of the render-dedup series. Done when `seon.render.value/bounded-text` is deleted and every caller converted in the same commit, lint clean."
@@ -105,7 +105,7 @@
             #{"docs/research/agent-platform/2026-10-07/printer-code/review-diff-astra-notes.md"}}
  #:seon.task{:name "transacted-passes-a-basis-descriptor-to-stored-collection"
   :kind :function
-  :intent "Showing (`seon.db/pull` (`seon.db/db`) '[*] [`:seon.cluster.eval/id` \"af9da2066437\"]) through the printer records the diagnostic \"`seon.db/stored-collection` :malli.core/invalid-schema-at-call ... Don't know how to create ISeq from: clojure.lang.Keyword\" at render/value.clj:358 (producer `seon.render.value/transacted`). The offending call is [{:db-name .. :t .. :datahike/commit-id ..} `:seon.cluster.eval/read-evidence` ()], a basis descriptor where `:seon.db/database-value` is expected. Correct: transacted reads from a database value (or its connection), never a descriptor. Evidence: result e497d4c908865. Proof: showing that pull yields no stored-collection diagnostic."
+  :intent "Showing (`seon.db/pull` (`seon.db/db`) '[*] [`:seon.cluster.eval/id` \"af9da2066437\"]) through the printer records the diagnostic \"`seon.db/stored-collection` :malli.core/invalid-schema-at-call ... Don't know how to create ISeq from: clojure.lang.Keyword\" at  (producer `seon.render.value/transacted`). The offending call is [{:db-name .. :t .. :datahike/commit-id ..} `:seon.cluster.eval/read-evidence` ()], a basis descriptor where `:seon.db/database-value` is expected. Correct: transacted reads from a database value (or its connection), never a descriptor. Evidence: result e497d4c908865. Proof: showing that pull yields no stored-collection diagnostic."
   :must-read #{seon.render.value/transacted seon.db/stored-collection}
   :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}
 

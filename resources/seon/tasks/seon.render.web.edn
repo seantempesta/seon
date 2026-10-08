@@ -14,12 +14,12 @@
              :kind :function
              :intent "`seon.render.web-test/reconnect-is-repaint-wire-test` takes about 200 s per run (200,627 ms, 248 assertions, test-data-assertions proof harness 2026-09-28): its check that no partial text exists at ANY basis walks every basis of the window as-of, so its cost follows the window, not the change, and it is far over its declared bound. Bound the check by what the change can reach (the bases the test itself committed, or one since-query over the window) so it runs sub-second."
              :must-read #{seon.render.web/render-step}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "an-unreportable-page-failure-is-only-a-log-line"
              :kind :function
              :intent "When a page derivation throws and failed-page-result cannot record it, unreportable-page-result (src/seon/render/web.clj) logs a WARN text line and paints a string; no fault reaches anyone. It fired for every debug-tab registration in a render state without its environment (test-data-assertions harness, 2026-09-28: fault! refused a nil environment, then a nil connection). A log line alone is a defect: deliver the failure as data to whoever can act on it."
              :must-read #{seon.render.web/failed-page-result seon.render.web/unreportable-page-result}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "the-web-worker-executor-is-never-shut-down"
              :kind :function
              :intent "`seon.render.web/start!` creates a virtual-thread-per-task executor per server and hands it to http-kit as :worker-pool; nothing keeps it and stop! never shuts it down, so every stopped server (each cluster stop, each web test) leaves an unowned executor behind. http-kit does not shut down a supplied pool. Keep the executor in the served descriptor and shut it down (awaiting termination under the delivery bound) in stop!, beside the server thread and feed-writer joins (flow-processes-opus 2026-09-28)."
@@ -28,12 +28,12 @@
              :kind :namespace
              :intent "Stale debt tags remain: render/web.clj:3193 (task seon.render.web/a-page-renders-with-a-refused-database) and schema.clj:20 (seon.schema/agents-can-validate, closed). Done when each tag names an open task or is deleted."
              :must-read #{seon.render.web/derive-context!}
-             :evidence #{"tmp/root-cause-census/report.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/root-cause-census--report.md"}}
  #:seon.task{:name "pages-print-values-instead-of-the-printer-html-face"
              :kind :namespace
              :intent "Web, health, error, schema, var, status, problems and repl pages print values themselves ([:pre (pr-str value)], [:code (print.value/bounded-text v)], 422/500/503 bodies of clipped results) instead of rendering them through the value printer's HTML face, so humans see clipped text the AI path does not and large values are printed whole (debug-value-html, repl render-html, create-owner-response). CLAUDE.md: printing is rendering with two consumers on one pipeline. Inventory class ui-print, 32 sites: render/web.clj 17, health.clj 5, error.clj 3, render/schema.clj 2, cluster/status.clj 1, problems.clj 1, render/var.clj 1, render/walk.clj 1, repl.clj 1. Done when every page shows values through the printer's hiccup output, and seon.render.web-test asserts the debug page for a 10 MB value returns under the printer's budget with its elision link."
              :must-read #{seon.health/finding-item}
-             :evidence #{"tmp/no-print-hash/print-sites.tsv" "tmp/no-print-hash/notes.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--print-sites.tsv" "docs/research/agent-platform/2026-10-08/task-census/evidence/no-print-hash--notes.md"}}
  #:seon.task{:name "the-built-stylesheet-is-stale-against-its-source",
             :kind :function,
             :intent

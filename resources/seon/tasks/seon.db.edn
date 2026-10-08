@@ -59,42 +59,42 @@
              :kind :function
              :intent "Per-file derivation keys (`seon.cluster/derivation-keys`) name the deriving code but not the database owner's read path: a read-path change that alters logical read results would leave reused entities derived from the old results. Retain a result digest in the read evidence a publication's derivation captures (`seon.db/read-evidence` with :seon.db/retain-read-results?) and replay it at the next publication, so such a change re-derives exactly the files whose reads answer differently."
              :must-read #{seon.db/read-evidence seon.db/read-evidence-current? seon.cluster/derivation-keys}
-             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/boot-source-perf--evidence.md"}}
  #:seon.task{:name "encoding-only-storage-changes-migrate-reused-entities"
              :kind :function
              :intent "A publication reuses every file entity whose derivation key is unchanged (`seon.cluster/derivation-keys`), so a storage encoding change without a schema change (seon.schema.datahike's codec, vector cells) leaves reused entities in the old encoding. Storage migration owns it: an encoding change ships its migration transaction (as `seon.db/vector-migration-tx` did), never a re-derivation."
              :must-read #{seon.db/vector-migration-tx seon.cluster/derivation-keys}
-             :evidence #{"tmp/boot-source-perf/evidence.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/boot-source-perf--evidence.md"}}
  #:seon.task{:name "projection-fallback-prints-instead-of-returning"
              :kind :function
              :intent "`seon.db/projection-fallback` (src/seon/db.clj:1364) prints `WARN seon.db/projection-fallback caller= ... missing-projection count=1` to stderr as a text line. It fires when `seon.error/prepare` runs inside a test member (test-data-assertions harness, 2026-09-28): the refusal value it also returns carries the fact, but the printed line is a second, undelivered channel. A log line alone is a defect: deliver the missing projection as the returned refusal (and record it where it is consumed), and have `seon.error/prepare`'s caller supply the member's projection."
              :must-read #{seon.db/projection-fallback seon.error/prepare}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "an-entity-only-pattern-scans-past-the-query-work-bound"
              :kind :function
              :intent "`seon.db/q` of [:find [?a ...] :in $ ?e :where [?e ?a]] with ?e 34746 (a task) exceeds the 65,536 query-work bound in 9.7 ms, and [?e ?a ?t] with a collection of 259 ref attributes does too, where (`seon.db/datoms` db :eavt 34746) reads its 12 datoms in 0.12 ms (default, 2026-09-28): the pattern does not use EAVT when only the entity is bound, so the cost grows with the entity id. seon.render.walk reads frontier datoms by EAVT instead. Done when a query binding only the entity reads EAVT (in the Datahike fork's planner) or refuses by name, with a regression."
              :must-read #{seon.db/q}
-             :evidence #{"tmp/related_data/proof.clj"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/related_data--proof.clj"}}
  #:seon.task{:name "a-unique-rejection-message-is-the-raw-exception"
              :kind :function
              :intent "A unique-constraint rejection from `seon.db/transact!` carries as its `:seon.error/message` Datahike's printed exception (\"clojure.lang.ExceptionInfo: Cannot add #datahike/Datom [...] because of unique constraint ...\"), and render-rejection-ai shows that text; `seon.db-test/unique-rejection-names-the-existing-owner-as-data` asserted the message named the owner and no ExceptionInfo and was red on 52e163bee (test-data-assertions proofs, 2026-09-28). The conflict owner is data under :seon.error/problems; the message should say what was refused and how to fix it, not print the cause (the cause belongs in `:seon.error/chain`)."
              :must-read #{seon.db/transact! seon.db/render-rejection-ai}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "the-missing-connection-refusal-has-no-fix-key"
              :kind :function
              :intent "`seon.db/missing-connection-error` answers a refusal whose fix (pass the database value, or (`seon.cluster.boot/connection` \"default\") at a development REPL) exists only inside `:seon.error/message` prose, so a test or agent can read it only as text. A refusal adds its fix as `:seon.error/fix` (AGENTS.md, errors are ordinary values of one shape)."
              :must-read #{seon.db/missing-connection-error}
-             :evidence #{"tmp/test-data-assertions/proofs.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "capturing-read-evidence-costs-0.8-ms-per-index-seek"
              :kind :function
              :intent "Binding `seon.db/*read-evidence-sink*` around seon.problems failed-tests made it 1,572 ms against 180 ms uncaptured: 1,775 captured (`seon.db/datoms` :avet) reads at about 0.8 ms each (default, armed, 2026-09-28). The runner patch reads those members in one query (25 ms); the capture's own per-read cost remains for any reader that seeks per item. Done when a captured index seek costs within 2x of an uncaptured one."
              :must-read #{seon.db/read-evidence seon.db/datoms}
-             :evidence #{"tmp/health-page/RESUME.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/health-page--RESUME.md"}}
  #:seon.task{:name "a-transaction-of-many-profile-measurements-hits-the-validation-node-limit"
              :kind :function
              :intent "Settlement refused: component validation-node-limit 250000 hit by a transaction with many :seon.profile.measurement rows (profile flush volume scales whole-value validation), and a run-owned would-be transaction carried 150+ :seon.profile.measurement upserts (tmp/store-growth/report.md). Done when a profile flush no longer makes one owning value whose validation scales with the measurements, the settlement is not refused at that volume, and the bound has a regression."
              :must-read #{seon.db/db seon.profile/cell}
-             :evidence #{"tmp/store-growth/report.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/store-growth--report.md"}}
  #:seon.task{:name "render-rejection-ai-fails-its-own-input-contract"
              :kind :function
              :intent "`seon.db/render-rejection-ai` fails its own input contract (five problems) for a transaction refused for a missing `:seon.turn/agent`: the error renderer cannot render an error (seen once, landing-reds-2). Done when a refusal for a missing `:seon.turn/agent` renders through its AI face with a regression on that exact transaction, and the contract admits every refusal the writer produces."
@@ -107,7 +107,7 @@
              :kind :function
              :intent "RC3 (tmp/root-cause-census/report.md): the world schema refuses `:seon.db/db`, so the 12 projection-fallback callers return db's refusal. Done when the world admits the database value the way its members are declared and the fallback callers are deleted."
              :must-read #{seon.db/db}
-             :evidence #{"tmp/root-cause-census/report.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/root-cause-census--report.md"}}
  #:seon.task{:name "hot-total-predicates-run-hundreds-of-millions-of-times"
              :kind :function
              :intent "runtime_status top on default (2026-10-07) ranks untested hot predicates: `seon.db/transaction-report-datom?` 201,990,743 calls, 19,102 ms; `seon.program/edn-round-trip-symbol?` 19,443,655 calls, 15,365 ms; `seon.profile/histogram?` 4,951,790 calls, 2,227 ms. They are total predicates used as schema leaves (seon.db.edn:301, seon.program.edn:73) and are themselves armed and profiled, so validating a collection pays the armed wrapper per element (a `my.fs/stat` repeated transaction-report-datom? 168-322 times, seon.effect/a-file-stat-costs-a-thousand-armed-calls). Find what the call count is proportional to (datoms of every report validated whole?) and make it follow the written datoms; a predicate that is a contract leaf gets a test of its law. Done when the same probe shows each predicate off the health top, with call counts per write proportional to that write, and each has a test. Proof: new law tests seon.db-test/transaction-report-datom-law, seon.program-test/edn-round-trip-symbol-law and seon.profile-test/histogram-law (to be written first) naming this task, plus the runtime_status probe re-read after a restart."
@@ -116,7 +116,7 @@
              :kind :function
              :intent "Every transaction runs validate-write-report (30 ms per commit), write-report-error (28 ms) and write-owned-values-error (20 ms): 389 commits in a 50 min session on default cost 11.9 s, 10.9 s and 7.9 s (2026-10-07); a contracted defn's transact! is 277 ms of which validate-write-report is 128 ms and write-report-error 119 ms, and a trivial (+ 1 2) commit of 28 datoms calls transaction-report-datom? 560 times. Find what each validation is proportional to (the whole report, every owning value, the projection) and validate each written owning value once at the writer. Done when a trivial commit's validation is under 5 ms and a defn's under 30 ms, with transaction-report-datom? calls equal to the datoms written; regression: a seon.db test asserting the armed-call count of one small commit."
              :must-read #{seon.db/validate-write-report seon.db/write-report-error seon.db/write-owned-values-error seon.db/transaction-report-datom?}
-             :evidence #{"tmp/waste-rank/profile-delta-table.txt" "tmp/waste-rank/large-values.edn"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/waste-rank--profile-delta-table.txt" "docs/research/agent-platform/2026-10-08/task-census/evidence/waste-rank--large-values.edn"}}
  #:seon.task{:name "settlement-transactions-are-stamped-as-absent-call"
              :kind :function
              :intent "stamp-transaction names a transaction's `:seon.db.transaction/operation` after its FIRST :db.fn/call, so an agent branch's run settlement (which starts with the [:db.fn/call `seon.db/absent-call` ...] run open) is recorded as `seon.db/absent-call`: on db-watch-probe's branch (2026-10-07) the (+ 1 2), defn and test-run settlements (28 to 1,718 datoms) all read absent-call, while the same settlement on cluster-default reads `seon.turn/record-evaluated-call`. Provenance that names a guard instead of the writer blinds every attribution of store growth by operation (watch.clj :window :by-operation). Done when the settlement names its own operation (pass it explicitly, or skip guard calls such as absent-call when deriving it), with a regression on the stamped operation of an agent-branch settlement."

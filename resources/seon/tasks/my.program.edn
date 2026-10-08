@@ -29,17 +29,17 @@
              :kind :function
              :intent "The last unproven step of the dogfood path: an agent's merged change reaches the files through write-back (`my.program/write-back!`). Done when a live branch change is proposed, merged and written back, the file diff equals the change, and the run is recorded as evidence (tmp/repl-audit/change.md lists the prior gaps)."
              :must-read #{my.program/prepare-merge! my.program/write-back!}
-             :evidence #{"tmp/repl-audit/change.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--change.md"}}
  #:seon.task{:name "history-shows-the-source-twice-and-no-commit-id"
              :kind :function
              :intent "`my.program/history` shows a definition's source twice per event and the write-back transaction carries no commit id. Done when each history event names the commit id recorded on its write-back transaction and shows a diff render instead of the second source copy."
              :must-read #{my.program/declaration-diff my.program/history}
-             :evidence #{"tmp/repl-audit/change.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--change.md"}}
  #:seon.task{:name "ns-unmap-and-remove-ns-cost-quarter-thousand-tokens-and-most-of-a-second"
              :kind :function
              :intent "`my.program/ns-unmap!` and remove-ns! add about 250 tokens of constant prose to every reply and take 0.6-0.8 s. Done when a reply is the value and one line, and the call is under 300 ms, timed against the same probe on the parent commit."
              :must-read #{my.program/ns-unmap! my.program/remove-ns!}
-             :evidence #{"tmp/repl-audit/change.md"}}
+             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--change.md"}}
  #:seon.task{:name "the-merge-prepare-costs-three-seconds-and-400k-calls"
              :kind :function
              :intent "The merge path: `my.program/prepare-merge!` takes 2.6-3.1 s and about 400k calls regardless of change size. The cold-projection hypothesis was falsified (800a94abb); it needs a sampled profile (Astra after a bow-out), then the responsible armed functions named and fixed. Done when a small merge prepares under one second, timed on parent and change."
@@ -75,4 +75,15 @@
              :intent "`my.program/breaks` on the namespace subject seon.turn took 5542 ms and 5876 ms on default's JVM, against 183 ms for the function subject `seon.render.value/render-ai`, so the test schema-and-namespace-reads-keep-different-connections-distinct exceeds its 5000 ms bound. Find what the namespace branch of breaks is proportional to (owned declarations, gate names, requiring namespaces) and make it sub-second; done when that test passes inside its bound."
              :must-read #{my.program/breaks}
              :evidence #{"docs/seon/specs/merge.md"}}
+
+ #:seon.task{:name "write-branch-writes-files-the-lane-has-not-claimed"
+             :kind :function
+             :intent "`my.program/write-branch!` (RF-1, 24e8cc2df) writes a branch's declarations into whatever files hold them, including files the lane has not claimed, after which bin/lane claim refuses those files as someone else's uncommitted change. Correct: before writing, it answers the paths it will write and refuses, as data naming them, any path the lane has not claimed. Proof: a my.program-test deftest (to be written) whose branch touches an unclaimed file asserts the refusal names that path and no file changed."
+             :must-read #{my.program/write-branch!}
+             :evidence #{"docs/seon/schedule/cards/RF-1.md"}}
+ #:seon.task{:name "diff-answers-empty-after-a-branch-write-back"
+             :kind :function
+             :intent "After a branch write-back of `my.turn/wait` through `my.program/write-branch!` (RF-1, 24e8cc2df), `my.program/diff` on that branch answered every section empty. Cause unknown: either the write-back moved the branch's comparison base to its own change (expected) or diff lost a real change (a defect). Done when a REPL reproduction names which, and a regression asserts the diff a write-back should leave. Proof: a my.program-test deftest (to be written)."
+             :must-read #{my.program/diff my.program/write-branch!}
+             :evidence #{"docs/seon/schedule/cards/RF-1.md"}}
 ]
