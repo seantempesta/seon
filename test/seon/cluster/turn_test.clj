@@ -3074,3 +3074,38 @@
              "the model was called three times, not four"))
        (is (str/starts-with? third-user (subs second-user 0 (block-start second-user)))
            "each request's history is a prefix of the next one's: the provider's prefix cache holds")))))
+
+(deftest ^{:seon.test/long "Three setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
+           :seon.test/long-ms 60000}
+  a-chat-model-request-carries-its-forms-as-assistant-messages
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (agent-eval running agent-id "(ns tq.cx12) (defn area [r] r)")
+     (agent-eval running agent-id "(in-ns 'tq.cx12) (clojure.test/deftest ^{:seon/tasks #{'tq.cx12/area}} area-test (clojure.test/is (= 25 (tq.cx12/area 5))))")
+     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                 :seon.task/ns 'tq.cx12 :seon.task/name "area" :seon.task/kind :function
+                                                 :seon.task/intent "Square."}))]
+       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+     (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :chat})")))
+         "the wire format is the agent's own setting")
+     (let [sent (model-requests! running agent-id connection ["(+ 40 2)" "(+ 7 7)" "(in-ns 'tq.cx12)\n(defn area [r] (* r r))"] 3)
+           messages (mapv #(get % "messages") sent)
+           roles (fn [ms] (mapv #(get % "role") ms))
+           [first-sent second-sent third-sent] messages
+           part-texts (fn [message] (mapv #(get % "text") (get message "content")))]
+       (is (= 3 (count sent)) "three model passes reached the provider")
+       (is (= ["system" "user"] (roles first-sent)) "before the first exchange the block is the only user message")
+       (is (= ["system" "assistant" "user"] (roles second-sent)))
+       (is (= ["system" "assistant" "user" "assistant" "user"] (roles third-sent)))
+       (is (str/includes? (get (nth third-sent 1) "content") "(+ 40 2)")
+           "the first pass's form is the model's own message")
+       (is (not (str/includes? (get (nth third-sent 1) "content") "#:seon.repl{"))
+           "no REPL reply inside the model's own message")
+       (is (str/includes? (get (nth third-sent 2) "content") "42") "the REPL's reply is the next user message")
+       (is (str/includes? (get (nth third-sent 3) "content") "(+ 7 7)"))
+       (let [[replies block] (part-texts (peek third-sent))]
+         (is (str/includes? replies "14") "the last user message holds the last pass's replies")
+         (is (str/starts-with? block "#:seon.context{:task") "then the block, as its second part"))
+       (is (= (pop second-sent) (subvec third-sent 0 2))
+           "the earlier messages are byte-identical in the next request: the provider's prefix cache holds")))))

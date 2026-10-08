@@ -139,6 +139,14 @@
                    :seon.config/dial true,
                    :seon.ai/request-attribute :seon.ai/thinking}
                   :seon.ai/thinking],
+                 :wrapping
+                 [:enum
+                  {:seon.config/display-label "Wire format" :seon.config/per-agent true,
+                   :description
+                   "How the model's history reaches the wire: :transcript sends one user message of exchanges then the block; :chat sends each of the agent's model calls as an assistant message of its forms and a user message of the REPL's replies, the block last.",
+                   :seon.config/dial true,
+                   :seon.ai/request-attribute :seon.ai/wrapping}
+                  :transcript :chat],
                  :timeout-ms
                  [:int
                   {:seon.config/display-label "Provider timeout" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1,

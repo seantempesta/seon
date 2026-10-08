@@ -558,6 +558,49 @@
   (cond-> {"content-type" "application/json"}
     api-key (assoc "authorization" (str "Bearer " api-key))))
 
+(defn- text-part
+  {:malli/schema [:=> [:cat [:string {:min 1}]] [:map ["type" [:= "text"]] ["text" [:string {:min 1}]]]]}
+  [text]
+  {"type" "text" "text" text})
+
+(defn- transcript
+  "One exchange as the REPL printed it: each form, then its reply."
+  {:malli/schema [:=> [:cat :seon.ai/exchange] :string]}
+  [exchange]
+  (str/join "\n" (map (fn [{form :seon.ai/form reply :seon.ai/reply}]
+                        (cond-> form reply (str "\n" reply)))
+                      exchange)))
+
+(defn- chat-messages
+  "One exchange as the model's own assistant message of its forms, then a user
+  message of what the REPL answered (none when nothing settled)."
+  {:malli/schema [:=> [:cat :seon.ai/exchange] [:vector :seon.ai/message]]}
+  [exchange]
+  (let [replies (keep :seon.ai/reply exchange)]
+    (cond-> [{"role" "assistant" "content" (str/join "\n" (map :seon.ai/form exchange))}]
+      (seq replies) (conj {"role" "user" "content" (str/join "\n" replies)}))))
+
+(defn messages
+  "The wire messages of one model call: `system`, the agent's `exchanges` laid
+  out by `wrapping`, and the `block` as the last content before the model's turn.
+
+  `:transcript` sends one user message of the exchanges then the block; `:chat`
+  sends each exchange as `chat-messages` and the block as a second text part of
+  the last user message, or as the only user message before the first exchange."
+  {:malli/schema [:=> [:cat :seon.ai/wrapping [:maybe :seon.ai/system] :seon.ai/exchanges :seon.ai/prompt]
+                  :seon.ai/messages]}
+  [wrapping system exchanges block]
+  (let [head (if system [{"role" "system" "content" system}] [])]
+    (case wrapping
+      :transcript
+      (conj head {"role" "user" "content" (str/join "\n\n" (conj (mapv transcript exchanges) block))})
+      :chat
+      (let [history (into head (mapcat chat-messages) exchanges)
+            {role "role" replies "content"} (peek history)]
+        (if (= "user" role)
+          (conj (pop history) {"role" "user" "content" [(text-part replies) (text-part block)]})
+          (conj history {"role" "user" "content" block}))))))
+
 (defn request-body
   "The provider request document, or a pre-call flat error. Pure."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.ai/request] :seon.ai/request-body]}
@@ -570,9 +613,9 @@
   (let [base (cond->
                {"model" model
                 "stream" (boolean stream?)
-                "messages" (cond-> []
-                             system (conj {"role" "system" "content" system})
-                             true (conj {"role" "user" "content" prompt}))}
+                ;; a request naming no wrapping sends its prompt as one transcript
+                "messages" (messages (:seon.ai/wrapping request :transcript) system
+                                     (:seon.ai/exchanges request []) prompt)}
                ;; `docs/seon/reference/llm-adapters.md:169-179`.
                stream? (assoc "stream_options" {"include_usage" true}))
         sent (:seon.ai/sent (wire-settings projection request))

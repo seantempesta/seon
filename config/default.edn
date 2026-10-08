@@ -473,6 +473,9 @@
  ; reply that writes `user=> (f)` still reaches its form.
  :seon.config.ai/stop ["#:seon.repl{"]
  :seon.config.ai/response-format :seon.config/absent
+ ; The wire format of the model's history (spec agent-loop §3.4): :transcript
+ ; until the competency bench compares it with :chat on the same tasks.
+ :seon.config.ai/wrapping :transcript
  :seon.config.ai/extra-body-edn :seon.config/absent
 
  ; Unit: the NAME of an environment variable. Never the credential —

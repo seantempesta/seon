@@ -4,8 +4,7 @@
   `model-context` is the one assembler: `(help)` as the system message, the
   agent's own model exchanges, then the block. Nothing of it is stored; an
   attempt records the basis it was assembled at."
-  (:require [clojure.string :as str]
-            [seon.bootstrap :as bootstrap]
+  (:require [seon.bootstrap :as bootstrap]
             [seon.cluster.message :as message]
             [seon.error.refusal]
             [seon.eval]
@@ -235,8 +234,16 @@
   '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
     {:seon.cluster.eval/run [:seon.turn/id {:seon.turn/attempts [:db/id]}]}])
 
+(defn- exchange-form
+  "One evaluation as the REPL showed it: the form as sent and what the REPL answered."
+  {:malli/schema [:=> [:cat :seon.repl/emission] [:map :seon.ai/form [:seon.ai/reply {:optional true}]]]}
+  [emission]
+  (let [reply (repl/reply-text emission)]
+    (cond-> {:seon.ai/form (repl/input-text emission)}
+      reply (assoc :seon.ai/reply reply))))
+
 (defn- exchanges
-  "The agent's own model exchanges in agent order: one text per call row carrying a model attempt."
+  "The agent's own model exchanges in agent order: one per call row carrying a model attempt."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :seon.context/exchanges :seon.error/value]]}
   [database agent-id]
@@ -247,7 +254,7 @@
            (filter #(seq (get-in % [:seon.cluster.eval/run :seon.turn/attempts])))
            (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
            (mapv (fn [run]
-                   (str/join "\n" (map #(repl/text (repl/entity-emission (assoc % :seon.db/db database))) run))))))))
+                   (mapv #(exchange-form (repl/entity-emission (assoc % :seon.db/db database))) run)))))))
 
 (defn model-context
   "What one model pass sends, as shown text.

@@ -93,7 +93,8 @@
             :seon.ai/api-key-variable (:seon.config.ai/api-key-variable @dials)
             :seon.ai/thinking :disabled
             :seon.ai/stop (:seon.config.ai/stop @dials)
-            :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)}
+            :seon.ai/timeout-ms (:seon.config.ai/timeout-ms @dials)
+            :seon.ai/wrapping (:seon.config.ai/wrapping @dials)}
            (:seon.ai/primary targets))
         "the primary retains every effective AI dial without reshaping it")
     (is (= [:seon.ai/primary] (keys targets))
@@ -1205,3 +1206,51 @@
     (is (false? (:seon.ai/request-transmitted? (:seon.error/data value)))
         "no network call happened at all")
     (is (= :credential (:seon.ai/error-class (:seon.error/data value))))))
+
+(deftest each-wrapping-builds-its-wire-messages
+  (let [one [{:seon.ai/form "(+ 1 2)" :seon.ai/reply "#:seon.repl{:value 3}"}]
+        two [{:seon.ai/form ";; look first\n(keys {:a 1})" :seon.ai/reply "#:seon.repl{:value (:a)}"}
+             {:seon.ai/form "(def x 1)" :seon.ai/reply "#:seon.repl{:value #'user/x}"}]
+        settled-nothing [{:seon.ai/form "(Thread/sleep 1000)"}]
+        roles #(mapv (fn [message] (get message "role")) %)
+        last-text (fn [messages]
+                    (let [content (get (peek messages) "content")]
+                      (if (string? content) content (get (peek content) "text"))))]
+    (doseq [[exchanges transcript-roles chat-roles]
+            [[[] ["system" "user"] ["system" "user"]]
+             [[one] ["system" "user"] ["system" "assistant" "user"]]
+             [[one two settled-nothing] ["system" "user"]
+              ["system" "assistant" "user" "assistant" "user" "assistant" "user"]]]
+            [wrapping expected-roles] [[:transcript transcript-roles] [:chat chat-roles]]]
+      (let [sent (ai/messages wrapping "help" exchanges "BLOCK")]
+        (testing (str wrapping " over " (count exchanges) " exchanges")
+          (is (= expected-roles (roles sent)) "roles and order")
+          (is (str/ends-with? (last-text sent) "BLOCK") "the block is the last content")
+          (is (= {"role" "system" "content" "help"} (first sent)) "help is the system message"))))
+    (testing "the transcript is today's single text: each form then its reply, exchanges apart, the block last"
+      (is (= "(+ 1 2)\n#:seon.repl{:value 3}\n\n;; look first\n(keys {:a 1})\n#:seon.repl{:value (:a)}\n(def x 1)\n#:seon.repl{:value #'user/x}\n\nBLOCK"
+             (get (peek (ai/messages :transcript "help" [one two] "BLOCK")) "content"))))
+    (testing "chat: the model's forms are its own messages and the REPL's replies the user's"
+      (let [sent (ai/messages :chat "help" [one two] "BLOCK")]
+        (is (= ";; look first\n(keys {:a 1})\n(def x 1)" (get (nth sent 3) "content")))
+        (is (= [{"type" "text" "text" "#:seon.repl{:value (:a)}\n#:seon.repl{:value #'user/x}"}
+                {"type" "text" "text" "BLOCK"}]
+               (get (peek sent) "content"))
+            "the block is a second part of the last user message, never its own message")))
+    (testing "adding an exchange leaves every earlier message byte-identical"
+      (doseq [wrapping [:chat]]
+        (let [before (ai/messages wrapping "help" [one] "BLOCK")
+              after (ai/messages wrapping "help" [one two] "BLOCK2")]
+          (is (= (pop before) (subvec after 0 (dec (count before)))))
+          (is (= (get (first (get (peek before) "content")) "text")
+                 (get (nth after (dec (count before))) "content"))
+              "the last reply keeps its text once the block moves on")))
+      (let [before (get (peek (ai/messages :transcript "help" [one] "BLOCK")) "content")
+            after (get (peek (ai/messages :transcript "help" [one two] "BLOCK")) "content")]
+        (is (str/starts-with? after (subs before 0 (str/index-of before "BLOCK"))))))
+    (testing "a request carries its wrapping to the wire"
+      (is (= ["system" "assistant" "user"]
+             (roles (get (ai/request-body (seon.schema/handed-projection)
+                                          (assoc base :seon.ai/system "help" :seon.ai/wrapping :chat
+                                                      :seon.ai/exchanges [one]))
+                         "messages")))))))

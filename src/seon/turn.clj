@@ -3860,12 +3860,7 @@
           refusal
           (when (or (:seon.turn.loop/phase-failed model-context)
                     (:seon.error/at model-context))
-            model-context)
-          ;; What is sent is derivable again: `model-context` at the
-          ;; attempt's recorded basis. Nothing of the prompt is stored.
-          text (when (and model-context (not refusal))
-                 (str/join "\n\n" (conj (:seon.context/exchanges model-context)
-                                         (:seon.ai/prompt model-context))))]
+            model-context)]
       (cond
         (:seon.config.ai/no-provider settings)
         (freeze! {:seon.ai/text ""})
@@ -3878,8 +3873,11 @@
         :else
         (let [completion (ai/complete
                           (db/carried-projection db)
-                          (cond-> (assoc primary :seon.ai/prompt text
-                                         :seon.ai/system (:seon.ai/system model-context))
+                          ;; What is sent is derivable again: `model-context` at the
+                          ;; attempt's recorded basis, laid out by `seon.ai/messages`.
+                          ;; Nothing of the prompt is stored.
+                          (cond-> (merge primary (select-keys model-context [:seon.ai/system :seon.ai/prompt])
+                                         {:seon.ai/exchanges (:seon.context/exchanges model-context)})
                             sink (assoc :seon.ai/stream? true
                                         :seon.ai/sink sink)))
               failure (when (or (:seon.ai/unreadable-response-member completion)

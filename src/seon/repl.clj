@@ -348,11 +348,13 @@
   (when (and (not changed?) (seq prose))
     (str/trim-newline prose)))
 
-(defn- input-text
+(defn input-text
   "The prompt line, the agent's comment and its source.
 
   The two-argument arity omits the comment for a reader that shows it as its
   own block; the AI grammar always includes it."
+  {:malli/schema [:function [:=> [:cat :seon.repl/emission] :string]
+                  [:=> [:cat :seon.repl/emission :boolean] :string]]}
   ([emission] (input-text emission true))
   ([{source :seon.cluster.eval/source prompt-ns :seon.ns/name
      changed? :seon.repl/changed-since? :as emission}
@@ -363,6 +365,21 @@
           (when (and comment? prose) (str prose "\n"))
           source))))
 
+(defn reply-text
+  "What the REPL answered one evaluation: its response map and, for a changed
+  value, the form reading it whole; nil when it has settled nothing."
+  {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
+  [emission]
+  (let [answer (response emission)
+        changed (when (and (:seon.repl/changed-since? emission)
+                           (:seon.eval/shown emission))
+                  (shown-value (:seon.eval/shown emission)))
+        full-handle (:seon.repl/handle emission)
+        full (when (and full-handle (map? changed) (:seon.repl/changes changed))
+               (str ";; full value: " (print/form-text (list 'get-in full-handle []))))]
+    (when (or answer full)
+      (str/join "\n" (remove nil? [answer full])))))
+
 (defn text
   "The REPL bytes for one evaluation: prompt, agent input, response.
 
@@ -372,15 +389,8 @@
   what taught agents to echo results instead of writing forms."
   {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
   [emission]
-  (let [answer (response emission)
-        changed (when (and (:seon.repl/changed-since? emission)
-                           (:seon.eval/shown emission))
-                  (shown-value (:seon.eval/shown emission)))
-        full-handle (:seon.repl/handle emission)]
-    (str (input-text emission)
-         (when answer (str "\n" answer))
-         (when (and full-handle (map? changed) (:seon.repl/changes changed))
-           (str "\n;; full value: " (print/form-text (list 'get-in full-handle [])))))))
+  (let [answer (reply-text emission)]
+    (str (input-text emission) (when answer (str "\n" answer)))))
 
 (defn- token-boundary? [character]
   (or (Character/isWhitespace ^char character)

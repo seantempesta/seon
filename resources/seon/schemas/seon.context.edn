@@ -33,7 +33,7 @@
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/unread {:optional true} :seon.context/unread]
                 [:seon.context/turns :seon.context/turns]],
-               :exchanges [:vector {:description "The agent's own model exchanges in agent order: each call row carrying a model attempt, its evaluations as the REPL showed them."} [:string {:min 1}]]
+               :exchanges :seon.ai/exchanges
                :model-context
                [:map {:description "What one model pass sends: (help)'s shown text as the system message, the agent's own model exchanges, then the current-state block's shown text."}
                 [:seon.ai/system :seon.ai/system]

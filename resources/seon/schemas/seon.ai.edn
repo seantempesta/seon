@@ -139,6 +139,8 @@
              :seon.ai/extra-body-edn]
             [:seon.ai/system {:optional true} :seon.ai/system]
             [:seon.ai/prompt :seon.ai/prompt]
+            [:seon.ai/exchanges {:optional true} :seon.ai/exchanges]
+            [:seon.ai/wrapping {:optional true} :seon.ai/wrapping]
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]
             [:seon.ai/stream? {:optional true} :seon.ai/stream?]
             [:seon.ai/sink {:optional true} :seon.ai/sink]
@@ -169,6 +171,8 @@
              :seon.ai/extra-body-edn]
             [:seon.ai/system {:optional true} :seon.ai/system]
             [:seon.ai/prompt :seon.ai/prompt]
+            [:seon.ai/exchanges {:optional true} :seon.ai/exchanges]
+            [:seon.ai/wrapping {:optional true} :seon.ai/wrapping]
             [:seon.ai/timeout-ms :seon.ai/timeout-ms]
             [:seon.ai/stream? {:optional true} :seon.ai/stream?]
             [:seon.ai/sink {:optional true} :seon.ai/sink]
@@ -381,6 +385,16 @@
            [:seon.error/message :seon.error/message]]],
           :max-tokens [:int {:min 1}],
           :system [:string {:min 1}],
+          :wrapping :seon.config.ai/wrapping,
+          :form [:string {:min 1 :description "One evaluation's form as the model sent it, with its comment: the REPL's input text."}],
+          :reply [:string {:min 1 :description "What the REPL answered one evaluation: its reply text."}],
+          :exchange [:vector {:min 1 :description "One model call of the agent: each evaluated form with what the REPL answered, in order."}
+                     [:map [:seon.ai/form :seon.ai/form] [:seon.ai/reply {:optional true} :seon.ai/reply]]],
+          :exchanges [:vector {:description "The agent's own model exchanges in agent order."} :seon.ai/exchange],
+          :message [:map {:description "One wire chat message: a role and its content, text or text parts."}
+                    ["role" [:enum "system" "user" "assistant"]]
+                    ["content" [:or [:string {:min 1}] [:vector {:min 1} [:map ["type" [:= "text"]] ["text" [:string {:min 1}]]]]]]],
+          :messages [:vector {:min 1} :seon.ai/message],
           :timeout :seon.ai/timeout-ms
  ; Additive error declaration manifest, 2026-09-18.
 
