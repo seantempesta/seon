@@ -39,7 +39,9 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: a REPL `require` updates the stored ns form (files are the write-back of the program), and a function's
+Root defaults taken: the automatic test step narrows to identities changed since its previous completed run (new optional
+request key; `my.test/check` and proofs keep the broad rule; namespace-derived seeds stay broad); a branch revision's reach maps are
+derived and dropped rather than cached (advancing from the recording transaction's report is the follow-up). A REPL `require` updates the stored ns form (files are the write-back of the program), and a function's
 digest depends only on the aliases it resolves through, so an unused alias changes no other digest (task `ad78cf13e`; lane ns-form). Tests reaching a change are answered by a reverse walk from the changed names (reach-cost option 1;
 the whole-program reach graph per change was the real P1 owner: 280 ms / 671 MB cold). SCI functions carry their defining context so a host thread reads the current definition (option
 A1: an SCI fn binds its defining context on entry when none is active; +4 ns (+14%) per call through a Var, correct for
@@ -200,3 +202,7 @@ of two each).
   disagree with the file. Fixed: a rewritten namespace row's digest covers what it keeps (`abb2f40a7`). Decided by root and in
   progress: REPL requires update the stored ns form; function digests use only the aliases they resolve through. Cost seen:
   one file's write-back proof is 160-790 ms / 280-780 MB (one clj-kondo analysis of the file).
+- **Step growth owner found** (lane step-growth): the automatic step passes everything the branch changed since its fork as
+  "the change", so each request redoes gate walks, reach digests and covered-by writes for every earlier branch test (+20 reads,
+  +3-4k calls per request) and re-runs unrelated reds. Root ruled: narrow the automatic step to changes since its last run.
+  reach-attribute holds 197 MB (38% of cache) of per-revision copies: derive-and-drop for branch revisions.
