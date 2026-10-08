@@ -39,7 +39,8 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: tests reaching a change are answered by a reverse walk from the changed names (reach-cost option 1;
+Root defaults taken: a REPL `require` updates the stored ns form (files are the write-back of the program), and a function's
+digest depends only on the aliases it resolves through, so an unused alias changes no other digest (task `ad78cf13e`; lane ns-form). Tests reaching a change are answered by a reverse walk from the changed names (reach-cost option 1;
 the whole-program reach graph per change was the real P1 owner: 280 ms / 671 MB cold). SCI functions carry their defining context so a host thread reads the current definition (option
 A1: an SCI fn binds its defining context on entry when none is active; +4 ns (+14%) per call through a Var, correct for
 reads, calls, host ops and writes; option A2 was free but left host ops and writes wrong). The reply's `:seon.cost/transactions` counts every durable commit the request caused, the test
@@ -195,3 +196,7 @@ of two each).
   reach-declarations no longer cached. Fresh occupancy 506 → 201 MB, 0 evictions over 11 requests, warm `reach-digests` 21-40 →
   0.2-0.4 ms. Two P1 growths exposed (lane step-growth): the test step grows with the tests already on a branch (483 → 946 ms
   over 7 trivial requests, +20 reads each), and reach-attribute is keyed per revision (+7 MB per request).
+- **Write-back diagnosed** (lane writeback): the check was right; the REPL path stored namespace rows whose digests and ns form
+  disagree with the file. Fixed: a rewritten namespace row's digest covers what it keeps (`abb2f40a7`). Decided by root and in
+  progress: REPL requires update the stored ns form; function digests use only the aliases they resolve through. Cost seen:
+  one file's write-back proof is 160-790 ms / 280-780 MB (one clj-kondo analysis of the file).
