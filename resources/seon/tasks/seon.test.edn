@@ -129,4 +129,10 @@
  #:seon.task{:name "a-check-compares-every-definition-digest-of-the-program-twice"
              :kind :function
              :intent "One check with no named change runs `seon.test/digest-differences` twice (in `seon.test/changes` and again in `seon.test/program-overlay-tx` under `seon.test/clean-request-handle`): each queries every :seon.program/definition-digest of the published base and of the candidate (about 12,000 rows each) and decodes the result, 41-54 ms per check on a throwaway root (lane check-cost, 2026-10-08), although the base is one immutable commit and the candidate differs from it by the agent's few rows. The same check also derives three whole-program projection content keys (`seon.db/declaration-content-key`, 66-90 ms): the as-of view `seon.test/changed-definition-symbols` reads and the request world's first writes. Done when one check computes the differences once, the base side is cached by its commit, and a one-definition check's difference and projection-key cost is proportional to the change, with a regression counting `seon.test/digest-differences` and `seon.db/declaration-content-key` calls through `seon.mcp/call`."
-             :must-read #{seon.test/digest-differences seon.test/changes seon.test/program-overlay-tx seon.test/changed-definition-symbols}}]
+             :must-read #{seon.test/digest-differences seon.test/changes seon.test/program-overlay-tx seon.test/changed-definition-symbols}}
+ #:seon.task{:name "a-schema-change-has-no-reaching-tests"
+             :kind :function
+             :intent "After an eval request registers a schema, the automatic test step's reaching request answers `:seon.test/coverage-unknown` (\"This changed declaration has no bounded graph selection\", offending `[:seon.schema/key …]`), and a bare `(my.test/check {})` answers the same error without `:seon.error/type`, so every `register!` eval request reports an error in its step (lane fix-branch-schema, after `17e426d36`; that check reply allocated about 1.08 GB). Done when the tests reaching a schema change are selected from the functions and tests whose contracts name that key, and the error carries its type. Blocks the Seon-agent loop for any schema task."
+             :must-read #{seon.test/run seon.schema/register! my.test/check}
+             :evidence #{"docs/seon/schedule/agent-loop-ledger.md"}}
+]

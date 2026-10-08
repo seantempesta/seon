@@ -397,6 +397,7 @@ from what the task names.
 | F8 | Task steps (shelved) | Steps are shelved by the owner: no current row builds on them or deletes them; the block, `doc` and help show none. A later row borrows the simplest parts into tasks | — | — | — | — | E | shelved |
 | F10 (root 2026-10-08) | A check that skipped declared-long tests says so | A check naming a namespace whose tests include declared-long ones (run only when named by var) reports `:seon.test/passed? false` with 0 failures: nothing red, yet not passed. The skipped members are reported as data (their names and the declared bound), and `passed?` follows the members that ran; a run with only skipped members answers that nothing ran, never a red | `src/seon/test/runner.clj` (lane check-cost holds it), `test/seon/test/runner_test.clj` | `seon.test.runner-test/a-skipped-long-test-is-named-not-failed` | T | check-cost (runner.clj) | E | ready after its deps |
 | F11 (root 2026-10-08) | The test step answers an unchanged red from its record | After one eval request breaks a reaching test, every later eval request's step reports the same red again. Question first: is it answered from its record or re-executed? `seon.turn/run-reaching` names the branch's whole change against its base, and AGENTS.md lets only green be reused ("Unknown or red cannot reuse green"), so a red member likely re-executes after every eval request. Measure executed against reused members over three eval requests after one breaking `defn`; then a red whose tested program and inputs are unchanged is answered from its record (the ruling: "unchanged results are answered from their record"), and the reply says it is unchanged | `src/seon/turn.clj`, `src/seon/test/runner.clj` | `seon.cluster.turn-test/an-unchanged-red-is-answered-from-its-record` (executed member count 0 on the third eval request) | T: follows the changed members only | F4c (turn.clj), check-cost (runner.clj) | B/E | ready after its deps (measure first) |
+| F12 (task `seon.test/a-schema-change-has-no-reaching-tests`; high: blocks the Seon-agent loop) | A schema change has reaching tests | After an eval request registers a schema, the step's reaching request answers `:seon.test/coverage-unknown` ("no bounded graph selection", offending `[:seon.schema/key …]`) and a bare `(my.test/check {})` answers it without `:seon.error/type`: every `register!` eval request reports an error. The tests reaching a schema key are those reaching the functions and tests whose contracts name it; the error carries its type | `src/seon/test.clj` (lane fix-branch-schema holds it), `test/seon/branch_schema_check_test.clj` | `seon.branch-schema-check-test/a-registered-schema-selects-the-tests-whose-contracts-name-it` | T | fix-branch-schema (test.clj) | E | ready after its deps (high) |
 
 ### 3.10 Merge (MA; spec [merge.md](../specs/merge.md); design: `redo/merge-acceptance.md`, in git's words)
 
@@ -825,6 +826,7 @@ moves to §2 with the commit).
 | W-25 | A check builds its world and compares every definition digest twice | world build 146-212 ms per check; two whole-program digest comparisons per check (lane check-cost, `f4008d441`) | `seon.test` check setup | `seon.test/a-check-compares-every-definition-digest-of-the-program-twice` | EN-7 (world reuse) and one comparison per check | ready (EN-7's order) |
 | W-26 | Every `defn` retracts and re-asserts the same `:seon.fn/ns` | one retraction and one assertion of an unchanged value per definition (lane check-cost) | the definition's recording (`seon.turn.batch`) | — (file with the fix) | RP-6a's recording owner writes only changed values | ready after RP-6a |
 | W-27 | A two-test check allocates 2.74 GB; a docstring-only `defn` 540 MB | `merge-path/merge-path-opus.md` §7 (GB class: never parked) | the check's reach and world build; the `defn` recording path | — (merge-path-opus files them) | diagnosis by allocation profile, then the owners' rows; W-25 and LR-BRANCHREACH are likely parts | ready (diagnosis first, ahead of other waste rows) |
+| W-28 | A check after a schema registration allocates about 1.08 GB | the `my.test/check` reply's `:large-allocation` finding (lane fix-branch-schema) | the check's selection and world build | `seon.test/a-schema-change-has-no-reaching-tests` | F12, then W-25's and W-27's owners | ready (with W-27) |
 
 ### 3.26 Transactions (TX; design: `redo/pass-and-recording.md` §2.1; censuses `tx-census/tx-census-opus.md`, `tx-census-astra.md`)
 
@@ -939,7 +941,7 @@ file-backed test namespace and a removed scratch namespace no longer block the l
 (F4d), and the block's broken tests (CS-01d); library names, referenced docs and doc sections in the block (CS-01c2,
 REF-1, CS-01c5, CS-01c3) and unread messages (CS-01c4); ingestion reporting unworkable tasks (TASK-CHECK) and the hook
 checking references (REF-2); which declarations a branch cannot prove (RF-3, owner route); a lane branch surviving a
-default restart (LR-BRANCHRESTART); an unchanged red answered from its record (F11); the hook's cluster and whole
+default restart (LR-BRANCHRESTART); reaching tests for a schema change (F12, high); an unchanged red answered from its record (F11); the hook's cluster and whole
 replies (LR-HOOK); `(seon.context/current-state)` printing the block, not the evaluation's world; test-support Vars and
 host dynamic bindings at the agent's REPL; assigning a task whose red proof exists only on a branch (the pilot's
 tasks, filed in `seon.context`, `seon.sci.eval`, `seon.task`, `my.test`, `my.program`).
@@ -1012,7 +1014,7 @@ the one before it.
 **The same path by row id.**
 1. CS-05b → CS-01c2 → REF-1 → CS-01c5 → CS-01c3 → TASK-CHECK → REF-2; S4-05a → CS-01c4 → CS-02.
    Alongside: S1-06 → S1-07a, S1-08; RED-8; LR-HOOK.
-2. F4c (in flight) → F4d; CS-01d; F11; LR-PROOFREAD. Alongside: A1, LR-PROOFSTATUS, LR-BRANCHRESTART, RF-3.
+2. F4c (in flight) → F4d; F12 (high); CS-01d; F11; LR-PROOFREAD. Alongside: A1, LR-PROOFSTATUS, LR-BRANCHRESTART, RF-3.
 3. Context track: S4-01 → S4-02a → S4-02b → S4-03 → S4-04 → S4-06 → S4-07a → S4-07b1 → S4-07b2 → S4-07b3; CS-03a →
    DBG-01; NK-5 after S4-03. Acquisition and storage track: SR-E; SR-GROW; PB-02's proof → PB-02b →
    PB-03, SR-H → SR-I; RP-0's owner rows; PB-04; LR-STALE3; RED-2; W-27 (GB class); MEM-05 (in flight); DIAL-1, DIAL-19;
