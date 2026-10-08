@@ -402,5 +402,14 @@ There are no changed program definitions for a reaching-test selection. The name
 `seon.ref-test/a-doc-section-reads-with-its-headings-below-and-size`,
 `seon.ref-test/a-reference-code-section-carries-its-pin` and
 `seon.context-test/a-library-symbol-resolves-with-its-pinned-revision`. No pre-existing red was established for
-these Vars; the broad namespaces were not run. The gate's result is reported with the commit, never predicted
-here. The note is approximately 9,500 estimated tokens; source/test net change is zero.
+these Vars; the broad namespaces were not run. The note is approximately 9,500 estimated tokens;
+source/test net change is zero.
+
+The first commit, `af1d204d7`, passed bin/lane commit's check of candidate
+`7032c3c56a3760050fc7eb5990ce67928bc0beac`: run e4471d9d5de3, executed 3, reused 0, assertions passed 13,
+failed 0, errors 0, passed true; test run 4,668 ms. Total gate time was 60,101 ms: publication 387 ms,
+adoption 6,356 ms; isolated JVM readiness 36,067 ms, boot 40,023 ms, test phase 4,766 ms. The throwaway
+PID was 26755, start instant 2026-10-08T09:43:51.223Z. This is positive smoke evidence for those installed
+candidate seams, not evidence that default was restarted or that proposed editing/navigation exists. The
+over-ten-second isolated boot is an observed cost under the explicitly requested gate; it belongs to the boot
+owner's follow-up schedule. This landing evidence is recorded by a forward documentation commit, never amendment.
