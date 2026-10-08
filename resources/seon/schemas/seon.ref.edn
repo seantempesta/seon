@@ -36,10 +36,11 @@
            :pin [:map {:description "The reference-code project and pinned revision a library definition loads from."}
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
            :schema-form :seon.schema/value
+           :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
            :resolved [:map {:description "A name resolved to its current definition, with the forms that read it."}
                       [:seon.ref/name :seon.ref/name]
                       [:seon.ref/line {:optional true} :seon.ref/line]
-                      [:arglists {:optional true} [:sequential [:vector :symbol]]]
+                      [:arglists {:optional true} :seon.ref/arglists]
                       [:seon.fn/spec {:optional true} :seon.fn/spec]
                       [:doc {:optional true} :string]
                       [:seon.ref/pin {:optional true} :seon.ref/pin]

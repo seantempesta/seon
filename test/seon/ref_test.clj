@@ -44,3 +44,9 @@
            [headings calls] (test-support/armed-calls '#{seon.ref/parsed} #(shown running agent-id code))]
        (is (= 1 headings))
        (is (= {'seon.ref/parsed 1} calls))))))
+
+(deftest a-function-whose-arglists-auto-resolve-a-keyword-resolves
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (is (= ['([{:seon.print/keys [node children]}])]
+            (shown running agent-id "(mapv :arglists (seon.ref/references {:seon.ref/text \"`seon.print/close-frame`\"}))"))))))

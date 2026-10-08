@@ -162,6 +162,19 @@
         pin (assoc :seon.ref/pin pin))
       {:seon.ref/name reference :seon.ref/problem-kind :unresolved})))
 
+(defn- stored-arglists
+  "A function's stored arglists text read as data in its own namespace: `::k` is
+  its namespace's keyword, `::alias/k` resolves through the loaded aliases."
+  {:malli/schema [:=> [:cat :qualified-symbol :string] :seon.ref/arglists]}
+  [function text]
+  ;; stored as source text until PR-25 stores the arglists as data
+  (let [home (symbol (namespace function))
+        aliases (some-> (find-ns home) ns-aliases)]
+    (edamame/parse-string text {:auto-resolve (fn [requested]
+                                                (if (= :current requested)
+                                                  home
+                                                  (or (some-> (get aliases requested) ns-name) requested)))})))
+
 (defn- resolve-name
   "One referenced name resolved to its current definition on `database`, or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
@@ -182,8 +195,7 @@
           (:seon.error/at function) function
           (:seon.fn/sym function)
           (cond-> {:seon.ref/name reference :seon.render/operations operations}
-            (:seon.fn/arglists function) (assoc :arglists ; stored text read back as data until PR-25
-                                                (edamame/parse-string (:seon.fn/arglists function)))
+            (:seon.fn/arglists function) (assoc :arglists (stored-arglists reference (:seon.fn/arglists function)))
             (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
             (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts (:seon.fn/doc function)))))))
           (:seon.error/at test-entity) test-entity
