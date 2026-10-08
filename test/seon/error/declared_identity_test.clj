@@ -1,6 +1,6 @@
 (ns seon.error.declared-identity-test
   "The producer declares an error's identity; settlement and recording read it
-  (`:seon.error/declared-schema` on the value's metadata) and guess nothing
+  (the value's `:seon.error/type`) and guess nothing
   from its members (agent-path root-cause audit M3/E6)."
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
@@ -11,7 +11,7 @@
 (defn- declared-and-valid?
   "The value names its declared schema, and that schema accepts it."
   [projection expected value]
-  (let [declared (:seon.error/declared-schema (meta value))]
+  (let [declared (:seon.error/type value)]
     (and (= expected declared)
          ((schema/projection-validator projection declared) value))))
 
@@ -27,6 +27,5 @@
        (is (declared-and-valid? projection :seon.db/invalid-read-error read-refusal))
        (is (declared-and-valid? projection :seon.render/ambiguous-error ambiguous))
        (is (= :seon.render/request-error
-              (:seon.error/declared-schema
-               (meta (render/request-profile {:seon.render/profile read-refusal}))))
+              (:seon.error/type (render/request-profile {:seon.render/profile read-refusal})))
            "a relabelling producer declares the identity it relabels to")))))

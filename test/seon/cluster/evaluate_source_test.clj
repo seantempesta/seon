@@ -8,10 +8,12 @@
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
+            [seon.ai.tokens :as tokens]
             [seon.db :as db]
             [seon.eval.drive :as drive]
             [seon.flow :as flow]
             [seon.id :as id]
+            [seon.render :as render]
             [seon.sci.eval :as sci.eval]
             [seon.batch :as batch]
             [seon.cache]
@@ -77,7 +79,7 @@
            :seon/tasks #{'seon.cluster.agent/a-trivial-form-waits-on-two-durable-commits 'seon.turn/a-turn-pass-derives-its-work-twice 'seon.sci.eval/agent-form-writes-name-an-unwritten-evaluation}}
   code-evaluates-as-one-ordinary-run-of-its-agent
   (with-armed-agent
-   (fn [{:keys [connection agent-id routing request code]}]
+   (fn [{:keys [connection cluster-name agent-id routing request code]}]
           (testing "every form of the code is one evaluation of the run, in order; nothing is read as prose"
             (let [result (code "1\n#?(:clj 2 :cljs 3)\n(str *ns*)")]
               (is (:seon.turn/id result))
@@ -160,17 +162,23 @@
             ;; post-evaluation walk realized all 200,000 elements here, and
             ;; `(range)` killed default (landing oom-63809).
             (code "(def realized (atom 0))\n(map (fn [x] (swap! realized inc) x) (range 200000))")
-            (let [realized (parse-long (first (shown connection (code "@realized"))))]
-              (is (< realized 1000) "no elements are realized after the print")
+            (let [realized (parse-long (first (shown connection (code "@realized"))))
+                  ;; the print steps at most half the budget's characters; a
+                  ;; chunked seq realizes the rest of its last 32-element chunk
+                  budget-chars (tokens/estimate-chars
+                                (:seon.render.profile/token-budget
+                                 (render/agent-render-profile (config/effective (db/db connection) cluster-name))))
+                  stepped (+ 32 (inc (quot budget-chars 2)))]
+              (is (<= realized stepped) "no elements are realized after the print")
               ;; The infinite case only once the finite one proves no later walk.
-              (when (< realized 1000)
+              (when (<= realized stepped)
                 (let [old-gen #(transduce (comp (filter (fn [pool] (str/includes? (.getName ^java.lang.management.MemoryPoolMXBean pool) "Old Gen")))
                                                 (map (fn [pool] (.getUsed (.getUsage ^java.lang.management.MemoryPoolMXBean pool)))))
                                           + (java.lang.management.ManagementFactory/getMemoryPoolMXBeans))
                       before (old-gen)
                       shown-values (shown connection (code "(range)\n(map inc (range))"))]
                   (is (= 2 (count shown-values)))
-                  (is (every? #(< (count %) 4000) shown-values))
+                  (is (every? #(<= (count %) budget-chars) shown-values) "each shows within the budget")
                   (is (< (- (old-gen) before) (* 256 1024 1024)) "old gen stays flat")))))
           (testing "an unbound Var's value is a value, as in Clojure: nothing walks the result to classify it"
             (let [result (code "(declare unbound-probe)\n{:u unbound-probe}")]
@@ -275,6 +283,25 @@
        (is (= [2 nil 4] (mapv :seon.batch/value jvm)) "JVM: the forms around the failed read run")
        (is (= :seon.sci.reader/form
               (:seon.error/member (:seon.batch/error-value (ex-data (:seon.batch/error (second jvm)))))))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.agent/a-run-refused-before-it-opens-answers-no-values}}
+  a-run-whose-open-is-refused-still-answers-its-values
+  ;; A form that closes its own agent's admission outside the run's custody
+  ;; leaves the run unopenable: the settlement is refused, and the answer was
+  ;; that refusal alone, every evaluated value dropped (lane what-broke,
+  ;; 2026-10-09). The path is total: the values return, the refusal beside them.
+  (with-armed-agent
+   (fn [{:keys [agent-id code]}]
+     (code (str "(defn close-my-admission! \"Closes my admission outside my run's custody.\""
+                " {:malli/schema [:=> [:cat :seon.db/connection] :boolean]} [c]"
+                " (some? (seon.db/call-with-custody {} #(seon.db/transact! c [[:db/add [:seon.agent/id \""
+                agent-id "\"] :seon.agent/admission-closed-tx \"datomic.tx\"]]))))"))
+     (let [result (code "(close-my-admission!)\n(+ 1 2)")]
+       (is (= ["true" "3"] (mapv (comp :seon.eval/shown :seon.sci.eval/evaluation)
+                                 (:seon.turn.loop/evaluated-sources result)))
+           "every evaluated form's value is answered")
+       (is (some? (:seon.error/type (:seon.turn.loop/refusal result)))
+           "the refused settlement is answered beside the values")))))
 
 (deftest a-pass-captures-definitions-realized-after-the-form-body
   (with-armed-agent

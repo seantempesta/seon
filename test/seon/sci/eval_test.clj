@@ -20,6 +20,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.pull-api :as pull-api]
             [seon.config :as config]
+            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
             [seon.blob :as blob]
@@ -2567,6 +2568,8 @@
       (is (pos? small-bytes) "the body's thread counts its allocation")
       (is (< large-bytes (+ small-bytes (* 16 1024 1024))) "a million elements cost what a thousand do")
       (is (< string-bytes (* 16 1024 1024)) "a 1 MB string is not copied for storage"))
-    (testing "an infinite lazy seq is realized only as far as it is shown"
+    (testing "an infinite lazy seq is stepped no further than the budget could show"
+      ;; the printer steps a seq at most half the budget's characters (one
+      ;; character and one separator per member), never the whole seq
       (is (pos? (:seon.eval/elisions infinite)))
-      (is (<= @realized 64)))))
+      (is (<= @realized (inc (quot (tokens/estimate-chars (:seon.render.profile/token-budget (:seon.render/profile request))) 2)))))))

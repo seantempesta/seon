@@ -156,16 +156,21 @@
   Admission closes on the agent rows my branch holds (the fact `retire-unclaimed!`
   and the run writer read); the owner's release of the execution (`release-context!`, or boot's
   `retire-unclaimed!`) unlinks the branch, so the run asking is never the one
-  released. Answers `:my.agent/retiring?`."
-  {:malli/schema [:=> [:cat :seon.store/branch :my.agent/branch-context] :my.agent/retired-branch]}
+  released. The close is written in my connection's custody, so the asking
+  run's open rides it and that run settles; a refused close is the answer.
+  Answers `:my.agent/retiring?`."
+  {:malli/schema [:=> [:cat :seon.store/branch :my.agent/branch-context]
+                  [:or :my.agent/retired-branch :seon.error/value]]}
   [lane {connection :seon.db/connection}]
   (let [open (db/q '[:find [?agent ...] :where [?agent :seon.agent/id _]
                      (not [?agent :seon.agent/admission-closed-tx])]
-                   @connection)]
-    (when (seq open)
-      (db/call-with-custody {}
-        #(db/transact! connection (mapv (fn [row] [:db/add row :seon.agent/admission-closed-tx "datomic.tx"]) open))))
-    {:seon.store/branch lane :my.agent/retired? false :my.agent/retiring? true}))
+                   @connection)
+        closed (when (seq open)
+                 (db/call-with-custody {:seon.db/connection connection}
+                   #(db/transact! connection (mapv (fn [row] [:db/add row :seon.agent/admission-closed-tx "datomic.tx"]) open))))]
+    (if (:seon.error/at closed)
+      closed
+      {:seon.store/branch lane :my.agent/retired? false :my.agent/retiring? true})))
 
 (defn retire-branch!
   "Retire a lane branch: its hosted agent first (admission closed, its graphs

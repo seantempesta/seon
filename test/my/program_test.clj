@@ -73,7 +73,7 @@
            key-report (program/reads-key {:seon.db/db database :seon.schema/key :seon.db/connection})
            namespace-report (program/breaks {:seon.db/db database :seon.program/subject 'seon.turn})
            render-report (program/breaks {:seon.db/db database
-                                          :seon.program/subject 'seon.render.value/render-ai})]
+                                          :seon.program/subject 'my.program/render-breakage-ai})]
        (is (not (:seon.error/at key-report)))
        (is (contains? (:seon.program/contract-refs key-report) 'seon.db/transact!))
        (is (seq (:seon.program/schema-references key-report)))
