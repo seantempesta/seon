@@ -130,6 +130,11 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   unresolved reference as a problem on the task, never a refusal. A task's proofs are the deftests carrying it in
   `:seon/tasks`, never prose. Lives in: `references/references.md`; cards CS-01c1..3; task census migration.
 
+- **One reference rule everywhere; Markdown for docs (owner 2026-10-08).** Docs are Markdown. Task intents, Markdown
+  docs (code spans and relative links) and docstrings are parsed for references by ONE resolver under the same rules;
+  the edit hook checks every edited doc, task file and docstring for references that don't resolve. Lives in: cards
+  REF-1, REF-2, CS-01c5, TASK-CHECK.
+
 ## 5. Merge
 
 - **Git's words.** Base merge and branch concepts, verbs, functions and data on git, so every agent understands them
