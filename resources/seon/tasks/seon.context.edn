@@ -1,17 +1,8 @@
 [
- #:seon.task{:name "current-state-prints-the-world-not-the-block"
-             :kind :function
-             :intent "`(seon.context/current-state)` at an agent's REPL shows the evaluation's world (connection, database, admission caps, SCI context with two different projection fingerprints, render profile) beside a value of turns-left only (confirmed on default 2026-10-08 after CS-01c1, agent integrate-2-probe). Done when the agent reads its block: task, references, proofs with status, and nothing of its world."
-             :must-read #{seon.context/current-state seon.context/current-state-ai}
-             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
  #:seon.task{:name "the-current-state-block-misleads-and-is-large"
              :kind :function
              :intent "The current-state block (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08): a proof shows :green with nothing saying a task whose proofs are all green proves nothing; must-read seon.render.value/render-ai shows :seon.ref/line 1 (wrong); :seon.fn/spec prints as a string instead of data; the block draws a :large-value finding against itself (1,108 tokens). Done when each is fixed at its producer (seon.context/current-state, seon.ref) with a regression per item."
              :must-read #{seon.context/current-state seon.ref/references}}
- #:seon.task{:name "a-red-proof-shows-printed-strings-and-only-its-first-failure"
-             :kind :function
-             :intent "In `(seon.context/current-state)` a red proof showed its first failing report only, as :expected and :actual strings; between passes the first report flipped between assertions and the model concluded its block was stale (live-agent run, agent live-flash, default 6cc5dbbb4, 2026-10-08). Done when the proof shows every failing assertion in a stable order, its claim as the runner's stored shown text marked as text."
-             :must-read #{seon.context/proofs}}
  #:seon.task{:name "a-lost-model-call-is-not-in-the-model-context"
              :kind :function
              :intent "Since CX-1 the model's context is (help), its own model exchanges and the block. A model call lost to a provider failure leaves a call row with a failed attempt and no evaluation, so the next model request does not say the call was lost or why (the system turn's fault read used to carry it). Done when the next model request shows the lost call's error: its exchange, or the block's errors section."
@@ -25,10 +16,6 @@
              :intent "The MCP reply for a branch agent's evaluation carries :errors (its open errors with signature, operation and count); the same agent's next model request carries none (repl-dogfood 2026-09-27, then the old prompt; still true of the model context since CX-1). An error is delivered in the reply of the agent that can act on it, the MCP reply and the next model request reading the same saved observation. Done when the model request shows the same error observation the MCP reply shows."
              :must-read #{seon.context/model-context seon.repl/response}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
- #:seon.task{:name "the-system-message-is-the-printed-help-map-not-its-render"
-             :kind :function
-             :intent "`seon.context/model-context` sends as the system message the value printer's text of `seon.bootstrap/help-value` with no render applied: the model reads {:seon.render/ai seon.bootstrap/render-help-ai, :seon.render/html seon.bootstrap/render-help-html, :seon.help/lines [\"You are an agent at a REPL ...\" ...]}, 1,346 characters, with the render keys and an escaped vector of strings, instead of the help the AI render produces (live-agent run 3, agent live-flash-3c, default 0de932400, 2026-10-08; rebuilt with (seon.context/model-context branch-db {} \"live-flash-3c\")). The current-state block in the same call is shown through its declared render. Done when the system message is the help value's AI render, as (help) shows it at the REPL, with no :seon.render/* keys. Run 4 (default e1a71b7c8, agent live-flash-4, 2026-10-08): the turn's own request (cluster ctx, caps and time limit) sends the render, 1,172 characters; a request with a profile but no :seon.sci.admit/caps, e.g. (seon.context/model-context db {:seon.db/connection c :seon.sci.eval/ctx ctx :seon.sci.eval/time-limit-ms 30000} id), still answers the printed map (1,346 characters) with no error: `seon.render/selection` refuses the missing caps, `seon.sci.eval/shown-result` puts that beside the value as :seon.cluster.eval/diagnostics, and model-context keeps only :seon.eval/shown, dropping it. Done also when such a request answers that refusal, never the printed map."
-             :must-read #{seon.context/model-context seon.bootstrap/help-value seon.bootstrap/render-help-ai}}
  #:seon.task{:name "a-handled-message-stays-unread-in-every-later-pass"
              :kind :function
              :intent "Root's message cebe98c3e8bc woke agent live-flash-4 (live-agent run 4, default e1a71b7c8, branch :agent-13d811644932, 2026-10-08); its first model turn recorded the wake in :seon.turn/handled, yet `seon.context/current-state` kept the message under :seon.context/unread in the block of all four model passes and after the task went green, since the model never called (my.message/received! \"cebe98c3e8bc\"). The same instruction is resent on every pass and reads as new work. Done when a message the agent's model turn has been shown appears in the block once, not on later passes, and a test asserts the second pass's block has no :seon.context/unread for it."

@@ -40,7 +40,7 @@
             {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}]
            [:seon.ns/name 'merge-m8.fixture]))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/a-defn-rewrites-its-namespace-row}} a-defn-keeps-its-namespace-row
+(deftest a-defn-keeps-its-namespace-row
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id connection]
      (is (= {} (select-keys (db/transact! connection [kept]) [:seon.error/message :seon.error/problems])))
@@ -57,8 +57,7 @@
                 (dissoc after :seon.ns/aliases :seon.ns/requires :seon.ns/source :seon.program/definition-digest))
              "a require changes only the require attributes"))))))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/a-repl-deftest-in-a-file-backed-test-namespace-is-refused}}
-  a-deftest-in-a-namespace-with-stored-refers-is-admitted
+(deftest a-deftest-in-a-namespace-with-stored-refers-is-admitted
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id connection]
      (is (= {} (select-keys (db/transact! connection
@@ -80,8 +79,7 @@
                                             [:seon.ns/name 'merge-m8.test-fixture]))))
          "the namespace keeps its refers"))))
 
-(deftest ^{:seon/tasks #{'seon.program/an-in-ns-namespace-blocks-diff-and-write-branch}}
-  a-removed-namespace-the-agent-stays-in-leaves-diff-answering
+(deftest a-removed-namespace-the-agent-stays-in-leaves-diff-answering
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id _connection]
      (eval! "(in-ns 'merge-m8.scratch) (defn merge-m8-scratch [x] x)" agent-id running)
@@ -93,8 +91,7 @@
        (is (false? (get reply "isError"))
            "diff answers, not a refusal, after the namespace the agent stood in was removed")))))
 
-(deftest ^{:seon/tasks #{'seon.program/a-deftest-over-a-contracted-defn-refuses-its-contract-facts}}
-  a-later-request-redefining-a-contracted-defn-is-admitted-as-written
+(deftest a-later-request-redefining-a-contracted-defn-is-admitted-as-written
   ;; each row: request 1 defines, request 2 redefines the same name; the
   ;; second definition is read as the agent's context binds it, never as
   ;; the base it forked from bound the shared Var
@@ -116,8 +113,7 @@
          (is (= expected (stored (db/db connection)))
              "the stored row is the second definition's, without the first one's contract"))))))
 
-(deftest ^{:seon/tasks #{'my.program/write-back-refuses-a-file-whose-unchanged-functions-reindex-differently}}
-  a-rewritten-namespace-row-stores-the-digest-of-what-it-keeps
+(deftest a-rewritten-namespace-row-stores-the-digest-of-what-it-keeps
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running agent-id connection]
      (is (= {} (select-keys (db/transact! connection [kept]) [:seon.error/message :seon.error/problems])))
@@ -130,8 +126,7 @@
        (is (= (db/namespace-digest-of database id {}) digest)
            "the stored digest is the digest of the stored row, doc and tasks included")))))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/a-repl-require-changes-the-namespace-context-but-not-its-source}}
-  a-repl-require-is-written-back-in-the-ns-form-and-reindexes-equal
+(deftest a-repl-require-is-written-back-in-the-ns-form-and-reindexes-equal
   ;; a new agent id gets its own branch off the cluster head, which holds the indexed file
   ((requiring-resolve 'seon.test-support/with-running-agent)
    (fn [running _ connection]
@@ -185,9 +180,7 @@
              (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
            ((requiring-resolve 'seon.test-support/delete-recursively!) root)))))))
 
-(deftest ^{:seon/tasks #{'seon.schema/a-committed-nilable-return-cannot-be-redefined
-                         'my.program/write-branch-refuses-an-unchanged-nilable-function}}
-  an-unchanged-committed-nilable-contract-is-admitted-and-written-back
+(deftest an-unchanged-committed-nilable-contract-is-admitted-and-written-back
   ;; the nilable-return rule judges a new or changed contract; one equal to
   ;; the committed contract keeps its committed admission at the REPL and in
   ;; write-back's reindex

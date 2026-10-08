@@ -77,8 +77,7 @@
      (is (= [[2 [[1 :dropped ")"]]] [3 nil]]
             (mapv (juxt :seon.repl/value :seon.repl/repairs) (replies "(inc 1)) (inc 2)" agent-id running)))))))
 
-(deftest ^{:seon/tasks #{'seon.turn/repairs-are-stored-as-printed-text}}
-  a-stored-repair-reads-back-as-data
+(deftest a-stored-repair-reads-back-as-data
   (support/with-running-agent
    (fn [running agent-id _]
      (is (= [{:seon.cluster.eval/source "(inc 1)"

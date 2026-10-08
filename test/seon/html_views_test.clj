@@ -171,8 +171,7 @@
         (is (str/includes? html "1,000"))
         (is (not (str/includes? html "1,000 s")))))))
 
-(deftest ^{:seon/tasks #{'my.agent/settings-bang-answers-the-overrides-before-the-write}}
-  the-settings-render-shows-the-overrides-it-was-handed
+(deftest the-settings-render-shows-the-overrides-it-was-handed
   (let [written {:seon.config.run/max-episode-runs 10}
         unit {:seon.render/value written :seon.agent/id "settings-render-proof" :seon.db/db (db/db)}]
     (is (= written (:my.agent/settings (agent/render-settings-ai unit))))))

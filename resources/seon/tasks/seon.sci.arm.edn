@@ -2,16 +2,6 @@
              :kind :function
              :intent "`seon.sci.arm/changed-namespaces` flags a namespace SCI merely touched (an unresolved qualified symbol), so the facts stage refuses a plain call (stale-agent-platform lane; 4be90d597 hid only the diagnostic). Done when the producer no longer reports a touched-only namespace as changed and a regression evaluates a plain call over an unresolved qualified symbol."
              :must-read #{seon.sci.arm/changed-namespaces}}
- #:seon.task{:name "a-def-without-line-metadata-refuses-its-origin",
-            :kind :function,
-            :intent
-            "source-display/printer-notes.md reports (eval (read r)) defining a function without reader line metadata refused by `seon.sci.arm/write-event` output at [`:seon.batch/origin` :line]. A def without an origin must remain valid, or refusal must happen at a declared input boundary; preserve the evaluated value. Regression through SCI evaluation with positionless source form.",
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
- #:seon.task{:name "a-redefinition-in-one-pass-is-armed-with-the-earlier-contract"
-             :kind :function
-             :intent "A defn whose :malli/schema changes from the contract its symbol already holds (an earlier form of the same pass, or an earlier pass) is armed at its write with the EARLIER contract, so a call with the new arity in the same pass is refused: (defn ^{:malli/schema [:=> [:cat :int] :int]} h [x] (inc x)) (defn ^{:malli/schema [:=> [:cat :int :int] :int]} h [x y] (+ x y 100)) (h 1 2) answers 'refused argument count: expected a declared argument count (1)'; the next pass returns 103. Cause: `seon.sci.arm/arm!` arms under the working value's projection, which carries the earlier row's function contract, and `seon.instrument/compiled-wrapper` prefers the projection's contract and its retained compiled schema over the authored one. Correct: the write arms the contract authored at that write. Proof: seon.cluster.turn-test/a-changed-arity-redefinition-is-callable-in-the-same-pass."
-             :must-read #{seon.sci.arm/arm! seon.instrument/compiled-wrapper}}
  #:seon.task{:name "arming-prints-the-authored-contract-to-read-it-back"
              :kind :function
              :intent "`seon.sci.arm/arm!` hands `seon.sci.eval/install-function-contract!` the Var's :malli/schema as (pr-str contract), and `seon.instrument/wrap-interpreted` reads it back with edn/read-string: a value printed to text and parsed again outside the value printer (kondo's one-printer warning on arm.clj). Correct: pass the contract form as data from the write to the compile; the stored row keeps its text where the store needs it. Proof: the arming path's existing tests (seon.cluster.turn-test/a-changed-arity-redefinition-is-callable-in-the-same-pass, `seon.cluster.turn-test/contracted-redefinition-exactly-replaces-the-entity`) stay green with no pr-str on the arming path."

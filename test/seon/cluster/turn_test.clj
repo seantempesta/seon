@@ -913,8 +913,7 @@
             (is (not (contains? entity :seon.fn/doc)))
             (is (not (contains? entity :seon.fn/workload)))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.arm/a-redefinition-in-one-pass-is-armed-with-the-earlier-contract}}
-  a-changed-arity-redefinition-is-callable-in-the-same-pass
+(deftest a-changed-arity-redefinition-is-callable-in-the-same-pass
   (with-cluster
     (fn [cluster]
       (with-provider! cluster
@@ -929,8 +928,7 @@
             (is (not (contains? call :seon.cluster.eval/error)) "the new arity is armed")
             (is (= 103 (edn/read-string (:seon.eval/shown call))))))))))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/a-function-using-a-schema-registered-in-the-same-form-is-not-admitted}}
-  a-function-using-a-schema-registered-in-the-same-form-is-admitted
+(deftest a-function-using-a-schema-registered-in-the-same-form-is-admitted
   (with-cluster
     (fn [cluster]
       (with-provider! cluster
@@ -1547,8 +1545,7 @@
                               [_ :seon.cluster.eval/error ?error]]
                             @connection))))))))
 
-(deftest ^{:seon/tasks #{'seon.problems/an-agents-own-form-errors-are-assigned-to-another-agent}}
-  a-red-form-stays-with-its-author-and-the-fold-continues
+(deftest a-red-form-stays-with-its-author-and-the-fold-continues
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -2850,9 +2847,7 @@
        (is (some #{'tq.f4-test/perimeter-uses-area} (:seon.turn.loop/red reaching)))
        (is (= 1 (:seon.test/fail-count (first results))) "the reaching step recorded the red result")))))
 
-(deftest ^{:seon/tasks #{'seon.turn/the-reply-tests-block-shows-the-pass-and-commit-ids
-                         'seon.test.runner/every-eval-request-reports-unrelated-reds-as-reaching}
-           :seon.test/long "Four evaluations, each followed by the step's test worlds (about 0.45 s per executed request)."
+(deftest ^{:seon.test/long "Four evaluations, each followed by the step's test worlds (about 0.45 s per executed request)."
            :seon.test/long-ms 30000}
   the-tests-block-shows-what-the-request-executed-and-nothing-after
   (test-support/with-running-agent
@@ -2932,8 +2927,7 @@
        (is (= 3 (count results)))
        (is (every? #(pos? (long (:seon.test/pass-count % 0))) results) "the next pass ran the queued tests and recorded them")))))
 
-(deftest ^{:seon/tasks #{'seon.test/an-exhausted-step-budget-reports-the-unstarted-members-pending}
-           :seon.test/long "Five evaluations, each followed by the step's test worlds."
+(deftest ^{:seon.test/long "Five evaluations, each followed by the step's test worlds."
            :seon.test/long-ms 60000}
   a-budget-spent-acquiring-the-first-world-leaves-the-members-pending
   (test-support/with-running-agent

@@ -32,11 +32,6 @@
              :intent "`seon.task/assign!` reads proofs from the home database only, and a proof reaches the home only by commit and a restart of default, while a throwaway check refuses a commit whose named test is red (`bin/lane commit --branch-evidence` now has `--accept-red-before`). So root cannot assign a task whose red proof exists only on a branch. Its refusal \"seon.task is refused: no-proofs.\" names neither the task nor the fix. Done when root can assign a task whose red proof exists on the agent's branch or in an accepted-red commit, and the refusal names the task and the `:seon/tasks` tag to add."
              :must-read #{seon.task/assign! seon.task/task-edges}
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
- #:seon.task{:name "an-assignment-offers-no-merge-request"
-             :kind :function
-             :intent "`(seon.task/assign! ...)` answers `:seon.render/operations [(my.program/propose-merge! {})]`, offered to root at assignment time: a merge request is meaningless before the agent has worked, and the name is retired for `request-merge!`. The reply offers nothing it cannot honor: an empty operations vector."
-             :must-read #{seon.task/assign!}
-             :evidence #{"docs/seon/schedule/agent-loop-ledger.md#S6-06a"}}
  #:seon.task{:name "an-assignment-reads-only-its-proofs"
              :kind :function
              :intent "One `seon.task/assign!` allocated 64.4 MB in 1,407 armed calls and 62 ms on the cluster: `seon.task/task-edges` runs two `or` queries (holders, referrers) and assign! needs only the proofs. A proof is one indexed query from the task's tag; the assignment read allocates under 8 MB."

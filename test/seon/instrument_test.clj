@@ -880,8 +880,7 @@
          (finally
            (doseq [name names] (ns-unmap 'seon.instrument-test name))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.boot/reset-takes-over-six-seconds}}
-  a-later-database-value-of-the-same-program-keeps-every-wrapper
+(deftest a-later-database-value-of-the-same-program-keeps-every-wrapper
   ;; A cluster restarted in the same JVM re-arms its program at a newer value:
   ;; the snapshot's database position is no input of the wrapper.
   (test-support/with-database

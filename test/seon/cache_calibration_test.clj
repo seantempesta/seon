@@ -70,8 +70,7 @@
        :seon.test.runner/reach-graph (* runner/reach-graph-entry-bytes graph-entries)
        :seon.test.runner/reach-index (+ (* runner/reach-index-entry-bytes graph-entries) (* 160 tests)))))
 
-(deftest ^{:seon/tasks #{'seon.cache/cache-weights-run-three-times-the-retained-bytes}}
-  every-reach-kind-is-charged-what-it-was-measured-to-retain
+(deftest every-reach-kind-is-charged-what-it-was-measured-to-retain
   (let [{:keys [kinds]} (:seon.measure/reach-kinds (measurement))]
     (is (= #{:seon.test.runner/reach-attribute :seon.test.runner/reach-node
              :seon.test.runner/reach-graph :seon.test.runner/reach-index}

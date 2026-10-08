@@ -6,8 +6,7 @@
             [seon.profile :as profile]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.turn/each-form-of-a-pass-costs-megabytes}}
-  a-pass-reads-its-terminal-ordinal-once
+(deftest a-pass-reads-its-terminal-ordinal-once
   (support/with-running-agent
    (fn [running agent-id _connection]
      (doseq [n [1 10]]
@@ -27,8 +26,7 @@
          (is (every? #(not (contains? % :seon.repl/diagnostics)) values))
          (is (= 1 calls)))))))
 
-(deftest ^{:seon/tasks #{'seon.turn/each-form-of-a-pass-costs-megabytes}}
-  jvm-render-settings-are-acquired-once-per-pass
+(deftest jvm-render-settings-are-acquired-once-per-pass
   (support/with-running-agent
    (fn [running agent-id _connection]
      (let [counts

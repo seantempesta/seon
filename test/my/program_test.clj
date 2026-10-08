@@ -19,8 +19,7 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'my.program/callers-lists-each-call-site-with-the-callees-arities}}
-  program-reads-name-the-referrers-and-propose-without-writing
+(deftest program-reads-name-the-referrers-and-propose-without-writing
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -298,15 +297,13 @@
         (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) [branch home])
         (support/delete-recursively! root)))))
 
-(deftest ^{:seon/tasks #{'my.program/source-repeats-the-docstring}}
-  source-shows-the-docstring-once-inside-the-source
+(deftest source-shows-the-docstring-once-inside-the-source
   (let [found (program/source (db/db) 'my.program/source)]
     (is (clojure.string/includes? (:source found) "Read one declaration's source") "the source carries its docstring")
     (is (not (contains? found :doc)) "the docstring is not repeated beside the source")
     (is (= 'my.program/source (:sym found)))))
 
-(deftest ^{:seon/tasks #{'my.program/breaks-of-a-widely-used-function-shows-its-callers-twice}}
-  breaks-of-a-widely-used-function-shows-each-caller-once-and-counts-what-it-cuts
+(deftest breaks-of-a-widely-used-function-shows-each-caller-once-and-counts-what-it-cuts
   (support/with-running-agent
    (fn [running agent-id _]
      (let [code "(my.program/breaks {:seon.program/subject 'seon.db/pull})"

@@ -211,8 +211,7 @@
                      (db/registration-check :seon.task/intent [:string {:min 1}])))
              "an unchanged form reads nothing"))))))
 
-(deftest ^{:seon/tasks #{'seon.render.ns/a-function-entity-render-repeats-an-unrun-state-per-test}}
-  a-function-renders-its-source-by-name
+(deftest a-function-renders-its-source-by-name
   ;; Class regression: the function node is its authored form; what it calls
   ;; and what calls it are its related data (seon.render.walk/related).
   (support/with-database
@@ -250,8 +249,7 @@
        (is (= '(dir my.agents.ns-owner) (sut/agent-namespace-form {:seon.db/db database :seon.agent/id "ns-owner"}))
            "the form face is the namespace's dir")))))
 
-(deftest ^{:seon/tasks #{'seon.render.ns/a-doc-line-is-the-first-physical-line-not-the-first-sentence}}
-  a-doc-line-is-the-docstrings-first-sentence
+(deftest a-doc-line-is-the-docstrings-first-sentence
   (let [shown (fn [doc] (:seon.ns/doc (sut/render-ai {:seon.render/value {:seon.ns/name 'seon.example :seon.ns/doc doc}
                                                      :seon.db/db (db/db) :seon.render/distance 0})))]
     (is (= "The one database namespace for all things Datahike."

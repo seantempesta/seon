@@ -230,8 +230,7 @@
         score #(#'health/score health/ranking now properties %)]
     (is (< (score (row 14 15 5000)) (score (row 24 25 300)))
         "a hot cheap function adds less time than a rarely called expensive one")))
-(deftest ^{:seon/tasks #{'seon.profile/health-and-explain-rank-wrapper-chains-by-inclusive-time}}
-  over-bound-findings-rank-by-self-time-and-leave-out-wrappers
+(deftest over-bound-findings-rank-by-self-time-and-leave-out-wrappers
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)

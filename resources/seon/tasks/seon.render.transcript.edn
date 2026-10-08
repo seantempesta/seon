@@ -1,10 +1,4 @@
-[#:seon.task{:name "keep-fault-observations-historical"
-             :kind :function
-             :intent "branch-errors reconstructs each evaluation's fault window by querying occurred-since as of its settlement transaction, but occurrence last-at and count are no-history attributes, so a later recurrence changes or removes what an old window shows and a fault after the last settlement has no window yet. Save the exact observation once when the evaluation settles and render that."
-             :must-read #{seon.render.transcript/branch-errors}
-             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
- #:seon.task{:name "delivered-errors-carry-no-result-handle",
+[#:seon.task{:name "delivered-errors-carry-no-result-handle",
             :kind :function,
             :intent
             "A core error recorded during an agent's call (another thread included) reaches the reply's `:seon.repl/errors` as `seon.error/value` plus count and branch, but with no result handle or dig form: the agent can reach the whole recorded error only by knowing to pull [`:seon.error/signature` s] with the observation selector. Reproduce: in SCI as agent X, @(future (`seon.fault/fault!` env (ex-info \"async\" {:probe/async 1}) {`:seon.agent/id` X ...})) answers :errors [{`:seon.error/signature` … `:seon.error/message` \"async\"}] without :probe/async or any handle. Correct (errors spec, 'Every error in a reply's :errors and :diagnostics carries its result handle'): each delivered error carries a handle or requery form that answers the whole recorded value. Proof: an evaluation that records a core fault answers :errors whose handle reads the fault's ex-data.",

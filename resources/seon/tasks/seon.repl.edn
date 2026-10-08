@@ -1,9 +1,4 @@
-[#:seon.task{:name "reply-map-is-not-edn-when-elided-or-rendered"
-             :kind :function
-             :intent "The reply map's own keys stay data whatever the value: the composer writes its entries (:findings, :interrupted, :result, :out, :note, :ns, :ms, :calls) first, then the value printer's shown text spliced as shown (:repeated, :errors, :diagnostics, :value or :error). Shown text is EDN except where the printer cuts inside a collection ({…1}, \"…\"…+N) or a render returns prose; prose with an open delimiter or quote (Steps: 1) open it\\n2) say \"hi) leaves the rest of the map unreadable as EDN, but it can only be followed by other spliced text and the closing brace, never by a composer key. A spliced entry whose last line may hold a comment is ended before the next key. (vec (range 3000)) once answered a :value ending in the floor's ';; …N' legend, so ', :result …, :ms 711}' sat on the comment line."
-             :must-read #{seon.repl/response seon.repl/value-text}
-             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}
- #:seon.task{:name "a-slow-reply-names-nothing"
+[#:seon.task{:name "a-slow-reply-names-nothing"
              :kind :function
              :intent "The SCI reply's `:seon.repl/ms` is the arm's evaluation time only (repl.clj ~218-219): acquisition (339 ms on a probe, recorded as `:seon.eval/acquisition-ms` but not shown), the install gate's disposable branch, and settlement are absent, and no armed function is named. pid 66629's 82 s evaluations left nothing on the cluster (max recorded duration 471 ms). Record [sym ms] of armed calls over slow-ms into the evaluating kernel arm (already per evaluation and carried across threads, adopt-arm), settle them beside acquisition-ms, and show the whole wall time and those names when it exceeds one second; this lets explain-slow's JVM-wide window go (seon.profile/slow-explanation-blames-the-agent-for-platform-time). Done when a regression whose evaluation waits over one second on an armed call gets a reply naming that call and the whole wall time, and concurrent work in other arms is not named."
              :must-read #{seon.profile/explain-slow seon.sci.kernel/adopt-arm seon.repl/response-entries}
@@ -46,13 +41,6 @@
             "A JVM-mode reply that shows a value pulled from ANOTHER branch prints its entity refs as lookup refs resolved against the evaluating agent's own branch: `(d/pull @(seon.db/branch-connection @(seon.cluster.boot/connection \"default\") :agent-cfd70b5547f7) '[{:seon.agent/settings [*]}] [:seon.agent/id \"r-turn-a\"])` run as agent r-turn (branch :agent-21293ca0b763) showed `:seon.config/agent [:seon.cluster.eval/id \"732b426d6067\"]`; eid 125951 is agent r-turn-a on the pulled branch and an evaluation on r-turn's branch. Turn refs printed the same way (`:seon.turn/agent [:seon.cluster.eval/id ...]`, `:seon.turn/trigger [:seon.turn/id ...]`). Resolve eids against the database the value came from, or print the eid. Proof: a deftest pulling from a second branch and asserting the shown ref.",
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
- #:seon.task{:name "a-selected-render-arrives-as-an-escaped-string",
-            :kind :function,
-            :intent
-            "Evaluating {`:seon.ns/name` 'seon.render} (a map satisfying `:seon.ns/ns`, so the namespace render is selected) answered :value as ONE string holding the printed render with \\n escapes and quoted inner strings (2,489 tokens whole, 873 shown), while calling `seon.render.ns/render-ai` explicitly on the same entity answers the map as data, laid out by the printer. Done when a selected render's data reaches the reply as data printed once, the same as an explicit call, asserted on the reply map.",
-            :must-read #{seon.repl/response},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
  #:seon.task{:name "every-def-repeats-the-same-persistence-note",
             :kind :function,
             :intent
@@ -76,11 +64,6 @@
              :intent "A cut :out prints (subs (`:seon.cluster.eval/output` (`seon.db/pull` '[`:seon.cluster.eval/output`] [`:seon.cluster.eval/id` \"29ea417f846d\"])) 4669) (default 2026-10-08): a database read with a Seon attribute name while the live output exists in the runtime. shown-output hands the printer a `seon.db/pull` requery id. Owner ruling 2026-10-08: elision forms are plain clojure.core on the live result symbol, with no database re-pull while the live value exists. Done when the form is (subs (:out result/e…) n), or (subs out/e… n) on the live output, asserted by evaluating it through the MCP entrance and comparing with (subs output n)."
              :must-read #{seon.repl/shown-output}
              :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
- #:seon.task{:name "the-slow-fix-ranks-the-whole-process"
-             :kind :function
-             :intent "The :slow finding's fix (`seon.profile/summary` (`seon.profile/cells`) 5) ranks the process's cumulative profile (`seon.cluster.boot/request!` 31751 ms total) as the same five prose lines in three lists, not the slow evaluation; the reply's :repeated adds about 446 tokens of seon.schema.* rows the agent cannot act on (`my.test/check`, 1,166 ms, default 2026-10-08). Done when the fix reads this evaluation's own armed calls as data and a slow MCP reply is bounded at 60 tokens."
-             :must-read #{seon.repl/findings}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
  #:seon.task{:name "reply-lacks-gc-commits-and-a-dialled-allocation-bound"
              :kind :function
              :intent "Each SCI reply now shows :seon.repl/alloc-mb from :seon.eval/allocated-bytes (every thread's allocation over the evaluation's window, since SCI runs on a virtual thread) and a :large-allocation finding past :seon.config.eval/bounds (400 MB). Missing: the evaluation's GC count and collection-time delta and the commits its request wrote, which need new :seon.eval attributes carried by seon.sci.eval's evaluation record and seon.turn's settlement and pull list (held files when this was filed); and the bound is declared data in the bounds schema, not a :seon.config/dial an operator can size for the machine, because seon.repl/findings judges the emission alone and receives no configuration. Done when a reply that collected garbage shows its GC delta, an eval request shows its commit count, and changing a dial changes the :large-allocation threshold without a reload."

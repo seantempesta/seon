@@ -65,8 +65,7 @@
                                                                   (db/pull @connection '[*] [:seon.task/id id]))}))
        (is (= "Second." (:seon.task/intent (task-section))) "the revision shows without a reassignment")))))
 
-(deftest ^{:seon/tasks #{'seon.context/current-state-prints-the-world-not-the-block}}
-  current-state-shows-only-its-sections
+(deftest current-state-shows-only-its-sections
   (test-support/with-running-agent
    (fn [running agent-id _connection]
      (is (= #{:seon.context/turns} (set (keys (block running agent-id))))
@@ -95,8 +94,7 @@
 (def ^:private two-failure-proof-test
   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\")\n (is (= 9 (tq.cs/f 3)) \"triples\"))")
 
-(deftest ^{:seon/tasks #{'seon.context/a-red-proof-shows-printed-strings-and-only-its-first-failure}}
-  a-red-proof-shows-every-failing-assertion-with-its-claim-as-text
+(deftest a-red-proof-shows-every-failing-assertion-with-its-claim-as-text
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task connection agent-id)
@@ -188,8 +186,7 @@
     (test-support/transacted! *connection* (turn/close-tx {:seon.turn/id "shown-first"}))
     (is (= ["after-open"] (unread)) "the closed turn's handled message is not unread in the next block")))
 
-(deftest ^{:seon/tasks #{'seon.context/the-system-message-is-the-printed-help-map-not-its-render}}
-  a-request-that-cannot-run-the-help-render-answers-a-refusal
+(deftest a-request-that-cannot-run-the-help-render-answers-a-refusal
   (test-support/seed-cluster! *connection* "unrendered")
   (test-support/transacted! *connection* (agent/creation-tx {:seon.agent/id "unrendered"
                                                              :seon.ns/name 'my.agents.unrendered

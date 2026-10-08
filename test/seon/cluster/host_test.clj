@@ -125,8 +125,7 @@
   [rule value]
   (boolean (some #{rule} (tree-seq coll? seq value))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt}}
-  a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged
+(deftest a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
       ;; Hosting writes the agent's home entity on the cluster by design
@@ -188,8 +187,7 @@
                     (db/pull (branch-db handle branch) [:seon.agent/admission-closed-tx] [:seon.agent/id "mcp/retiring"]))))
         (is (nil? (host/hosted handle branch)) "the parent roster no longer records the host")))))
 
-(deftest ^{:seon/tasks #{'seon.cluster/reset-leaves-old-agents-branches-and-connections}}
-  stopping-the-cluster-releases-every-host-connection
+(deftest stopping-the-cluster-releases-every-host-connection
   ;; A reset stops the instance in this JVM: a host left running kept its
   ;; branch connection, so its branch outlived the reforked cluster.
   (with-host-world {}

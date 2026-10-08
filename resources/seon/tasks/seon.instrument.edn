@@ -3,11 +3,6 @@
              :intent "Armed validation cost per call was Malli's regex driver for the :cat input plus -instrument-f's argument vector and always-on guard pair (~700-1300 B, 200-500 ns per armed call; ~6,600 armed calls per trivial agent form). Fixed in malli 43c6dca8 (pin c0c39ec5c), adopted at the next restart. Done when root re-runs tmp/contract-cost-opus/probe.clj on the new pin and the armed-validation share of a trivial eval (JFR, tmp/contract-cost-opus/agg.py) is measured; the remaining armed overhead is `seon.instrument/arm-var!`'s timing wrapper (~100 ns, 0 B) and the validators' own leaf work."
              :must-read #{seon.instrument/arm-var! seon.schema/canonical-reference-graph}
              :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md" "docs/research/agent-platform/landing/contract-cost-opus-2026-09-26.md"}}
- #:seon.task{:name "an-oversized-refusal-hides-its-cause"
-             :kind :function
-             :intent "When an armed refusal's data exceeds the admission bound (a 7,872-byte :over-bound remainder), the wrapper answers only 'X :malli.core/invalid-input: the refusal could not be built.' (instrument.clj:633), with no path, expected schema or offending shape. That is how call-reach's set-for-sequential defect showed at HEAD. The refusal must name the member and path and let the floor bound the offending value."
-             :must-read #{seon.instrument/compiled-wrapper}
-             :evidence #{"docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
  #:seon.task{:name "instrumentation-is-jvm-global"
              :kind :namespace
              :intent "Instrumentation and Malli's function-schema registration are process-global (2,098 installed wrappers; `seon.instrument/apply!` and malli.instrument change them for every test member), so the test runner must keep the ambient snapshot, drift and restore family and a member can damage shared Vars. Make wrappers and registrations per context so the C2 family (ambient-snapshot, restore-live-cluster-schema!, schema-restore-drift, run-vars!'s drift branch) can go in one cut."
@@ -41,9 +36,4 @@
  #:seon.task{:name "a-contract-with-an-fn-ifn-cannot-arm-on-a-sci-branch"
              :kind :function
              :intent "A contract containing [:fn clojure.core/ifn?] cannot arm on a SCI branch (\"No reader function for tag object\"): how the spec is stored and read back (my-program-reads lane, 67b4d420b). Done when a stored spec with a registered named predicate arms on a branch and the failing form is a regression."
-             :must-read #{seon.schema/register!}}
- #:seon.task{:name "a-refusal-of-a-database-argument-cannot-be-built"
-             :kind :function
-             :intent "In JVM mode on default (2026-10-09), (seon.db/transact! (seon.db/db (seon.cluster.boot/connection \"default\")) [{:seon.ns/sym 'scratch.bench/none}]) answers \"seon.db/transact! :malli.core/invalid-input: the refusal could not be built: class datahike.datom.Datom cannot be cast to class java.util.Map$Entry\": the input refusal walks the database value passed where a connection belongs as a map. A bench agent hit it the same way. Done when that call answers the ordinary argument-0 refusal naming the expected connection schema."
-             :must-read #{seon.instrument/compiled-wrapper}
-             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]
+             :must-read #{seon.schema/register!}}]

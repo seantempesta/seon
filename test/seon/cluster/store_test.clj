@@ -341,8 +341,7 @@
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.host/hosting-an-agent-costs-seconds-and-a-hundred-megabytes}}
-  a-branch-reads-the-index-nodes-its-store-already-holds
+(deftest a-branch-reads-the-index-nodes-its-store-already-holds
   ;; Each connection builds its own index tree over shared node addresses:
   ;; unless the store's node cache holds a whole-program read, every new
   ;; branch (each hosted agent) restores and keeps those nodes again.

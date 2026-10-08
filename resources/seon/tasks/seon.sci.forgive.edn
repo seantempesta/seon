@@ -13,9 +13,4 @@
             :must-read
             #{seon.sci.forgive/comment-of seon.sci.forgive/segments},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
- #:seon.task{:name "an-indented-definition-outside-a-fence-is-read-as-prose"
-  :kind :function
-  :intent "A definition whose line starts with whitespace and sits outside a code fence is read as prose under the documented line rule, so it is never evaluated, and a later form depending on it fails without saying why. Correct: either the stepper accepts leading whitespace before a form start, or the agent is told that the line was read as prose (help and the docs teach the rule, and a later form depending on the definition fails clearly). Proof: the probe in prose-design.md answers the chosen behavior as data."
-  :must-read #{seon.sci.forgive/segments}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]

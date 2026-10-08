@@ -133,8 +133,7 @@
            heads (set (map first (mapcat taught-forms lines)))]
        (is (contains? heads 'seon.schema/register!) "help teaches the registration form")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.lookup/dir-shows-internal-functions-and-supplied-arguments}}
-  dir-lists-what-an-agent-calls-as-an-agent-calls-it
+(deftest dir-lists-what-an-agent-calls-as-an-agent-calls-it
   (support/with-running-agent
    (fn [running agent-id _]
      (let [functions (into {} (map (juxt :sym :arglists))

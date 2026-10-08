@@ -82,7 +82,7 @@
         schemas (#'seon.db/write-entity-schemas projection [:seon.fn/sym])]
     (is (= #{:seon.fn/fn} (set (get schemas :seon.fn/sym))))))
 
-(deftest ^{:seon/tasks #{'seon.db/every-commit-validates-its-write-report-three-ways}} final-validation-asks-cell-storage-of-written-attributes-only
+(deftest final-validation-asks-cell-storage-of-written-attributes-only
   ;; A declaration write leaves a new projection whose holder answers nothing
   ;; yet. Default, 2026-10-07: every defn commit then asked all 3,389 forms
   ;; whether they are vector-shaped (143-177 ms of a 190-315 ms validation).
@@ -111,7 +111,7 @@
          (is (zero? (:seon.schema.usage/failing check))
              "registration reconstructs the stored values with the same write plans"))))))
 
-(deftest ^{:seon/tasks #{'seon.db/datoms-decodes-every-natively-typed-datom}} datoms-chooses-each-attribute-decoder-once
+(deftest datoms-chooses-each-attribute-decoder-once
   ;; Default, 2026-10-08: an AEVT read of :seon.fn/calls (107,203 datoms) cost
   ;; 13.6 ms in the read body against 0.9 ms through Datahike, asking every
   ;; datom's attribute and decoding each bridged value under its own projection.

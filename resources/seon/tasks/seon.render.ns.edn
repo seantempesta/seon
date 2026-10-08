@@ -1,13 +1,4 @@
-[#:seon.task{:name
-            "a-doc-line-is-the-first-physical-line-not-the-first-sentence",
-            :kind :function,
-            :intent
-            "`seon.render.ns/render-ai` on seon.db shows `:seon.ns/doc` \"The one database namespace for all things Datahike. Reads and writes use\": first-doc-line takes the docstring's first physical line, so a wrapped first sentence is cut mid-clause for every namespace and function whose summary wraps. Done when the shown doc line is the docstring's first sentence (through its first period or the first blank line), asserted on the render's data.",
-            :must-read
-            #{seon.render.ns/function-ai seon.render.ns/render-ai},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
- #:seon.task{:name "function-source-lines-print-several-per-line",
+[#:seon.task{:name "function-source-lines-print-several-per-line",
             :kind :function,
             :intent
             "`seon.render.ns/function-ai` returns source as :seon.render.ns/source-lines, a vector of strings; the value printer fills each output line with several of them (\"        query-input\" \"        (if explicit-database?\" on one line), every quote escaped, and the docstring is shown twice (as `:seon.fn/doc` and inside the source). For `seon.db/q` (62 lines) 32 lines show before the cut. Done when a function's source is shown as code, one source line per output line and unescaped, without repeating the doc, asserted on the render's data and the printer's own test (lane source-display owns the printer side).",
@@ -18,9 +9,4 @@
   :kind :function
   :intent "Two tests in test/seon/render/ns_test.clj are red on HEAD without a task: task-and-schema-entities-render-as-graph-nodes (56 of 200 stored task intents exceed 400 characters; see also seon.test reds-on-head-9d6b392b6-in-task-reaching-tests) and identity-reads-stewardship-without-an-agent-cluster-attribute (cause not yet diagnosed). Correct: classify each by the commit that changed its behavior, then fix the producer, update the retired assumption or delete the test; do not raise the bound to fit the data. Done when both are green on HEAD."
   :must-read #{seon.render.ns/task-ai}
-  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
- #:seon.task{:name "a-function-entity-render-repeats-an-unrun-state-per-test"
-             :kind :function
-             :intent "`(seon.db/pull (seon.db/db) '[*] [:seon.fn/sym 'seon.ai.tokens/estimate])` answers 1,459 shown tokens of 1,755 with the source as 13 string lines beside the docstring, and 11 of 15 related tests each carrying the same \"unrun or incomplete\" state string for tests that never ran (default 2026-10-08). Done when one status is stated once for the group, the source appears once, and tests that did not run are counted, not listed."
-             :must-read #{seon.render.ns/function-ai}
-             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]

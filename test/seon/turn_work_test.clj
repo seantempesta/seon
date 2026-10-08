@@ -764,8 +764,7 @@
         (d/release connection)
         (d/delete-database configuration)))))
 
-(deftest ^{:seon/tasks #{'seon.turn/no-model-turn-without-an-assignment}}
-  an-unassigned-agent-with-a-wake-gets-no-model-turn
+(deftest an-unassigned-agent-with-a-wake-gets-no-model-turn
   (with-unassigned-database
     (fn [connection]
       (configure-agent-bound! connection 100)
@@ -778,8 +777,7 @@
              (turn/next-agent-work @connection request))
           "once a task is assigned, the waiting wake opens the turn"))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-branch-agent-assigned-after-its-fork-never-gets-a-model-turn}}
-  a-branch-agent-assigned-after-its-fork-opens-its-model-turn
+(deftest a-branch-agent-assigned-after-its-fork-opens-its-model-turn
   ;; Assignments live at the task home (root's branch); the agent works on its own
   ;; branch, forked before root assigned it, so the branch never holds the assignment.
   (with-unassigned-database

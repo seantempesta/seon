@@ -39,8 +39,7 @@
      :handle (sci/eval-string* (get-in request [:seon.batch/world :seon.sci.eval/ctx]) "result/ehandle0")
      :analyzed (get calls 'seon.turn.batch/analyze-form)}))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/every-form-is-analyzed-because-its-result-handle-is-a-binding}}
-  only-a-defining-form-is-analyzed
+(deftest only-a-defining-form-is-analyzed
   (support/with-database
    (fn [connection]
      (let [plain (analyzed connection "(+ 1 1) (+ 2 2) (str \"a\" \"b\")")

@@ -779,8 +779,7 @@
 ;; its commit by `declaration-content-key` (about 30,000 datoms copied per
 ;; call, four calls per defn request on default), then `load-projection`
 ;; walked three whole AEVT ranges to find the one changed row.
-(deftest ^{:seon/tasks #{'seon.db/a-definition-write-reads-every-declaration-datom-for-its-projection-key}}
-  a-definition-write-keys-its-projection-by-its-own-datoms
+(deftest a-definition-write-keys-its-projection-by-its-own-datoms
   (test-support/with-database
    (fn [connection]
      (is (some? (:db-after (db/transact! connection [(test-support/namespace-entity (db/db connection)
@@ -827,8 +826,7 @@
        (is (< (get calls 'seon.db/builder-digest 0) reads)
            "the identity is derived once per revision set, not per read")))))
 
-(deftest ^{:seon/tasks #{'seon.schema.datahike/the-codec-reprints-values-to-compare-them}}
-  equal-reads-record-one-evidence-entry
+(deftest equal-reads-record-one-evidence-entry
   ;; An evaluation that read one thing 440,605 times stored 440,605 evidence
   ;; rows, 8,266 of them distinct, and its recording took about 66 s.
   (test-support/with-database
@@ -842,8 +840,7 @@
        (is (= 2 (count (db/read-evidence @captured)))
            "repeated equal reads are one dependency")))))
 
-(deftest ^{:seon/tasks #{'seon.schema.datahike/the-codec-reprints-values-to-compare-them}}
-  storing-and-reading-a-value-prints-it-once
+(deftest storing-and-reading-a-value-prints-it-once
   ;; Each keyword and symbol was printed to check that it reads back, and
   ;; decoding printed the value again to judge it canonical.
   (let [value [{:seon.ns/name 'seon.turn
@@ -3080,7 +3077,7 @@
         (is (identical? projection (db/carried-projection retained))
             "its projection is the loaded builder's, not one keyed by its recorded program")))))
 
-(deftest ^{:seon/tasks #{'seon.db/hot-total-predicates-run-hundreds-of-millions-of-times}} transaction-report-datom-law
+(deftest transaction-report-datom-law
   ;; The leaf of every :seon.db/transaction-report contract: true for each
   ;; datom a real write reports, false for anything else.
   (test-support/with-database
@@ -3094,8 +3091,7 @@
                       [(:e datom) (:a datom) (:v datom) (:tx datom) (:added datom)]
                       {:e (:e datom) :a (:a datom) :v (:v datom) :tx (:tx datom) :added (:added datom)}]))))))
 
-(deftest ^{:seon/tasks #{'seon.db/the-missing-connection-refusal-has-no-fix-key}}
-  a-missing-connection-refusal-carries-its-fix-as-data
+(deftest a-missing-connection-refusal-carries-its-fix-as-data
   (let [refusal (#'seon.db/missing-connection-error "a database value")]
     (is (clojure.string/includes? (str (:seon.error/fix refusal)) "seon.cluster.boot/connection"))
     (is (not (clojure.string/includes? (:seon.error/message refusal) "seon.cluster.boot/connection"))

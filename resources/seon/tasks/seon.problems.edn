@@ -8,11 +8,4 @@
              :kind :function
              :intent "ai-prose (src/seon/problems.clj:604) is the `:seon.render/ai` face of the problems value but returns the value printer's text (its contract is :string): it builds the family -> steering-lines map and calls `seon.render.value/render-ai` itself. A render returns data and the value printer prints it, so the face should return that lines map (with its requery offer) and leave printing to the edge. Until then seon.problems-test asserts the face's output only as text (includes the model id / stale Var) and six-hundred-failed-tests-render-within-the-profile-bound is a declared golden (test-data-assertions lane, 2026-09-28)."
              :must-read #{seon.problems/ai-prose seon.render.value/render-ai}
-             :evidence #{"test/seon/problems_test.clj"}}
- #:seon.task{:name
-            "an-agents-own-form-errors-are-assigned-to-another-agent",
-            :kind :function,
-            :intent
-            "Model turn 76fb76c15e95 of agent lp-add-2 (branch :agent-4512788dda3b, 2026-10-07) had three failing forms in namespace user; the settlement (tx 536872927) sent three 'Repair problem ... from run 76fb76c15e95' assignment messages from lp-add-2 to review-final-opus, another agent assigned to user. The author's own evaluation errors already return in its next context; routing them to another agent of the namespace delivers an agent mistake to someone who cannot act on it. Proof: a deftest where an agent's own failing form in a shared namespace sends no assignment.",
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}]
+             :evidence #{"test/seon/problems_test.clj"}}]

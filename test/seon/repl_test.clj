@@ -210,7 +210,7 @@
                       {:seon.print/options {:seon.print/length 0}}]]
       (is (= response (repl/response (merge emission settings)))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/deliver-evaluation-errors-as-values 'seon.turn/late-faults-accompany-evaluated-values}} a-response-carries-errors-as-data-and-late-diagnostics-beside-the-value
+(deftest a-response-carries-errors-as-data-and-late-diagnostics-beside-the-value
   ;; ONE SAVED OBSERVATION (AGENTS.md, one error shape): a failed
   ;; evaluation's shown text is its whole flat error, and the response embeds
   ;; it as data; a later stage's failure is its own entry beside the value.
@@ -354,7 +354,7 @@
       (is (not (str/starts-with? (str/triml text) ";")) "nothing precedes the reply map")
       reply)))
 
-(deftest ^{:seon/tasks #{'seon.repl/reply-map-is-not-edn-when-elided-or-rendered}} the-reply-is-one-edn-map-whatever-the-value
+(deftest the-reply-is-one-edn-map-whatever-the-value
   ;; Owner 2026-09-27: "The repl should be returning the timing and the result
   ;; so it's already a map" — "return data whenever possible so it's
   ;; unambiguous." Value, error, findings, handle and time are keys of the one
@@ -406,7 +406,7 @@
              (#'repl/reply-map [[:seon.repl/findings "[{:seon.repl/fix \"a; b\"}]"] [:seon.repl/ms "1"]
                                 [:seon.repl/value "[\"a;b\"]"]]))))))
 
-(deftest ^{:seon/tasks #{'seon.repl/a-selected-render-arrives-as-an-escaped-string}} a-rendered-value-with-cuts-is-spliced-verbatim
+(deftest a-rendered-value-with-cuts-is-spliced-verbatim
   ;; A render's shown text, its cut and dig form included, is the printer's
   ;; output: the reply holds it once, as shown, never quoted again.
   (let [shown "{:seon.ns/name seon.render,\n :seon.ns/doc \"Renders \\\"values\\\".\"}\nline two\n…+40 (seon.print/full result/e7b3)"
@@ -454,8 +454,7 @@
       (is (= [] (repl/findings (assoc emission :seon.eval/value-tokens 900 :seon.eval/shown-tokens 900)))
           "within the bound the value is simply shown"))))
 
-(deftest ^{:seon/tasks #{'seon.repl/the-slow-fix-ranks-the-whole-process}}
-  the-reply-carries-no-call-bookkeeping
+(deftest the-reply-carries-no-call-bookkeeping
   (let [emission {:seon.cluster.eval/source "(inc 1)"
                   :seon.repl/handle (admit/result-handle "e5886")
                   :seon.eval/shown "2"
@@ -494,8 +493,7 @@
     (is (= 0 (:seon.repl/ms reply)))))
 
 
-(deftest ^{:seon/tasks #{'seon.turn/the-user-prompt-stop-sequence-cuts-the-models-first-form}}
-  the-model-stop-sequences-never-cut-a-form-the-transcript-teaches
+(deftest the-model-stop-sequences-never-cut-a-form-the-transcript-teaches
   (let [emission {:seon.cluster.eval/source "(f)" :seon.ns/name 'user :seon.eval/shown "3"}
         stops (:seon.config.ai/stop config/defaults)]
     (is (seq stops))

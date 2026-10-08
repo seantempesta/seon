@@ -125,8 +125,7 @@
            (#'operator/test-check-arguments (:seon.operator/tests request) false)))
     (is (= :refused (:seon.operator/disposition refused)))))
 
-(deftest ^{:seon/tasks #{'seon.operator/a-red-on-head-cannot-be-compared-with-its-parent}}
-  check-at-a-revision-names-the-tests-without-paths
+(deftest check-at-a-revision-names-the-tests-without-paths
   (let [root (System/getProperty "java.io.tmpdir")
         request (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1"
                                       "--test" "seon.operator-test/check-at-a-revision-names-the-tests-without-paths"])
@@ -164,8 +163,7 @@
              (xmx {:seon.operator/managed-root "/root"
                    :seon.config/manifest {:seon.config.operator/heap-max-bytes 1073741824}}))))))
 
-(deftest ^{:seon/tasks #{'my.fs/fs-writes-land-in-the-archive-extract}}
-  a-launched-jvm-binds-the-agents-working-root-to-the-checkout
+(deftest a-launched-jvm-binds-the-agents-working-root-to-the-checkout
   (let [root (fn [request] (get-in (operator/boot-request request "/checkout")
                                    [:seon.config/environment :seon.config.fs/working-root]))]
     (testing "the checkout is the working root, not the archive the JVM runs in"

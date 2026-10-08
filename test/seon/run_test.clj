@@ -252,8 +252,7 @@
        (is (= [nil nil] (on (Thread/ofVirtual))))
        (is (every? (comp pos? val) (on (Thread/ofPlatform))))))))
 
-(deftest ^{:seon/tasks #{'seon.batch/each-fold-step-validates-every-entry-so-far}}
-  each-form-adds-the-same-validation-whatever-came-before
+(deftest each-form-adds-the-same-validation-whatever-came-before
   ;; A fold step validates the entry it publishes or replaces, never the
   ;; entries before it: the owned-work predicate every entry's validation
   ;; calls grows by the same count per added form.

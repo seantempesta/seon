@@ -6,12 +6,6 @@
                          "docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
                          "docs/seon/issues/test-world-preparation-spends-seconds-in-config-apply-and-unmemoized-reads.md"}}
- #:seon.task{:name "check-fails-on-agent-registered-schemas"
-             :kind :function
-             :intent "Once any contract on a branch names a schema the agent registered, `my.test/check` fails every test on the branch with :malli.core/invalid-schema {:schema :notes-index/note}: the check world's fork (fork-cluster-ctx via clean-request-handle -> install-function-contract!) builds contracts against a projection without the branch's schemas, while the install gate uses the right one. 1.6-3.2 s, once 17.3 s."
-             :must-read #{seon.sci.eval/install-function-contract! seon.test/clean-request-handle}
-             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
-                         "docs/seon/issues/my-test-check-fails-every-test-once-a-branch-contract-names-an-agent-schema.md"}}
  #:seon.task{:name "a-check-with-nothing-to-run-answers-green"
              :kind :function
              :intent "`my.test/check` answers green when the changed symbol has no executable reaching test, e.g. a caller dropped at acquisition (dogfood #20): the change goes untested and the answer says pass. Missing coverage must refuse by name."
@@ -38,11 +32,6 @@
              :evidence #{"docs/research/agent-platform/landing/merge-ns-rows-2026-09-26.md"
                          "docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"
                          "docs/seon/issues/eval-test-with-redefs-of-packaged-forms-breaks-concurrent-publication.md"}}
- #:seon.task{:name "checks-write-into-live-custody"
-             :kind :function
-             :intent "The auto-check and gate bodies write into the agent's live branch; functions keep their creation context's connection, so forking alone cannot move their calls (Astra M2; owner decision on gate world pending)."
-             :must-read #{seon.test/run}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
  #:seon.task{:name "reuse-only-selection-costs-a-second"
              :kind :function
              :intent "A named request whose members are all reusable greens still pays about 1.2 s before answering: seon.fault-test on default, 8 members, 0 executed, 1,223 ms wall; profiled, selection-admission 1,178 ms of which selection-facts 1,015 ms (4 calls), with-declarations x1,363. At six concurrent requests selection averaged 2,483 ms. Done when a request answering only recorded greens answers in time proportional to its members (tens of ms), measured by the same probe."
@@ -113,10 +102,6 @@
             :must-read #{seon.test/recorded-result},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
- #:seon.task{:name "selection-reads-the-whole-history-since-the-last-run",
-            :kind :function,
-            :intent "`seon.test/changed-definition-symbols` (in `seon.test/select`, every request, :named included) and `seon.test.runner/program-written-since?` (admission) query (`seon.db/since` (`seon.db/history` db) basis) with bound attributes, which costs in proportion to those attributes' whole history, not the datoms since basis: 41-660 ms per select on default (2026-10-07, `my.test/check` of one named test), program-written-since? 628 ms cold in a check JVM. Done when both compare Datahike attribute revisions (or read only the tx range since basis) and a one-test select costs tens of ms whatever the history.",
-            :must-read #{seon.test/select seon.test.runner/program-revisions}}
  #:seon.task{:name "a-one-test-proof-check-allocates-a-gigabyte"
              :kind :function
              :intent "One executed proof check allocates about a gigabyte. Measured on default (source 4b4caf142) 2026-10-08 through MCP SCI, agent redo-entrants-chk: a defn redefinition then (`my.test/check` {:seon.test/identities ['scratch.entrants/sq-test]}) took 506-1,040 ms and 930-1,682 MB all-thread per pass (one warm run: async-mixed 482 MB, ForkJoinPool worker 521 MB), 175-185k armed calls, 4 transaction attempts (the pass, admit-run, commit-results!, record-exit!). Stages: `seon.test/run` 333-859 ms, select 12-605 ms, clean-request-handle 152-159 ms, member-result 19-28 ms. The first executed check in the process: 1,886 ms and 3.2 GB (clean-request-handle 1,005 ms preparing the checkpoint, 5 commits). The reused check: 86-110 ms, 115-151 MB. Name the owners of the allocation with seon.pass-probe before F1-F3 and EN-6/EN-7 of docs/research/agent-platform/2026-10-08/redo/entrants.md. Done when one executed proof costs < 150 ms warm and < 20 MB of Seon work, and the first check in a process never allocates a gigabyte."
@@ -135,10 +120,6 @@
              :intent "After an eval request registers a schema, the automatic test step's reaching request answers `:seon.test/coverage-unknown` (\"This changed declaration has no bounded graph selection\", offending `[:seon.schema/key …]`), and a bare `(my.test/check {})` answers the same error without `:seon.error/type`, so every `register!` eval request reports an error in its step (lane fix-branch-schema, after `17e426d36`; that check reply allocated about 1.08 GB). Done when the tests reaching a schema change are selected from the functions and tests whose contracts name that key, and the error carries its type. Blocks the Seon-agent loop for any schema task."
              :must-read #{seon.test/run seon.schema/register! my.test/check}
              :evidence #{"docs/seon/schedule/agent-loop-ledger.md"}}
- #:seon.task{:name "an-exhausted-step-budget-reports-the-unstarted-members-pending"
-             :kind :function
-             :intent "When the automatic test step's time budget is spent while the first test world is built, `seon.test/run-request` computes a second `remaining-ms` after the first positive check and passes a negative one (-419 on lane dogfood-pb15, turn 133a4f30779a) to `seon.test/member-result`, whose contract requires at least 1: the agent's reply carries a contract error of about 2,000 tokens instead of the unstarted members as pending. Done when the budget is read once after the world is built and a non-positive one stops the run with the remaining members pending, continued at the next step."
-             :must-read #{seon.test/run seon.test/member-result seon.turn/run-reaching}}
  #:seon.task{:name "a-repl-test-after-a-root-ns-form-has-no-executable-var"
              :kind :function
              :intent "Root evaluated on main the file's (ns seon.ref-test ...) with two added requires, then the deftest seon.ref-test/a-resolved-function-offers-a-source-form-that-shows-its-source (fanout-2 run, default 795a770c2, 2026-10-08). Called at root's or the agent's REPL it runs, but every test-world run of it, on main and on agent fan2-source's branch after a correct fix, records error 1 with began? false and the failure \"The admitted identity has no executable test Var.\", so its task can never go green. Deftests defined the same way in seon.db-test and seon.transact-feedback-test without an ns form run and fail on their assertions. Without an ns form it happens too when the body names the test file's private helpers or aliases (fanout-3, default 324461975, 2026-10-09: root's seon.help-test/help-teaches-how-a-deftest-names-its-task over with-help-agent, taught-forms and the bootstrap alias recorded the same error; the same deftest with only fully qualified calls ran and failed on its assertion), because root's SCI context has not loaded the test namespace. A redefinition at root of a file-derived deftest with only fully qualified calls also loses it on branches (fanout-4, default 97f2b2ac3, 2026-10-09): root re-evaluated seon.db-test/a-missing-connection-refusal-carries-its-fix-as-data and seon.transact-feedback-test/uninstalled-attribute-candidates-are-the-nearest-names after in-ns; on main both ran and failed on their assertions, but on agents fan4-fix and fan4-near's branches every run recorded \"The admitted identity has no executable test Var.\", so two correct fixes never went green there, while a new deftest root defined the same way (seon.error-test/a-missing-name-with-no-near-names-has-no-namespace-list) ran and went green on agent fan4-empty's branch. Done when a deftest root defines at its REPL after an ns form runs in the test world as at the REPL."
@@ -155,10 +136,6 @@
              :kind :function
              :intent "A malformed `:seon/tasks` value on one deftest stopped a whole `bin/seon check` with an exception (lane h1-prose, 2026-10-09) instead of returning an error on that one test beside the others' results (AGENTS.md: nothing crashes; errors are data)."
              :must-read #{seon.test/run}}
- #:seon.task{:name "the-reaching-step-selects-every-branch-test-again"
-             :kind :function
-             :intent "The automatic test step's reaching request (`seon.turn/run-reaching`) names the branch's whole change since its fork every eval request, so `seon.test/select` walks, reach-digests and re-admits (`:seon.test.run/covered-by`) every earlier branch test: on default `dc79b069f` an agent adding one defn and one deftest per request read 20 more rows per request (493 to 573 over five requests) and about 3,000 more armed calls, and an unrelated defn re-executed an unrelated branch red. Done when the step's request selects only what changed since its previous completed run (`:seon.test/since-previous-run?`), the whole change before the first, while `my.test/check` keeps listing every reached test."
-             :must-read #{seon.test/select seon.turn/run-reaching seon.test/changes}}
  #:seon.task{:name "changed-definition-symbols-scans-whole-attributes-since-the-last-run"
              :kind :function
              :intent "`seon.test/changed-definition-symbols` reads the changes since the previous run through `seon.db/since` over history, whose attribute-bound clauses still walk each attribute's whole index filtered by transaction, plus two as-of `seon.test/definition-digests` reads: 123-160 ms of every automatic test step on default `dc79b069f` (agent step-growth-1, one defn and one deftest per request), proportional to the program, not to the request's one or two changed rows. Done when the identities changed since a run come from the transactions written since it (the branch commits after the run's basis, or the recording transaction's report the step holds), at a cost proportional to those datoms, with a regression counting reads through `seon.profile/measure`."

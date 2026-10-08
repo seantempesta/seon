@@ -15,8 +15,7 @@
                                                       "arguments" {"code" code "agent" agent-id "cluster" running}})))
             "content")))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-file-namespaces-library-aliases-do-not-resolve-until-required}
-           :seon.test/long "three MCP eval requests on a fresh agent branch"
+(deftest ^{:seon.test/long "three MCP eval requests on a fresh agent branch"
            :seon.test/long-ms 15000}
   a-file-namespace-resolves-its-library-aliases
   ;; seon.error requires [malli.core :as m] and [malli.error :as me]; nothing

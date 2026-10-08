@@ -842,7 +842,7 @@
                               (db/db connection)))))))))
    (is (= 1 @applications) "The canonical cluster seed is the sole config writer.")))
 
-(deftest ^{:seon/tasks #{'seon.error/deliver-core-faults-to-responsible-agent}} the-writer-not-the-evidence-shape-chooses-who-acts
+(deftest the-writer-not-the-evidence-shape-chooses-who-acts
   ;; Audit 2026-09-26 §2.5 item 2: a Throwable's presence used to route an
   ;; attributed fault to the agent it happened to, and the same fault as a
   ;; flat value to nobody. Both now reach the escalation owner the producer
@@ -1072,7 +1072,7 @@
        (is (false? (validate (assoc value :seon.instrument/arity (:min info)))))
        (is (false? (validate (assoc value :seon.instrument/declared-arity-count 2))))))))
 
-(deftest ^{:seon/tasks #{'seon.error/a-converted-error-keeps-its-transient-type}} complete-error-children-validate-through-the-writer
+(deftest complete-error-children-validate-through-the-writer
   (let [forms (assoc (schema.edn/packaged-forms)
                      ::manifest-id [:string {:seon.db/identity true}]
                      ::manifest-location [:and {:seon.db/component true
@@ -1174,7 +1174,7 @@
            (is (not (contains? occurrence :seon.db.write.attempt/request-id)))))))))
 
 
-(deftest ^{:seon/tasks #{'seon.error/a-converted-error-keeps-its-transient-type}} schema-refusals-are-admitted-at-the-recorder
+(deftest schema-refusals-are-admitted-at-the-recorder
   (test-support/with-database
    (fn [connection]
      (let [projection (schema/handed-projection)
@@ -1689,8 +1689,7 @@
       (is (= '([a b]) (:seon.instrument/arglists reply)))
       (is (not (contains? reply :seon.instrument/declared-arities))))))
 
-(deftest ^{:seon/tasks #{'seon.error/an-unresolved-symbol-shows-an-empty-neighbour-list}}
-  a-missing-name-with-no-near-names-has-no-namespace-list
+(deftest a-missing-name-with-no-near-names-has-no-namespace-list
   (let [database (seon.db/db)]
     (is (not (contains? (seon.error/reply-value database {:seon.error/message "Could not resolve symbol: nosuch.zz/undefined-sym"
                                                           :seon.program/not-found 'nosuch.zz/undefined-sym})
@@ -1714,8 +1713,7 @@
             phrase ["satisfying should" "with should"]]
       (is (not (clojure.string/includes? description phrase)) "Malli's sentence is not glued after a connective"))))
 
-(deftest ^{:seon/tasks #{'seon.error/an-enum-refusal-prints-the-schema-properties}}
-  an-equals-or-enum-expectation-carries-no-properties
+(deftest an-equals-or-enum-expectation-carries-no-properties
   (let [expected (fn [schema value]
                    (:seon.error/expected
                     (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) schema value)))
@@ -1724,8 +1722,7 @@
     (is (= [:enum :a :b] (expected [:enum {:description "x"} :a :b] :c)))
     (is (= [:int {:min 1}] (expected [:int {:min 1}] 0)) "a bound is part of the expectation")))
 
-(deftest ^{:seon/tasks #{'seon.error/a-map-for-a-sequential-is-refused-as-its-first-entry}}
-  a-map-for-a-sequential-is-refused-as-the-map
+(deftest a-map-for-a-sequential-is-refused-as-the-map
   (let [described (fn [value]
                     (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:sequential :map] value)))
                                                  :seon.error/path [] :seon.error/argument "xs" :seon.error/parent value}))]
@@ -1733,8 +1730,7 @@
     (is (= [:sequential :map] (:seon.error/expected (described {:a 1}))))
     (is (= 2 (:seon.error/offending (described [{:a 1} 2]))) "a bad member of a sequence is still named")))
 
-(deftest ^{:seon/tasks #{'seon.error/the-faults-render-pulls-with-a-sci-var-as-its-entity-id}}
-  the-faults-read-of-a-value-that-names-no-entity-is-absent
+(deftest the-faults-read-of-a-value-that-names-no-entity-is-absent
   (with-db
     (fn [connection]
       (let [database (db/db connection)

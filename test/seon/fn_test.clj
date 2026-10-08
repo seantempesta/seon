@@ -2851,7 +2851,7 @@
         (is (seq (:seon.fn/findings refusal))))
       (finally (test-support/delete-recursively! root)))))
 
-(deftest ^{:seon/tasks #{'seon.fn/host-bound-class-list-copies-interpreter-config}} host-binding-is-a-declaration-fact-not-a-caller-closure
+(deftest host-binding-is-a-declaration-fact-not-a-caller-closure
   (let [root (fixture-root)
         text (str "(ns sample.host-bound)\n"
                   "(defn clock [] (System/currentTimeMillis))\n"
@@ -3021,8 +3021,7 @@
                           entities))
             "a batch reads exactly the entities each identity reads alone")))))
 
-(deftest ^{:seon/tasks #{'my.program/write-branch-refuses-an-unchanged-nilable-function}}
-  a-contract-analyzes-to-the-same-row-under-any-print-binding
+(deftest a-contract-analyzes-to-the-same-row-under-any-print-binding
   ;; An agent's evaluation runs with `*print-namespace-maps*` false and the
   ;; publication that stored the file's rows ran with it true: a contract whose
   ;; properties share one namespace (`seon.error/scalar-text`) reindexed to

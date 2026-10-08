@@ -28,8 +28,7 @@
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
     (:seon.repl/value (support/mcp-reply result))))
 
-(deftest ^{:seon/tasks #{'seon.sci.arm/a-def-without-line-metadata-refuses-its-origin}}
-  a-definition-made-through-eval-answers-as-plain-sci
+(deftest a-definition-made-through-eval-answers-as-plain-sci
   (support/with-running-agent
    (fn [running agent-id _]
      (doseq [[label passes] rows]

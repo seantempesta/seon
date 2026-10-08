@@ -948,7 +948,7 @@
          (is (not (str/includes? nested "inner")) "a nested render is not invoked")
          (is (str/starts-with? (str/replace nested #"\s+" " ") "{:a {:seon.render/ai #object[")))))))
 
-(deftest ^{:seon/tasks #{'seon.render/a-renderer-is-chosen-by-key-presence}} a-failing-renderer-never-replaces-the-value
+(deftest a-failing-renderer-never-replaces-the-value
   ;; AGENTS.md, the REPL path is total: a renderer that throws or refuses
   ;; leaves its value printed as data, with ONE diagnostic line beside it for
   ;; the whole value, and the failures returned for the caller to record.
@@ -975,7 +975,7 @@
   [tag hiccup]
   (filter #(and (vector? %) (= tag (first %))) (tree-seq vector? seq hiccup)))
 
-(deftest ^{:seon/tasks #{'seon.render.value/render-text-past-the-budget-is-cut-mid-line-with-no-dig-form}} a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form
+(deftest a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form
   ;; Render text is a string shown as written and cut like one: at a line end
   ;; when one fits, counted, and read whole with `seon.print/full` on the handle.
   (support/with-database
@@ -1050,7 +1050,7 @@
     (remove #(= :seon.print/elided (:seon.print/face %))
             (or (:seon.print/items root) (:seon.print/entries root)))))
 
-(deftest ^{:seon/tasks #{'seon.render.value/session-print-length-loses-to-whole-admission}} a-session-print-bound-is-hard
+(deftest a-session-print-bound-is-hard
   ;; *print-length* / *print-level* are the agent's own bounds, as hard as
   ;; Clojure's: a collection whose cut would cost more than it hides is still
   ;; cut, zero shows none, and the cut names the session bound.
@@ -1071,7 +1071,7 @@
          (is (and cut (empty? more)) (str options " " raw ": one cut"))
          (is (= bound (:seon.print/bound-by cut)) (str options " " raw)))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-forms-set-print-length-is-recorded-but-not-applied}} a-session-print-length-bounds-the-shown-members
+(deftest a-session-print-length-bounds-the-shown-members
   ;; As at Clojure's REPL, a form's `set!` of *print-length* / *print-level*
   ;; bounds how the session's later values print, with a result handle; the
   ;; cut reads the rest.
@@ -1095,7 +1095,7 @@
        (is (= 2 (count (shown-members "#{1 2 3 4}"))))
        (is (= [] (shown-members "(set! *print-length* 0) [1 2 3]")) "zero shows none")))))
 
-(deftest ^{:seon/tasks #{'seon.render.value/core-text-refused-outside-custody}} a-diagnostic-printed-off-custody-shows-its-path-and-message
+(deftest a-diagnostic-printed-off-custody-shows-its-path-and-message
   ;; The core prints with no database: on a thread with no custody (a page
   ;; handler, any thread) a diagnostic still shows where and why it failed.
   (let [answer (promise)]
@@ -1149,7 +1149,7 @@
        (is (str/starts-with? (text undeclared) "{"))
        (is (str/includes? (text [undeclared]) ":seon.error/operation seon.db/pull"))))))
 
-(deftest ^{:seon/tasks #{'seon.render/a-renderer-is-chosen-by-key-presence}} a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
+(deftest a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
   ;; Smoke 2026-09-26: `(sorted-map 'b 2 'a 1)` printed a ClassCastException
   ;; from the renderer's keyword lookup in place of the map. Only a map
   ;; `keyword-lookup?` permits carries an attachment or an identity; a keyword
@@ -1488,7 +1488,7 @@
       (is (empty? (tree-cuts projection)) label)
       (is (= value (edn/read-string (:seon.render.value/text projection))) label))))
 
-(deftest ^{:seon/tasks #{'seon.render.value/string-fill-arms-a-call-for-each-character}} a-long-string-fills-the-budget-and-is-cut-at-a-line-end
+(deftest a-long-string-fills-the-budget-and-is-cut-at-a-line-end
   (let [source (str/join "\n" (for [i (range 400)] (str "  (line " i " (with \"text\" and more))")))
         projection (value/prepare (agent-unit source))
         [cut :as cuts] (tree-cuts projection)

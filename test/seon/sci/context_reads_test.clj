@@ -64,8 +64,7 @@
   [code agent-id running]
   (:seon.repl/value (last (filter #(contains? % :seon.repl/value) (step code agent-id running)))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-host-thread-reads-a-redefined-var-as-its-first-definition}}
-  a-host-thread-reads-the-current-definition
+(deftest a-host-thread-reads-the-current-definition
   ;; Clojure's Var roots are global: any thread reads the current root. An SCI
   ;; fn invoked on a thread with no `sci.ctx-store/*ctx*` reads the Var's own
   ;; field binding, which a redefinition in a later eval request never writes

@@ -117,8 +117,7 @@
      (is (some? read))
      (is (= read (retained-declarations (db/db connection))) "a data write reads no declaration again"))))))
 
-(deftest ^{:seon/tasks #{'seon.test.runner/reach-declarations-misses-on-every-branch}}
-  two-branches-of-one-program-share-reach-declarations
+(deftest two-branches-of-one-program-share-reach-declarations
  (support/with-database
   (fn [connection]
    (seed-reach-fixture! connection)
@@ -634,8 +633,7 @@
             (is (seq (runner/latest-results (db/db connection) [test-symbol])))))))))
 
 
-(deftest ^{:seon/tasks #{'seon.fn/call-reach-seeks-once-per-changed-declaration}}
-  selection-reads-each-declared-edge-attribute-once
+(deftest selection-reads-each-declared-edge-attribute-once
  ;; Selection for a change of many declarations read each declared-edge
  ;; attribute once per changed declaration; it reads each once, and only the
  ;; caller seeks follow the change. Seeds no function calls add no frontier.
@@ -654,8 +652,7 @@
     (is (= 19 (- (reads uncalled) (reads (take 1 uncalled))))
         "one caller seek per further seed, every other read once")))))
 
-(deftest ^{:seon/tasks #{'seon.test.runner/every-eval-request-reports-unrelated-reds-as-reaching}}
-  a-branchs-change-is-what-it-changed-since-its-fork
+(deftest a-branchs-change-is-what-it-changed-since-its-fork
  ;; A branch forked from its cluster inherits what the cluster changed since its
  ;; published commit; that change is the cluster's, never the branch's, so the
  ;; tests it reaches are not the branch's reaching tests.
@@ -682,8 +679,7 @@
     :seon.ns/aliases (mapv (fn [[local target]] {:seon.ns.alias/local local :seon.ns.alias/target-ns target}) aliases)}
    :all :agent))
 
-(deftest ^{:seon/tasks #{'seon.test.runner/a-require-in-a-hub-namespace-reaches-every-test}}
-  a-require-that-adds-an-alias-reaches-no-test-and-one-that-removes-it-reaches-its-namespace
+(deftest a-require-that-adds-an-alias-reaches-no-test-and-one-that-removes-it-reaches-its-namespace
  (support/with-database
   (fn [connection]
    (seed-reach-fixture! connection)
@@ -701,8 +697,7 @@
      (is (= [[:seon.ns/name 'reach.fixture]] (sut/changes child branch)) "a removed alias is a change of its namespace")
      (finally (agent/release-context! child)))))))
 
-(deftest ^{:seon/tasks #{'seon.test.runner/a-timed-out-unrelated-test-restarts-in-every-eval-request}}
-  an-unchanged-red-is-answered-from-its-record
+(deftest an-unchanged-red-is-answered-from-its-record
  (support/with-database
   (fn [connection]
    (seed-reach-fixture! connection)
@@ -745,8 +740,7 @@
          "a program write derives the set again")
      (finally (agent/release-context! child)))))))
 
-(deftest ^{:seon/tasks #{'seon.test/the-reaching-step-selects-every-branch-test-again}}
-  a-reaching-request-selects-what-changed-since-its-previous-run
+(deftest a-reaching-request-selects-what-changed-since-its-previous-run
   ;; The automatic step names the branch's whole change every eval request; narrowed
   ;; to what changed since its previous run, an unrelated change neither selects the
   ;; tests it does not reach nor executes a red it does not reach.

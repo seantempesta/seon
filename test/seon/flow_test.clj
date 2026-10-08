@@ -396,7 +396,7 @@
    (when (= 1 message) (throw (ex-info "panicking work" {::message message})))
    [state nil]))
 
-(deftest ^{:seon/tasks #{'seon.fault/delete-panic-record-policy-branch}} a-recorded-transform-fault-keeps-its-graph-running
+(deftest a-recorded-transform-fault-keeps-its-graph-running
   (test-support/with-database
       (fn [connection]
         (test-support/apply-config! connection "seon.flow-test" {})

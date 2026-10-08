@@ -301,7 +301,7 @@
        (evaluate running agent-id "(my.test/check {})")
        (is (:seon.task/assignment (assign)))))))
 
-(deftest ^{:seon/tasks #{'seon.task/an-assignment-offers-no-merge-request}} an-assignment-offers-no-merge-request
+(deftest an-assignment-offers-no-merge-request
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection (test-support/agent-tx @connection "offered"))

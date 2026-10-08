@@ -1,14 +1,4 @@
-[#:seon.task{:name "hosting-an-agent-costs-seconds-and-a-hundred-megabytes"
-             :kind :function
-             :intent "On a fresh disposable root, hosting an MCP agent (`seon.cluster.host/host!` on a new :agent-* branch) plus its first SCI run took ~1.4-1.6 s and kept ~100 MB of live heap per agent, over the 1 s / 10 MB budget. Cause: a new branch connection builds its own index tree; its first whole-program reads (`seon.sci.eval/load-core-namespaces!` in every acquisition, then the first form's analysis) restored ~3,400 index nodes from disk because the store's shared node cache held Datahike's default 1,000 nodes, so each branch decompressed them again (1.2 GB allocated) and its tree kept a private copy. Correct: a new branch reuses the nodes the store already holds and acquisition loads namespaces only when it derives a base. Proof: seon.cluster.store-test/a-branch-reads-the-index-nodes-its-store-already-holds."
-             :must-read #{seon.cluster.store/datahike-configuration seon.sci.eval/acquire!}
-             :evidence #{"docs/research/agent-platform/2026-10-07/host-cost/host-cost-notes.md"}}
- #:seon.task{:name "a-hosted-forms-write-names-its-evaluation-receipt"
-  :kind :function
-  :intent "A write a hosted form makes during evaluation carries no `:seon.db/receipt` on its transaction at HEAD 65cf8c26d: after a hosted run of (`seon.db/transact!` {:tx-data [task-row]}) on a branch, (d/q '[:find ?tx ?r :where [?tx `:seon.db/receipt` ?r]]) over the branch value is #{} although the task's transaction entity lists `:seon.db/receipt` among its attributes. `seon.receipt-write-carrier-test/evaluation-receipt-is-transaction-metadata` is red the same way, so the cause is the shared receipt stamp or its query (`seon.db/stamp-transaction`), not the host. Proof: host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged line 144 and the carrier test."
-  :must-read #{seon.db/stamp-transaction seon.db/transact!}
-  :evidence #{"docs/research/agent-platform/2026-10-08/red/red-1.md"}}
- #:seon.task{:name "a-refused-deletion-reaches-the-deleting-forms-receipt"
+[#:seon.task{:name "a-refused-deletion-reaches-the-deleting-forms-receipt"
   :kind :function
   :intent "At HEAD 65cf8c26d the program-deletion refusal no longer lands on the form that proposes it. In a hosted run, after defn refused-helper and defn refused-caller (calling it), the run (+ 1 2) (ns-unmap 'my.agents.host-probe 'refused-helper) (+ 3 4) settles with no `:seon.cluster.eval/error` on any receipt, no diagnostics, and no error occurrence; the helper stays in the database and the Var in SCI. The run of (ns-unmap ... 'lonely) on a function nobody calls IS refused: error \"Program deletion leaves 1 surviving referrers (:seon.error/offending)\" with no referrer named. The refusal is either misattributed or missing the proposals (`seon.turn/deletion-proposals`, turn.clj:3770) the test expects: the deleting form's error should name the helper and its diagnostics the caller. Proof: host-test/a-refused-deletion-is-its-forms-refusal-and-the-run-closes lines 505-506."
   :must-read #{seon.turn/deletion-proposals seon.turn/settle-batch-refusal!}

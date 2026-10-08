@@ -9,11 +9,6 @@
              :intent "program-attributes takes every partitioned schema's entries, not only `:seon.db/attributes` entities; a report schema marked with a partition put four uninstalled attributes into root's reads and stopped root's graph (fixed at the schema in 367871c45). Read only entity schemas, as `seon.schema/assert-entity-partition!` does."
              :must-read #{seon.program/program-attributes}
              :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
- #:seon.task{:name "a-contract-write-rederives-program-attributes"
-             :kind :function
-             :intent "Every contracted defn writes a function contract, which builds a new projection; program-attributes was held only by the projection value, so the pass after (and often the defn pass itself) re-walked all 3,403 schema forms through storable-properties-in: 24.9 MB and 25.6 ms per derivation on default (defn-why, 2026-10-08). Its answer reads only schema forms and admissions; reuse it across projections whose schema forms are equal. Done when two projections with equal schema forms answer the identical attribute set."
-             :must-read #{seon.program/program-attributes seon.schema.datahike/storable-properties-in}
-             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
  #:seon.task{:name "a-defn-scans-every-projection-form-per-call"
              :kind :function
              :intent "An agent defn on a branch takes 1.7 s p50 and allocates 1.57 GB JVM-wide with 182,000 armed calls per form (10 x (inc 1) on the same branch: 168 ms, 160 MB, 6,700 calls). The top counts are whole-projection walks: `seon.program/source-family?` 38,000 per defn (shapes-in and the families classification filter every key of :seon.schema.projection/forms, ~3,500, on each call), `seon.schema.internal/reference-id` 32,000, entity-maps 28,000, `seon.schema.datahike/compiled-storage` 12,000, storable-attribute-in? 9,300. The family set and shapes are functions of the projection alone; derive them once per projection (the projection's own cache seam) and find which caller rebuilds per defn."
@@ -34,14 +29,4 @@
             :intent
             "On default 42e569d9d, copied contracted defn- declarations in own SCI namespace review.growth return their Vars but program settlement refuses definition-digest: expected and offending differ. Six scratch declarations remained private, not adopted. entries additionally refuses its existing bare nilable return under a renamed namespace. Probe evidence includes exact source transformations and result handles; preserve admitted declaration source and writer digest agreement.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"}}
- #:seon.task{:name "an-in-ns-namespace-blocks-diff-and-write-branch"
-             :kind :function
-             :intent "After `my.program/remove-ns!` removes the namespace an agent stands in, its next evaluation writes the namespace back as its identity alone (`seon.turn/namespace-rows`), and `seon.program/digest-map` refused that undigested row, so `my.program/diff` and `my.program/write-branch!` refused on the branch for good. Done when an undigested namespace row is no declaration (`seon.program/namespace-stub?`): absent from the digest map, as the removal left it. Proof: `seon.program-test/a-removed-namespace-whose-stub-returns-is-retracted-not-undigested`, `seon.turn.batch-test/a-removed-namespace-the-agent-stays-in-leaves-diff-answering`."
-             :must-read #{seon.program/digest-map seon.program/changed-identities my.program/write-branch!}
-             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
- #:seon.task{:name "a-deftest-over-a-contracted-defn-refuses-its-contract-facts"
-             :kind :function
-             :intent "On an agent branch, eval request 1 `(defn t-two {:malli/schema [:=> [:cat] :any]} [] 1)` and eval request 2 `(clojure.test/deftest t-two (clojure.test/is (= 1 1)))` in the same namespace: the deftest's program facts are refused, because `seon.program/with-contract-facts` calls `seon.program/contract-facts` with the old defn's spec and `:seon.program/function-symbol` and `:seon.program/source` nil (default dcfbee6c1, 2026-10-09; bench E2 run bench-chat-slug-has-a-passing-test-typed-afba4f-0 lost its T3 proof this way after a manual run-tests showed 3 passes). Both forms in one request are admitted. Done when a deftest replacing a contracted defn is admitted as a test with no contract facts, or refused at its form naming the kind change."
-             :must-read #{seon.program/with-contract-facts seon.program/contract-facts}
-             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/growth/review-growth-codex-notes.md"}}]

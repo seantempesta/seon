@@ -247,9 +247,7 @@
                                   database (:seon.turn/id submitted)))
                     "and no evaluation without a terminal fact")))))))
 
-(deftest ^{:seon/tasks #{'seon.batch/an-error-recorded-while-showing-a-form-rides-the-next-form
-                         'seon.turn.batch/a-jvm-read-error-drops-the-form-and-every-later-form}}
-  a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
+(deftest a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
   ;; A failed read is its form's read error; the forms around it run, and no
   ;; error rides another form.
   (with-armed-agent
@@ -278,8 +276,7 @@
        (is (= :seon.sci.reader/form
               (:seon.error/member (:seon.batch/error-value (ex-data (:seon.batch/error (second jvm)))))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.observe/a-definition-realized-while-showing-a-lazy-value-is-observed}}
-  a-pass-captures-definitions-realized-after-the-form-body
+(deftest a-pass-captures-definitions-realized-after-the-form-body
   (with-armed-agent
    (fn [{:keys [connection agent-id code]}]
      (let [namespace-name (str "my.agents." agent-id)
@@ -293,8 +290,7 @@
          (code "(do (defn lazy-r [x] 1) (map (fn [_] (defn lazy-r [x] 2) 0) [1]))")
          (is (= "(defn lazy-r [x] 2)" (source-of 'lazy-r))))))))
 
-(deftest ^{:seon/tasks #{'seon.turn/an-armed-agents-run-forks-the-program-acquired-before-a-later-commit}}
-  an-armed-agents-run-sees-a-program-change-committed-by-another-writer
+(deftest an-armed-agents-run-sees-a-program-change-committed-by-another-writer
   ;; Boot arms agents, then adoption commits the loaded files' entities: the
   ;; next run must evaluate against that program, so `(doc x)` and a call of
   ;; the new definition resolve in the agent's own context.

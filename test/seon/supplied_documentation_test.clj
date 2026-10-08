@@ -114,8 +114,7 @@
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection))
            "no message is written")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/doc-in-names-schemas-by-their-registered-keys}}
-  doc-in-names-schemas-by-their-registered-keys
+(deftest doc-in-names-schemas-by-their-registered-keys
   (support/with-running-agent
    (fn [running agent-id _]
      (let [doc (:seon.repl/value

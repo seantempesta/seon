@@ -1607,8 +1607,7 @@
            (is (contains? (:seon.schema.projection/forms derived) ::incremental-declaration))
            (println "incremental load-projection" {:derived-ms derived-ms :full-ms full-ms})))))))
 
-(deftest ^{:seon/tasks #{'seon.schema/a-declaration-write-reloads-the-whole-projection}}
-  a-declaration-write-reprojects-only-its-declarations
+(deftest a-declaration-write-reprojects-only-its-declarations
   (test-support/with-database
    (fn [connection]
      (let [base (schema/projection-from-database (seon.db/db connection))
@@ -1982,8 +1981,7 @@
     (is (= :seon.schema/unregister-outside-delta (:seon.error/member refused)))
     (is (= :seon.schema-test/outside (:seon.schema/unregister-outside-delta refused)))))
 
-(deftest ^{:seon/tasks #{'seon.schema/build-projection-walks-every-form-before-its-memo}}
-  an-unchanged-population-names-its-predicates-without-walking-its-forms
+(deftest an-unchanged-population-names-its-predicates-without-walking-its-forms
   (let [forms {::walked [:fn 'seon.schema/byte-array?] ::plain :int}
         population-symbols #'schema/population-predicate-symbols
         first-answer (population-symbols forms {})]

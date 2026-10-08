@@ -13,9 +13,7 @@
   (doseq [{reply :text expected :segments} (edn/read-string (slurp "test/seon/sci/forgive_replies.edn"))]
     (is (= expected (forgive/segments reply)))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-markdown-heading-in-a-reply-is-read-as-code
-                         'seon.sci.forgive/an-indented-definition-outside-a-fence-is-read-as-prose}}
-  a-markdown-reply-reads-only-its-forms
+(deftest a-markdown-reply-reads-only-its-forms
   ;; A recorded 7,446-character reply of Markdown prose, backticked spans and
   ;; fences (bench E2 H1): only its Clojure-fenced forms are read; every prose
   ;; word becomes comment text, never a symbol to evaluate.

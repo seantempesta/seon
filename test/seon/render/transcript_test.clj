@@ -1197,8 +1197,7 @@
 ;; settlement: an error during N reads in N's response, once, and another
 ;; branch's errors never read at all. The window is the one its settlement
 ;; saved, never reconstructed from occurrence counters.
-(deftest ^{:seon/tasks #{'seon.render.transcript/keep-fault-observations-historical 'seon.turn/late-faults-accompany-evaluated-values}
-           :seon.test/golden "The branch errors are printed inside the response the agent reads; the floor may cut them, so the transcript text is what is asserted."}
+(deftest ^{:seon.test/golden "The branch errors are printed inside the response the agent reads; the floor may cut them, so the transcript text is what is asserted."}
   an-evaluations-branch-errors-read-in-its-own-response-once
   (support/with-database
    (fn [connection]
@@ -1229,7 +1228,7 @@
 ;; cluster's agents (`seon.fault/record!`); that copy reads in the window of the
 ;; cluster agent's evaluation with its origin branch, the same response MCP
 ;; answers the run with (`seon.dev.mcp/run-form`).
-(deftest ^{:seon/tasks #{'seon.render.transcript/keep-fault-observations-historical}} a-cluster-copy-of-another-branchs-fault-reads-in-the-cluster-agents-window
+(deftest a-cluster-copy-of-another-branchs-fault-reads-in-the-cluster-agents-window
   (let [cluster-name (str "transcript-copy-" (random-uuid))
         home (cluster.branch/cluster-branch cluster-name)]
     (support/with-database

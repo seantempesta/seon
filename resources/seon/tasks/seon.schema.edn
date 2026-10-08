@@ -19,16 +19,6 @@
              :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
                          "docs/research/agent-platform/landing/task-log-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:name "a-declaration-write-reloads-the-whole-projection"
-             :kind :function
-             :intent "Every declaration-touching write (a new function, a spec or schema change) pays load-projection from an identical base: 35-42 ms, O(program) even when nothing else differs. Derive the projection incrementally from the changed declarations."
-             :must-read #{seon.db/carried-projection seon.schema/load-projection}
-             :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"}}
- #:seon.task{:name "canonical-definition-cannot-invert-evaluated-roots"
-             :kind :function
-             :intent "A refusal of any contract holding [:fn ns/pred] armed from Var metadata cannot be built: canonicalization tries to invert compiled predicates. Model fix (Astra M3): preserve the admitted declarative form at arming; never canonicalize a compiled schema while building a refusal."
-             :must-read #{seon.schema/canonical-definition seon.instrument/compiled-wrapper}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
  #:seon.task{:name "map-validation-throws-on-sorted-maps-with-foreign-keys"
              :kind :function
              :intent "Malli's :map validator looks each declared key up (malli core.cljc:1276); a sorted map whose comparator cannot compare that key with its own keys throws ClassCastException instead of answering false (fault fa60ad84, `seon.schema/valid-candidate-value?` from turn-step, 17:13Z). The producer site was fixed in `seon.turn/disposition` (f83931226) by validating only maps that name the discriminator, and `seon.render.value/keyword-lookup?` guards the same class in render: two copies of one guard. Validating an arbitrary value against a candidate schema belongs to one owner; decide there, once, so callers delete their guards. At the agent REPL the throw escaped settlement and wedged the run; a throw while validating must settle as that form's failure."
@@ -67,15 +57,6 @@
              :intent "projection-cache-value holds each derivation by the projection value, and every contracted defn builds a new projection, so every derivation that reads only schema forms is recomputed after each definition: on default the pass after a defn spends 25-37 MB re-deriving program-attributes (fixed by holding it by forms and admissions), observation-selector (12.8 MB), declared-schema-keys (1.6 MB), shapes-in (2.1 MB) and the storable-attribute plans; that pass costs 94-97 MB and 57,000 armed calls against 55 MB and 8,000 for an ordinary pass (defn-why, 2026-10-08). Give the projection a schema-population identity that a contract-only write keeps (the advanced projection knows no schema row changed) and hold schema-only derivations by it. Done when the pass after a contract-only defn costs what an ordinary pass costs."
              :must-read #{seon.schema/projection-cache-value seon.schema/load-projection}
              :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
- #:seon.task{:name "build-projection-walks-every-form-before-its-memo"
-             :kind :function
-             :intent "build-projection calls predicate-bindings, which walks every schema form and every function contract with predicate-symbols-in, on every call before `seon.cache/lookup` can answer from its memo. A boot onto an empty store allocated 104.6 GB in 58 s (JFR ObjectAllocationSample, 4 GiB heap); 14.4 GB of it is this walk and 434 of 4470 execution samples (about 15 percent of the run's CPU) are inside predicate-symbols-in, reached by `seon.db/validate-write-report` (11.7 GB under call-with-projection) once per write, `seon.cluster/refresh-source!` (7.2 GB) and `seon.cluster/accrete-schema-population!` (6.5 GB). The walk's result is a function of the forms and contracts the memo is already keyed by. Derive the predicate symbols inside the memoized build, or from the declarations the write changed, so a call whose forms did not change walks nothing. Done when a write on an unchanged population allocates no predicate walk and the boot allocation profile no longer lists predicate-symbols-in in its top frames."
-             :must-read #{seon.schema/predicate-bindings seon.schema/predicate-symbols-in seon.schema/build-projection seon.schema/projection-build}
-             :evidence #{"docs/research/agent-platform/2026-10-08/boot/boot-adopt-why.md"}}
- #:seon.task{:name "a-committed-nilable-return-cannot-be-redefined"
-             :kind :function
-             :intent "Main holds seon.render.ns/first-doc-line with the contract [:=> [:cat [:maybe :string]] [:maybe :string]], but re-evaluating it, even unchanged, is refused at admission (\"has a bare nilable return\", `seon.schema.internal/assert-complete-schema!`), and [:or :nil :string] is refused the same way (fanout run, default e1a71b7c8, 2026-10-08: agent fan-doc spent 4 refused defns in one pass, then changed the return to :string, which breaks its five (when-let [line (first-doc-line doc)] ...) callers). An agent cannot fix a function whose committed contract the admission rule no longer accepts without rewriting its callers. Done when the rule and the committed program agree: every committed contract passes the rule that admits its redefinition, or the rule names the replacement shape an agent can use in place."
-             :must-read #{seon.schema.internal/assert-complete-schema! seon.render.ns/render-ai}}
  #:seon.task{:name "the-durable-projection-cache-evicts-a-commits-entry-across-tests-sharing-a-jvm"
              :kind :function
              :intent "`seon.schema.projection-writer-test/a-new-branch-at-an-equal-commit-reads-the-held-projection` passes alone and with its own namespace but fails (one `seon.db/declaration-content-key` call) when run in one JVM with `seon.db-test` and `seon.schema-test` tests, at HEAD and with PB-08 (2026-10-09): the likely cause is the 24-entry durable projection cache (`seon.db/carried-projection`, `content-projection`) evicting the commit's entry. Either the bound is a dial sized from what projections weigh, or the test owns its cache state."

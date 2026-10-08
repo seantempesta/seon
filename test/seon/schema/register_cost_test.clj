@@ -5,8 +5,7 @@
             [seon.profile :as profile]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.cluster.branch-evidence/a-schema-registered-on-a-branch-is-invisible-to-its-test-run}}
-  an-agent-registration-admits-one-identity-incrementally
+(deftest an-agent-registration-admits-one-identity-incrementally
   (support/with-running-agent
    (fn [running agent-id _connection]
      (let [request (json/write-str

@@ -55,7 +55,7 @@
      (is (= ['([{:seon.print/keys [node children]}])]
             (shown running agent-id "(mapv :arglists (seon.ref/references {:seon.ref/text \"`seon.print/close-frame`\"}))"))))))
 
-(deftest ^{:seon/tasks #{'seon.ref/unloaded-library-names-answer-unresolved}} an-unloaded-library-name-resolves-from-the-dependency-cache
+(deftest an-unloaded-library-name-resolves-from-the-dependency-cache
   (test-support/with-running-agent
    (fn [running agent-id _]
      (let [code (str "(let [found (seon.ref/references {:seon.ref/text \"`seon.operator/check!` `rewrite-clj.paredit/slurp-backward` `rewrite-clj.paredit/nope`\"})]"
@@ -101,8 +101,7 @@
        (is (= :file (:seon.ref/section-missing answer)))
        (is (some #{"README.md"} (:seon.ref/nearest answer)))))))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-must-read-offers-a-source-form-that-answers-nil}}
-  a-resolved-function-offers-a-source-form-that-shows-its-source
+(deftest a-resolved-function-offers-a-source-form-that-shows-its-source
   (let [database (db/db)
         source-form (last (:seon.render/operations (#'ref/resolve-name database 'seon.ref/references)))]
     (is (= '(my.program/source 'seon.ref/references) source-form))

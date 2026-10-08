@@ -534,8 +534,7 @@
       (finally ((requiring-resolve 'seon.fs/delete-recursively!)
                 (.getCanonicalPath (io/file "tmp")) (.getCanonicalPath root))))))
 
-(deftest ^{:seon/tasks #{'seon.test/selection-reads-the-whole-history-since-the-last-run
-                         'seon.test.runner/admission-filters-the-whole-program-history}}
+(deftest ^{:seon/tasks #{'seon.test.runner/admission-filters-the-whole-program-history}}
   an-unchanged-program-is-selected-and-admitted-without-reading-its-history
   ;; Equal program revisions between the last run and this value prove no
   ;; program write: neither selection nor admission scans history since it.

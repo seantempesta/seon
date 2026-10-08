@@ -36,8 +36,7 @@
     (is (nil? (:seon.cluster.eval/error evaluation)))
     (:seon.sci.admit/value evaluation)))
 
-(deftest ^{:seon/tasks #{'seon.render/the-viewer-scans-every-program-function}}
-  public-functions-follow-the-current-namespace-snapshot
+(deftest public-functions-follow-the-current-namespace-snapshot
   (let [ctx (eval/build-base-ctx (schema/handed-projection))]
     (is (= [] (kernel/public-functions-in ctx 'viewer)))
     (kernel/cache-function! ctx 'viewer/first {:seon.sci.eval/function-private? false})

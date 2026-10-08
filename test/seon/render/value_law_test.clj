@@ -60,7 +60,7 @@
    (gen/one-of [gen/small-integer gen/keyword-ns (gen/return nil)
                 (gen/fmap #(str/join "\n" %) (gen/vector line-gen 0 40))])))
 
-(deftest ^{:seon/tasks #{'seon.render.value/nested-hiccup-exceeds-the-printers-charge}} the-text-stays-inside-its-charge-and-budget
+(deftest the-text-stays-inside-its-charge-and-budget
   ;; A sequence's collapsed tail was folded into a tail cut longer than the
   ;; members it replaced, so the text outgrew its charge and printed whole.
   (is (lawful? [(list 0 [(apply str "aaaaaa" (repeat 82 "a"))])

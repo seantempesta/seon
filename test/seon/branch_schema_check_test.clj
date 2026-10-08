@@ -15,8 +15,7 @@
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
     (:seon.repl/value (support/mcp-reply result))))
 
-(deftest ^{:seon/tasks #{'seon.test/check-fails-on-agent-registered-schemas}}
-  a-branch-registered-schema-contracting-a-function-checks-green
+(deftest a-branch-registered-schema-contracting-a-function-checks-green
   (support/with-running-agent
    (fn [running agent-id _]
      (let [ns-name (str "my.agents." agent-id)
@@ -30,8 +29,7 @@
          (is (nil? (:seon.error/message check)) "the check answers a run, not an error")
          (is (true? (:seon.test/passed? check))))))))
 
-(deftest ^{:seon/tasks #{'seon.test/check-fails-on-agent-registered-schemas}}
-  a-request-that-throws-answers-an-unknown-error-with-its-cause
+(deftest a-request-that-throws-answers-an-unknown-error-with-its-cause
   (support/with-running-agent
    (fn [_running _agent-id connection]
      (let [result (test/run {:seon.test/execution (support/execution-handle connection)
@@ -42,8 +40,7 @@
        (is (some? (:seon.test/unknown result)) "an unknown error, not a throw")
        (is (= "injected" (-> result :seon.error/chain first :seon.error/message)) "the cause is kept")))))
 
-(deftest ^{:seon/tasks #{'seon.test/check-fails-on-agent-registered-schemas}}
-  a-failing-check-reply-carries-no-runner-report-in-out
+(deftest a-failing-check-reply-carries-no-runner-report-in-out
   (support/with-running-agent
    (fn [running agent-id _]
      (let [ns-name (str "my.agents." agent-id)]

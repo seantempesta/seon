@@ -60,8 +60,7 @@
          last
          :seon.repl/value)))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}
-           :seon.test/long "one MCP eval_clj pass per row form (17 forms across 13 rows), each ending in its test step: 7.2 s measured in a check JVM"
+(deftest ^{:seon.test/long "one MCP eval_clj pass per row form (17 forms across 13 rows), each ending in its test step: 7.2 s measured in a check JVM"
            :seon.test/long-ms 15000}
   plain-sci-rows-answer-as-plain-sci
   (support/with-running-agent
@@ -72,8 +71,7 @@
                 (last (mapv #(answered % agent-id running)
                             (if (string? code) [code] code))))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}}
-  a-test-of-an-earlier-pass-runs-the-redefined-callee
+(deftest a-test-of-an-earlier-pass-runs-the-redefined-callee
   (support/with-running-agent
    (fn [running agent-id _]
      (answered (str "(require '[clojure.test :refer [deftest is]]) (defn sq [x] (* x x)) (defn other [x] (sq x))"
@@ -88,8 +86,7 @@
        (is (= [2 1 #{"other-squares"}]
               [(:seon.render.test/test check) (:seon.render.test/fail check) failed]))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}}
-  another-writer-on-the-cluster-head-neither-hides-nor-freezes-a-callee
+(deftest another-writer-on-the-cluster-head-neither-hides-nor-freezes-a-callee
   ;; The fixture agent holds the cluster head's custody (its root, as on default);
   ;; a second agent created there is another writer of the same branch.
   (support/with-running-agent

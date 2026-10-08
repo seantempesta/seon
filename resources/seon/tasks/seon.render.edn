@@ -9,14 +9,6 @@
              :must-read #{seon.db/read-evidence seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:name "a-renderer-is-chosen-by-key-presence"
-             :kind :function
-             :intent "A plain value is rendered through an entity's declared renderer because it contains that entity's key: (select-keys issue [:seon.issue/id :seon.issue/status]) printed 'Issue ... still open.'; a map with `:seon.turn/id` 12 went through the turn renderer, which refused, and the evaluation was reported as an exception (7 KB, value printed twice); a schema definition whose properties hold `:seon.render/ai` renders its properties map through that renderer (about 10 KB of context dumped three times). Select by schema validity, and a render refusal is not an evaluation failure."
-             :must-read #{seon.render/render-call}
-             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
-                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"
-                         "docs/seon/issues/a-plain-value-with-an-entity-key-renders-through-that-entitys-renderer-and-fails-the-evaluation.md"
-                         "docs/seon/issues/schema-rows-render-through-the-pair-they-declare.md"}}
  #:seon.task{:name "face-vocabulary-remains-in-code"
              :kind :namespace
              :intent "Owner 2026-09-27: there are no \"faces\", just render functions and data. About 215 occurrences of face remain in src/seon and resources/seon/schemas (e.g. `:seon.print/face` as a print-node classification, render.clj face-valid?, {:face rendered}). Rename per docs/research/agent-platform/face-concept-audit-2026-09-26.md (it names each rename: `:seon.print/face` is a print-node kind; the AI/HTML selector is the consumer or attachment key) in one scripted sweep across src, schemas and tests, converting every reader in the same commit; AGENTS.md is already clean (494c8b200)."
@@ -55,9 +47,4 @@
  #:seon.task{:name "landing-reds-2-render-bow-outs"
              :kind :namespace
              :intent "Bow-outs from landing-reds-2: render-simplification (selection for [] no longer differs from `seon.agent/render-settings-ai` :161; one extra `seon.sci.kernel/invoke` on first render). Also web reds from web-shrink-reds (5574927cb): the next-turn fixture opening starts with the `:seon.agent/cluster` pull, `seon.error/render-html`'s 500 body drops the exception class, agent-render-profile budget 3200 < 3238 needed, and the reconnect tests take 23-42 s (held-pass promise never fires). Done when each is fixed or recorded in the render area spec with its number."
-             :must-read #{seon.repl/entity-emission}}
- #:seon.task{:name "the-viewer-scans-every-program-function"
-             :kind :function
-             :intent "`seon.render/viewer` -> `seon.sci.kernel/public-functions-in` walked every function of the context's program snapshot (5,663 rows) to find the viewing namespace's public functions, once per shown value: 2.3 MB per (+ 1 2) pass. Correct: work proportional to the namespace's functions (an index by namespace in the snapshot). Proof: viewer on a namespace with 0 functions allocates under 50 KB."
-             :must-read #{seon.sci.kernel/public-functions-in}
-             :evidence #{"docs/research/agent-platform/2026-10-07/pass-cost/design-notes.md"}}]
+             :must-read #{seon.repl/entity-emission}}]

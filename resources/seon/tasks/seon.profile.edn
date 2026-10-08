@@ -49,9 +49,4 @@
             :must-read #{seon.profile/begin},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
-
- #:seon.task{:name "health-and-explain-rank-wrapper-chains-by-inclusive-time"
-             :kind :function
-             :intent "`seon.profile/summary` now ranks by self time (`:seon.profile/self-ms` on every observation), but `seon.profile/explain` (`:growths`, `:lines`) and `seon.health/report` (definitions with a second of inclusive time) still rank inclusive totals, so `seon.flow/in-world`, `seon.turn/phase` and `seon.schema/call-with-projection-state` lead runtime_status on 70 s of callback time (2026-10-08). Done when explain's growths carry self time ranked first and the health candidates name definitions by self time with their inclusive total beside it."
-             :must-read #{seon.profile/explain seon.profile/observation seon.health/report}}
 ]

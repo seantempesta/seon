@@ -4,8 +4,7 @@
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.repl/the-slow-fix-ranks-the-whole-process}}
-  a-slow-reply-carries-no-armed-call-counts
+(deftest a-slow-reply-carries-no-armed-call-counts
   (support/with-running-agent
    (fn [running agent-id _]
      (let [call (fn [code]
@@ -19,8 +18,7 @@
          (is (= :slow (-> reply :seon.repl/findings first :seon.repl/finding)))
          (is (empty? (select-keys reply [:seon.repl/calls :seon.repl/repeated]))))))))
 
-(deftest ^{:seon/tasks #{'seon.instrument/a-refusal-of-a-database-argument-cannot-be-built}}
-  a-database-passed-for-a-connection-is-an-ordinary-argument-refusal
+(deftest a-database-passed-for-a-connection-is-an-ordinary-argument-refusal
   (support/with-running-agent
    (fn [running agent-id _]
      (let [reply (support/mcp-reply
@@ -34,8 +32,7 @@
        (is (not (re-find #"cannot be cast" (str (:seon.error/message error))))
            "the refusal is built, not the class cast of walking a database")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-quoted-alias-refuses-the-whole-requests-program-facts}}
-  a-quoted-alias-is-refused-at-its-own-form-and-the-rest-stands
+(deftest a-quoted-alias-is-refused-at-its-own-form-and-the-rest-stands
   (support/with-running-agent
    (fn [running agent-id _]
      (let [replies (support/mcp-replies

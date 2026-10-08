@@ -185,8 +185,7 @@
             "an operation within one second has nothing to explain"))
       (finally (ns-unmap 'seon.profile-test var-name)))))
 
-(deftest ^{:seon/tasks #{'seon.profile/health-and-explain-rank-wrapper-chains-by-inclusive-time}}
-  an-explanation-ranks-the-callee-that-did-the-work-above-the-wrapper-around-it
+(deftest an-explanation-ranks-the-callee-that-did-the-work-above-the-wrapper-around-it
   (let [work (symbol (str "explained-work-" (random-uuid)))
         wrap (symbol (str "explained-wrap-" (random-uuid)))]
     (try

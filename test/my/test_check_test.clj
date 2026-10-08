@@ -65,8 +65,7 @@
                                                body? (#(into (conj (subvec % 0 args) (node/whitespace-node " ") (node/token-node nil))
                                                              (subvec % args))))))))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/a-docstring-defn-allocates-half-a-gigabyte}}
-  a-docstring-only-defn-reruns-no-test-and-a-body-change-reruns-its-reaching-tests
+(deftest a-docstring-only-defn-reruns-no-test-and-a-body-change-reruns-its-reaching-tests
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [source (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'seon.task/steps-call]))

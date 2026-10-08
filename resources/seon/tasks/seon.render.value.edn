@@ -35,11 +35,6 @@
              :kind :function
              :intent "An MCP JVM eval returning 9 contract findings (maps of :row :col :level :type :filename :message) showed every :filename as \"/Users/sean/src/\"…+23 with a subs dig form (default 2026-09-27): breadth before depth spread the budget so each string stayed at its 16-character first chunk, and the path, the one member that identifies the finding, was unreadable while :type and :level printed whole. Rule 5 grows strings by doubling chunks but charges a path like prose. Done when a string that fits the remaining budget at its level prints whole before sibling collections expand (or short strings count as scalars), with a regression over a vector of such finding maps."
              :must-read #{seon.render.value/prepare}}
- #:seon.task{:name "nested-hiccup-exceeds-the-printers-charge"
-             :kind :function
-             :intent "MCP eval_clj (JVM mode) of [3.3 (clojure.edn/read-string (slurp \"tmp/related_data/charge-overflow.edn\"))], a 6 KB nested hiccup vector, prints its value as data with the diagnostic \"The value printer's saved text exceeded its charge.\" (default pid 9778, 2026-09-28): the laid-out text outgrew the allocator's charge. The same value prepared under the agent profile prints. Done when a regression over that value prints it under the MCP profile with no diagnostic."
-             :must-read #{seon.render.value/prepare seon.render.value/charge}
-             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/related_data--charge-overflow.edn"}}
  #:seon.task{:name "a-cut-operation-in-render-data-is-not-runnable"
              :kind :function
              :intent "Render data's cuts name no handle, so an offered operation the budget reaches last prints as (`seon.render.walk/related` …1): its request map is cut and the form cannot be run (`seon.test/run`'s related data, 2026-09-28). An operation is a whole form or absent. Done when a `:seon.render/operations` form inside render data prints whole or is dropped whole, with a regression."
@@ -76,33 +71,6 @@
             "source-display reports compiled prepare of [0..31] allocates 2 MB. Review own-branch SCI, exact platform-thread allocation: parent 2645120 bytes/2.529 ms; 7619b8dfd 2649624 bytes/2.662 ms, for 27 shown tokens, 1586/1587 direct armed calls. Measure settle/assoc-in and per-admission wrappers, then reduce work at the owner. No timing-only test; retain ordinary output/budget tests.",
             :evidence
             #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
- #:seon.task{:name "string-fill-arms-a-call-for-each-character",
-            :kind :function,
-            :intent
-            "7619b8dfd fill-end invokes armed escaped-width for each added character. Same 50 MB ASCII string, 1500 tokens, own SCI copies: parent 227 calls and 1714072 allocated bytes; change 912 calls and 3485128 bytes. Inline the one-character arithmetic or compose a bounded scan once; proposed equivalent scratch patch reduces allocation to 2349944 bytes. Named reaching proof: seon.render.value-test/a-long-string-fills-the-budget-and-is-cut-at-a-line-end.",
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
- #:seon.task{:name "core-text-refused-outside-custody"
-            :kind :function,
-            :intent
-            "Armed, `seon.render.value/core-text` builds a unit without `:seon.db/db`, which `:seon.render/unit` requires; call preparation supplies it only under custody. On a thread with no custody (prepl, a web handler without call-with-custody) (`seon.render.value/core-text` (vec (range 100))) answers the last resort \"[0 1 2 3 4 5 6 7 ...]\" (measured on a423b8b29, probe root) instead of the structural selection, and every prepare/text/html diagnostic shown by core-text reads {`:seon.render.value/diagnostics` [{`:seon.render.data/path` ..., `:seon.render.value/failure` #object[clojure.lang.ExceptionInfo 0x..]}]}: path and message lost. Correct: the core needs no database; it declares a unit schema without the required database (a different schema name, AGENTS.md supply rule) so it is never refused for a missing world member. Proof: seon.render.value-test/a-diagnostic-printed-off-custody-shows-its-path-and-message.",
-            :must-read #{seon.render.value/core-text},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/printer-code/review-diff-opus-notes.md"}}
- #:seon.task{:name "session-print-length-loses-to-whole-admission"
-            :kind :function,
-            :intent
-            "After (set! *print-length* 2) in an MCP SCI pass on a423b8b29: (vec (range 12)) -> [0 1 2 3 4 5 6 7 8 9 10 11], {:a 1 :b 2 :c 3} and #{1 2 3 4} print whole, because a collection whose cut (with its (drop 2 result/...) form) would cost more than the hidden members is admitted whole; (vec (range 30)) is cut at 2. In MCP JVM mode (set! *print-length* 2) succeeds and (range 40) prints 32 members: shown-result reads the session only from the SCI fork's ::print-session. Also *print-length* 0 shows one member ((max 1 length)) where Clojure shows none. Correct: an agent's print-length/print-level is a member bound the whole-admission rule never exceeds, in every entrant; the evaluation result's own `:seon.print/options` value is the source, not a place on the fork. Remaining after printer-fix: the JVM and turn show stages (`seon.turn.batch/jvm-show`, `seon.turn/show-row`) must pass the evaluation's options (patch in docs/research/agent-platform/2026-10-07/printer-fix/entrant.patch). Proof: seon.render.value-test/a-session-print-bound-is-hard.",
-            :must-read #{seon.render.value/prepare seon.sci.eval/shown-result},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/printer-code/review-diff-opus-notes.md"}}
- #:seon.task{:name "render-text-past-the-budget-is-cut-mid-line-with-no-dig-form"
-            :kind :function,
-            :intent
-            "`seon.render.value/make-node` cuts a root render's AI text longer than the budget at a character (`kept`), mid-line, ending `(+ 1 2…+1666` with no continuation form, and the cut is invisible to whole-size accounting: as SCI agent printer-text on default (ec5f13d2f), {:sym 'my/f `:seon.render/ai` (apply str (repeat 800 \"(+ 1 2)\\n\"))} replied with `:seon.eval/value-tokens` 1500 equal to shown-tokens. Correct: the render text is cut at its last line end inside the budget, the cut names its rest, and omitted-characters counts the cut. Remaining after printer-fix: a render value that cannot carry `seon.print/full`'s mark (a Var whose render returns text) has no dig form, only a requery refusal; no shipped renderer reaches it. Proof: seon.render.value-test/a-render-text-past-the-budget-is-cut-at-a-line-end-with-its-dig-form.",
-            :must-read #{seon.render.value/make-node},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/printer-code/review-diff-astra-notes.md"}}
  #:seon.task{:name "transacted-passes-a-basis-descriptor-to-stored-collection"
   :kind :function
   :intent "Showing (`seon.db/pull` (`seon.db/db`) '[*] [`:seon.cluster.eval/id` \"af9da2066437\"]) through the printer records the diagnostic \"`seon.db/stored-collection` :malli.core/invalid-schema-at-call ... Don't know how to create ISeq from: clojure.lang.Keyword\" at  (producer `seon.render.value/transacted`). The offending call is [{:db-name .. :t .. :datahike/commit-id ..} `:seon.cluster.eval/read-evidence` ()], a basis descriptor where `:seon.db/database-value` is expected. Correct: transacted reads from a database value (or its connection), never a descriptor. Evidence: result e497d4c908865. Proof: showing that pull yields no stored-collection diagnostic."

@@ -167,8 +167,7 @@
                 (ex-info message {})
                 {:seon.error/layer ::reply :seon.error/operation `core-fault! :seon.db.process/id "mcp-entrance-test"}))
 
-(deftest ^{:seon/tasks #{'seon.mcp/observation-reads-the-run-twice}
-           :seon.test/long "Ten MCP SCI runs on one hosted agent, each one settlement; measured in the s5a-reply landing."
+(deftest ^{:seon.test/long "Ten MCP SCI runs on one hosted agent, each one settlement; measured in the s5a-reply landing."
            :seon.test/long-ms 30000}
   an-sci-reply-is-what-the-run-saved
   ;; The reply is printed from the receipts the settlement saved, never by
@@ -328,8 +327,7 @@
        (is (empty? (:seon.cluster.eval/executed stored)) "a form stores no executed set")
        (is (< settled 110) "the settlement is proportional to one ns form and one defn")))))
 
-(deftest ^{:seon/tasks #{'seon.mcp/a-thrown-call-clips-its-request-text}}
-  a-thrown-call-carries-its-whole-request
+(deftest a-thrown-call-carries-its-whole-request
   ;; The value printer shows the request; nothing before it clips the text.
   (let [request (json/write-str {"name" "eval_clj" "arguments" {"code" (apply str (repeat 500 "(+ 1 2) "))}})
         failure (mcp/call-failure request (ex-info "boom" {}))]

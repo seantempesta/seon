@@ -271,7 +271,7 @@
            (error.refusal/frame-function 'seon.error.refusal_test$probe_var)))
     (is (nil? (error.refusal/frame-function 'user$eval479$fn__480)))))
 
-(deftest ^{:seon/tasks #{'seon.error.refusal/preserve-primary-and-suppressed-causes}} a-cleanup-failure-survives-beside-the-primary
+(deftest a-cleanup-failure-survives-beside-the-primary
   (let [primary (ex-info "primary" {:seon.probe/step :work} (ex-info "root" {:seon.probe/step :leaf}))
         cleanup (ex-info "cleanup" {:seon.probe/step :release} (IllegalStateException. "closed"))
         _ (.addSuppressed ^Throwable primary cleanup)
@@ -316,7 +316,7 @@
     (try (binding [*out* writer *print-length* nil *print-level* nil] (pr value)) @n
          (catch clojure.lang.ExceptionInfo e (when-not (identical? e over) (throw e))))))
 
-(deftest ^{:seon/tasks #{'seon.error.refusal/errors-reference-worlds-never-copy-them}} every-producer-references-the-worlds-it-was-handed
+(deftest every-producer-references-the-worlds-it-was-handed
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -357,7 +357,7 @@
                            [:db-name :t]))
            "a cause link's database is its name and basis")))))
 
-(deftest ^{:seon/tasks #{'seon.error.refusal/errors-reference-worlds-never-copy-them}} a-place-in-an-error-is-named-never-printed-through
+(deftest a-place-in-an-error-is-named-never-printed-through
   ;; Default OOMed (2026-09-26, heap dump java_pid12212): an instrument
   ;; refusal's offending web request held the agent roster atom, whose state
   ;; is every context's projection; http-kit printed the ex-data to 2 GB.

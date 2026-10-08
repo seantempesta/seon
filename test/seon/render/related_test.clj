@@ -108,8 +108,7 @@
        (is (= (into #{} (map str) (keys (dissoc (:seon.related/data ai) :seon.related/skipped))) summaries)
            "the HTML face heads a section for each group the AI face returns")))))
 
-(deftest ^{:seon/tasks #{'seon.render.ns/a-function-entity-render-repeats-an-unrun-state-per-test}}
-  a-distance-zero-test-render-is-its-name-and-state
+(deftest a-distance-zero-test-render-is-its-name-and-state
   (support/with-database
    (fn [connection]
      (world! connection)

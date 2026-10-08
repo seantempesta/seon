@@ -31,8 +31,7 @@
        (is (= 1 (:seon.test/error-count result)))
        (is (pos? (count (:seon.test/failure-message result))))))))
 
-(deftest ^{:seon/tasks #{'seon.operator/a-namespace-check-is-cut-at-one-flat-allowance}}
-  a-requested-namespace-is-bounded-by-what-its-tests-declare
+(deftest a-requested-namespace-is-bounded-by-what-its-tests-declare
   (test-support/with-database
    (fn [connection]
      (let [database (db/db connection)

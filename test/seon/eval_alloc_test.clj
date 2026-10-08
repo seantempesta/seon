@@ -23,8 +23,7 @@
          (finally (.set stop true)
                   (.join ^Thread noise (java.time.Duration/ofSeconds 1))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.kernel/alloc-mb-on-a-virtual-thread-measures-the-whole-jvm}}
-  an-evaluation-reply-shows-what-it-allocated
+(deftest an-evaluation-reply-shows-what-it-allocated
   (support/with-running-agent
    (fn [running agent-id _]
      ;; one 100,000,016-byte array, while another thread allocates throughout

@@ -1,11 +1,4 @@
-[#:seon.task{:name "a-refused-settlement-is-stored-as-a-core-fault"
-             :kind :function
-             :intent "A run whose settlement is refused by a declared writer refusal is stored as a core fault (signature 6e0c6d4e..., seon.db/transact!), shows 'Contract finding: seon.db/transact! returned this error ...' and carries a datahike.writer stack trace into the MCP reply, although it is the agent's mistake. Decide it in evaluate-sources, where the run's working value already settles each form's entity: an entity settled-value refuses becomes that form's refusal through refuse-install, and settle-batch-refusal!'s ordinal search is deleted."
-             :must-read #{seon.turn/evaluate-sources seon.turn/settle-batch!}
-             :evidence #{"docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
-                         "docs/seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md"
-                         "docs/seon/issues/expected-refusal-logs-raw-datom-error-twice.md"}}
- #:seon.task{:name "refusal-schemas-are-guessed-by-key"
+[#:seon.task{:name "refusal-schemas-are-guessed-by-key"
              :kind :function
              :intent "refusal-terminal-data (and the settle-batch! refusal and provider-failure recordings: three copies) chooses an error schema with a ~15-arm key-presence cond, because producers attach no :seon.error/declared-schema: seon.db write refusals and invalid-read, seon.schema validation, reply no-forms, render walk/request/ambiguous/invalid-output/unknown, transcript, config, fn namespace-unresolvable, eleven seon.ai refusals, cluster.prompt and turn rules. A missed producer gave a nil schema and panicked root's graph at every boot (fixed for one producer in e2d1690d4). One scripted sweep adds the metadata at each producer, then the three conds go."
              :must-read #{seon.error/recording seon.turn/refusal-terminal-data}
@@ -21,17 +14,6 @@
              :must-read #{seon.sci.eval/call-detecting-program-change seon.turn/evaluate-sources}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md"}}
- #:seon.task{:name "failed-run-left-unsettled"
-             :kind :function
-             :intent "A run failing after it records its sources was never closed with its cause (sorted-map wedge, sticky unavailable). rc-m4 f83931226 closes escaping runs; proven by root after restart."
-             :must-read #{seon.turn/turn}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
- #:seon.task{:name "late-faults-accompany-evaluated-values"
-             :kind :function
-             :intent "A settlement refusal, a renderer failure or a printing failure never replaces a completed evaluation's value: it is saved beside it as :seon.cluster.eval/diagnostics and shown as its own response entry; each settlement saves its fault window as references."
-             :must-read #{seon.turn/refusal-terminal-data seon.turn/settle-batch-refusal! seon.turn/fault-window}
-             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s12-record-data-opus-2026-09-26.md"}}
  #:seon.task{:name "a-turn-pass-derives-its-work-twice"
              :kind :function
              :intent "Each agent pass derives next-agent-work on a fresh database value, runs the turn, then derives it again for the rewake (more-agent-work?); with episode-exhausted! (turns-left: episode-runs + max-episode-runs, four history queries) and opening-deferred? a trivial form spends ~12 ms and ~59 seon.db/q in turn derivations (2 ms for the same derivation on a held value). The rewake answer is decidable from the pass's own report (a closed run with no unanswered wake) without re-deriving from scratch; the budget reads scan the agent's whole turn history since assignment."
@@ -122,13 +104,6 @@
             #{seon.turn/next-agent-work seon.turn/episode-exhausted!},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
- #:seon.task{:name "a-markdown-heading-in-a-reply-is-read-as-code",
-            :kind :function,
-            :intent
-            "planned-sources keeps Markdown structure as source: (planned-sources \"The fix is in `data-text`.\\n## What\\n(+ 1 2)\" 'user 100000) answers one source \"## What\\n(+ 1 2)\" (2026-10-07, default at 42e569d9d), whose `##` is an invalid reader token; live run 1 also saw backticked prose evaluated as syntax-quote. Prose lines, Markdown headings and fenced/backticked spans become comments; only forms are evaluated.",
-            :must-read #{seon.turn/planned-sources},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/live-run/report.md"}}
  #:seon.task{:name "a-message-from-root-never-refills-the-turn-bound",
             :kind :function,
             :intent
@@ -144,26 +119,11 @@
             :must-read #{seon.turn/read-row seon.turn/planned-sources},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
- #:seon.task{:name "each-form-of-a-pass-costs-megabytes"
-             :kind :function
-             :intent "An MCP SCI pass costs megabytes per form whatever the form does. Measured on default with seon.pass-probe/mcp!: 100 forms (+ n 1) 469 ms / 1.15 GB; 400 unresolved words 1,481 ms / 2.37 GB. After pass-cost (once-per-pass namespace lookup, config defaults, terminal ordinal, identity pull, JVM render policy): 100 forms SCI 191 ms / 350 MB, JVM 115 ms / 195 MB, still about 2.3 MB per SCI form. Remaining: retired context refresh and read evidence (S4), repeated recording and observation (S5), receipt machinery (S6), armed hot internals, Datahike query-cache inheritance walk. Correct: per-form work proportional to what the form did, well under 1 MB for a form that defines nothing. Proof: a pass-probe row where 100 non-defining forms allocate under 10x one form."
-             :must-read #{seon.turn/resume-turn seon.db/with-declarations}
-             :evidence #{"docs/research/agent-platform/2026-10-07/pass-cost/design-notes.md"}}
- #:seon.task{:name "an-armed-agents-run-forks-the-program-acquired-before-a-later-commit"
-             :kind :function
-             :intent "An armed agent's run (resume-turn) forked the cluster base context it captured at arming without acquiring the program its connection now holds, so a program change committed by another writer (boot's adoption of the loaded files, another agent's definition) stayed invisible to every SCI run until something else called seon.cluster.agent/acquire-context!. Observed on default after a restart onto b5ff51e4c: root's (doc h) failed 'Unable to resolve symbol: seon.sci.eval/reference-in' for two minutes while a freshly hosted agent and the JVM path saw the function. Correct: each pass acquires its base at the connection's current value before forking (a no-op when the program is unchanged)."
-             :must-read #{seon.turn/resume-turn seon.sci.eval/acquire! seon.cluster.agent/acquire-context!}
-             :evidence #{"docs/research/agent-platform/2026-10-07/doc-fix/doc-resolution-notes.md"}}
  #:seon.task{:name "a-not-admitted-diagnostic-prints-its-write-attempt"
              :kind :function
              :intent "(defn h {:malli/schema [:=> [:cat :int] [:maybe :int]]} [x] x) through MCP answered a :diagnostics entry of about 980 tokens (default 2026-10-08): request id, producer digest, basis, three host frames and the whole refused transaction, while the rule broken sits only in the message, which a 40-token prefix from not-admitted lengthens until the printer cuts it mid-sentence. with-diagnostic prints the error whole (render.value/core-text [error]) instead of projecting it with seon.error/reply-value as evaluation errors are (seon.sci.eval/shown-failure). Done when the diagnostic is reply-value's map (type, message, offending) and an MCP regression bounds the reply at 150 tokens."
              :must-read #{seon.turn/with-diagnostic seon.turn/not-admitted seon.error/reply-value}
              :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
- #:seon.task{:name "repairs-are-stored-as-printed-text"
-             :kind :function
-             :intent "seon.turn/repair-text printed an evaluation's repair vectors with the value printer and stored the text as the string attribute :seon.cluster.eval/repairs, which the reply spliced: a diagnostic stored as a printed copy, not data. Correct: the repairs are stored as [line kind text] tuples (:seon.cluster.eval/delimiter-repairs), in text order, and printed only at the reply edge. Proof: seon.repl-differential-reader-test/a-stored-repair-reads-back-as-data."
-             :must-read #{seon.turn/segmented-sources}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}
 
  #:seon.task{:name "an-identical-re-record-conflicts-with-itself"
   :kind :function
@@ -205,18 +165,10 @@
              :kind :function
              :intent "A red test's reason is invisible (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08): the test step's :red names only the test; :seon.render.test/failures carries only the symbol; \"exceeded 5000 ms\" and \"Worker-global state changed\" each needed manual digs (three in all); result entries lack :seon.test/passed?, so (remove :seon.test/passed?) matched every entry. Done when each red in the step summary and in the my.test/check failure render carries its failure data (test, expected/actual, or the bound or drift reason) and every result entry has :seon.test/passed?, with a regression on a red by bound and a red by drift."
              :must-read #{seon.turn/step seon.render.test/render-ai seon.test/recorded-result}}
- #:seon.task{:name "no-model-turn-without-an-assignment"
-             :kind :function
-             :intent "seon.turn/next-agent-work opens another model call after every successful reply (continuing-reply?) unless the last evaluation answered done or wait; only :seon.config.run/max-episode-runs (100) bounds it, and an agent without an assignment still gets model turns (error notifications to root open root turns too). Contradicts \"a model agent launches only on an assigned task with proofs\". Done when no model turn runs for an agent without an assigned task, with a test that an unassigned agent with a wake gets none."
-             :must-read #{seon.turn/next-agent-work}}
  #:seon.task{:name "ai-attempt-stores-printed-copies-of-settings-and-usage"
              :kind :function
              :intent "Evidence for ledger row SR-G: :seon.ai.attempt/settings-edn is written as (pr-str settings) in seon.turn (and usage-edn likewise), a stored printed copy and a second printer. Store the settings and usage as data, or only their digest and ids."
              :must-read #{seon.turn/step}}
- #:seon.task{:name "the-user-prompt-stop-sequence-cuts-the-models-first-form"
-             :kind :function
-             :intent "The transcript shows every exchange as `user=> form` and the model row stops on \"user=>\" (`:seon.config.ai/stop`), so a model that writes its next form the way the transcript shows it is cut before the form: the first deepseek-flash pass of the live-agent run (agent live-flash, default 6cc5dbbb4, 2026-10-08) ended after prose and an opening ```clojure fence, 78 completion tokens, finish reason stop, and answered 'Your reply had no form'. Done when the prompt marker the transcript teaches and the stop sequence never collide: a model reply that writes `user=> (f)` evaluates (f)."
-             :must-read #{seon.ai/complete seon.context/model-context}}
  #:seon.task{:name "a-model-pass-never-sees-its-test-step"
              :kind :function
              :intent "After a model pass that evaluated a form, `seon.turn/step` runs the proofs and reaching tests but offers the summary only on an MCP reply channel; the model's next prompt carries neither the summary nor the current-state block, so the model never learns its proof is still red (live-agent run, agent live-flash, default 6cc5dbbb4, 2026-10-08: nine passes, the agent learned the proof's status only by evaluating (seon.context/current-state) itself). Covered by the block-last assembly (ledger CS-03a) once it lands; done when a model pass's next prompt shows the proofs' status that pass's step recorded."
@@ -225,14 +177,6 @@
              :kind :function
              :intent "An orderly disarm while a model pass is assembling its context (seon.context/model-context inside the call turn's phase) interrupts the pass but records two error occurrences; a stop's wrapped interrupt is no error. Before CX-1 the test's stand-in redefined seon.cluster.prompt/prompt, which the pass no longer called, so the test hung instead (lane rip-context, 2026-10-08). Done when the interrupted pass closes as interrupted with no error recorded."
              :must-read #{seon.turn/call-turn seon.context/model-context seon.cluster.agent/disarm!}}
- #:seon.task{:name "a-branch-agent-assigned-after-its-fork-never-gets-a-model-turn"
-             :kind :function
-             :intent "`seon.turn/next-agent-work`'s :open arm (CX-2) reads the held assignment with `seon.task/agent-task` on the agent's own database value, but assignments live at the task home (`seon.task/home`), where `seon.task/assign!` writes them and every other reader (`seon.context/current-state`, `seon.render.ns`, `seon.cluster.status`, the step) looks. An agent whose branch forked before root assigned it never sees its assignment there, so its wakes stay unanswered and no model turn ever opens (live-agent run 3, default 0de932400, 2026-10-08): agent live-flash-3b on branch :agent-6ea18cf66f12, assigned on main after the fork, provider enabled on the branch, root's message delivered to the branch; (seon.task/agent-task branch-db \"live-flash-3b\") is nil, on main it is \"504845114355\", and (seon.turn/next-agent-work branch-db {:seon.agent/id \"live-flash-3b\"}) is nil. The run went ahead only by creating the agent row on main with its branch named, assigning it, and then forking the branch, so the branch inherited the assignment. `seon.turn-work-test/an-unassigned-agent-with-a-wake-gets-no-model-turn` keeps its agent on the task home, so it cannot see this. Done when an agent on its own branch, assigned at the home after its branch forked, opens a model turn on its next wake (read the assignment from `(or (some-> (seon.task/home db) seon.db/db) db)`, as `seon.context/current-state` does)."
-             :must-read #{seon.turn/next-agent-work seon.task/agent-task seon.task/home seon.context/current-state}}
- #:seon.task{:name "the-reply-tests-block-shows-the-pass-and-commit-ids"
-             :kind :function
-             :intent "Every eval reply after an agent defines a test ends with {:seon.turn.loop/tests {:seon.turn/id .. :seon.source/commit-id #uuid .. :seon.turn.loop/reaching {:seon.test/passed? false :seon.turn.loop/red [..]}}}, about 90 tokens, also after a read that changed nothing; the pass id and commit id have no agent consumer (the commit is there for `seon.turn/summary-queue`) and the reds include tests red on main that nothing on the branch changed, e.g. live.text-test/initials-of-words on every reply of agent context-corpus (context corpus, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when the shown block carries only the verdict and the red and pending names the agent's change reached, and a reply test asserts no :seon.turn/id or :seon.source/commit-id in it."
-             :must-read #{seon.turn/test-step seon.turn/summary seon.turn/summary-queue}}
  #:seon.task{:name "a-throwing-test-step-loses-its-cause"
              :kind :function
              :intent "When the automatic test step throws a non-refusal (a NullPointerException inside seon.test/changes while lane test-step worked, 2026-10-09), seon.turn/test-step answers only {:seon.error/message \"The automatic test step threw; the pass's values stand.\" :seon.error/exception-class \"java.lang.NullPointerException\"}: no cause chain, no throw site, so the agent and root cannot tell which owner failed without a debug build. A deliberate translation keeps the cause. Done when the step's error carries the cause chain (`:seon.error/chain`) of the thrown exception and a reply test asserts it names the throwing function."
@@ -242,8 +186,4 @@
              :intent "Bench E0-E1 (65 deepseek-flash runs, cap 6, default d384bb0c4, 2026-10-09): 97 of 322 model calls came after the run's proofs were green and 26 of 45 green runs hit the cap, because `seon.turn/continuing-reply?` continues while each reply evaluates a form, though `seon.bootstrap/help-value` says green proofs finish the task; agents invent a stop (run bench-defaults-area-is-contracted-typed-a9752a-2 sent `:seon.context/complete` five times after going green on call 1). The other way, 9 of 65 runs ended unfinished after 1-3 calls because one reply evaluated no form (forms written as ;; comments, or the single word \"Assess\") and nothing woke them again. Done when all-green proofs end the run and a no-form reply is answered with its diagnostic in the next call instead of ending the work."
              :must-read #{seon.turn/continuing-reply? seon.bootstrap/help-value}
              :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}
- #:seon.task{:name "a-commented-form-reply-is-answered-without-naming-its-forms"
-             :kind :function
-             :intent "Agent fan3-near (fanout-3 run, default 324461975, 2026-10-09, deepseek-flash) sent two replies whose every form sat inside a ;; comment line (;; (my.program/source 'seon.db/registered-attribute-candidates)); the first got the follow-up \"Your reply had no form; only comments/prose. Send a form.\" from `seon.turn/segmented-sources`, the second repeated the same commented forms and the run stopped waiting. `seon.bootstrap/help-value` teaches \"write every sentence as a ;; comment\". Done when a reply whose comment lines read as forms is answered with those forms named as data (the commented source and the line to send uncommented), so the next call evaluates them."
-             :must-read #{seon.turn/segmented-sources seon.turn/continuing-reply? seon.bootstrap/help-value}}
 ]

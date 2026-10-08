@@ -569,8 +569,7 @@
            (println "STATUS-FAULTED" elapsed-ms "ms"))
          (finally (swap! runtime/running-instances dissoc cluster-name)))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.boot/one-cluster-without-a-database-fails-the-whole-status}}
-  one-cluster-without-a-database-fails-the-whole-status
+(deftest one-cluster-without-a-database-fails-the-whole-status
   ;; A started or stopping instance holds no connection; status answers its
   ;; row as readiness data and every other row as usual.
   (let [live (some #(when (map? %) %) (vals @runtime/running-instances))

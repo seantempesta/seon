@@ -5,8 +5,7 @@
             [seon.profile :as profile]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.schema.datahike/an-ordinary-pass-builds-hundreds-of-storability-refusals}}
-  an-ordinary-pass-does-not-construct-storability-refusals
+(deftest an-ordinary-pass-does-not-construct-storability-refusals
   (support/with-running-agent
    (fn [running agent-id _]
      (let [call! (fn [code]

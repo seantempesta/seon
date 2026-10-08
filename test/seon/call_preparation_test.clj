@@ -995,8 +995,7 @@
             (is (not= name-a name-b)
                 "each evaluation supplied its OWN world's connection"))))))))
 
-(deftest ^{:seon/tasks #{'seon.test/checks-write-into-live-custody}}
-  a-function-made-in-one-context-uses-the-calling-evaluations-world
+(deftest a-function-made-in-one-context-uses-the-calling-evaluations-world
   ;; CLASS: a closure's call read its defaults from the context it was CREATED
   ;; in (SCI's captured ctx), so a function acquired from entities into a
   ;; connection-less base, or made in the agent's context and called from a

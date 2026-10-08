@@ -1,9 +1,4 @@
 [#:seon.task{:name "doc-shows-empty-sections-and-one-return-per-arity"
              :kind :function
              :intent "(doc seon.db/pull) answered :body \"\" and :example \"\" and an :out vector repeating one union three times, once per arity (context corpus row 4, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when an empty section is absent and a return every arity shares is said once."
-             :must-read #{seon.sci.lookup/docstring-parts seon.sci.lookup/documentation-value}}
- #:seon.task{:name "dir-shows-internal-functions-and-supplied-arguments"
-             :kind :function
-             :intent "`(dir my.program)` at an agent's REPL lists `my.program/supplied-context` (`:seon.fn/internal? true`) and arglists carrying supplied members (`my.program/source` as `[database sym]`), so bench agents passed them by hand: `(my.program/source (my.program/supplied-context {}) 'comp.geo/area)` and `(my.program/diff (my.program/supplied-context nil))` gave 8 refusals across 65 runs (bench E0-E1, 2026-10-09). Done when `dir` omits internal functions and shows each arglist as the agent calls it, without supplied world members."
-             :must-read #{seon.sci.lookup/directory-value my.program/supplied-context}
-             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]
+             :must-read #{seon.sci.lookup/docstring-parts seon.sci.lookup/documentation-value}}]

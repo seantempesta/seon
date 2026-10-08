@@ -1099,8 +1099,7 @@
                           (check {::sources {"test/seon/probe_test.clj" edited}
                                   ::baselines {"test/seon/probe_test.clj" baseline}})))))))
 
-(deftest ^{:seon/tasks #{'seon.contracts-compile-test/corpus-check-allocation-is-floored-by-edamame-per-char-boxing}}
-  checkout-predicates-are-checked-without-loading-and-follow-source-content
+(deftest checkout-predicates-are-checked-without-loading-and-follow-source-content
   (let [root (.toFile (java.nio.file.Files/createTempDirectory "contract-predicates" (make-array java.nio.file.attribute.FileAttribute 0)))
         path (io/file root "src/contract/cost/fixture.clj")
         projection (packaged-projection ".")

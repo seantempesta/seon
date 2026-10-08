@@ -23,7 +23,7 @@
                              (/ (- (System/nanoTime) start) 1e6)))))]
     (nth times (quot n 2))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-set-print-length-taxes-every-later-run}} a-set-print-length-costs-nothing-later
+(deftest a-set-print-length-costs-nothing-later
   (support/with-running-agent
    (fn [running agent-id _]
      (median-ms "(+ 1 1)" agent-id running 5)

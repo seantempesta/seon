@@ -197,8 +197,7 @@
     (is (not (contains? (program/shapes-in other) :memo.example/id))
         "Another projection value derives its own shapes")))
 
-(deftest ^{:seon/tasks #{'seon.turn.batch/a-repl-require-changes-the-namespace-context-but-not-its-source}}
-  a-require-a-definition-does-not-use-leaves-its-digest-unchanged
+(deftest a-require-a-definition-does-not-use-leaves-its-digest-unchanged
   ;; Task 434fed5a3a67: swapping one require changed every digest in its namespace.
   (let [entity {:seon.fn/sym 'sample/f
              :seon.fn/source "(defn f [x] (c/lookup x ::s/key))"
@@ -314,8 +313,7 @@
     (let [result (refusal (example-database projection [(entity :same digest-a)]))]
       (is (= :seon.program/history result)))))
 
-(deftest ^{:seon/tasks #{'seon.program/an-in-ns-namespace-blocks-diff-and-write-branch}}
-  a-removed-namespace-whose-stub-returns-is-retracted-not-undigested
+(deftest a-removed-namespace-whose-stub-returns-is-retracted-not-undigested
   (let [projection (schema/handed-projection)
         base (example-database projection [{:seon.fn/sym 'kept/f :seon.program/definition-digest digest-a}] true)
         with #(vary-meta (:db-after (d/with %1 %2)) assoc :seon.schema/projection projection)
@@ -1266,8 +1264,7 @@
     (is (schema/valid-candidate-value? projection :seon.program/identity-attribute :example/id))
     (is (schema/valid-candidate-value? projection :seon.program/source-attribute :example/source))))
 
-(deftest ^{:seon/tasks #{'seon.program/a-contract-write-rederives-program-attributes}}
-  equal-schema-forms-share-one-program-attribute-derivation
+(deftest equal-schema-forms-share-one-program-attribute-derivation
   (test-support/with-database
    (fn [connection]
      (let [projection (db/carried-projection @connection)
