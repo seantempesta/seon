@@ -48,8 +48,7 @@ cited below as `OD-Qn`); which of them the rulings answer is §1, and the questi
   · T tooling (`bin/*`, `.clj-kondo/`) · V vocabulary and living documents (`docs/seon/`, `.agents/skills`).
 - **Budgets** (owner 2026-10-08: no arbitrary targets; judge cost against what the work must do). Every budget reads:
   expected from the work (what it is proportional to and the rough cost that implies); measured parent and change;
-  10× or more over the expectation is a defect to diagnose, and any regression is reported (CLAUDE.md's hot-path rule
-  still asks that one over 20% or 50 ms is fixed before commit). The owner's own numbers are rulings and stay: a model
+  10× or more over the expectation is a defect to diagnose, and every regression is reported with its numbers. The owner's own numbers are rulings and stay: a model
   pass at 20-40 MB transient is fine and never GB; the whole process fits a 16 GB machine beside the user's work; a
   core function's raw return stays under 2,000 estimated tokens in ordinary use; CLAUDE.md's 1 s (a finding naming the
   owners) and 10 s (owner authorization and an issue). Invented MB and ms targets are deleted. The codes name the probe
