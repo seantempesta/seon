@@ -45,8 +45,8 @@
             (concat
              (map (fn [[sym spec]] [sym (edn/read-string spec) false]) functions)
              (map (fn [[k v]] [k v (contains? stored k)]) forms)))
-          inspected-tails (into #{} (comp (filter #(#{:value-tail :unguarded-tail}
-                                                    (:seon.schema.advisory/kind %)))
+          inspected-tails (into #{} (comp (filter #(#{:seon.schema.finding/value-tail :seon.schema.finding/unguarded-tail}
+                                                    (:seon.schema.finding/type %)))
                                           (map :seon.schema/identity)) findings)]
       (assert (every? #(contains? inspected-tails (first %)) unguarded)
               "A graph-declared unguarded variadic arity escaped schema inspection")
@@ -70,15 +70,15 @@
     (is (= [true false]
            (mapv :seon.schema/justified?
                  (inspect [:=> [:cat exempt :any] :int]))))
-    (is (= [:value-tail]
-           (mapv :seon.schema.advisory/kind
+    (is (= [:seon.schema.finding/value-tail]
+           (mapv :seon.schema.finding/type
                  (inspect [:=> [:cat [:* :seon.schema/value]] :int
                            [:fn {:error/message "parsed input count"} 'clojure.core/identity]]))))
-    (is (= [:unguarded-tail]
-           (mapv :seon.schema.advisory/kind
+    (is (= [:seon.schema.finding/unguarded-tail]
+           (mapv :seon.schema.finding/type
                  (inspect [:=> [:cat [:* :string]] :nil]))))
-    (is (= [:stored-nil]
-           (mapv :seon.schema.advisory/kind
+    (is (= [:seon.schema.finding/stored-nil]
+           (mapv :seon.schema.finding/type
                  (internal/permissive-positions
                   {:seon.schema/compiled (schema/structural-schema [:maybe :string])
                    :seon.schema/stored? true}))))
@@ -90,3 +90,15 @@
                              {:registry (merge (m/default-schemas)
                                                {:audit/attribute [:maybe (second exempt) :string]})})
                    :seon.schema/stored? true}))))))
+
+(deftest permissive-position-finding-names-its-registered-schema
+  (test-support/with-database
+   (fn [connection]
+     (let [findings (internal/permissive-positions
+                     {:seon.schema/compiled (schema/structural-schema [:map [:a :any]])})
+           finding (first findings)
+           registry (:seon.schema.projection/registry
+                     (db/carried-projection (db/db connection)))]
+       (is (= 1 (count findings)))
+       (is (= :seon.schema.finding/any (:seon.schema.finding/type finding)))
+       (is (m/validate (mr/schema registry (:seon.schema.finding/type finding)) finding))))))

@@ -2176,20 +2176,19 @@
                    (comp
                     (remove :seon.schema/justified?)
                     (keep
-                     (fn [{kind :seon.schema.advisory/kind
+                     (fn [{kind :seon.schema.finding/type
                            form :seon.schema/definition}]
                        (let [finding
                              (case kind
-                               :undefined
-                               (case form
-                                 :any :seon.fn.contract.finding/any
-                                 :some :seon.fn.contract.finding/some
-                                 nil)
-                               :bare-value
+                               :seon.schema.finding/any
+                               :seon.fn.contract.finding/any
+                               :seon.schema.finding/some
+                               :seon.fn.contract.finding/some
+                               :seon.schema.finding/bare-value
                                :seon.fn.contract.finding/bare-value
-                               :value-tail
+                               :seon.schema.finding/value-tail
                                :seon.fn.contract.finding/bare-value
-                               :unguarded-tail
+                               :seon.schema.finding/unguarded-tail
                                (when-not guarded?
                                  :seon.fn.contract.finding/unguarded-variadic)
                                nil)]

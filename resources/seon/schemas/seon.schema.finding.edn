@@ -1,0 +1,14 @@
+#:seon.schema.finding{:base
+                      [:map
+                       [:seon.schema/path :seon.render.data/path]
+                       [:seon.schema/identity {:optional true} :qualified-keyword]
+                       [:seon.schema/schema-type {:optional true} :keyword]
+                       [:seon.schema/justified? {:optional true} :boolean]
+                       [:seon.schema.admission/reason {:optional true} :string]]
+                      :any [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/any]]]]
+                      :some [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/some]]]]
+                      :maybe [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/maybe]]]]
+                      :stored-nil [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/stored-nil]]]]
+                      :bare-value [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/bare-value]]]]
+                      :value-tail [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/value-tail]]]]
+                      :unguarded-tail [:and :seon.schema.finding/base [:map [:seon.schema.finding/type [:= :seon.schema.finding/unguarded-tail]]]]}

@@ -403,7 +403,8 @@
                   [:or :nil :map]]}
   [file declaration-key form]
   (when-let [slot (first
-                   (filter #(and (= :undefined (:seon.schema.advisory/kind %))
+                   (filter #(and (#{:seon.schema.finding/any :seon.schema.finding/some}
+                                  (:seon.schema.finding/type %))
                                  (not (:seon.schema/justified? %)))
                            (internal/permissive-positions
                             {:seon.schema/compiled (schema/structural-schema form)})))]

@@ -179,25 +179,26 @@
                   reason (:seon.schema.admission/reason properties)
                   justified? (justified-polymorphism? (or properties {}))
                   problem (cond
-                            (#{:any :some} tag) :undefined
-                            (and stored? (= :maybe tag)) :stored-nil
+                            (= :any tag) :seon.schema.finding/any
+                            (= :some tag) :seon.schema.finding/some
+                            (and stored? (= :maybe tag)) :seon.schema.finding/stored-nil
                             (and input-slot?
                                  (or (= :seon.schema/value reference)
-                                     (= :seon.schema/value tag))) :bare-value
+                                     (= :seon.schema/value tag))) :seon.schema.finding/bare-value
                             (and (= :* tag)
                                  (some #(and (m/schema? %)
                                              (or (= :seon.schema/value (m/type %))
                                                  (and (m/-ref-schema? %)
-                                                      (= :seon.schema/value (m/-ref %))))) children)) :value-tail
+                                                      (= :seon.schema/value (m/-ref %))))) children)) :seon.schema.finding/value-tail
                             (and input-slot? (#{:* :+ :repeat} tag)
-                                 (not guarded?)) :unguarded-tail)]
+                                 (not guarded?)) :seon.schema.finding/unguarded-tail)]
               (into
                (if problem
                  [(cond-> {:seon.schema/path path
                            :seon.schema/definition (m/form node)
-                           :seon.schema.advisory/kind problem
-                           :seon.schema/justified? (boolean (and justified? (not= :stored-nil problem)))}
-                    (and justified? (not= :stored-nil problem))
+                           :seon.schema.finding/type problem
+                           :seon.schema/justified? (boolean (and justified? (not= :seon.schema.finding/stored-nil problem)))}
+                    (and justified? (not= :seon.schema.finding/stored-nil problem))
                     (assoc :seon.schema.admission/reason reason))]
                  [])
                (concat
@@ -392,7 +393,9 @@
           ;; `seon.schema.datahike` refuses where it derives storage.
           (if (and (contains? undefined-types schema-type)
                    (not (justified-polymorphism? properties)))
-            [{:seon.schema.advisory/kind :seon.schema.advisory/undefined
+            [{:seon.schema.finding/type (if (= :any schema-type)
+                                         :seon.schema.finding/any
+                                         :seon.schema.finding/some)
               :seon.schema/identity identity
               :seon.schema/path (vec path)
               :seon.schema/schema-type schema-type}]
@@ -418,7 +421,7 @@
               {})
 
              :else
-             [{:seon.schema.advisory/kind :seon.schema.advisory/maybe
+             [{:seon.schema.finding/type :seon.schema.finding/maybe
                :seon.schema/identity identity
                :seon.schema/path (vec path)}])))))
      walk-options)))
