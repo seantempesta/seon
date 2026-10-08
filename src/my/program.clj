@@ -105,53 +105,32 @@
 (defn- caller-data
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject :int] [:map [:seon.program/callers {:optional true} :seon.program/callers] [:seon.program/call-sites {:optional true} :seon.program/call-sites]]]}
   [database subject entity]
-  (let [callers (into (set (names-through database :seon.fn/calls subject :seon.fn/sym))
+  (let [read! (fn [result]
+                (if (:seon.db/invalid-read result) (throw (ex-info (:seon.error/message result) result)) result))
+        callers (into (set (names-through database :seon.fn/calls subject :seon.fn/sym))
                       (names-through database :seon.fn/calls subject :seon.test/sym))
-        arities (let [result (db/q database
-                       '[:find [?arity ...] :in $ ?entity
-                         :where [?entity :seon.fn/arities ?arity]] entity)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
-        declared (mapv #(dissoc (let [result (db/pull database
-                                                 [:seon.fn.arity/min :seon.fn.arity/max] %)]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
-                                :db/id) arities)
-        sites
-        (into []
-              (mapcat
-               (fn [caller]
-                 (let [stored caller
-                       entity-map (or (let [result (db/pull database [:db/id :seon.fn/form-span]
-                                                 [:seon.fn/sym stored])]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
-                               (let [result (db/pull database [:db/id :seon.fn/form-span]
-                                                 [:seon.test/sym stored])]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result)))
-                       tuples (let [result (db/q database
-                                     '[:find [?tuple ...] :in $ ?entity
-                                       :where [?entity :seon.fn/call-arities ?tuple]]
-                                     (:db/id entity-map))]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
-                       counts (keep (fn [[callee arity]]
-                                      (when (= subject callee) arity)) tuples)
-                       site (cond-> {:seon.fn/sym caller}
-                              (:seon.fn/form-span entity-map)
-                              (assoc :seon.fn/form-span (:seon.fn/form-span entity-map))
-                              (seq declared) (assoc :seon.fn/declared-arities declared))]
-                   (if (seq counts)
-                     (map #(assoc site :seon.fn/call-arity %) (sort counts))
-                     [site]))))
-              (sort callers))]
-    (present-groups {:seon.program/callers callers :seon.program/call-sites sites})))
+        sorted (vec (sort callers))
+        arities (read! (db/q database '[:find [?arity ...] :in $ ?entity :where [?entity :seon.fn/arities ?arity]] entity))
+        declared (mapv #(dissoc % :db/id) (read! (db/pull-many database [:seon.fn.arity/min :seon.fn.arity/max] arities)))
+        selector [:db/id :seon.fn/form-span :seon.fn/call-arities]
+        functions (read! (db/pull-many database selector (mapv #(vector :seon.fn/sym %) sorted)))
+        missing (into [] (keep-indexed (fn [position pulled] (when-not pulled position))) functions)
+        tests (when (seq missing)
+                (read! (db/pull-many database selector (mapv #(vector :seon.test/sym (sorted %)) missing))))
+        pulled (reduce (fn [found [position entity-map]] (assoc found position entity-map))
+                       functions (map vector missing tests))
+        site-of (fn [caller entity-map]
+                  (let [counts (keep (fn [[callee arity]] (when (= subject callee) arity))
+                                     (:seon.fn/call-arities entity-map))
+                        site (cond-> {:seon.fn/sym caller}
+                               (:seon.fn/form-span entity-map)
+                               (assoc :seon.fn/form-span (:seon.fn/form-span entity-map))
+                               (seq declared) (assoc :seon.fn/declared-arities declared))]
+                    (if (seq counts)
+                      (map #(assoc site :seon.fn/call-arity %) (sort counts))
+                      [site])))]
+    (present-groups {:seon.program/callers callers
+                     :seon.program/call-sites (vec (mapcat site-of sorted pulled))})))
 
 (defn callers
   "Read direct callers and their declaration spans and recorded call arities.

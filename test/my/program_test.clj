@@ -34,6 +34,16 @@
        (is (= expected (:seon.program/callers caller-report)))
        (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites report)))))
        (is (every? :seon.fn/form-span (:seon.program/call-sites report)))
+       (let [arities (db/q '[:find [?arity ...] :in $ ?target
+                             :where [?subject :seon.fn/sym ?target] [?subject :seon.fn/arities ?arity]]
+                           database 'seon.turn/open?)
+             declared (set (map #(select-keys (db/pull database [:seon.fn.arity/min :seon.fn.arity/max] %)
+                                              [:seon.fn.arity/min :seon.fn.arity/max])
+                                arities))
+             sites (:seon.program/call-sites caller-report)]
+         (is (every? #(= declared (set (:seon.fn/declared-arities %))) sites)
+             "every call site carries the subject's declared arities")
+         (is (some :seon.fn/call-arity sites) "a caller with a recorded call arity carries it"))
        (is (seq (:seon.program/gating report)))
        (is (= (function/gate-set database 'seon.turn/open?) (:seon.program/gating tests))
            "test selection is the call-reach gate set")
