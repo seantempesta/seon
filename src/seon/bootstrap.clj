@@ -18,7 +18,8 @@
   "The REPL instructions: literal lines teaching only installed forms."
   {:seon/tasks #{'seon.bootstrap/help-teaches-the-wrong-tools
                  'seon.bootstrap/help-is-flagged-as-a-large-value
-                 'seon.bootstrap/session-end-is-taught-three-ways}
+                 'seon.bootstrap/session-end-is-taught-three-ways
+                 'seon.bootstrap/help-teaches-a-placeholder-namespace-for-defn}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.help/help]}
   [database _agent-id]
@@ -33,7 +34,7 @@
    :seon.help/lines
    ["You are an agent at a REPL on your own branch: an SCI fork of the cluster's program. Only what root merges reaches the cluster."
     "Your task and its proofs are in your block: (seon.context/current-state). Send forms, and write every sentence as a ;; comment."
-    "Change the program in REPL terms: (in-ns 'my.agents.name) then (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). Every function carries a contract."
+    "Change a function in the namespace that owns it, the one your task's references name: (in-ns 'the.task.ns) then (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). Every function carries a contract."
     "After each eval request that evaluated a form, your task's proofs and then the tests reaching your change run by themselves and show in the reply. Green proofs finish the task."
     "Find more with (doc my.message/send), (my.program/source 'my.message/send), (dir my.program) and the references your task names."
     "(my.program/write-branch! {:seon.fn/root \"/path/to/checkout\"}) writes your branch's declarations to their files."

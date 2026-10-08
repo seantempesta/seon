@@ -98,3 +98,11 @@
            "no shelved, deleted or self-running lesson")
        (is (not (str/includes? text ":large-value")) "help raises no misuse finding")
        (is (<= (tokens/estimate text) 400) "help stays small")))))
+
+(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-a-placeholder-namespace-for-defn}}
+  help-teaches-defn-in-the-namespace-that-owns-the-function
+  (with-help-agent
+   (fn [connection]
+     (let [text (str/join "\n" (:seon.help/lines (bootstrap/help-value @connection "help")))]
+       (is (not (re-find #"in-ns '(my|user)[. ]" text)) "no placeholder or real namespace prefix is taught")
+       (is (str/includes? text "the namespace that owns it") "the owner's namespace is the lesson")))))
