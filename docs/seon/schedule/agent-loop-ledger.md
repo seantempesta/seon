@@ -979,6 +979,29 @@ Order: AE-1 → AE-2 → AE-3 need nothing unlanded and fix the live R-9 defect;
 it, or RT-2 first and AE-4 converts it); AE-5 follows AE-4 and CX-13; AE-6 and AE-7 follow AE-4 and change the wake
 path.
 
+### 3.32 Commit cost (CC; research `2026-10-09/commit-cost/commit-cost-astra.md`, `dad68a4ce`; index and counts [README-commit-cost](cards/README-commit-cost.md))
+
+A small durable commit costs 12-25 ms on default's store configuration (empty 12-13 ms, 17 datoms 19-25 ms, `d/with`
+0.12 ms; 30-41 node files plus an ~88 KB fused record written twice; two full barriers per head). The expected cost
+of the work is 4-6 ms (one append and one full flush); the installed two-barrier protocol floors at ~8 ms. Order:
+delete Seon commits that need not exist, write the root record once, share barriers across branches ready together.
+The datom write-ahead log is the owner's decision (README §"Step 4"), not a row. Commits per eval request today: a
+`:ping` or a `defn` with no reaching test 1, a `defn` or `deftest` whose reaching test executes 3 (recording,
+admission, completion), up to 5 with task proofs; the existing rows that remove them are listed in the README
+(CO-2, S5-02, TX-8, EN-6, TX-1..TX-7).
+
+| Id | Title | Change | Files | Proof | Budget | Deps | Group | Status |
+|---|---|---|---|---|---|---|---|---|
+| CC-0 | A small commit reports its milliseconds, files and barriers | a throwaway store at the production creation config; 20 recording-shaped 17-datom commits measured: ms, keys and bytes by kind, head size | `test/seon/cluster/store_test.clj` | `seon.cluster.store-test/a-small-commit-reports-its-milliseconds-files-and-head` | expected 10-15 ms p50 today; the bound each CC card tightens | none | E | ready ([card](cards/CC-0.md)) |
+| CC-1 | The reply counts the commits its request made | `:seon.cost/transactions` counts distinct commit ids, the JVM-mode recording included (today root JVM answers 0 for 1 commit; a `defn` with a test answers 4 for 3) | `src/seon/profile.clj` or the `seon.turn` cost assembly | `seon.turn-test/a-replys-transactions-are-its-durable-commits` | a few µs per request | none | B | ready ([card](cards/CC-1.md)) |
+| CC-2 | The test step's admission rides the recording transaction | probe first that `admit-run` inside the recording sees its program facts; the step selects before settle and executes on the committed head | `src/seon/turn.clj`, `src/seon/turn/batch.clj`, `src/seon/test.clj`, tests | `seon.turn-test/a-defn-with-a-reaching-test-commits-recording-and-completion-only` | one commit fewer per eval request whose tests execute: 19-25 ms | CC-Q1, CO-2, CC-1 | B/E | blocked-on-owner (CC-Q1) ([card](cards/CC-2.md)) |
+| CC-3 | Every branch-head reader accepts a head that names its commit | `datahike.writing/resolve-head` before every `stored->db` of a branch key (connector, versioning, readers, GC); no writer change | the Datahike fork, gitlink | `datahike.test.store-test/a-compact-head-reads-as-its-commit` | full head unchanged; compact head one cold `k/get` | none | O | ready ([card](cards/CC-3.md)) |
+| CC-4 | A commit writes its root record once and a compact head | with the commit graph, the branch key gets `{:datahike/commit-id cid}` after the record | the Datahike fork, gitlink | `datahike.test.store-test/a-commit-writes-a-compact-head`; CC-0 head < 1 KB | one record encode (2-5 ms) and ~88 KB per commit | CC-3 booted, CC-0 | O | ready after its deps ([card](cards/CC-4.md)) |
+| CC-5 | Measure what unfused roots save on a recording-shaped commit | fused vs unfused throwaway stores, CC-0's shape and 20 replayed recordings; no config change | research directory | the committed table and a keep-or-change row | seconds | CC-0, CC-4 | E | ready after its deps ([card](cards/CC-5.md)) |
+| CC-6 | Konserve's barriers are counted per head write | a recording test backing; two concurrent head writes, paused and failing barriers | the konserve fork (test) | `konserve.filestore-test/each-barriered-write-pays-two-store-barriers` | test only | none | O | ready ([card](cards/CC-6.md)) |
+| CC-7 | Head writes ready together share one pair of barriers | a store-scoped group in `update-blob`'s `:barriered` path: one writer leads at once, arrivals during a barrier join the next group; two dials | the konserve fork, gitlink; `seon.cluster.store/datahike-configuration`, `config/default.edn` | CC-6 tightened to 2 barriers per group | ~8·(1−1/N) ms per commit for N ready branches; one writer unchanged | CC-6 | O | ready after its deps ([card](cards/CC-7.md)) |
+| CC-8 | Datahike branches committing together share the group | fork test: 8 branches, 8 commits per burst, barriers < 16 | the Datahike fork (test), gitlink | `datahike.test.commit-group-test/branches-committing-together-share-barriers` | test seconds | CC-7 | O | ready after its deps ([card](cards/CC-8.md)) |
+
 ## 4. Retired and merged ids
 
 | Old id | Now |
@@ -1215,5 +1238,8 @@ patterns' Q1-Q2, a nested `defn` saved from its own span (RP-9), a code task wit
    for distance and continuation only. AU-Q17 waits on UL-1d.
 4. **The codec** (RESPEC R-5): keep, shrink to bridged attributes, or delete for Datahike-native values; the research
    is in (`c705b5ba9`, `8878ba93b`); recommended after R-5's dual review.
-5. **Root rulings still pending** (not owner questions, listed so they are not lost): the host-bound route (RF-3) and
+5. **Commit cost** ([README-commit-cost](cards/README-commit-cost.md)): CC-Q1, may the test step's writer admission
+   ride the eval request's recording transaction (OD-Q5 keeps admission at the writer)? CC-Q2, may the proofs and the
+   reaching tests be one test request? CC-Q3, when to open the datom write-ahead log design.
+6. **Root rulings still pending** (not owner questions, listed so they are not lost): the host-bound route (RF-3) and
    where the cluster base lives (LR-BASEWEIGHT, note `5cd143fc7`).
