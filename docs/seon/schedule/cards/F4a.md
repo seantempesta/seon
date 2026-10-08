@@ -7,8 +7,8 @@ created: 2026-10-08
 
 # F4a: Proofs run after a code-changing pass
 
-**Blocked on Q-B** (README: what triggers the step). The rest is decided, written for Q-B option 1; options 2 and 3
-change only the `step-due?` predicate below. Group B (`turn.clj`). Model: Opus (the proc step is the one REPL path).
+**Q-B answered (owner 2026-10-08 late):** the step runs after any eval request that evaluated a form; unchanged proofs
+answer from their record. Option 1 as written below. **In flight (lane f4a).** Group B (`turn.clj`). Model: Opus (the proc step is the one REPL path).
 Hard dependency: LR-CACHEb landed (a branch's first reaching check is GB without it).
 
 ## Files

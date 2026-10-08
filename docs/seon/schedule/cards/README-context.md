@@ -15,7 +15,7 @@ Storage: SR-H → SR-I; SR-E after SR-D; SR-C any time in group C order; SR-F af
 
 ## Owner questions
 
-**Q1 (blocks S4-02a). Where does a pass learn which assignment it belongs to?** The history (S4-03) is "call rows of
+**Answered (owner 2026-10-08 late): option 1.** **Q1 (blocks S4-02a). Where does a pass learn which assignment it belongs to?** The history (S4-03) is "call rows of
 the active assignment", but no pass knows its assignment today: the world carries an optional task id only
 (`src/seon/turn/world.clj:49-67`), and the assignment is written at the task home, which an agent's branch may not
 hold.
@@ -25,7 +25,7 @@ hold.
    row's. No write, but it compares times across two branches, which is fragile.
 3. Store the key on the agent entity when root assigns, and copy it from there. One more fact that can go stale.
 
-**Q2 (blocks PB-03b). After a reload, should the shared base be advanced in place or rebuilt once?** Today the first
+**Answered: option 2, measured first, rebuild only as fallback.** **Q2 (blocks PB-03b). After a reload, should the shared base be advanced in place or rebuilt once?** Today the first
 pass after an adoption rebuilds the whole base (measured 428 MB / 180 ms), once per adoption, not per pass.
 1. (simplest) Keep the rebuild once per adoption, and only release the previous base at once. Meets "never per pass",
    not "incrementally built up". No new code path.
@@ -34,7 +34,7 @@ pass after an adoption rebuilds the whole base (measured 428 MB / 180 ms), once 
    stale-caller tests must cover. Decide after PB-03a's measurement.
 3. Rebuild in the background right after adoption, so no agent pass waits on it. Hides the cost without removing it.
 
-**Q3 (does not block BLOB-K; card uses 1024). Blob compression floor: 1 KB or 256 bytes?** Your approved defaults say
+**Answered: 1 KB (option 1).** **Q3 (does not block BLOB-K; card uses 1024). Blob compression floor: 1 KB or 256 bytes?** Your approved defaults say
 "blob compression floor ~1 KB"; lane blob-konserve wrote 256 B ("below it the LZ4 frame and marker cost about what
 compression saves").
 1. 1024 B, as approved (card default). 2. 256 B, as the lane measured. 3. 1024 B now, revisit with a measured table.

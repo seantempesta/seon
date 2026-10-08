@@ -7,20 +7,19 @@ created: 2026-10-08
 
 # F4c: The step has a bound and continues
 
-**Blocked on Q-C** (the dial's default). Depends on F4b. Group B. Model: Opus.
+**Q-C answered (owner 2026-10-08 late): the dial defaults to 10 s.** Depends on F4b. Group B. Model: Opus.
 
 ## Files
 
 - `src/seon/turn.clj`
 - `resources/seon/schemas/seon.config.test.edn`
-- `config/default.edn`
 - `test/seon/cluster/turn_test.clj`
 
 ## Decided
 
 - Dial: `:seon.config.test/step-time-limit-ms [:int {:min 1 :seon.config/dial true}]` in `seon.config.test.edn`
-  (beside `:auto-check-cases`), default per Q-C in `config/default.edn` next to `:seon.config.test/auto-check-cases`
-  (`config/default.edn:165`). Read once per step with `seon.config/effective` the way `seon.test/run` reads its
+  (beside `:auto-check-cases`), declared with `:seon.config/default 10000` in the schema, so no `config/default.edn`
+  line is needed (`seon.config/registration-defaults`, `src/seon/config.clj:165-183`; that file is held by dials-16gb). Read once per step with `seon.config/effective` the way `seon.test/run` reads its
   bound (`test.clj:2283-2287`).
 - The bound is enforced by the runner, not by a second timer: `run-proofs` passes
   `:seon.test/check-time-limit-ms` = the dial; `run-reaching` passes the dial minus the proofs' measured elapsed
