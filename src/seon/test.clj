@@ -1602,11 +1602,20 @@
       (try
         (let [test-var (schema/call-with-projection
                         projection
-                        #(if (= :agent admission)
-                           (sci/resolve ctx test-symbol)
-                           (with-test-loader loader (fn [] (resolve-loaded test-symbol)))))]
-          (if (and (runner/var-reference? test-var) (ifn? (:test (meta test-var))))
-            test-var
+                        #(cond
+                           (= :agent admission) (sci/resolve ctx test-symbol)
+                           ;; A file test reaching the context's change runs
+                           ;; interpreted, calling the changed program; its
+                           ;; namespace loads first for the helpers it names.
+                           (sci.eval/interpreted-test? ctx test-symbol)
+                           (with-test-loader loader (fn [] (resolve-loaded test-symbol)
+                                                      (sci.eval/interpret-test! ctx database test-symbol)))
+                           :else (with-test-loader loader (fn [] (resolve-loaded test-symbol)))))]
+          (cond
+            (and (runner/var-reference? test-var) (ifn? (:test (meta test-var)))) test-var
+            ;; the interpretation's refusal, naming its cause
+            (map? test-var) test-var
+            :else
             {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/resolution
              :seon.error/operation 'seon.test/resolve-test
              :seon.test/not-runnable (str test-symbol)

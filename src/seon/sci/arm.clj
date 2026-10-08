@@ -42,9 +42,12 @@
   install gate's generated calls, a render) never installs it again from a
   stored row. A contract that cannot arm leaves the function callable as written, with the
   cause beside the write as `:seon.batch/arm-error`. Answers the write with what arming
-  did. It reads the Var as `ctx` binds it. The base's callers of a function the write defines apart from the
-  base's Var are re-interpreted onto it (`seon.sci.eval/reinterpret-inherited-callers!`);
-  a failure there is the write's `:seon.batch/arm-error` too."
+  did. It reads the Var as `ctx` binds it. The base's callers of a function the
+  write defines apart from the base's Var are re-interpreted onto it
+  (`seon.sci.eval/reinterpret-inherited-callers!`), and the callers and tests
+  `ctx` still runs compiled are interpreted (`seon.sci.eval/interpret-affected!`),
+  so the forms after the write call the definition through them; a failure
+  there is the write's `:seon.batch/arm-error` too."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working {v :var :as write}]
   (sci.ctx-store/with-ctx ctx
@@ -66,6 +69,7 @@
         (as-> armed
               (try
                 (eval/reinterpret-inherited-callers! ctx working sym v)
+                (eval/interpret-affected! ctx working [sym])
                 armed
                 (catch Throwable t
                   (update armed :seon.batch/arm-error #(or % (ex-message t))))))))))

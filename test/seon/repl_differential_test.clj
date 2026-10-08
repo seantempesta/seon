@@ -187,6 +187,47 @@
            (is (not (contains? red 'scratch.contracted-test/slug-lowers)))
            (is (nil? passed?) "nothing changed, so the step executed nothing and shows nothing")))))))
 
+(def ^:private branch-doc-line
+  "A branch definition of the file function `seon.render.ns/first-doc-line`
+  that every doc line reads as \"branch\"."
+  (str "(in-ns 'seon.render.ns)"
+       " (defn- first-doc-line {:malli/schema [:=> [:cat [:maybe :string]] :string]} [doc] \"branch\")"))
+
+(def ^:private shown-doc-line
+  "The doc line the file function `seon.render.ns/render-ai`, a compiled caller of `first-doc-line`, shows."
+  (str "(:seon.ns/doc (seon.render.ns/render-ai {:seon.render/value {:seon.ns/name 'seon.example :seon.ns/doc \"One. Two.\"}"
+       " :seon.db/db (seon.db/db) :seon.render/distance 0}))"))
+
+(def ^:private descending-member-problem
+  "A branch definition of the file function `seon.error/collection-member-problem`
+  that descends into any collection, so a map given for `[:sequential :map]`
+  is refused as one of its entries (its definition before 982a4e1ad)."
+  (str "(in-ns 'seon.error)"
+       " (defn- collection-member-problem {:malli/schema [:=> [:cat :map] [:or :nil :map]]} [problem]"
+       " (let [schema (m/deref-all (:schema problem)) schema-type (m/type schema)"
+       " child (when (#{:set :vector :sequential} schema-type) (first (m/children schema))) value (:value problem)]"
+       " (when (and child (coll? value))"
+       " (when-let [[member] (reduce (fn [_ member] (when-not (m/validate child member) (reduced [member]))) nil value)]"
+       " {:schema child :value member ::collection-type schema-type}))))"))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-file-derived-proof-never-sees-the-branch-redefinition}}
+  a-file-test-runs-the-branch-redefinition-of-a-file-function
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [{:keys [red]} (step-red descending-member-problem (str "branch-" agent-id) running)]
+       (is (contains? red 'seon.error-test/a-map-for-a-sequential-is-refused-as-the-map)
+           "the file test, green on the loaded program, ran the branch's definition through the compiled caller")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-branch-redefinition-never-reaches-its-inherited-callers}}
+  an-inherited-file-caller-sees-the-branch-redefinition-of-its-helper
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [brancher (str "branch-" agent-id)]
+       (testing "the forms after the redefinition call it through the compiled caller"
+         (is (= "branch" (answered (str branch-doc-line " " shown-doc-line) brancher running))))
+       (testing "and so does the next eval request"
+         (is (= "branch" (answered shown-doc-line brancher running))))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}}
   a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
   (support/with-running-agent

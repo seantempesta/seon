@@ -1482,7 +1482,8 @@
                 ;; the replacement too; retain only the destination's ns.
                 (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))))
 
-(declare base-bindings acquired-database? stale-reach reinterpret-reach!)
+(declare base-bindings acquired-database? stale-reach reinterpret-reach! interpret-affected!
+         namespace-row install-caller-host-bindings! install-required-libraries! acquisition-refusal)
 
 (defn acquired-program
   "Return the database and refusal report actually acquired by this context.
@@ -1497,6 +1498,43 @@
            (get-in snapshot [::acquisition :seon.sci.eval/interpreted-count] 0)
            :seon.test/acquisition-refusals
            (vec (get-in snapshot [::acquisition ::acquisition-refusals])))))
+
+(defn interpreted-test?
+  "Whether `ctx` interprets the test `test-symbol` from its stored source.
+  It does when the test reaches a definition the context's program changed, so
+  its body calls that program's definitions, not the compiled ones."
+  {:seon/tasks #{'seon.sci.eval/a-file-derived-proof-never-sees-the-branch-redefinition}
+   :malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] :boolean]}
+  [ctx test-symbol]
+  (contains? (some-> (::kernel/program-snapshot ctx) deref ::interpreted-tests) test-symbol))
+
+(defn interpret-test!
+  "Interpret the stored test `test-symbol` in `ctx` from `database`; its Var.
+  Its namespace binds what its row declares and the compiled interns of its
+  loaded host namespace, so the caller loads that namespace first (a test
+  namespace loads under the test runner's class loader). A test that cannot be
+  interpreted answers the acquisition refusal naming it."
+  {:seon/tasks #{'seon.sci.eval/a-file-derived-proof-never-sees-the-branch-redefinition}
+   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
+                  [:or :seon.sci.eval/sci-var :seon.sci.eval/row-acquisition-error :seon.sci.eval/interpretation-error]]}
+  [ctx database test-symbol]
+  (let [namespace-name (symbol (namespace test-symbol))
+        row (db/pull database [:seon.test/sym :seon.test/source :seon.schema.admission/source]
+                     [:seon.test/sym test-symbol])
+        ns-row (namespace-row (db/pull database namespace-pattern [:seon.ns/name namespace-name]))]
+    (binding [sci.lang/*write-observer* nil
+              sci.lang/*expansion-observer* nil]
+      (sci.ctx-store/with-ctx ctx
+        (try
+          (sci/install-namespace-bindings! ctx namespace-name (assoc (row-bindings ns-row) :refers {}))
+          (install-caller-host-bindings! ctx [ns-row])
+          (install-required-libraries! ctx [ns-row])
+          (install-namespace-bindings! ctx namespace-name (row-bindings ns-row))
+          (install-row! {:seon.sci.eval/ctx ctx :seon.db/db database
+                         :seon.program/row (assoc row :seon.test/ns [:seon.ns/name namespace-name])})
+          (sci/resolve ctx test-symbol)
+          (catch Throwable failure
+            (acquisition-refusal (assoc row :seon.test/ns [:seon.ns/name namespace-name]) failure)))))))
 
 (defn- installation-covers-program-change?
   "True when everything the settlement `report` changed since the context's
@@ -1606,7 +1644,7 @@
   (sci.ctx-store/with-ctx ctx
     (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
                       installations)
-          functions (into [] (keep (comp :seon.fn/sym :seon.program/row)) installations)
+          functions (into [] (keep (comp #(some-> % str symbol) :seon.fn/sym :seon.program/row)) installations)
           previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
       (transfer-evaluated-roots! ctx agent-ctx installations)
       ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
@@ -1645,6 +1683,11 @@
                 :let [before (get previous sym)]
                 :when (and before (not (identical? before (sci/resolve ctx sym))))]
           (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
+        ;; A caller `ctx` still runs compiled never sees a redefinition: the
+        ;; reverse closure of these definitions is interpreted once, so the
+        ;; next eval request calls the branch's program, as one Clojure Var would.
+        (when (seq functions)
+          (interpret-affected! ctx db functions))
         installed))))
 
 (defn- classpath-locatable?
@@ -2534,11 +2577,15 @@
 
 (defn- interpret-overlay!
   "Interpret the overlay `plan` on `ctx`: its overrides with their reverse
-  closure, its namespaces and its tests, and bind the compiled Vars of the
-  functions it adds; the acquisition advanced from the base's."
+  closure (functions and the tests reaching them), its namespaces and its
+  tests, and bind the compiled Vars of the functions it adds; the acquisition
+  advanced from the base's. What `ctx` already interprets, and the plan's
+  `::evaluated` definitions it holds as evaluated, are not installed again."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :map]}
-  [ctx database {::keys [overridden added namespaces tests]}]
+  [ctx database {::keys [overridden added namespaces tests evaluated]}]
   (let [snapshot @(::kernel/program-snapshot ctx)
+        already (into (set (::interpreted snapshot)) evaluated)
+        already-tests (set (::interpreted-tests snapshot))
         projection (or (db/carried-projection database) (:seon.schema/projection ctx))
         database (vary-meta database assoc :seon.schema/projection projection)
         closure (if (seq overridden)
@@ -2547,6 +2594,7 @@
         _ (when (:seon.db/invalid-read closure)
             (throw (ex-info "Cannot acquire the affected function closure." closure)))
         interpreted (into overridden (:seon.fn/affected closure))
+        tests (into [] (remove (comp already-tests first)) tests)
         rows-of (fn [symbols]
                   (into []
                         (keep (fn [{sym :seon.fn/sym source :seon.fn/source
@@ -2556,7 +2604,7 @@
                         (db/pull-many database [:seon.fn/sym :seon.fn/source :seon.schema.admission/source
                                                 :seon.fn/private?]
                                       (mapv #(vector :seon.fn/sym %) (sort symbols)))))
-        function-rows (rows-of interpreted)
+        function-rows (rows-of (remove already interpreted))
         added-rows (rows-of (remove interpreted added))
         selected (into (into #{} (map :seon.ns/name) namespaces) (map #(nth % 2)) function-rows)
         new-namespaces (into #{} (comp (map #(nth % 2)) (remove (:namespaces snapshot)) (remove selected))
@@ -2564,7 +2612,7 @@
         pulled (into {} (map (juxt :seon.ns/name namespace-row))
                      (db/pull-many database namespace-pattern
                                    (mapv #(vector :seon.ns/name %) (sort-by str (into selected new-namespaces)))))
-        namespace-rows (vals pulled)
+        namespace-rows (vec (vals pulled))
         namespace-row-by-name (select-keys pulled selected)]
     (schema/call-with-projection
      projection
@@ -2574,7 +2622,13 @@
                    (update :functions into (map (fn [row] [(first row) (function-entry row)]))
                            (concat added-rows function-rows))
                    (update :namespaces merge pulled)
-                   (assoc ::interpreted interpreted)))
+                   (update ::interpreted (fnil into #{}) interpreted)
+                   ;; The tests reaching a change run its interpreted program
+                   ;; too, a file-derived test as the agent's own: compiled,
+                   ;; its body would call the compiled callees. A file test is
+                   ;; interpreted when it runs (`interpret-test!`).
+                   (update ::interpreted-tests (fnil into #{})
+                           (concat (map first tests) (:seon.fn/tests closure)))))
        (install-declared-classes! ctx namespace-rows)
        (doseq [row namespace-rows]
          (sci/install-namespace-bindings!
@@ -2585,11 +2639,33 @@
        (install-required-libraries! ctx namespace-rows)
        (install-selected!
         ctx database (:seon.flow/commit-fault! snapshot) namespace-row-by-name
-        function-rows tests interpreted
+        function-rows tests (into #{} (map first) function-rows)
         (-> (::acquisition snapshot)
             (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
             (assoc :seon.schema/projection projection
-                   :seon.sci.eval/interpreted-count (count interpreted))))))))
+                   :seon.sci.eval/interpreted-count
+                   (count (::interpreted @(::kernel/program-snapshot ctx))))))))))
+
+(defn interpret-affected!
+  "Interpret in `ctx` the callers and tests reaching `changed` it runs compiled.
+  `changed` are functions `ctx` holds as evaluated; each caller and test of
+  their reverse closure that `ctx` still runs compiled is interpreted from its
+  stored source in `database`, so it calls `ctx`'s definitions. A host-bound
+  caller keeps its compiled Var. Once interpreted, a
+  caller sees every later redefinition through its context's binding, so a
+  repeated change pays only the closure read. The acquisition after it."
+  {:seon/tasks #{'seon.sci.eval/a-branch-redefinition-never-reaches-its-inherited-callers}
+   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:sequential :qualified-symbol]] :map]}
+  [ctx database changed]
+  ;; Interpreting a stored row is not the form's own definition: no write
+  ;; or expansion of it is observed as the program change.
+  (binding [sci.lang/*write-observer* nil
+            sci.lang/*expansion-observer* nil]
+    (sci.ctx-store/with-ctx ctx
+      (let [acquired (interpret-overlay! ctx database {::overridden (set changed) ::evaluated (set changed)
+                                                       ::added #{} ::namespaces [] ::tests []})]
+        (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
+        acquired))))
 
 (defn- overlay!
   "Interpret on `ctx`, a fork of the cluster base, what `database` changes of
