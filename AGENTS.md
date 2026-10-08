@@ -442,8 +442,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   "expected" and "known cost" are not reasons; reject reports lacking these numbers.
 - **Make cost follow changed inputs.** Eliminate whole-program work per change and per-call work that belongs once
   per evaluation. Branch creation is not full context construction. Hash admitted source inputs; compare commit
-  identities for unchanged adoption. Hot-path commits time the same probe on parent and change; fix regressions over
-  20% or 50 ms before commit.
+  identities for unchanged adoption. Hot-path commits time the same probe on parent and change and report every
+  regression with its numbers. Judge cost against what the work must do (what it is proportional to), never an invented
+  target: 10× over that expectation means wrong work to find and fix. Every policy number is a config dial sized for a
+  16 GB machine.
 - **Reuse content-valid work; derive without stamps.** Key derivations by what they read: content digests or the
   dependency's upstream change tracking. A commit id identifies a database value, not an excuse to recompute after
   unrelated writes. Memoize functions of immutable values; no writer `vary-meta`, transaction-carried candidate
