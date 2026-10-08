@@ -149,7 +149,9 @@
   cases, Costs, Recommendations, Errors, Known issues, any `## ` heading) or the
   end; the sections around it stay in the body. `Example: (form)` on one line
   yields that form."
-  {:malli/schema [:=> [:cat :string] [:map [:summary :string] [:body :string] [:example :string]]]}
+  {:seon/tasks #{'seon.sci.lookup/doc-shows-empty-sections-and-one-return-per-arity}
+   :malli/schema [:=> [:cat :string] [:map [:summary :string] [:body {:optional true} [:string {:min 1}]]
+                                      [:example {:optional true} [:string {:min 1}]]]]}
   [docstring]
   (let [lines (mapv str/trim (str/split-lines (or docstring "")))
         lines (vec (drop-while str/blank? lines))
@@ -164,12 +166,12 @@
         end (when start
               (or (first (filter #(heading? (lines %)) (range (inc start) (count lines))))
                   (count lines)))
-        join #(str/trim (str/join "\n" %))]
-    {:summary summary
-     :body (join (if start (concat (subvec lines 0 start) (subvec lines end)) lines))
-     :example (if start
-                (join (cons (example-start (lines start)) (subvec lines (inc start) end)))
-                "")}))
+        join #(str/trim (str/join "\n" %))
+        body (join (if start (concat (subvec lines 0 start) (subvec lines end)) lines))]
+    ;; an empty section is absent
+    (cond-> {:summary summary}
+      (seq body) (assoc :body body)
+      start (assoc :example (join (cons (example-start (lines start)) (subvec lines (inc start) end)))))))
 
 (defn- arglists-reader
   "The function that reads one arglists text as the namespace's own source
@@ -216,8 +218,9 @@
                arities (mapv m/-function-info (m/-function-schema-arities compiled))
                inputs (mapv #(m/form (:input %)) arities)
                outputs (mapv #(m/form (:output %)) arities)]
+           ;; one return shared by every arity is said once
            {:in (if (= 1 (count inputs)) (first inputs) inputs)
-            :out (if (= 1 (count outputs)) (first outputs) outputs)}))))
+            :out (if (apply = outputs) (first outputs) outputs)}))))
     {:in (declaration-absent :seon.fn/spec)
      :out (declaration-absent :seon.fn/spec)}))
 

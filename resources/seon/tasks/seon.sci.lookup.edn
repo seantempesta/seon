@@ -1,0 +1,4 @@
+[#:seon.task{:name "doc-shows-empty-sections-and-one-return-per-arity"
+             :kind :function
+             :intent "(doc seon.db/pull) answered :body \"\" and :example \"\" and an :out vector repeating one union three times, once per arity (context corpus row 4, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when an empty section is absent and a return every arity shares is said once."
+             :must-read #{seon.sci.lookup/docstring-parts seon.sci.lookup/documentation-value}}]

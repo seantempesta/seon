@@ -71,7 +71,7 @@
        (is (some #(= 'my.agent/settings! (:sym %)) entities))
        (is (every? #(and (:in %) (:out %)) entities))
        (is (every? #(not (str/includes? (:doc %) "\n")) entities))
-       (is (= #{:summary :body :example :arglists :in :out} (set (keys entity)))
+       (is (not (contains? entity :supplied))
            "settings! takes its connection and agent positionally: no map entry is supplied")
        (is (= (first (str/split-lines (:seon.fn/doc (db/pull (db/db connection) [:seon.fn/doc]
                                     [:seon.fn/sym 'my.agent/settings!]))))
@@ -82,8 +82,7 @@
        (is (= :seon.config/agent-overlay (second (:in entity))))
        (doseq [target ["my.message/send" "my.agent/done"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
-         (is (= (conj #{:summary :body :example :in :out} :arglists :supplied)
-                (set (keys doc))))
+         (is (= #{:summary :body :example :arglists :in :out :supplied} (set (keys doc))))
          (is (not (str/blank? (:summary doc))))
          (is (not (str/blank? (:body doc))))
          (is (seq (read-string (:example doc)))))
@@ -116,7 +115,7 @@
              library (value "(doc clojure.set/union)")
              aliased (value "(do (require '[clojure.set :as s]) (doc s/union))")]
          (is (every? #(contains? program %) [:summary :arglists :in :out]) "a program function keeps its contract")
-         (is (= (set (keys library)) #{:summary :body :example :arglists}) "a library Var has no invented contract")
+         (is (= (set (keys library)) #{:summary :arglists}) "a library Var has no invented contract and no empty section")
          (is (seq (:arglists library)))
          (is (= library aliased) "an alias resolves to the same Var"))
        (is (empty? (:seon.cluster.eval/output (run "(doc 'x)"))))
@@ -192,7 +191,7 @@
                        "(doc fixture.own-functions/identity-number)"]]
          (let [documented (run source)]
            (is (= {:summary "Return the number." :body "A durable function."
-                   :example "" :arglists '([number]) :in [:cat :int] :out :int}
+                   :arglists '([number]) :in [:cat :int] :out :int}
                   (:seon.sci.admit/value documented)))
            (is (seq (db/read-evidence @captured)))))))))
 
@@ -399,3 +398,17 @@
        (sci/eval-string* ctx "(ns-unmap 'clojure.core 'ns-publics)")
        (is (contains? (publics) 'clojure.set/union)
            "the public names come from SCI's namespace table, not an evaluated ns-publics call")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.lookup/doc-shows-empty-sections-and-one-return-per-arity}}
+  doc-leaves-out-empty-sections-and-says-a-shared-return-once
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           doc (:seon.sci.admit/value
+                (support/evaluate {:seon.sci.eval/ctx ctx
+                                   :seon.cluster.eval/source "(doc seon.db/pull)"
+                                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                                   :seon.sci.eval/time-limit-ms 2000}))]
+       (is (not-any? #(= "" %) (vals doc)) "an empty section is absent, never an empty string")
+       (is (= 3 (count (:in doc))) "each arity keeps its inputs")
+       (is (keyword? (first (:out doc))) "the return every arity shares is said once, one schema form")))))
