@@ -197,7 +197,7 @@
    :seon.render.profile/composition :multiline
    :seon.print/requery-refusal "printed by the core printer: the value has no result handle"})
 
-(declare render-ai render-html project)
+(declare render-ai render-html project compact-failure)
 
 (defn- opaque
   "How the core names a value nothing else could print: its class and
@@ -288,7 +288,7 @@
   ;; The cursor may be what failed: only a held vector is a path.
   (let [path (get-in unit [:seon.render.data/cursor :seon.render.data/path])]
     (diagnostics-shown [{:seon.render.data/path (if (vector? path) path [])
-                         :seon.render.value/failure refused}])))
+                         :seon.render.value/failure (compact-failure refused)}])))
 
 (defn text
   "The value printer's TOTAL text entry: `unit` through `render-ai`, or, when
@@ -596,6 +596,19 @@
                                (.getMessage link) (assoc :message (.getMessage link))
                                (identical? (class link) clojure.lang.ExceptionInfo)
                                (assoc :data (.getData ^clojure.lang.ExceptionInfo link))))))))
+
+(defn- compact-failure
+  "A presentation failure as the few facts that name it: the error's type,
+  operation and message (from the error map, or the Throwable's ex-data when
+  it carries one), else the Throwable's class and message. Never the ex-data
+  as a whole: Malli problems and the refused value stay in the stored fault."
+  {:malli/schema [:=> [:cat :seon.render.value/failure] :seon.render.value/failure-summary]}
+  [failure]
+  (let [data (if (instance? Throwable failure) (ex-data failure) failure)]
+    (if (:seon.error/type data)
+      (select-keys data [:seon.error/type :seon.error/operation :seon.error/message])
+      (cond-> {:seon.error/throwable-class (.getName (class failure))}
+        (ex-message failure) (assoc :seon.error/message (ex-message failure))))))
 
 (defn- seq-cells
   "A seq's first `limit` members, stepped as Clojure's printer steps any
@@ -1537,7 +1550,7 @@
   [value failure path]
   (let [value-text (bounded-text value 8192)
         diagnostic (bounded-text [{:seon.render.data/path path
-                                   :seon.render.value/failure (throwable-value failure)}])
+                                   :seon.render.value/failure (compact-failure failure)}])
         text (str value-text "\n" diagnostic)]
     {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
      :seon.render.value/options (print/default-options)
@@ -1790,7 +1803,7 @@
 
 (defn render-ai
   "Render any value-printer unit as its text, or the refusal its projection answered."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render.value/unit]
                   [:or :string :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
   [unit]
@@ -1800,7 +1813,7 @@
 
 (defn render-html
   "Render any value-printer unit as its hiccup, or the refusal its projection answered."
-  {:malli/schema [:=> [:cat :seon.render/unit]
+  {:malli/schema [:=> [:cat :seon.render.value/unit]
                   [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
   [unit]

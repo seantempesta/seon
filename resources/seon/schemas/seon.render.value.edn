@@ -61,7 +61,12 @@
                     :diagnostic [:map {:description "One presentation failure and the path of the value it happened at."}
                                  [:seon.render.data/path :seon.render.data/path]
                                  [:seon.render.value/failure :seon.render.value/failure]],
-                    :failure [:or :seon.error/throwable :seon.error/base],
+                    :failure [:or :seon.error/throwable :seon.error/base :seon.render.value/failure-summary],
+                    :failure-summary [:map {:description "A failure as shown: the error's type, operation and message, or the Throwable's class and message. Never the ex-data."}
+                                      [:seon.error/type {:optional true} :seon.error/type]
+                                      [:seon.error/operation {:optional true} :seon.error/operation]
+                                      [:seon.error/message {:optional true} :seon.error/message]
+                                      [:seon.error/throwable-class {:optional true} :seon.error/throwable-class]],
                     :basis [:int {:min 0 :description "The basis-t a re-derived value was derived at: its continuation links carry it, so every page of one sequence reads the same view."}],
                     :text :string,
                     :tree :seon.print/node,

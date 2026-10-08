@@ -28,3 +28,14 @@
          (let [rest-count (reply-text (str "(count " (first dig) ")") agent-id running)]
            (is (= (- total (parse-long (second dig)))
                   (:seon.repl/value (support/reply rest-count))))))))))
+
+(deftest println-output-answers-bounded-with-its-dig-form-and-no-diagnostics
+  ;; Regression: the output's value printer ran off custody, was refused for a
+  ;; missing database and answered a diagnostic holding the whole Throwable.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [text (reply-text "(do (dotimes [i 3000] (println i)) :done)" agent-id running)]
+       (is (< (tokens/estimate text) 2000))
+       (is (some? (re-find #"\(subs \(:seon\.cluster\.eval/output " text)) "the dig form")
+       (is (not (re-find #"seon\.render\.value/diagnostics" text)))
+       (is (not (re-find #"#error" text)))))))

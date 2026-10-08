@@ -1106,6 +1106,19 @@
       (is (str/includes? text "[:a 1]") "its path")
       (is (str/includes? text "boom here") "its message"))))
 
+(deftest a-failure-diagnostic-is-compact-data
+  ;; A refused or failed unit shows the failure's type, operation, message
+  ;; and path, never the Throwable with its whole ex-data.
+  (let [big (vec (range 2000))
+        failure (ex-info "render refused here" {:seon.error/type :seon.error/schema
+                                                :seon.error/operation 'seon.render.value/render-ai
+                                                :seon.error/message "render refused here"
+                                                :problems big})
+        shown (:seon.render.value/text (#'value/unavailable {} failure))]
+    (is (str/includes? shown "render refused here"))
+    (is (not (str/includes? shown "#error")))
+    (is (< (tokens/estimate shown) 100))))
+
 (deftest a-terminal-structural-failure-does-not-reenter-selection
   ;; The core's last resort is projection-free: a value whose realization
   ;; always throws ends in one diagnostic, never a nested selection.
