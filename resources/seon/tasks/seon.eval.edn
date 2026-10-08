@@ -2,7 +2,7 @@
             "of-agent-default-selector-refuses-on-roots-stored-read-plans",
             :kind :function,
             :intent
-            "(seon.eval/of-agent db \"root\") with the default selector (read evidence pulled whole) returns the read refusal 'The EDN-backed attribute :datahike.read/dependency-plan has an invalid logical value.' on default (722f110df, 2026-10-07) instead of root's 1,387 evaluations; with seon.eval/history-selector it answers. A stored read plan that no longer decodes makes the agent's whole history unreadable through the documented arity. Done when the default arity answers every stored evaluation (the read-evidence cut, seon.turn/read-evidence-rows-are-two-fifths-of-the-stored-bytes, removes the attribute from the default selector), proven by of-agent over an agent whose history holds an undecodable plan.",
+            "(`seon.eval/of-agent` db \"root\") with the default selector (read evidence pulled whole) returns the read refusal 'The EDN-backed attribute `:datahike.read/dependency-plan` has an invalid logical value.' on default (722f110df, 2026-10-07) instead of root's 1,387 evaluations; with `seon.eval/history-selector` it answers. A stored read plan that no longer decodes makes the agent's whole history unreadable through the documented arity. Done when the default arity answers every stored evaluation (the read-evidence cut, seon.turn/read-evidence-rows-are-two-fifths-of-the-stored-bytes, removes the attribute from the default selector), proven by of-agent over an agent whose history holds an undecodable plan.",
             :must-read #{seon.eval/of-agent},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"}}]

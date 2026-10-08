@@ -1,11 +1,11 @@
 [#:seon.task{:name "fs-read-ignores-limit-and-has-no-line-addressing"
              :kind :function
-             :intent "my.fs/read ignores :limit and has no line addressing (offset/count of lines), so agents read whole files. Done when :limit bounds the read and a line range is addressable, with a regression on a multi-line file. The open fault on my.fs/read (refused result missing :my.fs/error-path, my/fs.clj:39) is the same function."
+             :intent "`my.fs/read` ignores :limit and has no line addressing (offset/count of lines), so agents read whole files. Done when :limit bounds the read and a line range is addressable, with a regression on a multi-line file. The open fault on `my.fs/read` (refused result missing `:my.fs/error-path`, my/fs.clj:39) is the same function."
              :must-read #{my.fs/read}
              :evidence #{"tmp/repl-audit/read.md"}}
  #:seon.task{:name "archive-file-reads-have-no-explicit-source-world",
             :kind :function,
             :intent
-            "source-display/printer-notes.md reports my.fs/read reads the running committed archive rather than the checkout, and reading 93 KB in 8 KB windows costs 1057 ms and 16600 armed calls. Make the source world explicit and bound work by requested content; measure the same read at the owner. Existing fs-read-ignores-limit-and-has-no-line-addressing covers limit/line addressing, not the archive-vs-tree ambiguity and per-window cost.",
+            "source-display/printer-notes.md reports `my.fs/read` reads the running committed archive rather than the checkout, and reading 93 KB in 8 KB windows costs 1057 ms and 16600 armed calls. Make the source world explicit and bound work by requested content; measure the same read at the owner. Existing fs-read-ignores-limit-and-has-no-line-addressing covers limit/line addressing, not the archive-vs-tree ambiguity and per-window cost.",
             :evidence
             #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]

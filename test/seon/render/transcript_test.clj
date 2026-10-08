@@ -1431,7 +1431,7 @@
 ;; cluster's agents (`seon.fault/record!`); that copy reads in the window of the
 ;; cluster agent's evaluation with its origin branch, the same response MCP
 ;; answers the run with (`seon.dev.mcp/run-form`).
-(deftest ^{:seon/tasks #{'seon.render.transcript/keep-fault-observations-historical 'seon.dev.mcp/consume-recorded-diagnostic-observation}} a-cluster-copy-of-another-branchs-fault-reads-in-the-cluster-agents-window
+(deftest ^{:seon/tasks #{'seon.render.transcript/keep-fault-observations-historical}} a-cluster-copy-of-another-branchs-fault-reads-in-the-cluster-agents-window
   (let [cluster-name (str "transcript-copy-" (random-uuid))
         home (cluster.branch/cluster-branch cluster-name)]
     (support/with-database

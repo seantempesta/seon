@@ -10,17 +10,17 @@
              :must-read #{seon.bootstrap/help-value}}
 #:seon.task{:name "help-lists-no-tools-for-an-agent"
              :kind :function
-             :intent "(help) ends with 'Tools: . Inspect one with dir.' for a fresh branch agent (ctx-ex-1 on default, 2026-10-07): help-value lists the namespaces the agent's own namespace requires, which is none. The toolkit is seon.cluster.instruction/toolkit-namespaces; calling it from help-value made seon.help-test/help-evidence-tracks-its-code-version stale on any new namespace (its query reads every :seon.ns/name). Derive the tools line from the context-relevant namespaces with an attribute-bound read, or drop the line."
+             :intent "(help) ends with 'Tools: . Inspect one with dir.' for a fresh branch agent (ctx-ex-1 on default, 2026-10-07): help-value lists the namespaces the agent's own namespace requires, which is none. The toolkit is `seon.cluster.instruction/toolkit-namespaces`; calling it from help-value made `seon.help-test/help-evidence-tracks-its-code-version` stale on any new namespace (its query reads every `:seon.ns/name`). Derive the tools line from the context-relevant namespaces with an attribute-bound read, or drop the line."
              :must-read #{seon.bootstrap/help-value seon.cluster.instruction/toolkit-namespaces}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
 #:seon.task{:name "help-evidence-test-red-on-head"
              :kind :function
-             :intent "seon.help-test/help-evidence-tracks-its-code-version is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption."
+             :intent "`seon.help-test/help-evidence-tracks-its-code-version` is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption."
              :must-read #{seon.bootstrap/help-value}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
  #:seon.task{:name "session-end-is-taught-three-ways"
              :kind :function
-             :intent "help-value teaches (my.agent/done) as the required last form, though my.agent/done takes a request map and documents (my.agent/done {}); seon.cluster.agent/render-situation-ai says every run ends with my.turn/complete or my.turn/wait. Done when one session-end form is taught everywhere and a test resolves every form help shows."
+             :intent "help-value teaches (`my.agent/done`) as the required last form, though `my.agent/done` takes a request map and documents (`my.agent/done` {}); `seon.cluster.agent/render-situation-ai` says every run ends with `my.turn/complete` or `my.turn/wait`. Done when one session-end form is taught everywhere and a test resolves every form help shows."
              :must-read #{seon.bootstrap/help-value seon.cluster.agent/render-situation-ai my.agent/done}
              :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
  #:seon.task{:name "help-is-flagged-as-a-large-value"

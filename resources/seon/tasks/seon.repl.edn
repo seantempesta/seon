@@ -5,27 +5,27 @@
              :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}
  #:seon.task{:name "a-slow-reply-names-nothing"
              :kind :function
-             :intent "The SCI reply's :seon.repl/ms is the arm's evaluation time only (repl.clj ~218-219): acquisition (339 ms on a probe, recorded as :seon.eval/acquisition-ms but not shown), the install gate's disposable branch, and settlement are absent, and no armed function is named. pid 66629's 82 s evaluations left nothing on the cluster (max recorded duration 471 ms). Record [sym ms] of armed calls over slow-ms into the evaluating kernel arm (already per evaluation and carried across threads, adopt-arm), settle them beside acquisition-ms, and show the whole wall time and those names when it exceeds one second; this lets explain-slow's JVM-wide window go (seon.profile/slow-explanation-blames-the-agent-for-platform-time). Done when a regression whose evaluation waits over one second on an armed call gets a reply naming that call and the whole wall time, and concurrent work in other arms is not named."
+             :intent "The SCI reply's `:seon.repl/ms` is the arm's evaluation time only (repl.clj ~218-219): acquisition (339 ms on a probe, recorded as `:seon.eval/acquisition-ms` but not shown), the install gate's disposable branch, and settlement are absent, and no armed function is named. pid 66629's 82 s evaluations left nothing on the cluster (max recorded duration 471 ms). Record [sym ms] of armed calls over slow-ms into the evaluating kernel arm (already per evaluation and carried across threads, adopt-arm), settle them beside acquisition-ms, and show the whole wall time and those names when it exceeds one second; this lets explain-slow's JVM-wide window go (seon.profile/slow-explanation-blames-the-agent-for-platform-time). Done when a regression whose evaluation waits over one second on an armed call gets a reply naming that call and the whole wall time, and concurrent work in other arms is not named."
              :must-read #{seon.profile/explain-slow seon.sci.kernel/adopt-arm seon.repl/response-entries}
              :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}
  #:seon.task{:name "every-reply-repeats-open-faults"
              :kind :function
-             :intent "Each SCI reply's :errors repeated the agent's same open fault (seon.schema.datahike/decode-vectors, occurrence count 1..17) on every evaluation for the whole session, about 150 tokens per reply, whether or not the evaluation caused it, and after the fault's last occurrence. Show a fault in the reply of the evaluation that produced it or once when it opens; later replies can name the open count."
+             :intent "Each SCI reply's :errors repeated the agent's same open fault (`seon.schema.datahike/decode-vectors`, occurrence count 1..17) on every evaluation for the whole session, about 150 tokens per reply, whether or not the evaluation caused it, and after the fault's last occurrence. Show a fault in the reply of the evaluation that produced it or once when it opens; later replies can name the open count."
              :must-read #{seon.repl/response}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:name "a-slow-reply-names-counts-not-proportionality"
              :kind :function
-             :intent "A reply over one second lists :repeated [[sym calls ms] ...] sorted by call count (propose-merge!: seon.schema.datahike/logical-attribute? 199,406 calls first) but not what the work was proportional to or which armed call held the wall time, so the agent cannot tell a hub traversal from a per-member recording. Order by inclusive time, name the top call's input size (members, datoms, program entities), and state the ratio to the evaluation's own input."
+             :intent "A reply over one second lists :repeated [[sym calls ms] ...] sorted by call count (propose-merge!: `seon.schema.datahike/logical-attribute?` 199,406 calls first) but not what the work was proportional to or which armed call held the wall time, so the agent cannot tell a hub traversal from a per-member recording. Order by inclusive time, name the top call's input size (members, datoms, program entities), and state the ratio to the evaluation's own input."
              :must-read #{seon.repl/response-entries seon.profile/summary}
              :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
  #:seon.task{:name "offered-operations-cannot-name-the-prior-result"
              :kind :function
-             :intent "*1, *2 and *3 are nil at the SCI REPL (dogfood loop 2026-09-28), so a value that offers its next call as data cannot refer to itself: my.program/prepare-merge! offers (my.program/accept-merge! {...}) with its whole request literal. Bind *1/*2/*3 (and *e) in the agent's context from its own evaluations, as clojure.main does, or have the reply's printer substitute the result symbol it already prints (result/eN) into offered forms, so an offer is short and runs as shown."
+             :intent "*1, *2 and *3 are nil at the SCI REPL (dogfood loop 2026-09-28), so a value that offers its next call as data cannot refer to itself: `my.program/prepare-merge!` offers (`my.program/accept-merge!` {...}) with its whole request literal. Bind *1/*2/*3 (and *e) in the agent's context from its own evaluations, as clojure.main does, or have the reply's printer substitute the result symbol it already prints (result/eN) into offered forms, so an offer is short and runs as shown."
              :must-read #{seon.repl/response}
              :evidence #{"docs/research/agent-platform/dogfood-loop-2026-09-28.md"}}
  #:seon.task{:name "directory-render-returns-text-the-printer-clips-mid-form"
              :kind :function
-             :intent "render-directory-ai (src/seon/repl.clj) is dir's :seon.render/ai face but returns pr-str text (contract :string), so the value printer charges it as one leaf and clips it by characters: (dir my.message) in a fresh cluster is shown as 3,199 characters ending \"render-a…+646\" inside an unclosed schema map, which no reader can read back (EOF while reading), and its tail rows and :seon.repl/schemas are unreachable data. Return the {:seon.repl/columns :seon.repl/rows :seon.repl/schemas} map itself so the printer spreads its one budget over the shape and names each cut with a dig form; the HTML face renders the same map (test-data-assertions lane, 2026-09-28)."
+             :intent "render-directory-ai (src/seon/repl.clj) is dir's `:seon.render/ai` face but returns pr-str text (contract :string), so the value printer charges it as one leaf and clips it by characters: (dir my.message) in a fresh cluster is shown as 3,199 characters ending \"render-a…+646\" inside an unclosed schema map, which no reader can read back (EOF while reading), and its tail rows and `:seon.repl/schemas` are unreachable data. Return the {`:seon.repl/columns` `:seon.repl/rows` `:seon.repl/schemas`} map itself so the printer spreads its one budget over the shape and names each cut with a dig form; the HTML face renders the same map (test-data-assertions lane, 2026-09-28)."
              :must-read #{seon.repl/render-directory-ai seon.repl/render-directory-html seon.render.value/render-ai}
              :evidence #{"test/seon/supplied_documentation_test.clj"}}
  #:seon.task{:name "a-jvm-def-is-told-it-lives-in-sci"
@@ -35,7 +35,7 @@
  #:seon.task{:name "a-def-bound-to-an-error-value-shows-only-the-var",
             :kind :function,
             :intent
-            "(def tasks (seon.db/q '[:find [(pull ?t [... :seon.task/sym ...]) ...] ...] db)) answered {:seon.render.var/symbol tasks} with no error, though the query refused (uninstalled :seon.task/sym); the next form (count tasks) answered 13, the error map's key count, and (map :seon.task/kind tasks) thirteen nils. Done when a def whose value is an error map shows that error (its type and message) beside the Var, asserted through the agent entrance.",
+            "(def tasks (`seon.db/q` '[:find [(pull ?t [... `:seon.task/sym` ...]) ...] ...] db)) answered {`:seon.render.var/symbol` tasks} with no error, though the query refused (uninstalled `:seon.task/sym`); the next form (count tasks) answered 13, the error map's key count, and (map `:seon.task/kind` tasks) thirteen nils. Done when a def whose value is an error map shows that error (its type and message) beside the Var, asserted through the agent entrance.",
             :must-read #{seon.render.var/render-ai},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
@@ -49,14 +49,14 @@
  #:seon.task{:name "a-selected-render-arrives-as-an-escaped-string",
             :kind :function,
             :intent
-            "Evaluating {:seon.ns/name 'seon.render} (a map satisfying :seon.ns/ns, so the namespace render is selected) answered :value as ONE string holding the printed render with \\n escapes and quoted inner strings (2,489 tokens whole, 873 shown), while calling seon.render.ns/render-ai explicitly on the same entity answers the map as data, laid out by the printer. Done when a selected render's data reaches the reply as data printed once, the same as an explicit call, asserted on the reply map.",
+            "Evaluating {`:seon.ns/name` 'seon.render} (a map satisfying `:seon.ns/ns`, so the namespace render is selected) answered :value as ONE string holding the printed render with \\n escapes and quoted inner strings (2,489 tokens whole, 873 shown), while calling `seon.render.ns/render-ai` explicitly on the same entity answers the map as data, laid out by the printer. Done when a selected render's data reaches the reply as data printed once, the same as an explicit call, asserted on the reply map.",
             :must-read #{seon.repl/response},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
  #:seon.task{:name "every-def-repeats-the-same-persistence-note",
             :kind :function,
             :intent
-            "Every SCI def reply carries the same :note sentence (about 60 tokens: 'x lives only in your SCI context and is lost when the JVM restarts...'), from seon.repl/def-note; one scratch session of 25 defs carried it 25 times, the largest repeated text in the context. Done when the note is shown once per agent session (or once per conversation) and later def replies carry no note, asserted on reply data.",
+            "Every SCI def reply carries the same :note sentence (about 60 tokens: 'x lives only in your SCI context and is lost when the JVM restarts...'), from `seon.repl/def-note`; one scratch session of 25 defs carried it 25 times, the largest repeated text in the context. Done when the note is shown once per agent session (or once per conversation) and later def replies carry no note, asserted on reply data.",
             :must-read #{seon.repl/response},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
@@ -67,17 +67,17 @@
   :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/private-design.md"}}
  #:seon.task{:name "printed-output-reaches-the-reply-unbounded"
              :kind :function
-             :intent "A form's printed output reaches the reply whole: eval_clj sci '(dotimes [i 300000] (println i))' answered a 2,289,210-character MCP reply (:out-tokens 621528) on default 2026-10-08, while a 2,000,000-character string VALUE answered 5,172 characters. seon.repl's response composes :seon.repl/out with print/string-literal, a second printer outside the value printer's budget; the only response is a :large-output finding beside the flood. Correct: :out is shown through the value printer's one budget with a dig form for the rest, like any value. Proof: a deftest asserting the reply of 300,000 printed lines is under the value printer's bound and names a dig form."
+             :intent "A form's printed output reaches the reply whole: eval_clj sci '(dotimes [i 300000] (println i))' answered a 2,289,210-character MCP reply (:out-tokens 621528) on default 2026-10-08, while a 2,000,000-character string VALUE answered 5,172 characters. seon.repl's response composes `:seon.repl/out` with `seon.print/string-literal`, a second printer outside the value printer's budget; the only response is a :large-output finding beside the flood. Correct: :out is shown through the value printer's one budget with a dig form for the rest, like any value. Proof: a deftest asserting the reply of 300,000 printed lines is under the value printer's bound and names a dig form."
              :must-read #{seon.repl/response seon.print/string-literal}
              :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
 
  #:seon.task{:name "the-out-elision-form-re-pulls-the-database"
              :kind :function
-             :intent "A cut :out prints (subs (:seon.cluster.eval/output (seon.db/pull '[:seon.cluster.eval/output] [:seon.cluster.eval/id \"29ea417f846d\"])) 4669) (default 2026-10-08): a database read with a Seon attribute name while the live output exists in the runtime. shown-output hands the printer a seon.db/pull requery id. Owner ruling 2026-10-08: elision forms are plain clojure.core on the live result symbol, with no database re-pull while the live value exists. Done when the form is (subs (:out result/e…) n), or (subs out/e… n) on the live output, asserted by evaluating it through the MCP entrance and comparing with (subs output n)."
+             :intent "A cut :out prints (subs (`:seon.cluster.eval/output` (`seon.db/pull` '[`:seon.cluster.eval/output`] [`:seon.cluster.eval/id` \"29ea417f846d\"])) 4669) (default 2026-10-08): a database read with a Seon attribute name while the live output exists in the runtime. shown-output hands the printer a `seon.db/pull` requery id. Owner ruling 2026-10-08: elision forms are plain clojure.core on the live result symbol, with no database re-pull while the live value exists. Done when the form is (subs (:out result/e…) n), or (subs out/e… n) on the live output, asserted by evaluating it through the MCP entrance and comparing with (subs output n)."
              :must-read #{seon.repl/shown-output}
              :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
  #:seon.task{:name "the-slow-fix-ranks-the-whole-process"
              :kind :function
-             :intent "The :slow finding's fix (seon.profile/summary (seon.profile/cells) 5) ranks the process's cumulative profile (seon.cluster.boot/request! 31751 ms total) as the same five prose lines in three lists, not the slow evaluation; the reply's :repeated adds about 446 tokens of seon.schema.* rows the agent cannot act on (my.test/check, 1,166 ms, default 2026-10-08). Done when the fix reads this evaluation's own armed calls as data and a slow MCP reply is bounded at 60 tokens."
+             :intent "The :slow finding's fix (`seon.profile/summary` (`seon.profile/cells`) 5) ranks the process's cumulative profile (`seon.cluster.boot/request!` 31751 ms total) as the same five prose lines in three lists, not the slow evaluation; the reply's :repeated adds about 446 tokens of seon.schema.* rows the agent cannot act on (`my.test/check`, 1,166 ms, default 2026-10-08). Done when the fix reads this evaluation's own armed calls as data and a slow MCP reply is bounded at 60 tokens."
              :must-read #{seon.repl/findings}
              :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

@@ -2,7 +2,7 @@
             "a-doc-line-is-the-first-physical-line-not-the-first-sentence",
             :kind :function,
             :intent
-            "seon.render.ns/render-ai on seon.db shows :seon.ns/doc \"The one database namespace for all things Datahike. Reads and writes use\": first-doc-line takes the docstring's first physical line, so a wrapped first sentence is cut mid-clause for every namespace and function whose summary wraps. Done when the shown doc line is the docstring's first sentence (through its first period or the first blank line), asserted on the render's data.",
+            "`seon.render.ns/render-ai` on seon.db shows `:seon.ns/doc` \"The one database namespace for all things Datahike. Reads and writes use\": first-doc-line takes the docstring's first physical line, so a wrapped first sentence is cut mid-clause for every namespace and function whose summary wraps. Done when the shown doc line is the docstring's first sentence (through its first period or the first blank line), asserted on the render's data.",
             :must-read
             #{seon.render.ns/function-ai seon.render.ns/render-ai},
             :evidence
@@ -10,7 +10,7 @@
  #:seon.task{:name "function-source-lines-print-several-per-line",
             :kind :function,
             :intent
-            "seon.render.ns/function-ai returns source as :seon.render.ns/source-lines, a vector of strings; the value printer fills each output line with several of them (\"        query-input\" \"        (if explicit-database?\" on one line), every quote escaped, and the docstring is shown twice (as :seon.fn/doc and inside the source). For seon.db/q (62 lines) 32 lines show before the cut. Done when a function's source is shown as code, one source line per output line and unescaped, without repeating the doc, asserted on the render's data and the printer's own test (lane source-display owns the printer side).",
+            "`seon.render.ns/function-ai` returns source as :seon.render.ns/source-lines, a vector of strings; the value printer fills each output line with several of them (\"        query-input\" \"        (if explicit-database?\" on one line), every quote escaped, and the docstring is shown twice (as `:seon.fn/doc` and inside the source). For `seon.db/q` (62 lines) 32 lines show before the cut. Done when a function's source is shown as code, one source line per output line and unescaped, without repeating the doc, asserted on the render's data and the printer's own test (lane source-display owns the printer side).",
             :must-read #{seon.render.ns/function-ai},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}

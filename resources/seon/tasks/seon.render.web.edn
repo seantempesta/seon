@@ -1,18 +1,18 @@
 [#:seon.task{:name "the-render-cache-keeps-every-debug-view"
              :kind :function
-             :intent "The environment's :seon.render/cache atom held 69.8 MB at idle with no eviction; the graph page's ::graph-calls (36.7 MB) is deleted with that page, and ::invocations (27.5 MB) remains, with entries that retain read results. Retain read evidence without results, and bound the cache."
+             :intent "The environment's `:seon.render/cache` atom held 69.8 MB at idle with no eviction; the graph page's ::graph-calls (36.7 MB) is deleted with that page, and ::invocations (27.5 MB) remains, with entries that retain read results. Retain read evidence without results, and bound the cache."
              :must-read #{seon.render/render-call}
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/landing/mem-idle-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
  #:seon.task{:name "a-page-renders-with-a-refused-database"
              :kind :function
-             :intent "page-response reads (db/db connection) of a released connection and passes the refusal map on as :seon.db/db, so transcript/render-agent-header refuses its input instead of the page answering the read refusal. It happened when seon.render.web-test's server kept serving after its cluster's connection was released (member two-tabs-each-get-their-own-complete-paint left unexited). A read refusal answers the request as that refusal; a server outliving its cluster's connection is the second defect."
+             :intent "page-response reads (`seon.db/db` connection) of a released connection and passes the refusal map on as `:seon.db/db`, so `seon.render.transcript/render-agent-header` refuses its input instead of the page answering the read refusal. It happened when seon.render.web-test's server kept serving after its cluster's connection was released (member two-tabs-each-get-their-own-complete-paint left unexited). A read refusal answers the request as that refusal; a server outliving its cluster's connection is the second defect."
              :must-read #{seon.render.web/page-response seon.render.transcript/render-agent-header}
              :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}
  #:seon.task{:name "reconnect-wire-test-walks-the-whole-window"
              :kind :function
-             :intent "seon.render.web-test/reconnect-is-repaint-wire-test takes about 200 s per run (200,627 ms, 248 assertions, test-data-assertions proof harness 2026-09-28): its check that no partial text exists at ANY basis walks every basis of the window as-of, so its cost follows the window, not the change, and it is far over its declared bound. Bound the check by what the change can reach (the bases the test itself committed, or one since-query over the window) so it runs sub-second."
+             :intent "`seon.render.web-test/reconnect-is-repaint-wire-test` takes about 200 s per run (200,627 ms, 248 assertions, test-data-assertions proof harness 2026-09-28): its check that no partial text exists at ANY basis walks every basis of the window as-of, so its cost follows the window, not the change, and it is far over its declared bound. Bound the check by what the change can reach (the bases the test itself committed, or one since-query over the window) so it runs sub-second."
              :must-read #{seon.render.web/render-step}
              :evidence #{"tmp/test-data-assertions/proofs.edn"}}
  #:seon.task{:name "an-unreportable-page-failure-is-only-a-log-line"
@@ -22,7 +22,7 @@
              :evidence #{"tmp/test-data-assertions/proofs.edn"}}
  #:seon.task{:name "the-web-worker-executor-is-never-shut-down"
              :kind :function
-             :intent "seon.render.web/start! creates a virtual-thread-per-task executor per server and hands it to http-kit as :worker-pool; nothing keeps it and stop! never shuts it down, so every stopped server (each cluster stop, each web test) leaves an unowned executor behind. http-kit does not shut down a supplied pool. Keep the executor in the served descriptor and shut it down (awaiting termination under the delivery bound) in stop!, beside the server thread and feed-writer joins (flow-processes-opus 2026-09-28)."
+             :intent "`seon.render.web/start!` creates a virtual-thread-per-task executor per server and hands it to http-kit as :worker-pool; nothing keeps it and stop! never shuts it down, so every stopped server (each cluster stop, each web test) leaves an unowned executor behind. http-kit does not shut down a supplied pool. Keep the executor in the served descriptor and shut it down (awaiting termination under the delivery bound) in stop!, beside the server thread and feed-writer joins (flow-processes-opus 2026-09-28)."
              :must-read #{seon.render.web/start! seon.render.web/stop!}}
  #:seon.task{:name "stale-debt-tags-remain-in-web-and-schema"
              :kind :namespace
@@ -43,16 +43,16 @@
             #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-opus-notes.md"}}
  #:seon.task{:name "a-reconnect-refuses-a-pass-derived-before-it-connected-is-red"
   :kind :function
-  :intent "seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected (web_test.clj:1538) is red on HEAD with no task. Correct: diagnose by the commit that changed its behavior and fix the producer or retire the assumption. Done when green."
+  :intent "`seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected` (web_test.clj:1538) is red on HEAD with no task. Correct: diagnose by the commit that changed its behavior and fix the producer or retire the assumption. Done when green."
   :must-read #{seon.render.web/connected-value}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
  #:seon.task{:name "a-route-throw-no-longer-answers-a-bounded-500"
   :kind :function
-  :intent "seon.render.web-test/a-route-throw-answers-a-bounded-500-inside-the-handler (web_test.clj:2145) is red on HEAD with no task. The handler must answer a bounded 500 inside itself when a route throws (nothing crashes). Correct: diagnose, fix the producer. Done when green."
+  :intent "`seon.render.web-test/a-route-throw-answers-a-bounded-500-inside-the-handler` (web_test.clj:2145) is red on HEAD with no task. The handler must answer a bounded 500 inside itself when a route throws (nothing crashes). Correct: diagnose, fix the producer. Done when green."
   :must-read #{seon.render.web/handler}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
  #:seon.task{:name "unrelated-transaction-no-longer-reuses-the-debug-observation"
   :kind :function
-  :intent "seon.render.web-test/unrelated-transaction-reuses-debug-observation-and-render-call (web_test.clj:1245) is red on HEAD with no task: an unrelated transaction should reuse the debug observation and render call (cost follows changed inputs) and does not. Correct: diagnose which read now invalidates the cache and fix the producer. Done when green. Note: reconnect-is-repaint-wire-test, also red, measured 10.1 s against a 5 s bound and is tracked by reconnect-wire-test-walks-the-whole-window."
+  :intent "`seon.render.web-test/unrelated-transaction-reuses-debug-observation-and-render-call` (web_test.clj:1245) is red on HEAD with no task: an unrelated transaction should reuse the debug observation and render call (cost follows changed inputs) and does not. Correct: diagnose which read now invalidates the cache and fix the producer. Done when green. Note: reconnect-is-repaint-wire-test, also red, measured 10.1 s against a 5 s bound and is tracked by reconnect-wire-test-walks-the-whole-window."
   :must-read #{seon.render.web/debug-query}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]

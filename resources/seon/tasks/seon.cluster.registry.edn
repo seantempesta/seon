@@ -1,10 +1,10 @@
 [#:seon.task{:name "branch-creation-is-serialized-store-wide"
              :kind :function
-             :intent "Every branch! takes Datahike's store-wide :roster reachability permit (gc_guard.cljc:99, exclusive among roster publishers) for the read-modify-write of :branches; each test member creates a branch. registry/branch! averaged 23 ms serial and 66 ms at six concurrent requests (105 calls). Done when member branch creation does not serialize concurrent requests: batch roster publication per request, or a compare-and-set roster update in the fork, measured by the same N=6 probe."
+             :intent "Every branch! takes Datahike's store-wide :roster reachability permit (gc_guard.cljc:99, exclusive among roster publishers) for the read-modify-write of :branches; each test member creates a branch. `seon.cluster.registry/branch!` averaged 23 ms serial and 66 ms at six concurrent requests (105 calls). Done when member branch creation does not serialize concurrent requests: batch roster publication per request, or a compare-and-set roster update in the fork, measured by the same N=6 probe."
              :must-read #{seon.cluster.registry/branch! seon.cluster.registry/retire-branch!}
              :evidence #{"docs/research/agent-platform/test-agents-concurrency-2026-09-27.md"}}
  #:seon.task{:name "a-status-read-pays-a-store-read-for-the-current-source-commit"
              :kind :function
-             :intent "seon.cluster.registry/connection-branch-commit-id for :current-src costs 2.9 ms per call (default 2026-09-28), a third of a warm health report (seon.cluster.status/snapshot). Read the branch commit from a value the process already holds, or key it by what changes it (publication); done when a warm status read is under 1 ms."
+             :intent "`seon.cluster.registry/connection-branch-commit-id` for :current-src costs 2.9 ms per call (default 2026-09-28), a third of a warm health report (`seon.cluster.status/snapshot`). Read the branch commit from a value the process already holds, or key it by what changes it (publication); done when a warm status read is under 1 ms."
              :must-read #{seon.cluster.registry/connection-branch-commit-id seon.cluster.status/snapshot}
              :evidence #{"tmp/health-page/RESUME.md"}}]

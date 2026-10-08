@@ -1,4 +1,4 @@
 [#:seon.task{:name "dogfood-followups-background-and-shell-weight"
              :kind :namespace
-             :intent "Dogfood follow-ups: a background call answers agent-already-running (#4), shell output is heavy in the reply, and my.fs/read lacks line addressing (separate task). Done when each is reproduced at the REPL, and either fixed with a regression or restated as its own task with numbers."
+             :intent "Dogfood follow-ups: a background call answers agent-already-running (#4), shell output is heavy in the reply, and `my.fs/read` lacks line addressing (separate task). Done when each is reproduced at the REPL, and either fixed with a regression or restated as its own task with numbers."
              :must-read #{seon.background/poll seon.shell/output?}}]

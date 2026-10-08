@@ -6,70 +6,16 @@
             :must-read #{seon.sci.forgive/next-form},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
- #:seon.task{:name "a-prose-repair-replays-the-whole-reply",
-            :kind :function,
-            :intent
-            "seon.sci.forgive/segments on the nine live-run-1 replies joined (11,887 chars, 52 :prose repairs) takes 55 ms and allocates 339 MB per read at HEAD 439401ac3 (run4 7b254915ca94, 12 KB: 17.7 ms, 24.5 MB): each prose repair builds a new text with str, a new reader replayed char by char to the cursor (`version`), and structural trials over the rest of the text (first-form-structural? on (subs text start), code-suffix per paren, Parinfer over the rest). Correct: cost proportional to the reply once; prose becomes comments in one line pass. Measured by the reader-prose lane's measure script; the design is docs/research/agent-platform/2026-10-07/reader-prose/design-notes.md.",
-            :must-read
-            #{seon.sci.forgive/next-form
-              seon.sci.forgive/comment-rest-of-line
-              seon.sci.forgive/version}}
  #:seon.task{:name "prose-after-the-last-form-is-dropped",
             :kind :function,
             :intent
-            "seon.sci.forgive/segments attaches prose only as the comment of the form after it, so prose after a reply's last form reaches no evaluation row: loop-pass lp-add-2 call 1 ended 'The fix is complete: add-one now uses (inc x) ... is green.' and the next prompt (loop-pass/runs/00-installed-turn-lp-add-2/call-2-prompt.md) holds none of it; (seon.sci.forgive/segments \"(+ 1 2)\\nDone, it works.\") answers only the (+ 1 2) segment. The agent's own claims vanish from its history while the raw reply is kept only as a blob. Correct: every line of a reply is either a form or a comment held by an exchange the agent sees again. Proof: segments of that text keeps the trailing comment.",
+            "`seon.sci.forgive/segments` attaches prose only as the comment of the form after it, so prose after a reply's last form reaches no evaluation row: loop-pass lp-add-2 call 1 ended 'The fix is complete: add-one now uses (inc x) ... is green.' and the next prompt (loop-pass/runs/00-installed-turn-lp-add-2/call-2-prompt.md) holds none of it; (`seon.sci.forgive/segments` \"(+ 1 2)\\nDone, it works.\") answers only the (+ 1 2) segment. The agent's own claims vanish from its history while the raw reply is kept only as a blob. Correct: every line of a reply is either a form or a comment held by an exchange the agent sees again. Proof: segments of that text keeps the trailing comment.",
             :must-read
             #{seon.sci.forgive/comment-of seon.sci.forgive/segments},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
- #:seon.task{:name
-            "structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote",
-            :kind :function,
-            :intent
-            "seon.sci.forgive's structural reader passes its options map raw to edamame.core/parse-next, whose docstring requires options normalized by normalize-opts; `:all true` is only expanded there (edamame/impl/parser.cljc:960-967), so the structural trial refuses #'x, #(...), @x, #\"re\" and `x: (seon.sci.forgive/first-form-structural? \"(meta #'x)\") is false (edamame: 'Var literal not allowed. Use the `:var` option'), while the same text with (edamame.impl.parser/normalize-opts opts) reads. Each such form, and each prose token that is no valid token (`Note:`), in a reply then runs delimiter-repair: Parinfer over the whole rest of the reply (48 MB for one form at offset 944 of a 9.5 KB reply), and the repair is always rejected. Measured on default 722f110df (unarmed callers, armed forgive): segments of the live replies joined, 9.5 KB 61 ms 219 MB; 19 KB 297 ms 1.57 GB; 28.6 KB (planned-sources) 541 ms 5.1 GB; 38 KB 1.4 s 12 GB; 76 KB 4.1 s 94 GB. Same class as seon.sci.forgive/a-prose-repair-replays-the-whole-reply. Correct: structural trials accept every form the live reader accepts, and no trial reads past the form at the cursor. Proof: a table test that first-form-structural? accepts each of those forms, and a reply-size regression that allocation of segments grows linearly.",
-            :must-read
-            #{seon.sci.forgive/delimiter-repair
-              seon.sci.forgive/next-form
-              seon.sci.forgive/first-form-structural?},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
- #:seon.task{:name "discard-consumes-prose-and-fence-boundaries",
-            :kind :function,
-            :intent
-            "A model reply's `#_` read its operand wherever the reader found one, across prose lines and fence lines: (seon.sci.forgive/segments \"#_ (+ 1 2)\\nDone.\\n(+ 3 4)\") ran Done. as code, and a `#_` alone before a closing fence discarded the fence line. A reader conditional selecting no :clj branch did the same. Correct: a no-value construct is skipped inside its region (the text between fence lines), and classification resumes after it. Proof: seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules (the no-value rows).",
-            :must-read #{seon.sci.forgive/step}}
- #:seon.task{:name "reader-at-restarts-line-and-column-numbering",
-            :kind :function,
-            :intent
-            "seon.sci.forgive/reader-at built a reader over (subs text pos bound), so a reader built after prose, a `;` comment, a fence or a second form on a line counted lines and columns from 1:1: (seon.sci.forgive/step ...) over \"Some prose.\\n(defn pa [x] x)\" gave the form :line 1 :column 1 while its entry was at line 2, and a read error at text line 4 reported line 2. The one-text fold (S6-03, S5-04) joins write origins to entries by position and found no definition. Correct: the reader starts at the text's own line and column for its position. Proof: seon.sci.forgive-test/a-form-read-mid-text-has-the-texts-own-line-and-column.",
-            :must-read #{seon.sci.forgive/step}}
  #:seon.task{:name "an-indented-definition-outside-a-fence-is-read-as-prose"
   :kind :function
   :intent "A definition whose line starts with whitespace and sits outside a code fence is read as prose under the documented line rule, so it is never evaluated, and a later form depending on it fails without saying why. Correct: either the stepper accepts leading whitespace before a form start, or the agent is told that the line was read as prose (help and the docs teach the rule, and a later form depending on the definition fails clearly). Proof: the probe in prose-design.md answers the chosen behavior as data."
   :must-read #{seon.sci.forgive/segments}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}
- #:seon.task{:name "prose-after-a-form-on-its-line-is-evaluated"
-             :kind :function
-             :intent "In a model reply the rest of a line a form started is code, so trailing prose evaluates: (seon.turn/planned-sources \"(Note: this is prose) and more\\n(+ 1 2)\" 'user 100000) answers sources (Note: this is prose), and, more, (+ 1 2). seon.sci.forgive/reply-step treats every construct after code-end on the same line as code. Correct: after a form, a line's remainder that does not start a form is comment text. Proof: a forgive-test row where '(+ 1 2) gives 3' answers one source with the comment."
-             :must-read #{seon.sci.forgive/forgive}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
- #:seon.task{:name "a-bare-token-line-in-a-reply-is-prose"
-             :kind :function
-             :intent "A model reply line holding only a symbol, keyword, number or string is prose: (seon.turn/planned-sources \"result/e1a2b3c4d5e6\" 'user 100000) and \"42\" answer the no-forms refusal, so an agent cannot dig a result handle or read a Var by naming it, as the REPL teaches (keys result/...). seon.sci.forgive/form-start? accepts only collection, quote, deref, meta and dispatch characters. Correct: a line whose whole text reads as one token that resolves (a qualified symbol, a result handle, a keyword, a literal) is a form. Proof: a forgive-test row answering result/e1a2b3c4d5e6 as one source."
-             :must-read #{seon.sci.forgive/form-start?}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
- #:seon.task{:name "a-nested-discard-evaluates-a-discarded-form"
-             :kind :function
-             :intent "The forgiving scan counted `#_` as a prefix needing one form, so a discard whose operand is a discard ended too early: (seon.sci.forgive/segments \"#_ #_ 1 2 3\" :code) answered sources 2 and 3, and an MCP SCI run of #_ #_ 1 2 3 replied 2 and 3 where plain SCI reads only 3; a discarded side effect ran. Correct: a discard that starts a form is one no-value construct, and every further discard in it needs one more form, as the reader consumes them. Proof: seon.repl-differential-reader-test/a-nested-discard-answers-as-plain-sci and the discard rows of seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules."
-             :must-read #{seon.sci.forgive/forgive}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}
- #:seon.task{:name "a-bare-true-false-or-nil-line-is-prose"
-             :kind :function
-             :intent "In a model reply a line holding only true, false or nil became a comment: (seon.sci.forgive/segments \"true\\nfalse\\nnil\\n42\" :reply) answered only 42, against the ruling that a line reading as one literal is code. seon.sci.forgive/literal-line? omitted the three symbol-shaped literals. Correct: each is one source. Proof: seon.repl-differential-reader-test/true-false-and-nil-lines-are-code-in-a-reply."
-             :must-read #{seon.sci.forgive/forgive}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}
- #:seon.task{:name "a-repair-goes-to-the-last-form-starting-on-its-line"
-             :kind :function
-             :intent "seon.sci.forgive/segments gave each repair to the last segment whose start line was at or before the repair's line, so with two forms on one line the first form's stray closer went to the second: (seon.sci.forgive/segments \"(inc 1)) (inc 2)\" :code) put [1 :dropped \")\"] on (inc 2). Correct: a repair carries its offset in the forgiven text and belongs to the segment whose span starts at or before it. Proof: seon.repl-differential-reader-test/a-repair-rides-with-the-form-it-repaired-on-a-shared-line."
-             :must-read #{seon.sci.forgive/segments}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}]

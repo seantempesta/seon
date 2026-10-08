@@ -15,7 +15,7 @@
     (and (= expected declared)
          ((schema/projection-validator projection declared) value))))
 
-(deftest ^{:seon/tasks #{'seon.turn/refusal-schemas-are-guessed-by-key}}
+(deftest ^{:seon/tasks #{'seon.error/s1-left-metadata-readers-and-stamps-in-three-test-files 'seon.turn/refusal-schemas-are-guessed-by-key}}
   producers-declare-the-identity-settlement-records
   (support/with-database
    (fn [connection]

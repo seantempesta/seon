@@ -1,0 +1,8 @@
+[#:seon.task{:name "the-hook-sends-only-forms-with-a-var-definition"
+             :kind :namespace
+             :intent "The edit hook (bin/seon-hook, RF-4 at 3c15a3434) chooses the changed forms to send to the lane branch from clj-kondo's :var-definitions, so a changed defmethod, a changed ns form (requires, aliases) and a changed top-level form that defines no var are never sent: the branch keeps running the old method and the old namespace table, silently. Not covered by UL-1c, which classifies definitions, not which changed forms are sent. Correct: every top-level form whose text changed is sent in file order, the ns form first. Proof: a seon.dev.hook-test deftest (to be written) editing a defmethod and an ns require asserts both reach the branch."
+             :evidence #{"docs/seon/schedule/cards/RF-4.md"}}
+ #:seon.task{:name "the-hook-prepends-in-ns-instead-of-passing-the-namespace"
+             :kind :namespace
+             :intent "The hook sends (in-ns 'ns) before the changed forms in eval_clj's code (bin/seon-hook ~1247), so every reply carries the in-ns form's namespace value as noise. eval_clj's namespace argument already starts the run there, also for a namespace the branch has never seen (probed 2026-10-08, agent task-census-probe, namespace scratch.census-never-seen: (def probe-x 1) defined scratch.census-never-seen/probe-x, *ns* answered it). Correct: pass the namespace argument and drop the in-ns form. Proof: a seon.dev.hook-test deftest (to be written) asserting the request carries the namespace argument and no in-ns form."
+             :evidence #{"docs/seon/schedule/cards/RF-4.md"}}]

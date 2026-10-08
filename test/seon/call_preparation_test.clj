@@ -736,8 +736,7 @@
             (is (true? ((var probe-received-database?) "a")))
             (is (= 1 @entered)))))))))
 
-(deftest ^{:seon/tasks #{'seon.call-preparation/acquired-functions-get-no-supplied-defaults}}
-  host-work-outside-an-evaluation-keeps-its-declared-arity
+(deftest host-work-outside-an-evaluation-keeps-its-declared-arity
   ;; CLASS (acceptance run, 2026-09-26, error f962afd56382): settlement on the
   ;; turn thread called `(seon.turn/receipt-settle-tx request)`, the declared
   ;; one-arity. Its count collides with the two-arity's shape with the
@@ -996,7 +995,7 @@
             (is (not= name-a name-b)
                 "each evaluation supplied its OWN world's connection"))))))))
 
-(deftest ^{:seon/tasks #{'seon.test/checks-write-into-live-custody 'seon.call-preparation/acquired-functions-get-no-supplied-defaults}}
+(deftest ^{:seon/tasks #{'seon.test/checks-write-into-live-custody}}
   a-function-made-in-one-context-uses-the-calling-evaluations-world
   ;; CLASS: a closure's call read its defaults from the context it was CREATED
   ;; in (SCI's captured ctx), so a function acquired from entities into a

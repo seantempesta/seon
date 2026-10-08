@@ -1,28 +1,8 @@
-[#:seon.task{:name "consume-recorded-diagnostic-observation"
-             :kind :function
-             :intent "The bridge kept its own error cursor (window-bases), a second occurred-since query per evaluation and a top-20 summary, lost on restart and shared across sessions. A run's reply now carries each evaluation's :seon.repl/response from seon.render.transcript/history-entries, the bytes its agent's next context reads; it stays open until that observation holds the error as complete data (value, chain, location) rather than triage prose."
-             :must-read #{seon.dev.mcp/run-form seon.dev.mcp/run-events}
-             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
- #:seon.task{:name "mcp-failure-answers-carry-a-babashka-stack-trace"
-             :kind :function
-             :intent "A declared bridge failure answers with the whole Throwable->map printed, trace included: the repl-unavailable and session-lost answers (default restarting, 2026-09-26) each carried about 9,000 characters (about 2,800 tokens) of the bridge's own babashka interpreter frames around a one-line ex-info whose ex-data already names the failure, the cluster and the remedy. The frames are the bridge's, never the agent's or Seon's. A declared failure is its ex-data; the trace belongs only to an undeclared throwable."
-             :must-read #{seon.dev.mcp/failure seon.dev.mcp/mcp-error}
-             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}
- #:seon.task{:name "branch-eval-answers-no-events"
-             :kind :function
-             :intent "An MCP eval_clj SCI run on a branch intermittently answers :seon.dev.mcp/events [] although the evaluation settled and its shown text is saved (branch merge-cut1-opus 2026-09-26: evals fea1a8955086 shown a task-edges value, 4d2fab4f0f7d shown \"3\", and a refused my.test/check). Silence is read as nothing; the saved observation must be delivered."
-             :must-read #{seon.dev.mcp/failure}
-             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}
- #:seon.task{:name "a-live-io-prepl-session-has-no-idle-bound"
+[#:seon.task{:name "a-live-io-prepl-session-has-no-idle-bound"
              :kind :function
              :intent "Every eval_clj session_id opens an io-prepl session (a socket in the one shared bridge, a thread in the JVM) that lives until an error, a timeout or its JVM's replacement. Sessions whose JVM is gone are now released when runtime_status lists them; a finished lane's session on the live JVM is not, because a caller's going away is invisible to the shared bridge. Declare an idle limit as a cluster config dial, enforced by the owner that observes idleness (the JVM's prepl server), and answer a released named session with its declared :session-lost."
              :must-read #{seon.dev.mcp/execute-clj-eval}
              :evidence #{"docs/research/agent-platform/landing/stability-opus-2026-09-27.md"}}
- #:seon.task{:name "branch-mcp-takes-one-form"
-             :kind :function
-             :intent "MCP eval_clj in sci mode with a branch refuses a second form (script/seon/dev/mcp.clj ~377-398), so an outside agent cannot send a multi-form run on its branch (e.g. several register! calls); wrapping them in do then hits register!'s top-level-only refusal (schema.clj ~1310-1320). A branch run should take a run of forms as root's does."
-             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
  #:seon.task{:name "large-source-request-fails-in-the-bridge",
             :kind :function,
             :intent

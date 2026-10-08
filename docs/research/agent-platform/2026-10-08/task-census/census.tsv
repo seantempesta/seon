@@ -1,0 +1,548 @@
+sym	ns-exists	missing-vars	tags	ledger	cards	missing-evidence	signals
+my.agent/a-context-only-branch-read-is-not-supplied	true						AU-Q1 call-preparation
+my.agent/retire-branch-refuses-a-finished-agent-as-admission-closed	true			LR-RETIRE			PR printer rows; GV renames
+my.agent/a-refused-retire-leaves-the-agent-admission-closed	true						GV renames
+my.edit/file-edit-tools-bypass-write-back	true		src/my/edit.clj				
+my.edit/edit-hook-budgets-need-owner-numbers	true						
+my.fs/fs-read-ignores-limit-and-has-no-line-addressing	true						E-SDELETE fault into error
+my.fs/archive-file-reads-have-no-explicit-source-world	true						
+my.program/an-agent-cannot-see-or-choose-its-change	true	my.program/overrides	src/my/program.clj				GV-4/GV-5 merge request; GV renames
+my.program/breaks-plans-a-contract-change-as-a-retraction	true		src/my/program.clj				
+my.program/breaks-costs-seconds-on-a-hub	true						GV-4/GV-5 merge request
+my.program/a-one-line-change-resends-the-whole-definition	true						
+my.program/propose-refusal-names-no-next-step	true						F8 steps shelved; GV-4/GV-5 merge request; GV renames
+my.program/a-merged-change-reaching-the-files-is-unproven	true						F8 steps shelved; GV-4/GV-5 merge request
+my.program/history-shows-the-source-twice-and-no-commit-id	true						
+my.program/ns-unmap-and-remove-ns-cost-quarter-thousand-tokens-and-most-of-a-second	true						
+my.program/the-merge-prepare-costs-three-seconds-and-400k-calls	true						
+my.program/source-repeats-the-docstring	true						
+my.program/alias-and-require-as-retarget-silently	true						
+my.program/merge-tools-throw-instead-of-returning	true						GV-4/GV-5 merge request; GV renames
+my.program/root-cannot-diff-a-proposal	true						GV-4/GV-5 merge request
+my.program/accept-cannot-retire-a-hosted-proposers-branch	true						E-SDELETE fault into error; GV-4/GV-5 merge request; GV renames
+my.program/breaks-on-a-namespace-subject-takes-five-seconds	true		test/my/program_test.clj	PB-15 W-19	PB-15		
+my.task/the-queue-on-an-agent-branch-offers-tasks-claimed-on-the-cluster	true						
+my.task/no-per-function-health-view-and-open-misses-over-bound-tasks	true						E-SDELETE fault into error
+my.task/task-creation-is-not-an-agent-call	true						F8 steps shelved
+my.task/task-writes-are-untimed-and-refusals-are-hand-built	true						F8 steps shelved; S4 context deletion
+my.task/open-offers-no-authored-tasks	true						E-SDELETE fault into error
+my.task/open-takes-over-a-second-validating-query-variables	true						
+my.test/run-answers-a-whole-namespace-without-a-verdict	true						
+my.test/run-owned-reply-repeats-its-output	true						
+my.test/check-in-the-defining-pass-says-the-test-does-not-exist	true			MS-11b			
+my.test/a-check-no-test-reaches-reads-as-a-failure	true						PR printer rows
+seon.ai/no-auth-refuses-at-complete	true						E-SDELETE fault into error
+seon.ai/the-ai-test-captured-run4-reply-is-unread	true						
+seon.ai/deepseek-model-rows-and-dial-classification-are-stale	true						
+seon.background/dogfood-followups-background-and-shell-weight	true						
+seon.batch/a-jvm-run-answers-evaluated-but-not-recorded	true						
+seon.batch/an-earlier-redefinition-of-a-host-function-fails-as-a-core-fault	true						E-SDELETE fault into error
+seon.batch/each-fold-step-validates-every-entry-so-far	true		test/seon/run_test.clj				F8 steps shelved
+seon.batch/an-error-recorded-while-showing-a-form-rides-the-next-form	true		test/seon/cluster/evaluate_source_test.clj				EN-1/RP-15a receipts
+seon.batch/a-deftest-fixture-observation-is-dropped-by-the-runtime-batch	true			RED-6			
+seon.bootstrap/help-teaches-the-wrong-tools	true		src/seon/bootstrap.clj				GV-4/GV-5 merge request
+seon.bootstrap/help-does-not-teach-how-a-test-names-a-task	true						
+seon.bootstrap/help-lists-no-tools-for-an-agent	true						
+seon.bootstrap/help-evidence-test-red-on-head	true						
+seon.bootstrap/session-end-is-taught-three-ways	true						F7 completion
+seon.bootstrap/help-is-flagged-as-a-large-value	true			H-01			S4 context deletion
+seon.cache/one-weighted-cache-under-a-memory-cap	true						
+seon.call-preparation/a-positional-database-is-not-supplied	true		src/seon/call_preparation.clj				AU-Q1 call-preparation
+seon.call-preparation/the-call-state-is-an-atom	true	seon.call-preparation/hook					AU-Q1 call-preparation
+seon.cluster.agent/a-trivial-form-waits-on-two-durable-commits	true		test/seon/cluster/evaluate_source_test.clj				64-handle bound; RP/EN/S6 turn+recording
+seon.cluster.agent/an-escaped-pass-closes-the-reply-without-its-fault	true						F8 steps shelved; EN-1/RP-15a receipts; E-SDELETE fault into error
+seon.cluster.agent/a-wrapped-stop-interrupt-is-recorded-as-a-core-fault	true						F8 steps shelved; EN-1/RP-15a receipts; E-SDELETE fault into error
+seon.cluster.agent/interrupted-rewalks-the-cause-chain	true						
+seon.cluster.agent/reply-size-is-measured-by-printing-the-sources	true						
+seon.cluster.agent/reply-size-prints-sources-to-measure-them	true						
+seon.cluster.agent/finished-agents-and-their-branches-accumulate	true						GV renames
+seon.cluster.boot/reset-takes-over-six-seconds	true		test/seon/instrument_test.clj				
+seon.cluster.boot/a-development-cluster-boots-in-tens-of-seconds	true						
+seon.cluster/adoption-readopts-what-the-jvm-loaded	true			W-1			S4 context deletion
+seon.cluster/record-jvm-evaluations-on-shared-path	true	seon.cluster/mcp-project seon.cluster/mcp-valf					E-SDELETE fault into error
+seon.cluster/a-missed-quiescence-keeps-the-route-listener	true						
+seon.cluster/adoption-write-costs-sixteen-seconds	true						
+seon.cluster/boot-publication-phases-are-invisible	true						S4 context deletion
+seon.cluster/a-test-adoption-moves-the-jvms-loaded-identity	true						S4 context deletion
+seon.cluster/incremental-publication-test-redefines-process-wide-vars	true						S4 context deletion
+seon.cluster/schema-adoption-refuses-instead-of-dropping-an-edn-encoded-value	true						
+seon.cluster/schema-convergence-sees-order-the-store-does-not-keep	true						
+seon.cluster/publication-tests-cost-35-seconds	true						
+seon.cluster/schema-form-keys-re-derive-files-whose-entities-do-not-change	true						S4 context deletion
+seon.cluster/retiring-an-attribute-with-stored-component-data-refuses-adoption	true						EN-1/RP-15a receipts
+seon.cluster/reset-leaves-old-agents-branches-and-connections	true		test/seon/cluster/host_test.clj				GV renames
+seon.cluster/a-missed-agent-join-throws-instead-of-answering	true						
+seon.cluster.host/hosting-an-agent-costs-seconds-and-a-hundred-megabytes	true		test/seon/cluster/store_test.clj				
+seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt	true		test/seon/cluster/host_test.clj	TX-0	TX-0		EN-1/RP-15a receipts
+seon.cluster.host/a-refused-deletion-reaches-the-deleting-forms-receipt	true		test/seon/cluster/host_test.clj	RP-1	RP-1		EN-1/RP-15a receipts; GV-4/GV-5 merge request; RP/EN/S6 turn+recording
+seon.cluster.instruction/toolkit-includes-fixtures-and-undocumented-generators	true						
+seon.cluster.message/unresolved-sender-logs-unbounded	true						PR printer rows
+seon.cluster.prompt/an-agents-context-omits-the-faults-mcp-shows	true						E-SDELETE fault into error; S4 context deletion
+seon.cluster.prompt/a-later-wake-message-never-reaches-the-context	true						S4 context deletion
+seon.cluster.registry/branch-creation-is-serialized-store-wide	true						GV renames
+seon.cluster.registry/a-status-read-pays-a-store-read-for-the-current-source-commit	true						
+seon.cluster.source/changed-identities-walks-history-for-an-adopted-commit	true						
+seon.cluster.source/index-issues-drops-every-opened-date-in-a-git-less-archive	true						
+seon.cluster.source/a-new-function-cannot-arm-in-the-merge-gate	true						GV-4/GV-5 merge request
+seon.cluster.source/a-test-only-namespace-throws-at-prepare	true						GV-4/GV-5 merge request
+seon.cluster.source/a-branch-schema-blocks-diff-and-merge	true						
+seon.cluster.source/a-red-prepare-leaks-its-candidate-branch	true						
+seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check	true			UL-9 DEPS-1	SP-2 README-audits DEPS-1 FK-ASYNC UL-7		
+seon.cluster.source/a-candidate-script-namespace-is-analyzed-as-the-running-jvms-copy	true						
+seon.cluster.source/three-write-back-merge-tests-red-in-prepare-merge	true						GV-4/GV-5 merge request
+seon.cluster.store/each-commit-forces-the-directory-once-per-node	true						64-handle bound; PR printer rows
+seon.cluster.store/a-small-commit-rewrites-thirty-index-nodes	true						PR printer rows; S4 context deletion
+seon.cluster.store/index-roots-lose-their-subtree-counts	true			DH-1			
+seon.cluster.store/each-commit-serializes-its-root-record-twice	true						
+seon.cluster.store/an-ordinary-commit-writes-26-files-and-136-kb	true						64-handle bound; PR printer rows
+seon.cluster.store/collection-lists-the-store-keys-twice	true						
+seon.cluster.store/each-commit-serializes-hundreds-of-times-the-bytes-it-writes	true			DH-8 W-2			64-handle bound
+seon.cluster.wake/wake-delivery-never-arrives-in-the-test-world	true						
+seon.competency/area-is-contracted	false		test/seon/competency_test.clj				
+seon.config/a-config-read-walks-the-whole-registry	true						
+seon.config/compute-concurrency-dial-has-no-executor	true						
+seon.config/no-provider-cannot-be-lifted-per-agent	true						
+seon.config/an-agent-branch-forked-before-a-new-required-dial-refuses-every-eval-request	true				README-recording		
+seon.contracts-compile-test/edit-hook-refuses-a-lawful-throw-of-a-registered-error	true					docs/research/agent-platform/2026-10-07/reuse-audit/reuse-audit-notes.md	
+seon.contracts-compile-test/empty-input-calls-analyzer-with-a-refused-empty-source-map	true						
+seon.contracts-compile-test/corpus-check-allocation-is-floored-by-edamame-per-char-boxing	true		test/seon/contracts_compile_test.clj				
+seon.db/the-query-wrapper-costs-36x-datahike	true		src/seon/db.clj test/seon/db_overhead_test.clj				
+seon.db/call-reach-is-recomputed-per-render	true						
+seon.db/arity-caches-copy-the-indexes	true						NK no kinds
+seon.db/custody-scopes-widen	true						
+seon.db/deletion-error-has-no-caller	true						
+seon.db/a-query-refusal-holds-a-parser-object	true						
+seon.db/the-checked-writer-is-slow-on-a-fresh-branch	true		src/seon/db.clj				PR printer rows
+seon.db/admission-without-projection-embeds-its-error	true						
+seon.db/a-report-db-before-names-a-stale-commit	true						
+seon.db/q-lets-a-dependency-throw-escape	true						
+seon.db/read-evidence-carries-result-digests	true						
+seon.db/encoding-only-storage-changes-migrate-reused-entities	true						
+seon.db/projection-fallback-prints-instead-of-returning	true						
+seon.db/an-entity-only-pattern-scans-past-the-query-work-bound	true						
+seon.db/a-unique-rejection-message-is-the-raw-exception	true						
+seon.db/the-missing-connection-refusal-has-no-fix-key	true						
+seon.db/capturing-read-evidence-costs-0.8-ms-per-index-seek	true						S4 context deletion
+seon.db/a-transaction-of-many-profile-measurements-hits-the-validation-node-limit	true						
+seon.db/render-rejection-ai-fails-its-own-input-contract	true						
+seon.db/the-datahike-parity-test-names-an-unadmitted-callable	true						
+seon.db/the-world-schema-refuses-the-database-value	true						
+seon.db/hot-total-predicates-run-hundreds-of-millions-of-times	true		test/seon/db_test.clj		PB-10		
+seon.db/every-commit-validates-its-write-report-three-ways	true		test/seon/db_overhead_test.clj		PB-10		
+seon.db/settlement-transactions-are-stamped-as-absent-call	true					docs/research/agent-platform/2026-10-07/db-watch/findings.md	RP/EN/S6 turn+recording
+seon.db/a-probe-below-the-seek-break-even-scans-the-attribute	true					datahike.query.execute/probe-driven-threshold is 2500 (an in-memory cost model: seek 50us vs 20ns/datom). One bound value into an attribute of under 2500 datoms scans and filters the whole attribute: [?run :turn/id ?id] read 9 nodes on a 2,000-run store and 3 on a 20,000-run store.	
+seon.db/a-variable-attribute-rule-query-reads-942-nodes-for-no-rows	true						
+seon.db/an-agent-transact-reports-the-runs-open-datoms	true						EN-1/RP-15a receipts
+seon.db/an-identity-join-scans-the-whole-ref-attribute	true						EN-1/RP-15a receipts
+seon.db/an-or-clause-joined-to-a-pattern-costs-a-scan-per-binding	true						
+seon.db/fork-optimistic-tx-report-test-races-its-listener	true						
+seon.db/fork-planner-regression-bench-never-finishes	true					`clojure -M:bench -m benchmark.planner-regression --assert` at d9121bbb (and with dh-planner's change) prints no shape row within 900 s after 'stores ready' (timeout exit 124).	
+seon.db/history-joins-ignore-shared-added-flags	true						
+seon.db/planner-estimates-load-every-node-of-the-counted-range	true			DH-3		persistent-sorted-set 0.4.137 count-slice loads every node under the counted range (a branch stores its own subtree count, not its children's): estimate-pattern of [?x :eval/run ?run] read 239 nodes on a 1.16M-datom file store; planning a 5-clause query on a fresh connection read 790 nodes. Plans are cached per shape, but the key embeds substituted constants, so scalar-input and literal queries re-plan per value. dh-planner notes 2026-10-07.	
+seon.db/q-hands-a-non-query-map-to-refused-read	true						
+seon.db/rule-arguments-resolve-lookup-shaped-data-as-entities	true						
+seon.db/a-cross-pass-alias-retarget-leaves-dependant-digests-stale	true						
+seon.db/the-digest-refusal-names-no-cause	true						
+seon.db/transact-call-takes-five-seconds-at-its-maximum	true						E-SDELETE fault into error
+seon.db/a-refused-write-names-the-undeclared-key-among-the-registered-candidates	true						
+seon.db/a-datahike-query-walks-every-retained-result-bucket	true			DH-5 W-5			
+seon.db/every-index-node-access-updates-an-lru-map	true			DH-4b W-6			
+seon.db/a-definition-write-reads-every-declaration-datom-for-its-projection-key	true			PB-08 W-7			
+seon.dev.hook/the-hook-sends-only-forms-with-a-var-definition	false						
+seon.dev.hook/the-hook-prepends-in-ns-instead-of-passing-the-namespace	false						
+seon.dev.mcp/a-live-io-prepl-session-has-no-idle-bound	true	seon.dev.mcp/execute-clj-eval					
+seon.dev.mcp/large-source-request-fails-in-the-bridge	true						
+seon.dev.mcp/the-timeout-remedy-names-a-parameter-eval-clj-does-not-declare	true						
+seon.documentation/documentation-test-reads-a-retired-doc-and-dir-shape	false						
+seon.effect/background-poll-answers-edn-strings	true		src/my/background.clj				
+seon.effect/a-file-stat-costs-a-thousand-armed-calls	true						EN-1/RP-15a receipts
+seon.error/a-deleted-functions-fault-never-resolves	true						E-SDELETE fault into error
+seon.error/a-missing-key-message-reads-badly	true						
+seon.error/deliver-core-faults-to-responsible-agent	true		test/seon/error_test.clj				E-SDELETE fault into error
+seon.error/fault-observation-returns-the-recorded-error	true						E-SDELETE fault into error
+seon.error/error-transactions-carry-references-never-worlds	true						
+seon.error/refusal-html-reads-as-fragments	true						E-SDELETE fault into error
+seon.error/health-stays-faulted-on-dead-process-faults	true						E-SDELETE fault into error; RP/EN/S6 turn+recording
+seon.error/an-enum-refusal-prints-the-schema-properties	true						
+seon.error/a-fault-notification-is-its-errors-edn-as-text	true						E-SDELETE fault into error; PR printer rows
+seon.error/a-distance-zero-fault-render-omits-whether-it-is-open	true						E-SDELETE fault into error
+seon.error/the-error-observation-pull-names-541-attributes	true						
+seon.error/a-fixed-fault-with-an-answering-task-has-no-proof-path	true						E-SDELETE fault into error; GV-4/GV-5 merge request; GV renames
+seon.error/a-converted-error-keeps-its-transient-type	true		test/seon/error_test.clj				
+seon.error/s1-left-metadata-readers-and-stamps-in-three-test-files	true		test/seon/error/declared_identity_test.clj				S4 context deletion
+seon.error/error-messages-print-growing-values	true						E-SDELETE fault into error
+seon.error/error-admission-is-a-second-clipper	true						PR printer rows
+seon.error/a-fault-without-an-operation-is-recorded-under-normalize	true						E-SDELETE fault into error
+seon.error/an-error-render-drops-the-members-that-say-what-is-missing	true						
+seon.error/fault-task-closing-has-no-writer-left	true						E-SDELETE fault into error
+seon.error/an-unresolved-symbol-shows-an-empty-neighbour-list	true						
+seon.error/fault-window-derives-the-error-selector-when-no-error-occurred	true			PB-07a W-9	PB-07a		E-SDELETE fault into error
+seon.error/commit-tx-stored-the-whole-admitted-data-edn-over-the-fitted-one	true		src/seon/error.clj test/seon/error_evidence_test.clj	SP-1a	SP-1a	b233d838f	E-SDELETE fault into error
+seon.error.refusal/preserve-primary-and-suppressed-causes	true		test/seon/error/refusal_test.clj				
+seon.error.refusal/errors-reference-worlds-never-copy-them	true		test/seon/error/refusal_test.clj				
+seon.error.refusal/refusal-offending-arguments-held-by-reference	true						
+seon.error.refusal/a-refusal-omits-the-data-that-explains-it	true						GV-4/GV-5 merge request; GV renames
+seon.error.refusal/hand-built-error-maps-remain-across-the-namespaces	true						E-SDELETE fault into error
+seon.error.refusal/errors-capture-whole-stack-traces	true						S4 context deletion
+seon.error.refusal/identity-folding-assumes-stable-projectors	true						
+seon.error.refusal/the-error-data-walk-allocates-a-kilobyte-per-collection-node	true						
+seon.eval.drive/unreachable-definitions-remain-in-src	true						EN-1/RP-15a receipts
+seon.eval/of-agent-default-selector-refuses-on-roots-stored-read-plans	true						
+seon.fault/delete-panic-record-policy-branch	true		test/seon/fault_test.clj test/seon/flow_test.clj				E-SDELETE fault into error
+seon.fault/carried-receipt-hangs-on-cyclic-cause-chain	true		src/seon/fault.clj				EN-1/RP-15a receipts; E-SDELETE fault into error; PR printer rows
+seon.fault/fault-write-bound-is-wall-clock-under-contention	true						E-SDELETE fault into error
+seon.fault/log-lines-print-values-outside-the-printer	true						E-SDELETE fault into error
+seon.fault/a-delivered-fault-names-the-normalizer-not-its-boundary	true						E-SDELETE fault into error
+seon.flow/a-cancelled-future-is-not-exit	true		src/seon/flow.clj				
+seon.flow/blocking-konserve-io-bursts-the-mixed-pool-to-five-hundred-threads	true			MEM-02 W-3			
+seon.fn.analyzer/local-root-dependency-analysis-goes-stale	true		src/seon/fn/analyzer.clj				F8 steps shelved; S4 context deletion
+seon.fn.analyzer/fork-source-lint-misreads-local-macro-bindings	true						
+seon.fn.analyzer/analysis-runs-over-the-one-second-bound-without-a-task	true						
+seon.fn.analyzer/each-analysis-resolves-the-lint-configuration-from-disk	true			PB-12 W-13	PB-12		
+seon.fn/tests-reaching-saturates	true		src/seon/fn.clj				
+seon.fn/call-reach-refuses-every-gate	true						
+seon.fn/a-used-class-makes-a-row-host-bound	true						
+seon.fn/agent-mistakes-read-as-missing-dependency-analysis	true		src/seon/fn.clj				E-SDELETE fault into error
+seon.fn/dependency-analysis-error-is-not-an-error	true						E-SDELETE fault into error
+seon.fn/mention-closure-survives-beside-call-reach	true		src/seon/fn.clj				AU-Q1 call-preparation
+seon.fn/host-bound-class-list-copies-interpreter-config	true		test/seon/fn_test.clj				
+seon.fn/gate-sets-map-arity-gets-a-supplied-database	true						
+seon.fn/caller-relint-follows-contract-consumers	true						
+seon.fn/report-identities-costs-a-second-per-call	true						
+seon.fn/fn-test-redefines-vars	true						
+seon.fn/build-artifact-is-a-second-indexing-path	true						
+seon.fn/functions-without-tests-is-the-last-datalog-reach	true						
+seon.fn/cross-file-derivation-inputs-rely-on-dependent-relint	true						
+seon.fn/an-armed-first-population-takes-a-hundred-seconds	true						
+seon.fn/refused-publication-reads-have-no-redefinition-free-regression	true						
+seon.fn/contract-findings-has-no-scope	true						
+seon.fn/an-edit-rewrites-every-definition-below-it	true					docs/research/agent-platform/2026-10-07/db-watch/findings.md	
+seon.fn/backticked-docstring-references-have-no-index	true						
+seon.fn/batched-analysis-uses-one-namespace-row-per-run	true						
+seon.fn/a-renamed-refer-drops-its-call-edge	true						
+seon.fn/private-flag-disagrees-with-the-var-for-computed-metadata	true						
+seon.fn/a-dependent-keeps-no-edge-to-a-callee-defined-after-it	true						
+seon.fn/contract-facts-row-names-no-schema-in-its-refusal	true						
+seon.fn/call-reach-seeks-once-per-changed-declaration	true		test/seon/test_reaching_test.clj	selection reads			
+seon.html-views/html-views-identity-and-fault-pairs-are-red	false						E-SDELETE fault into error
+seon.instrument/hot-internals-pay-armed-validation	true		src/seon/instrument.clj test/seon/armed_calls_test.clj				
+seon.instrument/an-oversized-refusal-hides-its-cause	true		test/seon/schema/predicate_metadata_refusal_test.clj				PR printer rows
+seon.instrument/instrumentation-is-jvm-global	true		src/seon/instrument.clj				
+seon.instrument/contract-refusal-carries-wrapper-bookkeeping	true		src/seon/instrument.clj				
+seon.instrument/a-test-redefines-arming-jvm-wide	true						F8 steps shelved; S4 context deletion
+seon.instrument/violation-construction-is-quadratic-in-explain-errors	true						PR printer rows
+seon.instrument/a-map-for-a-sequential-crashes-the-refusal-builder	true						
+seon.instrument/a-re-evaluation-test-leaves-a-replaced-root	true						
+seon.instrument/a-contract-with-an-fn-ifn-cannot-arm-on-a-sci-branch	true						
+seon.maintenance/collection-marks-slowly-and-records-nothing	true			SR-ENUMa W-15	SR-ENUMa		
+seon.maintenance/root-verification-compares-a-moving-head	true						E-SDELETE fault into error
+seon.maintenance/a-test-request-collects-the-whole-store-under-the-exclusive-gate	true						
+seon.maintenance/the-daily-collection-keeps-every-commit-of-a-live-branch	true						
+seon.mcp/entrance-stages-select-no-tests	true						
+seon.mcp/observation-reads-the-run-twice	true		test/seon/mcp_entrance_test.clj				EN-1/RP-15a receipts
+seon.mcp/entrance-profile-counts-the-requested-evaluation	true						
+seon.mcp/jvm-mode-replies-omit-time-calls-and-location	true						
+seon.mcp/a-thrown-call-clips-its-request-text	true		test/seon/mcp_entrance_test.clj				
+seon.operator/class-prune-deletes-a-directory-a-check-is-sharing-before-its-jvm-launches	true			LR-SHARED			
+seon.operator/a-deep-check-queue-times-out-waiting-for-a-slot	true						
+seon.operator/check-cannot-run-tests-of-host-bound-namespaces-against-a-candidate	true						
+seon.operator/check-test-cannot-run-platform-tests	true						
+seon.operator/check-test-reports-failed-for-an-excluded-long-test	true						
+seon.operator/committed-source-same-sha-race	true						
+seon.operator/status-prints-ok-while-the-cluster-is-still-starting	true						
+seon.operator/operator-prints-whole-results	true						
+seon.operator/check-rehearsal-cost-follows-drift-not-the-change	true						S4 context deletion
+seon.operator/check-decides-documentation-by-input-roots	true						
+seon.operator/check-rehearses-an-indexer-change-with-the-old-indexer	true						
+seon.operator/build-cache-keys-hash-printed-text	true						
+seon.operator/a-candidate-that-babashka-cannot-load-passes-the-check	true						
+seon.print/a-dig-form-through-a-list-index-reads-nil	true						F8 steps shelved
+seon.print/multiline-literals-hide-line-breaks-from-layout	true						
+seon.print/elision-forms-call-a-seon-helper	true						F8 steps shelved
+seon.print/the-printer-law-lint-refuses-nothing	true						
+seon.print/a-member-cut-costs-more-than-it-hides	true			PR-02			
+seon.print.value/a-contract-refusal-prints-a-generated-example-of-the-whole-schema	false	seon.print.value/bounded-text					PR printer rows
+seon.print.value/printed-copies-stored-or-sent-instead-of-values	false	seon.print.value/bounded-text					E-SDELETE fault into error; PR printer rows; S4 context deletion
+seon.print.value/ad-hoc-text-clips-outside-the-printer	false	seon.print.value/bounded-text					PR printer rows
+seon.problems/a-status-observation-costs-half-a-gigabyte	true		src/seon/problems.clj				E-SDELETE fault into error
+seon.problems/ai-prose-returns-printed-text-not-data	true						
+seon.problems/an-agents-own-form-errors-are-assigned-to-another-agent	true		test/seon/cluster/turn_test.clj				
+seon.profile/slow-explanation-blames-the-agent-for-platform-time	true		src/seon/profile.clj				E-SDELETE fault into error
+seon.profile/scope-wrappers-report-callback-time-as-work	true		src/seon/profile.clj src/seon/sci/eval.clj				
+seon.profile/call-counters-are-jvm-wide-so-counting-tests-race	true						
+seon.profile/the-bracket-leaves-a-thread-local-entry-per-cell-on-every-thread	true						
+seon.profile/reading-the-profile-cells-costs-3-ms	true						
+seon.profile/no-per-symbol-profile-and-zero-calls-reads-as-unmeasured	true						
+seon.profile/reading-the-profile-validates-every-cell	true		src/seon/profile.clj test/seon/profile_test.clj				
+seon.profile/transaction-stamps-store-hot-and-repeated-sets-nothing-reads	true					docs/research/agent-platform/2026-10-07/db-watch/findings.md	
+seon.profile/begin-validates-every-cell-with-armed-predicates	true		src/seon/profile.clj test/seon/profile_test.clj				
+seon.profile.measurement/a-test-run-upserts-three-hundred-measurement-rows	true					docs/research/agent-platform/2026-10-07/db-watch/findings.md	RP/EN/S6 turn+recording
+seon.program/a-docstring-edit-changes-the-definition-digest	true	seon.test.runner/reach-entity	src/seon/program.cljc				
+seon.program/program-attributes-trust-any-partition	true		src/seon/program.cljc				
+seon.program/a-contract-write-rederives-program-attributes	true		test/seon/program_test.clj				
+seon.program/a-defn-scans-every-projection-form-per-call	true						
+seon.program/row-vocabulary-sweep	true						
+seon.program/values-printed-to-order-or-compare	true						
+seon.program/sci-scratch-definitions-refuse-their-produced-digest	true						
+seon.render/captured-invocations-blank-source-faces	true		src/seon/render.clj				
+seon.render/cold-renders-recompute-read-evidence	true						
+seon.render/a-renderer-is-chosen-by-key-presence	true		test/seon/render/value_test.clj				
+seon.render/face-vocabulary-remains-in-code	true						NK no kinds
+seon.render/unit-sweep-retyped-non-map-render-inputs	true						
+seon.render/a-transaction-report-prints-its-runs-bookkeeping	true						EN-1/RP-15a receipts
+seon.render/a-cold-prompt-renders-every-evaluation-again	true						
+seon.render/a-render-against-another-database-reads-the-context-custody	true						
+seon.render/an-unchanged-retained-call-selects-and-invokes-again	true						F8 steps shelved
+seon.render/a-nested-declared-value-prints-as-an-object	true						
+seon.render/declared-metadata-selects-a-value-that-no-longer-fits	true						
+seon.render/landing-reds-2-render-bow-outs	true						S4 context deletion
+seon.render/the-viewer-scans-every-program-function	true		test/seon/sci/kernel_test.clj				
+seon.render.ns/a-doc-line-is-the-first-physical-line-not-the-first-sentence	true						
+seon.render.ns/function-source-lines-print-several-per-line	true						
+seon.render.ns/ns-render-tests-are-red-on-head	true						
+seon.render.test/a-test-entity-shows-its-failures-twice	true						
+seon.render.test/a-failed-test-renders-in-28-ms	true						
+seon.render.test/render-coverage-reads-the-retired-render-unknown-refusal-key	true						
+seon.render.test/a-test-render-omits-what-the-test-asserts	true						NK no kinds
+seon.render.transcript/keep-fault-observations-historical	true		test/seon/render/transcript_test.clj				E-SDELETE fault into error
+seon.render.transcript/delivered-errors-carry-no-result-handle	true						E-SDELETE fault into error
+seon.render.value/continuations-cannot-navigate-derived-nodes	true						
+seon.render.value/nested-renders-bypass-the-floor	true						PR printer rows
+seon.render.value/test-messages-print-whole-worlds	true						PR printer rows
+seon.render.value/a-lazy-seq-that-throws-shows-as-empty	true						PR printer rows
+seon.render.value/an-uncut-string-node-carries-no-total	true	seon.cluster/mcp-get-value					PR printer rows
+seon.render.value/a-count-prints-as-an-entity-reference	true						F8 steps shelved; PR printer rows
+seon.render.value/a-short-identifier-string-is-cut-at-its-first-chunk	true						
+seon.render.value/nested-hiccup-exceeds-the-printers-charge	true		test/seon/render/value_law_test.clj				
+seon.render.value/a-cut-operation-in-render-data-is-not-runnable	true						
+seon.render.value/short-strings-in-pairs-are-cut	true						
+seon.render.value/bounded-text-survives-in-the-render-namespace	true	seon.print.value/bounded-text					PR printer rows
+seon.render.value/cuts-cost-more-than-they-hide-across-siblings	true						NK no kinds; 64-handle bound
+seon.render.value/failed-selection-escapes-the-profile-budget	true						PR printer rows
+seon.render.value/printing-thirty-two-numbers-allocates-megabytes	true						
+seon.render.value/string-fill-arms-a-call-for-each-character	true		test/seon/render/value_test.clj				GV-4/GV-5 merge request
+seon.render.value/core-text-refused-outside-custody	true		test/seon/render/value_test.clj				
+seon.render.value/session-print-length-loses-to-whole-admission	true		test/seon/render/value_test.clj				
+seon.render.value/render-text-past-the-budget-is-cut-mid-line-with-no-dig-form	true		test/seon/render/value_test.clj				
+seon.render.value/transacted-passes-a-basis-descriptor-to-stored-collection	true						
+seon.render.value/a-cut-set-or-map-names-the-whole-collection	true						64-handle bound
+seon.render.var/a-deftest-reply-shows-only-its-var	true						GV-4/GV-5 merge request; GV renames
+seon.render.var/reaching-tests-are-never-run-and-a-first-red-is-silent	true						GV-4/GV-5 merge request; GV renames
+seon.render.web/the-render-cache-keeps-every-debug-view	true						
+seon.render.web/a-page-renders-with-a-refused-database	true		src/seon/render/web.clj				
+seon.render.web/reconnect-wire-test-walks-the-whole-window	true						F8 steps shelved
+seon.render.web/an-unreportable-page-failure-is-only-a-log-line	true						E-SDELETE fault into error
+seon.render.web/the-web-worker-executor-is-never-shut-down	true						
+seon.render.web/stale-debt-tags-remain-in-web-and-schema	true						
+seon.render.web/pages-print-values-instead-of-the-printer-html-face	true						PR printer rows
+seon.render.web/the-built-stylesheet-is-stale-against-its-source	true						NK no kinds
+seon.render.web/a-reconnect-refuses-a-pass-derived-before-it-connected-is-red	true						
+seon.render.web/a-route-throw-no-longer-answers-a-bounded-500	true						
+seon.render.web/unrelated-transaction-no-longer-reuses-the-debug-observation	true						
+seon.repl/reply-map-is-not-edn-when-elided-or-rendered	true		test/seon/repl_test.clj				F8 steps shelved; PR printer rows
+seon.repl/a-slow-reply-names-nothing	true						
+seon.repl/every-reply-repeats-open-faults	true						E-SDELETE fault into error
+seon.repl/a-slow-reply-names-counts-not-proportionality	true						GV-4/GV-5 merge request; GV renames
+seon.repl/offered-operations-cannot-name-the-prior-result	true						
+seon.repl/directory-render-returns-text-the-printer-clips-mid-form	true						
+seon.repl/a-jvm-def-is-told-it-lives-in-sci	true						
+seon.repl/a-def-bound-to-an-error-value-shows-only-the-var	true						NK no kinds
+seon.repl/a-ref-from-another-branch-prints-with-the-wrong-identity	true						
+seon.repl/a-selected-render-arrives-as-an-escaped-string	true		test/seon/repl_test.clj				
+seon.repl/every-def-repeats-the-same-persistence-note	true						
+seon.repl/a-fn-valued-def-is-told-nothing-is-persisted	true						
+seon.repl/printed-output-reaches-the-reply-unbounded	true						
+seon.repl/the-out-elision-form-re-pulls-the-database	true						
+seon.repl/the-slow-fix-ranks-the-whole-process	true			MS-04			
+seon.schedule/a-scheduled-collection-runs-inside-the-schedule-proc-step-and-reports-as-in-world	true						F8 steps shelved; EN-1/RP-15a receipts
+seon.schedule/the-schedule-test-root-page-members-differ-after-a-firing	true						
+seon.schema.datahike/decoding-pays-a-projection-scope-and-cache-claim-per-value	true						
+seon.schema.datahike/an-attribute-query-calls-logical-attribute-once-per-datom	true						
+seon.schema.datahike/an-ordinary-pass-builds-hundreds-of-storability-refusals	true		test/seon/pass_waste_test.clj	pass-waste			
+seon.schema.datahike/the-datahike-fork-collapses-distinct-incomparable-values	true			VEC-9			
+seon.schema/agents-can-validate	true		src/seon/schema.clj				
+seon.schema/register-works-only-top-level	true						
+seon.schema/the-projection-travels-ambiently	true						
+seon.schema/a-declaration-write-reloads-the-whole-projection	true		test/seon/schema_test.clj	PB-05			
+seon.schema/canonical-definition-cannot-invert-evaluated-roots	true		test/seon/schema/predicate_metadata_refusal_test.clj				
+seon.schema/map-validation-throws-on-sorted-maps-with-foreign-keys	true						F8 steps shelved; E-SDELETE fault into error
+seon.schema/a-function-contract-changes-the-schema-projection	true						
+seon.schema/pull-selector-predicate-compiles-per-check	true						NK no kinds
+seon.schema/schema-registration-rechecks-the-whole-program-per-key	true				RP-4 README-recording		
+seon.schema/contract-check-on-three-files-exceeds-one-second	true						
+seon.schema/a-registration-refusal-carries-an-error-type	true						
+seon.schema/schema-only-derivations-are-rederived-per-projection	true			PB-07b W-9	PB-07b		
+seon.schema/build-projection-walks-every-form-before-its-memo	true		test/seon/schema_test.clj	PB-16 W-21	PB-16		S4 context deletion
+seon.schema.edn/declaration-stamp-has-no-caller	true		src/seon/schema/edn.clj				
+seon.sci.admit/large-printed-output-refuses-the-evaluation	true		src/seon/sci/admit.clj				PR printer rows
+seon.sci.arm/changed-namespaces-flags-a-namespace-sci-merely-touched	true						
+seon.sci.arm/a-def-without-line-metadata-refuses-its-origin	true		test/seon/repl_differential_eval_test.clj	eval-defs			NK no kinds
+seon.sci.arm/a-redefinition-in-one-pass-is-armed-with-the-earlier-contract	true		test/seon/cluster/turn_test.clj				
+seon.sci.arm/arming-prints-the-authored-contract-to-read-it-back	true						
+seon.sci.arm/arming-projection-is-rebuilt-per-caller-within-one-form	true						
+seon.sci.arm/an-unarmable-contract-breaks-the-definition	true						
+seon.sci.branch-execution-test/branch-proof-expects-a-retired-evaluation-row	true						
+seon.sci.branch-execution-test/interpreted-callers-proof-expects-host-bound-callers-to-refuse	true						
+seon.sci.branch-execution-test/branch-proof-live-context-lacks-the-private-test-helpers	true						
+seon.sci.eval/doc-and-dir-erase-request-keys	true						
+seon.sci.eval/a-contract-predicate-is-refused-both-ways	true						
+seon.sci.eval/incremental-install-leaves-callers-on-the-jvm-definition	true						
+seon.sci.eval/repl-namespace-changes-drift-from-the-ns-text	true						
+seon.sci.eval/acquisition-rebuilds-the-whole-program	true						
+seon.sci.eval/copied-vars-pin-old-wrapper-generations	true						
+seon.sci.eval/shown-result-ignores-the-floor-refusal	true						PR printer rows
+seon.sci.eval/clojure-test-parity-residue	true						
+seon.sci.eval/branch-change-measured-against-loaded-program	true						
+seon.sci.eval/analysis-order-differs-from-evaluation-order	true						
+seon.sci.eval/deliver-evaluation-errors-as-values	true		test/seon/repl_test.clj test/seon/sci/eval_test.clj				PR printer rows
+seon.sci.eval/forms-just-after-boot-cost-hundreds-of-ms	true						
+seon.sci.eval/agent-form-writes-name-an-unwritten-evaluation	true		test/seon/cluster/evaluate_source_test.clj				EN-1/RP-15a receipts
+seon.sci.eval/program-change-check-scans-the-whole-history	true		test/seon/sci/program_change_report_test.clj	PB-02			
+seon.sci.eval/program-movement-is-checked-three-ways-per-form	true			PB-02b			
+seon.sci.eval/a-result-handle-is-bound-at-three-sites	true						
+seon.sci.eval/a-refused-run-leaves-its-program-in-the-context	true						
+seon.sci.eval/interpreted-rows-lack-own-namespace-class-imports	true						
+seon.sci.eval/copied-jvm-import-hides-sci-import	true						
+seon.sci.eval/non-defn-definitions-store-no-entity	true						
+seon.sci.eval/defmacro-in-let-loses-its-location	true						
+seon.sci.eval/an-agent-cannot-read-the-private-code-it-must-change	true						
+seon.sci.eval/replaced-and-acquisition-ms-have-no-producer	true						EN-1/RP-15a receipts
+seon.sci.eval/docstring-parts-reads-everything-after-example-as-the-example	true						
+seon.sci.eval/the-defn-reply-prints-before-its-own-change-applies	true						F8 steps shelved; RP/EN/S6 turn+recording
+seon.sci.eval/value-storage-walks-serializes-and-stores-every-value-up-to-eight-megabytes	true		test/seon/sci/eval_test.clj				F8 steps shelved; PR printer rows
+seon.sci.eval/doc-prints-contracts-expanded-with-keys-garbled	true						
+seon.sci.eval/bare-source-and-apropos-do-not-resolve-in-an-agents-repl	true						F8 steps shelved; GV-4/GV-5 merge request
+seon.sci.eval/find-doc-floods-out-with-thousands-of-tokens	true						
+seon.sci.eval/a-fresh-contexts-result-handles-have-no-regression	true						
+seon.sci.eval/live-results-are-held-for-the-contexts-lifetime	true			MEM-03		docs/research/agent-platform/2026-10-07/db-watch/findings.md	64-handle bound
+seon.sci.eval/a-private-function-def-disappears-between-mcp-evaluations	true						
+seon.sci.eval/a-stack-overflow-in-the-error-path-reaches-shown-failure-as-nil	true						E-SDELETE fault into error
+seon.sci.eval/dependency-namespaces-have-no-doc-or-dir-in-an-agents-repl	true						GV-4/GV-5 merge request
+seon.sci.eval/diagnostics-dig-forms-point-into-the-value	true						PR printer rows
+seon.sci.eval/dir-shows-each-uncontracted-def-as-two-timestamped-errors	true						NK no kinds
+seon.sci.eval/loading-source-arms-tens-of-thousands-of-calls	true						
+seon.sci.eval/run-test-var-throws-on-an-sci-test-var	true						
+seon.sci.eval/a-forms-set-print-length-is-recorded-but-not-applied	true		test/seon/render/value_test.clj				EN-1/RP-15a receipts
+seon.sci.eval/a-test-error-report-prints-the-whole-host-stack	true						
+seon.sci.eval/a-set-print-length-taxes-every-later-run	true		test/seon/repl_differential_p11_test.clj				
+seon.sci.eval/a-test-report-erases-the-agents-stack-frames	true						
+seon.sci.eval/an-arity-error-names-the-sci-closure	true			MS-03			
+seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass	true		test/seon/repl_differential_test.clj	F0			GV-4/GV-5 merge request; GV renames
+seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass	true		src/seon/sci/eval.clj test/seon/repl_differential_test.clj	LR-STALE2			
+seon.sci.eval/a-redefinition-walks-the-reverse-closure-with-its-test-reach	true		src/seon/sci/eval.clj	LR-STALE3			
+seon.sci.eval/tests-reaching-turns-and-acquisition-are-red-at-head	true			RED-2			S4 context deletion
+seon.sci.eval/a-program-change-walks-every-var-to-carry-the-private-layer	true			PB-11 W-12			
+seon.sci.forgive/a-prompt-marker-is-stripped-and-its-namespace-ignored	true						
+seon.sci.forgive/prose-after-the-last-form-is-dropped	true						
+seon.sci.forgive/an-indented-definition-outside-a-fence-is-read-as-prose	true						
+seon.sci.kernel/the-memory-gate-names-in-flight-work-it-cannot-see	true						
+seon.sci.kernel/memory-pressure-crossed-during-test-rounds	true						
+seon.sci.kernel/sci-pmap-escapes-the-arm	true						
+seon.sci.kernel/a-failure-keeps-and-classifies-every-frame-of-every-link	true						
+seon.sci.kernel/an-agent-exception-has-no-error-type	true						
+seon.sci.observe/a-definition-realized-while-showing-a-lazy-value-is-observed	true		test/seon/cluster/evaluate_source_test.clj				
+seon.sci.reader/reader-head-check-is-a-second-declaration-derivation	true		src/seon/sci/reader.cljc	UL-1a			
+seon.sci.reader/schema-entities-lose-their-declaring-namespace	true						
+seon.sci.reader/a-value-deeper-than-the-readers-stack-cannot-be-read-back	true						
+seon.sci.reader/prose-in-a-reply-is-evaluated-as-symbols	true						F8 steps shelved
+seon.task/no-repl-entrance-creates-a-task	true		src/seon/task.clj				NK no kinds; GV-4/GV-5 merge request
+seon.task/open-tasks-with-all-proofs-green-are-not-flagged	true						AU-Q1 call-preparation
+seon.task/tasks-have-no-done-when-and-name-subjects-only-through-must-read	true						
+seon.task/task-text-references-are-never-resolved	true						PR printer rows
+seon.task/a-runtime-created-task-is-never-written-back	true						
+seon.test-support/refusal-data-recognizes-errors-by-at-and-layer	true						
+seon.test-support/evaluate-answers-nil-for-a-refused-form	true						
+seon.test.accretion/schema-row-compiles-every-reached-form	true						
+seon.test.cache/dependency-revisions-are-not-test-inputs	true						
+seon.test/a-changed-check-builds-a-world-per-request	true		src/seon/test.clj		EN-7		
+seon.test/check-fails-on-agent-registered-schemas	true						
+seon.test/a-check-with-nothing-to-run-answers-green	true						
+seon.test/a-test-world-has-no-agent	true		src/seon/test.clj				F8 steps shelved
+seon.test/property-members-pay-a-commit-per-step	true						F8 steps shelved
+seon.test/tests-redefine-default-vars	true						
+seon.test/checks-write-into-live-custody	true		test/seon/call_preparation_test.clj				
+seon.test/reuse-only-selection-costs-a-second	true						E-SDELETE fault into error
+seon.test/one-test-run-costs-seconds-around-a-147-ms-body	true		test/seon/test/overlay_world_test.clj				
+seon.test/an-agent-branch-test-run-cannot-branch-its-fresh-checkpoint	true						E-SDELETE fault into error
+seon.test/a-test-request-refuses-whole-when-one-namespace-has-no-eligible-tests	true						
+seon.test/a-test-run-refusal-escapes-as-an-exception	true						E-SDELETE fault into error
+seon.test/release-and-rethrow-sites-repeat-instead-of-one-with-release	true						
+seon.test/the-transitions-test-runs-six-to-seven-seconds-against-a-five-second-bound	true						S4 context deletion
+seon.test/red-tests-on-head-are-unclassified	true						GV-4/GV-5 merge request
+seon.test/test-release-closes-branch-connections-out-of-order	true						GV renames
+seon.test/reds-on-head-9d6b392b6-in-task-reaching-tests	true						F8 steps shelved; E-SDELETE fault into error; GV-4/GV-5 merge request; S4 context deletion
+seon.test/reds-on-head-178aa24e0-in-db-program-schema-tests	true						S4 context deletion
+seon.test/a-check-answer-shows-digests-the-agent-cannot-use	true						64-handle bound
+seon.test/a-stale-stored-definition-digest-refuses-every-test-world	true						
+seon.test/an-agent-branch-sees-none-of-its-clusters-test-evidence	true						
+seon.test/selection-reads-the-whole-history-since-the-last-run	true		test/seon/test/selection_test.clj				
+seon.test/a-one-test-proof-check-allocates-a-gigabyte	true						
+seon.test.runner/admission-filters-the-whole-program-history	true		src/seon/test/runner.clj test/seon/test/selection_test.clj				
+seon.test.runner/failure-evidence-is-stored-as-text	true		src/seon/test/runner.clj				
+seon.test.runner/a-rerun-failure-report-conflicts-and-faults-the-request	true						E-SDELETE fault into error
+seon.test.runner/reach-over-every-test-takes-thirty-seconds	true						
+seon.test.runner/drift-prints-unbounded	true						PR printer rows
+seon.test.runner/drift-is-blamed-on-concurrent-requests	true						
+seon.test.runner/a-green-re-record-sweeps-the-failure-cell	true						
+seon.test.runner/worker-drift-prints-its-sets-unbounded	true						PR printer rows; S4 context deletion
+seon.test.runner/reach-entries-fill-half-the-cache-at-half-hit-rate	true						NK no kinds
+seon.test.runner/a-test-error-shows-runner-frames-not-the-throw-site	true						
+seon.test.runner/reach-declarations-misses-on-every-branch	true		test/seon/test_reaching_test.clj				NK no kinds
+seon.turn.batch/every-form-is-analyzed-because-its-result-handle-is-a-binding	true		test/seon/sci/result_handle_test.clj				
+seon.turn.batch/tests-read-forms-through-a-stage-no-entrant-uses	true						
+seon.turn.batch/a-jvm-read-error-drops-the-form-and-every-later-form	true		test/seon/cluster/evaluate_source_test.clj				F8 steps shelved
+seon.turn.batch/a-declared-var-call-stores-no-edge	true						
+seon.turn.batch/analysis-uses-the-namespace-row-after-the-form	true						
+seon.turn.batch/a-function-using-a-schema-registered-in-the-same-form-is-not-admitted	true		test/seon/cluster/turn_test.clj				
+seon.turn.batch/a-value-def-over-a-function-keeps-the-stale-function-row	true						
+seon.turn.batch/an-unjoined-definition-write-is-silent	true						NK no kinds
+seon.turn.batch/a-defn-rewrites-its-namespace-row	true		test/seon/turn/batch_test.clj				NK no kinds
+seon.turn.batch/a-jvm-compile-error-shows-the-wrapper-message	true			MS-03			
+seon.turn.batch/a-core-unmap-with-a-surviving-caller-is-silently-undone	true			RP-1	RP-1		
+seon.turn/a-refused-settlement-is-stored-as-a-core-fault	true		test/seon/turn_test.clj				E-SDELETE fault into error; RP/EN/S6 turn+recording
+seon.turn/refusal-schemas-are-guessed-by-key	true		test/seon/error/declared_identity_test.clj				RP/EN/S6 turn+recording
+seon.turn/a-preview-reparses-retained-source	true						S4 context deletion
+seon.turn/close-turn-is-a-third-commit	true						RP/EN/S6 turn+recording
+seon.turn/a-reload-between-forms-is-undetected	true						
+seon.turn/a-blind-cross-branch-writer-is-promoted-to-a-read	true						
+seon.turn/failed-run-left-unsettled	true		test/seon/cluster/agent_test.clj test/seon/turn_test.clj				
+seon.turn/late-faults-accompany-evaluated-values	true		test/seon/render/transcript_test.clj test/seon/repl_test.clj				E-SDELETE fault into error; RP/EN/S6 turn+recording
+seon.turn/a-turn-pass-derives-its-work-twice	true		test/seon/cluster/evaluate_source_test.clj				F8 steps shelved; S4 context deletion
+seon.turn/an-agent-form-is-read-again-by-each-consumer	true						
+seon.turn/receipt-attributes-are-a-hand-list	true						EN-1/RP-15a receipts
+seon.turn/opening-run-id-from-a-stale-count	true						S4 context deletion
+seon.turn/a-gate-exception-refuses-the-whole-run	true						F8 steps shelved; E-SDELETE fault into error
+seon.turn/analyze-settlement-is-unreached	true	seon.turn/analyze-settlement					EN-1/RP-15a receipts; RP/EN/S6 turn+recording
+seon.turn/a-nested-in-ns-loses-the-whole-run	true						
+seon.turn/history-acquisition-decodes-stored-read-plans	true						S4 context deletion
+seon.turn/compaction-erases-no-history-form-text	true				S4-07b3		S4 context deletion
+seon.turn/a-refused-multi-form-settlement-returns-nothing	true						EN-1/RP-15a receipts; E-SDELETE fault into error; RP/EN/S6 turn+recording
+seon.turn/schema-redeclaration-revalidates-unchanged-attributes	true						EN-1/RP-15a receipts
+seon.turn/the-unbound-check-walks-the-live-value-without-a-bound	true	seon.turn/unbound-value?					
+seon.turn/a-refused-refusal-settlement-throws-past-the-reply	true						F8 steps shelved; E-SDELETE fault into error; RP/EN/S6 turn+recording
+seon.turn/a-transient-write-refusal-parks-the-agent-until-restart	true						F8 steps shelved; E-SDELETE fault into error
+seon.turn/a-definition-is-settled-twice	true						EN-1/RP-15a receipts; RP/EN/S6 turn+recording
+seon.turn/a-trivial-agent-turn-takes-eleven-seconds	true						F8 steps shelved; S4 context deletion
+seon.turn/an-mcp-run-of-root-waits-behind-roots-faulting-system-turn	true						E-SDELETE fault into error; S4 context deletion
+seon.turn/row-tx-is-a-second-declaration-writer	true						
+seon.turn/eval-origin-has-no-producer-or-consumer	true						NK no kinds
+seon.turn/turn-continue-read-results-arrive-before-done-takes-six-seconds	true						S4 context deletion
+seon.turn/a-deep-value-loses-the-run	true				README-audits		EN-1/RP-15a receipts
+seon.turn/each-trivial-evaluation-retains-two-hundred-kilobytes	true			MEM-04			F8 steps shelved; RP/EN/S6 turn+recording
+seon.turn/read-evidence-rows-are-two-fifths-of-the-stored-bytes	true					docs/research/agent-platform/2026-10-07/db-watch/findings.md	EN-1/RP-15a receipts; S4 context deletion
+seon.turn/a-deferred-wake-is-answered-by-silence	true						E-SDELETE fault into error; S4 context deletion
+seon.turn/a-markdown-heading-in-a-reply-is-read-as-code	true						
+seon.turn/a-message-from-root-never-refills-the-turn-bound	true						S4 context deletion
+seon.turn/a-prose-only-reply-evaluates-its-first-word	true						F8 steps shelved
+seon.turn/generated-opening-reads-fail-when-evaluated-as-written	true						S4 context deletion
+seon.turn/generated-render-sources-are-read-as-model-replies	true						
+seon.turn/each-form-of-a-pass-costs-megabytes	true		test/seon/pass_cost_test.clj				EN-1/RP-15a receipts; S4 context deletion
+seon.turn/an-armed-agents-run-forks-the-program-acquired-before-a-later-commit	true		test/seon/cluster/evaluate_source_test.clj				
+seon.turn/a-not-admitted-diagnostic-prints-its-write-attempt	true						
+seon.turn/repairs-are-stored-as-printed-text	true		test/seon/repl_differential_reader_test.clj				NK no kinds
+seon.turn/an-identical-re-record-conflicts-with-itself	true						EN-1/RP-15a receipts
+seon.turn/a-pass-reads-its-run-through-whole-branch-queries	true			PB-09 W-10			E-SDELETE fault into error; PR printer rows; S4 context deletion
+seon.turn/turns-left-allocates-836-kilobytes-per-call	true			W-4			
+seon.turn/the-test-step-results-never-reach-the-eval-reply	true						F8 steps shelved
+seon.turn/an-executed-test-request-allocates-seven-hundred-megabytes-in-the-step	true						F8 steps shelved
+seon.turn.world/fault-recording-refuses-cross-branch-custody	true						EN-1/RP-15a receipts; E-SDELETE fault into error; GV-4/GV-5 merge request

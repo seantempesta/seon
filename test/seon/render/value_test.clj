@@ -1484,7 +1484,7 @@
       (is (empty? (tree-cuts projection)) label)
       (is (= value (edn/read-string (:seon.render.value/text projection))) label))))
 
-(deftest a-long-string-fills-the-budget-and-is-cut-at-a-line-end
+(deftest ^{:seon/tasks #{'seon.render.value/string-fill-arms-a-call-for-each-character}} a-long-string-fills-the-budget-and-is-cut-at-a-line-end
   (let [source (str/join "\n" (for [i (range 400)] (str "  (line " i " (with \"text\" and more))")))
         projection (value/prepare (agent-unit source))
         [cut :as cuts] (tree-cuts projection)

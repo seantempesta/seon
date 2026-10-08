@@ -52,8 +52,7 @@
        (sort-by :seon.cluster.eval/ordinal)
        (mapv #(dissoc % :seon.cluster.eval/ordinal))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/a-nested-discard-evaluates-a-discarded-form}}
-  a-nested-discard-answers-as-plain-sci
+(deftest a-nested-discard-answers-as-plain-sci
   (support/with-running-agent
    (fn [running agent-id _]
      (doseq [codes [["#_ #_ 1 2 3"]
@@ -64,8 +63,7 @@
          (is (= (plain-values codes)
                 (last (mapv #(mapv :seon.repl/value (replies % agent-id running)) codes)))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/a-bare-true-false-or-nil-line-is-prose}}
-  true-false-and-nil-lines-are-code-in-a-reply
+(deftest true-false-and-nil-lines-are-code-in-a-reply
   (support/with-running-agent
    (fn [running agent-id _]
      (let [text "true\nfalse\nnil\n42"]
@@ -73,8 +71,7 @@
               (mapv :seon.cluster.eval/source (stored (settled text agent-id running 'seon.turn/planned-sources)))))
        (is (= (plain-values [text]) (mapv :seon.repl/value (replies text agent-id running))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/a-repair-goes-to-the-last-form-starting-on-its-line}}
-  a-repair-rides-with-the-form-it-repaired-on-a-shared-line
+(deftest a-repair-rides-with-the-form-it-repaired-on-a-shared-line
   (support/with-running-agent
    (fn [running agent-id _]
      (is (= [[2 [[1 :dropped ")"]]] [3 nil]]

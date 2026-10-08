@@ -1,10 +1,10 @@
 [#:seon.task{:name "background-poll-answers-edn-strings"
              :kind :function
-             :intent "my.background/poll answers :seon.effect/request-edn and :seon.effect/result-edn as EDN strings, so the agent must parse its own result; component arguments stay in request EDN."
+             :intent "`my.background/poll` answers `:seon.effect/request-edn` and `:seon.effect/result-edn` as EDN strings, so the agent must parse its own result; component arguments stay in request EDN."
              :must-read #{my.background/poll seon.effect/request!}
              :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
                          "docs/seon/issues/capability-component-arguments-stay-in-request-edn.md"}}
  #:seon.task{:name "a-file-stat-costs-a-thousand-armed-calls"
              :kind :function
-             :intent "One foreground (my.fs/stat {:my.fs/path \"README.md\"}) as root on default took 76 ms and 1,285 armed calls, a second 45 ms and 1,079 (2026-09-28, flow-processes-opus), repeated seon.db/transaction-report-datom? 322 and 168 times, seon.profile/world-counter? 238 and 220, seon.db/database-value? 135: the receipt's open and settle transactions dominate a sub-millisecond stat. Find what the per-effect work is proportional to (datoms of each receipt transaction checked one predicate call at a time?) and make an ordinary effect cost what its handler costs plus one small write."
+             :intent "One foreground (`my.fs/stat` {`:my.fs/path` \"README.md\"}) as root on default took 76 ms and 1,285 armed calls, a second 45 ms and 1,079 (2026-09-28, flow-processes-opus), repeated `seon.db/transaction-report-datom?` 322 and 168 times, `seon.profile/world-counter?` 238 and 220, `seon.db/database-value?` 135: the receipt's open and settle transactions dominate a sub-millisecond stat. Find what the per-effect work is proportional to (datoms of each receipt transaction checked one predicate call at a time?) and make an ordinary effect cost what its handler costs plus one small write."
              :must-read #{seon.effect/request! seon.effect/open-call seon.db/transact!}}]

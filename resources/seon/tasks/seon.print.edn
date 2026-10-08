@@ -1,7 +1,7 @@
 [#:seon.task{:name "a-dig-form-through-a-list-index-reads-nil",
             :kind :function,
             :intent
-            "A cut under a list or seq member prints a continuation through plain get-in, e.g. (subs (get-in result/e… [0]) 127) for (\"long string\"): get-in does not index a list or seq, so the offered dig form reads nil and subs throws. seon.print/continuation chooses get-in from the path alone; the value printer's member step for a non-vector sequential is a plain index. Done when every printed continuation, evaluated on the held value, returns the cut's rest (a regression evaluating the continuation form for list, lazy-seq and vector members).",
+            "A cut under a list or seq member prints a continuation through plain get-in, e.g. (subs (get-in result/e… [0]) 127) for (\"long string\"): get-in does not index a list or seq, so the offered dig form reads nil and subs throws. `seon.print/continuation` chooses get-in from the path alone; the value printer's member step for a non-vector sequential is a plain index. Done when every printed continuation, evaluated on the held value, returns the cut's rest (a regression evaluating the continuation form for list, lazy-seq and vector members).",
             :must-read
             #{seon.print/continuation seon.render.value/admit-member},
             :evidence
@@ -15,7 +15,7 @@
 
  #:seon.task{:name "elision-forms-call-a-seon-helper"
              :kind :function
-             :intent "A cut under a set member or a non-keyword map key prints (drop 32 (seon.print/value-at result/e092ae498f621 '[[:seon.render.data/entry 0 :seon.render.data/val]])) (default 2026-10-08), where clojure.core says (drop 32 (val (nth (seq result/e092ae498f621) 0))). Owner ruling 2026-10-08: elision forms use only clojure.core on the live result symbol. Done when every offered elision form names only clojure.core functions and the result symbol (nth, seq, key, val for typed steps), asserted on the form's symbols and its value through the MCP entrance."
+             :intent "A cut under a set member or a non-keyword map key prints (drop 32 (`seon.print/value-at` result/e092ae498f621 '[[:seon.render.data/entry 0 :seon.render.data/val]])) (default 2026-10-08), where clojure.core says (drop 32 (val (nth (seq result/e092ae498f621) 0))). Owner ruling 2026-10-08: elision forms use only clojure.core on the live result symbol. Done when every offered elision form names only clojure.core functions and the result symbol (nth, seq, key, val for typed steps), asserted on the form's symbols and its value through the MCP entrance."
              :must-read #{seon.print/continuation seon.print/value-at}
              :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
 

@@ -25,12 +25,7 @@
       (is (= text (:seon.batch/text forgiven)))
       (is (not (find forgiven :seon.batch/repairs))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/discard-consumes-prose-and-fence-boundaries
-                         'seon.sci.forgive/prose-after-a-form-on-its-line-is-evaluated
-                         'seon.sci.forgive/a-bare-token-line-in-a-reply-is-prose
-                         'seon.sci.forgive/a-nested-discard-evaluates-a-discarded-form
-                         'seon.sci.forgive/a-bare-true-false-or-nil-line-is-prose}}
-  the-reader-reads-a-reply-by-its-line-rules
+(deftest the-reader-reads-a-reply-by-its-line-rules
   (are [mode text sources] (= sources (mapv :seon.batch/source (:seon.batch/segments (forgive/segments text mode))))
     ;; a failed collection is one source; reading resumes after its closer
     :reply "```clojure\n[1 bad: (+ 2 3)]\n(+ 4 5)\n```"          ["[1 bad: (+ 2 3)]" "(+ 4 5)"]
@@ -90,8 +85,7 @@
                                                             {:seon.batch/line 2 :seon.batch/at 7 :seon.batch/inserted ")"}]
     :code  "(+ 1 2)"                                       nil))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/a-repair-goes-to-the-last-form-starting-on-its-line}}
-  each-segment-carries-the-repairs-from-its-start-to-the-next
+(deftest each-segment-carries-the-repairs-from-its-start-to-the-next
   (are [text repairs] (= repairs (mapv #(mapv (juxt :seon.batch/line :seon.batch/dropped :seon.batch/inserted) (:seon.batch/repairs %))
                                        (:seon.batch/segments (forgive/segments text :code))))
     "(+ 1 2))"                      [[[1 ")" nil]]]
@@ -112,9 +106,7 @@
     (forgive/segments reply)
     (if (neg? before) -1 (- (.getCurrentThreadAllocatedBytes threads) before))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/a-prose-repair-replays-the-whole-reply
-                         'seon.sci.forgive/structural-trials-refuse-var-quote-anonymous-fn-deref-regex-and-syntax-quote}}
-  a-reply-reads-in-allocation-linear-in-its-length
+(deftest a-reply-reads-in-allocation-linear-in-its-length
   ;; Prose words, prompt markers and dispatch forms once each re-read the
   ;; whole rest of the reply: four times the reply allocated twenty times more.
   (let [unit (str "Note: the value is read here.\n```clojure\nuser=> (meta #'x)\n(map #(inc %) [1 2])\n"
@@ -153,8 +145,7 @@
                            (select-keys (ex-data failure) [:line :column])
                            (-> r :seon.batch/form meta (select-keys [:line :column])))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.forgive/reader-at-restarts-line-and-column-numbering}}
-  a-form-read-mid-text-has-the-texts-own-line-and-column
+(deftest a-form-read-mid-text-has-the-texts-own-line-and-column
   (are [mode text expected] (= expected (positions text mode))
     :reply "Some prose.\n(defn pa [x] x)"                [{:line 2 :column 1}]
     :reply "Prose\n(def a 1)\nmore\n(def b 2)"            [{:line 2 :column 1} {:line 4 :column 1}]

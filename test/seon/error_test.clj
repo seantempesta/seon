@@ -1071,7 +1071,7 @@
        (is (false? (validate (assoc value :seon.instrument/arity (:min info)))))
        (is (false? (validate (assoc value :seon.instrument/declared-arity-count 2))))))))
 
-(deftest complete-error-children-validate-through-the-writer
+(deftest ^{:seon/tasks #{'seon.error/a-converted-error-keeps-its-transient-type}} complete-error-children-validate-through-the-writer
   (let [forms (assoc (schema.edn/packaged-forms)
                      ::manifest-id [:string {:seon.db/identity true}]
                      ::manifest-location [:and {:seon.db/component true
@@ -1173,7 +1173,7 @@
            (is (not (contains? occurrence :seon.db.write.attempt/request-id)))))))))
 
 
-(deftest schema-refusals-are-admitted-at-the-recorder
+(deftest ^{:seon/tasks #{'seon.error/a-converted-error-keeps-its-transient-type}} schema-refusals-are-admitted-at-the-recorder
   (test-support/with-database
    (fn [connection]
      (let [projection (schema/handed-projection)
