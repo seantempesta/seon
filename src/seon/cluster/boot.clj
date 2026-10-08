@@ -641,11 +641,13 @@
   "The root store's growth for `status`: its key count, and when the root was
   last collected and what that reclaimed (`maintenance/last-collection` over a
   running cluster's database, the typed never-collected refusal included).
-  Answers nothing when no cluster runs."
+  Answers nothing when no cluster database stands (every instance mid-start
+  or mid-stop)."
   {:malli/schema [:=> [:cat :seon.operator/managed-root]
                   [:or :nil [:map [:seon.operator/store :seon.operator.store/observation]]]]}
   [managed-root]
-  (when-let [instance (first (vals @running-instances))]
+  (when-let [instance (some #(when (store/connection? (:seon.boot/cluster-connection %)) %)
+                            (vals @running-instances))]
     {:seon.operator/store
      {:seon.operator.store/files
       (fs/entry-count (get-in instance [:seon.boot/config :seon.boot/store-dir]))

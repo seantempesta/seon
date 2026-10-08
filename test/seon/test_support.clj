@@ -10,6 +10,7 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.boot :as boot]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -33,7 +34,7 @@
             [seon.turn]
             [seon.turn.batch :as turn.batch])
   (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
-           [java.net InetSocketAddress]
+           [java.net InetAddress InetSocketAddress ServerSocket]
            [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
@@ -1286,7 +1287,8 @@
         world-environment (environment cluster-name connection)
         ctx (fork-cluster-ctx connection cluster-name)
         routing (attempt-routing connection)]
-    (with-open [^java.io.Closeable launcher (closeable
+    (with-open [listener (ServerSocket. 0 1 (InetAddress/getLoopbackAddress))
+                ^java.io.Closeable launcher (closeable
                           (flow/start-work-launcher!
                            {:seon.env/environment world-environment
                             :seon.flow/configuration (select-keys (config/effective (db/db connection) cluster-name)
@@ -1299,10 +1301,16 @@
                      :seon.db.process/id cluster/boot-process-identity})
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id agent-id}]
         (transacted! connection (agent-tx @connection agent-id))
+        ;; The roster holds declared instances only (`:seon.boot/instance`),
+        ;; read by status and the MCP entrance: boot's own constructor builds
+        ;; this one over its own listener, so stopping it closes no live one.
         (swap! operator.runtime/running-instances assoc running
-               {:seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)
-                :seon.store/store (:seon.store/store target)
-                :seon.boot/ready-ms 0})
+               (assoc (boot/listening-instance (assoc (some :seon.boot/config (vals @operator.runtime/running-instances))
+                                                      :seon.boot/cluster-name running)
+                                               listener)
+                      :seon.turn.loop/cluster (assoc handle :seon.agent/routing routing)
+                      :seon.store/store (:seon.store/store target)
+                      :seon.boot/ready-ms 0))
         (try
           (body running agent-id connection)
           (finally
