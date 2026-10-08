@@ -221,8 +221,15 @@ of two each).
 - **Fan-out 5** (`b06d986f5`): 0 of 3, nothing landed; the main finding was a core defect: after `in-ns` into a file namespace
   its library aliases didn't resolve (the libraries weren't exposed). **Fixed** (`e40167fbe`: acquisition exposes every loaded
   library a program namespace requires, aliases or refers; ~5 ms per base build). Also fixed: re-entering a function with its
-  committed contract unchanged was refused because its admission source flipped `:core` → `:agent` (`cf4794d43`). Write-back of
-  fan5-seq's branch now succeeds (270 ms, 414 MB); its earlier refusal didn't reproduce. **PB-08** landed (`98de689da`): a
+  committed contract unchanged was refused because its admission source flipped `:core` → `:agent` (`cf4794d43`). Correction (fan-out 6): the write-back refusal
+  naming the unchanged `seon.error/scalar-text` DOES reproduce through `my.program/write-branch!` on a fresh store (721-891 MB per
+  refusal); the earlier non-reproduction called `write-back!` directly. Lane wb-scalar is on it. **PB-08** landed (`98de689da`): a
   definition write advances its projection from its own report (0 full projection rebuilds per write, was 2+1). **CC-3/CC-4**
   bumped (`92af22555`, Datahike e65599de): branch head 3.8 KB → 149 B; commit time stays at the ~12 ms flush floor (CC-7 is the
   time lever).
+- **Fan-out 6** (`982a4e1ad` landed 2 of 3 fixes through the check; frictions `951cad923`): 0 of 3 green on the agents' own
+  branches. Confirmed fixed: aliases (no recurrence), faults render (refused replies have no renderer error), DSML down 7/32 → 5/30.
+  **The central gap found:** a proof loaded from a test file runs compiled and never sees the branch's redefinition, so no
+  real task's proof can turn green on a branch. AGENTS.md already prescribes the answer (interpret the changed definitions'
+  affected callers, tests included, in SCI on the branch); lane affected-callers is designing and building it. Root refused one
+  fix in review (it parsed Malli's message text with a regex).
