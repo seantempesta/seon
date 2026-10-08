@@ -830,10 +830,13 @@
       :qualified-symbol "a namespaced symbol" :nil "nil" :uuid "a UUID"
       :tuple (str "a tuple with " (count (m/children check)) " entries")
       :enum (str "either " (str/join " or " (map pr-str (m/children check))))
+      := (str "the value " (pr-str (first (m/children check))))
       :and (or declared-message (str/join " and " (children)))
       :or (or declared-message (str/join " or " (children)))
       :fn (or declared-message "the declared predicate")
-      (str "a value satisfying " (or declared-message "the declared schema")))))
+      (let [schema-type (m/type check)]
+        (str "a value satisfying " (or (:description (m/properties check))
+                                       (if (symbol? schema-type) schema-type (str "the declared " (name schema-type) " schema"))))))))
 
 (defn- collection-member-problem
   {:malli/schema [:=> [:cat :map]
