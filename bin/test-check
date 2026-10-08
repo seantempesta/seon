@@ -79,7 +79,22 @@
         (usage!))
       (when-not (pos-int? shipped-check-bound)
         (throw (ex-info "config/default.edn declares no :seon.test/check-time-limit-ms; the transport has no backstop to derive." {})))
-      (let [form (list 'let ['handle handle-form
+      (let [;; The request's wall bound is what its tests declare (no lower than the
+            ;; test time limit, no higher than the operator's check ceiling).
+            request (if (or (:seon.test/check-time-limit-ms request)
+                            (not (#{:named} (:seon.test/policy request))))
+                      request
+                      (let [declared (eval! (list 'seon.test/requested-bound-ms
+                                                  (list 'seon.db/db (list :seon.db/connection handle-form))
+                                                  (list 'quote (set (:seon.test/identities request)))
+                                                  (list 'quote (set (:seon.test/namespaces request))))
+                                            transport-bound)]
+                        (if (pos-int? declared)
+                          (assoc request :seon.test/check-time-limit-ms
+                                 (min (#'operator/operator-check-bound-ms {})
+                                      (max shipped-check-bound declared)))
+                          request)))
+            form (list 'let ['handle handle-form
                              'result (list 'seon.test/run
                                            (list 'merge (list 'quote request)
                                                  {:seon.test/execution 'handle

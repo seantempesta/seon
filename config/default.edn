@@ -360,6 +360,11 @@
  ; Ordinary socket/process events retain the separate silence bound above.
  :seon.config.operator/boot-bound-ms 300000
 
+ ; Unit: milliseconds; the ceiling on one check's test run. A request is
+ ; bounded by the sum of its tests' declared bounds; ten minutes is the
+ ; longest foreground command and keeps one check from holding a slot longer.
+ :seon.config.operator/check-bound-ms 600000
+
  ; Unit: bytes; the -Xmx of every JVM the operator launches. Sized for a
  ; 16 GB machine: the OS, browser and editor keep 6-8 GB, Seon gets about
  ; 6 GB RSS, which is this heap plus metaspace, threads and native memory.

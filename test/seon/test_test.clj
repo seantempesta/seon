@@ -31,6 +31,23 @@
        (is (= 1 (:seon.test/error-count result)))
        (is (pos? (count (:seon.test/failure-message result))))))))
 
+(deftest ^{:seon/tasks #{'seon.operator/a-namespace-check-is-cut-at-one-flat-allowance}}
+  a-requested-namespace-is-bounded-by-what-its-tests-declare
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           symbols (set (db/q '[:find [?symbol ...]
+                                :where [?test :seon.test/sym ?symbol]
+                                       [(namespace ?symbol) ?name] [(= ?name "seon.test-test")]]
+                              database))
+           by-namespace (sut/requested-bound-ms database #{} #{'seon.test-test})]
+       (is (seq symbols) "the namespace's tests are in the program")
+       (is (= (sut/declared-bound-ms database symbols) by-namespace))
+       (is (= by-namespace
+              (sut/requested-bound-ms database #{'seon.test-test/interpreted-test-bodies-use-the-sci-interrupt-bound}
+                                      #{'seon.test-test}))
+           "an identity inside a requested namespace is counted once")))))
+
 (deftest resolution-follows-admitted-source-and-acquisition
   (test-support/with-database
    (fn [connection]

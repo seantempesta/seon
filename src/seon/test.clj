@@ -2203,6 +2203,20 @@
                                  database (vec symbols))))]
     (max 1 (reduce + 0 (map #(get declared % 5000) symbols)))))
 
+(defn requested-bound-ms
+  "`declared-bound-ms` of the tests a request names: its identities and every
+  test of its namespaces, so a namespace's wall time is what its members
+  declare, never one flat allowance."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol] [:set :symbol]] [:int {:min 1}]]}
+  [database identities namespaces]
+  (declared-bound-ms
+   database
+   (into (set identities)
+         (selection-read!
+          (db/q '[:find [?symbol ...] :in $ [?namespace ...]
+                  :where [?test :seon.test/sym ?symbol] [(namespace ?symbol) ?name] [(= ?name ?namespace)]]
+                database (mapv str namespaces))))))
+
 (def batch-limit
   "The declared bound on members per admission and per release transaction.
   A request over more members admits, runs and releases one batch at a time,

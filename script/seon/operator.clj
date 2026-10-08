@@ -51,6 +51,15 @@
     (when-not (pos-int? value) (throw (ex-info "Missing operator boot bound." manifest)))
     value))
 
+(defn operator-check-bound-ms
+  "The ceiling on one check's test run."
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
+  (let [value (get manifest :seon.config.operator/check-bound-ms
+                   (:seon.config.operator/check-bound-ms @shipped-default-decisions))]
+    (when-not (pos-int? value) (throw (ex-info "Missing operator check bound." manifest)))
+    value))
+
 (defn operator-heap-max-bytes
   "The configured `-Xmx` of every JVM the operator launches, in bytes."
   {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
@@ -1692,7 +1701,7 @@
         argv (into ["bb" "--config" "/dev/null" "--classpath" classpath
                     (str source-root "/bin/test-check") "--root" disposable "default"]
                    (test-check-arguments tests include-long?))
-        bound (+ (operator-boot-bound-ms {}) (operator-silence-backstop-ms {}))]
+        bound (+ (operator-check-bound-ms {}) (operator-silence-backstop-ms {}))]
     (try
       {:seon.operator/test-summary (str/trim (command! argv source-root bound))
        :seon.operator/tests-passed? true}

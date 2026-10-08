@@ -59,4 +59,7 @@
  #:seon.task{:name "a-red-on-head-cannot-be-compared-with-its-parent"
              :kind :function
              :intent "A test red on HEAD could be classified by the commit that changed it only by hand-building an archive. `bin/seon check --at REV --test NS/NAME` runs the named tests on a throwaway JVM booted from `git archive REV` (no working-tree paths, no rehearsal adoption), reusing the candidate machinery, so one var's result at HEAD and HEAD~1 are two commands. Done when parse-argv carries --at and refuses PATH beside it, and a recorded run shows one var at HEAD and HEAD~1."
-             :must-read #{seon.operator/check! seon.operator/parse-argv}}]
+             :must-read #{seon.operator/check! seon.operator/parse-argv}} #:seon.task{:name "a-namespace-check-is-cut-at-one-flat-allowance"
+             :kind :function
+             :intent "bin/test-check bounded every non-isolated request by the flat :seon.test/check-time-limit-ms (120 s) plus a 30 s transport allowance, so a namespace of declared-long tests stopped at the deadline: seon.cluster.agent-test executed 11 tests and listed ten as pending (not started) at 120299 ms (check --at HEAD, 2026-10-08). The request's bound is now the sum of its tests' declared bounds (seon.test/requested-bound-ms), no lower than the dial and no higher than :seon.config.operator/check-bound-ms; the tally already reports finished results, the unfinished test and the pending tests as data."
+             :must-read #{seon.test/requested-bound-ms seon.test/declared-bound-ms}}]
