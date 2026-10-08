@@ -30,6 +30,7 @@
                               :seon.agent/settings
                               {:seon.config.ai/api-key-variable credential}}
                              {:seon.message/id "refusal-trigger" :seon.message/to [:seon.agent/id agent-id] :seon.message/content "Take one turn."}])
+       (support/assign-task! connection agent-id)
        (let [cluster (support/cluster-handle
                       {:seon.db/connection connection
                        :seon.cluster/name cluster-name

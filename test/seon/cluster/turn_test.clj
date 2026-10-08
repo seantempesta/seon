@@ -252,6 +252,7 @@
                          [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}]]))]
         (when (or (:seon.config/error-key result) (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           (throw (ex-info "Turn fixture seed was refused." result))))
+      (test-support/assign-task! connection "agent-a")
       (with-render-context-proc
          connection
          ;; THE HANDLE IS THE PRODUCTION HANDLE: `test-support/cluster-handle`
@@ -747,7 +748,8 @@
                [{:db/id [:seon.config/cluster "turn-test"]
                :seon.config.run/max-episode-runs cap}]]))]
               (when (:seon.db.write.attempt/request-id seed)
-                (throw (ex-info "Terminal refusal fixture seed was refused." seed))))
+                (throw (ex-info "Terminal refusal fixture seed was refused." seed)))
+              (test-support/assign-task! connection "peer"))
             (let [stored-source (:seon.fn/source
                                  (db/pull @connection [:seon.fn/source] [:seon.fn/sym doomed]))]
             (with-redefs
@@ -1299,6 +1301,7 @@
                              cat
                              [(test-support/agent-tx @connection "agent-b")
                               [{:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract"}]]))
+          (test-support/assign-task! connection "agent-b")
           (drive-agent! cluster "agent-b" 2)
           (let [evaluations
                 (db/q '[:find [(pull ?evaluation
@@ -2072,6 +2075,7 @@
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
         (is (some? (:db-after (db/transact! connection (into [(namespace-entity 'my.agents.agent-b)] (test-support/agent-tx @connection "agent-b"))))))
+        (test-support/assign-task! connection "agent-b")
         (with-redefs [ai/complete
                       (recording-completer
                        requests

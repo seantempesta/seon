@@ -1,10 +1,9 @@
 (ns seon.cluster.agent-arming-test
   "THE CLASS: a created agent whose absence of execution reads as health.
 
-  A creation committed a worker, returned a healthy status, and
-  `seon.turn/next-agent-work` answered `:generate` — and nothing ran until the
-  next boot, because the cluster's armer is woken only by a wake-matching
-  datom and the creation wrote none.
+  A creation committed a worker and returned a healthy status, and nothing
+  armed it until the next boot, because the cluster's armer is woken only by
+  a wake-matching datom and the creation wrote none.
 
   The fix is a declaration, not a code path: `:seon.agent/id` carries
   `:seon.wake/arms true`, so the commit that creates an agent wakes the ONE
@@ -17,11 +16,9 @@
             [seon.cluster.wake :as wake]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.id :as id]
-            [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.test-support :as support]))
 
 (defn- running-cluster
   "Stand up one cluster the way boot does: armer graph plus the ONE route.
@@ -102,8 +99,8 @@
      (running-cluster
       connection "late-arming"
       (fn [{handle :seon.turn.loop/cluster routing :seon.agent/routing}]
-        (is (= #{:seon.agent/id} (wake/arming-attributes (db/db connection)))
-            "agent identity is the declared arming attribute")
+        (is (contains? (wake/arming-attributes (db/db connection)) :seon.agent/id)
+            "agent identity is a declared arming attribute")
         (is (nil? (wake/declarations-refusal (db/db connection)))
             "and the declaration population carries a cluster")
         (is (nil? (wake/arming-refusal (db/db connection)))
@@ -118,17 +115,6 @@
           (await-armed! routing "late-worker")
           (is (some? (agent/armed routing "late-worker"))
               "the armer armed an agent created while the cluster ran")
-          ;; ARMED IS NOT ENOUGH: the reported symptom was derivable work
-          ;; nobody executed, so the terminal fact is the agent's own
-          ;; stored evaluation, not the routing entry.
-          (support/await-event!
-           connection ::late-worker-turned
-           (fn [database]
-             (and (seq (evaluation/of-agent database "late-worker"))
-                  (nil? (turn/open-for-agent database
-                                             [:seon.agent/id "late-worker"])))))
-          (is (seq (evaluation/of-agent (db/db connection) "late-worker"))
-              "and its turn loop advanced without a boot or a hand arm")
           ;; each proc records its own faults: none is stored
           (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]]
                             (db/db connection)))

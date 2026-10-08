@@ -2,8 +2,6 @@
   "A task's ordered steps: the agent's plan, persistent facts at the task home. Each test asserts
   one behavior on data."
   (:require [clojure.test :refer [deftest is]]
-            [clojure.java.io :as io]
-            [clojure.string :as str]
             [my.task :as my.task]
             [seon.cluster :as cluster]
             [seon.db :as db]
@@ -16,31 +14,6 @@
   [connection]
   {:seon.db/connection connection :seon.agent/id "root"})
 
-(defn declare-proof!
-  "Declare on `connection`, unrun, the deftest `ns-sym`/`test-name` naming the task `task-sym`,
-  as a task file's proof is declared at the cluster head before anyone is assigned the task."
-  {:malli/schema [:=> [:cat :seon.db/connection :symbol :symbol :symbol] :seon.schema/value]}
-  [connection ns-sym test-name task-sym]
-  (let [root (io/file "tmp" "declare-proof" (str (random-uuid)))
-        file (io/file root (str (str/replace (str ns-sym) "." "/") ".clj"))]
-    (try (io/make-parents file)
-         (spit file (str "(ns " ns-sym " (:require [clojure.test :refer [deftest is]]))\n"
-                         "(deftest ^{:seon/tasks #{'" task-sym "}} " test-name " (is (= 1 1)))\n"))
-         (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection)
-                                                                    (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
-         (finally (test-support/delete-recursively! root)))))
-
-(defn hold-task!
-  "Create the task `tq.steps/work`, whose proof has not run, and assign it to `agent-id`."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
-  [connection agent-id]
-  (declare-proof! connection 'tq.steps 'proves 'tq.steps/work)
-  (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.steps
-                               :seon.task/name "work" :seon.task/kind :work :seon.task/intent "Steps."})]
-    (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
-                   :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
-    nil))
-
 (defn- with-root
   "Run `f` with a connection holding a seeded cluster and its root agent, which holds a task with an unrun proof."
   [f]
@@ -48,7 +21,7 @@
    (fn [connection]
      (test-support/seed-cluster! connection "task-steps" {})
      (cluster/seed-root-agent! connection "task-steps" cluster/boot-process-identity)
-     (hold-task! connection "root")
+     (test-support/assign-task! connection "root")
      (f connection))))
 
 (deftest planning-with-no-task-is-refused-for-want-of-a-proof

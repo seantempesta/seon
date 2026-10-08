@@ -78,6 +78,7 @@
                  (cluster/ensure-entity! connection cluster/boot-process-identity
                                          {:seon.agent/id "juniper" :seon.cluster/name "loop-continue"
                                           :seon.ns/name 'my.agents.juniper})
+                 (support/assign-task! connection "juniper")
                  (try
                    (fixture/install! handle routing)
                    (catch Throwable failure

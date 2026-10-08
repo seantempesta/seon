@@ -5,6 +5,7 @@
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.data.json :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :as test]
             [datahike.api :as d]
             [seon.cluster :as cluster]
@@ -24,6 +25,7 @@
             [seon.profile :as profile]
             [seon.program :as program]
             [seon.schema :as schema]
+            [seon.task :as task]
             [seon.batch]
             [seon.sci.eval :as sci.eval]
             [seon.sci.observe :as observe]
@@ -652,6 +654,33 @@
         "Recursive test cleanup is restricted to descendants of tmp/."
         {::path (str target-path)})))
     (fs/delete-recursively! (str root-path) (str target-path))))
+
+(defn declare-proof!
+  "Declare on `connection`, unrun, the deftest `ns-sym`/`test-name` naming the task `task-sym`,
+  as a task file's proof is declared at the cluster head before anyone is assigned the task."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol :symbol :symbol] :seon.schema/value]}
+  [connection ns-sym test-name task-sym]
+  (let [root (io/file "tmp" "declare-proof" (str (random-uuid)))
+        file (io/file root (str (str/replace (str ns-sym) "." "/") ".clj"))]
+    (try (io/make-parents file)
+         (spit file (str "(ns " ns-sym " (:require [clojure.test :refer [deftest is]]))\n"
+                         "(deftest ^{:seon/tasks #{'" task-sym "}} " test-name " (is (= 1 1)))\n"))
+         (transacted! connection (seon.fn/reconcile-tx (db/db connection)
+                                                       (seon.fn/program-entities {:seon.fn/roots [(.getPath root)]}) []))
+         (finally (delete-recursively! root)))))
+
+(defn assign-task!
+  "Assign `agent-id` a task of its own whose proof has not run: a model turn needs an assignment."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
+  [connection agent-id]
+  (let [slug (str/replace (str/lower-case agent-id) #"[^a-z0-9]+" "-")
+        task-name (str "work-" slug)]
+    (declare-proof! connection 'tq.assigned (symbol (str "proves-" slug)) (symbol "tq.assigned" task-name))
+    (let [created (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.assigned
+                                 :seon.task/name task-name :seon.task/kind :work :seon.task/intent "Work."})]
+      (task/assign! {:seon.db/connection connection :seon.task/assigned (:seon.task/id created)
+                     :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch (get-in (db/db connection) [:config :branch])})
+      nil)))
 
 (defn file-store-probe-schema
   "Return the one synthetic string marker attribute for a file-store test."

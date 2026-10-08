@@ -35,12 +35,22 @@
    :seon.error/data {:seon.fn.analyzer/findings
                      [{:seon.fn.analyzer/level :error}]}})
 
-(defn- with-database
+(defn- with-unassigned-database
+  "Call `(body connection)` on a fresh database holding the agent, which holds no task."
   [body]
   (support/with-database
    (fn [connection]
       (support/transacted! connection (support/agent-tx @connection agent-id))
       (body connection))))
+
+(defn- with-database
+  "Call `(body connection)` on a fresh database holding the agent, assigned a task whose proof has not run:
+  a model turn needs an assignment."
+  [body]
+  (with-unassigned-database
+   (fn [connection]
+     (support/assign-task! connection agent-id)
+     (body connection))))
 
 (defn- add-trigger!
   "Commit one trigger message for the agent."
@@ -103,7 +113,9 @@
                  :seon.cluster.eval/ordinal ordinal
                  :seon.cluster.eval/at now
                  ;; the result's presence IS the terminal state
-                 :seon.eval/shown shown-text}])))
+                 :seon.eval/shown shown-text
+                 ;; an evaluated form has a duration; a read failure has none
+                 :seon.eval/duration-ms 0}])))
 
 (defn- close-run! [connection]
   (support/transacted! connection
@@ -174,7 +186,8 @@
                      :seon.cluster.eval/ordinal ordinal
                      :seon.cluster.eval/at now
                      :seon.eval/shown (if (= ordinal lint-ordinal)
-                                        (pr-str lint-refusal) "1")})
+                                        (pr-str lint-refusal) "1")
+                     :seon.eval/duration-ms 0})
                   receipts))
        (and triggered? (not trigger-first?)) (conj message)
        closed? (conj [:db/add [:seon.turn/id run-id]
@@ -487,11 +500,11 @@
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                       :seon.turn.work/next derived))
-                 ;; An accepted reply without a disposition continues even
-                 ;; after its wake is answered. Receipt content cannot
-                 ;; manufacture a new trigger.
+                 ;; An accepted reply that evaluated a form and set no
+                 ;; disposition continues even after its wake is answered.
+                 ;; Receipt content cannot manufacture a new trigger.
                  (or (not answered-closed?)
-                     (= (when planned? :open) situation))
+                     (= (when (and planned? (seq receipts)) :open) situation))
                  ;; :resume carries the FIRST ordinal with no terminal
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation
@@ -747,3 +760,52 @@
       (finally
         (d/release connection)
         (d/delete-database configuration)))))
+
+(deftest ^{:seon/tasks #{'seon.turn/no-model-turn-without-an-assignment}}
+  an-unassigned-agent-with-a-wake-gets-no-model-turn
+  (with-unassigned-database
+    (fn [connection]
+      (configure-agent-bound! connection 100)
+      (add-trigger! connection)
+      (is (nil? (turn/next-agent-work @connection request)) "a wake alone opens no model turn")
+      (is (= [message-id] (mapv :seon.message/id (turn/unanswered-triggers @connection agent-id)))
+          "the wake stays unanswered")
+      (support/assign-task! connection agent-id)
+      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id :seon.message/id message-id}
+             (turn/next-agent-work @connection request))
+          "once a task is assigned, the waiting wake opens the turn"))))
+
+(defn- closed-reply!
+  "Commit one closed model turn `id` whose reply settled `evaluations` (maps merged onto each row)."
+  [connection id evaluations]
+  (support/transacted! connection (turn/open-tx {:seon.turn/id id :seon.turn/agent [:seon.agent/id agent-id]
+                                                 :seon.turn/opened-tx "datomic.tx" :seon.turn.work/situation :call}))
+  (support/transacted!
+   connection
+   (into [(model-attempt id now) [:db/add [:seon.turn/id id] :seon.turn/reply-size 64]]
+         (map-indexed (fn [ordinal facts]
+                        (merge {:seon.cluster.eval/id (str id "-" ordinal) :seon.cluster.eval/run [:seon.turn/id id]
+                                :seon.cluster.eval/ordinal ordinal :seon.cluster.eval/at now}
+                               facts)))
+         evaluations))
+  (support/transacted! connection [[:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"]]))
+
+(deftest a-prose-only-reply-waits
+  ;; A fixture-model reply with no form settles one row whose read failed: an
+  ;; error and no duration, as `seon.turn/read-row` settles it unrun.
+  (with-database
+    (fn [connection]
+      (configure-agent-bound! connection 100)
+      (closed-reply! connection "prose-run"
+                     [{:seon.cluster.eval/source "I will look at the task first."
+                       :seon.cluster.eval/error "Your reply had no form; only comments/prose. Send a form."}])
+      (is (nil? (turn/next-agent-work @connection request)) "a prose-only reply waits")
+      (closed-reply! connection "read-error-run"
+                     [{:seon.cluster.eval/source "{:a}"
+                       :seon.cluster.eval/error "The map literal starting with :a contains 1 form(s)."}])
+      (is (nil? (turn/next-agent-work @connection request)) "a reply of only read errors waits")
+      (closed-reply! connection "form-run"
+                     [{:seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3" :seon.eval/duration-ms 0}])
+      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
+             (turn/next-agent-work @connection request))
+          "a reply that evaluated a form continues"))))

@@ -52,6 +52,7 @@
                        applied
                        #'schema.internal/assert-compilable-schema!)
                       "the regression keeps the formerly failing boundary armed")
+                  (test-support/assign-task! connection "root")
                   (test-support/transacted!
                                connection
                                [{:seon.message/id message-id :seon.message/to [:seon.agent/id "root"] :seon.message/content "Complete one instrumented turn."}])

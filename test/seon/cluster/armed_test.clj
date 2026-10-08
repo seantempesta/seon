@@ -264,6 +264,7 @@
            ;; completed, then a message commits before arm! returns.
            ;; Boot must already have registered the routing listener.
            (test-support/await-event! primed "boot arm prime")
+           (test-support/assign-task! (:seon.db/connection (:seon.turn.loop/cluster request)) "root")
            (test-support/transacted!
                         (:seon.db/connection
                          (:seon.turn.loop/cluster request))

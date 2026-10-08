@@ -33,6 +33,7 @@
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
             [sci.core :as sci]
+            [sci.ctx-store]
             [seon.batch]
             [seon.sci.admit :as admit]
             [seon.sci.batch :as sci.batch]
@@ -2051,9 +2052,12 @@
        :seon.agent/id agent-id})))
 
 (defn- continuing-reply?
-  "The latest closed turn accepted a provider reply and did not end the session."
+  "True when the latest closed provider reply evaluated a form and ended no session.
+  A form whose read failed (a prose-only reply is one) settles unrun, with no
+  `:seon.eval/duration-ms`, so a reply of prose or only read errors waits."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (when-let [latest-t
+  (if-let [latest-t
              (db/q '[:find (max ?t) . :in $ ?agent-id
                      :where [?agent :seon.agent/id ?agent-id]
                      [?turn :seon.turn/agent ?agent]
@@ -2070,8 +2074,11 @@
              [?turn :seon.turn/reply-size _]
              [?turn :seon.turn/attempts ?attempt]
              (not [?attempt :seon.ai.attempt/error _])
-             (not [?turn :seon.turn/disposition _])]
-           database agent-id latest-t))))
+             (not [?turn :seon.turn/disposition _])
+             [?evaluation :seon.cluster.eval/run ?turn]
+             [?evaluation :seon.eval/duration-ms _]]
+           database agent-id latest-t))
+    false))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -2082,9 +2089,10 @@
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
-  turn, the `:open` arm admits unanswered wakes or continuation of the
-  latest closed provider reply under the same turn bound. A reply continues
-  unless its last evaluation returned a completed/wait disposition.
+  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`);
+  then it admits unanswered wakes or continuation of the latest closed
+  provider reply under the same turn bound. A reply continues when it
+  evaluated a form and returned no completed/wait disposition.
   Virtual and system replies never authorize continuation.
   A successful provider attempt answers its earlier wakes. A provider
   refusal leaves them unanswered and defers reopening until a new outside
@@ -2117,12 +2125,18 @@
       ;; answers all of them, so nothing is selected and nothing is
       ;; claimed; the wakes are named only so a consumer can say what it
       ;; is about to answer. Handling claims are recorded at settlement.
-      (let [deferred (opening-deferred? db agent-id)]
-        (if (and (map? deferred)
-                 (contains? deferred :seon.error/at)
-                 (contains? deferred :seon.error/layer)
-                 (contains? deferred :seon.error/operation))
+      ;; A MODEL TURN NEEDS AN ASSIGNMENT: with none held, wakes stay
+      ;; unanswered until a task is assigned.
+      (let [held (task/agent-task db agent-id)
+            deferred (when (string? held) (opening-deferred? db agent-id))]
+        (cond
+          (map? held) held
+          (and (map? deferred)
+               (contains? deferred :seon.error/at)
+               (contains? deferred :seon.error/layer)
+               (contains? deferred :seon.error/operation))
           deferred
+          (string? held)
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
               (when (or (seq wakes) (continuing-reply? db agent-id))
@@ -4091,14 +4105,16 @@
 
 (defn- entry-bindings
   "The Vars each form bound, as the installation reads them: ordinal -> symbol
-  -> its value and metadata, from one walk of the batch's writes."
-  {:malli/schema [:=> [:cat :seon.batch/batch] [:map-of :seon.cluster.eval/ordinal :seon.sci.eval/bindings]]}
-  [batch]
-  (reduce (fn [by {op :seon.batch/op sym :seon.batch/sym the-var :seon.batch/var kind :seon.batch/kind n :seon.batch/ordinal}]
-            (if (and (= :bind op) (= :root kind) sym)
-              (assoc-in by [n sym] {:seon.sci.eval/value @the-var :seon.sci.eval/metadata (meta the-var)})
-              by))
-          {} (:seon.batch/writes batch)))
+  -> its value and metadata, from one walk of the batch's writes, read in the
+  evaluating context `ctx` (a Var's value is per context)."
+  {:malli/schema [:=> [:cat :seon.batch/batch :seon.sci.eval/ctx] [:map-of :seon.cluster.eval/ordinal :seon.sci.eval/bindings]]}
+  [batch ctx]
+  (sci.ctx-store/with-ctx ctx
+    (reduce (fn [by {op :seon.batch/op sym :seon.batch/sym the-var :seon.batch/var kind :seon.batch/kind n :seon.batch/ordinal}]
+              (if (and (= :bind op) (= :root kind) sym)
+                (assoc-in by [n sym] {:seon.sci.eval/value @the-var :seon.sci.eval/metadata (meta the-var)})
+                by))
+            {} (:seon.batch/writes batch))))
 
 (defn evaluate-sources
   "Evaluate a run's ordered rows through the one REPL path
@@ -4194,7 +4210,7 @@
                     (dissoc :seon.batch/settle))
         batch (seon.batch/evaluate-batch request)
         registered? (boolean (seq (schema/changed-keys (:seon.sci.batch/delta request))))
-        bound (entry-bindings batch)
+        bound (entry-bindings batch ctx)
         uncontracted (turn.batch/uncontracted-measures basis agent-id (:seon.batch/entries batch))]
     {:seon.turn.loop/evaluated-sources
      (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before reads facts-error change] :as entry}]

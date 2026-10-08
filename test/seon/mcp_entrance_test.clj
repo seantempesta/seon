@@ -140,6 +140,7 @@
                                                               :seon.config.run/max-episode-runs 1}))
                                           ")")
                               "agent" agent-id "cluster" running})
+          (support/assign-task! connection agent-id)
           (outside #(drive/inbound! connection cluster-name (:seon.db.process/id cluster) agent-id "Wake."))
           ;; the member's wake routing is not armed: drive the agent's passes as its proc would
           (loop [passes 0]

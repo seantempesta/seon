@@ -97,6 +97,7 @@
           connection (agent/creation-tx
                       {:seon.agent/id "thrown-step" :seon.ns/name 'my.agents.thrown-step
                        :seon.cluster/name (get-in state [:seon.turn.loop/cluster :seon.cluster/name])}))
+         (test-support/assign-task! connection "thrown-step")
          (test-support/transacted!
           connection [{:seon.message/id "thrown-step-wake" :seon.message/content "wake"
                        :seon.message/to [:seon.agent/id "thrown-step"]}])

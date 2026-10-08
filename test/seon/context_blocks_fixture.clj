@@ -8,7 +8,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.test-support :as test-support]))
 
 ; The live installer and loop regression share these ordinary declarations.
 ; The scenario's orders are DURABLE datoms on every cluster that seeds it, so
@@ -224,7 +225,8 @@
       (checked (cluster/ensure-entity!
                 connection (:seon.db.process/id handle)
                 {:seon.agent/id "juniper" :seon.cluster/name cluster-name
-                 :seon.ns/name 'my.agents.juniper})))
+                 :seon.ns/name 'my.agents.juniper}))
+      (test-support/assign-task! connection "juniper"))
     (install!
      handle routing
      (fn []

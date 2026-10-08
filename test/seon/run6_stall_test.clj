@@ -36,6 +36,7 @@
      (is (:db-after
           (transact! connection
                      (support/agent-tx @connection "run6-stall" 'my.agents.run6-stall))))
+     (support/assign-task! connection "run6-stall")
      (is (= 3 (:seon.config.run/max-episode-runs
                (seon.agent/settings! {:seon.config.run/max-episode-runs 3} connection "run6-stall"))))
      (is (:db-after

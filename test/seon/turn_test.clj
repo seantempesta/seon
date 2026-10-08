@@ -95,6 +95,7 @@
      (support/transacted! connection
                           [{:seon.agent/id "budget-close-worker"
                             :seon.agent/settings {:seon.config.run/max-episode-runs 2}}])
+     (support/assign-task! connection "budget-close-worker")
      (support/transacted! connection
                           (turn/open-tx {:seon.turn/id "first-closed-call"
                                          :seon.turn/agent [:seon.agent/id "budget-close-worker"]
@@ -519,6 +520,8 @@
 (deftest an-episode-budget-read-refusal-reaches-next-work-verbatim
   (support/with-database
     (fn [connection]
+      (support/transacted! connection (support/agent-tx @connection "unreadable-budget"))
+      (support/assign-task! connection "unreadable-budget")
       (let [database (db/db connection)
             refusal (db/q '[:find ?entity .
                             :where [?entity :seon.audit/poison _]]
@@ -1286,6 +1289,7 @@
         (support/seed-cluster! connection cluster-name {})
         (cluster/seed-root-agent! connection cluster-name cluster/boot-process-identity)
         (checked-transact! connection (support/agent-tx @connection agent-id))
+        (support/assign-task! connection agent-id)
         (async/>!! completion :seon.agent/ready)
         ;; The dial rides the handle exactly as the turn completion allowance
         ;; does: a fixture pins its own bound, and the caller wins.

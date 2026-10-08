@@ -8,7 +8,6 @@
             [seon.instrument :as instrument]
             [seon.mcp :as mcp]
             [seon.task :as task]
-            [seon.task-steps-test :as steps]
             [seon.test-support :as test-support]))
 
 (def ^:dynamic ^:private *connection* nil)
@@ -53,7 +52,7 @@
            id (:seon.task/id (task/create! (assoc declaration :seon.task/intent "First.")))
            task-section #(:seon.context/task (block running agent-id))]
        (is (nil? (:seon.context/task (block running agent-id))) "an agent holding no task has no task section")
-       (steps/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
+       (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
        (task/assign! {:seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
        (is (= {:seon.task/sym 'tq.cs/shape :seon.task/intent "First."} (task-section)))
@@ -81,7 +80,7 @@
   "Creates and assigns the task `tq.cs/shape` for `agent-id`."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id] :nil]}
   [connection agent-id]
-  (let [_ (steps/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
+  (let [_ (test-support/declare-proof! connection 'tq.cs-test 'shape 'tq.cs/shape)
         id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                          :seon.task/name "shape" :seon.task/kind :function :seon.task/intent "First."}))]
     (task/assign! {:seon.db/connection connection :seon.task/assigned id
@@ -112,7 +111,7 @@
 (deftest the-block-resolves-the-names-a-task-references
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (let [_ (steps/declare-proof! connection 'tq.cs-test 'names 'tq.cs/names)
+     (let [_ (test-support/declare-proof! connection 'tq.cs-test 'names 'tq.cs/names)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "names" :seon.task/kind :function
                                             :seon.task/intent "Use `seon.task/home` and `:seon.task/intent`."
@@ -127,7 +126,7 @@
 (deftest a-task-naming-a-missing-symbol-shows-a-problem
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (let [_ (steps/declare-proof! connection 'tq.cs-test 'missing 'tq.cs/missing)
+     (let [_ (test-support/declare-proof! connection 'tq.cs-test 'missing 'tq.cs/missing)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "missing" :seon.task/kind :function
                                             :seon.task/intent "Fix `tq.cs/missing`."}))]
@@ -139,7 +138,7 @@
 (deftest a-library-symbol-resolves-with-its-pinned-revision
   (test-support/with-running-agent
    (fn [running agent-id connection]
-     (let [_ (steps/declare-proof! connection 'tq.cs-test 'library 'tq.cs/library)
+     (let [_ (test-support/declare-proof! connection 'tq.cs-test 'library 'tq.cs/library)
            id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
                                             :seon.task/name "library" :seon.task/kind :function
                                             :seon.task/intent "Validate with `malli.core/validator`."}))]

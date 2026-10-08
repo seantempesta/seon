@@ -29,6 +29,7 @@
                     :seon.effect/duration-ms 3
                     :seon.effect/settled-at now
                     :seon.effect/to [:seon.agent/id "background-agent"]}]))
+        (support/assign-task! connection "background-agent")
         (is (= {:seon.turn.work/situation :open
                 :seon.agent/id "background-agent"}
                (turn/next-agent-work

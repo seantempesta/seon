@@ -3,7 +3,8 @@
   contracts and Flow: its runs land on its branch, siblings stay independent,
   an ordinary message wakes it, and retirement closes admission at the writer."
   (:require [clojure.core.async :as async]
-            [seon.task-steps-test :as task-steps-test]
+            ;; loaded so a hosted run can check one of its tests by symbol
+            [seon.task-steps-test]
             [clojure.edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -425,7 +426,7 @@
             declaration {:seon.task/ns host-ns :seon.task/name "square" :seon.task/kind :function :seon.task/intent "Square."}
             task-id (read-string (first (hosted-run! hosted (str "(:seon.task/id (seon.task/create! '" (pr-str declaration) "))"))))
             as-root #(db/call-with-custody {:seon.db/connection connection} (fn [] (% (assoc %2 :seon.db/connection connection))))]
-        (task-steps-test/declare-proof! connection host-ns 'square-test (task/task-sym host-ns "square"))
+        (support/declare-proof! connection host-ns 'square-test (task/task-sym host-ns "square"))
         (is (= ":unassigned" (refusal)) "an agent root assigned nothing is refused by name")
         (is (= '(my.program/propose-merge! {})
                (last (:seon.render/operations (as-root task/assign! {:seon.task/assigned task-id :seon.task/agent [:seon.agent/id "mcp/proposer"]

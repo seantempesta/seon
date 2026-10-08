@@ -166,6 +166,7 @@
            {:seon.agent/id "restart-a"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-a})
+          (test-support/assign-task! connection "restart-a")
           (with-redefs
             [ai/complete
              (fn [_projection _]
@@ -335,6 +336,7 @@
            {:seon.agent/id "restart-b"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-b})
+          (test-support/assign-task! connection "restart-b")
           (with-redefs
             [ai/complete
              (fn [_projection _]

@@ -1449,6 +1449,7 @@
                                                           @connection)
                                                     "cap-2026072814")
                                              {:seon.config.run/max-episode-runs 3})])
+        (test-support/assign-task! connection "alice")
         ;; episode 1: a human asks
         (outside-trigger! connection "alice" "h1" "human asks")
         (opened-run! connection "alice" "e1" "h1" now)

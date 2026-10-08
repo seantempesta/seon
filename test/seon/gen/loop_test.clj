@@ -124,6 +124,7 @@
                                        {:seon.boot/cluster-name "generate-code-v0"
                                         :seon.config/manifest
                                         {:seon.config.run/max-episode-runs 100}}))))
+       (doseq [[agent-id] cast-spec] (test-support/assign-task! connection agent-id))
        ;; Unresolved calls cross the ordinary evaluator boundary; the
        ;; run loop's second static-admission pass was deleted with the
        ;; minimal turn, so no lint bypass is needed.
