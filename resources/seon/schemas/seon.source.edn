@@ -132,11 +132,13 @@
                [:seon.fn/root :seon.fn/root]],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
-               :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :not-analyzable :not-equivalent :install-failed],
+               :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :conflict :not-analyzable :not-equivalent :install-failed],
               :write-back-error
               [:and :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
-                [:seon.source/path {:optional true} :seon.source/path]]],
+                [:seon.source/path {:optional true} :seon.source/path]
+                [:seon.program/conflict-digests {:optional true :description "A :conflict's declarations: the merge base (the branch's base), head (the file now, ours) and branch (theirs) digest of each."}
+                 :seon.program/conflict-digests]]],
               :base-digest [:string {:min 1 :description "The file digest the replaced declarations were analyzed from."}],
               :candidate-digest [:string {:min 1 :description "The digest of the installed, proven candidate bytes."}],
               :replaced [:vector {:description "The declarations a write-back replaced, by identity."} :seon.program/identity],

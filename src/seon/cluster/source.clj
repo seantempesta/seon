@@ -1102,10 +1102,50 @@
                     database namespace-name)]
     (when (= 1 (count files)) (first files))))
 
+(defn- file-rows
+  "The declarations `text`, the file at `path` under `root`, holds by identity,
+  as the ordinary analyzer reads it against `database`'s program; else the
+  analyzer's refusal (`:seon.fn/index-refused`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/root :string :seon.source/path :string]
+                  [:or [:map-of :seon.program/declaration-identity :map] [:map [:seon.fn/index-refused :boolean]]]]}
+  [database root relative-root path text]
+  ;; The analyzer refuses blocking findings by throwing (`seon.fn/assert-clean-analysis!`):
+  ;; a declaration valid at the REPL may name a namespace its file does not require.
+  ;; `database` names the first-party functions the file calls: without it a call into
+  ;; another first-party namespace is unclassifiable (`seon.fn/host-bound-callers`).
+  (let [analyzed (try (fn/analyze-entities {:seon.fn/root (str root) :seon.fn/roots [relative-root]
+                                            :seon.fn/changed-paths #{path}
+                                            :seon.source/previous-database database
+                                            :seon.fn.analyzer/sources {(.getCanonicalPath (io/file root (str path))) text}})
+                      (catch clojure.lang.ExceptionInfo failure
+                        (if (:seon.fn/index-refused (ex-data failure)) (ex-data failure) (throw failure))))]
+    (if (sequential? analyzed)
+      (into {} (keep #(when (:seon.program/definition-digest %) [(program/row-identity %) %])) analyzed)
+      analyzed)))
+
+(defn- conflicts
+  "The conflict digests of each of `identities` that `ours` (the file's
+  declarations now, by identity) holds differently from both the merge base
+  `before` and the branch `after`: changed on both sides."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:map-of :seon.program/declaration-identity :map]
+                       :seon.program/identity-set]
+                  :seon.program/conflict-digests]}
+  [before after ours identities]
+  (let [[base theirs] (map #(held-digests % identities) [before after])]
+    (into {} (keep (fn [identity]
+                     (let [head (get-in ours [identity :seon.program/definition-digest] :seon.program/absent)]
+                       (when-not (#{(base identity) (theirs identity)} head)
+                         [identity {:seon.program/base-digest (base identity) :seon.program/head-digest head
+                                    :seon.program/branch-digest (theirs identity)}]))))
+          identities)))
+
 (defn- proven-file
   "The candidate bytes that write `identities` as `after` holds them over
-  their one file under `root` as `before` recorded it, proven by the ordinary
-  analyzer to declare exactly `after`'s rows of that file; else the refusal."
+  their one file under `root` as it is now, proven by the ordinary analyzer to
+  declare the file's other declarations unchanged and exactly `after`'s rows of
+  `identities`; else the refusal. A file changed since `before` recorded it
+  (a sibling change landed) is read again: each written declaration must still
+  hold its `before` digest there, else the write-back is a `:conflict`."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set :seon.fn/root]
                   [:or :seon.source/proof :seon.source/write-back-error]]}
   [before after identities root]
@@ -1117,18 +1157,23 @@
                                                             :seon.fn.file/digest]}]
                                   identity)]
                  (when (:db/id entity) entity)))
-        changes (for [identity identities] [identity (pull before identity) (pull after identity)])
+        recorded (for [identity identities] [identity (pull before identity) (pull after identity)])
         source-of #(or (:seon.fn/source %) (:seon.test/source %) (:seon.ns/source %))
         file-of (fn [[[_ declared] was _]]
                   (cond was (:seon.fn/file was)
                         (qualified-symbol? declared) (namespace-path before (symbol (namespace declared)))))
-        files (into #{} (map file-of) changes)
-        {path :seon.fn.file/relative-path base-digest :seon.fn.file/digest
+        files (into #{} (map file-of) recorded)
+        {path :seon.fn.file/relative-path recorded-digest :seon.fn.file/digest
          relative-root :seon.fn.file/relative-root} (first files)
         file (io/file root (str path))
         base-bytes (when (and (= 1 (count files)) path (.isFile file)) (Files/readAllBytes (.toPath file)))
-        before-entities (keep second changes)
+        base-digest (some-> base-bytes sha-256)
         base-text (some-> ^bytes base-bytes (String. "UTF-8"))
+        ;; The file's declarations now: as `before` recorded them, or read again when the file changed since.
+        ours (when (and base-bytes (not= recorded-digest base-digest)) (file-rows before root relative-root path base-text))
+        conflicting (when (and ours (not (:seon.fn/index-refused ours))) (conflicts before after ours (set identities)))
+        changes (if ours (mapv (fn [[identity _ now]] [identity (get ours identity) now]) recorded) recorded)
+        before-entities (keep second changes)
         ;; A namespace entity records its exact `ns` form, not a span: that form's one occurrence in the file.
         span-of (fn [{span :seon.fn/form-span source :seon.ns/source}]
                   (or span (when-let [at (and source base-text (str/index-of base-text source))]
@@ -1155,34 +1200,28 @@
       (refuse :one-file "Each change needs its source and one file."
               {:seon.error/offending identities})
       (nil? base-bytes) (refuse :file-absent "The changed declarations' file is absent under the root." {})
-      (not= base-digest (sha-256 base-bytes))
-      (refuse :file-changed "The file changed after its declarations were analyzed." {:seon.error/offending base-digest})
+      (:seon.fn/index-refused ours)
+      (refuse :not-analyzable "The file as it is now does not analyze cleanly." {:seon.error/offending (:seon.fn/findings ours)})
+      (seq conflicting)
+      (refuse :conflict "The file changed these declarations since your branch's base, and your branch changed them too."
+              {:seon.error/offending (vec (sort-by str (keys conflicting))) :seon.program/conflict-digests conflicting})
       (let [spans (map span-of before-entities)]
         (or (some nil? spans) (not= (mapv span-text spans) (mapv source-of before-entities))))
       (refuse :span-mismatch "A before-state has no span, or its span no longer holds its declaration's source." {})
       :else
       (let [candidate (spliced base-bytes (edits))
-            ;; The analyzer refuses blocking findings by throwing (`seon.fn/assert-clean-analysis!`):
-            ;; a declaration valid at the REPL may name a namespace its file does not require.
-            ;; `after` names the first-party functions the file calls: without it a call into
-            ;; another first-party namespace is unclassifiable (`seon.fn/host-bound-callers`).
-            analyzed (try (fn/analyze-entities {:seon.fn/root (str root) :seon.fn/roots [relative-root]
-                                            :seon.fn/changed-paths #{path}
-                                            :seon.source/previous-database after
-                                            :seon.fn.analyzer/sources {(.getCanonicalPath file)
-                                                                       (String. ^bytes candidate "UTF-8")}})
-                          (catch clojure.lang.ExceptionInfo failure
-                            (if (:seon.fn/index-refused (ex-data failure)) (ex-data failure) (throw failure))))
-            reindexed (when (sequential? analyzed) (declaration-digests analyzed))
-            ;; Every declaration the file holds after the write, as `after` holds it.
+            reindexed (file-rows after root relative-root path (String. ^bytes candidate "UTF-8"))
+            ;; Every declaration the file holds after the write: its others as they are now, the written ones as `after` holds them.
             expected (into {} (remove (comp #{:seon.program/absent} val))
-                           (held-digests after (into (set (keys (file-digests before path))) identities)))
-            differing (vec (sort-by str (filter #(not= (get expected %) (get reindexed %))
-                                                (into (set (keys expected)) (keys reindexed)))))]
+                           (merge (if ours (update-vals ours :seon.program/definition-digest) (file-digests before path))
+                                  (held-digests after (set identities))))
+            actual (when-not (:seon.fn/index-refused reindexed) (update-vals reindexed :seon.program/definition-digest))
+            differing (vec (sort-by str (filter #(not= (get expected %) (get actual %))
+                                                (into (set (keys expected)) (keys actual)))))]
         (cond
-          (not reindexed)
+          (not actual)
           (refuse :not-analyzable "The candidate file does not analyze cleanly; its namespace form may lack a require the accepted declarations use."
-                  {:seon.error/offending (:seon.fn/findings analyzed)})
+                  {:seon.error/offending (:seon.fn/findings reindexed)})
           (seq differing)
           (refuse :not-equivalent "The reindexed candidate does not declare exactly the accepted program."
                   {:seon.error/offending differing :seon.error/expected (select-keys expected differing)})
@@ -1277,11 +1316,12 @@
   declaration still holds, on the branch head, the digest the merge commit gave
   it (other writes never stale it); every change names one file (a replaced or
   retracted declaration by its state before the merge, an added one by its
-  namespace's file) and every before-state a span holding its source; each
-  file's bytes are the ones its declarations were analyzed from; and the
-  ordinary analyzer (`seon.fn/analyze-rows` over the candidate text) reindexes
-  the candidate to exactly the digests the merge commit holds for the file's
-  declarations. Every file's disk bytes are checked again, then each
+  namespace's file) and every before-state a span holding its source; a file
+  changed since its declarations were analyzed is read again and each written
+  declaration must still hold its base digest there (else `:conflict`, with
+  `:seon.program/conflict-digests`); and the ordinary analyzer reindexes the
+  candidate to the file's other declarations unchanged and the merge commit's
+  digests for the written ones. Every file's disk bytes are checked again, then each
   candidate is installed by an atomic rename, answering one entry per file. Publishing the changed path stays with the
   publication owner.
 

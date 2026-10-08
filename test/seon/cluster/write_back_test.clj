@@ -403,3 +403,60 @@
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
         (support/delete-recursively! root)))))
+
+(deftest ^{:seon.test/long "Analyses of a one-file fixture onto H, three branches each replacing one declaration, and three write-backs (each analyzing the changed file and its candidate)."
+           :seon.test/long-ms 20000
+           :seon/tasks #{'my.program/write-branch-refuses-a-file-a-sibling-change-already-landed-in}}
+  a-sibling-change-landed-in-the-file-is-kept-and-the-same-declaration-conflicts
+  ;; Two branches of one base change different declarations of one file: the
+  ;; second writes back onto the file the first already rewrote, keeping both.
+  ;; A third changing the declaration the first rewrote is a conflict.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbsib" suffix ".core"))
+        root (str "tmp/write-back-sibling-test-" suffix)
+        path (str "src/wbsib" suffix "/core.clj")
+        callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
+        caller [:seon.fn/sym (symbol (str fixture-ns) "caller")]
+        branches (mapv #(keyword (str "write-back-sibling-" % "-" suffix)) ["one" "two" "three"])]
+    (io/make-parents (io/file root path))
+    (spit (io/file root path) (fixture-source fixture-ns))
+    (try
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            base (db/commit-id (db/db h-conn))
+            base-digests (digests entities)
+            write! (fn [branch identity source]
+                     (registry/branch! {:seon.store/store store :seon.store/branch branch :seon.cluster.registry/from base})
+                     (let [context (agent/acquire-context! target nil {:seon.agent/branch branch})
+                           conn (:seon.db/connection context)]
+                       (try
+                         (support/transacted! conn (support/replacement-tx (db/db conn) identity source {}))
+                         {:digest (:seon.program/definition-digest (db/pull (db/db conn) [:seon.program/definition-digest] identity))
+                          :written (source/write-back! {:seon.db/connection conn :seon.fn/root root
+                                                        :seon.source/accepted {:seon.program/identities #{identity}
+                                                                               :seon.source/base-commit-id base
+                                                                               :seon.source/commit-id (db/commit-id (db/db conn))}})}
+                         (finally (agent/release-context! context)))))
+            one (write! (branches 0) callee "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))")
+            two (write! (branches 1) caller "(defn caller\n  \"Call the callee twice.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (callee (callee x)))")
+            on-disk (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))
+            three (write! (branches 2) callee "(defn callee\n  \"Add one, by addition.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ 1 x))")]
+        (is (= [callee] (get-in one [:written :seon.source/files 0 :seon.source/replaced])) "the first branch writes back")
+        (is (= [caller] (get-in two [:written :seon.source/files 0 :seon.source/replaced]))
+            "the second branch writes back onto the file the first changed")
+        (is (= [(:digest one) (:digest two)] [(get on-disk callee) (get on-disk caller)])
+            "the file holds both branches' changes")
+        (is (= {:seon.source/write-back-refused :conflict :seon.source/path path
+                :seon.program/conflict-digests {callee {:seon.program/base-digest (get base-digests callee)
+                                                        :seon.program/head-digest (:digest one)
+                                                        :seon.program/branch-digest (:digest three)}}}
+               (select-keys (:written three) [:seon.source/write-back-refused :seon.source/path :seon.program/conflict-digests]))
+            "a declaration changed on both sides is a conflict naming the file, the declaration and its digests")
+        (is (= (:digest one) (get (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})) callee))
+            "a conflict writes nothing"))
+      (finally
+        (doseq [b branches] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
+        (support/delete-recursively! root)))))
