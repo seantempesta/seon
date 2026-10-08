@@ -38,4 +38,14 @@
   :kind :function
   :intent "(do (seon.schema/register! :k [:int {:min 0 :max 100}]) (defn ^{:malli/schema [:=> [:cat :k] :int]} f [x] (quot x 2))) in ONE form arms f (its gate works) but does not admit it: the reply carries 'Not admitted to the program ... derive: :malli.core/invalid-schema {:schema :k}' from seon.schema/contract-product and f has no entity. Cause: seon.sci.arm/arm! arms under seon.sci.arm/arming-projection (the batch's registration delta included), while seon.turn.batch/write-entity built the row's contract facts from the working value's carried projection, which lacks a registration the batch has not applied yet. Correct: the row reads the projection the write was armed under. Proof: seon.cluster.turn-test/a-function-using-a-schema-registered-in-the-same-form-is-admitted."
   :must-read #{seon.turn.batch/write-entity seon.sci.arm/arming-projection}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}
+ #:seon.task{:name "a-value-def-over-a-function-keeps-the-stale-function-row"
+  :kind :function
+  :intent "(defn fl2 [] 1) then (def fl2 5) in separate passes on a branch leaves [:seon.fn/sym scratch.priv/fl2] with source (defn fl2 [] 1) while the Var is 5, and the next pass renders the Var as a function (:seon.render.var/contract :missing). Cause: write-entity answers :join :value and only a :rebound join withdraws a row (turn/batch.clj:344). Correct: a value def over a function row retires the row (BEHAVIOR CHANGE). Proof: the private-design.md assertion table row for fl: no row after the rebind and :seon.batch/private carries :not-a-function."
+  :must-read #{seon.turn.batch/write-entity}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/private-design.md"}}
+ #:seon.task{:name "an-unjoined-definition-write-is-silent"
+  :kind :function
+  :intent "When join-write answers :no-definition-at-origin the definition is not admitted, and the pass records nothing and says nothing: no note and no error. Correct: an unanalyzed note (an error value delivered in the reply) names the Var and the origin that joined no analyzed definition. Proof: a definition write whose origin joins no analyzed form answers a diagnostic naming it."
+  :must-read #{seon.turn.batch/join-write}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}]

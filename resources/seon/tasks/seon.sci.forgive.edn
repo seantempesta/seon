@@ -42,4 +42,9 @@
             :kind :function,
             :intent
             "seon.sci.forgive/reader-at built a reader over (subs text pos bound), so a reader built after prose, a `;` comment, a fence or a second form on a line counted lines and columns from 1:1: (seon.sci.forgive/step ...) over \"Some prose.\\n(defn pa [x] x)\" gave the form :line 1 :column 1 while its entry was at line 2, and a read error at text line 4 reported line 2. The one-text fold (S6-03, S5-04) joins write origins to entries by position and found no definition. Correct: the reader starts at the text's own line and column for its position. Proof: seon.sci.forgive-test/a-form-read-mid-text-has-the-texts-own-line-and-column.",
-            :must-read #{seon.sci.forgive/reader-at}}]
+            :must-read #{seon.sci.forgive/reader-at}}
+ #:seon.task{:name "an-indented-definition-outside-a-fence-is-read-as-prose"
+  :kind :function
+  :intent "A definition whose line starts with whitespace and sits outside a code fence is read as prose under the documented line rule, so it is never evaluated, and a later form depending on it fails without saying why. Correct: either the stepper accepts leading whitespace before a form start, or the agent is told that the line was read as prose (help and the docs teach the rule, and a later form depending on the definition fails clearly). Proof: the probe in prose-design.md answers the chosen behavior as data."
+  :must-read #{seon.sci.forgive/segments}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}]
