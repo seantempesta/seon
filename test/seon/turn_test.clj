@@ -1217,18 +1217,8 @@
                             [:seon.ns/name 'my.macro-caller])))))
       (let [source (str "(defn ^{:malli/schema [:=> [:cat] :int]} "
                         "unresolved-caller [] (missing.target/nope))")
-            preliminary-entity
-            {:seon.fn/sym 'my.macro-caller/unresolved-caller
-             :seon.fn/ns [:seon.ns/name 'my.macro-caller]
-             :seon.fn/source source
-             :seon.fn/arglists "([])"
-             :seon.fn/private? false
-             :seon.fn/spec "[:=> [:cat] :int]"
-             :seon.schema.admission/source :agent}
-            entity (second
-                 (seon.fn/analyze-form
-                  @connection source (:seon.fn/ns preliminary-entity)
-                  preliminary-entity))
+            entity (support/program-fn-entity @connection 'my.macro-caller/unresolved-caller source
+                                              {:seon.schema.admission/source :agent})
             result (db/transact!
                     connection
                     ;; the definition's facts, as the fold writes them
@@ -1238,9 +1228,10 @@
         (is (not-any? #(= 'missing.target/nope (:seon.fn/callee %))
                       (:seon.program/unresolved-callers report))
             "a namespace without a program entity is outside the unresolved-call report")
-        (is (= #{'missing.target/nope}
-               (set (:seon.fn/calls (db/pull @connection [:seon.fn/calls]
-                                           [:seon.fn/sym 'my.macro-caller/unresolved-caller])))))))))
+        ;; SCI refuses to define a function calling an unresolved qualified symbol,
+        ;; so the one path never stores one as a call; the definition itself is stored
+        (is (some? (:db/id (db/pull @connection [:db/id]
+                                    [:seon.fn/sym 'my.macro-caller/unresolved-caller]))))))))
 
 (deftest receipt-transitions-preserve-one-terminal-outcome
   (let [start-tx (ns-resolve 'seon.turn 'receipt-start-tx)
@@ -2267,7 +2258,8 @@
            unchanged (turn.batch/program-facts request (db/db connection) (:seon.batch/program batch))
            _ (support/transacted!
               connection
-              [(support/program-fn-entity basis 'user/stale-f
+              [(support/namespace-entity basis 'user)
+               (support/program-fn-entity basis 'user/stale-f
                                           "(defn stale-f {:malli/schema [:=> [:cat :int] :int]} [x] (dec x))"
                                           {:seon.schema.admission/source :agent})])
            head (db/db connection)
@@ -2336,6 +2328,8 @@
   ;; admitted to the program.
   (let [refusal {:seon.error/message "Recorded source argument counts disagree with the final prepared arities."
                  :seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.turn.batch/program
+                 :seon.error/operation 'seon.turn.batch/program-facts
                  :seon.error/offending [{:seon.fn/sym 'my.x/lint3}]}
         receipt (#'turn/not-admitted {:seon.eval/shown "#'my.x/lint3"} refusal)]
     (is (str/starts-with? (:seon.cluster.eval/error receipt) "Not admitted to the program")

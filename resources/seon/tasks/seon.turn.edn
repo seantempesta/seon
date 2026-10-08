@@ -216,4 +216,10 @@
              :kind :function
              :intent "seon.turn/repair-text printed an evaluation's repair vectors with the value printer and stored the text as the string attribute :seon.cluster.eval/repairs, which the reply spliced: a diagnostic stored as a printed copy, not data. Correct: the repairs are stored as [line kind text] tuples (:seon.cluster.eval/delimiter-repairs), in text order, and printed only at the reply edge. Proof: seon.repl-differential-reader-test/a-stored-repair-reads-back-as-data."
              :must-read #{seon.turn/segmented-sources}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}
+
+ #:seon.task{:name "an-identical-re-record-conflicts-with-itself"
+  :kind :function
+  :intent "seon.cluster.evaluate-sources-test/ordered-evaluation-retains-one-explicit-basis-without-publication (red on HEAD 7a9ceb44a) transacts seon.turn/record-evaluated-tx's tx-data with its first element repeated, as the contract promises ('an identical cached identity is a no-op'); the writer answers {:seon.error/operation seon.turn/record-evaluated-call :seon.error/message \"run transition refused: recorded-content-conflict\"} and nothing is recorded (seven outcomes, zero receipts). Cause not isolated: the stored content (stored-record-content) differs from the expected content (recorded-evaluation) for the run's own just-written evaluations. Correct: find the key that differs and make saving and comparison read one projection. Done when that test is green."
+  :must-read #{seon.turn/record-evaluated-call seon.turn/record-evaluated-tx}
+  :evidence #{"docs/research/agent-platform/2026-10-08/review/red-triage.md"}}]

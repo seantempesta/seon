@@ -2,4 +2,10 @@
              :kind :function
              :intent "bin/seon --root R reset NAME --force took 6.4-12.7 s on a fresh disposable root (stop and unlink under 0.2 s): almost all of it start! re-standing the cluster in the same JVM. Profiled (8.4 s with 63 hosts): seon.cluster/arm-host-program! re-armed all 2,584 contracted Vars (2.2 s) because seon.instrument's current-wrapper? compared the call-preparation snapshot's checked-through-t, a database position no wrapper reads; seon.fn.analyzer/ensure-dependency-analysis! linted the checkout's non-program roots (1.2 s); the new cluster's base-context derivation (1.1 s, cold index nodes); stopping 63 hosts (1.7 s). Correct: reset reuses the JVM's armed program, loaded namespaces and caches so it costs well under 2 s. Proof: seon.instrument-test/a-later-database-value-of-the-same-program-keeps-every-wrapper, plus profile evidence of start! after a reset."
              :must-read #{seon.cluster.boot/start! seon.cluster/arm-host-program! seon.fn.analyzer/ensure-dependency-analysis!}
-             :evidence #{"docs/research/agent-platform/2026-10-07/host-cost/host-cost-notes.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/host-cost/host-cost-notes.md"}}
+
+ #:seon.task{:name "a-development-cluster-boots-in-tens-of-seconds"
+  :kind :function
+  :intent "seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-builds-an-attempt-ready-prompt boots one real development cluster with seon.cluster.boot/start! and ran 49.9 s (declared bound 5 s; throwaway JVM check on 7a9ceb44a with two other check JVMs running). Over ten seconds needs an issue: profile start! on an empty store, name the armed functions that dominate and fix them. Done when the same test measures under its declared bound."
+  :must-read #{seon.cluster.boot/start!}
+  :evidence #{"docs/research/agent-platform/2026-10-08/review/red-triage.md"}}]
