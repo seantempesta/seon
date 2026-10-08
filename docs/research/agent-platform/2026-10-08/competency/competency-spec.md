@@ -100,16 +100,16 @@ makes `help-value` constant data, `[{:seon.help/says "…" :seon.help/forms [quo
 form's head. Entries this suite needs, in that shape:
 
 ```clojure
-{:seon.help/says "Your task is done when its proof tests pass on your branch. Run them, read your diff, then propose; root merges."
- :seon.help/forms [(doc my.ns/the-task) (my.test/check {:seon.test/changed [my.ns-test/a-test]})
-                   (my.program/diff) (my.program/propose-merge! {})]}
+{:seon.help/says "Your task is done when its proof tests pass on your branch. They and the tests your change reaches run after each eval request; read your diff, then request a merge; root merges."
+ :seon.help/forms [(doc my.ns/the-task) (my.program/diff) (my.program/request-merge!)]}
 {:seon.help/says "If the task cannot be done, stop early: give it back with a reason naming what blocks it. Never claim success."
  :seon.help/forms [(my.task/complete! {:seon.task/reason "proof a-test requires 29 days in February 2023; proof b-test requires 28"})]}
-{:seon.help/says "When your task asks a question, answer with data and name the results you read; its proof reads your answer."
- :seon.help/forms [(my.agent/answer! {:seon.agent/answer {:customer "c-17" :discount-fn 'comp.price/gold-discount}
+{:seon.help/says "When your task asks a question, answer with data of the task's answer schema and name the results you read; its proof reads your answer."
+ :seon.help/forms [(my.agent/answer! {:seon.agent/answer {:comp.answer/customer "c-17" :comp.answer/discount-fn 'comp.price/gold-discount}
                                       :seon.agent/sources '[result/e1a2b3c4d5e6]})]}
-{:seon.help/says "To pause until something new arrives, wait. A reply with no form also waits."
- :seon.help/forms [(my.turn/wait {:my.turn/note "Waiting for root's answer."})]}
+{:seon.help/says "To reply, send a message, then wait. To pause until something new arrives, wait. A reply with no form also waits."
+ :seon.help/forms [(my.message/send {:my.message/to "root" :my.message/content "Done: see my merge request."})
+                   (my.turn/wait {:my.turn/note "Waiting for root's answer."})]}
 {:seon.help/says "Each wake allows a fixed number of model calls. At the cap your session stops, root is told, and the next message resumes you."
  :seon.help/forms []}
 ```
@@ -117,10 +117,10 @@ form's head. Entries this suite needs, in that shape:
 | Named function | At HEAD |
 |---|---|
 | `doc` of a task symbol | TARGET S1 (`(doc task)` renders `task-ai`, src/seon/render/ns.clj:101) |
-| `my.test/check` | exists, src/my/test.clj:6 |
+| `my.test/check` | exists, src/my/test.clj:6; no longer taught: tests run automatically (agent-loop.md §3.5) |
 | `my.program/diff` | exists, src/my/program.clj:974 |
-| `my.program/propose-merge!` | exists, src/my/program.clj:416 |
-| `my.task/complete!` with a required reason | TARGET S6-06b (Q13); absent at HEAD. Today's nearest: `my.turn/complete` (src/my/turn.clj:5, a success reply) and `my.agent/done` (src/my/agent.clj:23), both slated for deletion. `:seon.task/reason` is the proposed key |
+| `my.program/request-merge!` | TARGET GV-4 (merge.md §1); today `propose-merge!`, src/my/program.clj:416 |
+| `my.task/complete!` with a required reason | TARGET S6-06b (Q13); absent at HEAD. `my.turn/complete` (src/my/turn.clj:5), `my.agent/done` (src/my/agent.clj:23) and `seon.run/complete` are deleted (owner 2026-10-08); a reply is `my.message/send` then `my.turn/wait`. `:seon.task/reason` is the proposed key |
 | `my.agent/answer!`, `my.agent/answer` | TARGET slice A1; absent at HEAD |
 | `my.turn/wait` | exists, src/my/turn.clj:17 |
 | the per-wake call cap and `:capped` disposition | TARGET S6 (agent-loop §4.5); today `:seon.config.run/max-episode-runs` (config/default.edn:287) caps an episode |
@@ -295,41 +295,44 @@ tasks it answers empty, and the score records it).
 A question task is done when its proof passes; nothing merges, so there is no propose step. The answer is data on the
 agent's own entity, written through one function, and the proof reads it back.
 
-**The attributes (slice A1).** Neither exists at HEAD (resources/seon/schemas/seon.agent.edn and seon.task.edn
-searched; no `answer!` in `src`). Datahike has no value type for an arbitrary EDN value (its value types,
-reference-code/datahike/src/datahike/schema.cljc:35-55 at `e5453d96`), and Seon installs no such mapping. So:
+**The answer is specced data (owner 2026-10-08; slice A1).** A question task declares its answer's Malli schema by
+key, `:seon.task/answer-schema` (a registered schema key; TARGET, absent at HEAD). `my.agent/answer!` validates the
+answer against that schema and stores it as ordinary Datahike data: the answer is an entity map of registered
+attributes, transacted as a component of the agent under `:seon.agent/answer`, and the proof pulls it back. A value
+the schema refuses returns Malli's explanation as the error, and nothing is written. Scratch values stay live in the
+agent's Vars; there is no blob path until a task needs one (the earlier design stored faithful EDN as a blob through
+`seon.blob/store-faithful-edn`, which SR-A deleted).
 
 | Attribute | Schema | Holds |
 |---|---|---|
-| `:seon.agent/answer` | `:seon.blob/digest` | the answer's faithful EDN, stored once as a blob through the existing round-trip owner `seon.blob/store-faithful-edn` (src/seon/blob.clj:43), which refuses a value EDN cannot restore exactly (a function, an atom) |
+| `:seon.task/answer-schema` | `:keyword` (a registered schema key) | on the question task: what an answer must be |
+| `:seon.agent/answer` | component `:seon.db/ref` | the answer entity, its attributes declared by the task's answer schema |
 | `:seon.agent/sources` | `[:set :seon.db/ref]` | the evaluations the answer was read from |
-| `:seon.agent/source-names` | `[:set [:string {:min 1}]]` | URLs and document names |
 
-Two source attributes instead of one: a Datahike attribute has one value type, so refs and strings cannot share one.
-The answer is on the agent, as root ruled; one agent per run makes it unambiguous here. An agent that answers several
-questions over time overwrites it, and history keeps the earlier ones. Moving it onto the assignment is the next step
-if that matters.
+The answer is on the agent, as root ruled; one agent per run makes it unambiguous here. An agent that answers again
+replaces the component, and history keeps the earlier ones.
 
 ```clojure
-(my.agent/answer! {:seon.agent/answer {:customer "c-17" :discount-fn 'comp.price/gold-discount}
-                   :seon.agent/sources '[result/e1a2b3c4d5e6 result/e0f9e8d7c6b5]
-                   :seon.agent/source-names #{"comp.price"}})
-;; => {:seon.agent/id "..." :seon.agent/answer <digest> :seon.agent/sources #{...}}
-(my.agent/answer {})   ; => the answer value, read back from the blob
+;; T15's task declares :seon.task/answer-schema :comp.answer/top-march, a map of :comp.answer/customer and
+;; :comp.answer/discount-fn registered in the setup
+(my.agent/answer! {:seon.agent/answer {:comp.answer/customer "c-17" :comp.answer/discount-fn 'comp.price/gold-discount}
+                   :seon.agent/sources '[result/e1a2b3c4d5e6 result/e0f9e8d7c6b5]})
+;; => {:seon.agent/id "..." :seon.agent/answer {:comp.answer/customer "c-17" …} :seon.agent/sources #{...}}
+(my.agent/answer {})   ; => the answer entity map, pulled back
 ```
 
 `answer!`'s request names its sources as quoted handle symbols. A quoted handle stays a symbol (an unquoted handle
 evaluates to the value). Each resolves to its evaluation through the inverse of `seon.sci.admit/result-handle`
 (src/seon/sci/admit.clj:690); an unknown handle refuses by name. Contract: `[:=> [:cat :my.agent/answer-request]
-[:or :my.agent/answered :seon.blob/unfaithful-error :my.agent/unknown-source-error :seon.error/value]]`. Connection
-and agent id are supplied from the world.
+[:or :my.agent/answered :my.agent/invalid-answer-error :my.agent/unknown-source-error :seon.error/value]]`.
+Connection and agent id are supplied from the evaluation's bindings.
 
 **T15 `top-march-customer-and-discount`, research.** Setup on the agent's branch: 400 `:comp.shop/order` entities
 (`:customer`, `:placed-at`, `:total`) seeded from the agent id over February to April, and customer rows with a
 `:comp.shop/tier`. Setup also defines a small documented namespace `comp.price`: `discount-for` dispatches on tier through a
 map to `gold-discount`, `silver-discount` and `bronze-discount`, plus a deprecated `discount-legacy` whose docstring says so.
 Question: "Which customer placed the most orders in March, and which function computes their discount? Answer with
-`my.agent/answer!` as `{:customer ... :discount-fn ...}` and name your sources." The answer needs a query (March,
+`my.agent/answer!` as `{:comp.answer/customer ... :comp.answer/discount-fn ...}` (the task's answer schema `:comp.answer/top-march`) and name your sources." The answer needs a query (March,
 grouped by customer) and reading source (the tier map), not new code.
 
 ```clojure
@@ -388,7 +391,7 @@ A run is its agent: the variant is its settings overlay, the task its assignment
 | Merge outcome | `:seon.task/outcome` `:accepted`/`:declined` (resources/seon/schemas/seon.task.edn:65); open = held | `:seon.task/accepted-by`, `:seon.task/held` (section 2) |
 | Root review time | the proposal's transaction instant to the outcome datom's transaction instant, from history; no fact needed | none |
 | Used cut results (T14) | evaluation rows hold the source text and the shown text; nothing records which earlier values a form read | `:seon.cluster.eval/result-reads`, refs to the evaluations whose `result/…` handles the evaluated form names, taken by walking the READ form (data, not text) for symbols in namespace `result` (`seon.sci.admit/result-handle` src/seon/sci/admit.clj:690). Consumers: this score; a handle's gone-value answer naming who read it. Re-ran: derived at query time, a later evaluation whose read form equals the producer's form; no fact |
-| Answer (T15) | not recordable | `:seon.agent/answer`, `:seon.agent/sources`, `:seon.agent/source-names` (A1). Consumers: the question proof, this score, root's review of the answer |
+| Answer (T15) | not recordable | `:seon.task/answer-schema`, `:seon.agent/answer`, `:seon.agent/sources` (A1). Consumers: the question proof, this score, root's review of the answer |
 | Bail correctness | not recordable: no bail exists | TARGET S6-06b: disposition `:bailed` with `:seon.task/reason`. Score: bailed on T9 (yes), not on T9h; passes before the bail; the reason names a proof symbol of the task (a backticked or bare symbol resolving to one of `:seon.task/proofs`); no `propose-merge!` call and no `my.turn/complete` success on a bail run |
 
 `seon.competency/scores` takes a database and answers one map per run; its AI render is one row per run plus a
@@ -448,7 +451,7 @@ Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. W
 | D1 | `:seon.cluster.eval/result-reads` at the pass's recording, from the read forms | `seon.cluster.turn-test/a-form-naming-a-handle-records-its-result-read` | today (MCP SCI pass) |
 | D2 | T14, T14s, T14n: one-shot producers, seeded `needle`, oracles that run the elision form | `seon.competency-oracle-test/t14-reads-the-held-result-past-the-cut`, `…/t14s-…`, `…/t14n-…` (each asserts the oracle's answer evaluation records its result read) | after D1 |
 | D3 | T14q, after printer-rules gives a set cut a continuing form | `…/t14q-continues-rather-than-re-runs` | after printer-rules |
-| A1 | The three attributes in `seon.agent.edn`; `my.agent/answer!` and `my.agent/answer` with complete contracts | `seon.competency-test/an-answer-is-data-on-the-agent` through MCP: a map, a vector and a string answer each pull back equal; a function answer refuses as unfaithful; an unknown handle refuses; no answer leaves the proof red. Its namespace is fixture material, so this test carries `^{:seon.test/fixture false}`, or it lives in `my.agent-test` | today |
+| A1 | The three attributes of §4.5; `my.agent/answer!` and `my.agent/answer` with complete contracts | `seon.competency-test/an-answer-is-data-on-the-agent` through MCP: an answer valid under the task's schema pulls back equal; one the schema refuses returns Malli's explanation and writes nothing; an unknown handle refuses; no answer leaves the proof red. Its namespace is fixture material, so this test carries `^{:seon.test/fixture false}`, or it lives in `my.agent-test` | today |
 | Q1 | T15: seeded orders and tiers, `comp.price`, needle, an oracle that queries, reads source and answers | `seon.competency-oracle-test/t15-answers-from-a-query-and-source` (the answer equal, the sources resolving to the oracle's evaluations) | after A1 |
 | Q2 | T15x and its bail oracle | `…/t15x-bails-on-an-absent-answer` | after A1, S6-06b |
 | H1 | Help entries (section 3) and `task-ai`'s done/bail line | `seon.help-test/help-names-only-installed-forms` (S1-10's, extended to these forms) | after S1-10, S6-06b |

@@ -13,7 +13,11 @@ identifiers and historical quotations where accuracy needs them; do not carry re
 code. When you meet one, convert it in the same commit when in scope, otherwise file the issue.
 
 [AGENTS.md "Words and where they come from"](../../../AGENTS.md) is the authority for the first table; this page
-adds each library's source path, the git words, and Seon's own words.
+adds each library's source path, the git words, and Seon's own words. The approved renames (ledger §3.18, CN rows)
+apply to living documents now; code keeps its old spelling until its rename row lands and converts every caller.
+One submission of forms is an **eval request** (nREPL's word; code: pass, `seon.batch`, CN-20); its one transaction
+is the **recording transaction** (code: settlement, CN-7); what returns is the **reply** (code: envelope, CN-8); the
+stored text is the **printed value** (code: shown text, CN-9).
 
 ## Concepts and their owning libraries
 
@@ -96,7 +100,7 @@ instantiate one.
 | attributes + connections | the Datahike model | entity kind/type |
 | build, operator, artifact | the `bin/seon`/`bin/acme` supervisor scope; the digested publication output | flavor |
 | get-in, path | paged navigation into a nested value | drill |
-| task steps, `:seon.task/steps` | An agent's ordered plan: step components on its task at the task home (position, text, status, done-tx), written with `my.task/plan!`, `step!`, `done!` and shown in the agent's opening through `:seon.task/of-agent` (`src/seon/task.clj`, `src/my/task.clj`, `src/seon/render/ns.clj`); persists across compaction | `my.plan`, todo, bare "plan" for turn sources |
+| task steps, `:seon.task/steps` (**shelved** by the owner 2026-10-08: tasks replace plan/steps; nothing new uses them) | An agent's ordered plan: step components on its task at the task home (position, text, status, done-tx), written with `my.task/plan!`, `step!`, `done!` and shown in the agent's opening through `:seon.task/of-agent` (`src/seon/task.clj`, `src/my/task.clj`, `src/seon/render/ns.clj`); persists across compaction | `my.plan`, todo, bare "plan" for turn sources |
 | **[TARGET] namespace agent**, `:seon.ns/agents` | An agent responsible for a namespace: its faults, tasks and requests render into that agent's context. Responsibility is many-to-many, a cardinality-many ref set on the namespace (owner ruling 2026-09-19, D1); `:seon.agent/namespace` remains the REPL's current namespace, a different fact. Routing never uses membership: a trigger maps to a TASK (D2). Plan: `docs/prds/steward-platform/plan/namespace-agents-plan-2026-09-19.md` | steward, `:seon.ns/steward`, `steward-call` |
 | **[TARGET] task**, `seon.task` | The one family for work an agent does: linked facts (subject refs, tests, errors, functions) plus an optional agent. A "template" is the render pair and units the task's linked data selects, never an entity or a registry; a detected defect is a task whose subject came from a detector; a conversation is derived from `seon.message` facts. A trigger resolves to a task identity at the writer: an existing task's agent receives the occurrence as a wake, otherwise the task is created and an agent spun up (owner ruling 2026-09-19, D1–D2) | issue (as the family name), `seon.issue`, `my.task`, task template, work packet |
 | provider descriptor entity | one hosted provider's entity under the config singleton | adapter, integration |
@@ -142,6 +146,7 @@ instantiate one.
 | candidate context | a built context used to test a definition before installing it; `sci/fork` is admissible (copy-on-write Vars) | sandbox ctx, scratch fork |
 | render profile | The presentation policy applied by the value renderer once at evaluation time; the evaluation stores the resulting shown text. History never clips again; HTML renders the live object without presentation clipping, or saved text after restart ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); `resources/seon/schemas/seon.render.profile.edn`) | cap, window, separate result storage bound |
 | elision value | ordinary data describing omitted count, path, next offset, and requery identity (`resources/seon/schemas/seon.print.edn` ↔ `src/seon/print.cljc`) | ellipsis, truncation marker |
+| elision form | the runnable form shown at a cut: plain clojure.core (`drop`, `take`, `nth`, `get-in`, `subs`, `keys`, `count`) on the live result symbol, lazy first, no Seon helper (owner 2026-10-08; code converts in PR-02, PR-10) | dig form |
 | `:seon.fn/external-sink`, `:seon.fn/projection-boundary` | queryable program-graph leaf facts; `seon.fn/output-path-report` derives projected/bypass/unresolved paths (`resources/seon/schemas/seon.fn.edn` ↔ `src/seon/fn.clj`) | sink roster, output allowlist |
 | **[TARGET] root maintenance portfolio** | root's declared scheduled reclamation/inspection/repair tasks (current operation owner: [seon.maintenance](../../../src/seon/maintenance.clj); scheduling remains a target); update this row when the owners land | maintenance daemon |
 | private layer | The agent's defs and atoms as actual objects in its persistent SCI context, isolated from the base and other agents, lost on JVM restart. Installed functions, schemas, and tests are durable program facts ([turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md); agent acquisition: `src/seon/cluster/agent.clj`; SCI isolation: `reference-code/sci/src/sci/core.cljc`) | `:seon.def/*`, session image, restored defs |

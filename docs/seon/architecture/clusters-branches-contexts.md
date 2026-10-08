@@ -59,9 +59,10 @@ supply the facts each operation reads.
    three functions as an isolated agent; the runner is never a second mechanism.
 7. **Merge is program entities only, git-like.** Non-conflicting entities land on the
    merge branch; conflicts stay for the agent to fix there, so the problem
-   shrinks; the combined program is tested in a context forked from that branch. The
-   gate is green reaching tests plus contracts; a named accept (root or the owner)
-   then advances the pointer. Write-back to files is the same gate; its diff is a
+   shrinks; the combined program is tested in a context forked from that branch.
+   `merge!` commits only when every test on the merge branch is green (the proofs, the
+   tests reaching the change and root's chosen tests) and integrity holds; that commit
+   advances main ([merge.md](../specs/merge.md)). Write-back to files is the same gate; its diff is a
    separate spec (branch + current codebase in, minimal recomputation, spans or whole
    files out).
 8. **Filesystem lanes (Codex, Claude) are live agents on one branch of
@@ -71,4 +72,6 @@ supply the facts each operation reads.
    Isolation between filesystem lanes remains file ownership. Seon agents doing all
    updates is the goal; the filesystem path is bootstrap.
 9. **Delete the branch, then GC.** A deleted branch leaves the roster; its data is
-   reclaimed by the retention sweep, never by a per-branch cleanup.
+   reclaimed by the retention sweep, never by a per-branch cleanup. A finished agent's
+   branch is deleted once its task is done or given back and its merge request is
+   closed, so its history and blobs can be collected (owner 2026-10-08; merge.md §4).

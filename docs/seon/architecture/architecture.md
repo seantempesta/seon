@@ -41,7 +41,15 @@ apply to boot, evaluation, tests, rendering, effects and cleanup.
 ## 2. Process, store and boot
 
 The operator supplies a small bootstrap configuration: process root, store path,
-REPL binding and logs. It opens the host REPL before store acquisition so boot
+REPL binding and logs. Every size, count, byte budget, heap cap, timeout and threshold
+is a configuration dial whose shipped default fits a 16 GB machine running many agents
+beside the user's work, never derived from host RAM (owner 2026-10-08): the heap cap
+(4 GB, `:seon.config.operator/heap-max-bytes`, passed as `-Xmx`), `seon.cache`'s byte
+budget (512 MB, live results inside it), Datahike's node cache (to become byte-bounded,
+replacing its soft-referenced retention: ledger DH-4a/b), the 4,096-byte inline/blob
+threshold and the timeouts. Configuration files are to be read by Aero (`#profile`,
+`#env`, `#include`; one file for the JVM and the Babashka operator; ledger DIAL-1), with
+Malli validation and the database reconcile of `seon.config` unchanged. It opens the host REPL before store acquisition so boot
 failure can be inspected. The process root owns the store under a lifetime lock;
 Datahike's connection writer serializes transactions, but does not prevent another
 process from opening the same store. A cluster receives one environment value
