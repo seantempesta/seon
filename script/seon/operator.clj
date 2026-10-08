@@ -1439,6 +1439,19 @@
             :seon.operator/phases (:seon.operator/phases source)}
            (program-source (:seon.boot/advertisement outcome)))))
 
+(defn- adopted!
+  "`default`'s adoption of the publication the ready JVM of `root` booted with:
+  a resumed store's boot publishes the changed files onto `current-src` but an
+  existing cluster keeps its program until it adopts. The adoption, or its
+  failure as a diagnostic."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [root]
+  (try (connected! {:seon.operator/managed-root root
+                    :seon.operator/command :init
+                    :seon.operator/development-cluster "default"})
+       (catch Exception cause
+         (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause))))
+
 (defn move-to-head!
   "Replace the root's JVM with one whose program is committed HEAD, keeping the
   store and every cache.
@@ -1483,12 +1496,7 @@
         missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
         ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
         began-adopt (System/nanoTime)
-        adoption (when ready?
-                   (try (connected! {:seon.operator/managed-root root
-                                     :seon.operator/command :init
-                                     :seon.operator/development-cluster "default"})
-                        (catch Exception cause
-                          (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause))))
+        adoption (when ready? (adopted! root))
         adopt-ms (elapsed-ms began-adopt)
         adopted? (and ready? (not (:seon.error/message adoption)))
         pruned (when adopted? (prune-archives! root source-root))
@@ -1942,16 +1950,29 @@
             seeded-ms (elapsed-ms began)
             boot (launched-throwaway! root disposable sha)
             booted-ms (elapsed-ms began)
-            run (when (:seon.operator/ready? boot)
+            ;; The template's `default` runs the base's program: it adopts the
+            ;; candidate's publication before its tests are selected, or a test
+            ;; the candidate adds is not one of its tests.
+            adoption (when (:seon.operator/ready? boot) (adopted! disposable))
+            adopted-ms (elapsed-ms began)
+            adopted? (and (:seon.operator/ready? boot) (not (:seon.error/message adoption)))
+            run (when adopted?
                   (run-candidate-tests! (:seon.operator/source-root boot) disposable tests include-long?))
             phases (merge (:seon.operator/phases boot)
                           {:seon.operator/slot-wait-ms waited-ms
                            :seon.operator/seed-ms (- seeded-ms waited-ms)
-                           :seon.operator/tests-ms (- (elapsed-ms began) booted-ms)})
+                           :seon.operator/adopt-ms (- adopted-ms booted-ms)
+                           :seon.operator/tests-ms (- (elapsed-ms began) adopted-ms)})
             evidence {:seon.operator/test-phases phases :seon.operator/seed seed
                       :seon.operator/swept swept}]
-        (if (:seon.operator/ready? boot)
+        (cond
+          adopted?
           (merge run evidence)
+          (:seon.operator/ready? boot)
+          (diagnostic (str "The throwaway JVM from " sha " refused to adopt its publication; its tests did not run.")
+                      (assoc evidence :seon.operator/adoption adoption)
+                      :client-failed)
+          :else
           (diagnostic (str "The throwaway JVM from " sha " did not reach readiness; its tests did not run.")
                       (assoc evidence :seon.operator/value (:seon.operator/value boot)
                              :seon.operator/log-tail (log-tail (str (io/file disposable "data/clusters/default/logs/seon.log")) 40))
