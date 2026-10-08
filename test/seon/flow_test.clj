@@ -13,6 +13,8 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [seon.flow :as sut]
+            [seon.profile :as profile]
+            [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
   (:import [java.io File]
@@ -195,6 +197,30 @@
       (finally
         (.countDown release)
         (flow/stop graph)))))
+
+(deftest ^{:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}}
+  a-proc-thread-lives-in-its-projection-world-without-one-armed-call
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "flow-projection-thread")
+     (test-support/apply-config! connection "flow-projection-thread" {})
+     (let [database (db/db connection)
+           state (sci.eval/projection-state database (schema/projection-from-database database)
+                                            "flow-projection-thread")
+           wrapper (first (filter #(= 'seon.schema/call-with-projection-state (:seon.profile/sym %))
+                                  (profile/cells)))
+           executor (#'sut/graph-executor {::sut/projection-state state})
+           seen (.submit ^java.util.concurrent.ExecutorService executor
+                         ^java.util.concurrent.Callable
+                         (fn [] {:state @#'schema/*projection-state*
+                                 :entered (some-> ^ThreadLocal (:seon.profile/entered wrapper) .get)}))]
+       (try
+         (is (some? wrapper) "the wrapper is armed, so a counted call would show")
+         (let [{:keys [entered] :as observed} (.get seen 5 TimeUnit/SECONDS)]
+           (is (identical? state (:state observed)) "the thread runs in the graph's projection state")
+           (is (nil? entered) "the thread's life is not a call of the wrapper"))
+         (finally
+           (.shutdown executor)))))))
 
 (deftest an-idle-graph-joins-at-once
   (let [{::sut/keys [graph executor]} (join-probe-graph! (CountDownLatch. 1) (CountDownLatch. 1))]

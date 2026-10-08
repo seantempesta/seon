@@ -1123,21 +1123,41 @@
   (binding [*packaged-forms* forms]
     (f)))
 
+(defn projection-bindings
+  "The Var bindings that make `projection` this thread's declaration population.
+
+  A thread that lives in that world for its whole life (a Flow proc loop)
+  installs them with `with-bindings`, so its lifetime is never counted as one
+  armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
+  {:malli/schema [:=> [:cat :map] [:map-of [:fn clojure.core/var?] [:or :nil :map]]]}
+  [projection]
+  {#'*projection* projection
+   #'*projection-state* nil})
+
+(defn projection-state-bindings
+  "The Var bindings that make `projection-state` this thread's advanceable projection.
+
+  A thread that lives in that world for its whole life (a Flow proc loop)
+  installs them with `with-bindings`, so its lifetime is never counted as one
+  armed call (task `seon.profile/scope-wrappers-report-callback-time-as-work`)."
+  {:malli/schema [:=> [:cat [:fn clojure.core/deref]] [:map-of [:fn clojure.core/var?] [:or :nil [:fn clojure.core/deref]]]]}
+  [projection-state]
+  {#'*projection-state* projection-state
+   #'*projection* nil
+   #'*packaged-forms* nil})
+
 (defn call-with-projection
   "Call `f` with one immutable database-derived projection for this operation."
   {:malli/schema [:=> [:cat :map [:fn clojure.core/ifn?]] [:or :seon.error/base :seon.schema/validation-refusal :seon.db.write/validation-refusal :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The callback preserves declaration data or returns the writer's base diagnostic or instrumentation registration refusal unchanged.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [projection f]
-  (binding [*projection* projection
-            *projection-state* nil]
+  (with-bindings (projection-bindings projection)
     (f)))
 
 (defn call-with-projection-state
   "Call `f` with one cluster-owned, advanceable schema projection state."
   {:malli/schema [:=> [:cat [:fn clojure.core/deref] [:fn clojure.core/ifn?]] [:or :seon.schema/validation-refusal :seon.db.write/validation-refusal :seon.instrument/registration-error [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The body returns its polymorphic result unchanged; instrumentation acquisition can return its declared registration refusal.", :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [projection-state f]
-  (binding [*projection-state* projection-state
-            *projection* nil
-            *packaged-forms* nil]
+  (with-bindings (projection-state-bindings projection-state)
     (f)))
 
 (defn- active-projection []

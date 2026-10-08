@@ -87,10 +87,13 @@
      (newThread [_ runnable]
        (.unstarted (Thread/ofVirtual)
                    (cond
+                     ;; the thread's whole life runs in the world, not as one armed call
                      projection-state
-                     #(schema/call-with-projection-state projection-state (fn [] (.run runnable)))
+                     (let [bindings (schema/projection-state-bindings projection-state)]
+                       #(with-bindings bindings (.run runnable)))
                      projection
-                     #(schema/call-with-projection projection (fn [] (.run runnable)))
+                     (let [bindings (schema/projection-bindings projection)]
+                       #(with-bindings bindings (.run runnable)))
                      :else runnable))))))
 
 (defn start-graph!
