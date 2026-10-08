@@ -57,4 +57,8 @@
  #:seon.task{:name "verified-recomputes-reach-digests-for-the-whole-program"
              :kind :function
              :intent "seon.test/verified? on a proof with a recorded result calls seon.test.runner/reach-digests: 5.9 s, 4.2 GB, 3.3M calls cold (whole-program work) on every seon.task/assign! of a proof with evidence (lane assign-reply). Done when the digests are derived only for the proof's reach and cached by content, with timing on the same probe under one second."
-             :must-read #{seon.test.runner/reach-digests seon.test/verified?}}]
+             :must-read #{seon.test.runner/reach-digests seon.test/verified?}}
+ #:seon.task{:name "every-eval-request-reports-unrelated-reds-as-reaching"
+             :kind :function
+             :intent "Every eval request on default answers :seon.turn.loop/reaching red with tests that do not reach anything it evaluated: (my.agent/branch) by a fresh unassigned agent answered red [live.text-test/initials-of-words, my.program-test/source-shows-the-docstring-once-inside-the-source, seon.html-views-test/the-settings-render-shows-the-overrides-it-was-handed, seon.render.ns-test/a-doc-line-is-the-docstrings-first-sentence] (fanout run, default e1a71b7c8, 2026-10-08), and agent fan-settings, green on its proof, was shown the other agents' proofs as its own reaching reds. An agent cannot tell what its change broke. Done when the reaching set is the tests that reach the eval request's changed definitions, and a request that changed none reports none."
+             :must-read #{seon.test.runner/reach-digests seon.cluster.branch-evidence/branch-evidence}}]

@@ -103,4 +103,8 @@
  #:seon.task{:name "remove-ns-allocates-two-gigabytes"
              :kind :function
              :intent "(my.program/remove-ns! 'tq.probe) allocated 2,061 MB in 839 ms for a tiny namespace (lane assign-reply). Done when the cost follows the namespace's own definitions."
-             :must-read #{my.program/remove-ns!}}]
+             :must-read #{my.program/remove-ns!}}
+ #:seon.task{:name "a-root-repl-proof-cannot-reach-its-file"
+             :kind :function
+             :intent "Root gives a real backlog task its red proof by a deftest at its REPL on main (a proof must be at the home before seon.task/assign! accepts it), but nothing writes that deftest to its file: bin/lane evidence for an agent's branch called test/my/program_test.clj unanalyzable once the deftest was appended by hand (it used clojure.string/includes? without a require), and differing (namespace row and test digest) after adding the require (fanout run, default e1a71b7c8, 2026-10-08), so each proof landed through a separate 55 s throwaway check (e39453e05). Done when root writes its own main definitions back with the same write-back and the proof file commits with the agent's change by branch evidence."
+             :must-read #{my.program/write-branch! seon.cluster.branch-evidence/branch-evidence seon.task/assign!}}]

@@ -7,4 +7,8 @@
              :kind :function
              :intent "The namespace docstring says a definition's batch schedules its reaching tests, but no pass does: the only callers of `seon.test/run` are `my.test/check`, `my.test/run-owned`, `my.program/propose-merge!` and root's candidate gate. Redefining a function reached by a test leaves status answering :pending across later passes with no member row. After an explicit `my.test/check` records that test red, status answers {} because a red with no earlier result is neither pending nor newly red, so the agent is never shown its red test. The pass schedules the reaching tests off the pass (agent-loop spec 4.5, AR-01) and status names a first red (AR-04)."
              :must-read #{seon.render.var/status}
-             :evidence #{"docs/seon/specs/agent-loop.md"}}]
+             :evidence #{"docs/seon/specs/agent-loop.md"}}
+ #:seon.task{:name "the-offered-check-names-an-unquoted-symbol"
+             :kind :function
+             :intent "A defn's reply offers (my.test/check {:seon.test/changed [my.program/source]}) with the symbol unquoted; agent fan-source ran it as offered and got \"my.test/check refused argument 0 at [:seon.test/changed 0]: expected ... a namespaced symbol, got an instance of clojure.lang.AFunction$1\" (fanout run, default e1a71b7c8, 2026-10-08). `seon.render.var/render-ai` builds (list 'my.test/check {:seon.test/changed [sym]}). Done when every offered operation evaluates as shown, with a test evaluating the offered form."
+             :must-read #{seon.render.var/render-ai my.test/check}}]

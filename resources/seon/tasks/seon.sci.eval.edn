@@ -312,4 +312,8 @@
  #:seon.task{:name "showing-an-infinite-lazy-seq-realizes-far-past-what-is-shown"
              :kind :function
              :intent "`seon.sci.eval-test/showing-a-value-realizes-and-stores-only-what-is-shown` is red at HEAD 9aea31407 (bin/seon check, 2026-10-08): an infinite lazy seq shown in a reply is realized to 3,201 elements where the test bounds it at 64. The value printer's budget should bound realization to what it shows. Done when that test is green."
-             :must-read #{seon.sci.eval/shown-result}}]
+             :must-read #{seon.sci.eval/shown-result}}
+ #:seon.task{:name "a-branch-redefinition-never-reaches-its-inherited-callers"
+             :kind :function
+             :intent "An agent's admitted redefinition of a private helper never reaches the unchanged public function that calls it, in any later eval request, so a proof that goes through the caller stays red on a correct fix (fanout run, default e1a71b7c8, 2026-10-08). Agent fan-doc on branch :agent-f42e9edd16a3 admitted (defn- seon.render.ns/first-doc-line {:malli/schema [:=> [:cat [:maybe :string]] :string]} ...) returning the first sentence; (seon.render.ns-test/a-doc-line-is-the-docstrings-first-sentence), which calls (seon.render.ns/render-ai unit) at distance 0, still answered the first physical line in the agent's next three eval requests, while proofs calling the redefined function directly (fan-source, fan-settings) went green. The direct-call case is `seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee`; this is its caller-depth case. Done when a test calling an inherited caller sees the branch's redefinition of its callee in the next eval request."
+             :must-read #{seon.sci.eval/fork-cluster-ctx seon.render.ns/render-ai}}]

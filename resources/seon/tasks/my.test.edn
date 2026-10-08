@@ -26,4 +26,8 @@
  #:seon.task{:name "check-ignores-the-tests-key"
              :kind :function
              :intent "(my.test/check {:seon.test/tests [sym]}) ignores the key and runs the tests reaching the named function instead (13 s) (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08). Done when a named test list runs exactly those tests, with a regression, or the request schema refuses the key."
-             :must-read #{my.test/check}}]
+             :must-read #{my.test/check}}
+ #:seon.task{:name "an-agent-cannot-run-one-test-by-hand"
+             :kind :function
+             :intent "At an agent's REPL (clojure.test/run-test-var #'t) throws ClassCastException (sci.lang.Namespace cannot be cast to clojure.lang.Symbol), (clojure.test/run-test t) and (clojure.test/test-vars [#'t]) answer nil, and calling the deftest prints FAIL lines located at (lookup.clj:43) (fanout run, default e1a71b7c8, 2026-10-08; agents fan-source and live-flash-4 tried these). Done when clojure.test's own run-test-var and run-test answer their summary map at the agent's REPL, as in Clojure."
+             :must-read #{my.test/run-owned}}]
