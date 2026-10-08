@@ -604,7 +604,7 @@
         (is (= 1 (resolutions {:tx-data [wide nested]}))
             "resolution count is per transaction, never per entity")))))
 
-(deftest repeated-canonical-storage-is-decoded-once
+(deftest repeated-storage-is-decoded-once
   (let [projection (schema/declaration-projection)
         attr :datahike.read/revision]
     (doseq [n [1 10 100]]
@@ -613,11 +613,11 @@
             encoded (schema.datahike/encode-attribute-value-in projection attr value)
             [decoded calls]
             (support/armed-calls
-             '#{seon.schema.datahike/decode-canonical-edn}
+             '#{seon.schema.datahike/decode-edn}
              #(mapv (fn [_] (schema.datahike/decode-attribute-value-in projection attr encoded)) (range n)))]
         (is (= (vec (repeat n value)) decoded))
-        (is (<= (get calls 'seon.schema.datahike/decode-canonical-edn) 1)
-            "a content key is parsed and canonicalized at most once")))
+        (is (<= (get calls 'seon.schema.datahike/decode-edn) 1)
+            "a content key is parsed at most once")))
     (is (nil? (schema.datahike/decode-attribute-value-in projection attr "nil"))
         "a read does not reapply today's admission schema to canonical stored nil")
     (is (nil? (schema.datahike/decode-attribute-value-in projection attr "nil")))))

@@ -527,25 +527,48 @@
     ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
     (catch RuntimeException _ false)))
 
+(defn- readable-identifier?
+  "Whether keyword or symbol `identifier` reads back as itself. Identifiers
+  are few and recur in every value, so the reader decides each once, under
+  `seon.cache`."
+  {:malli/schema [:=> [:cat [:or :keyword :symbol]] :boolean]}
+  [identifier]
+  (seon.cache/lookup ::readable-identifier identifier (constantly 64)
+                     #(reader-round-trips? identifier) some?))
+
+(def ^:private natural-order-classes
+  "Classes whose `compare` is total and consistent with `=`, and is exactly
+  the order `seon.print/compare-values` gives two members of one class."
+  #{clojure.lang.Keyword clojure.lang.Symbol String Long java.util.UUID})
+
+(defn- natural-order?
+  "Whether `members` are all of one natural-order class, so `compare` sorts
+  them as `storage-compare` would."
+  {:malli/schema [:=> [:cat [:or :nil [:sequential :seon.schema/value]]] :boolean]}
+  [members]
+  (let [member-class (class (first members))]
+    (and (contains? natural-order-classes member-class)
+         (every? #(identical? member-class (class %)) members))))
+
 (defn- storage-data
   "Replace inexpressible identifiers and impose canonical collection order."
   [value]
   (walk/postwalk
    (fn [element]
      (cond
-       (and (keyword? element) (not (reader-round-trips? element)))
+       (and (keyword? element) (not (readable-identifier? element)))
        (tagged-literal 'seon.schema.datahike/keyword
                        [(namespace element) (name element)])
 
-       (and (symbol? element) (not (reader-round-trips? element)))
+       (and (symbol? element) (not (readable-identifier? element)))
        (tagged-literal 'seon.schema.datahike/symbol
                        [(namespace element) (name element)])
 
        (map? element)
-       (into (sorted-map-by storage-compare) element)
+       (into (if (natural-order? (keys element)) (sorted-map) (sorted-map-by storage-compare)) element)
 
        (set? element)
-       (into (sorted-set-by storage-compare) element)
+       (into (if (natural-order? (seq element)) (sorted-set) (sorted-set-by storage-compare)) element)
 
        :else element))
    value))
@@ -1127,23 +1150,21 @@
       (storage-string (validate-logical-slot-in! projection attr value))
       value)))
 
-(defn- decode-canonical-edn
-  "Decode and check canonical storage once. The tuple retains successful nil;
-  failures throw with this attribute and are never retained by the cache."
+(defn- decode-edn
+  "Decode stored EDN once. The tuple retains successful nil; failures throw
+  with this attribute and are never retained by the cache. The writer made
+  the text canonical; a read never re-prints it to judge it again."
   {:malli/schema [:=> [:cat :qualified-keyword :string] [:tuple :seon.schema/value]]}
   [attr value]
-  (let [decoded (try
-                  (edn/read-string {:readers storage-readers} value)
-                  (catch Throwable _
-                    (refuse-slot! ::malformed-edn attr value)))]
-    (when-not (= value (storage-string decoded))
-      (refuse-slot! ::noncanonical-edn attr value))
-    [decoded]))
+  [(try
+     (edn/read-string {:readers storage-readers} value)
+     (catch Throwable _
+       (refuse-slot! ::malformed-edn attr value)))])
 
 (defn attribute-decoder-in
   "Select an attribute's storage decoder once for a held projection.
   Writers retain it in their attribute plan; each value still goes through
-  the canonical EDN check and its existing content-keyed cache."
+  the EDN decode and its existing content-keyed cache."
   {:malli/schema [:=> [:cat :map :keyword] :seon.instrument/callable]}
   [projection attr]
   (if-not (edn-encoded-attr-in? projection attr)
@@ -1153,15 +1174,15 @@
         (refuse-slot! ::storage-not-string attr value))
       (first
        (seon.cache/lookup
-        ::decoded-edn [decode-canonical-edn storage-string storage-readers attr value]
+        ::decoded-edn [decode-edn storage-readers attr value]
         ;; Stored text, decoded nodes and the key; no second value walk to weigh.
         (constantly (* 10 (count value)))
-        #(decode-canonical-edn attr value))))))
+        #(decode-edn attr value))))))
 
 (defn decode-attribute-value-in
   "Decode one attribute value against exactly one projection.
 
-   Refuses storage that is not canonical EDN. A committed value is returned as
+   Refuses storage that is not EDN. A committed value is returned as
    written: admission judges writes, and a read never re-applies the current
    write schema to it (a dependency plan stored before its pattern bound
    reads whole). A caller choosing among candidate attributes validates the

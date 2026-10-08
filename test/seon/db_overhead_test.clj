@@ -67,13 +67,12 @@
         {:seon.db-overhead/keys [by-function] decoded :seon.db-overhead/value}
         (observe #(mapv decode (repeat 100 encoded)))]
     (is (= (vec (repeat 100 value)) decoded))
-    (is (= 100 (get by-function 'seon.cache/lookup)) "canonical decoding remains armed")
+    (is (= 100 (get by-function 'seon.cache/lookup)) "decoding remains armed")
     (is (zero? (get by-function 'seon.schema.datahike/compiled-storage 0))
         "a retained decoder does not traverse the storage schema per value")
     (is (nil? (decode "nil")) "canonical historical values are read without re-admission")
     (doseq [[stored rule] [[1 :seon.schema.datahike/storage-not-string]
-                           ["{" :seon.schema.datahike/malformed-edn]
-                           [" nil" :seon.schema.datahike/noncanonical-edn]]]
+                           ["{" :seon.schema.datahike/malformed-edn]]]
       (let [refusal (try (decode stored) (catch clojure.lang.ExceptionInfo error (ex-data error)))]
         (is (= attribute (:seon.schema.datahike/attr refusal)))
         (is (= rule (:seon.schema.datahike/rule refusal)))))))

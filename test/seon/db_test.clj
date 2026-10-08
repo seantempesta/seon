@@ -792,6 +792,42 @@
        (is (< (get calls 'seon.db/builder-digest 0) reads)
            "the identity is derived once per revision set, not per read")))))
 
+(deftest ^{:seon/tasks #{'seon.schema.datahike/the-codec-reprints-values-to-compare-them}}
+  equal-reads-record-one-evidence-entry
+  ;; An evaluation that read one thing 440,605 times stored 440,605 evidence
+  ;; rows, 8,266 of them distinct, and its recording took about 66 s.
+  (test-support/with-database
+   (fn [connection]
+     (let [captured (atom [])]
+       (binding [db/*conn* connection
+                 db/*read-evidence-sink* captured]
+         (dotimes [_ 200] (db/q exam-query))
+         (db/q schema-family-query))
+       (is (= 201 (count @captured)))
+       (is (= 2 (count (db/read-evidence @captured)))
+           "repeated equal reads are one dependency")))))
+
+(deftest ^{:seon/tasks #{'seon.schema.datahike/the-codec-reprints-values-to-compare-them}}
+  storing-and-reading-a-value-prints-it-once
+  ;; Each keyword and symbol was printed to check that it reads back, and
+  ;; decoding printed the value again to judge it canonical.
+  (let [value [{:seon.ns/name 'seon.turn
+                :datahike.read/attributes (into #{} (map #(keyword "probe.codec" (str "a" %))) (range 300))
+                (keyword "probe.codec" "an unreadable") (symbol "also unreadable")}]
+        _ (schema.datahike/encode-attribute-value-in fixture-projection ::html-declaration value)
+        [stored calls] (test-support/armed-calls
+                        '#{seon.id/printed seon.schema.datahike/encode-attribute-value-in}
+                        #(schema.datahike/encode-attribute-value-in fixture-projection ::html-declaration value))
+        [decoded read-calls] (test-support/armed-calls
+                              '#{seon.id/printed seon.schema.datahike/decode-attribute-value-in}
+                              #(schema.datahike/decode-attribute-value-in
+                                fixture-projection ::html-declaration stored))]
+    (is (= value decoded) "the value reads back, unreadable identifiers included")
+    (is (= 1 (get calls 'seon.schema.datahike/encode-attribute-value-in)) "the encoder is armed and counted")
+    (is (<= (get calls 'seon.id/printed 0) 3) "the stored text is the one print")
+    (is (= 1 (get read-calls 'seon.schema.datahike/decode-attribute-value-in)) "the decoder is armed and counted")
+    (is (<= (get read-calls 'seon.id/printed 0) 2) "a read never prints")))
+
 (deftest query-and-pull-append-evidence-only-when-captured
   (test-support/with-database
    (fn [connection]

@@ -1054,7 +1054,7 @@
   as facts, holds neither: a request is code (a `#\"…\"` literal is a host
   Pattern, not EDN), and the evaluation that owns this evidence already
   references its source, whose preview `seon.turn/system-turn` compares by
-  shown value."
+  shown value. Equal evidence appears once."
   {:malli/schema
    [:function
     [:=> [:cat [:vector :seon.db/captured-read]]
@@ -1064,7 +1064,12 @@
      [:vector :seon.db/read-evidence]]]}
   ([captured] (read-evidence captured {}))
   ([captured options]
-   (mapv (fn [{database :seon.db/db
+   ;; Evidence is a set of facts: an evaluation that reads one thing many
+   ;; times depends on it once, and stores it once.
+   (into
+    []
+    (comp
+     (map (fn [{database :seon.db/db
                source-position :seon.db/source-argument-position
                plan :datahike.read/dependency-plan
                :as entry}]
@@ -1105,8 +1110,9 @@
              ;; A read kept past the pattern bound is replayed and compared by
              ;; its digest; its result is never copied into the plan.
              (and replayable? (not past-bound?))
-             (assoc :seon.db/read-result stable-result))))
-         captured)))
+             (assoc :seon.db/read-result stable-result)))))
+     (distinct))
+    captured)))
 
 (declare decode-index-page decode-query-result decode-pull-result read-declarations
          with-declarations encode-query-request query-value-type-error query-input-values)
