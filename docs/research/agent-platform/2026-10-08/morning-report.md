@@ -7,6 +7,10 @@ created: 2026-10-08
 
 # Morning report
 
+**Headline: the full loop ran end to end for the first time (fan-out 8, `7c9b96d8e`).** A live deepseek-flash agent's file
+proof went green on its own branch; root reviewed and improved the change; `my.program/write-branch!` wrote it back; `bin/lane
+commit --branch-evidence` proved it (7 verified tests) and committed. No platform errors.
+
 This page is built up through the night; the final form is written before the owner wakes.
 
 ## Decisions root took on the owner's behalf (review these)
@@ -258,3 +262,8 @@ of two each).
 - **Task hygiene** (`6a447487d`): 154 open tasks with tagged proofs checked at HEAD (6 runs); 114 retired (all proofs green), 18 left
   red (incl. bench T1-T4, red by design), 22 green held back because `src/` functions carry their tags (a separate platform cut).
   −829 lines.
+- **Fan-out 8** (`7c9b96d8e` via branch evidence; frictions `036a0ec13`): 2 of 2 real tasks green on the agents' own branches (8 and 10
+  calls), 0 platform errors; review improved one fix (never reads Malli's message text) and rejected the other as worse. The
+  struggling agent's calls went to context friction: escaped-string source copied into a defn, `slurp` unbound with no alternative
+  (14 times), `(my.program/diff {})` refused (lane context-4). Costs now visible: test step 3.6 s, write-branch! 763 MB, proofs read
+  2 GB for 3 tasks, closure interpretation ~1 GB (lane lazy-callers).
