@@ -115,3 +115,11 @@ Acceptance command names the MCP regression plus seven existing bridge tests: op
 members; lifted properties; repeated false answers; absent-schema refusal; native literal types;
 compiled storage reuse; unsupported native shapes. The exact selected vars are in the commit message.
 No pre-existing red in that selected set is excluded. Broad tiers remain root's work.
+
+
+Final acceptance landed as `18e658348`: 5 files, +176/-17 lines including evidence. Gate run
+`4cfaf381eb79` executed all eight selected tests: 46 passing assertions, zero failures/errors,
+5,970 ms. Candidate lint: 6,131 ms, zero errors, 1,459 warnings. Publication/adoption on disposable
+live-store branches took 3,422/795 ms. Candidate readiness 37,384 ms, boot 41,547 ms, slot wait
+35,244 ms; total check 94,697 ms. These setup costs are reported, not presented as sub-second.
+The broad tiers and installation on default remain root's responsibility.
