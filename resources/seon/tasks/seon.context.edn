@@ -24,4 +24,8 @@
              :kind :function
              :intent "The MCP reply for a branch agent's evaluation carries :errors (its open errors with signature, operation and count); the same agent's next model request carries none (repl-dogfood 2026-09-27, then the old prompt; still true of the model context since CX-1). An error is delivered in the reply of the agent that can act on it, the MCP reply and the next model request reading the same saved observation. Done when the model request shows the same error observation the MCP reply shows."
              :must-read #{seon.context/model-context seon.repl/response}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "the-system-message-is-the-printed-help-map-not-its-render"
+             :kind :function
+             :intent "`seon.context/model-context` sends as the system message the value printer's text of `seon.bootstrap/help-value` with no render applied: the model reads {:seon.render/ai seon.bootstrap/render-help-ai, :seon.render/html seon.bootstrap/render-help-html, :seon.help/lines [\"You are an agent at a REPL ...\" ...]}, 1,346 characters, with the render keys and an escaped vector of strings, instead of the help the AI render produces (live-agent run 3, agent live-flash-3c, default 0de932400, 2026-10-08; rebuilt with (seon.context/model-context branch-db {} \"live-flash-3c\")). The current-state block in the same call is shown through its declared render. Done when the system message is the help value's AI render, as (help) shows it at the REPL, with no :seon.render/* keys."
+             :must-read #{seon.context/model-context seon.bootstrap/help-value seon.bootstrap/render-help-ai}}]
