@@ -157,4 +157,8 @@
              :kind :function
              :intent "At root on default c7a7030d8 (2026-10-09, fresh reset), `(my.test/check {:seon.test/changed [ten test symbols]})` ran 5 and answered `:seon.test/passed? false` with 5 results and no key naming the other 5 (`seon.cluster.evaluate-source-test/code-evaluates-as-one-ordinary-run-of-its-agent`, `seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted`, `seon.cluster.turn-test/a-model-request-is-help-own-exchanges-and-the-block-last`, `seon.sci.context-reads-test/a-branch-redefinition-of-a-loaded-test-runs-under-its-own-bound`, `seon.repl-differential-test/a-file-proof-aliasing-its-subject-runs-green-on-the-branch`), all declared `:seon.test/long`. `my.test/check` already lists `:seon.test/long-excluded` as an answer key, but none was set. Done when a named check answers every named test it did not run under the key saying why, by name."
              :must-read #{my.test/check seon.test/run}}
-]
+ #:seon.task{:name "a-test-result-keeps-no-cost"
+             :kind :function
+             :intent "`seon.test/run` measures each member's body (`seon.test.timing/run-ms`) and then discards the cost: the stored member keeps counts and `:seon.test.member/reach-digest`, so no later comparison can see a branch that made a reaching test do 1,000x the work. Each completed member stores `:seon.test.member/calls` (its own `seon.batch/sink`), `:seon.test.member/alloc-bytes` (its body thread), `:seon.test.member/run-ms` and at most `:seon.config.test.cost/top` `:seon.test.member/top` rows, written by `seon.test.runner/complete-members`."
+             :must-read #{seon.test/run seon.test.runner/complete-members seon.batch/sink seon.batch/calls}
+             :evidence #{"docs/seon/schedule/cards/COST-REG.md"}}]

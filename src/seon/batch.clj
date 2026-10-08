@@ -138,6 +138,18 @@
   [s]
   (reduce (fn [m [[sym _] n]] (update m sym (fnil + 0) n)) {} (executed s)))
 
+(defn top
+  "A sink's `limit` most-called definitions as `[sym calls self-ms]` rows, every
+  executed definition of a symbol summed, ranked by calls then self time."
+  {:malli/schema [:=> [:cat :seon.batch/sink [:int {:min 0}]] :seon.test.member/top]}
+  [^java.util.concurrent.ConcurrentHashMap s limit]
+  (->> s
+       (reduce (fn [m [[sym _] ^java.util.concurrent.atomic.AtomicLongArray a]]
+                 (update m sym (fn [[n self]] [(+ (or n 0) (.get a 0)) (+ (or self 0) (.get a 2))])))
+               {})
+       (sort-by (fn [[_ [n self]]] [(- n) (- self)]))
+       (into #{} (comp (take limit) (map (fn [[sym [n self]]] [sym n (quot self 1000000)]))))))
+
 (def ^:private ^java.util.function.Function new-adder
   "A sink's counter for a key it has not seen, the same five slots as
   `seon.profile/new-adder` makes: calls, nanos, self nanos and the two marks

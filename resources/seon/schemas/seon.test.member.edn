@@ -17,6 +17,10 @@
  :seon.test.member/failures [:set {:description "Signature-keyed failing reports observed in this execution; no pass report entities. Optional peer refs sweep with report deletion."} :seon.db/ref]
  :seon.test.member/error [:and {:description "Boundary failure preventing normal member completion, when present. Optional peer ref sweeps with the error."} :seon.db/ref]
  :seon.test.member/reach-digest [:and {:description "The test's reach digest as this execution tested it: the content of its static closure (sources, specs, named schemas), so reuse compares it with the current reach on any branch or lineage. Absent: unknown, never reuse."} :seon.test/reach-digest]
+ :seon.test.member/calls [:int {:min 0 :description "Armed calls this member's body made, counted in a call sink of its own (the world it ran in, with its own sink; work it hands to virtual threads outside that world is not counted). Absent: no world ran the body, so unknown."}]
+ :seon.test.member/alloc-bytes [:int {:min 0 :description "Bytes the member's body thread allocated while the body ran (HotSpot's per-thread count); work handed to other threads is not counted."}]
+ :seon.test.member/run-ms [:double {:min 0 :description "Wall milliseconds of the member's body on its body thread, resolution and seeds excluded."}]
+ :seon.test.member/top [:set {:description "At most `:seon.config.test.cost/top` rows `[sym calls self-ms]` of the definitions the body called most, from its own call sink."} [:tuple :qualified-symbol [:int {:min 0}] [:int {:min 0}]]]
  :seon.test.member/member
  [:map {:seon.db/attributes true}
   [:seon.test.member/symbol :seon.test.member/symbol]
@@ -34,4 +38,8 @@
   [:seon.test.member/ended? {:optional true} :seon.test.member/ended?]
   [:seon.test.member/failures {:optional true} :seon.test.member/failures]
   [:seon.test.member/error {:optional true} :seon.test.member/error]
-  [:seon.test.member/reach-digest {:optional true} :seon.test.member/reach-digest]]}
+  [:seon.test.member/reach-digest {:optional true} :seon.test.member/reach-digest]
+  [:seon.test.member/calls {:optional true} :seon.test.member/calls]
+  [:seon.test.member/alloc-bytes {:optional true} :seon.test.member/alloc-bytes]
+  [:seon.test.member/run-ms {:optional true} :seon.test.member/run-ms]
+  [:seon.test.member/top {:optional true} :seon.test.member/top]]}

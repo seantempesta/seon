@@ -1683,6 +1683,9 @@
                (execution-refusal! operation run-id :seon.test/population-unknown
                                    :complete-outcome-events result))
              {:seon.test.member/value member :seon.test.member/outcome outcome
+              ;; What the body cost, measured on its own thread and sink.
+              ::cost (select-keys result [:seon.test.member/calls :seon.test.member/alloc-bytes
+                                          :seon.test.member/run-ms :seon.test.member/top])
               :seon.test.run/terminated? (true? (get result :seon.test.run/terminated? terminated?))
               :seon.test.report/values reports})) results)
         _ (when (not= (count results) (count (set (map :seon.test/sym results))))
@@ -1705,7 +1708,7 @@
     (into report-tx
           (mapcat
            (fn [{member :seon.test.member/value outcome :seon.test.member/outcome
-                 terminated? :seon.test.run/terminated?
+                 cost ::cost terminated? :seon.test.run/terminated?
                  reports :seon.test.report/values}]
              (let [eid (:db/id member)
                    report-ids (set (map :seon.test.report/id reports))
@@ -1722,7 +1725,7 @@
                                      (select-keys member outcome-keys) outcome))
                (cond-> []
                  (not completed?)
-                 (conj (cond-> (assoc outcome :db/id eid
+                 (conj (cond-> (assoc (merge outcome cost) :db/id eid
                                       :seon.test.member/completed-tx "datomic.tx")
                          (seq report-ids)
                          (assoc :seon.test.member/failures
@@ -1865,7 +1868,10 @@
               added-members (into #{} (remove held-members) wanted-reach)
               wanted-digest (get digests test-symbol)
               result-entity
-              (cond-> (assoc (dissoc result :seon.test/failures :seon.test.run/terminated?)
+              ;; A member's cost is its own evidence (`complete-members`), never copied here.
+              (cond-> (assoc (dissoc result :seon.test/failures :seon.test.run/terminated?
+                                     :seon.test.member/calls :seon.test.member/alloc-bytes
+                                     :seon.test.member/run-ms :seon.test.member/top)
                              :db/id test-entity-id
                              :seon.test/run "test-run"
                              :seon.test/run-basis-t basis-t

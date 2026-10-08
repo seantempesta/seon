@@ -12,6 +12,7 @@
             [clojure.core.async.flow :as-alias flow]
             [seon.config :as config]
             [seon.cluster.process :as cluster.process]
+            [seon.batch]
             [seon.cache]
             [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
@@ -225,6 +226,27 @@
                                                       :seon.cluster.eval/ordinal 0})
        :seon.sci.eval/ctx ctx :seon.effect/counter (atom -1)})))
 
+(defn- measured-body
+  "Run `body` with a fresh call sink and return its result with what the body
+  cost on this thread: `:seon.test.member/alloc-bytes`, `:seon.test.member/run-ms`
+  and, when a world counted into the sink, `:seon.test.member/calls` and, given
+  a `limit`, at most that many `:seon.test.member/top` rows."
+  {:malli/schema [:=> [:cat [:or :nil :seon.config.test.cost/top] [:=> [:cat :seon.batch/sink] :seon.schema/value]]
+                  :seon.schema/value]}
+  [limit body]
+  (let [mx ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+        sink (seon.batch/sink)
+        allocated (.getCurrentThreadAllocatedBytes mx)
+        started (System/nanoTime)
+        result (body sink)
+        run-ms (/ (- (System/nanoTime) started) 1000000.0)
+        alloc-bytes (max 0 (- (.getCurrentThreadAllocatedBytes mx) allocated))]
+    (if (and (map? result) (not (:seon.error/at result)))
+      (cond-> (assoc result :seon.test.member/alloc-bytes alloc-bytes :seon.test.member/run-ms run-ms)
+        seon.batch/*world* (assoc :seon.test.member/calls (reduce + 0 (vals (seon.batch/calls sink))))
+        (and seon.batch/*world* limit) (assoc :seon.test.member/top (seon.batch/top sink limit)))
+      result)))
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
@@ -244,7 +266,8 @@
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                         [:seon.test/member {:optional true} :seon.agent/execution-handle]
-                        [:seon.test/effect-attempt? {:optional true} :boolean]]
+                        [:seon.test/effect-attempt? {:optional true} :boolean]
+                        [:seon.config.test.cost/top {:optional true} :seon.config.test.cost/top]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
   [loaded since test-symbol resolve! timeout-ms custody release!]
@@ -273,6 +296,11 @@
                           (:seon.error/at member) member
                           (:seon.error/at context) context
                           :else
+                          ;; The body's own cost, measured on this thread: its
+                          ;; calls into a sink of its own, its allocation and its time.
+                          (measured-body
+                           (:seon.config.test.cost/top custody)
+                           (fn [sink] (binding [seon.batch/*world* (some-> seon.batch/*world* (assoc :seon.batch/sink sink))]
                           ;; Stored results are the record: a member's report lines are not the evaluation's `:out`.
                           (with-bindings {(:context @attempt-writers) context
                                           #'clojure.test/*test-out* (java.io.Writer/nullWriter)}
@@ -300,7 +328,7 @@
                                       (or (:seon.test/long-ms
                                            (let [test-meta (test-var-meta (:seon.sci.eval/ctx custody) test-var)]
                                              (program/test-markers test-meta (meta (:ns test-meta)))))
-                                          5000))))))))))))))
+                                          5000)))))))))))))))))
             ;; a platform thread: HotSpot counts a platform thread's
             ;; allocation and none of a virtual thread's, so a body's
             ;; allocation bounds measure it
@@ -2204,7 +2232,7 @@
   A body still live at the bound keeps its branch; once the watcher observes
   its exit and releases the branch, `exited!` gets any cleanup failure."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :map :seon.test/sym [:int {:min 1}]
-                       [:=> [:cat [:maybe :seon.error/throwable]] :nil] :boolean]
+                       [:=> [:cat [:maybe :seon.error/throwable]] :nil] :boolean :seon.config.test.cost/top]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
                    [:seon.test/timings
                     [:map [:seon.agent/branch :seon.agent/branch]
@@ -2212,7 +2240,7 @@
                      [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
                      [:seon.test.timing/run-ms :seon.test.timing/run-ms]
                      [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
-  [request-handle since test-symbol remaining-ms exited! effect-attempt?]
+  [request-handle since test-symbol remaining-ms exited! effect-attempt? top]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
@@ -2282,7 +2310,8 @@
                       #(bounded-result
                         sci.eval/loaded-identity since test-symbol resolve! remaining-ms
                         {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
-                         :seon.test/member child :seon.test/effect-attempt? effect-attempt?}
+                         :seon.test/member child :seon.test/effect-attempt? effect-attempt?
+                         :seon.config.test.cost/top top}
                         (fn [watched?]
                           (release! watched?)
                           (when watched? (exited! @cleanup-failure))
@@ -2664,7 +2693,9 @@
                           (let [{result :seon.test/result timings :seon.test/timings}
                                 (member-result handle since test-symbol left
                                                #(record-exit! test-symbol %)
-                               (contains? effect-reach test-symbol))]
+                               (contains? effect-reach test-symbol)
+                               (or (:seon.config.test.cost/top effective)
+                                   (:seon.config.test.cost/top config/defaults)))]
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]

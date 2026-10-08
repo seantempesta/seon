@@ -19,7 +19,11 @@
                      :seon.test/failing-assertions]
                     [:seon.test/failure-message
                      {:optional true}
-                     :seon.test/failure-message]],
+                     :seon.test/failure-message]
+                    [:seon.test.member/calls {:optional true} :seon.test.member/calls]
+                    [:seon.test.member/alloc-bytes {:optional true} :seon.test.member/alloc-bytes]
+                    [:seon.test.member/run-ms {:optional true} :seon.test.member/run-ms]
+                    [:seon.test.member/top {:optional true} :seon.test.member/top]],
                    :captured-results
                    [:vector :seon.test.runner/captured-result],
                    :completion

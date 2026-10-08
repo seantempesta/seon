@@ -176,6 +176,18 @@
  ; Each step's time limit; proofs run first, tests the limit leaves continue on the next pass.
  :seon.config.test/step-time-limit-ms 10000
 
+ ; A reaching test that got more expensive than its baseline is red (card COST-REG):
+ ; each member keeps its own calls, allocation, run time and top rows; a signal
+ ; is a regression past both its factor and its floor.
+ :seon.config.test.cost/top 10
+ :seon.config.test.cost/alloc-factor 2
+ :seon.config.test.cost/alloc-floor-bytes 67108864
+ :seon.config.test.cost/calls-factor 2
+ :seon.config.test.cost/calls-floor 1000
+ :seon.config.test.cost/ms-factor 3
+ :seon.config.test.cost/ms-floor 1000
+ :seon.config.test.cost/assign-runs 32
+
  ; EVERY TURN AND ORDERLY AGENT STOP WAIT ON THE TURN'S OWN COMPLETION EVENTS.
  ; This is the loud last-resort bound when the permit, completion, or
  ; turn-stopped event never arrives; firing is a core-fault report, never
