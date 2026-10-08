@@ -1,4 +1,6 @@
 (ns seon.web.jvm-test
+  {:seon.test/long "Every test here stages blobs, which needs a file-backed store: `with-published-file-database` publishes the whole checkout into an empty store per test, 38-55 s each in the throwaway check JVM, against about 1 s for the same tests on a branch of the executing store (`seon.test-support/file-backed-branch-without-republication`)."
+   :seon.test/long-ms 90000}
   (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -24,12 +26,13 @@
   (deref (ns-resolve namespace symbol)))
 
 (defn- with-file-database
-  [body]
-  (let [root (io/file "tmp/my-web-test" (str (random-uuid)))]
-    (try
-      (support/with-published-file-database
-       root :my-web-test
-       (fn [connection]
+  ([body] (with-file-database {:seon.config.eval.result/blob-threshold 8} body))
+  ([config-overlay body]
+   (let [root (io/file "tmp/my-web-test" (str (random-uuid)))]
+     (try
+       (support/with-published-file-database
+        root :my-web-test
+        (fn [connection]
           ;; The branch's own program projection is carried by
           ;; `with-published-file-database` itself -- without it the effect
           ;; door asks a projection with no function contracts and refuses
@@ -39,13 +42,11 @@
           ;; effect door read their dials through the cluster's own facts, so a
           ;; branch carrying a config entity and no cluster entity answers nil for
           ;; every dial and the handler dereferences it.
-          (support/seed-cluster!
-           connection "default"
-           {:seon.config.eval.result/blob-threshold 8})
+          (support/seed-cluster! connection "default" config-overlay)
           (body connection)))
-      (finally
-        (when (.exists root)
-          (filesystem/delete-recursively! (str root) (str root)))))))
+       (finally
+         (when (.exists root)
+           (filesystem/delete-recursively! (str root) (str root))))))))
 
 (defn- response!
   [^HttpExchange exchange status headers octets]
@@ -93,6 +94,11 @@
      (http-handler
       #(response! % 200 {"Content-Type" "application/octet-stream"}
                   oversized)))
+    (.createContext
+     server "/between-ceilings"
+     (http-handler
+      #(response! % 200 {"Content-Type" "application/octet-stream"}
+                  (byte-array 6000 (byte 7)))))
     (.createContext
      server "/too-large-chunked"
      (http-handler
@@ -186,7 +192,7 @@
   [base-url]
   {:seon.config.web/timeout-ms 1000
    :seon.config.web/max-response-bytes 4096
-   :seon.config.web/max-inline-bytes 8
+   :seon.config.eval.result/blob-threshold 8
    :seon.config.web/max-redirects 3
    :seon.config.web/max-search-results 5
    :seon.config.web/search-endpoint (str base-url "/search")
@@ -296,6 +302,21 @@
             (is (= (:my.web.body/digest body) (:my.web.body/blob body)))
             (is (Arrays/equals ^bytes oversized ^bytes actual))
             (is (not (contains? body :my.web.body/octet-values)))))))))
+
+(deftest ^{:seon.test/fixture-observation "A 6000-byte body, over the shipped blob threshold 4096 and under the deleted web ceiling 8192, must be a blob, not inline."} a-body-between-the-old-ceilings-is-a-blob
+  (with-file-database
+    {:seon.config.eval.result/blob-threshold 4096}
+    (fn [connection]
+      (with-server
+        (fn [{:keys [base-url]}]
+          (let [body (:my.web/body
+                      (fetch connection
+                             {:my.web/url (str base-url "/between-ceilings")}
+                             (assoc (config base-url)
+                                    :seon.config.web/max-response-bytes 65536)))]
+            (is (= 6000 (:my.web.body/bytes body)))
+            (is (string? (:my.web.body/blob body)))
+            (is (not (contains? body :my.web.body/text)))))))))
 
 (deftest ^{:seon.test/fixture-observation "The response ceiling must refuse chunked input in the physical blob-staging fixture before oversized publication."} response-size-ceiling-refuses-a-chunked-body
   (with-file-database
@@ -408,8 +429,7 @@
           (support/apply-config!
            connection "default"
            (assoc (web-manifest base-url)
-                  :seon.config.eval.result/blob-threshold 8
-                  :seon.config.web/max-inline-bytes 4096))
+                  :seon.config.eval.result/blob-threshold 8))
           (support/transacted!
                   connection
                   (into (support/agent-tx @connection "web-agent")
@@ -446,16 +466,15 @@
       (with-server
         (fn [{:keys [base-url]}]
           ;; THIS TEST'S SUBJECT IS THE INLINE ARM of both body
-          ;; representations, so its inline ceiling must admit them: the
-          ;; suite manifest's `:seon.config.web/max-inline-bytes 8` sends the
+          ;; representations, so the blob threshold must admit them: the
+          ;; suite manifest's `:seon.config.eval.result/blob-threshold 8` sends the
           ;; 18-byte HTML body to the blob tier and `:my.web.body/text` is
           ;; then absent by design. The blob arm has its own test,
           ;; `oversized-bodies-spill-byte-exactly-through-the-blob-tier`.
           (support/apply-config!
            connection "default"
            (assoc (web-manifest base-url)
-                  :seon.config.eval.result/blob-threshold 8
-                  :seon.config.web/max-inline-bytes 4096))
+                  :seon.config.eval.result/blob-threshold 4096))
           (support/transacted!
                   connection
                   (into (support/agent-tx @connection "web-agent")

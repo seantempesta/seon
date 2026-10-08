@@ -7,8 +7,8 @@
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.web.extract])
-  (:import [java.io ByteArrayInputStream ByteArrayOutputStream FilterInputStream
-            InputStream SequenceInputStream]
+  (:import [java.io ByteArrayOutputStream FilterInputStream
+            InputStream]
            [java.net URI]
            [java.net.http HttpClient HttpClient$Redirect HttpRequest HttpRequest$Builder
             HttpRequest$BodyPublishers HttpResponse HttpResponse$BodyHandlers]
@@ -123,6 +123,9 @@
          :my.web/url url})))))
 
 (defn- bounded-input
+  {:malli/schema
+   [:=> [:cat :seon.blob/input-stream :seon.config.web/max-response-bytes :my.web/url]
+    :seon.blob/input-stream]}
   [^InputStream input limit url]
   (let [read-count (volatile! 0)
         refuse (fn []
@@ -142,6 +145,10 @@
            (let [next-byte (.read input)]
              (when-not (neg? next-byte) (vswap! read-count inc))
              next-byte)))
+        ;; proxy routes every `read` overload to this one fn, so each arity
+        ;; InputStream declares is answered here
+        ([buffer]
+         (.read ^InputStream this ^bytes buffer 0 (alength ^bytes buffer)))
         ([buffer offset length]
          (if (= @read-count limit)
            (let [next-byte (.read input)]
@@ -191,21 +198,18 @@
              (mapv #(bit-and 0xff %) ^bytes octets)))))
 
 (defn- capture-body!
-  [connection ^InputStream input max-inline max-response url content-type
-   force-blob?]
+  [connection ^InputStream input max-response url content-type force-blob?]
   (with-open [^InputStream bounded (bounded-input input max-response url)]
-    (let [prefix (.readNBytes bounded (int (inc max-inline)))]
-      (if (and (not force-blob?) (<= (alength ^bytes prefix) max-inline))
-        {:seon.web.jvm/body (inline-body prefix content-type)
-         :seon.web.jvm/octet-array prefix}
-        (let [source (SequenceInputStream.
-                      (ByteArrayInputStream. prefix) bounded)
-              stored (blob/stage-binary! connection source)]
-          {:seon.web.jvm/body
-           {:my.web.body/bytes (:seon.blob/size stored)
-            :my.web.body/digest (:seon.blob/digest stored)
-            :my.web.body/blob (:seon.blob/digest stored)}
-           :seon.blob/staged-write stored})))))
+    (let [stored (blob/stage-binary! connection bounded)
+          octets (:seon.blob/staged-octets stored)]
+      (if (and octets (not force-blob?))
+        {:seon.web.jvm/body (inline-body octets content-type)
+         :seon.web.jvm/octet-array octets}
+        {:seon.web.jvm/body
+         {:my.web.body/bytes (:seon.blob/size stored)
+          :my.web.body/digest (:seon.blob/digest stored)
+          :my.web.body/blob (:seon.blob/digest stored)}
+         :seon.blob/staged-write stored}))))
 
 (defn- captured-octets
   [connection captured]
@@ -273,7 +277,8 @@
   (deref (ns-resolve namespace symbol)))
 
 (defn- fetch
-  {:malli/schema
+  {:seon/tasks #{'seon.web.jvm/fetch-catch-all-hides-host-defects}
+   :malli/schema
    [:=> [:cat :my.web/fetch-request :seon.config/effective]
     [:or :my.web/fetch-result :my.web/error]]}
   [request effective]
@@ -281,7 +286,6 @@
         method (or (:my.web/method request) :get)
         timeout-ms (:seon.config.web/timeout-ms effective)
         max-response (:seon.config.web/max-response-bytes effective)
-        max-inline (:seon.config.web/max-inline-bytes effective)
         max-redirects (:seon.config.web/max-redirects effective)]
     (try
       (loop [current-url original-url
@@ -325,7 +329,7 @@
                       final-url (str (.uri ^HttpResponse response))]
                   (ensure-declared-length! response max-response final-url)
                   (let [captured
-                        (capture-body! db/*conn* body max-inline max-response
+                        (capture-body! db/*conn* body max-response
                                        final-url content-type false)
                         octets (captured-octets db/*conn* captured)
                         base
@@ -414,7 +418,6 @@
               captured
               (capture-body!
                db/*conn* (.body ^HttpResponse response)
-               (:seon.config.web/max-inline-bytes effective)
                (:seon.config.web/max-response-bytes effective)
                final-url content-type true)
               body (:seon.web.jvm/body captured)

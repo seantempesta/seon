@@ -13,4 +13,9 @@
              :kind :namespace
              :intent "A test member's connection is its own branch, not the cluster head, so a test of a function that compares a branch with its cluster head (RF-1, 24e8cc2df: `my.program/write-branch!`, `my.program/diff`) must build its own cluster-<name> branch by hand. Correct: one test-support helper gives a member a cluster head and a branch off it, and the clojure-testing skill names it. Proof: a seon.test-support-test deftest (to be written) asserting the helper's branch compares against the head it made."
              :evidence #{"docs/seon/schedule/cards/RF-1.md"}}
+ #:seon.task{:name "file-backed-branch-without-republication"
+             :kind :function
+             :intent "with-published-file-database publishes the whole checkout into an empty store for every test (refresh-source! onto a fresh root), so each blob-staging test pays a full publication: seon.web.jvm-test runs 38-55 s per test in the throwaway check JVM (2026-10-08, SP-3 web half), against 3 tests in 3018 ms on with-database, whose in-memory store refuses staging (seon.blob/stage-file!: no process root). Correct: a file-backed fixture branch with the program projection that does not republish the checkout per test, e.g. one published file root per source commit branched per test, or a file-backed fresh store carrying the installed schema and projection. Proof: seon.web.jvm-test/oversized-bodies-spill-byte-exactly-through-the-blob-tier under the 5 s bound with the namespace's :seon.test/long removed."
+             :must-read #{seon.test-support/with-published-file-database seon.test-support/populate-published-root! seon.blob/stage-binary!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/storage-point/sp3-web-handover.md"}}
 ]
