@@ -471,16 +471,22 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   and input evidence; past observed reach is diagnostic. Unknown or red cannot reuse green. Record completion even
   with no armed calls; a recording failure is not success. Keep one regression per behavior class, and destructive
   isolation until proven confined.
-- **Prove each slice before it lands; run the broad tiers centrally.** A lane commits through `bin/lane commit LANE
-  -m MSG --test NS... PATHS`, which runs `bin/seon check PATHS --test NS...`: the candidate archive (HEAD plus the
-  slice) is published and adopted on disposable branches, then a throwaway JVM boots from it on a disposable store
-  and runs the named tests through the one runner; any red, boot failure or lint error refuses the commit. Name the
-  tests reaching the change. Root restarts default after each landing and runs platform/affected integration and the
-  bulk tier once, not per edit. Classify each red from stored runs by the commit that changed its
-  behavior, then delete tests of deleted machinery, update retired assumptions or fix the surviving owner; replacement
-  behavior tests land with the cut; never wholesale-triage reds. Gate inputs are `seon.test.cache/input-roots`:
-  documentation never publishes or widens gates; fix a tool that does so before proceeding. HEAD must load and the
-  named probe answer.
+- **Prove each slice before it lands; run the broad tiers centrally.** An ordinary function changes REPL-first: the
+  lane `defn`s it on its own branch in the main JVM, the reaching tests run there incrementally (unchanged green
+  members reused by reach digest), and the file is written back from the branch. It commits through `bin/lane commit
+  LANE --branch-evidence AGENT PATHS`, which checks that each committed file declares exactly its branch's definition
+  digests and that every test reaching them holds green evidence current on that branch, lints, and boots no JVM; a
+  changed declaration no test reaches is unproven. Host-bound and platform slices (a declaration SCI cannot
+  interpret, the evaluator, writer, test runner, boot, schema publication, schema resources, configuration,
+  dependencies, `bin/` and `script/`) commit through `bin/lane commit LANE -m MSG --test NS... PATHS`, which runs
+  `bin/seon check`: the candidate archive (HEAD plus the slice) is published and adopted on disposable branches, then
+  a throwaway JVM boots from it and runs the named tests through the one runner; any red, boot failure or lint error
+  refuses the commit. Name the tests reaching the change. Root restarts default after each landing and runs
+  platform/affected integration and the bulk tier once, not per edit. Classify each red from stored runs by the
+  commit that changed its behavior, then delete tests of deleted machinery, update retired assumptions or fix the
+  surviving owner; replacement behavior tests land with the cut; never wholesale-triage reds. Gate inputs are
+  `seon.test.cache/input-roots`: documentation never publishes or widens gates; fix a tool that does so before
+  proceeding. HEAD must load and the named probe answer.
 - **Make bounds honest.** Tests fail beyond their declared bound, default five seconds; a longer bound carries a
   reason naming the measured operation, its numbers in profile evidence. Distinguish acquisition from warm execution; priming never
   excuses a timeout. The [testing skill](.agents/skills/clojure-testing/SKILL.md) names installed enforcement.
@@ -510,6 +516,21 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 
 ## Operating and collaborating
 
+- **Work as a Seon agent.** Our own lanes are the first Seon agents. Root files each slice as a task with a red tagged
+  proof (an existing failing test, a table row, or a measured-cost assertion through `seon.profile/measure`) and assigns
+  it; the lane's first form reads its block, `(seon.context/current-state)`, then works by `defn` on its branch: the
+  edit hook evaluates changed forms there and the proofs and reaching tests run by themselves after each eval request.
+  It writes back with `my.program/write-branch!`, commits with `--branch-evidence`, and files every gap in its context
+  as a task. Every reply carries `:seon.repl/ms` and `:seon.repl/alloc-mb`: read them, and treat 10× over what the form
+  should cost as wrong work. Tests read reply items by content (the shared test-support reader), never by position.
+- **Plan before implementing; keep lanes short.** Design decisions are made up front in implementation cards
+  (`docs/seon/schedule/cards/`) by an agent with full context; implementers follow one card in about fifteen minutes and
+  stop and report when the code contradicts it. Work past about fifteen minutes is split. Hard designs get iteration
+  from real use, a research lane and an independent outside check before they are fixed; a fix that fights the design
+  goes to the owner with options. `bin/lane commit` takes one `--test` per test and runs a declared-long test only when
+  named by var.
+- **Restart in batches.** A restart or reset is a batch: root lands every ready dependency or fork bump and pending fix
+  just before it. Nothing is ever left staged in the shared index (it blocks every lane's commit).
 - **Operate through `bin/seon`.** Use its installed help for start/status/open/init/config apply/stop/down/reset/
   nuke, never deleted internals. Every JVM runs a committed archive, submodules at their pinned revisions, never the working tree: `start` launches HEAD;
   `start --head` replaces a live root with HEAD, retaining store and caches; a dependency-class miss is filled before
