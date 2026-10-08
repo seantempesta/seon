@@ -71,13 +71,12 @@
     :seon.config.fs/roots [(str root)]
     :seon.config.shell/time-limit-ms 5000
     :seon.config.shell/termination-grace-ms 250
-    :seon.config.shell/inline-output-bytes 4096
     :seon.config.shell/preview-bytes 1024
     :seon.config.shell/stdin-max-bytes (* 16 1024 1024)}
    overrides))
 
 (defn- with-file-database
-  [root f]
+  [root threshold f]
   (support/with-published-file-database
    root :my-shell-test
    (fn [connection]
@@ -85,7 +84,7 @@
                        {:seon.db/connection connection
                         :seon.boot/cluster-name "shell-test"
                         :seon.config/manifest
-                        {:seon.config.eval.result/blob-threshold 4096}})]
+                        {:seon.config.eval.result/blob-threshold threshold}})]
        (when-not (contains? configured :seon.reconcile/operations)
          (throw (ex-info "Shell fixture configuration was refused." configured))))
      (f connection))))
@@ -94,6 +93,7 @@
   [effective-map f]
   (with-file-database
     (:seon.config.fs/working-root effective-map)
+    (:seon.config.eval.result/blob-threshold effective-map)
     (fn [connection]
       (binding [effect/*request-context*
                 {:seon.db/connection connection
@@ -233,7 +233,7 @@
   (with-temp-tree
     (fn [root]
       (with-handler
-        (effective root {:seon.config.shell/inline-output-bytes 8})
+        (effective root {:seon.config.eval.result/blob-threshold 8})
         (fn [connection run effective-map]
           (doseq [octets [[0 255 65 66 67 68 69]
                           [0 255 65 66 67 68 69 70 71]]]
@@ -374,7 +374,7 @@
   (with-temp-tree
     (fn [root]
       (with-file-database
-        root
+        root 4096
         (fn [connection]
           (let [written (db/transact!
                          connection
@@ -476,7 +476,7 @@
   (with-temp-tree
     (fn [root]
       (with-file-database
-        root
+        root 4096
         (fn [connection]
           (let [effective-map
                 (effective root

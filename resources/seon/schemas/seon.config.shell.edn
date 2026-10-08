@@ -4,8 +4,6 @@
                       :seon.config/dial true
                       :seon.config/optional true
                       :seon.shell/environment "HOME"}]
-                    :inline-output-bytes
-                    [:int {:min 1, :seon.config/dial true}]
                     :lang
                     [:string
                      {:min 1

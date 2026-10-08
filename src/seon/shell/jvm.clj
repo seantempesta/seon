@@ -304,9 +304,8 @@
   [_connection captured effective]
   (let [size (:seon.blob/size captured)
         content-digest (:seon.blob/digest captured)
-        inline-limit (:seon.config.shell/inline-output-bytes effective)
         preview-limit (:seon.config.shell/preview-bytes effective)
-        inline? (<= size inline-limit)
+        inline? (contains? captured :seon.blob/staged-octets)
         retained-length (if inline? size (min size preview-limit))
         retained (blob/read-staged-chunk captured 0 retained-length)
         decoded (try (strict-utf8 retained)
