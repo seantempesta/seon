@@ -1122,7 +1122,8 @@
                                 {::analyzer/paths ["src/seon/await.clj"]}))))
           "a real file calling seon.error's vars still resolves them"))))
 
-(deftest tests-reaching-follows-calls-and-explicit-subjects
+(deftest ^{:seon/tasks #{'seon.fn/a-file-proof-two-compiled-callers-away-never-sees-the-branch-redefinition}}
+  tests-reaching-follows-calls-and-explicit-subjects
   (test-support/with-database
     (fn [connection]
       (let [namespace-ref [:seon.ns/name 'sample.reach]
@@ -1141,6 +1142,8 @@
                                     #{(quote sample.reach/target)})
                       (function-entity (quote sample.reach/direct)
                                     #{(quote sample.reach/target)})
+                      (function-entity (quote sample.reach/outer)
+                                    #{(quote sample.reach/bridge)})
                       (function-entity (quote sample.reach/untested) nil)])
         (test-support/transacted!
                      connection
@@ -1153,6 +1156,12 @@
                       (test-entity (quote sample.reach/indirect)
                                 {:seon.fn/calls
                                  #{(quote sample.reach/bridge)}
+                                 :seon.test/pass-count 1
+                                 :seon.test/fail-count 0
+                                 :seon.test/error-count 0})
+                      (test-entity (quote sample.reach/distant)
+                                {:seon.fn/calls
+                                 #{(quote sample.reach/outer)}
                                  :seon.test/pass-count 1
                                  :seon.test/fail-count 0
                                  :seon.test/error-count 0})
@@ -1170,7 +1179,15 @@
         (is (= [(quote sample.reach/direct)
                 (quote sample.reach/indirect)
                 (quote sample.reach/property)]
-               (seon.fn/tests-reaching @connection (quote sample.reach/target))))
+               (seon.fn/tests-reaching @connection (quote sample.reach/target)))
+            "selection is the target and its direct callers")
+        (is (= [(quote sample.reach/direct)
+                (quote sample.reach/distant)
+                (quote sample.reach/indirect)
+                (quote sample.reach/property)]
+               (:seon.fn/tests (seon.fn/reverse-closure {:seon.db/db @connection
+                                                         :seon.fn/seeds #{(quote sample.reach/target)}})))
+            "a test two callers away is in the closure a branch interprets")
         (is (not-any? #(= "sample.reach" (namespace %))
                       (:seon.fn/calls
                        (db/pull @connection [:seon.fn/calls]

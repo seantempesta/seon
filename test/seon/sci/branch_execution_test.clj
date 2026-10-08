@@ -1,5 +1,6 @@
 (ns seon.sci.branch-execution-test
   (:require [seon.render.value]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
@@ -625,3 +626,29 @@
                 "another commit is another key, never the first commit's map")
             (is (not (contains? (loaded-digests before) 'seon.sci.eval-test/loaded-digest-probe))))))))))
 
+
+(deftest ^{:seon/tasks #{'seon.fn/a-file-proof-two-compiled-callers-away-never-sees-the-branch-redefinition}
+           :seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting one changed definition's reverse closure (24 functions on default)."
+           :seon.test/long-ms 8000}
+  a-file-test-callers-away-from-a-branch-change-runs-interpreted
+  ;; seon.ref-test/a-span-of-a-name-and-more-words-is-prose calls
+  ;; seon.ref/references -> seon.ref/candidate -> seon.ref/span-candidate: a
+  ;; branch change of span-candidate must run that file test interpreted, or
+  ;; its compiled body calls the compiled chain and never sees the change.
+  (support/with-database
+   (fn [connection]
+     (let [changed 'seon.ref/span-candidate
+           proof 'seon.ref-test/a-span-of-a-name-and-more-words-is-prose
+           before (db/db connection)
+           source (str/replace-first
+                   (:seon.fn/source (db/pull before [:seon.fn/source] [:seon.fn/sym changed]))
+                   #"^(\(defn-?\s+\S+)" "$1 \"Branch version.\"")
+           _ (support/transacted!
+              connection
+              (support/replacement-tx before [:seon.fn/sym changed] source
+                                      {:seon.schema.admission/source :agent}))
+           ctx (eval/base-ctx (db/db connection))]
+       (is (= [] (functions/gate-set before changed))
+           "selection stays at the change and its direct callers")
+       (is (eval/interpreted-test? ctx proof)
+           "the file test three calls from the change runs interpreted on the branch")))))

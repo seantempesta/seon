@@ -1930,95 +1930,87 @@
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols))))))
 
-(defn- identity-names
-  "`[attribute symbol]` of each requested identity entity, read in one batch."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value [:set :int]]
-                  [:map-of :int [:tuple :keyword :qualified-symbol]]]}
-  [read! database entities]
-  (into {} (map (fn [[entity attribute named]] [entity [attribute named]]))
-        (into #{}
-              (mapcat (fn [row]
-                        (keep (fn [attribute]
-                                (when-let [named (get row attribute)] [(:db/id row) attribute named]))
-                              [:seon.fn/sym :seon.test/sym])))
-              (read! (db/pull-many database [:db/id :seon.fn/sym :seon.test/sym] (vec entities))))))
-
-(defn- call-reach
-  "The tests exercising `seeds` or their direct callers, plus tests named as seeds.
-  Declared invocation edges and test subjects count; symbol mentions do not."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
+(defn- closure-walk
+  "The transitive callers of `seeds` (`::affected`), the tests reaching them at
+  any depth (`::tests`) and the tests calling a seed or a direct caller
+  (`::selected`), from one walk. A test reaches by calling a walked function,
+  naming one as `:seon.test/subject` or being a seed. Declared invocation edges
+  count; symbol mentions do not. Throws a read refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
+                  [:map [::affected :seon.fn/affected] [::tests :seon.fn/tests] [::selected :seon.fn/tests]]]}
   [database seeds]
-  (try
-    (let [read! read-or-throw!
-          named (fn [entities] (identity-names read! database entities))
-          declared #(declared-callers read! database %)
-          ;; Callers of each target: one index seek per target, proportional
-          ;; to the change.
-          callers-of (fn [targets]
-                       (into #{} (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %)))) targets))
-          ;; Tests whose subject is a target: one walk of the few subject
-          ;; datoms, never a seek per frontier name.
-          subjects-of (fn [targets]
-                        (let [targets (set targets)]
-                          (into #{} (keep #(when (targets (:v %)) (:e %)))
-                                (read! (db/datoms database :aevt :seon.test/subject)))))
-          seed-callers (into (callers-of seeds) (mapcat val (declared seeds)))
-          callers (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.fn/sym attribute) symbol)))
-                        (named seed-callers))
-          added (remove (set seeds) callers)
-          frontier (into (set seeds) callers)
-          reaching (-> seed-callers
-                       (into (callers-of added))
-                       (into (mapcat val (declared added)))
-                       (into (subjects-of frontier)))]
-      (vec (sort (into (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.test/sym attribute) symbol)))
-                             (named reaching))
-                       (keep :seon.test/sym
-                             (read! (db/pull-many database [:seon.test/sym]
-                                                 (mapv #(vector :seon.test/sym %) seeds))))))))
-    (catch clojure.lang.ExceptionInfo failure
-      (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+  (let [read! read-or-throw!
+        seeds (vec seeds)
+        ;; every declared edge in one walk, read per level by target
+        declared (declared-callers read! database)
+        ;; one indexed query per level, never a pull per caller entity
+        named (fn [attribute entities]
+                (if (empty? entities)
+                  #{}
+                  (into #{} (map second)
+                        (read! (db/q '[:find ?entity ?symbol :in $ ?attribute [?entity ...]
+                                       :where [?entity ?attribute ?symbol]]
+                                     database attribute (vec entities))))))
+        present (into #{} (keep :seon.fn/sym)
+                      (read! (db/pull-many database [:seon.fn/sym]
+                                          (mapv #(vector :seon.fn/sym %) seeds))))
+        ;; a caller entity named once is never resolved again; test entities
+        ;; are leaves the walk keeps but never extends. `levels` holds each
+        ;; level's [frontier caller-entities], seeds' callers first.
+        [affected levels]
+        (loop [frontier seeds seen (set seeds) entities #{} affected present levels []]
+          (if (empty? frontier)
+            [affected levels]
+            (let [callers (into #{} (remove entities)
+                                (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
+                                        (mapcat declared frontier)))
+                  fresh (vec (remove seen (named :seon.fn/sym callers)))]
+              (recur fresh (into seen fresh) (into entities callers) (into affected fresh)
+                     (conj levels [frontier callers])))))
+        ;; tests whose subject is among `targets`: one walk of the few subject
+        ;; datoms, never a seek per name
+        subject-datoms (read! (db/datoms database :aevt :seon.test/subject))
+        subjects (fn [targets] (into #{} (keep #(when (targets (:v %)) (:e %))) subject-datoms))
+        seed-tests (into #{} (keep :seon.test/sym)
+                         (read! (db/pull-many database [:seon.test/sym]
+                                             (mapv #(vector :seon.test/sym %) seeds))))
+        tests-of (fn [levels]
+                   (let [walked (into (set seeds) (mapcat first) levels)]
+                     (vec (sort (into seed-tests
+                                      (named :seon.test/sym
+                                             (into (subjects walked) (mapcat second) levels)))))))]
+    {::affected affected
+     ::tests (tests-of levels)
+     ;; the owner's selection depth: seeds and their direct callers
+     ::selected (tests-of (take 2 levels))}))
 
 (defn reverse-closure
-  "The transitive callers of `seeds` and the tests selected by `seon.fn/call-reach`.
-  Declared invocation edges count; symbol mentions do not."
-  {:malli/schema [:=> [:cat :seon.fn/gate-request]
+  "The transitive callers of `seeds` and the tests reaching them at any depth,
+  the tests a branch runs interpreted for a change to `seeds`
+  (`seon.fn/closure-walk`)."
+  {:seon/tasks #{'seon.fn/a-file-proof-two-compiled-callers-away-never-sees-the-branch-redefinition}
+   :malli/schema [:=> [:cat :seon.fn/gate-request]
                   [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
   [{database :seon.db/db seeds :seon.fn/seeds}]
   (try
-    (let [read! read-or-throw!
-          seeds (vec seeds)
-          ;; every declared edge in one walk, read per level by target
-          declared (declared-callers read! database)
-          ;; one indexed query per level, never a pull per caller entity
-          functions (fn [entities]
-                      (if (empty? entities)
-                        #{}
-                        (into #{} (map second)
-                              (read! (db/q '[:find ?entity ?symbol :in $ [?entity ...]
-                                             :where [?entity :seon.fn/sym ?symbol]]
-                                           database (vec entities))))))
-          present (into #{} (keep :seon.fn/sym)
-                        (read! (db/pull-many database [:seon.fn/sym]
-                                            (mapv #(vector :seon.fn/sym %) seeds))))
-          affected
-          ;; a caller entity named once is never resolved again
-          (loop [frontier seeds seen (set seeds) entities #{} affected present]
-            (if (empty? frontier)
-              affected
-              (let [callers (into #{} (remove entities)
-                                  (concat (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %))) frontier)
-                                          (mapcat declared frontier)))
-                    fresh (vec (remove seen (functions callers)))]
-                (recur fresh (into seen fresh) (into entities callers) (into affected fresh)))))
-          tests (read! (call-reach database seeds))]
+    (let [{::keys [affected tests]} (closure-walk database (set seeds))]
       {:seon.fn/affected affected :seon.fn/tests tests})
     (catch clojure.lang.ExceptionInfo failure
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
+(defn- reaching-tests
+  "The tests the walk of `seeds` selects: those calling a seed or a direct
+  caller (`seon.fn/closure-walk`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.fn/sym]]
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
+  [database seeds]
+  (try
+    (::selected (closure-walk database seeds))
+    (catch clojure.lang.ExceptionInfo failure
+      (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+
 (defn gate-sets
-  "Select the tests exercising changed definitions (`call-reach`).
+  "Select the tests exercising changed definitions (`seon.fn/reverse-closure`).
   The map arity seeds one frontier with all changed symbols. The positional arity
   answers, per seed, the conservative reverse closure through calls,
   references and declared edges that destructive isolation reads
@@ -2031,7 +2023,7 @@
     [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
      [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error]]]}
   ([{database :seon.db/db seeds :seon.fn/seeds}]
-   (call-reach database (vec seeds)))
+   (reaching-tests database (set seeds)))
   ([database function-symbols]
    (let [result (gate-sets-in database function-symbols)]
      (if (:seon.db/invalid-read result)
@@ -2091,13 +2083,13 @@
                (sort print/compare-values entities))})))
 
 (defn gate-set
-  "The tests exercising one function identity (`call-reach`).
+  "The tests exercising one function identity (`seon.fn/reverse-closure`).
   Use gate-sets when one operation asks about several identities."
   {:seon/tasks #{'seon.fn/tests-reaching-saturates}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
-  (call-reach database [function-symbol]))
+  (reaching-tests database #{function-symbol}))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
