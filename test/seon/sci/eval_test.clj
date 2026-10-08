@@ -32,6 +32,7 @@
             [seon.id]
             [seon.program :as program]
             [sci.core :as sci]
+            [sci.ctx-store]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
             [seon.render.walk :as render.walk]
@@ -195,10 +196,10 @@
                                   (:seon.fn/host-bound? (db/pull after [:seon.fn/host-bound?] [:seon.fn/sym %])))
                             (:seon.fn/affected (seon.fn/reverse-closure {:seon.db/db after
                                                                          :seon.fn/seeds #{changed-sym}})))]
-       (is (= "Branch version." (:doc (meta (sci/resolve ctx changed-sym))))
+       (is (= "Branch version." (sci/eval-string* ctx (str "(:doc (meta #'" changed-sym "))")))
            "what the branch evaluates from source sees its definition")
        (is (seq callers) "the change reaches host-bound callers in loaded namespaces")
-       (is (every? #(identical? @(resolve %) @(sci/resolve ctx %)) callers)
+       (is (every? #(identical? @(resolve %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) callers)
            "each unchanged host-bound caller keeps its compiled Var, never a refusing stub")
        (is (= "{:a 1}" (sci/eval-string* ctx "(pr-str {:a 1})"))
            "the branch's evaluator keeps printing")))))
@@ -667,7 +668,7 @@
     (is (= ["Reset doc." true]
            (:seon.sci.admit/value reset)))))
 
-(deftest sci-fork-copies-existing-var-roots-on-write
+(deftest sci-fork-bindings-are-per-context
   (let [parent (eval/build-base-ctx (seon.schema/handed-projection))
         _ (sci/eval-string* parent
                             "(def shared :parent) (def bound :parent) (def untouched :parent)")
@@ -685,12 +686,16 @@
         "a new fork name changes only the fork's env map")
     (is (identical? untouched-parent-var untouched-fork-var)
         "an untouched name retains the structurally shared Var")
-    (is (not (identical? parent-var fork-var))
-        "a redefinition creates a generation-owned Var")
+    (is (identical? parent-var fork-var)
+        "a redefinition keeps the Var; the fork writes its own binding")
     (is (= :parent (sci/eval-string* parent "shared"))
         "eval-def leaves the parent root unchanged")
     (is (= :fork-redefinition (sci/eval-string* forked "shared")))
+    (is (= [:parent :fork-redefinition]
+           [(sci.ctx-store/with-ctx parent @parent-var) (sci.ctx-store/with-ctx forked @fork-var)])
+        "a host read of the one Var answers the binding of the context it binds")
     (is (identical? bound-var (sci/resolve forked 'bound)))
+    (is (identical? bound-var (sci/resolve parent 'bound)))
     (is (= :parent (sci/eval-string* parent "bound"))
         "context-aware root binding leaves the parent root unchanged")
     (is (= :fork-bind-root (sci/eval-string* forked "bound")))))
@@ -731,10 +736,10 @@
          (seon.schema/projection-from-database (db/db connection))
          (db/db connection))
         (is (identical? parent-var (sci/resolve parent 'contracted)))
-        (is (identical? parent-root @(sci/resolve parent 'contracted)))
-        (is (not (identical? parent-var
-                             (sci/resolve candidate 'contracted)))
-            "contract installation copies the inherited candidate Var")
+        (is (identical? parent-var (sci/resolve candidate 'contracted))
+            "the fork arms its own binding of the one Var")
+        (is (identical? parent-root (sci.ctx-store/with-ctx parent @parent-var)))
+        (is (not (identical? parent-root (sci.ctx-store/with-ctx candidate @parent-var))))
         (is (= 42 (sci/eval-string* candidate "(contracted 42)")))))))
 
 (deftest base-context-bindings-resolve-without-dependency-stubs

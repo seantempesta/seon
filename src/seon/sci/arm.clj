@@ -2,7 +2,8 @@
   "Arming at the write: each observed definition's contract is armed on the
   exact Var written, under the batch's arming projection, before the next
   expression runs. The write observer stages (`seon.sci.observe`) call it."
-  (:require [seon.db :as db]
+  (:require [sci.ctx-store]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]))
@@ -41,32 +42,33 @@
   install gate's generated calls, a render) never installs it again from a
   stored row. A contract that cannot arm leaves the function callable as written, with the
   cause beside the write as `:seon.batch/arm-error`. Answers the write with what arming
-  did. The base's callers of a function the write defines apart from the
+  did. It reads the Var as `ctx` binds it. The base's callers of a function the write defines apart from the
   base's Var are re-interpreted onto it (`seon.sci.eval/reinterpret-inherited-callers!`);
   a failure there is the write's `:seon.batch/arm-error` too."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working {v :var :as write}]
-  (let [sym (var-symbol v)
-        contract (:malli/schema (meta v))
-        function? (fn? @v)]
-    (when (and sym function?)
-      (kernel/mark-installed! ctx sym))
-    (cond-> (if-not (and sym contract function?)
-              write
+  (sci.ctx-store/with-ctx ctx
+    (let [sym (var-symbol v)
+          contract (:malli/schema (meta v))
+          function? (fn? @v)]
+      (when (and sym function?)
+        (kernel/mark-installed! ctx sym))
+      (cond-> (if-not (and sym contract function?)
+                write
+                (try
+                  (#'eval/install-function-contract!
+                   ctx {:seon.fn/sym sym :seon.fn/spec (pr-str contract) :seon.sci.eval/sci-var v}
+                   (arming-projection request working) working)
+                  (assoc write :seon.batch/armed true)
+                  (catch Throwable t
+                    (assoc write :seon.batch/arm-error (ex-message t)))))
+        (and sym function?)
+        (as-> armed
               (try
-                (#'eval/install-function-contract!
-                 ctx {:seon.fn/sym sym :seon.fn/spec (pr-str contract) :seon.sci.eval/sci-var v}
-                 (arming-projection request working) working)
-                (assoc write :seon.batch/armed true)
+                (eval/reinterpret-inherited-callers! ctx working sym v)
+                armed
                 (catch Throwable t
-                  (assoc write :seon.batch/arm-error (ex-message t)))))
-      (and sym function?)
-      (as-> armed
-            (try
-              (eval/reinterpret-inherited-callers! ctx working sym v)
-              armed
-              (catch Throwable t
-                (update armed :seon.batch/arm-error #(or % (ex-message t)))))))))
+                  (update armed :seon.batch/arm-error #(or % (ex-message t))))))))))
 
 (defn write-event
   "A producer write as the batch records it: the Var's symbol, origin and kind.

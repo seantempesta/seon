@@ -159,6 +159,34 @@
            (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
            (is (true? passed?) "the step ran the reaching tests green")))))))
 
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}}
+  an-inherited-test-sees-the-branch-redefinition-of-a-contracted-callee
+  ;; The live shape: main's callee has a contract, so the branch's base arms
+  ;; its own copy of it; main's test must still call the branch's definition.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [brancher (str "branch-" agent-id)]
+       (answered (str "(in-ns 'scratch.contracted) (clojure.core/refer-clojure)"
+                      " (defn slug {:malli/schema [:=> [:cat :string] :string]} [title] \"\")")
+                 agent-id running)
+       (answered (str "(ns scratch.contracted-test (:require [clojure.test :refer [deftest is]]"
+                      " [scratch.contracted :as c])) (deftest slug-lowers (is (= \"ab\" (c/slug \"AB\"))))")
+                 agent-id running)
+       (testing "the redefining pass runs main's test against the branch's definition"
+         (let [{:keys [value red passed?]}
+               (step-red (str "(in-ns 'scratch.contracted)"
+                              " (defn slug {:malli/schema [:=> [:cat :string] :string]} [title]"
+                              " (clojure.string/lower-case title)) (slug \"AB\")")
+                         brancher running)]
+           (is (= "ab" value))
+           (is (not (contains? red 'scratch.contracted-test/slug-lowers)))
+           (is (true? passed?) "the step ran the reaching tests green")))
+       (testing "a later eval request in the test namespace still runs it against the branch's definition"
+         (let [{:keys [value red passed?]} (step-red "(in-ns 'scratch.contracted-test) (c/slug \"AB\")" brancher running)]
+           (is (= "ab" value))
+           (is (not (contains? red 'scratch.contracted-test/slug-lowers)))
+           (is (true? passed?) "the step ran the reaching tests green")))))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}}
   a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
   (support/with-running-agent

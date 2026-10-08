@@ -1,6 +1,7 @@
 (ns seon.test.runner
   "Capture test Var results in this JVM and commit them as per-member facts."
   (:require [seon.error.refusal]
+            [sci.ctx-store]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -387,42 +388,46 @@
     [:or [:vector :seon.test.runner/captured-result]
      :seon.test/not-runnable-error]]}
   [test-vars custody]
-  (if-let [unrunnable (first (remove #(ifn? (:test (meta %))) test-vars))]
-    (seon.error.refusal/error :seon.test/not-runnable-error
-     {:seon.error/layer :seon.test/execution
-      :seon.error/operation `run-vars!
-      :seon.error/message "The supplied Var has no clojure.test function."
-      :seon.test/not-runnable (str unrunnable)
-      :seon.error/member :seon.test/var
-      :seon.error/expected "a Var carrying a clojure.test function"
-      :seon.error/offending unrunnable
-      :seon.error/data {:seon.test/var (str unrunnable)}})
-    (let [selected-namespaces (set (map (comp symbol namespace symbol var-symbol) test-vars))
-          options (report-options custody)
-          capture (atom {::order [] ::results {}})
-          reported-signatures (atom #{})
-          default-report (.getRawRoot #'test/report)
-          before (ambient-snapshot)]
-      (binding [test/*report-counters* (ref test/*initial-report-counters*)
-                test/*testing-vars* ()
-                test/*testing-contexts* ()
-                test/report
-                (fn [event]
-                  (capture-and-report-event!
-                   options capture selected-namespaces default-report
-                   reported-signatures event))]
-        (db/call-with-custody custody
-          #(run-selected-tests (sort selected-namespaces) test-vars
-                               (:seon.sci.eval/ctx custody))))
-      (let [results (captured-results @capture)
-            drift (ambient-drift before (ambient-snapshot))]
-        (mapv (fn [result]
-                (cond-> result
-                  (seq drift) (update :seon.test/error-count (fnil inc 0))
-                  (seq drift) (update :seon.test/failure-message
-                                      #(str (when % (str % "\n"))
-                                            "Worker-global state changed: " (report-value options drift)))))
-              results)))))
+  ;; An SCI test Var's :test and its callees are read as the custody's
+  ;; context binds them. A host run binds no context: a nil binding would
+  ;; hide the one a library stored (clj-kondo's hooks `reset-ctx!` it).
+  (with-bindings (if-let [ctx (:seon.sci.eval/ctx custody)] {#'sci.ctx-store/*ctx* ctx} {})
+    (if-let [unrunnable (first (remove #(ifn? (:test (meta %))) test-vars))]
+      (seon.error.refusal/error :seon.test/not-runnable-error
+       {:seon.error/layer :seon.test/execution
+        :seon.error/operation `run-vars!
+        :seon.error/message "The supplied Var has no clojure.test function."
+        :seon.test/not-runnable (str unrunnable)
+        :seon.error/member :seon.test/var
+        :seon.error/expected "a Var carrying a clojure.test function"
+        :seon.error/offending unrunnable
+        :seon.error/data {:seon.test/var (str unrunnable)}})
+      (let [selected-namespaces (set (map (comp symbol namespace symbol var-symbol) test-vars))
+            options (report-options custody)
+            capture (atom {::order [] ::results {}})
+            reported-signatures (atom #{})
+            default-report (.getRawRoot #'test/report)
+            before (ambient-snapshot)]
+        (binding [test/*report-counters* (ref test/*initial-report-counters*)
+                  test/*testing-vars* ()
+                  test/*testing-contexts* ()
+                  test/report
+                  (fn [event]
+                    (capture-and-report-event!
+                     options capture selected-namespaces default-report
+                     reported-signatures event))]
+          (db/call-with-custody custody
+            #(run-selected-tests (sort selected-namespaces) test-vars
+                                 (:seon.sci.eval/ctx custody))))
+        (let [results (captured-results @capture)
+              drift (ambient-drift before (ambient-snapshot))]
+          (mapv (fn [result]
+                  (cond-> result
+                    (seq drift) (update :seon.test/error-count (fnil inc 0))
+                    (seq drift) (update :seon.test/failure-message
+                                        #(str (when % (str % "\n"))
+                                              "Worker-global state changed: " (report-value options drift)))))
+                results))))))
 
 (defn run-var!
   "Run one host or SCI test Var under the custody its caller hands it, and

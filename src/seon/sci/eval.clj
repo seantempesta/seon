@@ -110,6 +110,7 @@
             [my.turn]
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
+            [sci.ctx-store]
             [sci.lang]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
@@ -395,39 +396,56 @@
 
 (def ^:private absent-intern (Object.))
 
-(defn- turn-interns
-  "Vars and dereferenced roots owned by this SCI fork's generation.
-
-  `def`, `intern`, and inherited-root writes stamp SCI's current fork
-  generation (`reference-code/sci/src/sci/impl/evaluator.cljc:25-49` and
-  `sci/impl/utils.cljc:359-379`). Host Vars copied into the context by system
-  namespace installation carry no such stamp. This is the definition-event
-  provenance for the agent's defs: namespace membership never decides authorship.
-
-  A Var of this generation that did not exist in the acquired program was
-  `assoc-in`ed into its namespace map, so only maps not `identical?` to the
-  acquired program's (`::program-namespaces`, taken under another generation)
-  are walked. Without that reference every namespace is walked.
-
-  Values rather than Var identities are retained because redefinition may
-  mutate an already generation-owned Var root. Values are not traversed."
+(defn- inherit-var-bindings!
+  "Record the Var bindings `ctx` holds now, at its fork, as the ones it
+  inherited: its own definitions of inherited Vars are the bindings that
+  differ from them (`own-binding?`)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/ctx]}
   [ctx]
-  (let [turn-generation (:sci/generation @(:env ctx))
-        program (::program-namespaces @(::kernel/program-snapshot ctx))
+  (swap! (:env ctx) #(assoc % ::inherited-var-bindings (get % :sci/var-bindings {})))
+  ctx)
+
+(defn- own-binding?
+  "Whether `ctx` wrote its own binding of `sci-var` since its fork."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/sci-var] :boolean]}
+  [ctx sci-var]
+  (let [binding (sci.vars/context-binding ctx sci-var)]
+    (boolean (and binding
+                  (not (identical? binding (get (::inherited-var-bindings @(:env ctx)) sci-var)))))))
+
+(defn- turn-interns
+  "This context's own definitions: the Vars it wrote since its fork.
+
+  A redefinition of an inherited Var keeps the Var and writes this context's
+  own binding of it (`own-binding?`). A new name is a Var with an SCI
+  generation (an SCI `def` or `intern`; host Vars copied in by namespace
+  installation carry none) at a path where the acquired program
+  (`::program-namespaces`) has no Var or another one; only namespace maps not
+  `identical?` to the acquired program's can hold one. Without that reference
+  every generation-stamped Var is new.
+
+  Values rather than Var identities are retained because a later write may
+  replace the root. Values are not traversed."
+  [ctx]
+  (let [program (::program-namespaces @(::kernel/program-snapshot ctx))
         reference (when (and program
-                             (not= (::generation program) turn-generation))
-                    (::namespaces program))]
-    (if-not turn-generation
-      {}
+                             (not= (::generation program) (:sci/generation @(:env ctx))))
+                    (::namespaces program))
+        rebound? (not (identical? (get @(:env ctx) :sci/var-bindings {})
+                                  (get @(:env ctx) ::inherited-var-bindings {})))]
+    (sci.ctx-store/with-ctx ctx
       (into {}
             (for [[namespace-name namespace-map] (sci/namespace-state ctx)
-                  :when (not (and reference
-                                  (identical? namespace-map
-                                              (get reference namespace-name))))
+                  :let [program-map (get reference namespace-name)
+                        new-names? (not (and reference (identical? namespace-map program-map)))]
+                  :when (or rebound? new-names?)
                   [intern-name sci-var] namespace-map
                   :when (and (symbol? intern-name)
                              (sci.utils/var? sci-var)
-                             (= turn-generation (:sci/generation (meta sci-var))))]
+                             (or (and rebound? (own-binding? ctx sci-var))
+                                 (and new-names?
+                                      (contains? (meta sci-var) :sci/generation)
+                                      (not (identical? sci-var (get program-map intern-name))))))]
               [(symbol (str namespace-name) (str intern-name))
                {:seon.sci.eval/var sci-var
                 :seon.sci.eval/metadata (meta sci-var)
@@ -736,7 +754,7 @@
       (sci/bind-root!
        ctx sci-var
        (instrument/wrap-interpreted
-        function-symbol spec-edn projection caps @sci-var
+        function-symbol spec-edn projection caps (sci.ctx-store/with-ctx ctx @sci-var)
         (cond-> (assoc (select-keys @(::kernel/program-snapshot ctx)
                                     [:seon.flow/commit-fault!])
                        :seon.call-preparation/snapshot current)
@@ -1355,26 +1373,45 @@
     #(sci/eval-form ctx form)))
 
 (defn- transfer-evaluated-roots!
-  [ctx installations]
+  "Install each evaluated definition of `installations` into `ctx`.
+
+  The evaluated Var and its root and metadata are read in the context that
+  evaluated it (`source`), whose own binding they are; without one, the
+  evaluation's recorded root. A name `ctx` already holds takes them as its
+  binding of its Var (`sci.core/intern` of an existing name); a new name
+  installs the evaluated Var itself, so closures that captured it and `ctx`
+  call one Var."
+  [ctx source installations]
   (let [roots (into {} (mapcat (comp :seon.sci.eval/bindings
                                     :seon.sci.eval/evaluation)) installations)]
     (doseq [qualified (into #{} (keep #(some-> % str symbol))
                            (mapcat (comp (juxt :seon.fn/sym :seon.test/sym)
                                          :seon.program/row) installations))
-            :let [{value :seon.sci.eval/value metadata :seon.sci.eval/metadata}
-                  (get roots qualified)]
-            :when (get roots qualified)]
-      (let [namespace-name (symbol (namespace qualified))]
+            :let [recorded (get roots qualified)]
+            :when recorded]
+      (let [namespace-name (symbol (namespace qualified))
+            local-name (symbol (name qualified))
+            evaluated (when source
+                        (let [v (get-in (sci/namespace-state source) [namespace-name local-name])]
+                          (when (sci.utils/var? v) v)))
+            [value metadata] (if evaluated
+                               (sci.ctx-store/with-ctx source [@evaluated (meta evaluated)])
+                               [(:seon.sci.eval/value recorded) (:seon.sci.eval/metadata recorded)])
+            existing (get-in (sci/namespace-state ctx) [namespace-name local-name])]
         (when-not (sci/find-ns ctx namespace-name)
           (sci/add-namespace! ctx namespace-name {}))
-        (let [installed (sci/intern ctx namespace-name
-                                    (with-meta (symbol (name qualified)) metadata) value)]
-          ;; SCI intern replaces an existing root without adopting symbol
-          ;; metadata. The evaluated :test body and contract belong to the
-          ;; replacement too; retain only the destination's generation/ns.
-          (reset-meta! installed
-                       (merge metadata (select-keys (meta installed)
-                                                    [:sci/generation :ns]))))))))
+        (when (and evaluated (not (sci.utils/var? existing)))
+          (sci/add-namespace! ctx namespace-name {local-name evaluated}))
+        (sci.ctx-store/with-ctx ctx
+          (let [target (if (sci.utils/var? existing) existing evaluated)]
+            ;; Already `ctx`'s root and metadata (a new Var `source` owned):
+            ;; nothing to write, so `ctx` holds no binding of its own.
+            (when-not (and target (identical? value @target) (identical? metadata (meta target)))
+              (let [installed (sci/intern ctx namespace-name (with-meta local-name metadata) value)]
+                ;; SCI intern replaces an existing root without adopting symbol
+                ;; metadata. The evaluated :test body and contract belong to
+                ;; the replacement too; retain only the destination's ns.
+                (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))))
 
 (declare base-bindings acquired-database? stale-reach reinterpret-reach!)
 
@@ -1497,48 +1534,49 @@
     report :seon.db/transaction-report
     written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
-  (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
-                    installations)
-        functions (into [] (keep (comp :seon.fn/sym :seon.program/row)) installations)
-        previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
-    (transfer-evaluated-roots! ctx installations)
-    ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
-    ;; settlement wrote, and every registration an earlier run committed. The
-    ;; context's own projection is stale for the latter, so a defn naming a
-    ;; schema registered in an earlier run refused out of the turn (reds
-    ;; group I); folding each row into it again also rebuilt the projection
-    ;; once per row. Derived once per committed value (memoized).
-    (let [projection (schema/projection-from-database db)
-          installed (mapv (fn [{program-row :seon.program/row}]
-                            (install-row!
-                             {:seon.sci.eval/ctx ctx
-                              :seon.db/db db
-                              :seon.program/row program-row
-                              ::evaluated? true
-                              ::prepared-projection projection}))
-                          installations)]
-      (when-let [snapshot (::base-bindings agent-ctx)]
-        (reset! snapshot (base-bindings ctx)))
-      ;; The agent's snapshot holds the rows its own definitions committed, so
-      ;; its next regeneration reads them unchanged rather than another writer's.
-      (when-let [agent-snapshot (::kernel/program-snapshot agent-ctx)]
-        (swap! agent-snapshot update :functions merge
-               (select-keys (:functions @(::kernel/program-snapshot ctx))
-                            (keep (comp :seon.fn/sym :seon.program/row) installations))))
-      (when (and report written-on
-                 (every? :seon.sci.eval/installed installed)
-                 (installation-covers-program-change?
-                  ctx written-on report installations (context-projection ctx)))
-        (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
-          (swap! (::kernel/program-snapshot target) assoc :seon.db/db db)))
-      ;; A definition that landed in a new Var of `ctx` leaves the callers and
-      ;; tests analyzed against its previous Var calling that one: they are
-      ;; analyzed again here, as one Clojure Var would be seen.
-      (doseq [sym functions
-              :let [before (get previous sym)]
-              :when (and before (not (identical? before (sci/resolve ctx sym))))]
-        (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
-      installed)))
+  (sci.ctx-store/with-ctx ctx
+    (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
+                      installations)
+          functions (into [] (keep (comp :seon.fn/sym :seon.program/row)) installations)
+          previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
+      (transfer-evaluated-roots! ctx agent-ctx installations)
+      ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
+      ;; settlement wrote, and every registration an earlier run committed. The
+      ;; context's own projection is stale for the latter, so a defn naming a
+      ;; schema registered in an earlier run refused out of the turn (reds
+      ;; group I); folding each row into it again also rebuilt the projection
+      ;; once per row. Derived once per committed value (memoized).
+      (let [projection (schema/projection-from-database db)
+            installed (mapv (fn [{program-row :seon.program/row}]
+                              (install-row!
+                               {:seon.sci.eval/ctx ctx
+                                :seon.db/db db
+                                :seon.program/row program-row
+                                ::evaluated? true
+                                ::prepared-projection projection}))
+                            installations)]
+        (when-let [snapshot (::base-bindings agent-ctx)]
+          (reset! snapshot (base-bindings ctx)))
+        ;; The agent's snapshot holds the rows its own definitions committed, so
+        ;; its next regeneration reads them unchanged rather than another writer's.
+        (when-let [agent-snapshot (::kernel/program-snapshot agent-ctx)]
+          (swap! agent-snapshot update :functions merge
+                 (select-keys (:functions @(::kernel/program-snapshot ctx))
+                              (keep (comp :seon.fn/sym :seon.program/row) installations))))
+        (when (and report written-on
+                   (every? :seon.sci.eval/installed installed)
+                   (installation-covers-program-change?
+                    ctx written-on report installations (context-projection ctx)))
+          (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
+            (swap! (::kernel/program-snapshot target) assoc :seon.db/db db)))
+        ;; A definition that landed in a new Var of `ctx` leaves the callers and
+        ;; tests analyzed against its previous Var calling that one: they are
+        ;; analyzed again here, as one Clojure Var would be seen.
+        (doseq [sym functions
+                :let [before (get previous sym)]
+                :when (and before (not (identical? before (sci/resolve ctx sym))))]
+          (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
+        installed))))
 
 (defn- classpath-locatable?
   "Whether THIS PROCESS's own classpath can serve one namespace's source.
@@ -2041,114 +2079,115 @@
                        [:set :qualified-symbol] :map]
                   :map]}
   [ctx db commit-fault! namespace-row-by-name function-rows test-rows interpreted state]
-  (let [function-rows-by-ns (group-by #(nth % 2) function-rows)
-        test-rows-by-ns (group-by #(nth % 2) test-rows)
-        {order ::order cycle ::cycle}
-        (namespace-order namespace-row-by-name
-                         (into (set (keys namespace-row-by-name))
-                               (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))
-        ;; a stored cycle is the agent's mistake, delivered as its refusal
-        state (cond-> state cycle (update ::agent-mistakes (fnil into []) (cycle-refusals cycle)))
-        install-row
-        (fn [state row]
-          (try
-            (let [installed
-                  (install-row!
-                   {:seon.sci.eval/ctx
-                    (assoc ctx :seon.schema/projection
-                           (:seon.schema/projection state))
-                    :seon.db/db db
-                    ::prepared-projection (:seon.schema/projection state)
-                    :seon.program/row row})]
-              (if (or (contains? installed :seon.instrument/check)
-                      (:seon.sci.eval/refused-function installed))
+  (sci.ctx-store/with-ctx ctx
+    (let [function-rows-by-ns (group-by #(nth % 2) function-rows)
+          test-rows-by-ns (group-by #(nth % 2) test-rows)
+          {order ::order cycle ::cycle}
+          (namespace-order namespace-row-by-name
+                           (into (set (keys namespace-row-by-name))
+                                 (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))
+          ;; a stored cycle is the agent's mistake, delivered as its refusal
+          state (cond-> state cycle (update ::agent-mistakes (fnil into []) (cycle-refusals cycle)))
+          install-row
+          (fn [state row]
+            (try
+              (let [installed
+                    (install-row!
+                     {:seon.sci.eval/ctx
+                      (assoc ctx :seon.schema/projection
+                             (:seon.schema/projection state))
+                      :seon.db/db db
+                      ::prepared-projection (:seon.schema/projection state)
+                      :seon.program/row row})]
+                (if (or (contains? installed :seon.instrument/check)
+                        (:seon.sci.eval/refused-function installed))
+                  (update state (refusal-member row) (fnil conj [])
+                          (acquisition-refusal row installed))
+                  (cond-> (assoc state
+                         :seon.schema/projection
+                         (:seon.schema/projection installed)
+                         :seon.sci.eval/installed
+                         (+ (:seon.sci.eval/installed state)
+                            (:seon.sci.eval/installed installed)))
+                    (:seon.sci.eval/load-result installed)
+                    (update :seon.sci.eval/load-results (fnil conj [])
+                            (:seon.sci.eval/load-result installed)))))
+              (catch Throwable failure
+                (when (:seon.instrument/registration-observation (error/refusal failure))
+                  (throw failure))
                 (update state (refusal-member row) (fnil conj [])
-                        (acquisition-refusal row installed))
-                (cond-> (assoc state
-                       :seon.schema/projection
-                       (:seon.schema/projection installed)
-                       :seon.sci.eval/installed
-                       (+ (:seon.sci.eval/installed state)
-                          (:seon.sci.eval/installed installed)))
-                  (:seon.sci.eval/load-result installed)
-                  (update :seon.sci.eval/load-results (fnil conj [])
-                          (:seon.sci.eval/load-result installed)))))
-            (catch Throwable failure
-              (when (:seon.instrument/registration-observation (error/refusal failure))
-                (throw failure))
-              (update state (refusal-member row) (fnil conj [])
-                      (acquisition-refusal row failure)))))]
-    ;; Interpreted callers analyze against every other name their compiled
-    ;; namespace reaches; only this branch's rows become SCI definitions.
-    (install-caller-host-bindings!
-     ctx (keep namespace-row-by-name (keys function-rows-by-ns)))
-    ;; Copy inherited Vars into this generation before analyzing any caller.
-    ;; SCI definitions then replace roots in those same Vars; a caller analyzed
-    ;; before its callee must not retain the old generation's copied root.
-    (doseq [sym interpreted
-            :let [candidate (sci/resolve ctx sym)]
-            :when candidate]
-      (sci/bind-root! ctx candidate @candidate))
-    (let [functions-installed
-          (reduce
-           (fn [state namespace-name]
-             ;; Each function installs its exact bindings inside the named
-             ;; refusal boundary. A refused dependency must not escape here
-             ;; as an unclassified namespace-binding exception.
-             (when (empty? (get function-rows-by-ns namespace-name))
-               (when-let [row (get namespace-row-by-name namespace-name)]
-                 (install-namespace-bindings!
-                  ctx namespace-name (row-bindings row))))
-             ;; Rows carry no definition order, and SCI resolves a body's
-             ;; free symbols when it analyzes it. Declare every new Var of
-             ;; the namespace first, as Clojure's `declare` does, so a caller
-             ;; installed before its callee resolves the Var the callee binds.
-             (when-let [undeclared
-                        (seq (keep (fn [[sym]]
-                                     (when-not (sci/resolve ctx (symbol sym))
-                                       (symbol (name sym))))
-                                   (get function-rows-by-ns namespace-name)))]
-               (sci/binding [sci/ns (sci/create-ns namespace-name)]
-                 (sci/eval-form ctx (list* 'declare undeclared))))
-             (reduce
-              install-row
-              (cond-> state
-                (::agent-authored?
-                 (get namespace-row-by-name namespace-name))
-                (update :seon.sci.eval/installed inc))
-              (map (fn [[sym source _ admission private?]]
-                     {:seon.fn/sym sym
-                      :seon.schema.admission/source admission
-                      :seon.fn/source source
-                      :seon.fn/ns [:seon.ns/name namespace-name]
-                      :seon.fn/private? private?
-                      :seon.fn/arglists
-                      (:seon.fn/arglists (db/pull db [:seon.fn/arglists]
-                                                [:seon.fn/sym sym]))
-                      ::skip-contract-install?
-                      (not= :agent admission)})
-                   (sort-by first
-                            (get function-rows-by-ns namespace-name)))))
-           state
-           order)]
-      ;; Tests resolve only after every namespace's functions and exact
-      ;; bindings are present. This makes renamed `deftest` deterministic.
-      (record-acquisition-refusals!
-       ctx db
-       (reduce
-        (fn [state namespace-name]
-          (reduce
-           install-row
-           state
-           (map (fn [[sym source _ admission]]
-                  {:seon.test/sym sym
-                   :seon.schema.admission/source admission
-                   :seon.test/source source
-                   :seon.test/ns [:seon.ns/name namespace-name]})
-                (sort-by first (get test-rows-by-ns namespace-name)))))
-        functions-installed
-        order)
-       commit-fault!))))
+                        (acquisition-refusal row failure)))))]
+      ;; Interpreted callers analyze against every other name their compiled
+      ;; namespace reaches; only this branch's rows become SCI definitions.
+      (install-caller-host-bindings!
+       ctx (keep namespace-row-by-name (keys function-rows-by-ns)))
+      ;; Copy inherited Vars into this generation before analyzing any caller.
+      ;; SCI definitions then replace roots in those same Vars; a caller analyzed
+      ;; before its callee must not retain the old generation's copied root.
+      (doseq [sym interpreted
+              :let [candidate (sci/resolve ctx sym)]
+              :when candidate]
+        (sci/bind-root! ctx candidate @candidate))
+      (let [functions-installed
+            (reduce
+             (fn [state namespace-name]
+               ;; Each function installs its exact bindings inside the named
+               ;; refusal boundary. A refused dependency must not escape here
+               ;; as an unclassified namespace-binding exception.
+               (when (empty? (get function-rows-by-ns namespace-name))
+                 (when-let [row (get namespace-row-by-name namespace-name)]
+                   (install-namespace-bindings!
+                    ctx namespace-name (row-bindings row))))
+               ;; Rows carry no definition order, and SCI resolves a body's
+               ;; free symbols when it analyzes it. Declare every new Var of
+               ;; the namespace first, as Clojure's `declare` does, so a caller
+               ;; installed before its callee resolves the Var the callee binds.
+               (when-let [undeclared
+                          (seq (keep (fn [[sym]]
+                                       (when-not (sci/resolve ctx (symbol sym))
+                                         (symbol (name sym))))
+                                     (get function-rows-by-ns namespace-name)))]
+                 (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                   (sci/eval-form ctx (list* 'declare undeclared))))
+               (reduce
+                install-row
+                (cond-> state
+                  (::agent-authored?
+                   (get namespace-row-by-name namespace-name))
+                  (update :seon.sci.eval/installed inc))
+                (map (fn [[sym source _ admission private?]]
+                       {:seon.fn/sym sym
+                        :seon.schema.admission/source admission
+                        :seon.fn/source source
+                        :seon.fn/ns [:seon.ns/name namespace-name]
+                        :seon.fn/private? private?
+                        :seon.fn/arglists
+                        (:seon.fn/arglists (db/pull db [:seon.fn/arglists]
+                                                  [:seon.fn/sym sym]))
+                        ::skip-contract-install?
+                        (not= :agent admission)})
+                     (sort-by first
+                              (get function-rows-by-ns namespace-name)))))
+             state
+             order)]
+        ;; Tests resolve only after every namespace's functions and exact
+        ;; bindings are present. This makes renamed `deftest` deterministic.
+        (record-acquisition-refusals!
+         ctx db
+         (reduce
+          (fn [state namespace-name]
+            (reduce
+             install-row
+             state
+             (map (fn [[sym source _ admission]]
+                    {:seon.test/sym sym
+                     :seon.schema.admission/source admission
+                     :seon.test/source source
+                     :seon.test/ns [:seon.ns/name namespace-name]})
+                  (sort-by first (get test-rows-by-ns namespace-name)))))
+          functions-installed
+          order)
+         commit-fault!)))))
 
 (defn- namespace-row
   "A pulled namespace row carrying its source, admission and authorship."
@@ -2529,19 +2568,21 @@
         (pos-int? budget) (assoc :seon.print/budget budget)))))
 
 (defn- base-bindings
-  "Snapshot program roots to distinguish the entering private layer."
+  "Snapshot program roots, as `ctx` binds them, to distinguish the entering
+  private layer."
   [ctx]
-  (into {}
-        (mapcat
-         (fn [[namespace-name bindings]]
-           (map (fn [[binding-name binding]]
-                  [[namespace-name binding-name]
-                   (if (sci.utils/var? binding)
-                     [(if (sci.vars/hasRoot binding) @binding absent-intern)
-                      (dissoc (meta binding) :sci/generation)]
-                     [binding])])
-                bindings)))
-        (sci/namespace-state ctx)))
+  (sci.ctx-store/with-ctx ctx
+    (into {}
+          (mapcat
+           (fn [[namespace-name bindings]]
+             (map (fn [[binding-name binding]]
+                    [[namespace-name binding-name]
+                     (if (sci.utils/var? binding)
+                       [(if (sci.vars/hasRoot binding) @binding absent-intern)
+                        (dissoc (meta binding) :sci/generation)]
+                       [binding])])
+                  bindings)))
+          (sci/namespace-state ctx))))
 
 (defn- same-program-root?
   "Contract wrappers retain their original interpreted callable as metadata."
@@ -2563,7 +2604,7 @@
   "Fork the replacement base and carry the private layer as actual objects.
 
   The private layer is what the agent's own evaluation added: Vars its SCI
-  generation defined, and Vars at a path the base it forked from never had (a
+  generations defined, its own bindings of inherited Vars, and Vars at a path the base it forked from never had (a
   namespace it required from the JVM, `load-host-namespace`). Owned private
   Vars keep their roots, including captured values; an own definition keeps its
   Var, which takes another writer's definition of its row in place. Inherited
@@ -2572,7 +2613,9 @@
   An unavailable execution's private layer is the unrestored one, so it
   carries nothing: the context is the base acquired at the branch head."
   [ctx base]
-  (let [generation (:sci/generation @(:env ctx))
+  (let [;; Every generation this context held: SCI stamps a Var born in one,
+        ;; and each regeneration gives the context a new one.
+        generations (conj (get @(:env ctx) ::generations #{}) (:sci/generation @(:env ctx)))
         layer (sci/namespace-state ctx)
         previous @(::base-bindings ctx)
         current (base-bindings base)
@@ -2581,25 +2624,30 @@
                                              @(::kernel/program-snapshot base)
                                              [(symbol (str %1) (str %2))]))
         private-bindings
-        (for [[namespace-name entries] layer
-              [local-name entry] entries
-              :when (sci.utils/var? entry)
-              :let [path [namespace-name local-name]
-                    root (if (sci.vars/hasRoot entry) @entry absent-intern)
-                    held (get current path)
-                    transferred? (boolean (and held (same-program-root? root (first held))))
-                    own? (= generation (:sci/generation (meta entry)))
-                    changed (when-not transferred? (changed? namespace-name local-name))
-                    adopted (when (and own? changed (sci.utils/var? (get-in base-layer path)))
-                              (get-in base-layer path))]
-              ;; An own Var stays the Var its callers' closures hold, as one
-              ;; Clojure Var does: settlement transfers its root into the base
-              ;; under another Var, and another writer's definition of its row
-              ;; is adopted into it. Only a deleted row drops it.
-              :when (if own?
-                      (or transferred? (not changed) adopted)
-                      (and (not (contains? previous path)) (not changed) (not transferred?)))]
-          [namespace-name local-name entry (or transferred? (some? adopted)) adopted])
+        (sci.ctx-store/with-ctx ctx
+          (doall
+           (for [[namespace-name entries] layer
+                 [local-name entry] entries
+                 :when (sci.utils/var? entry)
+                 :let [path [namespace-name local-name]
+                       root (if (sci.vars/hasRoot entry) @entry absent-intern)
+                       held (get current path)
+                       transferred? (boolean (and held (same-program-root? root (first held))))
+                       rebound? (own-binding? ctx entry)
+                       own? (or rebound? (contains? generations (:sci/generation (meta entry))))
+                       changed (when-not transferred? (changed? namespace-name local-name))
+                       adopted (when (and own? changed (sci.utils/var? (get-in base-layer path)))
+                                 (get-in base-layer path))]
+                 ;; An own Var stays the Var its callers' closures hold, as one
+                 ;; Clojure Var does, with this context's binding of it:
+                 ;; settlement transfers its root into the base, and another
+                 ;; writer's definition of its row is adopted into it. Only a
+                 ;; deleted row drops it.
+                 :when (if own?
+                         (or transferred? (not changed) adopted)
+                         (and (not (contains? previous path)) (not changed) (not transferred?)))]
+             [namespace-name local-name entry (or transferred? (some? adopted)) adopted
+              (when rebound? (sci.vars/context-binding ctx entry))])))
         private-names (into #{} (map (fn [[namespace-name local-name _]]
                                       (symbol (str namespace-name) (str local-name))))
                             private-bindings)
@@ -2609,26 +2657,33 @@
                                            (symbol (str namespace-name) (str local-name)))))
                              private-bindings)
         regenerated
-        (assoc (merge ctx (sci/fork base))
-               ::base-bindings (atom current)
-               ::kernel/installed-functions
-               (atom (into @(::kernel/installed-functions base)
-                           (filter private-names)
-                           @(::kernel/installed-functions ctx)))
-               ::kernel/program-snapshot
-               (atom (update @(::kernel/program-snapshot base) :functions merge
-                             (select-keys (:functions @(::kernel/program-snapshot ctx))
-                                          snapshot-names)))
-               :seon.sci.eval/private-state :preserved-in-memory)]
-    ;; Keep the continuing agent's generation and owned Vars. Re-interning
-    ;; only their roots would detach private closures from their private Vars.
-    ;; Every inherited base Var still belongs to a different generation.
-    (swap! (:env regenerated) assoc :sci/generation generation)
-    (doseq [[namespace-name local-name entry _ adopted] private-bindings]
-      (when (and adopted (sci.vars/hasRoot adopted))
-        (sci/bind-root! regenerated entry @adopted)
-        (reset-meta! entry (merge (meta adopted) (select-keys (meta entry) [:sci/generation :ns]))))
-      (sci/add-namespace! regenerated namespace-name {local-name entry}))
+        (inherit-var-bindings!
+         (assoc (merge ctx (sci/fork base))
+                ::base-bindings (atom current)
+                ::kernel/installed-functions
+                (atom (into @(::kernel/installed-functions base)
+                            (filter private-names)
+                            @(::kernel/installed-functions ctx)))
+                ::kernel/program-snapshot
+                (atom (update @(::kernel/program-snapshot base) :functions merge
+                              (select-keys (:functions @(::kernel/program-snapshot ctx))
+                                           snapshot-names)))
+                :seon.sci.eval/private-state :preserved-in-memory))]
+    ;; The regenerated context takes a new generation, so it writes no Var
+    ;; its earlier forks share in place; the Vars born in the ones it held
+    ;; stay its own.
+    (swap! (:env regenerated) assoc ::generations generations)
+    ;; Owned private Vars keep their objects and this context's bindings of
+    ;; them. Re-interning only their roots would detach private closures from
+    ;; their private Vars.
+    (sci.ctx-store/with-ctx regenerated
+      (doseq [[namespace-name local-name entry _ adopted binding] private-bindings]
+        (when binding
+          (sci.vars/update-binding! regenerated entry (constantly binding)))
+        (when (and adopted (sci.vars/hasRoot adopted))
+          (sci/bind-root! regenerated entry @adopted)
+          (reset-meta! entry (merge (meta adopted) (select-keys (meta entry) [:ns]))))
+        (sci/add-namespace! regenerated namespace-name {local-name entry})))
     (doseq [[namespace-name entries] layer
             [local-name entry] entries
             :let [prior (first (get previous [namespace-name local-name]))]
@@ -2699,7 +2754,7 @@
         ctx (if agent-ctx
               (regenerate-agent-context! agent-ctx base-ctx)
               (env/carry-state
-               (assoc (sci/fork base-ctx)
+               (assoc (inherit-var-bindings! (sci/fork base-ctx))
                              ::turn-fork? true
                              ::base-bindings (atom (base-bindings base-ctx))
                              ::result-objects (atom {})
@@ -2864,14 +2919,14 @@
     [(store-identity loaded) commit]))
 
 (defn- copy-base-ctx
-  "A fresh context over the cluster base: SCI's generation-aware fork plus owned
+  "A fresh context over the cluster base: an SCI fork (its own Var bindings) plus owned
   copies of the kernel atoms, holding the caller's database, loaded program and
   fault recorder."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
                        [:or :nil :seon.flow/commit-fault!]]
                   :seon.sci.eval/ctx]}
   [cached database loaded recorder]
-  (assoc (sci/fork cached)
+  (assoc (inherit-var-bindings! (sci/fork cached))
          ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
          ::kernel/program-snapshot
          (atom (cond-> (assoc @(::kernel/program-snapshot cached)
@@ -3044,55 +3099,58 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     commit-fault! :seon.flow/commit-fault!}]
-  (let [snapshot @(::kernel/program-snapshot ctx)]
-    (if (acquired-database? ctx database)
-      (do
-        ;; Same program: the acquired value advances to the supplied one, so
-        ;; a branch opened at it holds the acquired program by commit id.
-        (when-not (identical? database (:seon.db/db snapshot))
-          (swap! (::kernel/program-snapshot ctx) assoc :seon.db/db database)
-          (advance-context-projection! ctx database (context-projection ctx)))
-        (::acquisition snapshot))
-      (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
-            source (loaded-source snapshot database)
-            generated (base-ctx database
-                                (cond-> {::loaded-database (loaded-program source)}
-                                  commit-fault!
-                                  (assoc :seon.flow/commit-fault! commit-fault!)))
-            acquired (::acquisition generated)
-            ;; This context's own definitions (its generation's Vars that no
-            ;; program install bound) survive as objects, as
-            ;; `regenerate-agent-context!` carries them for a turn fork,
-            ;; unless the program changed their symbol's row.
-            generation (:sci/generation @(:env ctx))
-            installed @(::kernel/installed-functions ctx)
-            interns (turn-interns ctx)
-            replaced (replaced-definitions snapshot @(::kernel/program-snapshot generated)
-                                           (keys interns))
-            own (into [] (keep (fn [[qualified {sci-var :seon.sci.eval/var}]]
-                                 (when-not (or (and (contains? installed qualified)
-                                                    (not (get-in snapshot [:functions qualified ::context-defined?])))
-                                               (contains? replaced qualified))
-                                   [(symbol (namespace qualified)) (symbol (name qualified)) sci-var])))
-                      interns)]
-        ;; SCI stamps later definitions with this generation. Installing the
-        ;; unforked base loses the provenance that definition-row observes.
-        (reset! (:env ctx) @(:env (sci/fork generated)))
-        (when generation (swap! (:env ctx) assoc :sci/generation generation))
-        (doseq [[namespace-name local-name sci-var] own]
-          (sci/add-namespace! ctx namespace-name {local-name sci-var}))
-        (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
-        (advance-context-projection! ctx database (:seon.schema/projection generated))
-        (let [recorded (record-refusals-once! ctx database acquired commit-fault!)]
-          ;; The memoized base is shared by key; the loaded authority belongs
-          ;; to this context, not to the base.
-          (reset! (::kernel/program-snapshot ctx)
-                  (cond-> (assoc @(::kernel/program-snapshot generated)
-                                 ::acquisition recorded
-                                 ::loaded-basis (loaded-basis source))
-                    (::loaded-connection snapshot)
-                    (assoc ::loaded-connection (::loaded-connection snapshot))))
-          recorded)))))
+  (sci.ctx-store/with-ctx ctx
+    (let [snapshot @(::kernel/program-snapshot ctx)]
+      (if (acquired-database? ctx database)
+        (do
+          ;; Same program: the acquired value advances to the supplied one, so
+          ;; a branch opened at it holds the acquired program by commit id.
+          (when-not (identical? database (:seon.db/db snapshot))
+            (swap! (::kernel/program-snapshot ctx) assoc :seon.db/db database)
+            (advance-context-projection! ctx database (context-projection ctx)))
+          (::acquisition snapshot))
+        (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
+              source (loaded-source snapshot database)
+              generated (base-ctx database
+                                  (cond-> {::loaded-database (loaded-program source)}
+                                    commit-fault!
+                                    (assoc :seon.flow/commit-fault! commit-fault!)))
+              acquired (::acquisition generated)
+              ;; This context's own definitions (the Vars it wrote that no
+              ;; program install bound) survive as objects with its bindings of
+              ;; them, as `regenerate-agent-context!` carries them for a turn
+              ;; fork, unless the program changed their symbol's row.
+              installed @(::kernel/installed-functions ctx)
+              interns (turn-interns ctx)
+              replaced (replaced-definitions snapshot @(::kernel/program-snapshot generated)
+                                             (keys interns))
+              own (into [] (keep (fn [[qualified {sci-var :seon.sci.eval/var}]]
+                                   (when-not (or (and (contains? installed qualified)
+                                                      (not (get-in snapshot [:functions qualified ::context-defined?])))
+                                                 (contains? replaced qualified))
+                                     [(symbol (namespace qualified)) (symbol (name qualified)) sci-var
+                                      (sci.vars/context-binding ctx sci-var)])))
+                        interns)]
+          ;; A fork of the base: the context takes a new generation, so it
+          ;; writes no Var the base or its other forks share in place.
+          (reset! (:env ctx) @(:env (sci/fork generated)))
+          (inherit-var-bindings! ctx)
+          (doseq [[namespace-name local-name sci-var binding] own]
+            (when binding
+              (sci.vars/update-binding! ctx sci-var (constantly binding)))
+            (sci/add-namespace! ctx namespace-name {local-name sci-var}))
+          (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
+          (advance-context-projection! ctx database (:seon.schema/projection generated))
+          (let [recorded (record-refusals-once! ctx database acquired commit-fault!)]
+            ;; The memoized base is shared by key; the loaded authority belongs
+            ;; to this context, not to the base.
+            (reset! (::kernel/program-snapshot ctx)
+                    (cond-> (assoc @(::kernel/program-snapshot generated)
+                                   ::acquisition recorded
+                                   ::loaded-basis (loaded-basis source))
+                      (::loaded-connection snapshot)
+                      (assoc ::loaded-connection (::loaded-connection snapshot))))
+            recorded))))))
 
 (defn- acquire-function-from-database!
   "Acquire the lazy program before its first named invocation."
@@ -3165,7 +3223,7 @@
 (defn fork-cluster-ctx
   "Fork an acquired program ctx for one sovereign database connection.
 
-  Program Vars remain copy-on-write through SCI's generation-aware `fork`;
+  Program Vars are shared through SCI's `fork`, each context writing its own bindings;
   connection custody, schema projection, and supplied-default state are
   reconstructed from the receiving branch and therefore cannot leak between
   sibling clusters. A fork of an acquired base acquires the supplied value's
@@ -3214,7 +3272,7 @@
          projection-state (env/environment-state receiving-environment)
          _ (db/carry-connection-projection-state! connection projection-state)
          ctx (env/carry-state
-               (assoc (sci/fork base-ctx)
+               (assoc (inherit-var-bindings! (sci/fork base-ctx))
                       ::kernel/installed-functions
                       (atom @(::kernel/installed-functions base-ctx))
                       ::kernel/program-snapshot
@@ -3228,13 +3286,14 @@
                projection-state)
          ctx (assoc ctx :my.program/base-ctx ctx)]
      ;; A sovereign branch must not inherit the source branch's recorder.
-     ;; SCI's generation-aware bind-root! changes only this fork's Vars.
-     (doseq [function-symbol @(::kernel/installed-functions ctx)
-             :let [candidate (sci/resolve ctx function-symbol)]
-             :when (and candidate
-                        (::instrument/interpreted-original (meta @candidate)))]
-       (install-function-contract!
-        ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db))
+     ;; bind-root! in the fork writes the fork's own binding of each Var.
+     (sci.ctx-store/with-ctx ctx
+       (doseq [function-symbol @(::kernel/installed-functions ctx)
+               :let [candidate (sci/resolve ctx function-symbol)]
+               :when (and candidate
+                          (::instrument/interpreted-original (meta @candidate)))]
+         (install-function-contract!
+          ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db)))
      (when connection
        (watch-program-identity! connection))
      ;; A fork of an acquired program holds the program of the value it is
