@@ -1650,12 +1650,11 @@
                  :seon.error/throwable (ex-info "probe: nested" {:probe/k 1}
                                                 (IllegalStateException. "root cause"))})
         reply (error/reply-value nil thrown)]
-    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
-             :seon.error/message "probe: nested" :seon.error/data {:probe/k 1}}
+    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo" :seon.error/data {:probe/k 1}}
             {:seon.error/throwable-class "java.lang.IllegalStateException"
              :seon.error/message "root cause"}]
            (:seon.error/chain reply))
-        "each link's class, message and data, without frames")
+        "each link's class, message and data, without frames; the shown message is not repeated")
     (testing "a bare message has nothing more to say"
       (is (not (contains? (error/reply-value nil (error.refusal/diagnostic
                                                   {:seon.error/at (java.util.Date.)
@@ -1666,3 +1665,25 @@
     (testing "a structural refusal keeps its problems and shows no chain"
       (is (not (contains? (error/reply-value nil (assoc thrown :seon.error/offending ["4"]))
                           :seon.error/chain))))))
+
+(deftest an-error-reply-names-its-type-and-says-each-thing-once
+  (testing "the variant's type is part of the reply"
+    (is (= :seon.instrument/contract-error
+           (:seon.error/type (error/reply-value nil {:seon.error/type :seon.instrument/contract-error
+                                                     :seon.error/message "f refused argument 0"})))))
+  (testing "a cause link does not repeat the shown message"
+    (let [reply (error/reply-value nil (error.refusal/diagnostic
+                                        {:seon.error/at (java.util.Date.) :seon.error/layer :seon.error-test/probe
+                                         :seon.error/operation 'seon.error-test/probe
+                                         :seon.error/throwable (ex-info "Bad entity attribute :x/y" {:attribute :x/y})}))]
+      (is (= "Bad entity attribute :x/y" (:seon.error/message reply)))
+      (is (= [{:attribute :x/y}] (mapv :seon.error/data (:seon.error/chain reply))))
+      (is (not-any? :seon.error/message (:seon.error/chain reply)))))
+  (testing "an arity refusal shows its arglists, not their arity bounds again"
+    (let [reply (error/reply-value nil {:seon.error/message "f refused argument count"
+                                        :seon.instrument/arglists '([a b])
+                                        :seon.instrument/declared-arities
+                                        #{{:seon.instrument.arity/ordinal 0 :seon.instrument.arity/min 2
+                                           :seon.instrument.arity/max 2}}})]
+      (is (= '([a b]) (:seon.instrument/arglists reply)))
+      (is (not (contains? reply :seon.instrument/declared-arities))))))

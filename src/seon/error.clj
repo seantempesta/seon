@@ -1910,6 +1910,7 @@
   The whole error stays one read away through the evaluation's result
   handle. The keys, each present only when it has something to say:
 
+  - `:seon.error/type`: the error's variant, when it names one.
   - `:seon.error/message`: the producer's message (its first cause link's).
   - `:seon.error/problems`: each failing path with the expected schema, the
     offending value there and one generated `:seon.error/example` of the
@@ -1917,7 +1918,8 @@
   - `:seon.error/offending`, `:seon.error/expected`, `:seon.error/member`:
     for any other refusal, what was refused and what was expected (the
     referrers blocking a removal, the name not found).
-  - `:seon.instrument/arglists` and `declared-arities` for an arity refusal, and
+  - `:seon.instrument/arglists` for an arity refusal (its `declared-arities`
+    only when it has no arglists), and
     `:seon.instrument/caller`, the call's place in the agent's code.
   - `:seon.error/in-namespace`: when a name was not found, the names its
     namespace declares nearest to it by spelling, at most eight.
@@ -1925,7 +1927,8 @@
     removal's callers, at most three) mentions the blocked subject.
   - `:seon.error/chain`: for a thrown failure that is no structural refusal
     (no problems, nothing offending), every cause link's class, message and
-    `ex-data` without frames, when there is more than the message to say.
+    `ex-data` without frames, when there is more than the message to say; a
+    link's message equal to the shown message is not repeated.
   - `:seon.sci.eval/stacktrace`: the agent's own frames.
 
   The one-argument arity reads the database in custody, if any.
@@ -1986,12 +1989,15 @@
                                      (cond-> (dissoc link :seon.error/frames)
                                        (let [data (:seon.error/data link)]
                                          (or (:seon.error/at data) (and (map? data) (empty? data))))
-                                       (dissoc :seon.error/data)))
+                                       (dissoc :seon.error/data)
+                                       ;; the reply's message is already shown once
+                                       (= message (:seon.error/message link)) (dissoc :seon.error/message)))
                                    (:seon.error/chain error))]
                    (when (or (< 1 (count links)) (some :seon.error/data links))
                      links)))
          arity? (contains? error :seon.instrument/declared-arities)]
      (cond-> {}
+       (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)
        (and class (not= "clojure.lang.ExceptionInfo" (str class)))
        (assoc :seon.error/exception-class class)
@@ -2004,7 +2010,8 @@
        (assoc :seon.error/fix (:seon.error/fix error))
        (and arity? (seq (:seon.instrument/arglists error)))
        (assoc :seon.instrument/arglists (:seon.instrument/arglists error))
-       (and arity? (seq (:seon.instrument/declared-arities error)))
+       ;; the arglists already say which counts are declared
+       (and arity? (empty? (:seon.instrument/arglists error)) (seq (:seon.instrument/declared-arities error)))
        (assoc :seon.instrument/declared-arities (:seon.instrument/declared-arities error))
        (string? (:seon.instrument/caller error))
        (assoc :seon.instrument/caller (:seon.instrument/caller error))
