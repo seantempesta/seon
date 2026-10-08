@@ -18,6 +18,7 @@ the fact keeping digest and size. Lane: Sonnet.
 ## Functions
 - SCHEMA: `:output-size [:int {:min 0}]` and `:output-blob :seon.blob/digest` beside `:output`
   (`seon.cluster.eval.edn:57`), optional receipt members.
+- SCHEMA (SP-2): when SP-2 has landed, `:output` is declared `:seon.blob/inline-text` in this commit, so the writer refuses an inline output over the threshold (storage-point §2).
 - CHANGE the two producers in `seon.sci.eval` that `assoc :seon.cluster.eval/output`: call
   `(seon.blob/inline-or-stage connection output :seon.cluster.eval/output :seon.cluster.eval/output-size :seon.cluster.eval/output-blob)`
   (`src/seon/blob.clj:217`), merge `:seon.blob/fact`, carry `:seon.blob/staged-writes` into the settlement's staged

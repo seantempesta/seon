@@ -7,7 +7,7 @@ lane: cards-storage-point
 
 # Storage point: decide a stored value's form once, refuse re-copies at the writer
 
-Lane `cards-storage-point`, 2026-10-08. Design and cards only; no source changed. Cards: `SP-1a`, `SP-1b`, `SP-2`,
+Lane `cards-storage-point`, 2026-10-08. Design and cards only; no source changed. Cards: `SP-1a`, `SP-1b`, `SP-1c`, `SP-2`,
 `SP-3`, `SP-4` in `docs/seon/schedule/cards/`.
 
 What exists: `seon.blob/inline-or-stage` (`src/seon/blob.clj:250-270`, SR-B `9fc503097`) decides inline text versus a
@@ -50,7 +50,7 @@ The other dials that decide inline or blob, read on default 2026-10-08 (JVM prob
 | `:seon.config.web/max-inline-bytes` | 8,192 | `web/jvm.clj:284,417` (`capture-body!` `:193-208`) | **Deleted** (SP-3). Same double decision, and a different number: a 6,000-byte body is inline by web's rule and over the threshold by the blob's |
 | `:seon.config.fs/max-inline-bytes` | 8,192 | `fs/jvm.clj:518` (`read` window), `edit/jvm.clj:137` (edit context window) | **Kept, justified**: it decides nothing about storage. It is the default of a read request's `:my.fs/max-bytes`, the size of the slice an agent asked for, at the owner's 2,000-token raw-return rule (8,192 bytes is about 2,000 tokens). Its edit use is an agent-facing clip outside the printer, already in the printer-rules census (`printer-rules/printer-rules-opus-printer-rules.md:149`); that census owns it |
 | `:seon.config.eval.result/max-bytes` | 8,388,608 | `sci/eval.clj:4152-4180` (printed output), `sci/admit.clj:757-778` | **Kept, justified**: it is not an inline/blob decision but the runaway bound on what one evaluation may capture before refusing (a print loop). It caps work, not form; SR-C stores the captured text by the one dial |
-| `:seon.config.shell/preview-bytes` | 1,024 | `shell/jvm.clj:308` | **Not a storage dial**: a stored prefix copy for display, a clip outside the printer; deleted with SP-3 because the inline/blob split it served is gone (the value's text is shown by the printer from the blob) |
+| `:seon.config.shell/preview-bytes` | 1,024 | `shell/jvm.clj:308` | **Not a storage dial**: a stored prefix copy for display, a clip outside the printer, already in the printer-rules census (`printer-rules-opus-printer-rules.md:150`), which owns it; SP-3 leaves it unchanged |
 
 `turn.clj:4204-4212` makes a sixth decision with no dial of its own: model reasoning compares `count` (characters)
 to the blob threshold and stages by hand; under 4,096 characters a reasoning of up to 12 KB stays inline. SP-4 routes
@@ -75,9 +75,9 @@ explicitly"), and an inline function is an anonymous contract function (refused 
 function"). A literal `:max` is the hardcoded number the owner forbids. The writer already has both seams this needs:
 
 - it reads a policy dial from the database it leaves, `:seon.config.db/validation-node-limit`, in
-  `validate-write-report` (`src/seon/db.clj:5411-5446`), minimum over every asserted value;
+  `validate-write-report` (`src/seon/db.clj:5411-5443`), minimum over every asserted value;
 - it derives attribute rules from schema properties once per projection, as `retention-rules` does for
-  `:seon.db/append-only-after` (`db.clj:5448-5458`).
+  `:seon.db/append-only-after` (`db.clj:5445-5455`).
 
 So the rule is data on the schema (`:seon.db/max-bytes-dial` names the dial), the attribute set is derived once per
 projection by walking `:seon.schema.projection/forms` and `m/deref-all` (`reference-code/malli/src/malli/core.cljc:2872`)
@@ -127,7 +127,7 @@ class-name parsing (`error/refusal.clj:91-140`, `schema.clj:1023`), the printer 
 | `error.clj:422-432` `project-observation`; `admitted-size` `:434-446` | Write attempt operations and schema declarations admitted and printed as EDN into `:seon.error.projection` components | bound 8 MB | Delete; shown text plus the cached value (SP-1b) |
 | `effect.clj:539-559` `staged-result` | Canonical EDN of the whole admitted result kept inline AND as a blob over the threshold | up to 8 MB, stored twice | SR-EFFECT: `inline-or-stage` on `result-edn` |
 | `effect.clj:866`, `render.clj:1110` | Canonical EDN of an unknown-evidence marker | bytes | None: a small fixed value |
-| `shell/jvm.clj:303-322` `output-descriptor` | Re-reads a prefix of the staged capture as `text` or `preview`, decided by a second dial | 4 KB inline, 1 KB preview copy | Decide from the staged write; delete the preview copy (SP-3) |
+| `shell/jvm.clj:303-322` `output-descriptor` | Re-reads a prefix of the staged capture as `text` or `preview`, decided by a second dial | 4 KB inline, 1 KB preview copy | Decide from the staged write (SP-3); the preview copy is the printer-rules census's row |
 | `web/jvm.clj:193-208` `capture-body!` | Reads `max-inline + 1` bytes, then stages the rest by a different dial | 8 KB | Stage once with `stage-binary!`, decide from its staged write (SP-3) |
 | `turn.clj:4204-4212` | Reasoning compared in characters, staged by hand | up to 12 KB inline | `inline-or-stage` (SP-4) |
 | `test/runner.clj:1394-1405,1433-1438` `thrown-artifact` | Thrown test failure admitted then printed as a value artifact, staged as a blob | up to 8 MB | SR-E (card exists): shown text only |
@@ -164,6 +164,20 @@ The byte count itself allocates: `seon.blob/utf8-size` builds the whole UTF-8 ar
 (probe on default: both answer 1,200,000 for a 300,000-repetition string of `"abé"`); Guava is on the classpath
 transitively, not declared. SP-2 uses `utf8-size` unchanged; switching needs Guava declared in `deps.edn` and is left
 to the owner (stop reinventing cuts both ways: a transitive dependency is not ours to lean on).
+
+## Cards and order
+
+Ordered around the file holders of 2026-10-08 (`bin/lane status`):
+
+| Card | What | Waits on |
+| --- | --- | --- |
+| SP-3 | Shell and web take the one threshold; two dials deleted | nothing (files unheld): first |
+| SP-1a | Error stores shown text only; `data-edn`, the fitting loop and the b233d838f restoration deleted | `cards-audits` releases `src/seon/error.clj` |
+| SP-1b | No admitted copies of offending values (`bounded-text`, `project-observation`) | SP-1a |
+| SP-1c | `:seon.config.error/max-evidence-bytes` and its carriers deleted (scripted sweep) | SP-1b; `f4a` releases `src/seon/turn.clj`; before E-SDELETE |
+| SP-2 | Writer refuses stored text over the dial; `:seon.blob/inline-text` | `led-cacheb` releases `src/seon/db.clj`, `blob-konserve` releases `seon.blob.edn`; SP-1b |
+| SP-4 | Reasoning by `inline-or-stage` in bytes | SP-2; `f4a` |
+| SR-C, SR-F, SR-EFFECT | Their producers stage over the threshold and declare their attribute `:seon.blob/inline-text` | SP-2 (line added to SR-C and SR-F) |
 
 ## Findings outside this assignment
 

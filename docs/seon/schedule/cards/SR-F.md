@@ -16,6 +16,7 @@ Ledger row SR-F (group C). Same rule as SR-C for `:seon.eval/shown`. Lane: Sonne
 
 ## Functions
 - SCHEMA: `:shown-size [:int {:min 0}]`, `:shown-blob :seon.blob/digest` in `seon.eval.edn`, optional.
+- SCHEMA (SP-2): when SP-2 has landed, `:seon.eval/shown` is declared `:seon.blob/inline-text` in this commit; 20 of 604 stored values on default exceed 4,096 bytes today, so it cannot be declared before this card (storage-point §2).
 - CHANGE where the settlement writes `:seon.eval/shown` (the evaluation map from `shown-result`): store through
   `seon.blob/inline-or-stage` with `:seon.eval/shown :seon.eval/shown-size :seon.eval/shown-blob`.
 - CHANGE `seon.repl/value-text` (`src/seon/repl.clj:164`) to the one reader:
