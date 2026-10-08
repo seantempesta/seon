@@ -175,4 +175,8 @@
  #:seon.task{:name "a-throwing-test-step-loses-its-cause"
              :kind :function
              :intent "When the automatic test step throws a non-refusal (a NullPointerException inside seon.test/changes while lane test-step worked, 2026-10-09), seon.turn/test-step answers only {:seon.error/message \"The automatic test step threw; the pass's values stand.\" :seon.error/exception-class \"java.lang.NullPointerException\"}: no cause chain, no throw site, so the agent and root cannot tell which owner failed without a debug build. A deliberate translation keeps the cause. Done when the step's error carries the cause chain (`:seon.error/chain`) of the thrown exception and a reply test asserts it names the throwing function."
-             :must-read #{seon.turn/test-step seon.error.refusal/diagnostic}}]
+             :must-read #{seon.turn/test-step seon.error.refusal/diagnostic}}
+ #:seon.task{:name "a-host-bound-redefinition-runs-its-reaching-tests-in-sci"
+             :kind :function
+             :intent "Defining the host-bound `seon.sci.eval/build-base-ctx` on a branch (lane repl-only-a5, default fa92a2503, 2026-10-09) made the eval request's test step run 115 reaching tests (10.5 s of an 11.1 s request), 13 red and 10 errored, a reply of about 3,000 tokens, although a host-bound change runs compiled until merge and only `my.test/check-platform` can prove it; the heap's live set rose from 0.66 GB to 3.17 GB over this and the next minutes, after which every evaluation was refused for memory pressure. Done when the test step answers a host-bound change by naming its platform proof instead of running reaching tests in SCI."
+             :must-read #{seon.turn/step my.test/check-platform seon.sci.kernel/memory-pressure}}]

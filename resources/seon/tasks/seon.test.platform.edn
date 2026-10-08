@@ -3,4 +3,12 @@
              :intent "A branch's change to a host-bound function runs its tests on the old compiled Var, so `seon.cluster.branch-evidence/branch-evidence` refuses it and only `bin/seon check --test` proves it. `my.test/check-platform` writes the branch into a copy of the published archive (`my.program/write-branch!`), commits it on the published commit (`seon.test.platform/candidate-commit!`), runs the tests in a throwaway JVM (`seon.test.platform/run-check!`) and records their results on the branch (`seon.test.platform/record!`) as a run carrying `:seon.test.run/git-sha`; the gate then lists the change under `:seon.test.platform/proven`."
              :must-read #{my.test/check-platform seon.test.platform/record! seon.test.platform/run-check!
                           seon.cluster.branch-evidence/branch-evidence seon.test/verified? seon.test.runner/commit-results!}
-             :evidence #{"docs/seon/schedule/cards/PLATFORM-STEP.md" "docs/research/agent-platform/2026-10-09/platform-step.md"}}]
+             :evidence #{"docs/seon/schedule/cards/PLATFORM-STEP.md" "docs/research/agent-platform/2026-10-09/platform-step.md"}}
+ #:seon.task{:name "a-test-the-branch-adds-is-not-eligible-in-the-check"
+             :kind :function
+             :intent "`my.test/check-platform` cannot prove a test the branch adds. Lane repl-only-a5 (default fa92a2503, 2026-10-09) added `my.program-test/an-agent-reads-and-writes-files-as-clojure-does` on its branch; write-back into candidate 84cf0c36c was correct, but the check refused \"The requested test is not eligible.\" (`seon.test/select`): the check store is cloned from the published commit's template (`seon.operator/seeded-store!`) and the candidate's files are published but not adopted (the run says \"source ... is published but not yet adopted\"), so the new test has no entity there. An existing test named the same way ran (run 2f3c6f610ea1). Done when a check-platform run naming a test only the branch declares runs it in the candidate JVM."
+             :must-read #{seon.test.platform/run-check! seon.test/select seon.operator/seeded-store!}}
+ #:seon.task{:name "a-refused-platform-check-names-no-diagnostic"
+             :kind :function
+             :intent "A red or refused `bin/seon check` reached through `seon.test.platform/run-check!` answers only its argv and the first message line; the operator wrote a DIAGNOSTIC file (phases, test summary, failure reports) that the REPL answer does not name, so lane repl-only-a5 had to rerun the check from a shell to see why it failed. Done when the answer carries the diagnostic's test summary and phases as data."
+             :must-read #{seon.test.platform/run-check!}}]

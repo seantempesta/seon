@@ -11,4 +11,8 @@
  #:seon.task{:name "the-offered-check-names-an-unquoted-symbol"
              :kind :function
              :intent "A defn's reply offers (my.test/check {:seon.test/changed [my.program/source]}) with the symbol unquoted; agent fan-source ran it as offered and got \"my.test/check refused argument 0 at [:seon.test/changed 0]: expected ... a namespaced symbol, got an instance of clojure.lang.AFunction$1\" (fanout run, default e1a71b7c8, 2026-10-08). `seon.render.var/render-ai` builds (list 'my.test/check {:seon.test/changed [sym]}). Done when every offered operation evaluates as shown, with a test evaluating the offered form."
-             :must-read #{seon.render.var/render-ai my.test/check}}]
+             :must-read #{seon.render.var/render-ai my.test/check}}
+ #:seon.task{:name "an-unchanged-redefinition-lists-pending-tests"
+             :kind :function
+             :intent "Redefining `my.program-test/shown-value` with its exact text on a branch rendered `:seon.render.var/pending` with three reaching tests and a `my.test/check` operation, while `my.program/diff` showed no change to it (lane repl-only-a5, 2026-10-09). Done when the Var render of a definition at its base digest offers no pending tests."
+             :must-read #{seon.render.var/var-value? my.program/diff}}]

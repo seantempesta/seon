@@ -25,4 +25,7 @@
              :kind :function
              :intent "(`my.test/check` {:seon.test/changed ['seon.db/registered-attribute-candidates 'seon.db/missing-connection-error]}) at root ran two reaching tests whose run-ms were 40 and 22 ms but took 1,395 ms and allocated 1,419 MB (fanout-3 run, default 324461975, 2026-10-09); a check reaching nothing (my.test/check-now) took 186 ms and 311 MB. Done when a check's cost follows the tests it runs, its allocation owners named by `seon.profile/measure`."
              :must-read #{my.test/check seon.test/run}}
-]
+ #:seon.task{:name "a-check-failure-shows-no-message"
+             :kind :function
+             :intent "`my.test/check` rendered an errored test as only `{:seon.test/sym ...}` under `:seon.render.test/failures` (lane repl-only-a5, 2026-10-09); its message, \"The admitted identity has no executable test Var.\", was found three evaluations later under `:seon.test/results` `:seon.test.failure/reports`. Done when each listed failure shows its report message."
+             :must-read #{my.test/check}}]
