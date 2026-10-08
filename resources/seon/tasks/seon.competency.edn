@@ -2,4 +2,39 @@
              :kind :function
              :intent "In namespace comp.geo define area [w h] returning w*h, with the Malli contract [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]. Done when comp.geo/area answers 6 for 2 and 3, refuses -1 with an error value, and carries its contract in :malli/schema metadata. The success test is seon.competency-test/t1-area-is-contracted."
              :must-read #{}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "area-is-contracted-typed"
+             :kind :function
+             :intent "Define `comp.geo/area` of a width and a height, answering their product, contracted `[:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]`. Done when `seon.competency-test/t1-area-is-contracted` is green: `(comp.geo/area 2 3)` answers 6, `(comp.geo/area -1 3)` answers the contract's error value, and the Var's metadata holds the contract."
+             :must-read #{}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "quantity-schema-then-function-prose"
+             :kind :schema
+             :intent "Register the schema :comp.order/qty as a positive integer, [:int {:min 1}]. Then in namespace comp.order define double-qty taking one quantity and returning it doubled, with a contract whose input is :comp.order/qty. Done when the registered schema is [:int {:min 1}], double-qty answers 4 for 2 and refuses 0 with an error value. The success test is seon.competency-test/t2-quantity-schema-then-function."
+             :must-read #{}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "quantity-schema-then-function-typed"
+             :kind :schema
+             :intent "Register `:comp.order/qty` as `[:int {:min 1}]` with `seon.schema/register!`, then define `comp.order/double-qty` contracted `[:=> [:cat :comp.order/qty] :int]`, answering its quantity doubled. Done when `seon.competency-test/t2-quantity-schema-then-function` is green: `(seon.schema/schema-definition :comp.order/qty)` answers `[:int {:min 1}]`, `(comp.order/double-qty 2)` answers 4 and `(comp.order/double-qty 0)` answers the contract's error value."
+             :must-read #{seon.schema/register! seon.schema/schema-definition}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "slug-has-a-passing-test-prose"
+             :kind :function
+             :intent "The function comp.text/slug turns a title into a lowercase, dash-separated slug. In namespace comp.text-test write a test named slug-lowercases with at least two assertions about slug, and make it pass. Done when slug-lowercases has run green with two or more passing assertions. The success test is seon.competency-test/t3-slug-has-a-passing-test."
+             :must-read #{}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "slug-has-a-passing-test-typed"
+             :kind :function
+             :intent "Write the deftest `comp.text-test/slug-lowercases` for `comp.text/slug`, with at least two `clojure.test/is` assertions, and make it pass. Done when `seon.competency-test/t3-slug-has-a-passing-test` is green: the test's recorded run has two or more passes, no failure and no error."
+             :must-read #{comp.text/slug clojure.test/deftest}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "app-calls-util-through-an-alias-prose"
+             :kind :namespace
+             :intent "In namespace comp.util define clamp, which keeps an integer within 0 to 10. Then in namespace comp.app, requiring comp.util under the alias u, define bounded, which calls u/clamp. Both functions carry contracts. Done when bounded answers 10, 0 and 7 for 15, -3 and 7 and comp.app's alias u names comp.util. The success test is seon.competency-test/t4-app-calls-util-through-an-alias."
+             :must-read #{}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}
+ #:seon.task{:name "app-calls-util-through-an-alias-typed"
+             :kind :namespace
+             :intent "Define `comp.util/clamp` contracted `[:=> [:cat :int] :int]`, keeping an integer within 0 to 10, and `comp.app/bounded` with the same contract, in a `comp.app` whose `ns` form requires `comp.util` as `u` and whose body calls `u/clamp`. Done when `seon.competency-test/t4-app-calls-util-through-an-alias` is green: `(mapv comp.app/bounded [15 -3 7])` answers `[10 0 7]` and `(ns-aliases 'comp.app)` maps `u` to `comp.util`."
+             :must-read #{}
              :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}]

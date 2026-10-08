@@ -6,6 +6,45 @@
   (:require [seon.context :as context]
             [seon.db :as db]))
 
+(def setups
+  "The definitions each task's agent starts from, evaluated as its first eval request on its own branch;
+  a task with no entry starts from the cluster's program."
+  (let [slug "(ns comp.text (:require [clojure.string :as str]))
+              (defn slug
+                \"A lowercase, dash-separated slug of the title `s`.\"
+                {:malli/schema [:=> [:cat :string] :string]}
+                [s]
+                (str/join \"-\" (str/split (str/lower-case (str/trim s)) #\"\\s+\")))"]
+    {'seon.competency/slug-has-a-passing-test-prose slug
+     'seon.competency/slug-has-a-passing-test-typed slug}))
+
+(def oracles
+  "Each task's known solution, as its agent would evaluate it; a task's two wordings share one."
+  (let [area "(ns comp.geo)
+              (defn area
+                {:malli/schema [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]}
+                [w h]
+                (* w h))"
+        qty "(seon.schema/register! :comp.order/qty [:int {:min 1}])
+             (ns comp.order)
+             (defn double-qty {:malli/schema [:=> [:cat :comp.order/qty] :int]} [q] (* 2 q))"
+        slug-test "(ns comp.text-test (:require [clojure.test :refer [deftest is]] [comp.text :as text]))
+                   (deftest slug-lowercases
+                     (is (= \"hello-world\" (text/slug \"Hello World\")))
+                     (is (= \"abc\" (text/slug \"  ABC \"))))"
+        aliased "(ns comp.util)
+               (defn clamp {:malli/schema [:=> [:cat :int] :int]} [x] (max 0 (min 10 x)))
+               (ns comp.app (:require [comp.util :as u]))
+               (defn bounded {:malli/schema [:=> [:cat :int] :int]} [x] (u/clamp x))"]
+    {'seon.competency/area-is-contracted area
+     'seon.competency/area-is-contracted-typed area
+     'seon.competency/quantity-schema-then-function-prose qty
+     'seon.competency/quantity-schema-then-function-typed qty
+     'seon.competency/slug-has-a-passing-test-prose slug-test
+     'seon.competency/slug-has-a-passing-test-typed slug-test
+     'seon.competency/app-calls-util-through-an-alias-prose aliased
+     'seon.competency/app-calls-util-through-an-alias-typed aliased}))
+
 (def ^:private call-selector
   [:db/id {:seon.turn/opened-tx [:db/id :db/txInstant]} {:seon.turn/closed-tx [:db/id :db/txInstant]}
    {:seon.turn/attempts [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens
