@@ -1741,3 +1741,12 @@
         (is (nil? (error/faults-form (unit sci-var :seon.error/of-steward))) "an SCI Var names no agent")
         (is (nil? (error/render-faults-ai (unit sci-var :seon.error/agent))) "its AI face shows nothing")
         (is (nil? (error/faults-form (unit nil nil))))))))
+
+(deftest ^{:seon/tasks #{'seon.error/a-missing-key-held-under-another-namespace-is-not-named}}
+  a-missing-key-names-the-same-name-the-map-holds
+  (let [fix (fn [parent]
+              (:seon.error/fix
+               (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:map [:my.message/to :string]] parent)))
+                                            :seon.error/path [:my.message/to] :seon.error/argument "request" :seon.error/parent parent})))]
+    (is (clojure.string/includes? (fix {:seon.message/to "x"}) ":seon.message/to") "the held key of the same name is named")
+    (is (= "Supply :my.message/to with a string." (fix {:other 1})))))

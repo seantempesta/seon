@@ -376,7 +376,7 @@
   (is (= "(trim \"a \")" (:example (lookup/docstring-parts "Trim a title.\n\n  Example: (trim \"a \")"))))
   (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/open)"}
          (lookup/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
-  (is (= "" (:example (lookup/docstring-parts "No example here.")))))
+  (is (nil? (find (lookup/docstring-parts "No example here.") :example)) "an empty section is absent"))
 
 (deftest a-refused-schema-read-keeps-its-refusal
   ;; A database that has not installed the schema attributes refuses the pull;
@@ -412,3 +412,11 @@
        (is (not-any? #(= "" %) (vals doc)) "an empty section is absent, never an empty string")
        (is (= 3 (count (:in doc))) "each arity keeps its inputs")
        (is (keyword? (first (:out doc))) "the return every arity shares is said once, one schema form")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.lookup/a-summary-ends-at-an-abbreviation}}
+  a-summary-runs-past-an-abbreviation
+  (is (= "Classify one refusal (a map, e.g. an ex-info's data) by its type."
+         (:summary (seon.sci.lookup/docstring-parts "Classify one refusal (a map, e.g. an ex-info's data) by its type. Then more."))))
+  (is (= "Read the head, i.e. the newest commit."
+         (:summary (seon.sci.lookup/docstring-parts "Read the head, i.e. the newest commit. Then more."))))
+  (is (= "Read one." (:summary (seon.sci.lookup/docstring-parts "Read one. Then more.")))))

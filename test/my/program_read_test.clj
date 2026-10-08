@@ -43,3 +43,11 @@
        (is (= 'seon.task (:ns sized)))
        (is (= lines (reverse (sort lines))))
        (is (seq (:largest sized)))))))
+
+(deftest ^{:seon/tasks #{'my.program/source-of-a-misspelled-name-names-nothing-near}}
+  source-of-a-misspelled-name-names-it-first-in-a-fixed-message
+  (let [database (seon.db/db)
+        typo (my.program/source database 'seon.ref/sectoin)
+        elsewhere (my.program/source database 'nope.ns/foo)]
+    (is (= 'seon.ref/section (first (:seon.error/expected typo))))
+    (is (= (:seon.error/message typo) (:seon.error/message elsewhere)) "the message is fixed text; the names are data")))

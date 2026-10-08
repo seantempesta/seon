@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is]]
             [my.program :as program]
             [seon.db :as db]
+            [seon.error]
             [seon.mcp :as mcp]
             [seon.ref :as ref]
             [seon.test-support :as test-support]))
@@ -106,3 +107,19 @@
         source-form (last (:seon.render/operations (#'ref/resolve-name database 'seon.ref/references)))]
     (is (= '(my.program/source 'seon.ref/references) source-form))
     (is (string? (:source (program/source database (second (second source-form))))))))
+
+(deftest ^{:seon/tasks #{'seon.ref/a-span-with-words-after-a-name-reads-as-that-name}}
+  a-span-of-a-name-and-more-words-is-prose
+  (let [found (seon.ref/references (seon.db/db) {:seon.ref/text "Use `seon.ref/references`, not `seon.ref/section AGENTS.md` or `foo/bar baz`."})]
+    (is (= ['seon.ref/references] (vec (keep :seon.ref/name found))))))
+
+(deftest ^{:seon/tasks #{'seon.ref/a-missing-anchor-ranks-headings-by-shared-prefix}}
+  a-missing-anchor-names-the-closest-spelled-heading-first
+  (doseq [reference ["AGENTS.md#Data-and-contracts" "AGENTS.md#bata-and-contracts"]]
+    (is (= "data-and-contracts" (:seon.ref/anchor (first (:seon.ref/nearest (seon.ref/section reference)))))
+        "a capital letter or a first-letter typo still ranks the heading first")))
+
+(deftest ^{:seon/tasks #{'seon.ref/a-missing-section-reply-shows-only-its-message}}
+  a-missing-heading-reply-names-the-nearest-heading
+  (let [reply (seon.error/reply-value nil (seon.ref/section "AGENTS.md#data-and-contract"))]
+    (is (some #{"data-and-contracts"} (tree-seq coll? seq reply)) "the agent's reply carries the nearest heading")))

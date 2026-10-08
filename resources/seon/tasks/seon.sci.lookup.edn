@@ -1,4 +1,9 @@
 [#:seon.task{:name "doc-shows-empty-sections-and-one-return-per-arity"
              :kind :function
              :intent "(doc seon.db/pull) answered :body \"\" and :example \"\" and an :out vector repeating one union three times, once per arity (context corpus row 4, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when an empty section is absent and a return every arity shares is said once."
-             :must-read #{seon.sci.lookup/docstring-parts seon.sci.lookup/documentation-value}}]
+             :must-read #{seon.sci.lookup/docstring-parts seon.sci.lookup/documentation-value}}
+ #:seon.task{:name "a-summary-ends-at-an-abbreviation"
+             :kind :function
+             :intent "`seon.sci.lookup/docstring-parts` ends a docstring's summary at its first \". \", so an abbreviation cuts it: the summaries of `seon.db/dependency-error`, `seon.schema.internal/assert-non-nilable-value-schema!` and `seon.error.refusal/error` end in \"e.g.\" (3 of 3,691 program docstrings at default 0f0e77ed8, 2026-10-09), and `doc` and `seon.ref/references` show that cut sentence. Done when a period ending an abbreviation (e.g., i.e., etc., vs.) does not end the summary, and a sentence's own period still does. Checked by `seon.sci.documentation-test/a-summary-runs-past-an-abbreviation`, which calls `seon.sci.lookup/docstring-parts` directly."
+             :must-read #{seon.sci.lookup/docstring-parts}}
+]
