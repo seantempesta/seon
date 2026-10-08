@@ -78,7 +78,7 @@
       (let [unit {:seon.help/lines ["Inspect (dir my.task) before acting." "Then (doc seon.db/q)."]}
             html (bootstrap/render-help-html unit)]
         (readable! html ["<code>(dir my.task)</code>" "<code>(doc seon.db/q)</code>"])
-        (is (= (golden :help) (bootstrap/render-help-ai unit)))))))
+        (is (= (:seon.help/lines unit) (bootstrap/render-help-ai unit)))))))
 
 (deftest identity-pairs-preserve-ai
   (support/with-database

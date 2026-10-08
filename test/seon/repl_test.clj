@@ -28,7 +28,7 @@
   (doseq [source ["\n```clojure\n;; café <tag>\n(+ 1 2)\n```"
                   "[\"unfinished\\\"" "\\; \\newline ; comment\n{:x -3.2}" ""]
           response [{:seon.eval/shown "[1 :two result/e3]"}
-                    {:seon.eval/shown "Plain help.\nUse (dir my.task)."
+                    {:seon.eval/shown "[\"Plain help.\"\n \"Use (dir my.task).\"]"
                      :seon.eval/renderer 'seon.bootstrap/render-help-ai}
                     {:seon.cluster.eval/error "Reader error"}]]
     (let [emission (merge (cond-> {:seon.ns/name 'my.agents.juniper}

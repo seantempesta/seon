@@ -1,1 +1,1 @@
-{:creation "Agent alice · namespace my.agents.alice · cluster fixture · bootstrap run opening.", :faults "Connection lost", :rejection "Duplicate identity", :fault "Connection lost", :help "Inspect (dir my.task) before acting.\nThen (doc seon.db/q)."}
+{:creation "Agent alice · namespace my.agents.alice · cluster fixture · bootstrap run opening.", :faults "Connection lost", :rejection "Duplicate identity", :fault "Connection lost"}

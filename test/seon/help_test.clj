@@ -69,8 +69,7 @@
           (recur (inc start) (cond-> forms (seq? form) (conj form))))))))
 
 (defn- agent-text
-  "The raw text of the REPL item of one `eval_clj` of `code` as `agent-id` through the MCP entrance.
-  Help is shown as prose, which is not itself readable data, so the text is returned unread."
+  "The raw text of the REPL item of one `eval_clj` of `code` as `agent-id` through the MCP entrance."
   {:malli/schema [:=> [:cat :string :string :string] :string]}
   [code agent-id running]
   (let [texts (map #(get % "text")
@@ -117,3 +116,11 @@
            "no line carries a placeholder path, ellipsis or angle-bracket slot")
        (is (not-any? #(= 'my.program/write-branch! (first %)) forms)
            "write-back is root's step, not a call help teaches a worker")))))
+
+(deftest ^{:seon/tasks #{'seon.bootstrap/the-help-reply-is-not-data}}
+  the-help-reply-reads-as-data-its-value-the-help-lines
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (is (= (:seon.help/lines (bootstrap/help-value @connection agent-id))
+            (:seon.repl/value (support/reply (agent-text "(help)" agent-id running))))
+         "the reply is one EDN form whose value is the help lines"))))

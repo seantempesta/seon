@@ -41,10 +41,11 @@
     "A reply is data: :value, :error, :findings and :result, a live symbol you can pass to forms or dig into with get-in. A mistake is an :error map beside the value: read its problems before retrying."]})
 
 (defn render-help-ai
-  "Show help lines as bare text, one per line."
-  {:malli/schema [:=> [:cat :seon.help/help] :string]}
+  "Show the help lines, as data."
+  {:seon/tasks #{'seon.bootstrap/the-help-reply-is-not-data}
+   :malli/schema [:=> [:cat :seon.help/help] :seon.help/lines]}
   [instructions]
-  (str/join "\n" (:seon.help/lines instructions)))
+  (:seon.help/lines instructions))
 
 (defn render-help-html
   "Show the same help lines as a list."
