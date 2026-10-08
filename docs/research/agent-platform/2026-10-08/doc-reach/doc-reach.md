@@ -68,3 +68,21 @@ A docstring-only `defn` of `seon.task/step-summary` (second edit on the branch):
 `:seon.repl/alloc-mb` 52.7, 11,438 calls; JVM thread allocation over the pass 2,744 MB; the step reran
 the two reaching tests (`seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes` red, a
 pre-existing failure).
+
+## Landed (dc87db3f3) and what is not yet measured
+
+- Throwaway check of HEAD plus the slice: `my.test-check-test`, `seon.test.runner-test` and
+  `seon.cluster.branch-evidence-test` (long, included): 17 executed, 144 pass, 0 fail, 0 error.
+  `my.test-check-test/a-docstring-only-defn-reruns-no-test-and-a-body-change-reruns-its-reaching-tests`
+  drives `seon.mcp/call`: a docstring-only `defn` of `seon.task/steps-call` answers no test step; the same
+  form with a `nil` before its body runs its reaching tests.
+- REPL probes on default (scratch namespace, JVM mode): recomputing the canonical row reproduced 400/400
+  sampled stored definition digests; the behavior digest equals the stored digest for every undocumented
+  sample (166/166) and differs for every documented one (234/234); the docstring literal is removed from
+  3,555 of 3,558 documented sources (the three left carry `:doc` in metadata and stay whole). About 0.8 ms
+  per declaration uncached.
+- Not measured: the after numbers (`:seon.repl/alloc-mb`, JVM thread allocation) on default, which runs
+  the previous commit until root's restart; and the cold reach cost once per JVM (estimated at most
+  3,558 × 0.8 ms ≈ 2.8 s if a request reaches every documented declaration, then cached). If the cold
+  cost shows in the first test request after boot, store the digest beside the definition digest
+  (option 2 above).
