@@ -124,4 +124,9 @@
  #:seon.task{:name "source-shows-code-as-an-escaped-string"
              :kind :function
              :intent "`(my.program/source 'seon.error/schema-expectation)` answers its code under `:source` as one string, so the reply shows it with every quote escaped (\\\" inside the docstring). Agent fan8-key-a (fan-out 8, default bb934b396, 2026-10-09) copied that text into its first `defn`, which SCI refused as 'Unable to resolve symbol: of', then spent most of its 10 calls re-reading the source (`clojure.repl/source`, `source-fn`, `slurp`); agent fan4-empty hit the same class (`seon.fn.signature/read-source`). A function's source prints whole, as code. Done when the reply of `my.program/source` shows the definition as readable code an agent can copy into a `defn` unchanged."
-             :must-read #{my.program/source}}]
+             :must-read #{my.program/source}}
+ #:seon.task{:name "the-map-argument-proof-errors-reading-its-reply"
+             :kind :function
+             :intent "`(my.program/diff {})` answers `{:added [], :changed [], :removed []}` like `(my.program/diff)` through MCP on default (2026-10-09), yet its proof `my.program-test/a-map-argument-lacking-world-members-is-filled-from-the-world` errors at main: inside `seon.test-support/with-running-agent`, reading the first reply (`(my.program/diff)`) with `seon.test-support/reply` throws `Invalid token: /Users/sean/src/seon/data/store` (test report e50e75cc6ba9), so some content item of that reply is not data: a bare store path. Done when every content item of that eval request reads back as data and the proof is green, so `my.program/diff-with-a-map-argument-is-refused-as-a-context` can retire."
+             :must-read #{my.program/diff seon.test-support/mcp-reply seon.test-support/with-running-agent}}
+]

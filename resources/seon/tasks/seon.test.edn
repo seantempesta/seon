@@ -153,4 +153,8 @@
              :kind :function
              :intent "On an agent branch (default 6e9b9017c, fan-out 6, agent fan6-key), one eval request `(ns fan6.probe-test (:require [clojure.test :refer [deftest is]]))` plus one deftest calling `seon.error/explain-problem` cost 3,688 ms, of which the test step 3,525 ms, 798,415 armed calls and 8,080 reads; a redefinition of `seon.error/explain-problem` on a fresh branch cost a 2,054 ms test step plus 462 ms apply. The test itself runs in milliseconds. Done when the step for one new test and its reaching proofs costs about the tests' own run, with a `seon.profile/measure` regression."
              :must-read #{seon.turn/run-reaching seon.test/run-request}}
+ #:seon.task{:name "a-named-check-drops-declared-long-tests-without-saying-so"
+             :kind :function
+             :intent "At root on default c7a7030d8 (2026-10-09, fresh reset), `(my.test/check {:seon.test/changed [ten test symbols]})` ran 5 and answered `:seon.test/passed? false` with 5 results and no key naming the other 5 (`seon.cluster.evaluate-source-test/code-evaluates-as-one-ordinary-run-of-its-agent`, `seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted`, `seon.cluster.turn-test/a-model-request-is-help-own-exchanges-and-the-block-last`, `seon.sci.context-reads-test/a-branch-redefinition-of-a-loaded-test-runs-under-its-own-bound`, `seon.repl-differential-test/a-file-proof-aliasing-its-subject-runs-green-on-the-branch`), all declared `:seon.test/long`. `my.test/check` already lists `:seon.test/long-excluded` as an answer key, but none was set. Done when a named check answers every named test it did not run under the key saying why, by name."
+             :must-read #{my.test/check seon.test/run}}
 ]
