@@ -78,7 +78,29 @@ edits; a check records one `:seon.db/commit-revisions` entry per member branch):
 Live default after the restart on `75aa6990b`: the cluster value carries a conservative revision (its opening
 commit) beside 97 attribute revisions, as the fork now promises.
 
-Change with the runner key: pending `src/seon/test/runner.clj` (held by lane led-storage).
+Change with the runner key (`ead65e695`, measured at HEAD `9f43acf5e`, which also carries another lane's
+konserve bump; throwaway root):
+
+| pass | wall ms | allocated | armed calls | reach-declarations | reach-graph |
+|---|---:|---:|---:|---|---|
+| a, cold JVM | 745-918 | 1.28 GB | 182k | 1 miss | 1 miss, 3 hits |
+| a, warm | 91-141 | 113-118 MB | 43-44k | - | 1 hit |
+| b, new branch | 423-440 | 449-452 MB | 158k | 1 miss | 1 miss, 3 hits |
+| c, new branch | 269-401 | 312-315 MB | 136k | 0 misses | 4 hits |
+
+Agent c's first check reuses b's reach work: zero misses, about 120 MB and 22k armed calls less than the
+parent's new-branch row (435 MB, 159k). Agent b still misses a's entry, and it should: the only differing key
+entry is `:seon.program/definition-digest`, because the cluster wrote a new agent namespace row (which carries a
+definition digest) between a's and b's branch creation. The key is per attribute, so any declaration digest
+write, a namespace row included, changes it; narrowing that needs per-kind digests and is not in this row.
+
+The `:seon.db/commit-revisions` lookups count 46-55 misses per check: `recorded-revisions` asks for commits
+nothing recorded (each member branch's resolution ends at an unrecorded conservative commit). They read
+nothing and retain nothing.
+
+Live store: the landing check (`bin/lane commit`, default's root, store of default) published the candidate
+in 16.2 s and adopted it in 6.6 s (1,541 identities) on disposable branches, tests green. Publication over
+10 s is the existing `seon.cluster.source/publish!` over-bound task, not this slice's cost.
 
 ## Findings
 
