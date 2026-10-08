@@ -2979,9 +2979,12 @@
 
 (defn- model-requests!
   "Wake `agent-id` once with an outside message and answer its model calls with `replies`; the request
-  documents, once every reply is taken and the agent's last call row is closed."
-  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]}
-  [running agent-id connection replies]
+  documents, once `expected` calls (every reply, by default) are taken and the agent's last call row is closed."
+  {:malli/schema [:function [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]
+                  [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string] pos-int?] [:vector :map]]]}
+  ([running agent-id connection replies]
+   (model-requests! running agent-id connection replies (count replies)))
+  ([running agent-id connection replies expected]
   (let [ledger (atom [])
         closed-calls #(or (db/q '[:find (count ?turn) . :in $ ?agent-id
                                   :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
@@ -3007,12 +3010,13 @@
          (.get wake))
        (wake! running agent-id)
        (loop [tries 600]
-         (when (and (pos? tries) (< (closed-calls) (count replies)))
+         (when (and (pos? tries) (< (closed-calls) expected))
            (Thread/sleep 50)
            (recur (dec tries))))
-       @ledger))))
+       @ledger)))))
 
-(deftest ^{:seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}
+           :seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
            :seon.test/long-ms 60000}
   a-model-request-is-help-own-exchanges-and-the-block-last
   (test-support/with-running-agent
@@ -3026,9 +3030,10 @@
                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
      (let [help-reply (str/join (map #(get % "text") (get (eval-result running agent-id "(help)") "content")))
            _ (agent-eval running agent-id "(+ 1 2)")
+           wrong "(in-ns 'tq.cx1)\n(defn area [r] (* r 2))"
            definition "(in-ns 'tq.cx1)\n(defn area [r] (* r r))"
-           sent (model-requests! running agent-id connection
-                                 [definition "(+ 40 2)" "(seon.run/complete \"squared\")"])
+           ;; the definition turns the proof green: the fourth reply is never asked for
+           sent (model-requests! running agent-id connection ["(+ 40 2)" wrong definition "(+ 7 7)"] 3)
            messages (mapv #(get % "messages") sent)
            system (fn [ms] (some #(when (= "system" (get % "role")) (get % "content")) ms))
            user (fn [ms] (some #(when (= "user" (get % "role")) (get % "content")) ms))
@@ -3043,16 +3048,29 @@
        (is (= :seon.render/request-error (:seon.error/type (seon.context/model-context (db/db connection) {} agent-id)))
            "a request that cannot render help is an error, never the printed help map as the system message")
        (is (every? some? [first-user second-user third-user]))
-       (is (str/includes? second-user "(defn area [r] (* r r))") "the first pass's form is in the history")
+       (is (str/includes? second-user "(+ 40 2)") "the first pass's form is in the history")
+       (is (str/includes? second-user "42") "with its shown reply")
        (doseq [text [second-user third-user]]
          (is (not (str/includes? text "(+ 1 2)")) "an outside evaluation under the agent's id is not history")
          (is (not (str/includes? text "seon.error/for-agent")) "no system-turn row is history")
          (is (not (str/includes? text "turns left")) "no turns frame"))
-       (is (str/includes? third-user "(+ 40 2)") "the second pass's form is in the third request")
-       (is (str/includes? third-user "42") "with its shown reply")
+       (is (str/includes? third-user "(* r 2)") "the second pass's form is in the third request")
        (is (= 0 (block-start first-user)) "the first pass has no exchanges: only its block")
        (is (str/includes? (subs first-user (block-start first-user)) ":red") "the block shows the proof red before the change")
-       (is (str/includes? (subs second-user (block-start second-user)) ":green")
-           "the block, last, shows the proof's status recorded after pass 1's step")
+       (is (str/includes? (subs third-user (block-start third-user)) ":red")
+           "the block, last, shows the proof's status recorded after pass 2's step")
+       (let [block (loop [tries 200]
+                     (let [block (seon.context/current-state (db/db connection) agent-id)]
+                       (if (or (zero? tries) (= :done (get-in block [:seon.context/turns :seon.task/status])))
+                         block
+                         (do (Thread/sleep 50) (recur (dec tries))))))
+             db (db/db connection)]
+         (is (= :done (get-in block [:seon.context/turns :seon.task/status])) "the green proof shows the task done")
+         (is (nil? (turn/next-agent-work db {:seon.agent/id agent-id}))
+             "a done task opens no further model turn")
+         (is (= 3 (db/q '[:find (count ?turn) . :in $ ?agent-id
+                          :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent] [?turn :seon.turn/attempts _]]
+                        db agent-id))
+             "the model was called three times, not four"))
        (is (str/starts-with? third-user (subs second-user 0 (block-start second-user)))
            "each request's history is a prefix of the next one's: the provider's prefix cache holds")))))

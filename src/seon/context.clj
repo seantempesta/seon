@@ -140,6 +140,35 @@
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
                :seon.context/proof-list entries}))))))
 
+(defn- all-green?
+  "True when the proofs section `proven` holds proofs and every one is green."
+  {:malli/schema [:=> [:cat [:or :nil :seon.context/proofs :seon.error/value]] :boolean]}
+  [proven]
+  (= #{:green} (set (keys (:seon.context/counts proven)))))
+
+(defn- held-task
+  "The declaration of the task `agent-id` holds, read at the task home seen from `database`; nil when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :nil :seon.context/task :seon.error/value]]}
+  [database agent-id]
+  (let [home (if-let [connection (task/home database)] (db/db connection) database)
+        handle (task/agent-task home agent-id)]
+    (cond (:seon.error/at handle) handle
+          (string? handle)
+          (let [pulled (db/pull home task-selector [:seon.task/id handle])]
+            ;; a cardinality-many pull is a vector; the declaration holds a set
+            (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))))
+
+(defn task-done?
+  "True when the task `agent-id` holds has proofs and all are green on `database`, the agent's branch:
+  the task is done for the agent, pending root's merge, and the turn loop opens no continuation for it."
+  {:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  [database agent-id]
+  (let [held (held-task database agent-id)]
+    (boolean (and held (not (:seon.error/at held))
+                  (all-green? (proofs database (:seon.task/sym held)))))))
+
 (defn- unshown
   "The inbox `items` no turn of `agent-id` has handled: a closed model turn's
   settlement records each message its pass was shown (`seon.turn/close-call`)."
@@ -157,7 +186,8 @@
 
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
-  task home reads it now, and its turns left with the task's status. Sections are
+  task home reads it now, and its turns left with the task's status (`:done` once every
+  proof is green, then `:capped` with no turns left, else `:working`). Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
   no model turn of it was shown yet, oldest first, each once with its id, sender,
   instant and content.
@@ -169,21 +199,19 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :seon.context/current-state :seon.error/value]]}
   [database agent-id]
-  (let [home (if-let [connection (task/home database)] (db/db connection) database)
-        handle (task/agent-task home agent-id)
-        held (when (string? handle)
-               (let [pulled (db/pull home task-selector [:seon.task/id handle])]
-                 ;; a cardinality-many pull is a vector; the declaration holds a set
-                 (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))
+  (let [found (held-task database agent-id)
+        held (when-not (:seon.error/at found) found)
         left (turn/turns-left database agent-id)
         proven (when held (proofs database (:seon.task/sym held)))
         unread (let [items (message/inbox database agent-id)]
                  (if (:seon.error/at items) items (unshown database agent-id items)))
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
-    (or (some #(when (:seon.error/at %) %) (concat [handle held left proven unread] reads))
+    (or (some #(when (:seon.error/at %) %) (concat [found left proven unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
-                                       held (assoc :seon.task/status (if (zero? left) :capped :working)))}
+                                       held (assoc :seon.task/status (cond (all-green? proven) :done
+                                                                           (zero? left) :capped
+                                                                           :else :working)))}
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
           (seq reads) (assoc :seon.context/must-reads reads)

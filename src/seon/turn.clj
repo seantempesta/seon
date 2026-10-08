@@ -62,6 +62,8 @@
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 (defonce ^:private context-model-context
   (delay (requiring-resolve 'seon.context/model-context)))
+(defonce ^:private context-task-done?
+  (delay (requiring-resolve 'seon.context/task-done?)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-changes
@@ -2052,34 +2054,58 @@
        :seon.turn/id run-id
        :seon.agent/id agent-id})))
 
+(defn- evaluated-form?
+  "True when the call row `turn` evaluated at least one form: a form whose read failed (a prose-only
+  reply is one) settles unrun, with no `:seon.eval/duration-ms`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] :boolean]}
+  [database turn]
+  (some? (db/q '[:find ?evaluation . :in $ ?turn
+                 :where [?evaluation :seon.cluster.eval/run ?turn] [?evaluation :seon.eval/duration-ms _]]
+               database turn)))
+
 (defn- continuing-reply?
-  "True when the latest closed provider reply evaluated a form and ended no session.
-  A form whose read failed (a prose-only reply is one) settles unrun, with no
-  `:seon.eval/duration-ms`, so a reply of prose or only read errors waits."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  "True when the latest closed provider reply ended no session and either evaluated a form or is the
+  first reply with no evaluated form after one that did: a reply of prose or only read errors gets one
+  more call, whose context shows its diagnostic, and a second such reply in a row waits."
+  {:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
-  (if-let [latest-t
-             (db/q '[:find (max ?t) . :in $ ?agent-id
-                     :where [?agent :seon.agent/id ?agent-id]
-                     [?turn :seon.turn/agent ?agent]
-                     [?turn :seon.turn/id _ ?t]
-                     [?turn :seon.turn/closed-tx _]]
-                   database agent-id)]
-    (some?
-     (db/q '[:find ?turn . :in $ ?agent-id ?latest-t
-             :where [?agent :seon.agent/id ?agent-id]
-             [?turn :seon.turn/agent ?agent]
-             [?turn :seon.turn/id _ ?t]
-             [(= ?t ?latest-t)]
-             [?turn :seon.turn/closed-tx _]
-             [?turn :seon.turn/reply-size _]
-             [?turn :seon.turn/attempts ?attempt]
-             (not [?attempt :seon.ai.attempt/error _])
-             (not [?turn :seon.turn/disposition _])
-             [?evaluation :seon.cluster.eval/run ?turn]
-             [?evaluation :seon.eval/duration-ms _]]
-           database agent-id latest-t))
-    false))
+  (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
+                         :where [?agent :seon.agent/id ?agent-id]
+                         [?turn :seon.turn/agent ?agent]
+                         [?turn :seon.turn/id _ ?t]
+                         [?turn :seon.turn/closed-tx _]]
+                       database agent-id)
+        latest (when latest-t
+                 (db/q '[:find ?turn . :in $ ?agent-id ?latest-t
+                         :where [?agent :seon.agent/id ?agent-id]
+                         [?turn :seon.turn/agent ?agent]
+                         [?turn :seon.turn/id _ ?t]
+                         [(= ?t ?latest-t)]
+                         [?turn :seon.turn/closed-tx _]
+                         [?turn :seon.turn/reply-size _]
+                         [?turn :seon.turn/attempts ?attempt]
+                         (not [?attempt :seon.ai.attempt/error _])
+                         (not [?turn :seon.turn/disposition _])]
+                       database agent-id latest-t))
+        previous-t (when (and latest (not (evaluated-form? database latest)))
+                     (db/q '[:find (max ?t) . :in $ ?agent-id ?latest-t
+                             :where [?agent :seon.agent/id ?agent-id]
+                             [?turn :seon.turn/agent ?agent]
+                             [?turn :seon.turn/id _ ?t]
+                             [(< ?t ?latest-t)]
+                             [?turn :seon.turn/closed-tx _]
+                             [?turn :seon.turn/reply-size _]
+                             [?turn :seon.turn/attempts _]]
+                           database agent-id latest-t))]
+    (cond (nil? latest) false
+          (evaluated-form? database latest) true
+          (nil? previous-t) true
+          :else (some? (db/q '[:find ?turn . :in $ ?previous-t
+                               :where [?turn :seon.turn/id _ ?previous-t]
+                               [?evaluation :seon.cluster.eval/run ?turn]
+                               [?evaluation :seon.eval/duration-ms _]]
+                             database previous-t)))))
 
 (defn next-agent-work
   "The ONE thing to do next for `agent-id` on `db`, or nil when idle.
@@ -2094,7 +2120,9 @@
   read at the task home (`seon.task/home`) where assignments are written;
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
-  evaluated a form and returned no completed/wait disposition.
+  returned no completed/wait disposition and evaluated a form, or is the first
+  in a row that evaluated none (`continuing-reply?`), and never once the held
+  task's proofs are all green (`seon.context/task-done?`).
   Virtual and system replies never authorize continuation.
   A successful provider attempt answers its earlier wakes. A provider
   refusal leaves them unanswered and defers reopening until a new outside
@@ -2141,7 +2169,9 @@
           (string? held)
           (when-not deferred
             (let [wakes (unanswered-wakes db agent-id {})]
-              (when (or (seq wakes) (continuing-reply? db agent-id))
+              ;; a task whose proofs are all green is done for the agent: only a wake opens a turn
+              (when (or (seq wakes) (and (continuing-reply? db agent-id)
+                                         (not (@context-task-done? db agent-id))))
                 (cond->
                  {:seon.turn.work/situation :open
                   :seon.agent/id agent-id}

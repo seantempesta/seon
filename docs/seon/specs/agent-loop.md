@@ -289,7 +289,8 @@ order, and printed by the value printer like any evaluation, under the ordinary 
 - **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model eval request, each with
   its identity; `(my.message/inbox)` is the operation that shows them all (it is extended for unread items; there is
   no `my.agent/inputs`).
-- **Turns**: model calls left against the current outside wake, and the task's status.
+- **Turns**: model calls left against the current outside wake, and the task's status (`:done` once every proof is
+  green, `:capped` with no calls left, else `:working`).
 
 When everything is green and quiet the status sections collapse to one line (`{:proofs {:green 3} :calls-left 7}`);
 the task and proof sources always show, because they define done.
@@ -347,12 +348,12 @@ the web never reads the proc's memory.
 
 | After a model eval request | Next |
 |---|---|
-| ≥ 1 form evaluated, no session end, calls left | call the model again |
+| ≥ 1 form evaluated, no session end, calls left, the task not done | call the model again |
 | a form's value is `(my.turn/wait {:my.turn/note …})` | disposition `:wait`; no model call until a new outside wake. A reply to someone is `(my.message/send …)` followed by `(my.turn/wait …)`; `my.turn/complete`, `my.agent/done` and `seon.run/complete` are deleted |
-| no form (prose only), or only read errors | disposition `:wait`; the original wake is answered |
+| no form (prose only), or only read errors | one more call, whose history shows the reply with its no-form or read diagnostic; a second such reply in a row waits (disposition `:wait`); the original wake is answered |
 | provider failure or context refusal | counted call, no evaluations, answeredness unchanged, terminal reply |
 | call cap reached | disposition `:capped`; the assignment moves to the assigner in one transaction, agent and branch kept; the assigner's re-assignment to the same agent resumes it (ledger RT-13) |
-| the task's proofs all green and no broken test | a code task requests a merge (merge.md §1) and the agent waits; a code task with no change against main is done after checking main still holds the tested program, with no merge request; a task whose proofs read an answer is done at the task home; nothing merges |
+| the task's proofs all green | the task is `:done` for the agent (`seon.context/task-done?`, derived from the recorded proof results, never stored): the block shows it and no further model call opens on it; only a newer outside wake does. Its branch keeps the change for root's review. Target (F5, after RESPEC R-2), with no broken test: a code task requests a merge (merge.md §1) and the agent waits; a code task with no change against main is done after checking main still holds the tested program, with no merge request; a task whose proofs read an answer is done at the task home; nothing merges |
 | a proof recorded red after the agent's answered basis | work: the agent is woken, even after `:wait`, and the block shows the red data |
 | `(my.task/complete! {:seon.task/reason …})` (the reason is required) | disposition `:bailed`; the assignment moves to the assigner with the reason (an assignment is a wake; no message, ledger RT-13); this is the only use of `my.task/complete!` |
 | a newer outside wake | answered by the next eval request, whatever the disposition |

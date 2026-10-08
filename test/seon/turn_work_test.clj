@@ -502,11 +502,12 @@
                  (or (nil? derived)
                      (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                       :seon.turn.work/next derived))
-                 ;; An accepted reply that evaluated a form and set no
-                 ;; disposition continues even after its wake is answered.
+                 ;; An accepted reply that set no disposition continues even
+                 ;; after its wake is answered: one that evaluated a form, or
+                 ;; the agent's first that evaluated none (its one follow-up).
                  ;; Receipt content cannot manufacture a new trigger.
                  (or (not answered-closed?)
-                     (= (when (and planned? (seq receipts)) :open) situation))
+                     (= (when planned? :open) situation))
                  ;; :resume carries the FIRST ordinal with no terminal
                  ;; receipt — never one already settled, which is what
                  ;; "nothing re-executes" means in the derivation
@@ -812,7 +813,8 @@
          evaluations))
   (support/transacted! connection [[:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"]]))
 
-(deftest a-prose-only-reply-waits
+(deftest ^{:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}}
+  a-prose-only-reply-gets-one-more-call-and-a-second-waits
   ;; A fixture-model reply with no form settles one row whose read failed: an
   ;; error and no duration, as `seon.turn/read-row` settles it unrun.
   (with-database
@@ -821,13 +823,19 @@
       (closed-reply! connection "prose-run"
                      [{:seon.cluster.eval/source "I will look at the task first."
                        :seon.cluster.eval/error "Your reply had no form; only comments/prose. Send a form."}])
-      (is (nil? (turn/next-agent-work @connection request)) "a prose-only reply waits")
+      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id} (turn/next-agent-work @connection request))
+          "a first prose-only reply gets one more call")
       (closed-reply! connection "read-error-run"
                      [{:seon.cluster.eval/source "{:a}"
                        :seon.cluster.eval/error "The map literal starting with :a contains 1 form(s)."}])
-      (is (nil? (turn/next-agent-work @connection request)) "a reply of only read errors waits")
+      (is (nil? (turn/next-agent-work @connection request)) "a second reply in a row with no evaluated form waits")
       (closed-reply! connection "form-run"
                      [{:seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3" :seon.eval/duration-ms 0}])
       (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
              (turn/next-agent-work @connection request))
-          "a reply that evaluated a form continues"))))
+          "a reply that evaluated a form continues")
+      (closed-reply! connection "prose-after-form-run"
+                     [{:seon.cluster.eval/source "Assess"
+                       :seon.cluster.eval/error "Your reply had no form; only comments/prose. Send a form."}])
+      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id} (turn/next-agent-work @connection request))
+          "a prose-only reply after an evaluated form gets one more call"))))
