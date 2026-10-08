@@ -182,3 +182,60 @@
   (let [slots (requiring-resolve 'seon.operator/operator-check-slots)]
     (is (= 2 (slots nil)))
     (is (= 1 (slots {:seon.config.operator/check-slots 1})))))
+
+(deftest a-class-directory-a-check-holds-before-its-jvm-launches-is-pruned-only-after-release
+  ;; A check copying a directory has no JVM naming it yet (2026-10-08: another
+  ;; launch's prune deleted it, NoSuchFileException on a class).
+  (let [repository (str (java.nio.file.Files/createTempDirectory
+                         "seon-hold" (make-array java.nio.file.attribute.FileAttribute 0)))
+        classes (java.io.File. repository "target/dev-program-classes")
+        directory (fn [name age-ms]
+                    (doto (java.io.File. classes name) .mkdirs
+                      (.setLastModified (- (System/currentTimeMillis) age-ms))))
+        program (directory "program" 0)
+        held (directory "held-oldest" 900000)
+        _ (doseq [i (range 4)] (directory (str "recent-" i) (* 1000 (inc i))))
+        pid (.pid (java.lang.ProcessHandle/current))]
+    (try
+      (#'operator/hold! repository (.getCanonicalPath held))
+      (#'operator/prune-program-classes! repository (.getCanonicalPath program))
+      (is (.isDirectory held) "a directory a live pid holds survives the prune")
+      ;; The holder ends: its hold names a dead pid.
+      (let [dead (let [p (.start (ProcessBuilder. ["true"]))] (.waitFor p) (.pid p))
+            hold-file (first (filter #(.endsWith (.getName ^java.io.File %) (str "." pid))
+                                     (.listFiles (#'operator/holds-directory repository))))]
+        (.renameTo hold-file (java.io.File. (.getParentFile hold-file)
+                                            (str/replace (.getName hold-file) (str "." pid) (str "." dead)))))
+      (#'operator/prune-program-classes! repository (.getCanonicalPath program))
+      (is (not (.isDirectory held)) "released, it is pruned like any old directory")
+      (is (empty? (.listFiles (#'operator/holds-directory repository))) "the dead hold is swept")
+      (finally
+        (doseq [file (reverse (file-seq (java.io.File. repository)))] (.delete ^java.io.File file))))))
+
+(deftest a-shared-cache-link-is-replaced-atomically
+  ;; A reader of the link (a rehearsal copying the analyzer cache) must never
+  ;; find it missing while another check re-links it.
+  (let [root (str (java.nio.file.Files/createTempDirectory
+                   "seon-link" (make-array java.nio.file.attribute.FileAttribute 0)))
+        old-shared (doto (java.io.File. root "old") .mkdirs)
+        new-shared (doto (java.io.File. root "new") .mkdirs)
+        source (doto (java.io.File. root "source") .mkdirs)
+        link (java.io.File. source ".clj-kondo/.cache")
+        missing (atom 0)
+        running (atom true)]
+    (try
+      (spit (java.io.File. source "dependency-pins.txt") "")
+      (#'operator/share-caches! {".clj-kondo/.cache" (.getPath old-shared)} (.getPath source) [])
+      (let [reader (future (while @running
+                             (when-not (.isDirectory link) (swap! missing inc))))]
+        (dotimes [i 200]
+          (#'operator/share-caches! {".clj-kondo/.cache" (.getPath (if (even? i) new-shared old-shared))}
+                                    (.getPath source) []))
+        (reset! running false)
+        @reader)
+      (is (zero? @missing) "the link resolves at every instant")
+      (is (empty? (filter #(str/includes? (.getName ^java.io.File %) ".link-")
+                          (.listFiles (.getParentFile link)))) "no temporary link is left")
+      (finally
+        (reset! running false)
+        (doseq [file (reverse (file-seq (java.io.File. root)))] (.delete ^java.io.File file))))))

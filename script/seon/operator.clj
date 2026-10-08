@@ -613,19 +613,55 @@
                       (when (.isPresent args) (vec (.get args))))))
           (iterator-seq (.iterator stream)))))
 
+(defn- holds-directory
+  "Where a process registers the directories it will use before any JVM names
+  them: `<name of path>.<pid>` files, each alive as long as its pid."
+  [repository]
+  (io/file repository "target/operator-holds"))
+
+(defn- hold-name
+  [path]
+  (apply str (map #(if (Character/isLetterOrDigit (char %)) % \_) path)))
+
+(defn- hold!
+  "Register this process as a user of the directory `path`, so no prune deletes
+  it before a JVM names it on its classpath (a check copying a class directory
+  or an archive it has not yet launched from). Ends with the process: a hold
+  whose pid is gone is swept by `held?`."
+  {:malli/schema [:=> [:cat :string :string] :nil]}
+  [repository path]
+  (let [directory (doto (holds-directory repository) .mkdirs)]
+    (fs/create-file (io/file directory (str (hold-name path) "." (.pid (java.lang.ProcessHandle/current)))))
+    nil))
+
+(defn- held?
+  "Whether a live process holds `path` (`hold!`); holds of dead pids are deleted."
+  {:malli/schema [:=> [:cat :string :string] :boolean]}
+  [repository path]
+  (let [prefix (str (hold-name path) ".")]
+    (boolean
+     (some (fn [^java.io.File file]
+             (let [pid (parse-long (subs (.getName file) (count prefix)))]
+               (if (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) .isAlive)
+                 true
+                 (do (fs/delete-if-exists file) false))))
+           (filter #(str/starts-with? (.getName ^java.io.File %) prefix)
+                   (or (.listFiles (holds-directory repository)) []))))))
+
 (defn- prune-program-classes!
   "Keep `program` and the most recently used class directories; delete the
   rest and any staging a day old (a launch that died filling it). A directory
-  a live process names on its classpath is never deleted: a concurrent start
-  on another program still loads classes from it lazily (two roots
-  starting at once: NoSuchFileException on a class the other JVM needed)."
+  a live process names on its classpath, or holds (`hold!`) before it has
+  launched, is never deleted: a concurrent start or check still loads classes
+  from it (NoSuchFileException on a class the other JVM needed)."
   {:malli/schema [:=> [:cat :string :string] :nil]}
   [repository program]
-  (let [held? (let [arguments (live-arguments)]
+  (let [in-use? (let [arguments (live-arguments)]
                 (fn [^java.io.File directory]
                   (let [path (.getCanonicalPath directory)]
-                    (some #(str/includes? % path) arguments))))
-        directories (remove held? (or (.listFiles (io/file repository program-classes-root)) []))
+                    (or (held? repository path)
+                        (some #(str/includes? % path) arguments)))))
+        directories (remove in-use? (or (.listFiles (io/file repository program-classes-root)) []))
         {staging true complete false} (group-by #(str/includes? (.getName ^java.io.File %) ".staging-")
                                                 directories)
         stale (concat (drop program-classes-kept
@@ -716,6 +752,7 @@
                       {:seon.dev-cache/status :skipped
                        :seon.dev-cache/reason :nuke-reads-no-derived-state})
             program (when reuse-classes? (program-classes (repository-root) source classes))
+            _ (when program (hold! (repository-root) program))
             program-classes? (boolean (and program (.isDirectory (io/file program))))
             _ (when program (prune-program-classes! (repository-root) program))
             argv (launch-argv request source (start-classpath source classes program) (.getCanonicalPath heap)
@@ -1131,6 +1168,8 @@
       (do (.mkdirs cache)
           {:seon.operator/analysis-cache (.getCanonicalPath cache) :seon.operator/seeded :empty}))))
 
+(declare held-sources)
+
 (defn- share-caches!
   "Link each of `source`'s derived cache paths to its shared directory
   (`links`: relative path -> directory) and record the commit's pins
@@ -1151,11 +1190,20 @@
                     (and (fs/sym-link? link)
                          (= (str (fs/real-path shared)) (str (fs/read-link link))))
                     {:path relative :placed :kept}
+                    ;; A real directory is a JVM's private cache: replaced only
+                    ;; when no live process names this source.
+                    (and (fs/exists? link {:nofollow-links true}) (not (fs/sym-link? link))
+                         (contains? (held-sources) (str (fs/real-path source))))
+                    {:path relative :placed :kept-held}
                     :else
-                    (let [replaced? (fs/exists? link {:nofollow-links true})]
-                      (when replaced? (fs/delete-tree link))
+                    ;; Written beside and renamed over, so a concurrent reader of
+                    ;; the link sees the old or the new link, never none.
+                    (let [replaced? (fs/exists? link {:nofollow-links true})
+                          temporary (fs/path (fs/parent link) (str (fs/file-name link) ".link-" (random-uuid)))]
+                      (when (and replaced? (not (fs/sym-link? link))) (fs/delete-tree link))
                       (fs/create-dirs (fs/parent link))
-                      (fs/create-sym-link link (fs/real-path shared))
+                      (fs/create-sym-link temporary (fs/real-path shared))
+                      (fs/move temporary link {:replace-existing true :atomic-move true})
                       {:path relative :placed (if replaced? :replaced :linked)}))))
               (sort links))]
     (when-not (.isFile pins)
@@ -1210,7 +1258,8 @@
                          (or (.listFiles (io/file root "data/source")) []))
         {pruned true retained false}
         (group-by #(and (not= kept (.getCanonicalPath ^java.io.File %))
-                        (not (contains? held (.getCanonicalPath ^java.io.File %))))
+                        (not (contains? held (.getCanonicalPath ^java.io.File %)))
+                        (not (held? (repository-root) (.getCanonicalPath ^java.io.File %))))
                   archives)
         _ (doseq [archive pruned] (fs/delete-tree archive))
         linked (into #{}
@@ -1714,6 +1763,7 @@
         head (str/trim (command! ["git" "rev-parse" "--verify" "HEAD^{commit}"] repository 30000))
         sha (candidate-revision! repository (get request :seon.operator/paths []))
         {source-root :seon.operator/source-root :as source} (committed-source! root sha)
+        _ (hold! (repository-root) source-root)
         archive-ms (elapsed-ms began)]
     (try
       (let [rehearsal (connected! (assoc request :seon.source/directory source-root
