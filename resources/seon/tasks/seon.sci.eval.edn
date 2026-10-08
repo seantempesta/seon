@@ -233,4 +233,10 @@
              :kind :function
              :intent "After one (set! *print-length* 50) every later run of that agent costs about +100 ms and +280 MB: (+ 1 1) on agent repl-audit-opus-p measured 47/43/44 ms and ~55 MB per call before, 148/150/150 ms and ~340 MB after (all-thread allocation, default 2026-10-08); a fresh agent stays at ~45 ms. Cause not yet located: the turn thread's seon frames sample the same before and after, so the extra work is outside seon.* frames (session-print-options queries every evaluation the agent ever ran per fork; the print options ride every evaluation). Correct: a session print option costs nothing per run. Proof: a probe row where 10 runs after the set! cost within 10% of 10 runs before."
              :must-read #{seon.sci.eval/session-print-options seon.sci.eval/fork-for-turn}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
+
+ #:seon.task{:name "a-test-report-erases-the-agents-stack-frames"
+             :kind :function
+             :intent "agent-do-report calls .setStackTrace with an empty array on every link of an erroring test's Throwable (5295011dd, the fix for a-test-error-report-prints-the-whole-host-stack), so the live exception the agent may hold loses its frames for good: the bulk was a printing problem and the fix mutated the value. Done when the report prints the Throwable as its cause chain through the value printer under 300 estimated tokens and the held exception keeps its stack trace, asserted on (count (.getStackTrace e)) after run-tests."
+             :must-read #{seon.sci.eval/agent-do-report seon.error.refusal/chain}
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]

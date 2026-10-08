@@ -69,4 +69,10 @@
              :kind :function
              :intent "A form's printed output reaches the reply whole: eval_clj sci '(dotimes [i 300000] (println i))' answered a 2,289,210-character MCP reply (:out-tokens 621528) on default 2026-10-08, while a 2,000,000-character string VALUE answered 5,172 characters. seon.repl's response composes :seon.repl/out with print/string-literal, a second printer outside the value printer's budget; the only response is a :large-output finding beside the flood. Correct: :out is shown through the value printer's one budget with a dig form for the rest, like any value. Proof: a deftest asserting the reply of 300,000 printed lines is under the value printer's bound and names a dig form."
              :must-read #{seon.repl/response seon.print/string-literal}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
+
+ #:seon.task{:name "the-out-elision-form-re-pulls-the-database"
+             :kind :function
+             :intent "A cut :out prints (subs (:seon.cluster.eval/output (seon.db/pull '[:seon.cluster.eval/output] [:seon.cluster.eval/id \"29ea417f846d\"])) 4669) (default 2026-10-08): a database read with a Seon attribute name while the live output exists in the runtime. shown-output hands the printer a seon.db/pull requery id. Owner ruling 2026-10-08: elision forms are plain clojure.core on the live result symbol, with no database re-pull while the live value exists. Done when the form is (subs (:out result/e…) n), or (subs out/e… n) on the live output, asserted by evaluating it through the MCP entrance and comparing with (subs output n)."
+             :must-read #{seon.repl/shown-output}
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]

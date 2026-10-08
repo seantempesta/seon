@@ -11,4 +11,15 @@
             :intent
             "7619b8dfd string-literal emits physical newlines inside one :text op. fipp.engine annotate-rights and format-nodes count all text characters as one column span, so following groups do not know the final line column. Original lane reports a long line after a multiline string overflowing width. Preserve exact string content (including blank/trailing lines); use dependency layout semantics without adding indentation inside literal contents. Distinguish inherently unbreakable long source lines from layout-added overflow; add nested map/vector regressions.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/source-display/review-printer-codex-notes.md"}}
+
+ #:seon.task{:name "elision-forms-call-a-seon-helper"
+             :kind :function
+             :intent "A cut under a set member or a non-keyword map key prints (drop 32 (seon.print/value-at result/e092ae498f621 '[[:seon.render.data/entry 0 :seon.render.data/val]])) (default 2026-10-08), where clojure.core says (drop 32 (val (nth (seq result/e092ae498f621) 0))). Owner ruling 2026-10-08: elision forms use only clojure.core on the live result symbol. Done when every offered elision form names only clojure.core functions and the result symbol (nth, seq, key, val for typed steps), asserted on the form's symbols and its value through the MCP entrance."
+             :must-read #{seon.print/continuation seon.print/value-at}
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
+
+ #:seon.task{:name "the-printer-law-lint-refuses-nothing"
+             :kind :namespace
+             :intent "The one-printer rule is a clj-kondo :discouraged-var warning (.clj-kondo/config.edn), and bin/lane commit and the edit hook refuse only errors, so 183 printer findings landed and nothing refuses the next; bin/seon-hook (21 pr-str) is never linted; with-out-str, print bindings, Throwable->map, hand-built elision text and value-printing error messages are not detected. Done when a :seon/printer-law linter at :error, with a per-file ratchet baseline, refuses a candidate that adds (pr-str x), a hand-built N more text or (binding [*print-length* 5] …) outside seon.print, seon.render.value, seon.sci.admit and seon.id."
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]

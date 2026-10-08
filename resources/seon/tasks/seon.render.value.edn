@@ -107,4 +107,10 @@
   :kind :function
   :intent "Showing (seon.db/pull (seon.db/db) '[*] [:seon.cluster.eval/id \"af9da2066437\"]) through the printer records the diagnostic \"seon.db/stored-collection :malli.core/invalid-schema-at-call ... Don't know how to create ISeq from: clojure.lang.Keyword\" at render/value.clj:358 (producer seon.render.value/transacted). The offending call is [{:db-name .. :t .. :datahike/commit-id ..} :seon.cluster.eval/read-evidence ()], a basis descriptor where :seon.db/database-value is expected. Correct: transacted reads from a database value (or its connection), never a descriptor. Evidence: result e497d4c908865. Proof: showing that pull yields no stored-collection diagnostic."
   :must-read #{seon.render.value/transacted seon.db/stored-collection}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/failed-def-design.md"}}
+
+ #:seon.task{:name "a-cut-set-or-map-names-the-whole-collection"
+             :kind :function
+             :intent "A cut set or map prints an elision form that does not continue: on default 2026-10-08 (set (range 300)) showed 32 members then …268 result/e71ebe33e3ca0, (zipmap (range 200) (range 200)) showed …168 result/e8d6a2352dfbd, and {:m <100 keys>} showed …68 (get-in result/eb36a4e9a6cbf [:m]); each form returns the whole collection, so the agent reprints the same 32 and cannot continue. node-continuation sets the next offset to 0 for every :indexed? node, assuming shown order is not seq order; refuted on those values: (nth (seq s) 31) is the last shown member and (count (drop 32 s)) equals the printed count. Done when a cut set or map names (drop n r) on its path (a reordered map of at most 64 keyword keys names (apply dissoc r [shown keys])), asserted by evaluating the offered form through the MCP entrance and comparing it with (drop n (seq v))."
+             :must-read #{seon.render.value/node-continuation seon.print/continuation}
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]
