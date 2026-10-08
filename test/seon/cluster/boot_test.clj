@@ -9,6 +9,8 @@
             [seon.cluster.process :as process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.config :as config]
+            [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
             [seon.fs :as fs]
@@ -324,7 +326,8 @@
           (is (nil? (client/matching-handle identity))))))))
 
 (deftest ^{:seon.test/long "Destructive replacement republishes the complete program from an empty store."
-           :seon.test/long-ms 360000}
+           :seon.test/long-ms 360000
+           :seon/tasks #{'seon.cluster.boot/reset-cli-stdout-is-not-one-edn-value}}
   reset-one-jvm
   (with-published-root!
     (fn [root children sentinel]
@@ -485,6 +488,31 @@
                       acquired (completed! (launch-process! children ["bb" "-e" (pr-str form)]) event-ms)]
                   (is (zero? (:seon.probe/exit acquired)))
                   (is (= :acquired (:seon.probe/value acquired))))))))))))
+
+(deftest ^{:seon.test/long "Boots one development cluster and resets it in this JVM: two real start! calls on a published private store."
+           :seon.test/long-ms 240000
+           :seon/tasks #{'seon.cluster.boot/a-reset-drops-the-development-overlay}}
+  a-reset-development-cluster-keeps-its-overlay
+  (with-published-root!
+    (fn [root _ _]
+      (let [cluster (str "dev-" (id/id))
+            no-provider (fn [instance]
+                          (:seon.config.ai/no-provider
+                           (config/effective (db/db (:seon.boot/cluster-connection instance)) cluster)))
+            ;; The launcher supplies the listener of the cluster it opened the
+            ;; JVM for: that marks the development cluster.
+            booted (boot/start! {:seon.boot/root (str root "/data/clusters")
+                                 :seon.boot/cluster-name cluster
+                                 :seon.boot/prepl-server
+                                 (java.net.ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))})]
+        (is (true? (no-provider booted)))
+        (let [reset (boot/request! (merge (process/current-identity)
+                                          {:seon.operator/command :reset
+                                           :seon.operator/managed-root (or (store/declared-operator-root) root)
+                                           :seon.boot/cluster-name cluster}))]
+          (is (= cluster (:seon.boot/cluster-name reset)))
+          (is (true? (no-provider (get @runtime/running-instances cluster)))
+              "the reset cluster runs under the overlay it booted with"))))))
 
 (deftest an-uncaught-throwable-without-its-world-is-printed-and-never-stored-elsewhere
   ;; Before, the sole live instance recorded it: a probe's throwable became the

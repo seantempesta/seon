@@ -456,7 +456,9 @@
 
 (defn start!
   "Acquire a listener before the store; retain partial boot after any later refusal.
-  A supplied listener was opened by the launcher's minimal core-only entry form."
+  A supplied listener was opened by the launcher's minimal core-only entry form.
+  The instance holds the manifest and environment it applied, so a reset
+  re-applies the same configuration."
   {:malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
   [request]
   (let [began (System/nanoTime)
@@ -466,6 +468,14 @@
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
         paths (cluster/cluster-paths (:seon.boot/root config) name)
+        ;; The cluster the launcher opened this JVM for (it supplies the
+        ;; listener) is its development cluster: the development overlay
+        ;; lies under any `--config` manifest.
+        applied (cond-> (select-keys request [:seon.config/environment])
+                  (or (:seon.boot/prepl-server request) (:seon.config/manifest request))
+                  (assoc :seon.config/manifest
+                         (merge (when (:seon.boot/prepl-server request) (config/development-manifest))
+                                (:seon.config/manifest request))))
         ;; A partial boot stays in the one instance roster under its name;
         ;; the failure references it (name, reached layers, process), never
         ;; carries the live instance — its connection, context and graphs.
@@ -497,17 +507,9 @@
                                              :port (:seon.boot/prepl-port config)
                                              :args [:cluster-name name]}))
                                        (catch Throwable cause (throw (failed cause nil))))]
-                     (publish! (listening-instance config listener))))]
+                     (publish! (merge (listening-instance config listener) applied))))]
     (try
-      (let [;; The cluster the launcher opened this JVM for (it supplies the
-            ;; listener) is its development cluster: the development overlay
-            ;; lies under any `--config` manifest.
-            manifest (merge (when (:seon.boot/prepl-server request) (config/development-manifest))
-                            (:seon.config/manifest request))
-            compiled (config/compile-manifest
-                      (cond-> (assoc (select-keys request [:seon.config/environment])
-                                     :seon.boot/cluster-name name)
-                        manifest (assoc :seon.config/manifest manifest)))]
+      (let [compiled (config/compile-manifest (assoc applied :seon.boot/cluster-name name))]
         (.mkdirs (io/file (:seon.boot/log-dir config)))
         (cluster/warn-low-space! (str (io/file (:seon.boot/store-dir config) "../.."))
                                 (:seon.config/effective compiled))
@@ -727,11 +729,15 @@
                          _ (registry/retire-branch! {:seon.store/store held
                                                      :seon.store/branch (registry/cluster-branch n)})
                          unlinked-ms (quot (- (System/nanoTime) began) 1000000)
+                         ;; The fresh branch gets the configuration this
+                         ;; instance applied, its development overlay included.
                          started (start! (-> config
                                              (dissoc :seon.store/destroy? :seon.operator/force?
                                                      :seon.operator/command :seon.boot/log-dir
                                                      :seon.boot/store-dir)
-                                             (assoc :seon.boot/prepl-port 0)))]
+                                             (assoc :seon.boot/prepl-port 0)
+                                             (merge (select-keys instance [:seon.config/manifest
+                                                                           :seon.config/environment]))))]
                      (merge identity
                             {:seon.boot/cluster-name n
                              :seon.boot/readiness (readiness started)

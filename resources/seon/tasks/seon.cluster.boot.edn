@@ -14,4 +14,14 @@
   :kind :function
   :intent "`bin/seon status` failed whole (exit 1) on default at 17:35 with `seon.health/render-ai refused argument 0 at [:seon.db/db]` from `seon.cluster.boot/request!`'s `:status` branch, and answered OK on the next call: one running instance had no store connection at that moment (a start or stop in the same JVM), so `request!` built the render unit without `:seon.db/db`, while `render-ai` already handles an absent database (`(if database ...)`) but its contract `:seon.render/unit` requires it. One cluster's missing database must neither fail the other clusters' rows nor the status: fix the contract or the caller at the producer, and render that instance's row as its readiness. Proof: a status request with one instance lacking `:seon.boot/cluster-connection` answers every row, the incomplete one as data."
   :must-read #{seon.cluster.boot/request! seon.health/render-ai}
-  :evidence #{"docs/research/agent-platform/2026-10-08/model-pass/base-roster.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/model-pass/base-roster.md"}}
+
+ #:seon.task{:name "a-reset-drops-the-development-overlay"
+  :kind :function
+  :intent "`bin/seon reset default --force` left default on shipped defaults (a live provider, no `:seon.config.ai/no-provider true`) and root made 9 paid model calls: `seon.cluster.boot/start!` merged `config/development.edn` only when the launcher supplied `:seon.boot/prepl-server`, and the `:reset` branch of `seon.cluster.boot/request!` restarted from the instance's bootstrap config, which keeps neither the listener nor the manifest it applied. A reset re-applies the configuration the instance booted with: the instance holds its applied manifest as data and the reset passes it back."
+  :must-read #{seon.cluster.boot/start! seon.cluster.boot/request! seon.config/development-manifest}}
+
+ #:seon.task{:name "reset-cli-stdout-is-not-one-edn-value"
+  :kind :function
+  :intent "`seon.cluster.boot-test/reset-one-jvm` errors on HEAD a6231e1ad (throwaway check JVM, 2026-10-08): its `bin/seon --root R reset --force` child's stdout begins with an ISO timestamp (`Invalid number: 2026-10-08T11:06:39.608Z` from `clojure.edn/read-string` in the test's `completed!`), so the reset reply is no longer one EDN value on stdout. Find the producer of the timestamped line on the operator's stdout and send it to stderr or the start log, or make the reply the one value; the test is the proof."
+  :must-read #{seon.cluster.boot/request! seon.operator/request!}}]
