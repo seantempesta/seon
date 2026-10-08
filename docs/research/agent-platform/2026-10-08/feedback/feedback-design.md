@@ -92,8 +92,8 @@ The per-form `:seon.repl/ms` stays: it is the form's own evaluation, and next to
 
 ## 3. What disappears
 
-- The JVM-wide fallback in `seon.sci.kernel/record` (`jvm-allocated-bytes`, `::jvm-allocated-at-start`) and in
-  `seon.profile/measure` (`:alloc-scope :jvm`): a number that includes other lanes is deleted, not labelled (Sol option 1).
+- The JVM-wide fallback in `seon.sci.kernel/record` (`jvm-allocated-bytes`, `::jvm-allocated-at-start`; slice 1) and in
+  `seon.profile/measure` (`:alloc-scope :jvm`, routed): a number that includes other lanes is deleted, not labelled (Sol option 1).
 - `seon.batch/allocated-bytes` and the form's `:seon.batch/allocated-bytes`, a third copy of the same counter read
   (always absent on the virtual thread SCI runs on).
 - `seon.profile/transaction-observation`'s separate `:seon.batch/stamped-ns` clock for the request's ms: the request
@@ -118,16 +118,16 @@ The per-form `:seon.repl/ms` stays: it is the form's own evaluation, and next to
 
 ## 5. Slices (about 15 minutes each; each proof asserts reply DATA through `seon.mcp/call`)
 
+Order ruled by root after Sol landed (owner approved platform threads for evaluation): allocation honesty first, then
+the platform-worker arm, then the request cost map.
+
 | # | Slice | Files (owner today) | Proof |
 |---|---|---|---|
-| 1 | The pass reply carries `:seon.cost/ms` and `:seon.cost/stages` (batch timings + test step); MCP adds `:print` and prints `:seon.repl/request` | `src/seon/turn.clj` (held by codec-print), `src/seon/cluster/agent.clj`, `src/seon/mcp.clj`, the reply schema resource | new `seon.request-cost-test/a-reply-carries-its-request-cost`: for `:ping`, `:seon.cost/ms` ≥ the sum of `:stages` and ≥ the form's `:ms`; a defn request's stages include `:settle` and `:test-step` |
-| 2 | `:calls`, `:reads`, `:transactions` from the batch sink plus the test step's sink | `src/seon/turn.clj`, `src/seon/batch.clj` | row in the same test: three `(seon.db/pull …)` forms report `:reads` ≥ 3 more than `:ping`; a second concurrent agent's work leaves `:calls` unchanged within ±1% |
-| 3 | `:top` past the bound and the `:slow` finding on `:seon.cost/ms` with the request's `:top` in place of the whole-process summary | `src/seon/repl.clj`, `resources/seon/schemas/seon.eval.edn` (bounds) | `(Thread/sleep 1100)` via a contracted test-only function: the finding names that function first; no other agent's function appears |
-| 4 | Sol option 1: delete the JVM-wide fallback; `:alloc-mb` absent with `:unmeasured` on virtual threads | `src/seon/sci/kernel.clj`, `src/seon/profile.clj` (held by health-self), `test/seon/eval_alloc_test.clj` | convert `seon.eval-alloc-test/an-evaluation-reply-shows-what-it-allocated`: SCI reply has no `:alloc-mb` and names `:virtual-thread`; JVM-mode reply keeps it. Needs the owner's yes: the agent loses its only (polluted) allocation signal until slice 5 |
-| 5 | Sol option 2: the arm extent on a platform worker (`clojure.core.async.flow/futurize` + `bound-fn*`), giving `:alloc-mb` and `:cpu-ms` with declared scope | `src/seon/sci/eval.clj`, `src/seon/sci/kernel.clj` | `seon.sci.kernel/alloc-mb-on-a-virtual-thread-measures-the-whole-jvm`'s done-when: a concurrent allocating thread leaves the form's bytes within its own; the 100 MB array reads 100.0 ± 1 |
-
-Slice 1 was not implemented in this lane: the pass reply is built in `seon.turn/step`, which lane codec-print holds, and
-slice 4 changes what agents see (owner decision). Both are routed here, not patched around.
+| 1 | Sol option 1: delete the JVM-wide fallback in `seon.sci.kernel/record`; a virtual-thread evaluation records -1 and the reply omits `:alloc-mb` | `src/seon/sci/kernel.clj`, `resources/seon/schemas/seon.eval.edn`, `test/seon/eval_alloc_test.clj` (this lane) | `seon.eval-alloc-test/an-unmeasured-evaluation-reply-shows-no-allocation`. `seon.profile/measure`'s `:alloc-scope :jvm` is the same defect in `src/seon/profile.clj` (held by health-self): routed |
+| 2 | Sol option 2: the arm extent (arm acquisition, bindings, evaluate, print observation, record, stop) on a platform worker via `clojure.core.async.flow/futurize` + `bound-fn*`, with actual-exit ownership; `:alloc-mb` and `:cpu-ms` return with declared scope. Opus | `src/seon/sci/eval.clj`, `src/seon/sci/kernel.clj` | restore a positive allocation test: the 100 MB array reads 100.0 ± 1 with a concurrent allocating thread running (`seon.sci.kernel/alloc-mb-on-a-virtual-thread-measures-the-whole-jvm`'s done-when), cross-checked against the JFR per-thread sum (§1 method) |
+| 3 | The pass reply carries `:seon.cost/ms` and `:seon.cost/stages` (batch timings + test step); MCP adds `:print` and prints `:seon.repl/request` | `src/seon/turn.clj` (held by codec-print), `src/seon/cluster/agent.clj`, `src/seon/mcp.clj`, the reply schema resource | new `seon.request-cost-test/a-reply-carries-its-request-cost`: for `:ping`, `:seon.cost/ms` ≥ the sum of `:stages` and ≥ the form's `:ms`; a defn request's stages include `:settle` and `:test-step` |
+| 4 | `:calls`, `:reads`, `:transactions` from the batch sink plus the test step's sink | `src/seon/turn.clj`, `src/seon/batch.clj` | row in the same test: three `(seon.db/pull …)` forms report `:reads` ≥ 3 more than `:ping`; a second concurrent agent's work leaves `:calls` unchanged |
+| 5 | `:top` past the bound and the `:slow` finding on `:seon.cost/ms` with the request's `:top` in place of the whole-process summary | `src/seon/repl.clj`, `resources/seon/schemas/seon.eval.edn` (bounds) | a contracted function sleeping 1.1 s: the finding names it first; no other agent's function appears |
 
 ## 6. Accuracy contract
 
@@ -145,13 +145,13 @@ slice 4 changes what agents see (owner decision). Both are routed here, not patc
   48 `seon.db/q` calls (~41 ms), plus ~25 MB of platform-thread work. Belongs to the existing
   `seon.turn/each-form-of-a-pass-costs-megabytes` (which measured per form, not the fixed per-request cost); the
   owning query is the next probe (JFR stack depth 64 hides it; rerun with `-XX:FlightRecorderOptions:stackdepth=256`
-  or the sink's per-definition self time once slice 2 lands).
+  or the sink's per-definition self time once slice 4 lands).
 - A one-defn eval request in a new namespace took 3.8 s and 1.17 GB (turn 3.3 s). Over one second: belongs to the
   turn's owner; same evidence.
 - The default JVM still runs the pre-724024094 `seon.profile/measure` (`:called`, no `:ranked-by-self`): the self-time
   slot exists in source only until root's next restart.
 - `seon.repl/a-slow-reply-names-nothing` and `seon.sci.kernel/alloc-mb-on-a-virtual-thread-measures-the-whole-jvm`
-  are the existing tasks slices 3 and 4-5 close.
+  are the existing tasks slices 5 and 1-2 close.
 
 ## Appendix: probe forms (JVM mode, default)
 
