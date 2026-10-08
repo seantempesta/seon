@@ -243,3 +243,9 @@ of two each).
   caller see the branch's redefinition (two new proofs through `seon.mcp/call`, red at HEAD, green now). Cost per defn: leaf 12 ms,
   `explain-problem` (312 callers) 380 ms and 1.1 GB the first time, paid twice; a hub several seconds. Lazy per-caller
   interpretation is the filed next step (`e9582ffc7`). Fan-out 7 is testing the full path with file proofs.
+- **Fan-out 7** (`ad6d70476` landed through the check; frictions `a04fde197`): 0 of 3 green on the agents' branches. Progress:
+  `write-branch!` worked (172 ms, 297 MB); branch evidence refused correctly (reaching tests unproven on the branch). The new
+  blocker is in the affected-callers path: on live branches a file test reaching the redefinition has "no executable test Var"
+  (test namespaces aliasing the code under test as `sut` and tagging tasks); lane interp-test is on it. Root refused one fix in review
+  (it parsed Malli's message text again; the task now says to work from the schema). Hygiene: 67 of 74 "open" tasks with tagged
+  proofs are already green, never retired (lane retire-green).
