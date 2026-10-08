@@ -295,7 +295,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-HITS | — | after LR-CACHEb |
 | SR-BRANCH | — | after MA-15, F5, F7, MA-14b |
 | PB-07a | [PB-07a](PB-07a.md) | ready |
-| PB-07b | card next | after PB-07a, led-ul2 |
+| PB-07b | [PB-07b](PB-07b.md) (b1, b2) | after PB-07a, led-ul2 (b1), led-cacheb (b2) |
 | PB-08 | — | waits on led-cacheb (Opus) |
 | PB-09 | — | after S4-01 |
 | PB-10 | — | blocked (AU-Q12) |
