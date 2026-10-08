@@ -3028,6 +3028,8 @@
                                                  :seon.task/intent "Square."}))]
        (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
                            :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+     (is (nil? (:seon.repl/error (agent-eval running agent-id "(my.agent/settings! {:seon.config.ai/wrapping :transcript})")))
+         "this test reads the transcript wire format, set on the agent")
      (let [help-reply (str/join (map #(get % "text") (get (eval-result running agent-id "(help)") "content")))
            _ (agent-eval running agent-id "(+ 1 2)")
            wrong "(in-ns 'tq.cx1)\n(defn area [r] (* r 2))"
