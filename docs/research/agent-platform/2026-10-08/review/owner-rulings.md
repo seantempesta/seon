@@ -269,6 +269,13 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 ## 11. Process and lanes
 
+- **Good solutions, not fast ones (owner 2026-10-08).** "We need good solutions not fast solutions for all of these so we
+  need to either iterate and find solutions from experience and/or research agents and thinking longer ... Identify
+  square peg and round hole issues and when we need to step back and ask me." Hard problems get iteration from real
+  use, research lanes and independent outside checks (Astra/Sol) before a design is fixed; when a fix fights the
+  design (workarounds, special cases, a dependency bent against its grain), root stops and asks the owner with
+  options. Lives in: lane templates; root's process.
+
 - **Lanes work as Seon agents (owner 2026-10-08).** "instruct agents working on a task to generate the context in the
   repl and then work in the repl on solving it just as a seon agent will be." Root files each slice as a task with a
   red proving deftest and assigns it; the lane's first form reads its current-state block at the REPL, it works by
