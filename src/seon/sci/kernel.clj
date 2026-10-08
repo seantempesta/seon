@@ -14,7 +14,8 @@
   arm's value, so every thread serving one evaluation observes one deadline,
   counts into one entrance total, and is reachable by one `interrupt!`."
   (:refer-clojure :exclude [future-call pmap])
-  (:require [clojure.main :as main]
+  (:require [clojure.core.async.flow :as flow]
+            [clojure.main :as main]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [sci.core :as sci]
@@ -29,8 +30,8 @@
             [seon.sci.admit :as admit])
   (:import [java.lang.management ManagementFactory MemoryNotificationInfo MemoryPoolMXBean MemoryType]
            [javax.management Notification NotificationEmitter NotificationListener]
-           [java.util.concurrent Future ScheduledThreadPoolExecutor TimeUnit]
-           [java.util.concurrent.atomic AtomicBoolean AtomicLong]))
+           [java.util.concurrent CountDownLatch ExecutionException Future ScheduledThreadPoolExecutor TimeUnit]
+           [java.util.concurrent.atomic AtomicBoolean AtomicLong AtomicReference]))
 
 (defn interrupted?
   "True when a throwable or one of its causes is SCI's interrupt."
@@ -48,6 +49,11 @@
   []
   (.getCurrentThreadAllocatedBytes
    ^com.sun.management.ThreadMXBean thread-mx))
+
+(defn- cpu-ns
+  "This thread's CPU nanoseconds; -1 on a virtual thread, which HotSpot does not count."
+  []
+  (.getCurrentThreadCpuTime ^java.lang.management.ThreadMXBean thread-mx))
 
 (defonce ^:private ^ScheduledThreadPoolExecutor deadline-timer
   (doto (ScheduledThreadPoolExecutor.
@@ -312,6 +318,7 @@
         allocated-at-start (::allocated-at-start armed)
         owning-thread? (= (::owner-thread-id armed)
                           (.threadId (Thread/currentThread)))]
+    (cond->
     {:seon.eval/fn-entries (.get entries)
      :seon.eval/host-interop-count (.get host-interop-observations)
      :seon.eval/duration-ms
@@ -325,7 +332,11 @@
             (aget sampled 0))
           (.get adopted-allocated))
        -1)
-     :seon.eval/outcome (or @(::outcome armed) final-outcome)}))
+     :seon.eval/outcome (or @(::outcome armed) final-outcome)}
+      ;; the CPU time of the same threads, read on the owning platform thread
+      (and owning-thread? (::measurable armed) (not (neg? (::cpu-at-start armed))))
+      (assoc :seon.cost/cpu-ns (+ (- (cpu-ns) (::cpu-at-start armed))
+                                  (.get ^AtomicLong (::adopted-cpu-ns armed)))))))
 
 (defn- new-armed
   "The arm VALUE: every counter, latch, and identity one evaluation needs,
@@ -337,6 +348,8 @@
      ::sampled (long-array 1)
      ::host-interop-observations (AtomicLong. 0)
      ::adopted-allocated-bytes (AtomicLong. 0)
+     ::adopted-cpu-ns (AtomicLong. 0)
+     ::cpu-at-start (cpu-ns)
      ::built-in-calls (atom #{})
      ::reached (AtomicBoolean. false)
      ::travelled (AtomicBoolean. false)
@@ -441,6 +454,38 @@
   [ctx time-limit-ms]
   (acquire-arm ctx time-limit-ms))
 
+(defn- on-platform-worker
+  "`(f)`'s value, or its throw, run on a platform worker of core.async's mixed
+  pool (`clojure.core.async.flow/futurize`) with this thread's Clojure and SCI
+  bindings, after the worker's actual exit. The caller is one agent's serial
+  pass, so each agent holds at most one worker. An interrupt of this thread is
+  passed to the worker and the wait continues until the worker exits; the
+  interrupt is then restored on this thread."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "The body determines its return type; the handoff preserves that exact result."
+                         :gen/elements [nil false 0 "" :k [] {}]}]]}
+  [f]
+  (let [exited (CountDownLatch. 1)
+        ^AtomicReference worker (AtomicReference.)
+        ^AtomicBoolean interrupt (AtomicBoolean. false)
+        body (sci.vars/binding-conveyor-fn
+              (bound-fn* (fn []
+                           (.set worker (Thread/currentThread))
+                           (when (.get interrupt) (.interrupt (Thread/currentThread)))
+                           (try (f) (finally (.countDown exited))))))
+        ^Future task ((flow/futurize body :exec :mixed))]
+    (loop [stopped? false]
+      (if (try (.await exited) true
+               (catch InterruptedException _
+                 (.set interrupt true)
+                 (some-> ^Thread (.get worker) .interrupt)
+                 false))
+        (do (when stopped? (.interrupt (Thread/currentThread)))
+            (try (.get task)
+                 (catch ExecutionException failure (throw (.getCause failure)))))
+        (recur true)))))
+
 (defn with-arm
   "Run `work` under one arm and release it on every exit path.
 
@@ -460,11 +505,18 @@
            :seon.schema.admission/reason
            "The caller's body determines its return type; with-arm preserves that exact result."}]]}
   [ctx time-limit-ms work]
-  (let [armed (acquire-arm ctx time-limit-ms)]
-    (try
-      (work armed)
-      (finally
-        ((::stop! armed))))))
+  (let [governed #(let [armed (acquire-arm ctx time-limit-ms)]
+                    (try
+                      (work armed)
+                      (finally
+                        ((::stop! armed)))))]
+    ;; A NEW arm on a virtual thread runs its whole extent on a platform worker,
+    ;; where HotSpot counts the thread's allocation and CPU time; nested work
+    ;; and a platform caller stay on their thread.
+    (if (and (.isVirtual (Thread/currentThread))
+             (nil? (some-> (::guard ctx) current-thread-arm)))
+      (on-platform-worker governed)
+      (governed))))
 
 (def ^:dynamic *host-world*
   "The context a host body runs as when no evaluation arms its thread: a JVM
@@ -634,16 +686,21 @@
     (work)
     (let [^ThreadLocal thread-arm (::thread-arm @process-guard)
           displaced (.get thread-arm)
-          allocated-at-entry (allocated-bytes)]
+          allocated-at-entry (allocated-bytes)
+          cpu-at-entry (cpu-ns)]
       (.set thread-arm carried-arm)
       (try
         (work)
         (finally
-          (let [allocated-at-exit (allocated-bytes)]
+          (let [allocated-at-exit (allocated-bytes)
+                cpu-at-exit (cpu-ns)]
             (when (and (not (neg? allocated-at-entry))
                        (not (neg? allocated-at-exit)))
               (.addAndGet ^AtomicLong (::adopted-allocated-bytes carried-arm)
-                          (- allocated-at-exit allocated-at-entry))))
+                          (- allocated-at-exit allocated-at-entry)))
+            (when (and (not (neg? cpu-at-entry)) (not (neg? cpu-at-exit)))
+              (.addAndGet ^AtomicLong (::adopted-cpu-ns carried-arm)
+                          (- cpu-at-exit cpu-at-entry))))
           (if displaced
             (.set thread-arm displaced)
             (.remove thread-arm)))))))

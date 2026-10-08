@@ -4244,7 +4244,8 @@
            (:seon.batch/entries batch))
      :seon.turn.loop/program {:seon.batch/request request :seon.batch/program (:seon.batch/program batch {})}
      :seon.batch/timings (:seon.batch/timings batch {})
-     :seon.cost/counts (profile/sink-counts (:seon.batch/sink world))}))
+     :seon.cost/counts (merge (profile/sink-counts (:seon.batch/sink world))
+                              (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch))))}))
 
 (defn preview-sources
   "Evaluate authored source once in the assigned agent's fork, persisting nothing.

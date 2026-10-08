@@ -182,7 +182,7 @@
             :alloc-mb
             [:string
              {:description
-              "The megabytes (to 0.1) one evaluation allocated, as seon.eval/allocated-bytes recorded it; that attribute names what the measure includes. An SCI evaluation runs on a virtual thread, so this is every thread's allocation over its window: it never misses the evaluation's own work and may include unrelated concurrent work."}],
+              "The megabytes (to 0.1) one evaluation allocated, as seon.eval/allocated-bytes recorded it; that attribute names what the measure includes. Absent when the evaluation was not measured."}],
             :repairs
             [:string
              {:description

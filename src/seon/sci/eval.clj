@@ -3577,6 +3577,9 @@
     (pos? (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes] -1))
     (assoc :seon.eval/allocated-bytes
            (get-in admitted [:seon.sci.admit/record :seon.eval/allocated-bytes]))
+    ;; the same threads' CPU time, for the request's cost (not stored)
+    (nat-int? (get-in admitted [:seon.sci.admit/record :seon.cost/cpu-ns]))
+    (assoc :seon.cost/cpu-ns (get-in admitted [:seon.sci.admit/record :seon.cost/cpu-ns]))
     (or (seq output-prefix) (seq (str printed)))
     (assoc :seon.cluster.eval/output
            (evaluation-output output-prefix printed))))

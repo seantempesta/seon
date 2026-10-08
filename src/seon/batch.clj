@@ -166,6 +166,23 @@
   (cond-> (merge {:seon.cost/ms (tenths (ms-since started-ns))} counts)
     (seq stages) (assoc :seon.cost/stages (update-vals stages tenths))))
 
+(defn arm-measures
+  "The allocation and CPU time of the forms' evaluation arms (each arm's
+  platform worker and the platform threads that adopted it), summed; a measure
+  any form lacks is absent, its reason in `:seon.cost/unmeasured`."
+  {:malli/schema [:=> [:cat [:sequential :map]] :map]}
+  [evaluations]
+  (let [allocated (map #(:seon.eval/allocated-bytes % -1) evaluations)
+        cpu (map #(:seon.cost/cpu-ns % -1) evaluations)
+        unmeasured (cond-> {}
+                     (some neg? allocated) (assoc :seon.cost/alloc-mb :unmeasured-arm)
+                     (some neg? cpu) (assoc :seon.cost/cpu-ms :unmeasured-arm))]
+    (cond-> {}
+      (empty? evaluations) (assoc :seon.cost/unmeasured {:seon.cost/alloc-mb :no-form :seon.cost/cpu-ms :no-form})
+      (and (seq evaluations) (not-any? neg? allocated)) (assoc :seon.cost/alloc-mb (/ (Math/round (/ (double (reduce + allocated)) 1e5)) 10.0))
+      (and (seq evaluations) (not-any? neg? cpu)) (assoc :seon.cost/cpu-ms (tenths (/ (reduce + cpu) 1e6)))
+      (and (seq evaluations) (seq unmeasured)) (assoc :seon.cost/unmeasured unmeasured))))
+
 (defn diagnostic
   "One diagnostic: the failing stage, the form it belongs to, the cause."
   {:malli/schema [:=> [:cat :keyword [:maybe :int] :seon.error/throwable] :seon.batch/diagnostic]}

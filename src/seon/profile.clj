@@ -669,19 +669,16 @@
   `hot-limit` each) and the count of reads among them (`read-entrances`). A
   thrown exception propagates.
 
-  Every counter but a platform thread's allocation is JVM-wide over the
-  call's window, so concurrent unrelated work counts too: allocation on a
-  virtual thread (every SCI evaluation) is every thread's
-  (`:seon.profile/alloc-scope :jvm`), and calls, reads and GC are always
-  every thread's. A platform thread's allocation is its own (`:thread`) and
-  misses work it hands to other threads."
+  Every counter but the allocation is JVM-wide over the call's window, so
+  concurrent unrelated work counts too. The allocation is the calling platform
+  thread's own (`:seon.profile/alloc-scope :thread`) and misses work it hands
+  to other threads; on a virtual thread, which has no count, it is absent."
   {:malli/schema [:=> [:cat :seon.profile/thunk] :seon.profile/measured-call]}
   [f]
   (let [;; local functions, not armed ones: the second reading's own calls
         ;; would otherwise count as the measured call's
         mx ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
-        allocated (fn [] (let [own (.getCurrentThreadAllocatedBytes mx)]
-                           (if (neg? own) [:jvm (.getTotalThreadAllocatedBytes mx)] [:thread own])))
+        allocated (fn [] (.getCurrentThreadAllocatedBytes mx))
         collected (fn [] (reduce (fn [[n ms] ^java.lang.management.GarbageCollectorMXBean gc-bean]
                                    [(+ n (max 0 (.getCollectionCount gc-bean))) (+ ms (max 0 (.getCollectionTime gc-bean)))])
                                  [0 0] (java.lang.management.ManagementFactory/getGarbageCollectorMXBeans)))
@@ -699,11 +696,11 @@
                                 (transient {}) (.values ^ConcurrentHashMap roster))))
         entries-before (entries)
         [gc-before gc-ms-before] (collected)
-        [scope allocated-before] (allocated)
+        allocated-before (allocated)
         started (System/nanoTime)
         value (f)
         ms (/ (Math/round (/ (- (System/nanoTime) started) 1e4)) 100.0)
-        [_ allocated-after] (allocated)
+        allocated-after (allocated)
         [gc-after gc-ms-after] (collected)
         called (into []
                      (keep (fn [[sym [n self]]]
@@ -714,13 +711,15 @@
                                   :seon.profile/self-ms (quot (- self self0) 1000000)}))))
                      (entries))
         ranked (fn [k] (into [] (take hot-limit) (sort-by k #(compare %2 %1) called)))]
+    (cond->
     {:seon.profile/value value
      :seon.profile/ms ms
-     :seon.profile/alloc-bytes (max 0 (- allocated-after allocated-before))
-     :seon.profile/alloc-scope scope
      :seon.profile/gc-count (- gc-after gc-before)
      :seon.profile/gc-ms (- gc-ms-after gc-ms-before)
      :seon.profile/calls (transduce (map :seon.profile/calls) + 0 called)
      :seon.profile/reads (transduce (comp (filter (comp read-entrances :seon.profile/sym)) (map :seon.profile/calls)) + 0 called)
      :seon.profile/ranked-by-self (ranked (juxt :seon.profile/self-ms :seon.profile/calls))
-     :seon.profile/ranked-by-calls (ranked :seon.profile/calls)}))
+     :seon.profile/ranked-by-calls (ranked :seon.profile/calls)}
+      (not (or (neg? allocated-before) (neg? allocated-after)))
+      (assoc :seon.profile/alloc-bytes (- allocated-after allocated-before)
+             :seon.profile/alloc-scope :thread))))

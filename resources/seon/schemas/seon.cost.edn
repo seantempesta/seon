@@ -9,13 +9,28 @@
  [:int {:min 0 :description "The calls among :seon.cost/calls to a seon.db read entrance (seon.profile/read-entrances)."}]
  :seon.cost/transactions
  [:int {:min 0 :description "The commit attempts among :seon.cost/calls (seon.profile/transaction-entrances)."}]
+ :seon.cost/alloc-mb
+ [:double {:min 0.0 :description "Megabytes (to 0.1) the request's forms allocated in their evaluation arms: the platform worker each form's arm ran on (seon.sci.kernel/with-arm) and the platform threads that adopted the arm (seon.sci.kernel/adopt-arm), from HotSpot's per-thread counter, independent of other threads. Outside it: the pass's fork, settlement and test step on the agent's virtual thread, the Datahike writer, unadopted futures."}]
+ :seon.cost/cpu-ns
+ [:int {:min 0 :description "CPU nanoseconds of one evaluation arm's threads, as :seon.cost/alloc-mb scopes them."}]
+ :seon.cost/cpu-ms
+ [:double {:min 0.0 :description "CPU milliseconds (to 0.1) of the request's evaluation arms, scoped as :seon.cost/alloc-mb."}]
+ :seon.cost/unmeasured
+ [:map-of {:description "A measure the request could not take, by its key, and why: :unmeasured-arm (a form's arm ran where HotSpot keeps no count), :no-form (nothing evaluated)."}
+  :qualified-keyword :keyword]
  :seon.cost/counts
  [:map [:seon.cost/calls :seon.cost/calls] [:seon.cost/reads :seon.cost/reads]
-  [:seon.cost/transactions :seon.cost/transactions]]
+  [:seon.cost/transactions :seon.cost/transactions]
+  [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
+  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]
  :seon.cost/request
  [:map {:description "What one eval request cost, every number this request's own; a measure that is unavailable is absent."}
   [:seon.cost/ms :seon.cost/ms]
   [:seon.cost/stages {:optional true} :seon.cost/stages]
   [:seon.cost/calls {:optional true} :seon.cost/calls]
   [:seon.cost/reads {:optional true} :seon.cost/reads]
-  [:seon.cost/transactions {:optional true} :seon.cost/transactions]]}
+  [:seon.cost/transactions {:optional true} :seon.cost/transactions]
+  [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
+  [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
+  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]}

@@ -317,7 +317,8 @@
                               code (db/db connection) cluster-name))
                true]))]
       [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))
-       (profile/sink-counts (:seon.batch/sink world))])))
+       (merge (profile/sink-counts (:seon.batch/sink world))
+              (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch))))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The entrance
