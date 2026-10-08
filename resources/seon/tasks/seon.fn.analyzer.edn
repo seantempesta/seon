@@ -8,4 +8,9 @@
             :intent
             "The source edit hook refuses unchanged Datahike execute.cljc local macro bindings first-attr, cur-d, si, cur-a, target-a at sorted-merge-inner-loop calls, and infers a nil type mismatch at execute-temporal-group-rel. It also refuses the test-rule-arguments name introduced by deftest-async in query_rules_test.cljc. Whole Seon archive lint reports zero errors because dependencies are outside its roots. Correct the analyzer's macro/signature understanding without disabling validation. This blocks the history cursor correctness fix described with its exact patch in docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md. Proof: prospective edits to these unchanged fork definitions should have no false error-level lint findings.",
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/dh-planner/dh-planner-review-notes.md"}}
+ #:seon.task{:name "analysis-runs-over-the-one-second-bound-without-a-task"
+             :kind :function
+             :intent "runtime_status on default (2026-10-08, commit 6ac7343e loaded) ranks seon.fn.analyzer/analyze over its bound: 11 calls, mean 1.17 s, max 10.0 s, and its caller seon.fn/analyzed-files 11 calls, mean 2.17 s, max 14.7 s; neither health row carries a task. Name what each call analyzes (files, forms) and whether the work follows the changed files or the whole program; an unchanged-input analysis should be a cache hit."
+             :must-read #{seon.fn.analyzer/analyze seon.fn/analyzed-files seon.fn/index!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/plan-review-opus3.md"}}]
