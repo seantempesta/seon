@@ -1,7 +1,8 @@
 (ns seon.operator-test
   (:require [clojure.core.server :as server]
             [clojure.edn :as edn]
-            [clojure.test :refer [deftest is]]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [seon.operator :as operator]
             [seon.test-support :as test-support]))
 
@@ -139,3 +140,14 @@
     (is (= 2 (:seon.operator/pruned-archives-count summary)))
     (is (= [42 "abc123" true] ((juxt :seon.boot/pid :seon.source/git-sha :seon.operator/adopted?) summary)))
     (is (not (contains? summary :seon.operator/captured-heads)))))
+
+(deftest a-launched-jvm-carries-the-configured-heap-cap
+  (let [xmx (fn [request] (filterv #(str/starts-with? % "-J-Xmx")
+                                   (operator/launch-argv request "/src" nil "/heap" "nil")))]
+    (testing "the shipped default caps every launch"
+      (is (= [(str "-J-Xmx" (:seon.config.operator/heap-max-bytes @operator/shipped-default-decisions))]
+             (xmx {:seon.operator/managed-root "/root"}))))
+    (testing "a manifest's dial replaces it"
+      (is (= ["-J-Xmx1073741824"]
+             (xmx {:seon.operator/managed-root "/root"
+                   :seon.config/manifest {:seon.config.operator/heap-max-bytes 1073741824}}))))))
