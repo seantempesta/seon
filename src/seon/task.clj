@@ -325,18 +325,19 @@
   The task is its symbol, as holders tag it, so a branch holding no task row reads its edges."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/sym] [:or :seon.task/edges :seon.db/invalid-read-error]]}
   [database sym]
-  (let [holders (db/q database '[:find ?s ?proof :in $ ?t :where [?e :seon.task/tasks ?t]
-                                 (or (and [?e :seon.test/sym ?s] [(ground true) ?proof])
-                                     (and (or [?e :seon.fn/sym ?s] [?e :seon.ns/name ?s]) [(ground false) ?proof]))] sym)
-        subjects (when-not (read-error holders) (set (keep (fn [[s proof]] (when-not proof s)) holders)))
-        referrers (when subjects
-                    (db/q database '[:find [?h ...] :in $ [?target ...]
-                                     :where (or (and [?e :seon.fn/must-read ?target]
-                                                     (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h]))
-                                                (and [?e :seon.task/must-read ?target] [?e :seon.task/sym ?h]))] (vec subjects)))]
-    (or (read-error holders) (read-error referrers)
-        {:seon.task/subjects subjects :seon.task/proofs (set (keep (fn [[s proof]] (when proof s)) holders))
-         :seon.task/referrers (set referrers)})))
+  (let [tagged (fn [attribute] (db/q [:find '[?s ...] :in '$ '?t :where ['?e :seon.task/tasks '?t] ['?e attribute '?s]] database sym))
+        proofs (tagged :seon.test/sym)
+        subject-reads (when-not (read-error proofs) [(tagged :seon.fn/sym) (tagged :seon.ns/name)])
+        subjects (when-not (some read-error subject-reads) (set (apply concat subject-reads)))
+        referrers (when (seq subjects)
+                    (mapv (fn [[reader holder]]
+                            (db/q [:find '[?h ...] :in '$ '[?target ...] :where ['?e reader '?target] ['?e holder '?h]]
+                                  database (vec subjects)))
+                          [[:seon.fn/must-read :seon.fn/sym] [:seon.fn/must-read :seon.test/sym]
+                           [:seon.fn/must-read :seon.ns/name] [:seon.task/must-read :seon.task/sym]]))]
+    (or (read-error proofs) (some read-error subject-reads) (some read-error referrers)
+        {:seon.task/subjects subjects :seon.task/proofs (set proofs)
+         :seon.task/referrers (set (apply concat referrers))})))
 
 (defn open-tasks
   "The task symbols a definition still lists; listing is openness (spec 7.2, 7.6)."
@@ -482,8 +483,7 @@
 (defn assign!
   "Root assigns the task `:seon.task/assigned` to the agent `:seon.task/agent`
   working on `:seon.task/branch`, binding the revision it reviews now. Answers
-  the assignment, offering the agent's proposal once a test naming the task
-  passes on its branch.
+  the assignment; it offers no operation, since nothing is yet worked.
 
   Example:
   (seon.task/assign! {:seon.task/assigned \"a1b2c3d4e5f6\" :seon.task/agent [:seon.agent/id \"mcp/fix\"]
@@ -514,7 +514,7 @@
                                   report
                                   {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
                                    :seon.task/branch branch
-                                   :seon.render/operations ['(my.program/propose-merge! {})]})))))))
+                                   :seon.render/operations []})))))))
 
 (defn assignment
   "What `agent-id` on `branch` is assigned in the cluster value `database`: its

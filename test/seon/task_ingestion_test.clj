@@ -10,6 +10,7 @@
             [seon.db :as db]
             [seon.fn]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
             [seon.task :as task]
             [seon.program :as program]
             [seon.test-support :as test-support]))
@@ -299,3 +300,25 @@
        (define 2)
        (evaluate running agent-id "(my.test/check {})")
        (is (:seon.task/assignment (assign)))))))
+
+(deftest ^{:seon/tasks #{'seon.task/an-assignment-offers-no-merge-request}} an-assignment-offers-no-merge-request
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agent-tx @connection "offered"))
+     (admit! connection (entities-of subject-source))
+     (ingest! connection (task-text "First." ""))
+     (let [reply (task/assign! {:seon.db/connection connection :seon.task/assigned handle
+                                :seon.task/agent [:seon.agent/id "offered"] :seon.task/branch :main})]
+       (is (:seon.task/assignment reply) "the assignment is written")
+       (is (= [] (:seon.render/operations reply)) "nothing is offered that cannot be done yet")))))
+
+(deftest ^{:seon/tasks #{'seon.task/an-assignment-reads-only-its-proofs}} an-assignment-reads-only-its-proofs
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agent-tx @connection "cheap"))
+     (admit! connection (entities-of subject-source))
+     (ingest! connection (task-text "First." ""))
+     (let [measured (profile/measure #(task/assign! {:seon.db/connection connection :seon.task/assigned handle
+                                                     :seon.task/agent [:seon.agent/id "cheap"] :seon.task/branch :main}))]
+       (is (:seon.task/assignment (:seon.profile/value measured)))
+       (is (< (:seon.profile/alloc-bytes measured) (* 8 1024 1024)) "one assignment allocates under 8 MB")))))
