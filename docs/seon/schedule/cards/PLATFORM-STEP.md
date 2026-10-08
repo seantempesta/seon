@@ -119,10 +119,9 @@ eval request on agent branch B changes host-bound declarations D
 
 ## Slices
 
-0. **Overlap the rehearsal with the throwaway JVM** in `seon.operator/check!` (`script/seon/operator.clj`, unheld,
-   ≤15 min). Start `candidate-tests!` in a future before `connected!`, deref both, and refuse on either. Both
-   proofs are kept and about 12 s is cut from every lane commit. The proof is an existing operator test plus one
-   `bin/seon check --test` timing row against the measured one.
+0. **Overlap the rehearsal with the throwaway JVM** (landed 9f9bdeccb). `seon.operator/check!` starts
+   `candidate-tests!` in a future before `connected!`, awaits both (`seon.operator/awaited!`) and refuses on either.
+   The rehearsal (13-23 s measured) now runs inside the slot wait or the throwaway's boot.
 1. **First agent-facing slice: `my.test/check-platform`, synchronous.**
    - Clone the published archive to `tmp/`, then call `write-branch!` into the clone.
    - Build a candidate commit with the published sha as its parent.
@@ -132,9 +131,19 @@ eval request on agent branch B changes host-bound declarations D
    - Record that value on B. Afterwards `bin/lane commit --branch-evidence` accepts it.
    - Proof: a task whose proof is red only because its function is host-bound turns green on the agent's branch
      through `my.test/check-platform`.
-2. **A template store per published commit.** The first boot of a base saves its store under
-   `data/check/template/<sha>`. Each check clones it (`cp -c -R`, 3.9 s measured) and adopts only the diff,
-   which cuts about 53 s.
+2. **A template store per published commit and slot** (`seon.operator/seeded-store!`). A store's identity is a
+   function of its canonical path (`seon.cluster.store/datahike-configuration`; Datahike refuses a differing stored
+   id), so a check JVM's root is its slot's fixed directory `data/check/slot-<n>`, and each slot keeps its own
+   template `data/check/template/<sha>_slot<n>`, built at that path the first time a check of that base takes the
+   slot (`seon.operator/built-template!`: boot onto an empty store, graceful `down`, rename into place; about 60 s
+   once). The base is the commit the root's live JVM runs; the commit id names every program input, so `<sha>` plus
+   the slot is the whole key. Each check clones the template (`cp -c -R`, about 5 s) and its boot publishes only the
+   candidate's changed files. One file lock per template orders clone and deletion; the dial
+   `:seon.config.operator/check-templates` keeps the least recently cloned beyond it from growing. Measured on one
+   test: 36.8 s total (clone 5.2, archive and classpath 7.5, boot 16.6 with ready 11.3, tests 4.9; rehearsal 6.6 in
+   parallel), against 113-156 s before. A commit whose program classes are not yet cached pays their compilation
+   once (ready 51.7 s on the first check of a new commit). A store id taken from the stored record instead of the
+   path would let one template serve every slot.
 3. **A warm platform JVM and an asynchronous step.**
    - One pre-started JVM per published commit, whose source root is the snapshot.
    - Each run writes the branch's files, and the development adoption path reloads the changed namespaces
@@ -158,7 +167,10 @@ eval request on agent branch B changes host-bound declarations D
    undo `defonce`, protocol extensions and registered schemas. Boot, schema, configuration and publication changes
    always need a fresh JVM. Is a path-free classifier for those (by declaration: host-bound boot layer, schema
    resource) acceptable, or should every host-bound change take the slower fresh JVM until slice 3 proves it?
-5. **Should `check-slots` be split?** Lanes and agents share it today, and R1 waited 64.7 s for a slot. Should agents
-   get their own dial, or are lane checks also agents' platform runs once slice 1 lands?
+5. **Should `check-slots` be split?** Lanes and agents share it today, and R1 waited 64.7 s for a slot. No agent
+   starts a check yet, so a separate dial would have no reader until slice 1. Slice 1 adds it:
+   `:seon.config.operator/agent-check-slots`, read by `seon.operator/check-slot!` under its own slot directory
+   (`data/check/agent/`) when the request comes from `my.test/check-platform`, with its regression beside
+   `seon.operator-test/check-slots-are-granted-in-ticket-order`.
 6. **Should empty-store publication be bisected first?** It doubled in two days, from a 36.7 s throwaway boot on
    2026-10-07 to 67.7 s today. Slice 2 removes it from checks, but every `nuke` and fresh install still pays it.

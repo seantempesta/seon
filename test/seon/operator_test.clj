@@ -198,12 +198,65 @@
             "granted tickets and the dead one are gone"))
       (finally (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. root))))))))
 
+(deftest a-dead-checks-disposable-root-is-swept-and-a-live-ones-kept
+  ;; A killed check never reaches its `finally`; the next check deletes its
+  ;; root only when its owning pid is gone, never a template, a slot's root,
+  ;; the queue or a link.
+  (let [root (str (.getCanonicalFile (java.io.File. (str "tmp/operator-sweep-test-" (random-uuid)))))
+        outside (java.io.File. (str root "-outside"))
+        pid (.pid (java.lang.ProcessHandle/current))
+        dead (let [p (.start (ProcessBuilder. ["true"]))] (.waitFor p) (.pid p))
+        sha "0123456789abcdef0123456789abcdef01234567"
+        place (fn [relative] (doto (java.io.File. root relative) .mkdirs))
+        dead-root (place (str "data/check/0123456789ab-" dead "/data/store"))
+        live-root (place (str "data/check/0123456789ab-" pid))
+        building (place (str "data/check/template/" sha "_slot0.store-" dead))
+        template (place (str "data/check/template/" sha "_slot0"))
+        slot-root (place "data/check/slot-0")
+        queue (place "data/check/queue")
+        link (java.io.File. root (str "data/check/abcdef012345-" dead))]
+    (try
+      (.mkdirs outside)
+      (java.nio.file.Files/createSymbolicLink (.toPath link) (.toPath outside)
+                                              (make-array java.nio.file.attribute.FileAttribute 0))
+      (let [swept (set (#'operator/swept-check-roots! root))]
+        (is (= #{(str (.getParentFile (.getParentFile dead-root))) (str building)} swept))
+        (is (every? #(.isDirectory ^java.io.File %) [live-root template slot-root queue outside])))
+      (finally
+        (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. root))))
+        (.delete link)
+        (.delete outside)))))
+
+(deftest check-templates-beyond-the-dial-are-pruned-least-recently-cloned-first
+  ;; Retention keeps the `kept` most recently cloned templates; one whose lock
+  ;; another holder has is never deleted under it.
+  (let [directory (doto (.getCanonicalFile (java.io.File. (str "tmp/operator-template-test-" (random-uuid)))) .mkdirs)
+        template (fn [sha age-ms]
+                   (doto (java.io.File. directory sha) .mkdirs
+                     (.setLastModified (- (System/currentTimeMillis) age-ms))))
+        newest (template "aaaa_slot0" 1000)
+        held (template "bbbb_slot1" 2000)
+        oldest (template "cccc_slot0" 3000)
+        channel (.getChannel (java.io.RandomAccessFile. (java.io.File. directory "bbbb_slot1.lock") "rw"))
+        _ (.lock channel)]
+    (try
+      (is (= [(str oldest)] (#'operator/pruned-templates! directory 1))
+          "the held template survives; the free older one goes")
+      (is (and (.isDirectory newest) (.isDirectory held)))
+      (.close channel)
+      (is (= [(str held)] (#'operator/pruned-templates! directory 1)))
+      (finally
+        (.close channel)
+        (run! #(.delete ^java.io.File %) (reverse (file-seq directory)))))))
+
 (deftest the-check-slot-count-is-a-dial
   ;; Resolved at run time: the rehearsal analyzes the running JVM's script/,
   ;; which lacks a var this commit adds (see c62a1d6b1).
-  (let [slots (requiring-resolve 'seon.operator/operator-check-slots)]
+  (let [slots (requiring-resolve 'seon.operator/operator-check-slots)
+        templates (requiring-resolve 'seon.operator/operator-check-templates)]
     (is (= 2 (slots nil)))
-    (is (= 1 (slots {:seon.config.operator/check-slots 1})))))
+    (is (= 1 (slots {:seon.config.operator/check-slots 1})))
+    (is (pos-int? (templates nil)) "the template retention is a shipped dial")))
 
 (deftest a-class-directory-a-check-holds-before-its-jvm-launches-is-pruned-only-after-release
   ;; A check copying a directory has no JVM naming it yet (2026-10-08: another

@@ -636,11 +636,13 @@
   "Register this process as a user of the directory `path`, so no prune deletes
   it before a JVM names it on its classpath (a check copying a class directory
   or an archive it has not yet launched from). Ends with the process: a hold
-  whose pid is gone is swept by `held?`."
+  whose pid is gone is swept by `held?`. A process holding a path twice (a
+  check's template JVM and its candidate share a class directory) holds it once."
   {:malli/schema [:=> [:cat :string :string] :nil]}
   [repository path]
-  (let [directory (doto (holds-directory repository) .mkdirs)]
-    (fs/create-file (io/file directory (str (hold-name path) "." (.pid (java.lang.ProcessHandle/current)))))
+  (let [directory (doto (holds-directory repository) .mkdirs)
+        hold (io/file directory (str (hold-name path) "." (.pid (java.lang.ProcessHandle/current))))]
+    (when-not (.exists hold) (fs/create-file hold))
     nil))
 
 (defn- held?
@@ -1614,6 +1616,17 @@
              :when (if alive? true (do (fs/delete-if-exists file) false))]
          [file pid])))
 
+(defn- free-lock
+  "The exclusive lock of `channel`'s file, or nil when another process or this
+  JVM holds it."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [channel]
+  (try (.tryLock ^java.nio.channels.FileChannel channel)
+       (catch Exception overlap ; this JVM holds it (bb lacks the class)
+         (when-not (= "java.nio.channels.OverlappingFileLockException" (.getName (class overlap)))
+           (throw overlap))
+         nil)))
+
 (defn- try-slot!
   "The held lock of slot `n` under `directory` with this process's pid written
   in it, or nil when another process or a waiter of this JVM holds it."
@@ -1621,12 +1634,7 @@
   [directory n pid]
   (let [channel (.getChannel (java.io.RandomAccessFile.
                               (io/file directory (str "slot-" n ".lock")) "rw"))
-        lock (try (.tryLock channel)
-                  (catch Exception overlap ; this JVM's own waiter holds it (bb lacks the class)
-                    (when-not (= "java.nio.channels.OverlappingFileLockException"
-                                 (.getName (class overlap)))
-                      (throw overlap))
-                    nil))]
+        lock (free-lock channel)]
     (if lock
       (do (.truncate channel 0)
           (.write channel (java.nio.ByteBuffer/wrap (.getBytes (str pid))))
@@ -1711,56 +1719,242 @@
             {:seon.operator/test-summary (str/trim output) :seon.operator/tests-passed? false}
             (throw refusal)))))))
 
+(defn operator-check-templates
+  "The configured number of check template stores (one per published commit)
+  one root keeps; the least recently cloned beyond it are deleted."
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
+  (let [value (get manifest :seon.config.operator/check-templates
+                   (:seon.config.operator/check-templates @shipped-default-decisions))]
+    (when-not (pos-int? value) (throw (ex-info "Missing operator check template count." manifest)))
+    value))
+
+(defn- process-alive?
+  "Whether any process has the pid `pid`."
+  {:malli/schema [:=> [:cat :int] :boolean]}
+  [pid]
+  (boolean (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) .isAlive)))
+
+(defn- swept-check-roots!
+  "Delete each disposable root under `root`'s `data/check` (`<sha>-<pid>`) and
+  `data/check/template` (`<name>.store-<pid>`) whose
+  owning check process is gone and of which no JVM lives (its advertised or
+  argument-named `(pid, start-instant)`); the deleted paths. A killed check
+  never reaches its own `finally`. `delete-tree` never follows a link."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [root]
+  (let [directory (io/file root "data/check")]
+    (vec (for [child (concat (.listFiles directory) (.listFiles (io/file directory "template")))
+               :when (and (.isDirectory ^java.io.File child) (not (fs/sym-link? child)))
+               :let [file-name (.getName ^java.io.File child)
+                     at (str/last-index-of file-name "-")
+                     pid (when at (parse-long (subs file-name (inc at))))]
+               ;; A slot root belongs to its slot's lock holder (`candidate-tests!`).
+               :when (and pid (not (str/starts-with? file-name "slot-"))
+                          (not (process-alive? pid)) (empty? (selected-processes (str child))))]
+           (do (fs/delete-tree child) (str child))))))
+
+(defn- launched-throwaway!
+  "Boot a JVM of commit `sha` under the disposable root `disposable` on
+  whatever store `disposable`'s `data/store` holds: whether it reached
+  readiness, its boot value and the phases. The caller stops it."
+  {:malli/schema [:=> [:cat :string :string :string] :map]}
+  [root disposable sha]
+  (let [began (System/nanoTime)]
+    (fs/create-dirs (io/file root pinned-directory))
+    (fs/create-dirs (io/file disposable "data/source"))
+    (fs/create-sym-link (io/file disposable pinned-directory)
+                        (fs/real-path (io/file root pinned-directory)))
+    (let [previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
+          source (filled-classes! disposable (prepared-source! disposable sha previous))
+          source-root (:seon.operator/source-root source)
+          prepared-ms (elapsed-ms began)
+          ;; A candidate's agents work in its own archive, never the checkout.
+          outcome (try (launch-child! {:seon.operator/managed-root disposable
+                                       :seon.operator/command :start
+                                       :seon.boot/cluster-name "default"
+                                       :seon.config/environment
+                                       {:seon.config.fs/working-root source-root}}
+                                      source-root true)
+                       (catch Exception cause
+                         {:seon.operator/value
+                          (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
+          value (:seon.operator/value outcome)
+          missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])]
+      {:seon.operator/ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
+       :seon.operator/value value
+       :seon.operator/source-root source-root
+       :seon.operator/phases (merge (:seon.operator/phases source)
+                                    {:seon.operator/prepare-ms prepared-ms
+                                     :seon.operator/boot-ms (- (elapsed-ms began) prepared-ms)
+                                     :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])})})))
+
+;;; A template store per published commit (card PLATFORM-STEP slice 2). A
+;;; throwaway JVM booted onto an empty store spends most of its boot publishing
+;;; the whole program, the same facts for every check of the same base. The
+;;; base is the commit the root's live JVM runs; its template is the store a
+;;; JVM of exactly that commit's archive published at its first boot onto an
+;;; empty store, then stopped through its own `down`. A store's identity is a
+;;; function of its canonical path (`seon.cluster.store/datahike-configuration`;
+;;; Datahike refuses a store id that differs from the stored one), so a check
+;;; JVM's root is its slot's fixed directory `data/check/slot-<n>` and each slot
+;;; keeps its own template, `data/check/template/<sha>_slot<n>`, built at that
+;;; path. The commit id names every program input (the schema resources,
+;;; configuration and pins are committed bytes), so with the slot it is the
+;;; whole key. Each check clones it (`cp -c -R`, an APFS clone) back to its
+;;; slot's store and its boot publishes only the candidate's files whose
+;;; digests differ, the resume path `start --head` takes. One exclusive file
+;;; lock per template orders clone and deletion across processes.
+
+(defn- with-template-lock
+  "`f`'s value, called holding the exclusive lock of the template `template-name` under
+  `directory`, awaited within `bound` ms. The lock is the OS's: a check that
+  dies releases it."
+  {:malli/schema [:=> [:cat :any :string [:int {:min 1}] fn?] :any]}
+  [directory template-name bound f]
+  (let [channel (.getChannel (java.io.RandomAccessFile. (io/file directory (str template-name ".lock")) "rw"))
+        began (System/nanoTime)]
+    (try
+      (loop []
+        ;; Closing the channel releases the lock (bb allows no `.release`).
+        (if (free-lock channel)
+          (f)
+          (do (when (< bound (elapsed-ms began))
+                (fail! "The check template's lock was not freed within its bound."
+                       {:seon.operator/template template-name :seon.operator/timeout-ms bound}))
+              (Thread/sleep 200)
+              (recur))))
+      (finally (.close channel)))))
+
+(defn- built-template!
+  "Build the template store `name` of commit `base` under `directory`: a JVM
+  of its archive boots onto an empty store at the slot root `disposable`,
+  stops through its own `down`, and its store is renamed into place. The
+  build's phases, or its failure; the slot root is emptied either way."
+  {:malli/schema [:=> [:cat :string :any :string :string :string] :map]}
+  [root directory base template-name disposable]
+  (let [began (System/nanoTime)
+        staged (io/file directory (str template-name ".store-" (.pid (java.lang.ProcessHandle/current))))]
+    (try
+      (let [boot (launched-throwaway! root disposable base)
+            stopped (down! {:seon.operator/managed-root disposable :seon.boot/cluster-name "default"}
+                           (selected-processes disposable))
+            result {:seon.operator/phases (:seon.operator/phases boot)
+                    :seon.operator/stopped stopped}]
+        (if (and (:seon.operator/ready? boot) (empty? (:seon.operator/graceful-failures stopped)))
+          (do (fs/move (io/file disposable "data/store") staged)
+              (fs/move staged (io/file directory template-name) {:atomic-move true})
+              (assoc result :seon.operator/build-ms (elapsed-ms began)))
+          (diagnostic (str "The template JVM of " base " did not boot and stop cleanly; the check boots onto an empty store.")
+                      (assoc result :seon.operator/value (:seon.operator/value boot)
+                             :seon.operator/log-tail (log-tail (str (io/file disposable "data/clusters/default/logs/seon.log")) 40))
+                      :client-failed)))
+      (finally
+        (doseq [process (selected-processes disposable)]
+          (terminate! process (operator-silence-backstop-ms {})))
+        (fs/delete-tree disposable)
+        (fs/create-dirs disposable)
+        (fs/delete-tree staged)))))
+
+(defn- pruned-templates!
+  "Delete the template stores under `directory` beyond the `kept` most
+  recently cloned, each only while its own lock is free; the deleted paths."
+  {:malli/schema [:=> [:cat :any [:int {:min 1}]] [:vector :string]]}
+  [directory kept]
+  (vec (for [template (->> (.listFiles ^java.io.File directory)
+                           (filter #(and (.isDirectory ^java.io.File %)
+                                         (str/includes? (.getName ^java.io.File %) "_slot")
+                                         (not (str/includes? (.getName ^java.io.File %) "."))))
+                           (sort-by #(.lastModified ^java.io.File %) >)
+                           (drop kept))
+             :let [channel (.getChannel (java.io.RandomAccessFile.
+                                         (io/file directory (str (.getName ^java.io.File template) ".lock")) "rw"))
+                   deleted (try (when (free-lock channel)
+                                  (fs/delete-tree template)
+                                  (str template))
+                                (finally (.close channel)))]
+             :when deleted]
+         deleted)))
+
+(defn- seeded-store!
+  "Place a clone of slot `slot`'s template store of the commit `root`'s live
+  JVM runs at the slot root `disposable`'s `data/store`, building the template
+  first when it is missing. The outcome: `:template` with the base commit, or
+  `:empty` (the JVM publishes the whole program) with the reason."
+  {:malli/schema [:=> [:cat :string :string :int] :map]}
+  [root disposable slot]
+  (let [began (System/nanoTime)
+        repository (committed-repository)
+        program (some-> (advertisement root nil) program-source :seon.operator/source-root io/file .getName)
+        base (when program
+               (let [sha (try (str/trim (command! ["git" "rev-parse" "--verify" (str program "^{commit}")]
+                                                  repository 30000))
+                              (catch clojure.lang.ExceptionInfo _ nil))]
+                 (when (= sha program) sha)))]
+    (if-not base
+      {:seon.operator/seeded :empty :seon.operator/reason :no-running-published-commit}
+      (let [directory (doto (io/file root "data/check/template") .mkdirs)
+            template-name (str base "_slot" slot)
+            template (io/file directory template-name)]
+        (with-template-lock
+          directory template-name (operator-boot-bound-ms {})
+          (fn []
+            (let [built (when-not (.isDirectory template)
+                          (built-template! root directory base template-name disposable))]
+              (if (.isDirectory template)
+                (do (fs/create-dirs (io/file disposable "data"))
+                    (command! ["cp" "-c" "-R" (str template) (str (io/file disposable "data/store"))]
+                              root (operator-silence-backstop-ms {}))
+                    (.setLastModified template (System/currentTimeMillis))
+                    (cond-> {:seon.operator/seeded :template :seon.source/git-sha base
+                             :seon.operator/seed-ms (elapsed-ms began)}
+                      built (assoc :seon.operator/built built
+                                   :seon.operator/pruned (pruned-templates! directory (operator-check-templates {})))))
+                {:seon.operator/seeded :empty :seon.operator/reason :template-build-failed
+                 :seon.operator/built built}))))))))
+
 (defn- candidate-tests!
-  "Boot a throwaway JVM of `root` from commit `sha`, run `tests` there and
-  answer the summary with the phases; a boot that does not reach readiness
-  answers its failure with the log's tail. The JVM is terminated by exact
-  identity and its disposable root deleted on every exit path."
+  "Boot a throwaway JVM of `root` from commit `sha` on a clone of the published
+  commit's template store, run `tests` there and answer the summary with the
+  phases; a boot that does not reach readiness answers its failure with the
+  log's tail. The JVM runs under its slot's root `data/check/slot-<n>`, is
+  terminated by exact identity and the root deleted on every exit path; dead
+  checks' roots are swept first."
   {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean] :map]}
   [root sha tests include-long?]
   (let [began (System/nanoTime)
+        swept (swept-check-roots! root)
         slot (check-slot! root (operator-boot-bound-ms {}) (operator-check-slots {})
                            (.pid (java.lang.ProcessHandle/current)))
         waited-ms (elapsed-ms began)
-        disposable (.getCanonicalPath
-                    (doto (io/file root "data/check"
-                                   (str (subs sha 0 12) "-" (.pid (java.lang.ProcessHandle/current))))
-                      .mkdirs))]
+        ;; The slot's lock is held, so its root is this check's alone: a dead
+        ;; holder's orphaned JVM is stopped by exact identity and its leftovers deleted.
+        disposable (.getCanonicalPath (doto (io/file root "data/check" (str "slot-" (:seon.operator/slot slot))) .mkdirs))
+        _ (doseq [process (selected-processes disposable)]
+            (terminate! process (operator-silence-backstop-ms {})))
+        _ (fs/delete-tree disposable)
+        _ (fs/create-dirs disposable)]
     (try
-      (fs/create-dirs (io/file root pinned-directory))
-      (fs/create-dirs (io/file disposable "data/source"))
-      (fs/create-sym-link (io/file disposable pinned-directory)
-                          (fs/real-path (io/file root pinned-directory)))
-      (let [previous (some-> (advertisement root nil) program-source :seon.operator/source-root)
-            source (filled-classes! disposable (prepared-source! disposable sha previous))
-            source-root (:seon.operator/source-root source)
-            prepared-ms (elapsed-ms began)
-            ;; A candidate's agents work in its own archive, never the checkout.
-            outcome (try (launch-child! {:seon.operator/managed-root disposable
-                                         :seon.operator/command :start
-                                         :seon.boot/cluster-name "default"
-                                         :seon.config/environment
-                                         {:seon.config.fs/working-root source-root}}
-                                        source-root true)
-                         (catch Exception cause
-                           {:seon.operator/value
-                            (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
-            value (:seon.operator/value outcome)
-            missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
-            ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
+      (let [seed (try (seeded-store! root disposable (:seon.operator/slot slot))
+                      (catch clojure.lang.ExceptionInfo refusal
+                        (fs/delete-tree (io/file disposable "data/store"))
+                        {:seon.operator/seeded :empty :seon.operator/reason (ex-data refusal)}))
+            seeded-ms (elapsed-ms began)
+            boot (launched-throwaway! root disposable sha)
             booted-ms (elapsed-ms began)
-            run (when ready? (run-candidate-tests! source-root disposable tests include-long?))
-            phases (merge (:seon.operator/phases source)
+            run (when (:seon.operator/ready? boot)
+                  (run-candidate-tests! (:seon.operator/source-root boot) disposable tests include-long?))
+            phases (merge (:seon.operator/phases boot)
                           {:seon.operator/slot-wait-ms waited-ms
-                           :seon.operator/prepare-ms prepared-ms
-                           :seon.operator/boot-ms (- booted-ms prepared-ms)
-                           :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
-                           :seon.operator/tests-ms (- (elapsed-ms began) booted-ms)})]
-        (if ready?
-          (assoc run :seon.operator/test-phases phases)
+                           :seon.operator/seed-ms (- seeded-ms waited-ms)
+                           :seon.operator/tests-ms (- (elapsed-ms began) booted-ms)})
+            evidence {:seon.operator/test-phases phases :seon.operator/seed seed
+                      :seon.operator/swept swept}]
+        (if (:seon.operator/ready? boot)
+          (merge run evidence)
           (diagnostic (str "The throwaway JVM from " sha " did not reach readiness; its tests did not run.")
-                      {:seon.operator/value value :seon.operator/test-phases phases
-                       :seon.operator/log-tail (log-tail (str (io/file disposable "data/clusters/default/logs/seon.log")) 40)}
+                      (assoc evidence :seon.operator/value (:seon.operator/value boot)
+                             :seon.operator/log-tail (log-tail (str (io/file disposable "data/clusters/default/logs/seon.log")) 40))
                       :client-failed)))
       (finally
         (try

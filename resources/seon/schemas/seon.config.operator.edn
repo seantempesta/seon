@@ -6,5 +6,7 @@
                        [:int {:seon.config/display-label "JVM heap cap" :seon.config/display-unit "bytes" :min 268435456 :seon.config/dial true :description "The -Xmx in bytes of every JVM the operator launches (start, nuke, check). Read from bootstrap configuration before the JVM exists, so never from the host's RAM."}]
                        :check-slots
                        [:int {:seon.config/display-label "Check JVM slots" :min 1 :seon.config/dial true :description "How many throwaway check JVMs one root runs at once; further checks wait in a first-come first-served queue. Each holds the JVM heap cap."}]
+                       :check-templates
+                       [:int {:seon.config/display-label "Check template stores" :min 1 :seon.config/dial true :description "How many template stores (one per published commit, data/check/template/<sha>) one root keeps for check JVMs to clone instead of publishing the whole program onto an empty store; the least recently cloned beyond it are deleted. Each is one fresh-boot store, about 80 MB."}]
                        :check-bound-ms
                        [:int {:seon.config/display-label "Check wall bound" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1 :seon.config/dial true :description "The ceiling on one check's test run: bin/test-check bounds a request by the sum of its tests' declared bounds, no lower than the test time limit and no higher than this."}]}

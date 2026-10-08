@@ -388,6 +388,12 @@
  ; 16 GB machine beside the running default.
  :seon.config.operator/check-slots 2
 
+ ; Unit: template stores one root keeps for check JVMs (one per published
+ ; commit and slot, data/check/template/<sha>_slot<n>, each one fresh-boot
+ ; store of about 80 MB on disk, cloned per check). Four holds two bases for
+ ; the two slots above; the least recently cloned beyond it are deleted.
+ :seon.config.operator/check-templates 4
+
  ; Full-store export copies every file and re-identifies every reachable commit.
 
  ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with
