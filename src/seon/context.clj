@@ -42,7 +42,10 @@
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [seon.error.refusal]
+            [clojure.string :as str]
+            [edamame.core :as edamame]
             [seon.ai.tokens :as tokens]
+            [seon.sci.eval :as sci.eval]
             [seon.task :as task]
             [seon.test.runner :as runner]
             [seon.turn :as turn]
@@ -360,6 +363,45 @@
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
                :seon.context/proof-list entries}))))))
 
+(defn- referenced-names
+  "The names a task references: its must-reads and the qualified symbols and keywords backticked in its intent, in first-seen order."
+  {:malli/schema [:=> [:cat :seon.context/task] [:vector :seon.context/name]]}
+  [task]
+  (let [spans (take-nth 2 (rest (str/split (:seon.task/intent task) #"`" -1)))
+        read-name (fn [span] (let [form (try (edamame/parse-string span) (catch Exception _ nil))]
+                               (when (or (qualified-symbol? form) (qualified-keyword? form)) form)))]
+    (into [] (distinct) (concat (sort (:seon.task/must-read task)) (keep read-name spans)))))
+
+(defn- must-read
+  "One referenced name resolved to its current definition on `database`, or a problem."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.context/name]
+                  [:or :seon.context/must-read :seon.context/name-problem :seon.error/value]]}
+  [database name]
+  (let [unresolved {:seon.context/name name :seon.context/problem :unresolved}
+        operations [(list 'doc name) (list 'clojure.repl/source name)]]
+    (if (qualified-keyword? name)
+      (let [found (sci.eval/schema-documentation database name name)]
+        (cond
+          (:seon.sci.eval/documentation-unavailable found) unresolved
+          (:seon.error/at found) found
+          :else {:seon.context/name name :seon.context/schema-form (:form found)
+                 :seon.render/operations [(list 'doc name)]}))
+      (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym name])
+            test (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym name]))
+            program-ns (when-not (or (:seon.fn/sym function) (:seon.test/sym test) (namespace name))
+                         (db/pull database [:seon.ns/name] [:seon.ns/name name]))]
+        (cond
+          (:seon.error/at function) function
+          (:seon.fn/sym function)
+          (cond-> {:seon.context/name name :seon.render/operations operations}
+            (:seon.fn/arglists function) (assoc :arglists ; stored text read back as data until PR-25
+                                                (edamame/parse-string (:seon.fn/arglists function)))
+            (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
+            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts (:seon.fn/doc function)))))))
+          (:seon.test/sym test) {:seon.context/name name :seon.render/operations operations}
+          (:seon.ns/name program-ns) {:seon.context/name name :seon.render/operations [(list 'doc name)]}
+          :else unresolved)))))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status. Sections are
@@ -373,14 +415,20 @@
   [database agent-id]
   (let [home (if-let [connection (task/home database)] (db/db connection) database)
         handle (task/agent-task home agent-id)
-        held (when (string? handle) (db/pull home task-selector [:seon.task/id handle]))
+        held (when (string? handle)
+               (let [pulled (db/pull home task-selector [:seon.task/id handle])]
+                 ;; a cardinality-many pull is a vector; the declaration holds a set
+                 (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))
         left (turn/turns-left database agent-id)
-        proven (when held (proofs database (:seon.task/sym held)))]
-    (or (some #(when (:seon.error/at %) %) [handle held left proven])
+        proven (when held (proofs database (:seon.task/sym held)))
+        names (when held (referenced-names held))
+        reads (when (seq names) (mapv #(must-read database %) names))]
+    (or (some #(when (:seon.error/at %) %) (concat [handle held left proven] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (if (zero? left) :capped :working)))}
           held (assoc :seon.context/task held)
-          proven (assoc :seon.context/proofs proven)))))
+          proven (assoc :seon.context/proofs proven)
+          (seq reads) (assoc :seon.context/must-reads reads)))))
 
 (defn current-state-ai
   "The block as the agent reads it: the task by symbol and declaration, without its handle."

@@ -2067,7 +2067,7 @@
     (sci/var->symbol resolved)
     authored))
 
-(defn- schema-documentation
+(defn schema-documentation
   "The declared form of the schema named `key`, with its description property."
   {:malli/schema [:=> [:cat :seon.db/db :qualified-keyword :seon.sci.eval/authored-reference]
                   [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}

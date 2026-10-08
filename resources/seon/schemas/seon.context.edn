@@ -87,7 +87,16 @@
                [:map {:description "Model calls left against the current wake and the held task's status."}
                 [:my.agent/turns-left :my.agent/turns-left]
                 [:seon.task/status {:optional true} :seon.task/status]],
-:proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
+:name [:or :qualified-symbol :qualified-keyword]
+               :must-read [:map [:seon.context/name :seon.context/name]
+                           [:arglists {:optional true} [:sequential [:vector :symbol]]]
+                           [:seon.fn/spec {:optional true} :seon.fn/spec]
+                           [:doc {:optional true} :string]
+                           [:seon.context/schema-form {:optional true} :seon.schema/value]
+                           [:seon.render/operations [:vector :seon.render/read-form]]]
+               :name-problem [:map [:seon.context/name :seon.context/name] [:seon.context/problem [:enum :unresolved]]]
+               :must-reads [:vector [:or :seon.context/must-read :seon.context/name-problem]]
+               :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
                :proof-failure [:map {:description "A red proof's first failing report as data."}
                                [:test :seon.test/sym] [:expected {:optional true} :string]
                                [:actual {:optional true} :string] [:message {:optional true} :string]]
@@ -102,6 +111,7 @@
                       :seon.render/ai seon.context/current-state-ai}
                 [:seon.context/task {:optional true} :seon.context/task]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
+                [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/turns :seon.context/turns]],
                :current-state-view
                [:map {:description "The block as the AI face shows it: the task without its handle."}
@@ -109,6 +119,7 @@
                  [:map [:seon.task/sym :seon.task/sym] [:seon.task/intent :seon.task/intent]
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
+                [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/turns :seon.context/turns]],
                :selection-refused-error
                [:and :seon.error/base
