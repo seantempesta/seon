@@ -34,3 +34,22 @@
                  (keep :seon.repl/error defined)])
              "the defn using the file's aliases is admitted without error"))
        (is (= "should be an integer" (last (values "(alias-probe :a)"))))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-is-empty-in-an-agents-context}
+           :seon.test/long "two MCP eval requests on a fresh agent branch, the second running its branch test step"
+           :seon.test/long-ms 15000}
+  an-agent-in-a-test-namespace-writes-a-proof-with-its-helpers
+  ;; my.program-test aliases seon.test-support as support and defines the
+  ;; private helper shown-value; neither is required by the agent
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [values (fn [items] (keep :seon.repl/value items))
+           entered (step "(in-ns 'my.program-test) [(fn? support/agent-value) (fn? shown-value)]" agent-id running)
+           proof (step (str "(deftest agent-written-proof"
+                            " (is (fn? support/agent-value)) (is (fn? shown-value)))")
+                       agent-id running)]
+       (is (= [true true] (last (values entered))) "the file's alias and private helper resolve")
+       (is (= [] (keep :seon.repl/error proof)) "the deftest using them is admitted")
+       (is (= {:seon.test/passed? true :seon.turn.loop/red []}
+              (some #(get-in % [:seon.turn.loop/tests :seon.turn.loop/reaching]) proof))
+           "the branch test step runs the new test green")))))

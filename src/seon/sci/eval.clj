@@ -1960,6 +1960,36 @@
           :when (not (contains? (:namespaces @(:env ctx)) target))]
     (load-host-namespace {:namespace target :ctx ctx})))
 
+(defn- enter-namespace!
+  "`ctx` with the program namespace a form runs in, and each it aliases, bound as
+  its file declares it, once per context: its loaded JVM namespace's interns,
+  private ones included, its refers and the public Vars of what it aliases
+  (`install-caller-host-bindings!`), loading that JVM namespace first when this
+  process serves it and has not (`host-namespace!`); a test namespace, which the
+  cluster never loads, enters here. A namespace without a program row is left
+  as SCI holds it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol] :seon.sci.eval/ctx]}
+  [ctx namespace-name]
+  (let [snapshot (::kernel/program-snapshot ctx)
+        rows (:namespaces @snapshot)
+        entered (::entered-namespaces @snapshot #{})
+        aliased (vals (get-in @(:env ctx) [:namespaces namespace-name :aliases]))
+        entering (into [] (comp (distinct) (remove entered) (keep rows))
+                       (cons namespace-name aliased))]
+    (when (seq entering)
+      (binding [sci.lang/*write-observer* nil
+                sci.lang/*expansion-observer* nil]
+        (sci.ctx-store/with-ctx ctx
+          (doseq [{entering-name :seon.ns/name} entering]
+            (host-namespace! entering-name))
+          (install-declared-classes! ctx entering)
+          (install-caller-host-bindings! ctx entering)
+          (install-required-libraries! ctx entering)
+          (doseq [row entering]
+            (install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))))
+      (swap! snapshot update ::entered-namespaces (fnil into #{}) (map :seon.ns/name) entering))
+    ctx))
+
 (defn- install-declared-classes!
   "Install every non-masked class named by acquired namespace facts."
   [ctx namespace-rows]
@@ -2253,10 +2283,10 @@
                   (throw failure))
                 (update state (refusal-member row) (fnil conj [])
                         (acquisition-refusal row failure)))))]
-      ;; Interpreted callers analyze against every other name their compiled
-      ;; namespace reaches; only this branch's rows become SCI definitions.
-      (install-caller-host-bindings!
-       ctx (keep namespace-row-by-name (keys function-rows-by-ns)))
+      ;; Interpreted callers and tests analyze against every other name their
+      ;; file namespace reaches; only this branch's rows become SCI definitions.
+      (doseq [namespace-name (sort-by str (distinct (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))]
+        (enter-namespace! ctx namespace-name))
       ;; Copy inherited Vars into this generation before analyzing any caller.
       ;; SCI definitions then replace roots in those same Vars; a caller analyzed
       ;; before its callee must not retain the old generation's copied root.
@@ -4328,6 +4358,7 @@
           (when-let [failure (first (:seon.test/acquisition-refusals
                                     (acquired-program evaluation-ctx)))]
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
+          (enter-namespace! evaluation-ctx namespace-name)
           (let [form (::form request)
             execution-ctx evaluation-ctx
             ;; Runs `evaluate!` on this form's ctx inside its REPL frame.
