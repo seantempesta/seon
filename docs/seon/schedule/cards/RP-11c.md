@@ -15,8 +15,7 @@ Ledger row RP-11c (group B). Design: `redo/pass-and-recording.md` §5 "Reading".
   `comment-of` (`:413`), `no-value?` (`:403`), `conditional-options` (`:395-401`), and the `edamame` require if unused.
 - `seon.turn/segmented-sources` (`src/seon/turn.clj:3017`), `planned-sources` (`:3044`), `code-sources` (`:3061`),
   `repair-data` (`:3008`) if no caller is left, `read-row` (`:4729`), `turn-rows-state` (`:4722`),
-  `fold-evaluations` (`:4278`), `fold-source` (`:4301`), `repair-text` (redesign §1: `turn.clj:3019` at its HEAD; find
-  it with `rg -n 'defn- repair-text' src`).
+  `fold-evaluations` (`:4278`), `fold-source` (`:4301`) (`repair-text` is already gone at HEAD).
 - The generated-opening and preview callers of `code-sources` (`preview-sources` `:5061`, `generate-turn` `:5348`):
   `preview-sources` reads at the cursor as RP-11a1 does; the generated opening is deleted by S4-02b, so if S4-02b has
   not landed, this row waits for it (the opening is its only remaining caller).

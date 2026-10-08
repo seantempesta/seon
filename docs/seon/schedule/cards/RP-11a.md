@@ -41,8 +41,9 @@ Lane: Sonnet. Cited at HEAD `e7f120672`. Two lettered slices: **RP-11a1** reads 
   Pick by key presence.
 
 ### Proof
-`seon.repl-differential-p7-test/an-alias-required-by-one-form-resolves-in-the-next` (marked existing in the ledger: it
-exists in `test/seon/repl_differential_p7_test.clj`; it must stay green) and the new
+`seon.repl-differential-p7-test/an-alias-required-by-one-form-resolves-in-the-next` (new: the ledger marks it existing,
+but `test/seon/repl_differential_p7_test.clj` has no such deftest at HEAD; it asserts that
+`"(require '[clojure.string :as s]) (s/upper-case \"a\")"` answers `"A"` for the second form) and the new
 `seon.repl-differential-p7-test/a-discard-of-an-empty-conditional-matches-plain-sci`: the eval request
 `"#_ #?(:cljs 1) 2 3"` answers one envelope with value `3` (plain SCI discards `2` with the conditional); on HEAD the
 segmenter splits differently (ledger §2 LR-READ row). The reader-fix rows of `seon.repl-differential-reader-test` stay

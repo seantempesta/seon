@@ -109,7 +109,7 @@ The `:dangling` finding beside the dangling-caller deletion is asserted by RP-6a
 deletion's reply carries no finding there either (add that assertion to RP-6a2's proof).
 
 Converted in the same commit (they assert today's refusal on an agent branch):
-- `seon.cluster.host-test/a-refused-deletion-is-its-forms-refusal-and-the-run-closes` (`test/seon/cluster/host_test.clj:487`):
+- `seon.cluster.host-test/a-refused-deletion-is-its-forms-refusal-and-the-run-closes` (`test/seon/cluster/host_test.clj:489`):
   rename to `an-unmap-with-a-surviving-caller-deletes-and-the-run-closes`; assert the deleting form's error is nil,
   the helper's row is absent after the run, siblings keep `"3"`/`"7"`, and `(refused-caller 1)` answers (a value or an error
   value: whether the caller's compiled body still holds the unmapped Var depends on reacquisition, as in Clojure, so
