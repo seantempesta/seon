@@ -13,6 +13,8 @@ Ledger row RP-6b (alias S5-04d, group B). Design: `redo/pass-and-recording.md` Â
 
 ## What was measured (default, agent `cards-recording`, 2026-10-08)
 
+This historical probe predates FK-SCI. To repeat it after that fork change, run `(ns-unalias *ns* 's)` before the second `require`.
+
 ```clojure
 (ns rp3probe.a (:require [clojure.string :as s]))
 (defn g "first" [] (s/join [1]))      ; value #'rp3probe.a/g, yet its reply carries

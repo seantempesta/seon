@@ -111,11 +111,11 @@ metadata keys are `:arglists :column :doc :file :line :name :ns :sci/generation`
    `a-definition-changed-since-the-run-read-it-is-refused-at-the-writer` `:2240`, whose fixture it copies:
    `support/with-database`, `world/agent-world`, `support/code-request`, `observe/observe`,
    `seon.batch/evaluate-batch` with `:seon.batch/settle` dissoc'ed):
-   text `"(ns rp3.b (:require [clojure.string :as s])) (defn g \"first\" [] (s/join [1])) (require '[clojure.set :as s]) (defn g \"second\" [] (s/union #{1}))"`.
+   text `"(ns rp3.b (:require [clojure.string :as s])) (defn g \"first\" [] (s/join [1])) (ns-unalias *ns* 's) (require '[clojure.set :as s]) (defn g \"second\" [] (s/union #{1}))"`.
    Assert on `(filter #(= 'rp3.b/g (:seon.batch/sym %)) (:seon.batch/writes batch))`: two writes; their
    `[:seon.batch/meta :doc]` are `"first"` then `"second"`; their resolvers' alias `s` targets are `clojure.string`
-   then `clojure.set` (read `:seon.ns.alias/target-ns` of the alias whose local is `s`). SCI retargets the alias in place (probed: `(require '[clojure.set :as s])` after `[clojure.string :as s]` answers
-   `(ns-aliases *ns*)` = `{s #namespace[clojure.set]}`).
+   then `clojure.set` (read `:seon.ns.alias/target-ns` of the alias whose local is `s`). The original probe predates FK-SCI: SCI then retargeted the alias in place (probed: `(require '[clojure.set :as s])` after `[clojure.string :as s]` answers
+   `(ns-aliases *ns*)` = `{s #namespace[clojure.set]}`). The proof explicitly unaliases first, so it also works after FK-SCI restores Clojure's refusal of a silent retarget.
 
 ## Reaching tests (run in `--test`)
 

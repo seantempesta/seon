@@ -12,24 +12,18 @@ The cards for the pass-and-recording rows (RP), the entrants rows (EN, S5-05, S5
 `docs/research/agent-platform/2026-10-08/redo/pass-and-recording.md` (§2.1 is the transaction-metadata fold-in) and
 `redo/entrants.md`, both approved by the owner on 2026-10-08. Cited at HEAD `e7f120672` unless a card says otherwise.
 
-## Owner question (blocking one assertion of RP-8)
+## Answered alias question
 
-**Q-R1. After an agent retargets an alias, what does reacquiring its earlier definition read?**
-Example: `(ns a (:require [clojure.string :as s])) (defn g [] (s/join [1]))`, then `(require '[clojure.set :as s])`.
-At the REPL `g` keeps calling `clojure.string/join`. The stored source says `(s/join [1])` and the namespace row now
-says `s` → `clojure.set`, so a reacquisition (or a file reload after write-back) reads `g` as `clojure.set/join`,
-which does not exist.
-1. **(recommended)** Clojure's own rule: a reload reads the source under the final namespace form, so `g` breaks on
-   reload exactly as it would for a Clojure file; RP-8's `:alias-retargeted` finding tells the agent at the moment it
-   happens ("a reload will read `s` as `clojure.set`"), and merge refuses a definition whose stored source does not
-   analyze to its recorded edges. No extra stored data.
-2. Store each definition's used aliases with it (`:seon.fn/aliases`, a small map) and have reacquisition and
-   write-back apply them (write-back would emit the original `:require`); keeps both calls working forever, costs a
-   new attribute and a write-back rule.
-3. Rewrite the stored source with fully qualified symbols at recording (rewrite-clj); the stored source then differs
-   from what the agent wrote.
-
-RP-8 is otherwise ready; only its "reacquire and repeat both calls" assertion waits for this answer.
+**Q-R1, answered:** reloading an earlier definition reads its stored source under the new alias, as a Clojure
+file reload would (owner-rulings §1; agent-loop.md §3.3).
+Example: `(ns a (:require [clojure.string :as s])) (defn g [] (s/join [1]))`, then
+`(ns-unalias *ns* 's)` and `(require '[clojure.set :as s])`. FK-SCI restores Clojure's refusal of a silent retarget.
+Before reload, `g` keeps calling `clojure.string/join`. The stored source says `(s/join [1])` and the final
+namespace row says `s` → `clojure.set`. After reload, calling `g` fails: `clojure.set/join` exists, but accepts
+two or three arguments, not the one supplied here.
+Clojure's rule applies. RP-8's `:alias-retargeted` finding warns the agent, and merge refuses the broken
+definition. No extra stored aliases or rewriting of authored source. Name the reaching reload and merge
+proofs before launching RP-8.
 
 ## Out-of-scope findings recorded while carding
 - **Every agent branch forked before a new required dial is bricked.** Task
@@ -69,7 +63,7 @@ RP-8 is otherwise ready; only its "reacquire and repeat both calls" assertion wa
 | RP-6d | [RP-6d](RP-6d.md) | after RP-6a |
 | RP-6e | [RP-6e](RP-6e.md) | after RP-6d |
 | RP-7 | [RP-7](RP-7.md) | after RP-6a, RP-6b, RP-11c |
-| RP-8 | [RP-8](RP-8.md) | after RP-6a (one assertion blocked on Q-R1) |
+| RP-8 | [RP-8](RP-8.md) | after RP-6a; name the answered reload/merge proofs before launch |
 | RP-9 | [RP-9](RP-9.md) | after RP-6a, RP-6d |
 | RP-10 | [RP-10](RP-10.md) | now (TX-4 first makes its proof exact) |
 | RP-11a | [RP-11a](RP-11a.md) | after RP-10, EN-8a |

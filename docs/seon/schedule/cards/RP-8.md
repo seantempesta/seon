@@ -8,10 +8,13 @@ created: 2026-10-08
 # RP-8 An alias retarget keeps both calls right and notes the reload change
 
 Ledger row RP-8 (alias S5-04c, Astra D9; group B). Design: `redo/pass-and-recording.md` §2 "Source fidelity under a
-retarget". Lane: Sonnet. Cited at HEAD `e7f120672`. One part (what reacquisition reads after a retarget) is owner
-question **Q-R1** in `README-recording.md`; this card implements the parts every option shares and is ready.
+retarget". Lane: Sonnet. Cited at HEAD `e7f120672`. **Q-R1 is answered:** reload reads the stored source under the
+retargeted alias, as Clojure does; calling the earlier definition may fail, and merge refuses the broken
+definition (owner-rulings §1; agent-loop.md §3.3). The retarget finding warns the agent before reload.
 
 ## What was measured (default, agent `cards-recording`, 2026-10-08)
+
+This historical probe predates FK-SCI. The proof below explicitly unaliases before retargeting, as Clojure requires.
 ```clojure
 (ns rp3probe.a (:require [clojure.string :as s]))
 (defn g "first" [] (s/join [1]))   ; value #'rp3probe.a/g, reply diagnostic: "Not admitted to the program … The stored
@@ -59,11 +62,12 @@ transaction stores, which is the final one. They differ, so the writer refuses t
 
 ## Proof
 `seon.repl-differential-p8-test/an-alias-retarget-keeps-both-calls-and-notes-the-reload-change` (new): evaluate
-`"(ns rp8.a (:require [clojure.string :as s])) (defn g [] (s/join [1 2])) (require '[clojure.set :as s]) (defn u [] (s/union #{1} #{2})) [(g) (u)]"`;
+`"(ns rp8.a (:require [clojure.string :as s])) (defn g [] (s/join [1 2])) (ns-unalias *ns* 's) (require '[clojure.set :as s]) (defn u [] (s/union #{1} #{2})) [(g) (u)]"`;
 assert the last value is `["12" #{1 2}]`, the `g` envelope carries no diagnostic and one `:alias-retargeted` finding
 naming `s`, `u` none, and both rows are stored (pull each `[:seon.fn/sym …]`), with `g`'s `:seon.fn/calls` containing
-`clojure.string/join`. The ledger's "(reacquire, repeat both calls, count side effects)" part waits on Q-R1: whatever
-the owner chooses decides what `(g)` answers after reacquisition; add that assertion with the answer.
+`clojure.string/join`. Also prove the answered reload rule: reload the stored definition under the final alias,
+then call `g`. The call fails because `clojure.set/join` requires two or three arguments and this call supplies
+one; merge refuses the broken definition. Name the reaching reload and merge tests before launching this slice.
 
 ## Reaching tests
 `seon.repl-differential-p8-test`, `seon.turn.batch-test`, `seon.turn-test`, `seon.fn-test`.
