@@ -2349,191 +2349,86 @@
     (let [known (into #{} (map first) branch-rows)]
       (into branch-rows (remove (comp known first)) (loaded-function-rows loaded)))))
 
-(defn- acquire-program!
-  "Acquire definitions against the JVM's loaded program value.
+(defn- commit-id-of
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :uuid]]}
+  [database]
+  (let [value-id (db/committed-value-identity database)]
+    (when (map? value-id) (:datahike.value/commit-id value-id))))
 
-  Overridden rows and their affected callers interpret stored source; matching
-  definitions bind compiled Vars regardless of authorship. Private evaluation objects are never
-  read from the database. Failed source loads remain typed acquisition results."
-  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
-  [{ctx :seon.sci.eval/ctx
-    db :seon.db/db
-    supplied-projection :seon.schema/projection
-    commit-fault! :seon.flow/commit-fault!}]
-  (let [recording-operation (or commit-fault!
-                                (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx)))
-        projection (or supplied-projection
-                       (db/carried-projection db)
-                       (:seon.schema/projection (env/of ctx)))
-        db (if projection
-             (vary-meta db assoc :seon.schema/projection projection)
-             db)]
-    (when-not projection
-      (let [failure (db/projection-fallback 'seon.sci.eval/acquire!)]
-        (throw (ex-info (:seon.error/message failure) failure))))
-    (schema/call-with-projection
-     projection
-     (fn []
-      (let [ctx (assoc ctx :seon.schema/projection projection)
-        namespace-assertions
-        (db/q '[:find ?namespace-name ?source ?admission
-               :where
-               [?namespace :seon.ns/name ?namespace-name]
-               [?namespace :seon.ns/source ?source]
-                [?namespace :seon.schema.admission/source ?admission]]
-             db)
-        namespace-source-by-name
-        (into {}
-              (map (fn [[namespace-name source admission]]
-                     [namespace-name [source admission]]))
-              namespace-assertions)
-        all-namespace-names
-        (db/q '[:find [?namespace-name ...]
-                :where
-                [_ :seon.ns/name ?namespace-name]]
-              db)
-        agent-authored?
-        (fn [admission]
-          (= :agent admission))
-        all-function-rows (function-rows db)
-        loaded (or (::loaded-database @(::kernel/program-snapshot ctx))
-                   (loaded-program db))
-        branch-digests (function-digests db)
-        ;; A loaded value identical to the acquired one may be uncommitted
-        ;; (`d/with`); only a distinct, committed loaded value is retained.
-        loaded-digests (if (identical? loaded db) branch-digests (loaded-digests loaded))
-        ;; Only what an agent authored overrides (`overridden-row?`): a
-        ;; file-derived row the loaded program moved past is not the branch's.
-        authored (into #{} (keep (fn [[sym _ _ admission]] (when (agent-authored? admission) (symbol sym))))
-                       all-function-rows)
-        overridden
-        (into #{} (keep (fn [[sym digest]]
-                          (when (and (authored sym) (not= digest (get loaded-digests sym))) sym)))
-              branch-digests)
-        closure (if (seq overridden)
-                  (seon.fn/reverse-closure {:seon.db/db db :seon.fn/seeds overridden})
-                  {:seon.fn/affected #{} :seon.fn/tests []})
-        _ (when (:seon.db/invalid-read closure)
-            (throw (ex-info "Cannot acquire the affected function closure." closure)))
-        interpreted (into overridden (:seon.fn/affected closure))
-        function-rows (filterv (fn [[sym]] (interpreted sym)) all-function-rows)
-        _ (install-program-doc! ctx db projection)
-        selected-namespace-names
-        (into (into #{} (map #(nth % 2)) function-rows)
-              (comp
-               (filter (fn [[_ _ admission]] (agent-authored? admission)))
-               (map first))
-              namespace-assertions)
-        all-namespace-rows
-        (mapv (fn [namespace-name row]
-                (let [[source admission]
-                      (get namespace-source-by-name namespace-name)]
-                  (assoc row
-                         ::namespace-source source
-                         ::namespace-admission admission
-                         ::agent-authored?
-                         (boolean (and admission
-                                       (agent-authored? admission))))))
-              all-namespace-names
-              (db/pull-many db
-                            '[* :seon.ns/requires
-                                {:seon.ns/aliases [*]}
-                                {:seon.ns/imports [*]}
-                                {:seon.ns/refers [*]}]
-                            (mapv #(vector :seon.ns/name %) all-namespace-names)))
-        all-namespace-row-by-name
-        (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
-        namespace-rows
-        (into []
-              (keep (fn [namespace-name]
-                      (get all-namespace-row-by-name namespace-name)))
-              selected-namespace-names)
-        test-rows
-        (into
-         []
-         (filter (fn [[_ _ _ admission]] (agent-authored? admission)))
-         (db/q '[:find ?sym ?source ?namespace-name ?admission
-                :where
-                [?test :seon.test/sym ?sym]
-                [?test :seon.test/source ?source]
-                [?test :seon.schema.admission/source ?admission]
-                [?test :seon.test/ns ?namespace]
-                [?namespace :seon.ns/name ?namespace-name]]
-              db))
-        function-rows-by-ns
-        (group-by #(nth % 2) function-rows)
-        test-rows-by-ns
-        (group-by #(nth % 2) test-rows)
-        namespace-row-by-name
-        (into {} (map (juxt :seon.ns/name identity)) namespace-rows)
-        _ (kernel/cache-program!
-           ctx
-           (into {}
-                 (map (fn [[sym source namespace-name admission private?]]
-                        [(symbol sym)
-                         {::function-source source
-                          ::function-admission admission
-                          ::function-namespace namespace-name
-                          ::function-private? private?
-                          ::agent-authored? (agent-authored? admission)}]))
-                 all-function-rows)
-           all-namespace-row-by-name)
-        _ (swap! (::kernel/program-snapshot ctx) assoc
-                 ::loaded-database loaded ::interpreted interpreted)
-        _ (when-let [recorder recording-operation]
-            (swap! (::kernel/program-snapshot ctx) assoc
-                   :seon.flow/commit-fault! recorder))
-        namespace-names
-        (into (set (keys namespace-row-by-name))
-              (concat (keys function-rows-by-ns)
-                      (keys test-rows-by-ns)))
-        dependencies
-        (into {}
-              (map
-               (fn [namespace-name]
-                 (let [bindings
-                       (row-bindings
-                        (get namespace-row-by-name namespace-name))]
-                   [namespace-name
-                    (into #{}
-                          (comp
-                           (filter namespace-names)
-                           (remove #{namespace-name}))
-                          (concat
-                           (:requires bindings)
-                           (keep (comp symbol namespace)
-                                 (vals (:refers bindings)))))])))
-              namespace-names)
-        namespace-order
-        (loop [remaining dependencies
-               ordered []]
-          (if (empty? remaining)
-            ordered
-            (let [ready (->> remaining
-                             (keep (fn [[namespace-name required]]
-                                     (when (empty? required) namespace-name)))
-                             (sort-by str)
-                             vec)]
-              (when (empty? ready)
-                (throw
-                 (ex-info
-                  "Program acquisition found a namespace binding cycle."
-                  {:seon.error/at (java.util.Date.)
-                    :seon.error/layer :seon.sci.eval/program
-                    :seon.error/operation 'seon.sci.eval/acquire-program!
-                    :seon.error/message "Namespace bindings form a cycle; remove the cyclic dependency before acquisition."
-                    :seon.error/offending remaining
-                    ::pending-namespaces (set (keys remaining))
-                    :seon.error/member :seon.ns/requires
-                    :seon.error/expected :seon.sci.eval/acyclic-bindings})))
-              (let [released (set ready)]
-                (recur
-                 (into {}
-                       (map (fn [[namespace-name required]]
-                              [namespace-name
-                               (apply disj required released)]))
+(defn- armed-dials
+  "The dial values an interpreted contract wrapper arms with from `database`,
+  or the key naming the configuration it lacks."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (let [effective (database-effective-config database)]
+    (if (:seon.error/message effective)
+      (select-keys effective [:seon.config/error-key])
+      (merge (select-keys effective [:seon.config.error/max-evidence-bytes])
+             {:seon.sci.admit/caps (config/result-caps effective)}))))
+
+(defn- function-entry
+  "The acquired program snapshot's entry for one function row."
+  {:malli/schema [:=> [:cat [:tuple :qualified-symbol :string :symbol :keyword :boolean]] :map]}
+  [[_ source namespace-name admission private?]]
+  {::function-source source
+   ::function-admission admission
+   ::function-namespace namespace-name
+   ::function-private? private?
+   ::agent-authored? (= :agent admission)})
+
+(defn- namespace-order
+  "`namespace-names` ordered so each follows the program namespaces its row binds."
+  {:malli/schema [:=> [:cat [:map-of :symbol :map] [:set :symbol]] [:vector :symbol]]}
+  [namespace-row-by-name namespace-names]
+  (loop [remaining (into {}
+                         (map (fn [namespace-name]
+                                (let [bindings (row-bindings (get namespace-row-by-name namespace-name))]
+                                  [namespace-name
+                                   (into #{}
+                                         (comp (filter namespace-names) (remove #{namespace-name}))
+                                         (concat (:requires bindings)
+                                                 (keep (comp symbol namespace) (vals (:refers bindings)))))])))
+                         namespace-names)
+         ordered []]
+    (if (empty? remaining)
+      ordered
+      (let [ready (->> remaining
+                       (keep (fn [[namespace-name required]] (when (empty? required) namespace-name)))
+                       (sort-by str)
+                       vec)]
+        (when (empty? ready)
+          (throw
+           (ex-info
+            "Program acquisition found a namespace binding cycle."
+            {:seon.error/at (java.util.Date.)
+             :seon.error/layer :seon.sci.eval/program
+             :seon.error/operation 'seon.sci.eval/acquire-program!
+             :seon.error/message "Namespace bindings form a cycle; remove the cyclic dependency before acquisition."
+             :seon.error/offending remaining
+             ::pending-namespaces (set (keys remaining))
+             :seon.error/member :seon.ns/requires
+             :seon.error/expected :seon.sci.eval/acyclic-bindings})))
+        (let [released (set ready)]
+          (recur (into {}
+                       (map (fn [[namespace-name required]] [namespace-name (apply disj required released)]))
                        (apply dissoc remaining ready))
-                 (into ordered ready))))))
+                 (into ordered ready)))))))
+
+(defn- install-selected!
+  "Interpret `function-rows` and `test-rows` on `ctx`, each namespace after the
+  ones it binds, advancing the acquisition `state`; the recorded acquisition."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:or :nil :seon.flow/commit-fault!]
+                       [:map-of :symbol :map]
+                       [:sequential [:tuple :qualified-symbol :string :symbol :keyword :boolean]]
+                       [:sequential [:tuple :qualified-symbol :string :symbol :keyword]]
+                       [:set :qualified-symbol] :map]
+                  :map]}
+  [ctx db commit-fault! namespace-row-by-name function-rows test-rows interpreted state]
+  (let [function-rows-by-ns (group-by #(nth % 2) function-rows)
+        test-rows-by-ns (group-by #(nth % 2) test-rows)
+        order (namespace-order namespace-row-by-name
+                               (into (set (keys namespace-row-by-name))
+                                     (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))
         install-row
         (fn [state row]
           (try
@@ -2563,27 +2458,10 @@
                 (throw failure))
               (update state (refusal-member row) (fnil conj [])
                       (acquisition-refusal row failure)))))]
-    ;; Imports are explicit namespace facts. Install their named classes before
-    ;; the namespace bindings resolve them; SCI is containment, not a security
-    ;; boundary, and the program graph—not a hand list—declares the set.
-    (install-declared-classes! ctx all-namespace-rows)
-    ;; Create every namespace and publish aliases first. Alias targets need not
-    ;; exist: this is the effective behavior of SCI's `:as-alias` too. Every
-    ;; program namespace needs its reader context, interpreted or not: an
-    ;; agent's first definition in a clean namespace is analysed against it.
-    (doseq [[namespace-name row] all-namespace-row-by-name]
-      (sci/install-namespace-bindings!
-       ctx namespace-name (assoc (row-bindings row) :refers {})))
-    ;; Namespace declarations establish aliases/imports first; compiled host
-    ;; bindings then populate the same SCI namespaces without being erased by
-    ;; that declaration install. Selected definitions overwrite only their Vars.
-    (install-first-party-namespaces!
-     ctx namespace-assertions all-namespace-rows
-     (host-function-rows all-function-rows loaded db))
     ;; Interpreted callers analyze against every other name their compiled
     ;; namespace reaches; only this branch's rows become SCI definitions.
     (install-caller-host-bindings!
-     ctx (keep all-namespace-row-by-name (keys function-rows-by-ns)))
+     ctx (keep namespace-row-by-name (keys function-rows-by-ns)))
     ;; Copy inherited Vars into this generation before analyzing any caller.
     ;; SCI definitions then replace roots in those same Vars; a caller analyzed
     ;; before its callee must not retain the old generation's copied root.
@@ -2591,10 +2469,6 @@
             :let [candidate (sci/resolve ctx sym)]
             :when candidate]
       (sci/bind-root! ctx candidate @candidate))
-    ;; The bare REPL name refers to the acquired macro itself. Keeping the
-    ;; boot-time copy here would preserve its old expansion after adoption.
-    (sci/add-namespace! ctx 'clojure.core
-                        {'help (sci/resolve ctx 'seon.bootstrap/help)})
     (let [functions-installed
           (reduce
            (fn [state namespace-name]
@@ -2632,23 +2506,11 @@
                       (:seon.fn/arglists (db/pull db [:seon.fn/arglists]
                                                 [:seon.fn/sym sym]))
                       ::skip-contract-install?
-                      (not (agent-authored? admission))})
+                      (not= :agent admission)})
                    (sort-by first
                             (get function-rows-by-ns namespace-name)))))
-           {:seon.schema/projection projection
-            :seon.sci.eval/interpreted-count (count interpreted)
-            :seon.sci.eval/installed 0
-            :seon.sci.eval/load-results
-            (into []
-                  (keep (fn [[sym _source _namespace admission _private]]
-                          (when (and (= :core admission)
-                                     (nil? (sci/resolve ctx (symbol sym))))
-                            {:seon.fn/sym sym
-                             :seon.sci.eval/load-state :unavailable
-                             :seon.error/message
-                             (str "The loaded JVM has no core definition " sym ".")})))
-                  all-function-rows)}
-           namespace-order)]
+           state
+           order)]
       ;; Tests resolve only after every namespace's functions and exact
       ;; bindings are present. This makes renamed `deftest` deterministic.
       (record-acquisition-refusals!
@@ -2665,8 +2527,263 @@
                    :seon.test/ns [:seon.ns/name namespace-name]})
                 (sort-by first (get test-rows-by-ns namespace-name)))))
         functions-installed
-        namespace-order)
-       commit-fault!)))))))
+        order)
+       commit-fault!))))
+
+(defn- namespace-row
+  "A pulled namespace row carrying its source, admission and authorship."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{source :seon.ns/source admission :seon.schema.admission/source :as row}]
+  (assoc row
+         ::namespace-source source
+         ::namespace-admission (when source admission)
+         ::agent-authored? (boolean (and source (= :agent admission)))))
+
+(def ^:private namespace-pattern
+  '[* :seon.ns/requires {:seon.ns/aliases [*]} {:seon.ns/imports [*]} {:seon.ns/refers [*]}])
+
+(defn- acquire-program!
+  "Acquire the whole program `db` holds, against the JVM's loaded program value.
+
+  Overridden rows and their affected callers interpret stored source; matching
+  definitions bind compiled Vars regardless of authorship. Private evaluation objects are never
+  read from the database. Failed source loads remain typed acquisition results."
+  {:malli/schema [:=> [:cat :seon.sci.eval/acquire-request] :map]}
+  [{ctx :seon.sci.eval/ctx
+    db :seon.db/db
+    supplied-projection :seon.schema/projection
+    commit-fault! :seon.flow/commit-fault!}]
+  (let [recording-operation (or commit-fault!
+                                (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx)))
+        projection (or supplied-projection
+                       (db/carried-projection db)
+                       (:seon.schema/projection (env/of ctx)))
+        db (if projection
+             (vary-meta db assoc :seon.schema/projection projection)
+             db)]
+    (when-not projection
+      (let [failure (db/projection-fallback 'seon.sci.eval/acquire!)]
+        (throw (ex-info (:seon.error/message failure) failure))))
+    (schema/call-with-projection
+     projection
+     (fn []
+      (let [ctx (assoc ctx :seon.schema/projection projection)
+            namespace-assertions
+            (db/q '[:find ?namespace-name ?source ?admission
+                    :where
+                    [?namespace :seon.ns/name ?namespace-name]
+                    [?namespace :seon.ns/source ?source]
+                    [?namespace :seon.schema.admission/source ?admission]]
+                  db)
+            all-namespace-names
+            (db/q '[:find [?namespace-name ...]
+                    :where
+                    [_ :seon.ns/name ?namespace-name]]
+                  db)
+            all-function-rows (function-rows db)
+            loaded (or (::loaded-database @(::kernel/program-snapshot ctx))
+                       (loaded-program db))
+            branch-digests (function-digests db)
+            ;; A loaded value identical to the acquired one may be uncommitted
+            ;; (`d/with`); only a distinct, committed loaded value is retained.
+            loaded-digests (if (identical? loaded db) branch-digests (loaded-digests loaded))
+            ;; Only what an agent authored overrides (`overridden-row?`): a
+            ;; file-derived row the loaded program moved past is not the branch's.
+            authored (into #{} (keep (fn [[sym _ _ admission]] (when (= :agent admission) (symbol sym))))
+                           all-function-rows)
+            overridden
+            (into #{} (keep (fn [[sym digest]]
+                              (when (and (authored sym) (not= digest (get loaded-digests sym))) sym)))
+                  branch-digests)
+            closure (if (seq overridden)
+                      (seon.fn/reverse-closure {:seon.db/db db :seon.fn/seeds overridden})
+                      {:seon.fn/affected #{} :seon.fn/tests []})
+            _ (when (:seon.db/invalid-read closure)
+                (throw (ex-info "Cannot acquire the affected function closure." closure)))
+            interpreted (into overridden (:seon.fn/affected closure))
+            function-rows (filterv (fn [[sym]] (interpreted sym)) all-function-rows)
+            _ (install-program-doc! ctx db projection)
+            selected-namespace-names
+            (into (into #{} (map #(nth % 2)) function-rows)
+                  (comp (filter (fn [[_ _ admission]] (= :agent admission))) (map first))
+                  namespace-assertions)
+            all-namespace-rows
+            (mapv namespace-row
+                  (db/pull-many db namespace-pattern
+                                (mapv #(vector :seon.ns/name %) all-namespace-names)))
+            all-namespace-row-by-name
+            (into {} (map (juxt :seon.ns/name identity)) all-namespace-rows)
+            test-rows
+            (into
+             []
+             (filter (fn [[_ _ _ admission]] (= :agent admission)))
+             (db/q '[:find ?sym ?source ?namespace-name ?admission
+                     :where
+                     [?test :seon.test/sym ?sym]
+                     [?test :seon.test/source ?source]
+                     [?test :seon.schema.admission/source ?admission]
+                     [?test :seon.test/ns ?namespace]
+                     [?namespace :seon.ns/name ?namespace-name]]
+                   db))]
+        (kernel/cache-program!
+         ctx
+         (into {} (map (fn [row] [(symbol (first row)) (function-entry row)])) all-function-rows)
+         all-namespace-row-by-name)
+        (swap! (::kernel/program-snapshot ctx) assoc
+               ::loaded-database loaded ::interpreted interpreted)
+        (when-let [recorder recording-operation]
+          (swap! (::kernel/program-snapshot ctx) assoc
+                 :seon.flow/commit-fault! recorder))
+        ;; Imports are explicit namespace facts. Install their named classes before
+        ;; the namespace bindings resolve them; SCI is containment, not a security
+        ;; boundary, and the program graph—not a hand list—declares the set.
+        (install-declared-classes! ctx all-namespace-rows)
+        ;; Create every namespace and publish aliases first. Alias targets need not
+        ;; exist: this is the effective behavior of SCI's `:as-alias` too. Every
+        ;; program namespace needs its reader context, interpreted or not: an
+        ;; agent's first definition in a clean namespace is analysed against it.
+        (doseq [[namespace-name row] all-namespace-row-by-name]
+          (sci/install-namespace-bindings!
+           ctx namespace-name (assoc (row-bindings row) :refers {})))
+        ;; Namespace declarations establish aliases/imports first; compiled host
+        ;; bindings then populate the same SCI namespaces without being erased by
+        ;; that declaration install. Selected definitions overwrite only their Vars.
+        (install-first-party-namespaces!
+         ctx namespace-assertions all-namespace-rows
+         (host-function-rows all-function-rows loaded db))
+        ;; The bare REPL name refers to the acquired macro itself. Keeping the
+        ;; boot-time copy here would preserve its old expansion after adoption.
+        (sci/add-namespace! ctx 'clojure.core
+                            {'help (sci/resolve ctx 'seon.bootstrap/help)})
+        (install-selected!
+         ctx db commit-fault!
+         (select-keys all-namespace-row-by-name selected-namespace-names)
+         function-rows test-rows interpreted
+         {:seon.schema/projection projection
+          :seon.sci.eval/interpreted-count (count interpreted)
+          :seon.sci.eval/installed 0
+          :seon.sci.eval/load-results
+          (into []
+                (keep (fn [[sym _source _namespace admission _private]]
+                        (when (and (= :core admission)
+                                   (nil? (sci/resolve ctx (symbol sym))))
+                          {:seon.fn/sym sym
+                           :seon.sci.eval/load-state :unavailable
+                           :seon.error/message
+                           (str "The loaded JVM has no core definition " sym ".")})))
+                all-function-rows)}))))))
+
+(defn- authored-rows
+  "The agent-authored program rows of `database`, found by their admission datoms."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
+  [database]
+  (let [datoms (db/datoms database :aevt :seon.schema.admission/source)]
+    (when (db/read-refusal? datoms)
+      (throw (ex-info (:seon.error/message datoms) datoms)))
+    (db/pull-many database (conj namespace-pattern {:seon.test/ns [:seon.ns/name]})
+                  (into [] (keep (fn [datom] (when (= :agent (:v datom)) (:e datom)))) datoms))))
+
+(defn- overlay-plan
+  "What `database` changes of the `loaded` program: the authored functions whose
+  digest the loaded program lacks or holds otherwise, the other functions it
+  lacks, and the authored namespace and test rows it does not hold as they are."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value] :map]}
+  [database loaded]
+  (let [rows (authored-rows database)
+        previous (authored-rows loaded)
+        digests (loaded-digests loaded)
+        ;; `loaded-digests` memoizes any committed value's digests by commit
+        held (if (commit-id-of database) (loaded-digests database) (function-digests database))
+        overridden (into #{} (keep (fn [{sym :seon.fn/sym :as row}]
+                                     (when (and sym (not= (row-definition-digest row) (get digests sym))) sym)))
+                         rows)
+        namespace-key (fn [row] [(:seon.ns/source row) (row-bindings row)])
+        test-row (fn [row] [(:seon.test/sym row) (:seon.test/source row)
+                            (get-in row [:seon.test/ns :seon.ns/name]) (:seon.schema.admission/source row)])
+        held-namespaces (into #{} (comp (filter :seon.ns/name) (map namespace-key)) previous)
+        held-tests (into #{} (comp (filter :seon.test/sym) (map test-row)) previous)]
+    {::overridden overridden
+     ::added (into #{} (remove #(or (contains? digests %) (overridden %))) (keys held))
+     ::namespaces (into [] (filter #(and (:seon.ns/name %) (:seon.ns/source %)
+                                         (not (held-namespaces (namespace-key %)))))
+                        rows)
+     ::tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)}))
+
+(defn- interpret-overlay!
+  "Interpret the overlay `plan` on `ctx`: its overrides with their reverse
+  closure, its namespaces and its tests, and bind the compiled Vars of the
+  functions it adds; the acquisition advanced from the base's."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :map]}
+  [ctx database {::keys [overridden added namespaces tests]}]
+  (let [snapshot @(::kernel/program-snapshot ctx)
+        projection (or (db/carried-projection database) (:seon.schema/projection ctx))
+        database (vary-meta database assoc :seon.schema/projection projection)
+        closure (if (seq overridden)
+                  (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds overridden})
+                  {:seon.fn/affected #{}})
+        _ (when (:seon.db/invalid-read closure)
+            (throw (ex-info "Cannot acquire the affected function closure." closure)))
+        interpreted (into overridden (:seon.fn/affected closure))
+        rows-of (fn [symbols]
+                  (into []
+                        (keep (fn [{sym :seon.fn/sym source :seon.fn/source
+                                    admission :seon.schema.admission/source private? :seon.fn/private?}]
+                                (when admission
+                                  [sym (or source "") (symbol (namespace sym)) admission (boolean private?)])))
+                        (db/pull-many database [:seon.fn/sym :seon.fn/source :seon.schema.admission/source
+                                                :seon.fn/private?]
+                                      (mapv #(vector :seon.fn/sym %) (sort symbols)))))
+        function-rows (rows-of interpreted)
+        added-rows (rows-of (remove interpreted added))
+        selected (into (into #{} (map :seon.ns/name) namespaces) (map #(nth % 2)) function-rows)
+        new-namespaces (into #{} (comp (map #(nth % 2)) (remove (:namespaces snapshot)) (remove selected))
+                             added-rows)
+        pulled (into {} (map (juxt :seon.ns/name namespace-row))
+                     (db/pull-many database namespace-pattern
+                                   (mapv #(vector :seon.ns/name %) (sort-by str (into selected new-namespaces)))))
+        namespace-rows (vals pulled)
+        namespace-row-by-name (select-keys pulled selected)]
+    (schema/call-with-projection
+     projection
+     (fn []
+       (swap! (::kernel/program-snapshot ctx)
+              #(-> %
+                   (update :functions into (map (fn [row] [(first row) (function-entry row)]))
+                           (concat added-rows function-rows))
+                   (update :namespaces merge pulled)
+                   (assoc ::interpreted interpreted)))
+       (install-declared-classes! ctx namespace-rows)
+       (doseq [row namespace-rows]
+         (sci/install-namespace-bindings!
+          ctx (:seon.ns/name row) (assoc (row-bindings row) :refers {})))
+       ;; A function the loaded program lacks runs as its compiled Var where
+       ;; this JVM has one, exactly as the base binds the loaded program's.
+       (install-first-party-namespaces! ctx [] namespace-rows added-rows)
+       (install-selected!
+        ctx database (:seon.flow/commit-fault! snapshot) namespace-row-by-name
+        function-rows tests interpreted
+        (-> (::acquisition snapshot)
+            (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
+            (assoc :seon.schema/projection projection
+                   :seon.sci.eval/interpreted-count (count interpreted))))))))
+
+(defn- overlay!
+  "Interpret on `ctx`, a fork of the cluster base, what `database` changes of
+  the loaded program; the acquisition, the base's own when nothing changed."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :map]}
+  [ctx database]
+  (let [snapshot @(::kernel/program-snapshot ctx)
+        loaded (::loaded-database snapshot)
+        commit (commit-id-of database)
+        plan (when-not (or (identical? loaded database)
+                           (and commit (= commit (commit-id-of loaded))))
+               (overlay-plan database loaded))
+        acquired (if (some seq (vals plan))
+                   (interpret-overlay! ctx database plan)
+                   (::acquisition snapshot))]
+    (swap! (::kernel/program-snapshot ctx) assoc
+           ::acquisition acquired ::armed-dials (armed-dials database))
+    acquired))
 
 (defn- latest-print-fact
   "The value of one print attribute on this agent's latest evaluation to set it."
@@ -2893,30 +3010,23 @@
         unbound (assoc :seon.sci.eval/unbound-results unbound)))))
 
 (def ^:private program-cache-policy
-  "Bound the memoized program identities and base contexts independently of commits."
+  "Bound the memoized program identities independently of commits."
   {::program-identity-cache-size 256
    ::program-identity-cache-reason
-   "One entry per recently acquired commit: agent turns, MCP evaluations and test requests on a few live branches; an evicted commit derives its identity again from its own cache-context."
-   ::base-context-cache-size 4
-   ::base-context-cache-reason
-   "A base context holds a whole interpreted program; four recent program identities cover the live branch and concurrent test requests without retaining an unbounded population."})
+   "One entry per recently acquired commit: agent turns, MCP evaluations and test requests on a few live branches; an evicted commit derives its identity again from its own cache-context."})
 
 (defonce ^:private program-identity-cache
   (cache/lru-cache-factory
    {} :threshold (::program-identity-cache-size program-cache-policy)))
 
-(defonce ^:private base-context-cache
-  (cache/lru-cache-factory
-   {} :threshold (::base-context-cache-size program-cache-policy)))
-
 (defn- acquisition-attributes
   "Every attribute an acquisition reads, derived from the projection's declarations.
 
   The program partition (`seon.program/program-attributes`), the projection's own
-  read set (`seon.schema/projection-attributes`), the contract dials an interpreted
-  wrapper arms with (`seon.config/dial-attributes`) and the loaded source commit.
-  Retained on the projection's own holder (`schema/projection-cache-value`), so
-  two populations whose fingerprints collide never share a derivation."
+  read set (`seon.schema/projection-attributes`) and the loaded source commit.
+  Dials are not among them: a context compares the dial values its wrappers
+  armed with (`armed-dials`). Retained on the projection's own holder
+  (`schema/projection-cache-value`)."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
   (schema/projection-cache-value
@@ -2924,7 +3034,6 @@
    (fn []
      (-> (program/program-attributes projection)
          (into schema/projection-attributes)
-         (into (config/dial-attributes projection))
          (conj :seon.config/cluster :seon.source/commit-id)))))
 
 (defn- revision-basis
@@ -2949,12 +3058,6 @@
   {:malli/schema [:=> [:cat :map [:set :qualified-keyword]] :map]}
   [basis attributes]
   (update basis :datahike.cache/attribute-revisions select-keys attributes))
-
-(defn- commit-id-of
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :uuid]]}
-  [database]
-  (let [value-id (db/committed-value-identity database)]
-    (when (map? value-id) (:datahike.value/commit-id value-id))))
 
 (defn- remember-program-identity!
   "Record a commit's revision basis unless its commit already has one."
@@ -2989,16 +3092,16 @@
   ::program-identity)
 
 (defn- derive-base-ctx
-  "Derive one base context: load the program's JVM namespaces, build the
-  interpreter and acquire the program."
+  "Derive the cluster base: load the loaded program's JVM namespaces, build the
+  interpreter under its projection and acquire the `loaded` program."
   {:malli/schema [:=> [:cat :seon.db/database-value :map] :seon.sci.eval/ctx]}
-  [database arm-request]
-  ;; Once per derivation: the memoized base's key covers every attribute that
-  ;; query reads and a JVM keeps what it loaded, so a cached base proves them loaded.
-  (load-core-namespaces! database)
-  (let [projection (if-let [carried (db/carried-projection database)]
-                     (schema/projection-from-database database carried)
-                     (schema/projection-from-database database))]
+  [loaded arm-request]
+  ;; Once per derivation: a JVM keeps what it loaded, so a cached base proves
+  ;; its loaded program's namespaces loaded.
+  (load-core-namespaces! loaded)
+  (let [projection (if-let [carried (db/carried-projection loaded)]
+                     (schema/projection-from-database loaded carried)
+                     (schema/projection-from-database loaded))]
     (schema/call-with-projection
      projection
      (fn []
@@ -3007,13 +3110,14 @@
                         :seon.schema/projection projection
                         ::kernel/install-function! install-function-from-database!)
              _ (swap! (::kernel/program-snapshot ctx) merge
-                      (select-keys arm-request [:seon.flow/commit-fault! ::loaded-database]))
+                      (select-keys arm-request [:seon.flow/commit-fault!])
+                      {::loaded-database loaded})
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
-                                 :seon.db/db database
-                                 :seon.schema/projection projection})]
-         ;; The base is memoized across branches and holds no database value:
-         ;; one would pin its connection's node cache. `copy-base-ctx` supplies
-         ;; each caller's database and loaded program.
+                                         :seon.db/db loaded
+                                         :seon.schema/projection projection})]
+         ;; The base is shared by every branch and holds no database value: one
+         ;; would pin its connection's node cache. `copy-base-ctx` supplies each
+         ;; caller's database and loaded program.
          (swap! (::kernel/program-snapshot ctx)
                 #(-> (dissoc % ::loaded-database)
                      (assoc ::acquisition acquired
@@ -3023,37 +3127,26 @@
                             :seon.test/class-loader (clojure.lang.RT/baseLoader))))
          (assoc ctx ::acquisition acquired))))))
 
-(defn- base-ctx-key
-  "The inputs a base context is a function of, or nil when one has no identity.
-
-  The program identity of the database, the loaded program it compares against
-  and the fault recorder its contract wrappers close over."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map]
-                  [:or :nil [:tuple :map [:or :nil :uuid] [:or :nil :seon.flow/commit-fault!]]]]}
-  [database arm-request]
-  (let [program (some-> (program-identity database)
-                        (program-basis (acquisition-attributes
-                                        (db/carried-projection database))))
-        loaded (::loaded-database arm-request)
-        loaded-id (when loaded (db/committed-value-identity loaded))]
-    (when (and program (or (nil? loaded) (map? loaded-id)))
-      [program
-       (when loaded (:datahike.value/commit-id loaded-id))
-       (:seon.flow/commit-fault! arm-request)])))
+(defn- cluster-base-key
+  "The inputs the cluster base is a function of: the loaded program's store and
+  commit (which also name its projection) and the fault recorder its wrappers
+  close over. Nil for an uncommitted loaded value."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:or :nil [:tuple :map :uuid [:or :nil :seon.flow/commit-fault!]]]]}
+  [loaded arm-request]
+  (when-let [commit (commit-id-of loaded)]
+    [(store-identity loaded) commit (:seon.flow/commit-fault! arm-request)]))
 
 (defn- copy-base-ctx
-  "A fresh context over a memoized base: SCI's generation-aware fork plus owned
-  copies of the kernel atoms, acquired at the supplied value against the
-  caller's loaded program (the base's key names its commit)."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :seon.sci.eval/ctx]}
-  [cached database arm-request]
+  "A fresh context over the cluster base: SCI's generation-aware fork plus owned
+  copies of the kernel atoms, holding the caller's database and loaded program."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value] :seon.sci.eval/ctx]}
+  [cached database loaded]
   (assoc (sci/fork cached)
          ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
          ::kernel/program-snapshot
          (atom (assoc @(::kernel/program-snapshot cached)
                       :seon.db/db database
-                      ::loaded-database (or (::loaded-database arm-request)
-                                            (loaded-program database))))))
+                      ::loaded-database loaded))))
 
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
@@ -3061,8 +3154,8 @@
   Matching definitions copy the loaded JVM Var root. Overrides and affected
   callers interpret their admitted source. Acquisition refusals remain values on the context;
   construction has no connection, writes no facts, and restores no private state.
-  A base context is a function of its program identity, loaded program and fault
-  recorder, memoized by that key; each call returns its own fork of the value."
+  Each call forks the one cluster base of the JVM's loaded program (a `seon.cache`
+  kind) and interprets the value's own changes on that fork (`overlay!`)."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]
@@ -3071,19 +3164,16 @@
      :seon.sci.eval/ctx]]}
   ([database] (base-ctx database {}))
   ([database arm-request]
-   (if-let [cache-key (base-ctx-key database arm-request)]
-     (let [cell (cache/lookup-or-miss
-                 base-context-cache cache-key
-                 (fn [_] (delay (derive-base-ctx database arm-request))))]
-       (copy-base-ctx
-        (try @cell
-             (catch Throwable failure
-               ;; A failed derivation is not a value of the key: drop the
-               ;; cell so the next call derives again, and surface the cause.
-               (cache/evict base-context-cache cache-key)
-               (throw failure)))
-        database arm-request))
-     (copy-base-ctx (derive-base-ctx database arm-request) database arm-request))))
+   (let [loaded (or (::loaded-database arm-request) (loaded-program database))
+         derive-base #(derive-base-ctx loaded arm-request)
+         cluster (if-let [cache-key (cluster-base-key loaded arm-request)]
+                   (seon.cache/lookup ::base-context cache-key
+                                      #(* 2048 (count (:functions @(::kernel/program-snapshot %))))
+                                      derive-base)
+                   (derive-base))
+         projection (or (db/carried-projection database) (schema/projection-from-database database))
+         ctx (assoc (copy-base-ctx cluster database loaded) :seon.schema/projection projection)]
+     (assoc ctx ::acquisition (overlay! ctx database)))))
 
 (defn- loaded-basis
   "The revision of the adoption record's attribute in the loaded source.
@@ -3121,7 +3211,8 @@
   leaves those revisions alone, and a branch opened at such a commit reads its
   parent's recorded basis. A later value of the acquired value's own lineage with
   equal revisions also matches and records its commit under the acquired identity.
-  A value without committed identity never matches."
+  Dial values the wrappers armed with must also be unchanged. A value without
+  committed identity never matches."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
   [ctx database]
   (let [snapshot @(::kernel/program-snapshot ctx)
@@ -3133,6 +3224,9 @@
           ;; An adoption moves the JVM's loaded program without touching this
           ;; branch's rows; an acquisition compared against the older one is stale.
           (loaded-program-current? ctx database)
+          ;; A settings write re-arms only when it moved a value the
+          ;; context's interpreted wrappers armed with.
+          (= (::armed-dials snapshot) (armed-dials database))
           (or (identical? previous database)
               (when (and commit-id (commit-id-of previous))
                 (let [attributes (acquisition-attributes (db/carried-projection previous))

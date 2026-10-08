@@ -206,6 +206,14 @@
                       (pr-str {:reused-acquire-ms (:ms reused)
                                :program-reacquire-ms (:ms reacquired)}))))))))))
 
+(defn- cluster-bases
+  "The retained cluster bases of the program `database`'s JVM loaded, by cache key."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (let [loaded (db/commit-id (#'eval/loaded-program database))]
+    (into {} (filter (fn [[[_ commit]]] (= loaded commit)))
+          (seon.cache/retained :seon.sci.eval/base-context))))
+
 (deftest ^{:seon.test/long "One complete base-context derivation of the canonical fixture program (measured 452-1,192 ms on default) and one memoized copy."
            :seon.test/long-ms 8000}
   a-base-context-is-memoized-by-its-program-and-each-caller-gets-its-own-fork
@@ -213,11 +221,14 @@
    (fn [connection]
      (let [database (db/db connection)
            first-call (measured #(eval/base-ctx database))
+           bases (cluster-bases database)
            second-call (measured #(eval/base-ctx database))
            a (:value first-call)
            b (:value second-call)]
-       (is (identical? (:seon.sci.eval/acquisition a) (:seon.sci.eval/acquisition b))
-           "the second call reads the derivation the first made")
+       (is (seq bases) "the first call left the loaded program's cluster base")
+       (is (= bases (cluster-bases database)) "the second call forks it and derives none")
+       (is (= (:seon.sci.eval/interpreted-count (:seon.sci.eval/acquisition a))
+              (:seon.sci.eval/interpreted-count (:seon.sci.eval/acquisition b))))
        (is (not (identical? (:env a) (:env b))))
        (is (not (identical? (:seon.sci.kernel/program-snapshot a)
                             (:seon.sci.kernel/program-snapshot b))))
@@ -277,6 +288,7 @@
       (fn []
        (let [a (support/fork-cluster-ctx connection)
              b (support/fork-cluster-ctx connection)
+             bases (cluster-bases (db/db connection))
              _ (declared! connection 'seon.sci.eval-test/concurrent-acquisition-probe
                  "(defn ^{:malli/schema [:=> [:cat] :int]} concurrent-acquisition-probe [] 2)")
              changed (db/db connection)
@@ -291,11 +303,57 @@
              from-b (deref in-b 6000 ::unfinished)]
          (is (not= ::unfinished from-a) "the first acquirer finished within its bound")
          (is (not= ::unfinished from-b) "the second acquirer finished within its bound")
-         (is (identical? from-a from-b)
-             "both acquirers read the one derivation of the program")
+         (is (seq bases) "the fixture's loaded program has its cluster base")
+         (is (= bases (cluster-bases changed))
+             "both acquirers fork the one cluster base; neither derives the program")
+         (is (= (:seon.sci.eval/interpreted-count from-a) (:seon.sci.eval/interpreted-count from-b)))
          (is (not (identical? (:env a) (:env b))) "each context keeps its own environment")
          (is (= 2 (sci/eval-string* a "(seon.sci.eval-test/concurrent-acquisition-probe)")))
          (is (= 2 (sci/eval-string* b "(seon.sci.eval-test/concurrent-acquisition-probe)")))))))))
+
+(deftest ^{:seon.test/long "One cluster-base derivation of the canonical fixture program, two branches, one interpreted override closure and one configuration write."
+           :seon.test/long-ms 12000}
+  agent-branches-and-a-settings-write-share-the-cluster-base
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [cluster-name (:seon.cluster/name (support/execution-handle connection))
+             live (support/fork-cluster-ctx connection)
+             captured (db/db connection)
+             bases (cluster-bases captured)
+             subject 'seon.sci.eval-test/cut?
+             overlay (fn [ctx] (set (:seon.sci.eval/interpreted @(:seon.sci.kernel/program-snapshot ctx))))
+             closure (fn [database seeds]
+                       (into seeds (:seon.fn/affected (functions/reverse-closure
+                                                       {:seon.db/db database :seon.fn/seeds seeds}))))
+             overridden (fn [database]
+                          (:seon.sci.eval/overridden
+                           (#'eval/overlay-plan database (:seon.sci.eval/loaded-database
+                                                          @(:seon.sci.kernel/program-snapshot live)))))]
+         (is (seq bases) "the cluster base exists once the cluster context acquired")
+         (on-branch connection captured cluster-name :pb01-a
+          (fn [a]
+            (on-branch connection captured cluster-name :pb01-b
+             (fn [b]
+               (support/transacted! a (agent-revision-tx (db/db a) [subject]))
+               (let [a-ctx (eval/fork-cluster-ctx live (db/db a) a)
+                     b-ctx (eval/fork-cluster-ctx live (db/db b) b)
+                     _ (eval/acquire! {:seon.sci.eval/ctx a-ctx :seon.db/db (db/db a)})
+                     first-b (eval/acquire! {:seon.sci.eval/ctx b-ctx :seon.db/db (db/db b)})
+                     repeat-b (eval/acquire! {:seon.sci.eval/ctx b-ctx :seon.db/db (db/db b)})
+                     _ (support/apply-config! b cluster-name {:seon.config.run/max-episode-runs 3})
+                     after-settings (eval/acquire! {:seon.sci.eval/ctx b-ctx :seon.db/db (db/db b)})]
+                 (is (= bases (cluster-bases (db/db b)))
+                     "two first acquisitions, a repeat and a settings write construct no cluster base")
+                 (is (identical? first-b repeat-b) "a repeat acquisition returns the acquired program")
+                 (is (identical? first-b after-settings)
+                     "a settings write that moves no armed dial keeps the acquired program")
+                 (is (= (conj (overridden (db/db b)) subject) (overridden (db/db a)))
+                     "a branch's overrides are its authored rows the loaded program lacks or holds otherwise")
+                 (is (= (closure (db/db a) (overridden (db/db a))) (overlay a-ctx))
+                     "the overlay is exactly the overrides plus their reverse closure")
+                 (is (= (closure (db/db b) (overridden (db/db b))) (overlay b-ctx))))))))))))))
 
 (defn- acquisition-view
   "What one acquisition compared against, what it interpreted and what it refused."
@@ -567,3 +625,4 @@
             (is (contains? (loaded-digests after) 'seon.sci.eval-test/loaded-digest-probe)
                 "another commit is another key, never the first commit's map")
             (is (not (contains? (loaded-digests before) 'seon.sci.eval-test/loaded-digest-probe))))))))))
+

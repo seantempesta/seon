@@ -14,6 +14,7 @@
             [seon.id :as id]
             [seon.sci.eval :as sci.eval]
             [seon.batch :as batch]
+            [seon.cache]
             [seon.test-support :as support]
             [seon.turn :as turn]
             [seon.turn.batch :as turn.batch]
@@ -328,3 +329,20 @@
        (is (not-any? :seon.cluster.eval/error receipts) "every form resolves in the agent's run")
        (is (= [2 '([x]) '([] [s1] [s1 s2] [s1 s2 & sets]) true]
               (mapv #(edn/read-string (:seon.eval/shown %)) receipts)))))))
+
+(deftest an-agents-second-run-and-a-settings-write-construct-no-base
+  ;; One cluster base per loaded program: a new agent's first run forks it,
+  ;; and neither its next run nor its settings write derives another.
+  (with-armed-agent
+   (fn [{:keys [connection code]}]
+     (let [loaded (db/commit-id (#'sci.eval/loaded-program @connection))
+           cluster-bases #(into {} (filter (fn [[[_ commit]]] (= loaded commit)))
+                                (seon.cache/retained :seon.sci.eval/base-context))
+           _ (code "(+ 1 2)")
+           before (cluster-bases)
+           runs [(code "(+ 1 2)")
+                 (code "(my.agent/settings! {:seon.config.run/max-episode-runs 3})")
+                 (code "(+ 1 2)")]]
+       (is (seq before) "the agent's first run forked the loaded program's cluster base")
+       (is (every? :seon.turn/id runs))
+       (is (= before (cluster-bases)) "a second run and a settings write derive no cluster base")))))

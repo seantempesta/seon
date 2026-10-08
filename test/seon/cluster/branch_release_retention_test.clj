@@ -1,6 +1,7 @@
 (ns seon.cluster.branch-release-retention-test
   "A released branch connection's node cache is collectable: no Seon cache keeps it."
   (:require [clojure.test :refer [deftest is]]
+            [seon.cache]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
@@ -42,18 +43,16 @@
     (is (not-any? #(instance? datahike.connector.Connection (second %))
                   (keys @@#'eval/refusal-recording-cache))
         "the refusal-recording cache keys on connection identity data")
-    (is (not-any? (fn [cell]
-                    (and (realized? cell)
-                         (some #(contains? @(::kernel/program-snapshot @cell) %)
-                               [:seon.db/db :seon.sci.eval/loaded-database])))
-                  (vals @@#'eval/base-context-cache))
-        "a memoized base context holds no database value")
-    (is (not-any? (fn [cell]
-                    (and (realized? cell)
-                         (some (fn [[_ bindings]]
-                                 (some #(and (instance? sci.lang.Var %)
-                                             (instance? datahike.db.DB (.getRawRoot ^sci.lang.Var %)))
-                                       (vals bindings)))
-                               (:namespaces @(:env @cell)))))
-                  (vals @@#'eval/base-context-cache))
+    (is (not-any? (fn [base]
+                    (some #(contains? @(::kernel/program-snapshot base) %)
+                          [:seon.db/db :seon.sci.eval/loaded-database]))
+                  (vals (seon.cache/retained :seon.sci.eval/base-context)))
+        "a cluster base holds no database value")
+    (is (not-any? (fn [base]
+                    (some (fn [[_ bindings]]
+                            (some #(and (instance? sci.lang.Var %)
+                                        (instance? datahike.db.DB (.getRawRoot ^sci.lang.Var %)))
+                                  (vals bindings)))
+                          (:namespaces @(:env base))))
+                  (vals (seon.cache/retained :seon.sci.eval/base-context)))
         "no interpreter Var root in a memoized base is a database value")))

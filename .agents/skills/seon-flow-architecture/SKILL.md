@@ -57,8 +57,10 @@ Installed: each turn forks the current base context
 (`seon.sci.eval/fork-for-turn`). When the agent's previous context is held,
 `regenerate-agent-context!` forks the new base and carries the agent's own
 private Vars over it as actual objects; inherited program bindings are
-replaced. Base contexts are memoized by program identity in a bounded LRU
-(`program-cache-policy` in `src/seon/sci/eval.clj`). The law is that a context
+replaced. A base context forks the one cluster base of the JVM's loaded
+program, the `seon.cache` kind `:seon.sci.eval/base-context` keyed by the
+loaded commit, and interprets the branch's own changes on that fork
+(`seon.sci.eval/base-ctx`, `overlay!`). The law is that a context
 is reacquired from its branch head and private defs, atoms and result objects
 stay in memory (CLAUDE.md, "An agent's context"). Do not restore `:seon.def`
 entities or rebuild a private layer from the database.
