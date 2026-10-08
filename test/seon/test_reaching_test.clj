@@ -76,11 +76,14 @@
   (count (filter #(= test-symbols (first %)) (keys (seon.cache/retained :seon.test.runner/reach-index)))))
 
 (defn- retained-declarations
-  "The content key of `database`'s declaration read when the central cache holds it, else nil."
+  "The content key of `database`'s declaration read when the central cache
+  holds every attribute read it names, else nil."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
   [database]
-  (let [content (#'runner/reach-revision-key database)]
-    (when (contains? (seon.cache/retained :seon.test.runner/reach-declarations) content) content)))
+  (let [content (#'runner/reach-revision-key database)
+        held (into #{} (map (fn [[attribute _ revision]] [attribute revision]))
+                   (keys (seon.cache/retained :seon.test.runner/reach-attribute)))]
+    (when (and content (every? held content)) content)))
 
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database

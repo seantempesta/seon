@@ -35,4 +35,18 @@
                 :seon.schema/declaration-predicates
                 {:count 72, :retained-bytes 5096, :bytes-per-unit 70}},
                :jvm "26.0.1",
-               :forms 3548}
+               :forms 3548,
+               :reach-kinds
+               {:date "2026-10-09",
+                :program "default at basis 536871406, commit 4cfa95427",
+                :tool
+                "identity-set object-graph walk of each kind's retained keys and values on default (compressed oops: 12-byte header, 4-byte refs, 8-byte alignment; checked against a used-heap delta after System/gc on a 300,000-entry map: 91.33 MB walked, 91.72 MB measured). Keywords, vars, classes and namespaces are interned and skipped; strings, symbols and UUIDs are the datoms' objects, shared with Datahike's index nodes and across revisions (summed per entry 151.6 MB, union 106.2 MB with them, 54.8 MB without), so the rows measure structure only. Kinds are walked in order, each counting only what the earlier ones did not hold, plus 256 bytes per entry for the cache's own entry.",
+                :kinds
+                {:seon.test.runner/reach-attribute
+                 {:entries 60, :map-entries 330207, :set-elements 1046475, :retained-bytes 54798000},
+                 :seon.test.runner/reach-node
+                 {:entries 8151, :names 222884, :retained-bytes 12049000},
+                 :seon.test.runner/reach-graph
+                 {:entries 24, :graph-entries 126393, :retained-bytes 3994000},
+                 :seon.test.runner/reach-index
+                 {:entries 16, :graph-entries 55123, :tests 51, :retained-bytes 955000}}}}

@@ -11,7 +11,8 @@
             [seon.fs :as fs]
             [seon.program :as program]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.test.runner :as runner]))
 
 (def ^:private tolerance
   "The charge may differ from the measured retention by at most 25% either way:
@@ -56,3 +57,30 @@
     (is (identical? projection (get (seon.cache/retained :seon.schema/declaration-projection)
                                     [forms (get (seon.cache/retained :seon.schema/declaration-predicates) forms)])))
     (is (empty? (seon.cache/retained :seon.config/declared-projection)))))
+
+(defn- reach-charge
+  "What a reach kind's weigher charges for the measured counts, the cache's
+  per-entry bytes included."
+  [kind {:keys [entries map-entries set-elements names graph-entries tests]}]
+  (+ (* 256 entries)
+     (case kind
+       :seon.test.runner/reach-attribute (+ (* runner/reach-map-entry-bytes map-entries)
+                                            (* runner/reach-set-element-bytes set-elements))
+       :seon.test.runner/reach-node (* runner/reach-node-name-bytes names)
+       :seon.test.runner/reach-graph (* runner/reach-graph-entry-bytes graph-entries)
+       :seon.test.runner/reach-index (+ (* runner/reach-index-entry-bytes graph-entries) (* 160 tests)))))
+
+(deftest ^{:seon/tasks #{'seon.cache/cache-weights-run-three-times-the-retained-bytes}}
+  every-reach-kind-is-charged-what-it-was-measured-to-retain
+  (let [{:keys [kinds]} (:seon.measure/reach-kinds (measurement))]
+    (is (= #{:seon.test.runner/reach-attribute :seon.test.runner/reach-node
+             :seon.test.runner/reach-graph :seon.test.runner/reach-index}
+           (set (keys kinds))))
+    (doseq [[kind counts] kinds]
+      (testing kind
+        (is (<= (/ 1 tolerance) (/ (double (reach-charge kind counts)) (:retained-bytes counts)) tolerance))))
+    (is (<= (/ 1 tolerance)
+            (/ (double (reduce + (map (fn [[kind counts]] (reach-charge kind counts)) kinds)))
+               (reduce + (map :retained-bytes (vals kinds))))
+            tolerance)
+        "the reach kinds together are charged what they retain")))

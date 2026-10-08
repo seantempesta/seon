@@ -747,8 +747,8 @@
 ;;; is a function of its graph facts and lives in the central cache under them;
 ;;; the requested tests' digests are cached together under the reached graph's
 ;;; content, edges included. A call reads the declarations' graph facts once
-;;; (cached per commit) and hashes the reached graph's components once, never a
-;;; closure per test.
+;;; (each attribute cached under its own revision) and hashes the reached
+;;; graph's components once, never a closure per test.
 
 (defn- reach-read!
   "`value`, or a throw carrying the read refusal it is; [[reach-entries]]
@@ -781,11 +781,37 @@
   (let [value (edn/read-string form)]
     {::leaf (id/digest 64 [schema-key value]) ::keys (reach-keywords value)}))
 
+;;; Reach kinds' weights: bytes of the structure an entry builds, measured
+;;; per entry with leaves excluded (bench/seon/cache_kind_measurement.edn).
+;;; Strings and symbols are the datoms' own objects, held by Datahike's index
+;;; nodes and shared by every revision's read, so they are not charged here;
+;;; structure another kind built is charged to the kind that built it.
+
+(def reach-map-entry-bytes
+  "Bytes per entry of an attribute's map: hash-trie slot, boxed entity id, node share."
+  52)
+
+(def reach-set-element-bytes
+  "Bytes per value in an entity's set of a many attribute."
+  36)
+
+(def reach-node-name-bytes
+  "Bytes per name a reach node holds: its out vector, key set and the row it is keyed by."
+  48)
+
+(def reach-graph-entry-bytes
+  "Bytes per node or schema entry of a reached graph's maps."
+  32)
+
+(def reach-index-entry-bytes
+  "Bytes per reached node or schema of a reach index's key and value."
+  16)
+
 (defn- reach-weight
   "A node's estimated retained bytes, from the counts it already has."
   {:malli/schema [:=> [:cat :map] :int]}
   [node]
-  (* 48 (+ 8 (count (::out node)) (count (::keys node)))))
+  (* reach-node-name-bytes (+ 8 (count (::out node)) (count (::keys node)))))
 
 (def ^:private reach-fact-attributes
   "Each reach fact attribute, with whether it holds many values."
@@ -821,7 +847,8 @@
                                                (transient {}) datoms))))]
     (if-let [revision (get revisions attribute)]
       (cache/lookup ::reach-attribute [attribute shape revision]
-                    (fn [by] (* 96 (+ (count by) (if (= :many shape) (transduce (map count) + 0 (vals by)) 0))))
+                    (fn [by] (+ (* reach-map-entry-bytes (count by))
+                                (if (= :many shape) (* reach-set-element-bytes (transduce (map count) + 0 (vals by))) 0)))
                     derive)
       (derive))))
 
@@ -830,31 +857,24 @@
   row to definition digest and to its reach facts (calls, references and
   keywords as sets, contract source and test subject as values), schema key
   to form, and each documented declaration to its docstring. Eleven attribute
-  reads ([[reach-attribute]]), each cached under its own revision; a committed value's whole answer is cached under all eleven
-  (`reach-revision-key`). Facts are read whole, never inferred from the
-  definition digest: a declaration-population retarget changes an invoker's
-  calls under an unchanged digest."
+  reads ([[reach-attribute]]), each cached under its own revision; the answer
+  itself is not cached: it only assembles those maps, and a second holder
+  would keep an evicted revision's maps alive unweighed.
+  Facts are read whole, never inferred from the definition digest: a
+  declaration-population retarget changes an invoker's calls under an
+  unchanged digest."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :keyword :map]]}
   [database]
-  (let [revisions (reach-revision-key database)
-        read (partial reach-attribute database revisions)
-        derive-declarations
-        #(let [schema-keys (read :seon.schema/key :by-entity)]
-           {::rows (merge (read :seon.fn/sym :by-value) (read :seon.test/sym :by-value))
-            ::digests (read :seon.program/definition-digest :by-entity)
-            ::documented (read :seon.fn/doc :by-entity)
-            ::facts (into {} (map (fn [[attribute many?]]
-                                    [attribute (read attribute (if many? :many :by-entity))]))
-                          reach-fact-attributes)
-            ::forms (into {} (keep (fn [[e form]] (when-let [k (schema-keys e)] [k form])))
-                          (read :seon.schema/form :by-entity))})]
-    (if revisions
-      (cache/lookup ::reach-declarations revisions
-                    (fn [{::keys [rows digests documented forms facts]}]
-                      (* 96 (+ (count rows) (count digests) (count documented) (count forms)
-                               (transduce (comp (mapcat vals) (map #(if (set? %) (count %) 1))) + 0 (vals facts)))))
-                    derive-declarations)
-      (derive-declarations))))
+  (let [read (partial reach-attribute database (reach-revision-key database))
+        schema-keys (read :seon.schema/key :by-entity)]
+    {::rows (merge (read :seon.fn/sym :by-value) (read :seon.test/sym :by-value))
+     ::digests (read :seon.program/definition-digest :by-entity)
+     ::documented (read :seon.fn/doc :by-entity)
+     ::facts (into {} (map (fn [[attribute many?]]
+                             [attribute (read attribute (if many? :many :by-entity))]))
+                   reach-fact-attributes)
+     ::forms (into {} (keep (fn [[e form]] (when-let [k (schema-keys e)] [k form])))
+                   (read :seon.schema/form :by-entity))}))
 
 (defn- reach-fixed-point
   "Every name reachable from `start` through each node's `edges`, by name:
@@ -909,7 +929,7 @@
   [database test-symbols]
   (if-let [revisions (reach-revision-key database)]
     (cache/lookup ::reach-graph [revisions (set test-symbols)]
-                  (fn [{::keys [nodes schemas]}] (* 64 (+ (count nodes) (count schemas))))
+                  (fn [{::keys [nodes schemas]}] (* reach-graph-entry-bytes (+ (count nodes) (count schemas))))
                   #(reached-graph database test-symbols))
     (reached-graph database test-symbols)))
 
@@ -1110,7 +1130,7 @@
                 ;; The nodes whole: their edges, not only their leaves, are
                 ;; what the index derives from.
                 ::reach-index [(set test-symbols) nodes (update-vals schemas ::leaf)]
-                (fn [_] (+ (* 128 (+ (count nodes) (count schemas))) (* 160 (count test-symbols))))
+                (fn [_] (+ (* reach-index-entry-bytes (+ (count nodes) (count schemas))) (* 160 (count test-symbols))))
                 #(reach-index graph test-symbols))
                ::nodes nodes))
       (catch Exception failure (reach-unavailable `reach-entries failure test-symbols)))))

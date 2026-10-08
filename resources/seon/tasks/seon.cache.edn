@@ -7,4 +7,8 @@
  #:seon.task{:name "cache-weights-run-three-times-the-retained-bytes"
              :kind :function
              :intent "seon.cache weights run about 3x high: 156 MB really retained against 498 MB of estimated weight; the two test-runner reach kinds account for 340 MB of the weight (heap-live lane, MAT, default, 2026-10-08). The byte budget therefore does not measure bytes and evicts too early. Fix the weighers (shared structure is weighed once per kind that holds it) so weight tracks retained bytes. Done when for the reach kinds the summed weight is within 1.5x of the measured retained size."
-             :must-read #{seon.cache/create seon.test.runner/reach-entries}}]
+             :must-read #{seon.cache/create seon.test.runner/reach-entries}} #:seon.task{:name "non-reach-kinds-weigh-three-to-seven-times-their-retained-bytes"
+             :kind :function
+             :intent "After the reach kinds were refit (cache-weight lane, 2026-10-09), the next largest seon.cache kinds still charge several times what an object-graph walk of their retained keys and values measures on default: :seon.sci.eval/loaded-digests 22.2 MB charged vs 8.1 MB (15 entries), :seon.task/tasks-tx 21.0 vs 7.0 MB (2), :seon.fn/population-targets 17.7 vs 2.4 MB (2), :seon.task/task-basis 9.6 vs 4.0 MB (1), :seon.task/file-grammar 8.8 vs 1.2 MB (1), :seon.cluster/derivation-world 9.7 vs 2.1 MB (1); leaves counted, so the true gap is larger where strings are shared. Refit each owner's weigher from counts the value has, with a measurement row and a calibration-test row like the reach kinds'. Done when each kind's charge is within 1.25x of its measured retention."
+             :must-read #{seon.cache/lookup seon.sci.eval/loaded-digests seon.task/tasks-tx seon.fn/population-targets}
+             :evidence #{"bench/seon/cache_kind_measurement.edn"}}]
