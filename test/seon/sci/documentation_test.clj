@@ -412,8 +412,7 @@
        (is (= 3 (count (:in doc))) "each arity keeps its inputs")
        (is (keyword? (first (:out doc))) "the return every arity shares is said once, one schema form")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.lookup/a-summary-ends-at-an-abbreviation}}
-  a-summary-runs-past-an-abbreviation
+(deftest a-summary-runs-past-an-abbreviation
   (is (= "Classify one refusal (a map, e.g. an ex-info's data) by its type."
          (:summary (seon.sci.lookup/docstring-parts "Classify one refusal (a map, e.g. an ex-info's data) by its type. Then more."))))
   (is (= "Read the head, i.e. the newest commit."

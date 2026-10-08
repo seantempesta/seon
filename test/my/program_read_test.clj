@@ -44,8 +44,7 @@
        (is (= lines (reverse (sort lines))))
        (is (seq (:largest sized)))))))
 
-(deftest ^{:seon/tasks #{'my.program/source-of-a-misspelled-name-names-nothing-near}}
-  source-of-a-misspelled-name-names-it-first-in-a-fixed-message
+(deftest source-of-a-misspelled-name-names-it-first-in-a-fixed-message
   (let [database (seon.db/db)
         typo (my.program/source database 'seon.ref/sectoin)
         elsewhere (my.program/source database 'nope.ns/foo)]

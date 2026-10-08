@@ -36,4 +36,9 @@
  #:seon.task{:name "a-memory-refusal-is-answered-four-times"
              :kind :function
              :intent "One :ping refused by acquire-arm for memory pressure (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08) returned two duplicate error maps plus two identical test-error maps (~1,500 tokens), one with a meaningless :seon.error/resolution digest pair; the proof step reported passed? true, red [] although evaluation was refused. Done when a refused evaluation answers one error map, no test-error is made for work never run, and the step reports the proofs as not run instead of passed."
-             :must-read #{seon.sci.kernel/memory-pressure-error seon.turn/step}}]
+             :must-read #{seon.sci.kernel/memory-pressure-error seon.turn/step}}
+ #:seon.task{:name "a-file-function-that-calls-slurp-cannot-be-redefined"
+             :kind :function
+             :intent "Agent fan9b-anchor (fan-out 9b, default f54e73c83, 2026-10-09), assigned `seon.ref/a-missing-anchor-ranks-headings-by-shared-prefix`, sent a correct-looking `(defn section ...)` after `(in-ns 'seon.ref)` and was refused with \"Unable to resolve symbol: slurp\": `seon.ref/section` reads its file with `clojure.core/slurp`, which an agent's SCI context leaves unbound (`seon.sci.kernel/host-function-tools` only names `my.fs/read` in the error). So no agent can redefine a file function whose body calls `slurp`, `spit` or `file-seq`, although the compiled function does and AGENTS.md says nothing is isolated for security. The agent never reached the proof `seon.ref-test/a-missing-anchor-names-the-closest-spelled-heading-first`. Done when an agent's redefinition of `seon.ref/section` (its body unchanged) is admitted on its branch and answers as the compiled one does."
+             :must-read #{seon.sci.kernel/failure-value seon.sci.eval/build-base-ctx seon.ref/section}}
+]

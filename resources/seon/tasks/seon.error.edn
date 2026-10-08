@@ -88,9 +88,4 @@
  #:seon.task{:name "error-notifications-to-root-are-printed-maps"
              :kind :function
              :intent "Error notifications to root are outside messages whose text is a pr-str of the error map (a second printer), delivered through :seon.config.error/escalate-to. Done when the notification carries the error's identity (signature, task, handle) as data and no printed copy."
-             :must-read #{seon.error/commit-call}}
- #:seon.task{:name "a-missing-key-held-under-another-namespace-is-not-named"
-             :kind :function
-             :intent "An agent called (my.message/send {:seon.message/to \"x\" :seon.message/content \"hi\"}) and was refused for missing `:my.message/to` and `:my.message/content` with the fix \"Supply :my.message/to with a string.\", never told that its map holds the same names under the seon.message namespace (agent tw-probe, default 0f0e77ed8, 2026-10-09). `seon.error/explain-problem` builds that fix for a Malli missing-key problem from the path alone, though its request carries the map as :seon.error/parent. Done when the fix of a missing qualified key whose `name` the parent map holds under another namespace also names that held key (:seon.message/to in the example), and a parent holding no such key keeps the fix unchanged. Checked by `seon.error-test/a-missing-key-names-the-same-name-the-map-holds`, which calls `seon.error/explain-problem` directly."
-             :must-read #{seon.error/explain-problem malli.core/explain}}
-]
+             :must-read #{seon.error/commit-call}}]

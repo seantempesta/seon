@@ -1741,8 +1741,7 @@
         (is (nil? (error/render-faults-ai (unit sci-var :seon.error/agent))) "its AI face shows nothing")
         (is (nil? (error/faults-form (unit nil nil))))))))
 
-(deftest ^{:seon/tasks #{'seon.error/a-missing-key-held-under-another-namespace-is-not-named}}
-  a-missing-key-names-the-same-name-the-map-holds
+(deftest a-missing-key-names-the-same-name-the-map-holds
   (let [fix (fn [parent]
               (:seon.error/fix
                (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:map [:my.message/to :string]] parent)))
