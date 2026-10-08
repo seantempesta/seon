@@ -46,9 +46,13 @@ context's `::interpreted` set grows by union. Seeds the context itself just eval
 - Host-bound members (`:seon.fn/host-bound?`): `install-row!` keeps their compiled Var (existing rule); calls
   through them stay compiled, which is RF-3's execution-evidence case, not this lane's. Macros in the closure are
   interpreted from source like any function row; a compiled caller of a host macro stays compiled (host-bound).
-- Tests: `install-selected!` already takes test rows; the closure's tests join them with their namespaces.
-  `seon.test/resolve-test` resolves a test from the context when the context interprets it (`:agent`, or in
-  `::interpreted`), else the host Var as today.
+- Tests: the overlay records the closure's tests (`:seon.fn/tests`) as the context's interpreted tests
+  (`seon.sci.eval/interpreted-test?`) without installing them. `seon.test/resolve-test` loads a file test's
+  namespace under the test loader (as the compiled path already does), then interprets the test row into the member's
+  context (`seon.sci.eval/interpret-test!`), so the test's helpers the closure does not reach bind their compiled
+  interns. Installing file tests eagerly at acquisition failed: a test namespace the JVM has not loaded leaves its
+  helpers unresolvable (check run: `Unable to resolve symbol: namespace-unit` for `seon.render.ns-test`). Lazy is
+  also the cheaper order: a test is interpreted only when a member runs it.
 - When: (1) acquisition (`interpret-overlay!`, now with tests); (2) settlement into the agent's live base
   (`install-evaluated-rows!`, replacing the dead identity check), so the next eval request sees it; (3) at the write
   in the turn fork (`seon.sci.arm/arm!`, replacing `reinterpret-inherited-callers!`), so later forms of the same
@@ -66,9 +70,19 @@ First redefinition of `f` in a context: closure query (12-373 ms) plus one inter
 (`seon.sci.eval/a-branch-overriding-a-widely-called-function-acquires-in-seconds`; the fix is the lazy closure, D3,
 binding each member to a stub that interprets on first call). Later redefinitions: the closure query only.
 
-## What SCI-3 then deletes
+## As landed (769c4a843) and what SCI-3 then deletes
 
-`stale-reach`, `reinterpret-reach!`, `reinterpret-inherited-callers!`, `inherited?` (callers already interpreted see
-the redefinition through context bindings; compiled ones are promoted by `interpret-affected!`); the pre-copy
-`doseq` in `install-selected!`; and the test-world interim in `seon.test/clean-request-handle` once the agent's live
-base holds the same promotions (it then forks the live base again).
+`seon.sci.eval/reinterpret-inherited-callers!` and `install-evaluated-rows!`'s identity check stay: removing them
+turned `seon.repl-differential-test/an-inherited-caller-sees-a-same-pass-redefinition` red (`[1 1 2]`), so a
+definition can still land in a Var other than the one an interpreted caller was analyzed against (another writer's
+caller, re-acquired base). That is SCI-3's evidence to collect before deleting `stale-reach`, `reinterpret-reach!`,
+`reinterpret-inherited-callers!` and `inherited?`: find which path still mints a new Var after SCI-1. The test-world
+interim in `seon.test/clean-request-handle` can go once the agent's live base is shown to hold the same promotions
+(it does after this change for functions; file tests are interpreted at resolve in any context).
+
+Measured (agent `affected-callers`, default `6e9b9017c`, emulated live base over branch `ac-helper`): promoting the
+313 callers and recording the 7 tests of `seon.error/collection-member-problem` took 380 ms and allocated about
+1.1 GB; repeating it on the promoted context took 63 ms (closure read only); the compiled caller answered `[:a 1]`
+before and the branch's `{:a 1}` after, and a later redefinition reached it with no re-analysis. In the check JVM
+the redefining eval request (`seon.render.ns/first-doc-line`, 65 callers) took 2.9 s, of which the test step
+1.16 s and the defn's own evaluation (arm-time promotion) 355 ms / 425 MB.
