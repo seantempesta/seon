@@ -24,10 +24,10 @@ this mechanism; this spec owns it. Order and status of the slices: [the ledger](
 `docs/research/agent-platform/2026-10-08/git-vocab/git-vocab.md`, approved 2026-10-08). **Main** is a cluster's
 branch (today `:cluster-<name>`, `seon.cluster.branch/cluster-branch`, renamed `main-branch`); "the tip of main" is its
 latest commit. An agent's **branch** is where it works; its **checked-out branch** is the branch its context holds
-(internally, custody). A **merge request** asks to merge a **source branch** into a **target branch** (GitLab's pair;
-GitHub's head and base already mean other things here). The **merge base** is the newest common ancestor. The **merge
-branch** is where a merge is tested and resolved, off the target. In a conflict, **ours** is the target and **theirs**
-is the source, as in `git merge`; Seon never rebases, so the words never swap. An **unmerged** identity is a conflict
+(internally custody today; `with-branch` after its rename, ledger CN-15). A **merge request** asks to merge a
+**source branch** into a **target branch** (GitLab's pair; GitHub's head and base already mean other things here).
+The **merge base** is the newest common ancestor. The **merge branch** is where a merge is tested and resolved, off
+the target. In a conflict, **ours** is the target and **theirs** is the source, as in `git merge`; Seon never rebases, so the words never swap. An **unmerged** identity is a conflict
 not yet resolved. **Behind** lists what the target changed since the merge base. A **norm** (Datahike's word) is the
 data change a merge carries. No invented short labels: never "S", "candidate", "head" or "proposal".
 
@@ -181,17 +181,21 @@ value and returns the transaction data that converts it. It is program, so it me
 proofs test it on its own rows. The request names its norms in order, `:seon.merge/norms [app.user/split-name]`. The
 merge commit records each norm's symbol and definition digest, and `merge!` skips a norm the target already records.
 Seon takes the concept and its rule, not `ensure-norms!` itself, which reads EDN resources and transacts each norm
-separately; the merge must commit program and converted data in one transaction. A norm's size is bounded by measured
-scan, output and time on the merge branch; one past the bound stops the merge and becomes its own root task (the bound
-is ledger MA-8b's owner question).
+separately; the merge must commit program and converted data in one transaction. The request's `:seon.merge/norms`
+is stored as the installed vector cells (`[:vector :symbol]`), never by transaction order, which neither keeps the
+order within one transaction nor survives a merge (`docs/research/agent-platform/2026-10-08/vectors/vectors.md`
+§3.1). A norm is bounded like any operation (CLAUDE.md "Make ordinary work sub-second"): its scan, output and time on
+the merge branch are measured and shown; over 1 s it is a finding naming the norm; over 10 s the merge stops and the
+norm becomes its own root task.
 
 ## 5. Automatic merging
 
 - **Configuration.** `:seon.config.merge/auto-merge` on the target cluster's configuration facts. Present: each new or
   updated merge request is merged automatically. Absent: every request waits for root. Root-owned: it lives on the
   target, never in `seon.config/defaults`.
-- **Runner.** Root's ordinary serialized agent path, entered by a schedule handler with its own call row: at start it
-  derives the open requests at the home, then listens for new and updated ones, and calls `merge!` for each. Same
+- **Runner.** Root's ordinary serialized agent path, entered by a schedule handler with its own call row and no
+  origin tag (root is an agent with a merge task): at start it derives the open requests at the home, then listens for
+  new and updated ones, and calls `merge!` for each. Same
   function, same writer; no second path and no model needed, so a provider-less root merges too.
 - **Stop.** A stopped automatic merge keeps the merge branch, records why on the request, and sends one message to
   root. The stop shows in root's current-state block, not its history. Root then reviews by hand (§1 forms).

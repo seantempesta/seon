@@ -42,9 +42,9 @@ here in place.
    (`seon.cache`), no second parser, evaluator, printer, store or harness. Each entrance supplies its read stage as one
    value (JVM mode also its eval stage, a test its resolved body); after reading, every entrance runs the same
    pipeline (§3.2, §3.3).
-3. **Light forgiveness for model text only.** Prose becomes comments and one linear scan balances delimiters, within
-   milliseconds and a few MB per reply. Valid Clojure passes byte for byte. Code (MCP, tests, generated) is read as
-   is.
+3. **Light forgiveness.** In model text, prose becomes comments; in every mode, one linear scan balances delimiters,
+   within milliseconds and a few MB per reply, with each repair shown beside the value it repaired. Valid Clojure
+   passes byte for byte. Code (MCP, tests, generated) gets no prose conversion: every line is code.
 4. **Context is three parts, in this order** (§3.4): the static prefix (`(help)` and fixed instructions, changing
    only with the loaded commit); the history (only the agent's own forms with their real results, append-only); the
    current-state block (rendered fresh at every model call from stored facts, never stored, never repeated). Each
@@ -196,8 +196,8 @@ and delimiter state across lines.
 - **No form.** A prose-only reply records one exchange (its call row) with the "no form" diagnostic and no
   evaluation, which tells the model to act.
 
-**Code (MCP, tests, generated, page-authored).** Text as is: every line is code, so `result/e…`, `*1`, `:k` and
-literals evaluate. A line that is exactly a fence, outside any form or string, is skipped. Input with no forms
+**Code (MCP, tests, generated, page-authored).** Every line is code, so `result/e…`, `:k` and literals evaluate; the
+one balancing pass runs as in reply mode, its repairs beside the value. A line that is exactly a fence, outside any form or string, is skipped. Input with no forms
 (`#_ 1`, only comments) answers `nil` without an error.
 
 **Evaluation.**
@@ -240,8 +240,12 @@ order, and printed by the value printer under the block budget. Sections, each a
   merge base is marked so; it does not block the merge request and stops `merge!` for root.
 - **Must-reads**: built automatically from what the task names: its must-reads and the fully qualified symbols and
   keywords backticked in its intent, each resolved to its current definition: arglists, contract and first docstring
-  line, with `(doc sym)` and `(clojure.repl/source sym)` offered as operations. A name resolving to nothing shows as a
-  problem on the task. An agent that runs the operations sees the result in its own history.
+  line, with `(doc sym)` and `(clojure.repl/source sym)` offered as operations. Library names resolve the same way
+  (`malli.core/validator`, `datahike.versioning/merge!`, a namespace such as `datahike.norm.norm`): read-only from the
+  host's loaded Var, with the project's pinned `reference-code/` revision, and nothing copied into the store.
+  Secondary to symbols, a must-read that is not a Var (a README, a doc page) is a path under
+  `reference-code/<project>/…`, shown with the pinned revision and one read operation. A name resolving to nothing
+  shows as a problem on the task. An agent that runs the operations sees the result in its own history.
 - **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model pass, each with
   its identity; `(my.agent/inputs)` is the operation that shows them all.
 - **Turns**: model calls left against the current outside wake, and the task's status.
@@ -263,8 +267,8 @@ until it is shown. A change in what the assigner wants is a task revision, not a
 assignment's exchanges as values and appends each finished exchange; it reads ordered history once, at proc start or
 a new assignment. Only exchanges whose call row carries a model attempt reach the model; there is no origin tag
 (ledger §3.15). Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
-Live results are held in `seon.cache` as an LRU kind (`:seon.repl/result`, keyed by evaluation id) under its
-configured byte budget, with no count limit; an evicted result's handle answers gone-value data with its saved shown
+Live results are held in `seon.cache` as a kind (`:seon.repl/result`, keyed by evaluation id) under its configured
+byte budget, with no count limit, evicted by Caffeine's own policy (W-TinyLFU, which approximates LRU); an evicted result's handle answers gone-value data with its saved shown
 text. Values the agent keeps in its own Vars are unaffected.
 
 **Storage roles** (`docs/research/agent-platform/2026-10-08/storage-roles/storage-roles.md`): the cache holds the full
@@ -345,7 +349,9 @@ There is no proof proc and no running or dirty state.
 ### 3.7 Lookups and help
 
 `doc`, `dir`, `source`, `apropos` and `find-doc` return data on SCI's `clojure.repl`, installed once in the SCI
-init; each declares the SCI context as a world input supplied from the evaluation. `(help)` is literal data teaching
+init; each declares the SCI context as a world input supplied from the evaluation. A name the agent's context does not
+define falls back to the host's loaded Var, so library code is readable at an agent's REPL: `source` of a library Var
+is its text in the pinned `reference-code/` checkout, as at the JVM REPL. `(help)` is literal data teaching
 only the forms its commit installs, each once, with exactly one session-end form; it is the static prefix.
 
 ### 3.8 Bounds
@@ -444,10 +450,21 @@ store before its slice lands.
 20. **Nested definitions** are known the way SCI knows them (its Var write hook), never by parsing text.
 21. **Cross-branch revisions** for content-keyed caches: the change to our Datahike fork is approved.
 22. **A test already red on main** before the source branch existed stops the automatic merge and asks root (merge.md §4).
-23. **Norms run in a fixed order**, listed as a vector on the merge request (`:seon.merge/norms`).
+23. **Norms run in a fixed order**, listed as a vector on the merge request (`:seon.merge/norms`), stored as vector
+    cells.
+24. **Delimiter repair in every mode** (the lightweight-forgiveness ruling; the installed scan already repairs MCP
+    code): §1.3.
+25. **Clojure's words.** One submission of forms is an **eval request** (nREPL's word); `seon.batch` folds into
+    `seon.repl` with clojure.main's stages `:read :eval :print :caught`; the other renames of the two Clojure-way
+    audits follow, one scripted sweep each, after the tasks-running work (ledger §3.18). This spec keeps today's words
+    (pass, settlement, envelope, shown text) until each rename lands and converts it.
+26. **State**: one validated state map per process and one per cluster; agent state in its Flow proc and SCI context;
+    Seon's cache counters are Caffeine's (ledger §3.19).
+27. **Ordered data** is stored as vector cells, never by transaction order (ledger §3.20).
+28. **Use the library.** Where a dependency does the job, use it and delete ours; keeping our own is an owner decision
+    per case (ledger §3.22).
+29. **Tasks reference library code**: library symbols, namespaces and `reference-code/` paths in a task resolve in the
+    block and at the agent's REPL (§3.4, §3.7).
+30. **`*1 *2 *3 *e`** are bound at an agent's REPL only if easy and cheap; lowest priority.
 
-Open:
-- **Subtree counts** (Datahike fork): child counts in branch nodes, counting at each split, or a recount job.
-- **Delimiter repair in code mode.** The law (§1.3) reads code as is; `seon.sci.forgive` also repairs delimiters for
-  MCP code. Recommendation: repair code-mode text too, with the same repair notes beside the value, since an MCP agent
-  benefits as a model does and the scan is the same; then §1.3 says so.
+Open: the ledger's §6 lists the questions still open for the owner.
