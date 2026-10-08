@@ -11,7 +11,7 @@
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (support/reply (get (last (get result "content")) "text"))))
+    (support/mcp-reply result)))
 
 (defn- median-ms
   "The median wall milliseconds of `n` runs of `code`."

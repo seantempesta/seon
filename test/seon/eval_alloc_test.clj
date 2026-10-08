@@ -12,7 +12,7 @@
                                (mcp/call (json/write-str
                                           {"name" "eval_clj"
                                            "arguments" {"cluster" running "agent" agent-id "code" code}})))]
-                    (support/reply (get (last (get reply "content")) "text"))))
+                    (support/mcp-reply reply)))
            ;; one 50,000,016-byte long array
            large (call "(alength (long-array 6250000))")
            small (call "(+ 1 2)")]
@@ -32,7 +32,7 @@
                                (mcp/call (json/write-str
                                           {"name" "eval_clj"
                                            "arguments" {"cluster" running "agent" agent-id "code" code}})))]
-                    (support/reply (get (last (get reply "content")) "text"))))
+                    (support/mcp-reply reply)))
            allocation (:seon.repl/value
                        (call "(select-keys (seon.profile/measure (fn [] (alength (long-array 6250000))))
                                 [:seon.profile/value :seon.profile/alloc-bytes :seon.profile/alloc-scope])"))

@@ -13,7 +13,7 @@
                                (mcp/call (json/write-str
                                           {"name" "eval_clj"
                                            "arguments" {"cluster" running "agent" agent-id "code" code}})))]
-                    (support/reply (get (last (get reply "content")) "text"))))]
+                    (support/mcp-reply reply)))]
        (call "(defn pf {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
        (doseq [[code expected calls]
                [["(pf 41)" 42 1]

@@ -764,6 +764,31 @@
             *default-data-reader-fn* (fn [tag form] {::tag tag ::form form})]
     (read-string text)))
 
+(defn- mcp-parsed
+  "Each content item of a parsed MCP tool result as [text reply]."
+  [result]
+  (mapv (fn [item] (let [text (get item "text")] [text (reply text)])) (get result "content")))
+
+(defn mcp-text
+  "The text of the REPL item of a parsed MCP `eval_clj` result: the last item
+  that is not the automatic test step, found by its data, never by position."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [result]
+  (first (last (remove #(contains? (second %) :seon.turn.loop/tests) (mcp-parsed result)))))
+
+(defn mcp-reply
+  "The REPL reply map of a parsed MCP `eval_clj` result, never the test step."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [result]
+  (reply (mcp-text result)))
+
+(defn mcp-tests
+  "The automatic test step's `:seon.turn.loop/tests` value of a parsed MCP
+  `eval_clj` result, or nil when the pass ran none."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/value]]}
+  [result]
+  (some #(:seon.turn.loop/tests (second %)) (mcp-parsed result)))
+
 (defn refusal-data
   "Return a flat error value, deepest thrown ex-data, or `committed`."
   [thunk]

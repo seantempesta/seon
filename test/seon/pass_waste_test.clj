@@ -21,7 +21,7 @@
              calls (reduce (fn [counts row]
                              (update counts (:seon.profile/sym row) (fnil + 0) (:seon.profile/calls row)))
                            {} (:seon.profile/by-calls measured))
-             reply (support/reply (get (last (get result "content")) "text"))]
+             reply (support/mcp-reply result)]
          (is (false? (get result "isError")))
          (is (= 42 (:seon.repl/value reply)))
          (is (not (contains? reply :seon.repl/diagnostics)))

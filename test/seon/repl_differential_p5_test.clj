@@ -12,7 +12,7 @@
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (get (last (get result "content")) "text")))
+    (support/mcp-text result)))
 
 (def ^:private lines 20000)
 

@@ -26,7 +26,7 @@
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (support/reply (get (last (get result "content")) "text")))))
+    (:seon.repl/value (support/mcp-reply result))))
 
 (deftest ^{:seon/tasks #{'seon.sci.arm/a-def-without-line-metadata-refuses-its-origin}}
   a-definition-made-through-eval-answers-as-plain-sci

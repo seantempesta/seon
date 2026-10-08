@@ -177,7 +177,7 @@
      (let [call (fn [code]
                   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                                         "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-                    (get (last (get result "content")) "text")))
+                    (support/mcp-text result)))
            _ (call "(defn error-result-refused {:malli/schema [:=> [:cat :int] :int]} [x] x)")
            refused (call "(error-result-refused \"not an int\")")
            data (support/reply refused)
