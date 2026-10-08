@@ -47,4 +47,14 @@
   :kind :function
   :intent "A definition whose line starts with whitespace and sits outside a code fence is read as prose under the documented line rule, so it is never evaluated, and a later form depending on it fails without saying why. Correct: either the stepper accepts leading whitespace before a form start, or the agent is told that the line was read as prose (help and the docs teach the rule, and a later form depending on the definition fails clearly). Proof: the probe in prose-design.md answers the chosen behavior as data."
   :must-read #{seon.sci.forgive/segments}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}
+ #:seon.task{:name "prose-after-a-form-on-its-line-is-evaluated"
+             :kind :function
+             :intent "In a model reply the rest of a line a form started is code, so trailing prose evaluates: (seon.turn/planned-sources \"(Note: this is prose) and more\\n(+ 1 2)\" 'user 100000) answers sources (Note: this is prose), and, more, (+ 1 2). seon.sci.forgive/reply-step treats every construct after code-end on the same line as code. Correct: after a form, a line's remainder that does not start a form is comment text. Proof: a forgive-test row where '(+ 1 2) gives 3' answers one source with the comment."
+             :must-read #{seon.sci.forgive/reply-step}
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
+ #:seon.task{:name "a-bare-token-line-in-a-reply-is-prose"
+             :kind :function
+             :intent "A model reply line holding only a symbol, keyword, number or string is prose: (seon.turn/planned-sources \"result/e1a2b3c4d5e6\" 'user 100000) and \"42\" answer the no-forms refusal, so an agent cannot dig a result handle or read a Var by naming it, as the REPL teaches (keys result/...). seon.sci.forgive/form-start? accepts only collection, quote, deref, meta and dispatch characters. Correct: a line whose whole text reads as one token that resolves (a qualified symbol, a result handle, a keyword, a literal) is a form. Proof: a forgive-test row answering result/e1a2b3c4d5e6 as one source."
+             :must-read #{seon.sci.forgive/form-start?}
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]

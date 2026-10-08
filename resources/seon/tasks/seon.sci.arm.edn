@@ -19,4 +19,9 @@
  #:seon.task{:name "arming-projection-is-rebuilt-per-caller-within-one-form"
              :kind :function
              :intent "When a form registers a schema the batch has not applied yet, seon.sci.arm/arming-projection rebuilds the delta projection (seon.schema/projection-with-declarations, about 5-8 ms and 10 MB per rebuild on the default program) for each caller in that form: seon.sci.arm/arm! once per arming write, seon.turn.batch/schema-notes and seon.turn.batch/derive-form once each. Repro: (do (seon.schema/register! :k [:int]) (defn ^{:malli/schema [:=> [:cat :k] :int]} f [x] x) (defn ^{:malli/schema [:=> [:cat :k] :int]} g [x] x)). Correct: one rebuild per form whose delta changed, the value handed to every reader. Proof: a pass with that form shows one projection-with-declarations call per form in its profile, and seon.cluster.turn-test/a-function-using-a-schema-registered-in-the-same-form-is-admitted stays green."
-             :must-read #{seon.sci.arm/arming-projection seon.turn.batch/derive-form}}]
+             :must-read #{seon.sci.arm/arming-projection seon.turn.batch/derive-form}}
+ #:seon.task{:name "an-unarmable-contract-breaks-the-definition"
+             :kind :function
+             :intent "A defn whose contract cannot arm stops working: (defn badc {:malli/schema [:=> [:cat :no.such/schema] :int]} [x] x) then (badc 1) answers 'audit.scratch/badc is unavailable: its contract did not arm' on default 2026-10-08, where plain SCI answers 1. seon.sci.arm/arm! catches the arming failure and replaces the Var root with refusing-root. CLAUDE.md: preserve malformed contracts as data and never arm them; the owner's law: any valid Clojure SCI can execute works. Correct: the evaluated definition keeps its root, the contract failure is a diagnostic beside it. Proof: a deftest where a defn with an unknown schema key still answers its call and the reply carries the arming diagnostic."
+             :must-read #{seon.sci.arm/arm!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]

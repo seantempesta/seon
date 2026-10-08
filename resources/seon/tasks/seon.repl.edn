@@ -64,4 +64,9 @@
   :kind :function
   :intent "(def ^:private fnA (fn [x] (inc x))) replies \"Nothing defined with def is persisted\" while the pass admitted a program row for it (rows for fv, fnA and pv exist). def-note sniffs the source text for def; the pass already knows the truth in :seon.batch/private (:not-a-function for a non-function value). Correct: the note follows what the pass admitted. Related tasks: seon.repl/every-def-repeats-the-same-persistence-note, seon.repl/a-jvm-def-is-told-it-lives-in-sci (one note, decided from the pass). Proof: a fn-valued def through the agent entrance replies without the not-persisted note, and a value def keeps it."
   :must-read #{seon.repl/def-note}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/private-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/private-design.md"}}
+ #:seon.task{:name "printed-output-reaches-the-reply-unbounded"
+             :kind :function
+             :intent "A form's printed output reaches the reply whole: eval_clj sci '(dotimes [i 300000] (println i))' answered a 2,289,210-character MCP reply (:out-tokens 621528) on default 2026-10-08, while a 2,000,000-character string VALUE answered 5,172 characters. seon.repl's response composes :seon.repl/out with print/string-literal, a second printer outside the value printer's budget; the only response is a :large-output finding beside the flood. Correct: :out is shown through the value printer's one budget with a dig form for the rest, like any value. Proof: a deftest asserting the reply of 300,000 printed lines is under the value printer's bound and names a dig form."
+             :must-read #{seon.repl/response seon.print/string-literal}
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]

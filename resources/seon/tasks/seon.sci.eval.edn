@@ -228,4 +228,9 @@
             :kind :function,
             :intent
             "In an MCP SCI pass, (deftest boom (is (= 1 (throw (ex-info \"boom\" {:a 1}))))) then (run-tests 'my.tsx) returned :out of about 10500 estimated tokens: clojure.test's report :error calls print-cause-trace with the live Throwable and no depth (reference-code/clojure/src/clj/clojure/test.clj:384-395). Correct: the erroring test's report holds the exception class and message and no host frames, under 300 estimated tokens. Proof: seon.sci.documentation-test/a-test-error-report-prints-the-exception-without-host-frames.",
-            :must-read #{seon.sci.eval/agent-test-namespace}}]
+            :must-read #{seon.sci.eval/agent-test-namespace}}
+ #:seon.task{:name "a-set-print-length-taxes-every-later-run"
+             :kind :function
+             :intent "After one (set! *print-length* 50) every later run of that agent costs about +100 ms and +280 MB: (+ 1 1) on agent repl-audit-opus-p measured 47/43/44 ms and ~55 MB per call before, 148/150/150 ms and ~340 MB after (all-thread allocation, default 2026-10-08); a fresh agent stays at ~45 ms. Cause not yet located: the turn thread's seon frames sample the same before and after, so the extra work is outside seon.* frames (session-print-options queries every evaluation the agent ever ran per fork; the print options ride every evaluation). Correct: a session print option costs nothing per run. Proof: a probe row where 10 runs after the set! cost within 10% of 10 runs before."
+             :must-read #{seon.sci.eval/session-print-options seon.sci.eval/fork-for-turn}
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]
