@@ -22,4 +22,8 @@
             :kind :function,
             :intent
             "`seon.mcp/call`'s catch built the shown source as (str/trim (subs request 0 (min 200 (count request)))): a second clip of the request text outside the value printer (CLAUDE.md: exactly one printer, nothing else clips). Correct: carry the request whole as data on the call's error value and let the value printer bound it. Proof: seon.mcp-entrance-test/a-thrown-call-carries-its-whole-request.",
-            :must-read #{seon.mcp/call}}]
+            :must-read #{seon.mcp/call}}
+ #:seon.task{:name "jvm-mode-defs-live-forever-with-no-owner"
+             :kind :function
+             :intent "Lanes' MCP `mode jvm` evaluations intern vars that live as long as the JVM and nothing reports or retires them: `user/ev` and `user/cap` hold 440,605 read-evidence maps (448 MB, 34% of the 1.16-1.31 GB live set after full GC), `user/db` pins an old database, `tmp.codec-print/*` (heap-live lane MAT, default, 2026-10-08). Options: JVM mode evaluates in a per-agent namespace retired with the agent (`my.agent/retire-branch!`), and/or runtime_status reports large interned vars by namespace. Done when a def made through `seon.mcp/jvm-run` by an agent is gone after that agent retires."
+             :must-read #{seon.mcp/jvm-run my.agent/retire-branch!}}]
