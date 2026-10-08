@@ -124,3 +124,6 @@
 [submodule "reference-code/aero"]
 	path = reference-code/aero
 	url = https://github.com/juxt/aero.git
+[submodule "reference-code/hiccup"]
+	path = reference-code/hiccup
+	url = https://github.com/weavejester/hiccup.git

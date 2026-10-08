@@ -28,6 +28,11 @@
         ;; seon.cache: the one process cache for derived values, bounded in
         ;; estimated bytes, one derivation per key (cache-central design 2026-09-26).
         com.github.ben-manes.caffeine/caffeine {:mvn/version "3.2.4"}
+        ;; Byte counting without building a byte array (Utf8/encodedLength); already
+        ;; on the classpath through dependencies, declared because Seon calls it.
+        com.google.guava/guava {:mvn/version "31.0.1-jre"}
+        ;; HTML serialization (replaces seon.render.hiccup, AU-Q7).
+        hiccup/hiccup {:mvn/version "2.0.0"}
 
         org.replikativ/datahike
         {:local/root "reference-code/datahike"
