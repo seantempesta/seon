@@ -125,6 +125,18 @@
            (#'operator/test-check-arguments (:seon.operator/tests request) false)))
     (is (= :refused (:seon.operator/disposition refused)))))
 
+(deftest ^{:seon/tasks #{'seon.operator/a-red-on-head-cannot-be-compared-with-its-parent}}
+  check-at-a-revision-names-the-tests-without-paths
+  (let [root (System/getProperty "java.io.tmpdir")
+        request (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1"
+                                      "--test" "seon.operator-test/check-at-a-revision-names-the-tests-without-paths"])
+        with-path (try (operator/parse-argv ["--seon-root" root "check" "--at" "HEAD~1" "src/seon/operator.clj"])
+                       (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]
+    (is (= "HEAD~1" (:seon.operator/at request)))
+    (is (= 1 (count (:seon.operator/tests request))))
+    (is (= [] (:seon.operator/paths request)))
+    (is (some? with-path) "a path beside --at is refused")))
+
 (deftest a-successful-start-reply-carries-counts-not-branch-heads
   ;; `start --head` printed ~10 KB, mostly one entry per captured branch head.
   (let [heads (into {} (map (fn [n] [(str "agent-" n) (str "commit-" n)])) (range 110))

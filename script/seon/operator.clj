@@ -1776,13 +1776,18 @@
         root (:seon.operator/managed-root request)
         repository (committed-repository)
         head (str/trim (command! ["git" "rev-parse" "--verify" "HEAD^{commit}"] repository 30000))
-        sha (candidate-revision! repository (get request :seon.operator/paths []))
+        at (:seon.operator/at request)
+        sha (if at
+              (str/trim (command! ["git" "rev-parse" "--verify" (str at "^{commit}")] repository 30000))
+              (candidate-revision! repository (get request :seon.operator/paths [])))
         {source-root :seon.operator/source-root :as source} (committed-source! root sha)
         _ (hold! (repository-root) source-root)
         archive-ms (elapsed-ms began)]
     (try
-      (let [rehearsal (connected! (assoc request :seon.source/directory source-root
-                                         :seon.boot/cluster-name (get request :seon.boot/cluster-name "default")))
+      (let [;; `--at REV` only runs tests on REV's archive: nothing to adopt.
+            rehearsal (when-not at
+                        (connected! (assoc request :seon.source/directory source-root
+                                           :seon.boot/cluster-name (get request :seon.boot/cluster-name "default"))))
             rehearsal-ms (elapsed-ms began)
             tests (get request :seon.operator/tests [])
             run (when (and (seq tests) (not (:seon.error/message rehearsal)))
@@ -1863,6 +1868,9 @@
           "--include-long" (if (= :check command)
                              (recur (next args) (assoc request :seon.operator/include-long? true) positionals)
                              (fail! "--include-long is supported only by check." request))
+          "--at" (if (and (= :check command) (seq (next args)))
+                   (recur (nnext args) (assoc request :seon.operator/at (second args)) positionals)
+                   (fail! "--at REV is supported only by check." request))
           "--test" (if (and (= :check command) (seq (next args)))
                      (recur (nnext args) (update request :seon.operator/tests (fnil conj []) (second args))
                             positionals)
@@ -1905,6 +1913,8 @@
                      (when stray
                        (fail! (str "'" stray "' is not a path: each test needs its own --test (--test A --test B), not --test A B.")
                               {:seon.operator/argument stray}))
+                     (when (and (:seon.operator/at request) (seq positionals))
+                       (fail! "--at REV checks REV's own archive: it takes no PATH." request))
                      (assoc request :seon.operator/paths
                             (mapv #(.getCanonicalPath (io/file %)) positionals)))
             (:status :down :nuke)
@@ -2024,7 +2034,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH...] [--test NS | --test NS/NAME]... [--include-long] (each test needs its own --test)"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH... | --at REV] [--test NS | --test NS/NAME]... [--include-long] (check --at REV runs the named tests on a throwaway JVM booted from git archive REV; each test needs its own --test)"}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.

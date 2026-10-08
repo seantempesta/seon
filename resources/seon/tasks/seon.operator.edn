@@ -55,4 +55,8 @@
  #:seon.task{:name "a-command-with-help-answers-an-error-map-instead-of-its-usage"
              :kind :function
              :intent "`bin/seon check --help` (and any command with --help) answers a full error map, \"Unknown option.\" with its chain, layer and timestamps, instead of the command's usage line (2026-10-08, lane impl-ref1). The usage exists: `bin/seon help` prints every command's flags. An agent's first natural probe of a command costs it an error to read. Done when `--help` after any command prints that command's usage from the same usage table and exits 0, as a regression on `seon.operator/parse-argv`."
-             :must-read #{seon.operator/parse-argv}}]
+             :must-read #{seon.operator/parse-argv}}
+ #:seon.task{:name "a-red-on-head-cannot-be-compared-with-its-parent"
+             :kind :function
+             :intent "A test red on HEAD could be classified by the commit that changed it only by hand-building an archive. `bin/seon check --at REV --test NS/NAME` runs the named tests on a throwaway JVM booted from `git archive REV` (no working-tree paths, no rehearsal adoption), reusing the candidate machinery, so one var's result at HEAD and HEAD~1 are two commands. Done when parse-argv carries --at and refuses PATH beside it, and a recorded run shows one var at HEAD and HEAD~1."
+             :must-read #{seon.operator/check! seon.operator/parse-argv}}]
