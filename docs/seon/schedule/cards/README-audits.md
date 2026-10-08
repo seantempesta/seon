@@ -277,8 +277,13 @@ fully specified in the ledger and its card is this lane's next batch.
 | UL-8 | [UL-8](UL-8.md) (8a, 8b) | ready |
 | UL-9 | — | waits on task `seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check` |
 | UL-10 | [UL-10](UL-10.md) (Opus; probe decides part 2) | ready after its file holders |
-| UL-10b, UL-12 … UL-25, DEPS-1 | — | rows from the answers; each waits on its fork row or file release (ledger) |
-| FK-MALLI, FK-KONDO, FK-DH, FK-ASYNC, FK-SCI | — | fork rows, one fork commit and one bump each; root batches the restarts |
+| UL-10b, UL-12 … UL-25 | — | rows from the answers; each waits on its fork row or file release (ledger) |
+| DEPS-1 | [DEPS-1](DEPS-1.md) | landed by root in the restart batch (hiccup 2.0.0 sorts keys; UL-16 keeps only style-key hyphenation) |
+| FK-MALLI | [FK-MALLI](FK-MALLI.md) | ready (fork) |
+| FK-KONDO | [FK-KONDO](FK-KONDO.md) (with PB-12a) | ready (fork) |
+| FK-SCI | [FK-SCI](FK-SCI.md) (future-call; alias refuses a retarget) | ready (fork) |
+| FK-DH | [FK-DH](FK-DH.md) (Opus) | after LR-CACHEb (one Datahike bump per batch) |
+| FK-ASYNC | [FK-ASYNC](FK-ASYNC.md) | root creates the fork remote; builds on unpushed `fb21fc0` |
 | UL-11 | [UL-11](UL-11.md) | ready (diagnosis) |
 | SR-P | [SR-P](SR-P.md) | ready after blob-konserve releases `blob.clj` |
 | SR-L | [SR-L](SR-L.md) | ready after led-cacheb releases `registry.clj` |
