@@ -88,3 +88,21 @@
          (answered (str in-shared "(defn g5 [] 7)") other running)
          (is (= [7 7] (answered (str in-shared "[(h5) (g5)]") agent-id running)))
          (is (= [8 8] (answered (str in-shared "(defn g5 [] 8) [(h5) (g5)]") agent-id running))))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass}}
+  an-inherited-caller-sees-a-same-pass-redefinition
+  ;; The fixture agent holds the cluster head's custody; the other agents
+  ;; created there are other writers of the same branch.
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [other (str "other-" agent-id)
+           fresh (str "fresh-" agent-id)
+           in-shared "(in-ns 'scratch.shared-writer) (clojure.core/refer-clojure) "]
+       (support/transacted! connection (support/agent-tx @connection other))
+       (support/transacted! connection (support/agent-tx @connection fresh))
+       (testing "a caller another writer defined runs the agent's redefinition in the redefining pass"
+         (answered (str in-shared "(defn g7 [] 1)") agent-id running)
+         (answered (str in-shared "(defn h7 [] (g7)) (defn k7 [] (h7))") other running)
+         (is (= [2 2 2] (answered (str in-shared "(defn g7 [] 2) [(k7) (h7) (g7)]") agent-id running))))
+       (testing "an agent's first pass (a fresh fork) redefines a callee the base interpreted"
+         (is (= [3 3 3] (answered (str in-shared "(defn g7 [] 3) [(k7) (h7) (g7)]") fresh running))))))))

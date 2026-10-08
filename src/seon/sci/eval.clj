@@ -2681,6 +2681,59 @@
                            (str "The loaded JVM has no core definition " sym ".")})))
                 all-function-rows)}))))))
 
+(declare same-program-root?)
+
+(defn- inherited-callers
+  "The agent-authored transitive callers of `function-symbol` in `database`
+  that `ctx` holds as the base's Var or as its own Var holding the base's root."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
+                  [:vector :qualified-symbol]]}
+  [ctx base database function-symbol]
+  (let [closure (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds #{function-symbol}})
+        _ (when (:seon.db/invalid-read closure)
+            (throw (ex-info (:seon.error/message closure) closure)))
+        held (:namespaces @(:env base))
+        own (:namespaces @(:env ctx))]
+    (into []
+          (filter (fn [caller]
+                    (let [path [(symbol (namespace caller)) (symbol (name caller))]
+                          base-var (get-in held path)
+                          fork-var (get-in own path)]
+                      (and (sci.utils/var? base-var) (sci.utils/var? fork-var)
+                           (::agent-authored? (kernel/program-function ctx caller))
+                           (or (identical? base-var fork-var)
+                               (same-program-root? @fork-var @base-var))))))
+          (sort (disj (:seon.fn/affected closure) function-symbol)))))
+
+(defn reinterpret-inherited-callers!
+  "The base's callers of `function-symbol` re-interpreted in the turn fork `ctx`.
+  When the fork defines it as `sci-var` apart from the base's Var, its callers
+  call that definition in the same pass, as one Clojure Var."
+  {:seon/tasks #{'seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass
+                 'seon.sci.eval/a-redefinition-walks-the-reverse-closure-with-its-test-reach}
+   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol :seon.sci.eval/sci-var]
+                  [:vector :qualified-symbol]]}
+  [ctx database function-symbol sci-var]
+  (let [base (::base-ctx ctx)
+        base-var (when base
+                   (get-in @(:env base) [:namespaces (symbol (namespace function-symbol))
+                                         (symbol (name function-symbol))]))]
+    (if-not (and (sci.utils/var? base-var) (not (identical? base-var sci-var)))
+      []
+      (let [callers (inherited-callers ctx base database function-symbol)]
+        ;; Re-interpretation is not the form's own definition: no write or
+        ;; expansion of it is observed as the program change.
+        (binding [sci.lang/*write-observer* nil
+                  sci.lang/*expansion-observer* nil]
+          ;; Copy every caller into this generation before analyzing any, so
+          ;; each caller resolves the others' copies, as `install-selected!` does.
+          (doseq [caller callers
+                  :let [caller-var (sci/resolve ctx caller)]]
+            (sci/bind-root! ctx caller-var @caller-var))
+          (doseq [caller callers]
+            (install-function-from-database! ctx database caller)))
+        callers))))
+
 (defn- authored-rows
   "The agent-authored program rows of `database`, found by their admission datoms."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
