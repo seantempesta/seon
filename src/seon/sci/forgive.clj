@@ -93,7 +93,8 @@
 
 (defn- literal-line?
   "Whether the trimmed line `[s le)` is exactly one literal (number, string,
-  keyword, character, `##` value) or one namespace-qualified symbol."
+  keyword, character, `##` value, `true`, `false`, `nil`) or one
+  namespace-qualified symbol."
   {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
   [^String text ^long s ^long le]
   (let [e (loop [e le] (if (and (> e s) (Character/isWhitespace (.charAt text (int (dec e))))) (recur (dec e)) e))
@@ -105,6 +106,7 @@
        (= \\ c) (and (>= (- e s) 2) (one-token? (+ s 2)))
        (= \# c) (and (> (- e s) 2) (= \# (.charAt text (int (inc s)))) (one-token? (+ s 2)))
        (not (one-token? s)) false
+       (#{"true" "false" "nil"} (subs text s e)) true
        (Character/isDigit c) true
        (#{\+ \-} c) (and (> (- e s) 1) (Character/isDigit (.charAt text (int (inc s)))))
        (= \: c) (> (- e s) 1)
@@ -148,7 +150,14 @@
         matching (fn [c] (loop [k (dec (.length open))]
                            (cond (neg? k) -1 (= c (closer-of (.charAt open k))) k :else (recur (dec k)))))
         at-code! (fn [o line] (when repair? (aset marks 1 (long o)) (aset marks 2 (long line))))
-        repair! (fn [line k v] (vswap! repairs conj! {:seon.batch/line line k v}))
+        repair! (fn [line at k v] (vswap! repairs conj! {:seon.batch/line line :seon.batch/at at k v}))
+        ;; closers inserted at `o` move every repair made after `o` by `d`
+        shift! (fn [o d]
+                 (loop [k (dec (count @repairs))]
+                   (let [r (when (>= k 0) (nth @repairs k))]
+                     (when (and r (>= (long (:seon.batch/at r)) (long o)))
+                       (vswap! repairs assoc! k (update r :seon.batch/at + d))
+                       (recur (dec k))))))
         start! (fn [o line ols] (vreset! form [o line (inc (- (long o) (long ols)))]) (aset marks 0 1))
         ;; an item ended at `o`: true when it completes the top-level form
         item! (fn [o line]
@@ -161,7 +170,8 @@
                            line (aget marks 2)
                            cls (closers 0)]
                        (.insert out (int o) ^String cls)
-                       (repair! line :seon.batch/inserted cls)
+                       (shift! o (count cls))
+                       (repair! line o :seon.batch/inserted cls)
                        (.setLength open 0)
                        (aset marks 0 1)
                        (item! (+ o (count cls)) line)))
@@ -209,13 +219,13 @@
                               (>= m 0)
                               (let [cls (closers (inc m))]
                                 (.append out text (int copied) (int i))
+                                (repair! line (.length out) :seon.batch/inserted cls)
                                 (.append out ^String cls)
-                                (repair! line :seon.batch/inserted cls)
                                 (.setLength open m)
                                 (recur (inc i) i (or (item! (+ (.length out) 1) line) after)))
                               :else
                               (do (.append out text (int copied) (int i))
-                                  (repair! line :seon.batch/dropped (str c))
+                                  (repair! line (.length out) :seon.batch/dropped (str c))
                                   (when top? (vreset! form nil) (aset marks 0 0))
                                   (recur (inc i) (inc i) after))))
                           \\ (let [j (token-end text (Math/min (+ i 2) le) le)] (recur j copied (or (item! (+ o (- j i)) line) after)))
@@ -225,7 +235,10 @@
                           \# (case d
                                (\( \{) (do (.append open (char d)) (at-code! (+ o 2) line) (recur (+ i 2) copied after))
                                \" (do (vreset! in-string true) (recur (+ i 2) copied after))
-                               (\_ \' \=) (do (prefix! 1) (recur (+ i 2) copied after))
+                               ;; a discard starting a form is that no-value
+                               ;; construct; any other needs one more item
+                               \_ (do (when-not top? (prefix! 2)) (recur (+ i 2) copied after))
+                               (\' \=) (do (prefix! 1) (recur (+ i 2) copied after))
                                \^ (do (prefix! 2) (recur (+ i 2) copied after))
                                \? (do (prefix! 1) (recur (if (and (< (+ i 2) le) (= \@ (.charAt text (int (+ i 2))))) (+ i 3) (+ i 2)) copied after))
                                \# (let [j (token-end text (+ i 2) le)] (recur j copied (or (item! (+ o (- j i)) line) after)))
@@ -271,8 +284,8 @@
       (when @in-string
         (vreset! balanced false)
         (when repair?
+          (repair! last-line (.length out) :seon.batch/inserted "\"")
           (.append out \")
-          (repair! last-line :seon.batch/inserted "\"")
           (vreset! in-string false)
           (item! (.length out) last-line))))
     (when (pos? (.length open))
@@ -411,35 +424,39 @@
        (str/join "\n")))
 
 (defn- owned
-  "`segments` with each of `repairs` on the last segment starting at or before
-  its line (`lines` are the segments' start lines), else on the first."
-  {:malli/schema [:=> [:cat [:vector :map] [:vector pos-int?] [:maybe :seon.batch/repairs]] [:vector :map]]}
-  [segments lines repairs]
+  "`segments` with each of `repairs`, in offset order, on the last segment
+  starting at or before its offset (`starts` are the segments' offsets in
+  the forgiven text), else on the first."
+  {:malli/schema [:=> [:cat [:vector :map] [:vector nat-int?] [:maybe :seon.batch/repairs]] [:vector :map]]}
+  [segments starts repairs]
   (if (empty? segments)
     segments
-    (reduce (fn [out {line :seon.batch/line :as repair}]
-              (update-in out [(max 0 (dec (count (take-while #(<= (long %) (long line)) lines)))) :seon.batch/repairs]
-                         (fnil conj []) repair))
-            segments repairs)))
+    (let [starts (long-array starts)]
+      (reduce (fn [out {at :seon.batch/at :as repair}]
+                (let [k (java.util.Arrays/binarySearch starts (long at))]
+                  (update-in out [(if (neg? k) (max 0 (- -2 k)) k) :seon.batch/repairs] (fnil conj []) repair)))
+              segments repairs))))
 
 (defn segments
   "Each form's source in the forgiven text, the text above it as its comment.
 
-  The text's repairs ride beside the segments, and each segment carries those
-  on its own lines. `mode` is `:reply` by default; a failed read's span is one
-  more source, whose live read answers its error."
+  The text's repairs ride beside the segments in text order, and each segment
+  carries those made from its start to the next segment's. `mode` is `:reply`
+  by default; a failed read's span is one more source, whose live read answers
+  its error."
   {:malli/schema [:function
                   [:=> [:cat :string] :seon.batch/segmented]
                   [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]]}
   ([text] (segments text :reply))
   ([text mode]
-   (let [{t :seon.batch/text spans :seon.batch/spans repairs :seon.batch/repairs} (forgive text mode)]
-     (loop [[[s e line] & more] spans prev 0 out [] lines []]
+   (let [{t :seon.batch/text spans :seon.batch/spans repairs :seon.batch/repairs} (forgive text mode)
+         repairs (some->> repairs (sort-by :seon.batch/at) vec)]
+     (loop [[[s e] & more] spans prev 0 out [] starts []]
        (if-not s
-         (cond-> {:seon.batch/segments (owned out lines repairs)} repairs (assoc :seon.batch/repairs repairs))
+         (cond-> {:seon.batch/segments (owned out starts repairs)} repairs (assoc :seon.batch/repairs repairs))
          (let [source (str/trimr (subs t s e))
                c (when (< (non-blank t prev s) (long s)) (comment-of (subs t prev s)))
                skip? (no-value? source)]
            (recur more e
                   (if skip? out (conj out (cond-> {:seon.batch/source source} (seq c) (assoc :seon.batch/comment c))))
-                  (if skip? lines (conj lines line)))))))))
+                  (if skip? starts (conj starts s)))))))))

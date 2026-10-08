@@ -119,7 +119,7 @@
              [:seon.cluster.eval/comment
               {:optional true}
               :seon.cluster.eval/comment]
-             [:seon.cluster.eval/repairs {:optional true} :seon.cluster.eval/repairs]
+             [:seon.cluster.eval/delimiter-repairs {:optional true} :seon.cluster.eval/delimiter-repairs]
              [:seon.cluster.eval/ordinal
               {:optional true}
               :seon.cluster.eval/ordinal]
@@ -186,7 +186,7 @@
             :repairs
             [:string
              {:description
-              "The forgiving scan's repairs on one evaluation's lines, as [line :dropped \"x\"] or [line :inserted \"x\"] data (seon.cluster.eval/repairs), beside its value."}],
+              "The forgiving scan's repairs owned by one evaluation (seon.cluster.eval/delimiter-repairs), as the value printer shows that data, beside its value."}],
             :repeated
             [:string
              {:description

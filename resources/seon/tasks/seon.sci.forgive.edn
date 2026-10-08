@@ -57,4 +57,19 @@
              :kind :function
              :intent "A model reply line holding only a symbol, keyword, number or string is prose: (seon.turn/planned-sources \"result/e1a2b3c4d5e6\" 'user 100000) and \"42\" answer the no-forms refusal, so an agent cannot dig a result handle or read a Var by naming it, as the REPL teaches (keys result/...). seon.sci.forgive/form-start? accepts only collection, quote, deref, meta and dispatch characters. Correct: a line whose whole text reads as one token that resolves (a qualified symbol, a result handle, a keyword, a literal) is a form. Proof: a forgive-test row answering result/e1a2b3c4d5e6 as one source."
              :must-read #{seon.sci.forgive/form-start?}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-audit/repl-audit-opus-audit.md"}}
+ #:seon.task{:name "a-nested-discard-evaluates-a-discarded-form"
+             :kind :function
+             :intent "The forgiving scan counted `#_` as a prefix needing one form, so a discard whose operand is a discard ended too early: (seon.sci.forgive/segments \"#_ #_ 1 2 3\" :code) answered sources 2 and 3, and an MCP SCI run of #_ #_ 1 2 3 replied 2 and 3 where plain SCI reads only 3; a discarded side effect ran. Correct: a discard that starts a form is one no-value construct, and every further discard in it needs one more form, as the reader consumes them. Proof: seon.repl-differential-reader-test/a-nested-discard-answers-as-plain-sci and the discard rows of seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules."
+             :must-read #{seon.sci.forgive/forgive}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}
+ #:seon.task{:name "a-bare-true-false-or-nil-line-is-prose"
+             :kind :function
+             :intent "In a model reply a line holding only true, false or nil became a comment: (seon.sci.forgive/segments \"true\\nfalse\\nnil\\n42\" :reply) answered only 42, against the ruling that a line reading as one literal is code. seon.sci.forgive/literal-line? omitted the three symbol-shaped literals. Correct: each is one source. Proof: seon.repl-differential-reader-test/true-false-and-nil-lines-are-code-in-a-reply."
+             :must-read #{seon.sci.forgive/forgive}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}
+ #:seon.task{:name "a-repair-goes-to-the-last-form-starting-on-its-line"
+             :kind :function
+             :intent "seon.sci.forgive/segments gave each repair to the last segment whose start line was at or before the repair's line, so with two forms on one line the first form's stray closer went to the second: (seon.sci.forgive/segments \"(inc 1)) (inc 2)\" :code) put [1 :dropped \")\"] on (inc 2). Correct: a repair carries its offset in the forgiven text and belongs to the segment whose span starts at or before it. Proof: seon.repl-differential-reader-test/a-repair-rides-with-the-form-it-repaired-on-a-shared-line."
+             :must-read #{seon.sci.forgive/segments}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}]

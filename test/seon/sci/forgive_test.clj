@@ -27,7 +27,9 @@
 
 (deftest ^{:seon/tasks #{'seon.sci.forgive/discard-consumes-prose-and-fence-boundaries
                          'seon.sci.forgive/prose-after-a-form-on-its-line-is-evaluated
-                         'seon.sci.forgive/a-bare-token-line-in-a-reply-is-prose}}
+                         'seon.sci.forgive/a-bare-token-line-in-a-reply-is-prose
+                         'seon.sci.forgive/a-nested-discard-evaluates-a-discarded-form
+                         'seon.sci.forgive/a-bare-true-false-or-nil-line-is-prose}}
   the-reader-reads-a-reply-by-its-line-rules
   (are [mode text sources] (= sources (mapv :seon.batch/source (:seon.batch/segments (forgive/segments text mode))))
     ;; a failed collection is one source; reading resumes after its closer
@@ -55,6 +57,14 @@
     :reply "```clojure\n(+ 1 2))\n(+ 3 4)\n```"                   ["(+ 1 2)" "(+ 3 4)"]
     :reply "```clj\n(foo]\n(+ 1 2)\n```"                          ["(foo)" "(+ 1 2)"]
     :reply "```clj\n(str \"abc\n```\n(+ 1 2)"                     ["(str \"abc\n```\n(+ 1 2)\")"]
+    ;; outside fences a bare true, false or nil line is code
+    :reply "true\nfalse\nnil\n42"                               ["true" "false" "nil" "42"]
+    :reply "trueish\nnil?"                                        []
+    ;; a discard's operand may itself be a discard: each consumes one more form
+    :code  "#_ #_ 1 2 3"                                          ["3"]
+    :code  "#_ #_ (prn 1) #_ (prn 2) (prn 3) 4"                   ["4"]
+    :code  "'#_ a b"                                              ["'#_ a b"]
+    :reply "#_ #_ (+ 1 2)\n(+ 3 4)\nDone.\n(+ 5 6)"                ["(+ 5 6)"]
     ;; no-value constructs stay inside their region
     :reply "#_ (+ 1 2)\nDone.\n(+ 3 4)"                             ["(+ 3 4)"]
     :reply "```clj\n#_ (+ 1 2)\n```\nDone.\n(+ 3 4)"                ["(+ 3 4)"]
@@ -69,20 +79,28 @@
 
 (deftest an-unbalanced-text-names-each-repair
   (are [mode text repairs] (= repairs (:seon.batch/repairs (forgive/segments text mode)))
-    :code  "(+ 1 2))"                                      [{:seon.batch/line 1 :seon.batch/dropped ")"}]
-    :code  "(defn f [x]\n  (+ x 1)\n(f 1)"                 [{:seon.batch/line 2 :seon.batch/inserted ")"}]
-    :code  "(let [x 1) x"                                  [{:seon.batch/line 1 :seon.batch/inserted "]"}]
-    :reply "(defn f [x]\n  (+ x 1)\nNow call it.\n(f 1)" [{:seon.batch/line 2 :seon.batch/inserted ")"}]
-    :reply "(str \"abc"                                   [{:seon.batch/line 1 :seon.batch/inserted "\""}
-                                                            {:seon.batch/line 1 :seon.batch/inserted ")"}]
+    :code  "(+ 1 2))"                                      [{:seon.batch/line 1 :seon.batch/at 7 :seon.batch/dropped ")"}]
+    :code  "(defn f [x]\n  (+ x 1)\n(f 1)"                 [{:seon.batch/line 2 :seon.batch/at 21 :seon.batch/inserted ")"}]
+    :code  "(let [x 1) x"                                  [{:seon.batch/line 1 :seon.batch/at 9 :seon.batch/inserted "]"}]
+    :reply "(defn f [x]\n  (+ x 1)\nNow call it.\n(f 1)" [{:seon.batch/line 2 :seon.batch/at 21 :seon.batch/inserted ")"}]
+    :reply "(str \"abc"                                   [{:seon.batch/line 1 :seon.batch/at 9 :seon.batch/inserted "\""}
+                                                            {:seon.batch/line 1 :seon.batch/at 10 :seon.batch/inserted ")"}]
+    ;; closers inserted before a dropped closer move its offset
+    :code  "(a ]\n  b\n(c)"                               [{:seon.batch/line 1 :seon.batch/at 3 :seon.batch/dropped "]"}
+                                                            {:seon.batch/line 2 :seon.batch/at 7 :seon.batch/inserted ")"}]
     :code  "(+ 1 2)"                                       nil))
 
-(deftest each-segment-carries-the-repairs-on-its-lines
-  (are [text repairs] (= repairs (mapv :seon.batch/repairs (:seon.batch/segments (forgive/segments text :code))))
-    "(+ 1 2))"                      [[{:seon.batch/line 1 :seon.batch/dropped ")"}]]
-    "(defn f [x]\n  (+ x 1)\n(f 1)" [[{:seon.batch/line 2 :seon.batch/inserted ")"}] nil]
-    "(f 1)\n(g 2))"                 [nil [{:seon.batch/line 2 :seon.batch/dropped ")"}]]
-    "(+ 1 2)"                       [nil]))
+(deftest ^{:seon/tasks #{'seon.sci.forgive/a-repair-goes-to-the-last-form-starting-on-its-line}}
+  each-segment-carries-the-repairs-from-its-start-to-the-next
+  (are [text repairs] (= repairs (mapv #(mapv (juxt :seon.batch/line :seon.batch/dropped :seon.batch/inserted) (:seon.batch/repairs %))
+                                       (:seon.batch/segments (forgive/segments text :code))))
+    "(+ 1 2))"                      [[[1 ")" nil]]]
+    "(defn f [x]\n  (+ x 1)\n(f 1)" [[[2 nil ")"]] []]
+    "(f 1)\n(g 2))"                 [[] [[2 ")" nil]]]
+    ;; two forms on one line: the stray closers after the first are its own
+    "(inc 1))) (inc 2)"             [[[1 ")" nil] [1 ")" nil]] []]
+    "(inc 1) (inc 2))"              [[] [[1 ")" nil]]]
+    "(+ 1 2)"                       [[]]))
 
 (defn- allocated-reading
   "Bytes this thread allocates segmenting `reply` (-1 on a virtual thread,

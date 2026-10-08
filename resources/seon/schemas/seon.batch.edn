@@ -26,7 +26,7 @@
  :text [:string {:description "Exact text of a batch: what is read, evaluated, stored and rendered."}]
  :start-ns :symbol
  :mode [:enum :reply :code]
- :segmented [:map {:description "A text's forms as the forgiving scan finds them (seon.sci.forgive/segments): each construct's source, a failed read's span included, the text above it as its comment, the repairs on its lines, and all the text's repairs."}
+ :segmented [:map {:description "A text's forms as the forgiving scan finds them (seon.sci.forgive/segments): each construct's source, a failed read's span included, the text above it as its comment, the repairs made from its start to the next segment, and all the text's repairs."}
              [:seon.batch/segments [:vector [:map [:seon.batch/source :string]
                                              [:seon.batch/comment {:optional true} :string]
                                              [:seon.batch/repairs {:optional true} :seon.batch/repairs]]]]
@@ -35,6 +35,7 @@
  :spans [:vector :seon.batch/span]
  :repair [:map {:description "One change the forgiving scan made to an unbalanced text: closers (or a string's quote) inserted on a line, or a stray closer dropped from it."}
           [:seon.batch/line pos-int?]
+          [:seon.batch/at {:description "Where in the forgiven text the change was made; the segment whose span starts at or before it owns the repair."} nat-int?]
           [:seon.batch/inserted {:optional true} :string]
           [:seon.batch/dropped {:optional true} :string]]
  :repairs [:vector :seon.batch/repair]

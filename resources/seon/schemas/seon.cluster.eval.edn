@@ -45,12 +45,11 @@
                       :seon.db/no-history? true,
                       :description
                       "The agent's own comment, stored verbatim. The REPL prompt precedes the comment and source as one agent input; the response follows both." :seon.wake/context-inert true}],
-                    :repairs
-                    [:string
-                     {:min 1,
-                      :seon.db/no-history? true,
-                      :description
-                      "The forgiving scan's repairs on this form's lines (seon.sci.forgive/segments), as the value printer shows them: [line :dropped \"x\"] for a stray closer removed, [line :inserted \"x\"] for closers or a quote added. Present only when the text did not balance. The reply shows them beside this form's value." :seon.wake/context-inert true}],
+                    :delimiter-repairs
+                    [:vector
+                     {:description
+                      "The forgiving scan's repairs owned by this form (seon.sci.forgive/segments), in text order: [line :dropped \"x\"] for stray closers removed from that line, [line :inserted \"x\"] for closers or a quote added there. Present only when the text did not balance. The reply prints them beside this form's value." :seon.wake/context-inert true}
+                     [:tuple [:int {:min 1}] [:enum :dropped :inserted] [:string {:min 1}]]],
                     :interrupted-at [:and {:seon.wake/context-inert true} :inst],
                     :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.cluster.eval/receipt :seon.wake/context-inert true}],
                     :ns [:and {:seon.wake/context-inert true} :seon.db/ref],
@@ -76,7 +75,7 @@
                      [:seon.cluster.eval/comment
                       {:optional true}
                       :seon.cluster.eval/comment]
-                     [:seon.cluster.eval/repairs {:optional true} :seon.cluster.eval/repairs]
+                     [:seon.cluster.eval/delimiter-repairs {:optional true} :seon.cluster.eval/delimiter-repairs]
                      [:seon.cluster.eval/author
                       {:optional true}
                       :seon.cluster.eval/author]

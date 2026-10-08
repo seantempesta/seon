@@ -7,7 +7,7 @@
                       [:seon.cluster.eval/comment
                        {:optional true}
                        :seon.cluster.eval/comment]
-                      [:seon.cluster.eval/repairs {:optional true} :seon.cluster.eval/repairs]
+                      [:seon.cluster.eval/delimiter-repairs {:optional true} :seon.cluster.eval/delimiter-repairs]
                       [:seon.ns/name {:optional true} :seon.ns/name]],
                      :sources [:vector :seon.cluster.reply/form],
                      :text :string,

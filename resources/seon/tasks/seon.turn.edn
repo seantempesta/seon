@@ -211,4 +211,9 @@
              :kind :function
              :intent "(defn h {:malli/schema [:=> [:cat :int] [:maybe :int]]} [x] x) through MCP answered a :diagnostics entry of about 980 tokens (default 2026-10-08): request id, producer digest, basis, three host frames and the whole refused transaction, while the rule broken sits only in the message, which a 40-token prefix from not-admitted lengthens until the printer cuts it mid-sentence. with-diagnostic prints the error whole (render.value/core-text [error]) instead of projecting it with seon.error/reply-value as evaluation errors are (seon.sci.eval/shown-failure). Done when the diagnostic is reply-value's map (type, message, offending) and an MCP regression bounds the reply at 150 tokens."
              :must-read #{seon.turn/with-diagnostic seon.turn/not-admitted seon.error/reply-value}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "repairs-are-stored-as-printed-text"
+             :kind :function
+             :intent "seon.turn/repair-text printed an evaluation's repair vectors with the value printer and stored the text as the string attribute :seon.cluster.eval/repairs, which the reply spliced: a diagnostic stored as a printed copy, not data. Correct: the repairs are stored as [line kind text] tuples (:seon.cluster.eval/delimiter-repairs), in text order, and printed only at the reply edge. Proof: seon.repl-differential-reader-test/a-stored-repair-reads-back-as-data."
+             :must-read #{seon.turn/segmented-sources}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/landed-review-sol-landed-review.md"}}]

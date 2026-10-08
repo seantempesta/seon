@@ -48,7 +48,7 @@
    :seon.cluster.eval/interrupted-at
    :seon.cluster.eval/output
    :seon.cluster.eval/comment
-   :seon.cluster.eval/repairs
+   :seon.cluster.eval/delimiter-repairs
    ;; THE FORM'S OWN PRINT OPTIONS, as evidence of the session's dynamic
    ;; bindings at evaluation time. They do NOT re-bound the shown text:
    ;; presentation is decided once, by the render profile, when the
@@ -586,8 +586,8 @@
                  ;; the evaluation.
                  (:seon.cluster.eval/comment form)
                  (assoc :seon.cluster.eval/comment (:seon.cluster.eval/comment form))
-                 (:seon.cluster.eval/repairs form)
-                 (assoc :seon.cluster.eval/repairs (:seon.cluster.eval/repairs form))
+                 (:seon.cluster.eval/delimiter-repairs form)
+                 (assoc :seon.cluster.eval/delimiter-repairs (:seon.cluster.eval/delimiter-repairs form))
                  ;; The print options the form set: stored they are
                  ;; `:seon.print/length` / `/level`, in flight they are the
                  ;; evaluation's `:seon.print/options` map.
