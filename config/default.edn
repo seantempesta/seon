@@ -106,6 +106,12 @@
  ; digest/size envelope, and blob — so this floor never forces a larger row.
  :seon.config.eval.result/blob-threshold 4096
 
+ ; Blob writes: LZ4 above 1 KiB (smaller blobs cost more than they save) up to 16 MiB
+ ; (a compressed blob is read whole, so its size bounds each read's work).
+ :seon.config.blob/compress? true
+ :seon.config.blob/compress-min-bytes 1024
+ :seon.config.blob/compress-max-bytes 16777216
+
  ; The generic value face is fitted after admission and recursive producer
  ; selection. Its visible budget is estimated tokens; its other bounds are
  ; structural, and its blob threshold reuses the storage decision above.
@@ -163,6 +169,9 @@
  ; contract cases in their candidate context before installation. The seed
  ; rides the terminal receipt, so every failure is exactly reproducible.
  :seon.config.test/auto-check-cases 25
+
+ ; The automatic test step after an eval request that evaluated a form.
+ :seon.config.test/step? true
 
  ; EVERY TURN AND ORDERLY AGENT STOP WAIT ON THE TURN'S OWN COMPLETION EVENTS.
  ; This is the loud last-resort bound when the permit, completion, or
