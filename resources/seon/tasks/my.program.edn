@@ -91,4 +91,8 @@
              :intent "`my.program/write-branch!` evaluated in the same eval request as the `defn` it should write reads the branch before the recording transaction and answers `:no-replacement` \"The accepted merge changed no declaration.\", naming a merge the agent never made. Done when it answers in write-back terms (nothing on the branch differs from its head yet; evaluate it in the next eval request), as `my.test/check` answers `:my.test/after-recording`."
              :must-read #{my.program/write-branch! seon.cluster.source/write-back!}
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
-]
+ #:seon.task{:name "callers-lists-each-call-site-with-the-callees-arities"
+             :kind :function
+             :intent "`(my.program/callers {:seon.program/subject 'seon.ai.tokens/estimate})` answers 2,630 tokens, 1,143 shown with 8 elisions (default 2026-10-08): `:seon.program/call-sites` repeats the callee's `:declared-arities` on every site and lists the callers a second time, so the budget is spent before the caller set (14 of 25) is shown. A caller set cut prints `(get-in result [:seon.program/callers])`, which returns the whole set, not the rest. Done when the render states the callee's arities once, lists each caller once with its call arity, and a set cut continues with `(drop n (seq ...))`."
+             :must-read #{my.program/callers seon.print/continuation}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]

@@ -283,4 +283,8 @@
              :intent "In the agent's SCI context `(binding [seon.db/*read-evidence-sink* sink] (seon.db/q …))` makes the Var look bound to SCI code, but `seon.db` (host code) appends nothing, so a test body (run in SCI) cannot observe reads or any other host dynamic Var. `seon.profile/measure` covers cost proofs; this covers every other dynamic-Var-observed behavior. Done when a binding of an exposed host dynamic Var in SCI is the host thread binding for the host calls inside it."
              :must-read #{seon.sci.eval/build-base-ctx seon.db/*read-evidence-sink*}
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
-]
+ #:seon.task{:name "source-of-a-library-var-answers-source-not-found"
+             :kind :function
+             :intent "`(clojure.repl/source clojure.core/map)`, `clojure.string/join` and `malli.core/validator` each answer \"Source not found\" with a nil value in an agent's SCI context (default 2026-10-08), though the checkout carries the pinned dependency source under reference-code/ and the CLAUDE.md law says read the dependency first. Done when source of a library var answers its source as the first-party Var does, or a typed unavailable value names where to read it."
+             :must-read #{seon.sci.eval/build-base-ctx}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]

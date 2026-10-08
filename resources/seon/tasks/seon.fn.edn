@@ -133,4 +133,14 @@
   :kind :function
   :intent "`seon.fn/call-reach` seeks :avet once per seed for `:seon.fn/calls`, once per frontier name for `:seon.test/subject`, and `seon.fn/declared-callers` seeks once per requested value for each indexed declared-edge attribute (`:seon.render/ai`, `:seon.render/html`, `:seon.render/form`, `:seon.schedule.task/function`, `:seon.effect/capability`), although those attributes hold at most a few hundred datoms. A `my.test/check` whose `seon.test/changes` holds thousands of identities therefore makes seven reads per changed declaration: (`seon.fn/gate-sets` {`:seon.db/db` db :seon.fn/seeds <all 5,672 function symbols>}) on default at 953efe25d made 39,713 `seon.db/datoms` reads, 595,936 armed calls, 632 ms and 1.19 GB; root's one-test check after a restart counted 20,042 reads and 2,931 ms. Correct: each declared-edge attribute and the subject attribute is read once by a walk; only the caller seeks stay per target. Proof: seon.test-reaching-test/selection-reads-each-declared-edge-attribute-once."
   :must-read #{seon.fn/call-reach seon.fn/declared-callers}
-  :evidence #{"docs/research/agent-platform/2026-10-07/led-cache/reach-key-notes.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-07/led-cache/reach-key-notes.md"}}
+ #:seon.task{:name "an-empty-tasks-annotation-is-refused-without-its-shape"
+             :kind :function
+             :intent "`(deftest ^{:seon/tasks []} doubles-green ...)` in an agent's SCI context is refused as :malformed-annotation with the explanation {:seon/tasks [\"invalid type\"]}, which names neither the expected shape nor a fix (default 2026-10-08). Done when the refusal names the schema of `:seon/tasks` and one example value, and the empty case is either admitted or refused for a stated reason."
+             :must-read #{seon.fn/index!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+ #:seon.task{:name "an-uncontracted-defn-is-admitted-without-its-warning"
+             :kind :function
+             :intent "`(defn no-contract [x] x)` in an agent's SCI context answers only the Var symbol; the law says the REPL admits it with a growing warning beside the value (default 2026-10-08, two uncontracted definitions in one agent, no warning on either reply). Done when the reply carries the warning with the count of the agent's uncontracted definitions, asserted on the reply's data."
+             :must-read #{seon.fn/index!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]

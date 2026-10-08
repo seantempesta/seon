@@ -27,4 +27,14 @@
              :kind :function
              :intent "(zipmap (range 2000) (map #(hash-map :id % :name (str \"item-\" %) :tags #{:a :b}) (range 2000))) showed 1,388 tokens of which about 810 are 29 per-entry cuts, each a 28-token dig form hiding one 4-token :tags member (default 2026-10-08). Nothing keeps a member whole when its printed size is under its continuation's. Done when no cut is emitted for a member smaller than its dig form and a regression bounds the zipmap reply. Same producer as seon.print/elision-forms-call-a-seon-helper."
              :must-read #{seon.print/continuation}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "the-display-budget-override-is-not-installed"
+             :kind :function
+             :intent "`(binding [seon.print/*budget* 4000] (vec (range 3000)))` in an agent's SCI context answers \"Unable to resolve var: seon.print/*budget*\" (default 32ca5f2e5, agent reply-census, 2026-10-08), so the owner-ruled override (PR-11) does not exist and nothing can widen one form past the 1,500-token profile budget. Done when the same form prints up to 4,000 tokens with one finding naming the override's token count, and the same form past the model ceiling is capped with a finding."
+             :must-read #{seon.render.value/render-ai-data seon.print/continuation}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+ #:seon.task{:name "a-child-cap-starves-small-elements"
+             :kind :function
+             :intent "`(vec (repeat 400 {:a 1 :b \"two\" :c [1 2 3]}))` shows 311 tokens of the 1,500-token budget because `:seon.render.profile/max-children` (32) cuts the vector at 32 members while 1,189 tokens are unspent (default 2026-10-08), while the 2,000-entry map spends 1,388 tokens on 32 fat entries: the child count, not the token budget, decides what a collection shows. Done when members are admitted until the profile's token budget is spent (the count cap only a backstop) and a regression shows 400 small maps filling the budget, each cut naming its count and a clojure.core continuation."
+             :must-read #{seon.render.value/render-ai-data}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]

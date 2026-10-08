@@ -18,4 +18,9 @@
   :kind :function
   :intent "Two tests in test/seon/render/ns_test.clj are red on HEAD without a task: task-and-schema-entities-render-as-graph-nodes (56 of 200 stored task intents exceed 400 characters; see also seon.test reds-on-head-9d6b392b6-in-task-reaching-tests) and identity-reads-stewardship-without-an-agent-cluster-attribute (cause not yet diagnosed). Correct: classify each by the commit that changed its behavior, then fix the producer, update the retired assumption or delete the test; do not raise the bound to fit the data. Done when both are green on HEAD."
   :must-read #{seon.render.ns/task-ai}
-  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
+ #:seon.task{:name "a-function-entity-render-repeats-an-unrun-state-per-test"
+             :kind :function
+             :intent "`(seon.db/pull (seon.db/db) '[*] [:seon.fn/sym 'seon.ai.tokens/estimate])` answers 1,459 shown tokens of 1,755 with the source as 13 string lines beside the docstring, and 11 of 15 related tests each carrying the same \"unrun or incomplete\" state string for tests that never ran (default 2026-10-08). Done when one status is stated once for the group, the source appears once, and tests that did not run are counted, not listed."
+             :must-read #{seon.render.ns/function-ai}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]
