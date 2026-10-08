@@ -45,7 +45,7 @@
       :else {:seon.agent/no-such-agent agent-id
              :seon.error/at (java.util.Date.) :seon.error/layer :seon.agent/identity
              :seon.error/operation 'seon.agent/archived?
-             :seon.error/message (str "No agent has id " (pr-str agent-id) ".")})))
+             :seon.error/message "No agent has this id."})))
 
 (defn open?
   "Whether this existing agent is not archived; this does not describe graph liveness."
