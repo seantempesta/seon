@@ -30,6 +30,17 @@
   [form expected agent-id running]
   (true? (:seon.repl/value (reply (pr-str (list '= form expected)) agent-id running))))
 
+(deftest a-child-cap-follows-the-budget
+  ;; 400 small maps fill the budget instead of stopping at a member count.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [{handle :seon.repl/result shown :seon.repl/value} (reply "(vec (repeat 400 {:a 1 :b \"x\"}))" agent-id running)
+           members (filterv map? shown)
+           form (last shown)]
+       (is (< 100 (count members) 400) "the budget, not a member count, decides how many show")
+       (is (= (list 'drop (count members) handle) form))
+       (is (continued? form (list 'drop (count members) (list 'vec (list 'repeat 400 {:a 1 :b "x"}))) agent-id running))))))
+
 (deftest a-cut-set-or-map-continues-where-it-stopped
   ;; A map or set past 64 members shows its first members in `seq` order, and
   ;; its cut continues with `drop` on the handle.

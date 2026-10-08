@@ -10,10 +10,12 @@
   1. One budget. The profile's token budget bounds the laid-out text, render
      output included; nothing else clips.
   2. Breadth before depth, earlier first. Every member of one level is
-     admitted before any member of the next, so a map shows all its keys
-     before a value expands; a sequence's or set's members sit one level
-     deeper per doubling of their position, so the first ones show whole and
-     the tail is cut with its count rather than every member starved.
+     admitted before any member of the next, so a map of at most 64 keys
+     shows all its keys before a value expands; a sequence's, a set's or a
+     larger map's members sit one level deeper per doubling of their
+     position, so the first ones show whole and the tail is cut with its
+     count rather than every member starved. The budget alone bounds how
+     many members show: there is no member count cap.
   3. Collapsed, then expanded. A collection not yet expanded shows its
      brackets, its count and a dig form; a nested entity shows its identity
      first.
@@ -193,7 +195,6 @@
   {:seon.render.profile/id :seon.render.profile/core
    :seon.render.profile/token-budget 1000
    :seon.render.profile/max-depth 8
-   :seon.render.profile/max-children 32
    :seon.render.profile/composition :multiline
    :seon.print/requery-refusal "printed by the core printer: the value has no result handle"})
 
@@ -1218,14 +1219,17 @@
       :else (one value))))
 
 (defn- sibling-level
-  "The level member `ordinal` of `parent` is admitted at: a map's members all
-  one level below it, so every key shows; a sequence's or set's one more level
-  per doubling of the ordinal, so earlier members are shown more fully and
-  the tail is cut with its count and dig form rather than starving all."
+  "The level member `ordinal` of `parent` is admitted at: a map of at most
+  64 members has them all one level below it, so every key shows; a larger
+  map's, a sequence's or a set's one more level per doubling of the ordinal,
+  so earlier members are shown more fully and the tail is cut with its count
+  and elision form rather than every member shown collapsed."
   {:malli/schema [:=> [:cat :map :int] :int]}
   [parent ordinal]
   (+ (inc (:level parent))
-     (if (= :map (:kind parent)) 0 (- 63 (Long/numberOfLeadingZeros (long ordinal))))))
+     (if (and (= :map (:kind parent)) (<= (:total parent 0) sorted-bound))
+       0
+       (- 63 (Long/numberOfLeadingZeros (long ordinal))))))
 
 (defn- admit-member
   {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
@@ -1425,7 +1429,6 @@
                     (and (:level context) (>= (:depth node) (:level context))) :seon.print/level
                     (>= (:depth node) (:max-depth context)) :seon.render.profile/max-depth
                     (and (:length context) (>= (:n node) (:length context))) :seon.print/length
-                    (>= (:n node) (:max-children context)) :seon.render.profile/max-children
                     :else :seon.render.profile/token-budget)
         raw? (:raw? node)
         request (cond-> (merge (:requery context)
@@ -1639,7 +1642,11 @@
                       :width (:seon.print/width options)
                       :budget (tokens/estimate-chars budget-tokens)
                       :reserve reserve
-                      :max-children (cond-> (:seon.render.profile/max-children profile)
+                      ;; THE BUDGET BOUNDS THE MEMBERS: no count cap of its own.
+                      ;; A shown member costs at least one character and one
+                      ;; separator, so a seq is stepped no further than half
+                      ;; the budget's characters (rule 7).
+                      :max-children (cond-> (inc (quot (tokens/estimate-chars budget-tokens) 2))
                                       (int? length) (min length))
                       :max-depth (cond-> (:seon.render.profile/max-depth profile)
                                    (int? level) (min level))

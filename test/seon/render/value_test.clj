@@ -351,11 +351,11 @@
                           :seon.render.profile/id :seon.render.profile/test
                           :seon.render.profile/token-budget 1024
                           :seon.render.profile/max-depth 8
-                          :seon.render.profile/max-children 1
                           :seon.render.profile/composition :single-line)
            floor-unit (assoc (registered-unit connection entities)
                              :seon.render.value/root root
-                             :seon.render/profile profile)
+                             :seon.render/profile profile
+                             :seon.print/options {:seon.print/length 1})
            projection (value/prepare floor-unit)
            root-elision (last (:seon.print/items
                                (:seon.render.value/tree projection)))
@@ -430,76 +430,73 @@
            (:seon.render.value/unreadable-artifact (value/read-artifact content))))))
 
 (deftest rendering-live-values-does-not-apply-a-storage-bound
-  (let [raw (vec (range 100))
+  (let [raw (vec (range 5000))
         request (assoc (unit raw) :seon.sci.admit/caps
-                       {:seon.config.eval.result/max-bytes 1})]
-    (is (= 68 (:seon.print/omitted (last (tree-cuts (value/prepare request))))))
-    (is (str/includes? (value/render-ai request) "…68"))
-    (is (str/includes? (hiccup/->string (value/render-html request)) "…68")
+                       {:seon.config.eval.result/max-bytes 1})
+        cut (last (tree-cuts (value/prepare request)))
+        marker (str "…" (:seon.print/omitted cut))]
+    (is (= (- (count raw) (:seon.render.data/next-offset cut)) (:seon.print/omitted cut)))
+    (is (str/includes? (value/render-ai request) marker))
+    (is (str/includes? (hiccup/->string (value/render-html request)) marker)
         "HTML shows the same selection and the same cut as the text")
     (is (not (str/includes? (value/render-ai request) "over-bound")))))
 
 (deftest elision-is-a-requeryable-structural-value
-  ;; THE SECOND AND THIRD BOUNDS. The AI projection is cut by the render
-  ;; profile — the one place presentation elides — and the cut is ordinary
-  ;; data naming what was omitted, the bound that made it, and how to ask
-  ;; again. HTML is the same selection: its cut is the same continuation.
+  ;; THE BUDGET IS THE BOUND. The AI projection is cut by the render
+  ;; profile's token budget — the one place presentation elides — and the cut
+  ;; is ordinary data naming what was omitted, the bound that made it, and
+  ;; how to read on. HTML is the same selection: its cut is the same
+  ;; continuation.
   (let [handle 'result/e0123456789ab
-        raw (vec (range 100))
+        raw (vec (range 5000))
         profile (render/agent-render-profile (support/effective-config))
-        kept (:seon.render.profile/max-children profile)
         result-unit (assoc (unit raw) :seon.repl/handle handle)
         projection (value/prepare result-unit)
         html (hiccup/->string (value/render-html result-unit))
         elision (last (:seon.print/items
-                       (:seon.render.value/tree projection)))]
+                       (:seon.render.value/tree projection)))
+        kept (:seon.render.data/next-offset elision)]
+    (is (< 32 kept (count raw)) "the budget, not a member count, decides what shows")
     (is (= {:seon.print/omitted (- (count raw) kept)
             :seon.render.data/total (count raw)
             :seon.render.data/path []
-            :seon.render.data/next-offset kept
-            :seon.print/bound-by :seon.render.profile/max-children
+            :seon.print/bound-by :seon.render.profile/token-budget
             :seon.render.profile/id (:seon.render.profile/id profile)
-            :seon.print/requery-id handle}
+            :seon.print/requery-id handle
+            :seon.print/continuation (list 'drop kept handle)}
            (select-keys elision
                         [:seon.print/omitted
                          :seon.render.data/total
                          :seon.render.data/path
-                         :seon.render.data/next-offset
                          :seon.print/bound-by
                          :seon.render.profile/id
-                         :seon.print/requery-id])))
-    (let [text (:seon.render.value/text projection)]
-      ;; One cut face carrying the form that reads the rest (owner 2026-09-27).
-      (is (str/includes? text (str "…" (- (count raw) kept) " (drop " kept " result/e0123456789ab)]")))
-      (is (not (str/includes? text ";;")) "no legend: the cut's own form says how to read on")
-      (is (= '(get-in result/e0123456789ab []) (:seon.print/requery-form elision))))
+                         :seon.print/requery-id
+                         :seon.print/continuation])))
+    (is (not (str/includes? (:seon.render.value/text projection) ";;"))
+        "no legend: the cut's own form says how to read on")
     (is (str/includes? html "seon-print-elision")
         "HTML shows the one selection, not a second unbounded one")
-    (is (not (str/includes? html ">99<")))))
+    (is (not (str/includes? html ">4999<")))))
 
-(deftest a-map-beyond-the-child-bound-costs-the-bound-not-its-size
-  ;; The AI render keeps the first `max-children` members in the map's held
-  ;; order and names the rest; nothing sorts the map, so a million entries
-  ;; cost the bound (design §3b).
+(deftest a-map-beyond-the-budget-costs-the-budget-not-its-size
+  ;; A map past 64 members shows its first members in `seq` order and its cut
+  ;; continues with `drop` on the handle; a million entries cost the budget
+  ;; (design §3b).
   (let [profile (render/agent-render-profile (support/effective-config))
-        kept (:seon.render.profile/max-children profile)
-        shown (fn [raw] (->> (value/prepare (assoc (unit raw) :seon.render/profile profile))
-                             :seon.render.value/tree :seon.print/entries
-                             (keep (fn [entry] (when (vector? entry)
-                                                 (:seon.print/value (first entry)))))))
-        whole (fn [raw] (keys raw))
-        mixed (merge (zipmap (range 20) (range)) (zipmap (map (comp keyword str) (range 20)) (range)))
         large (zipmap (range 1000000) (range))
         started (System/nanoTime)
-        projection (value/prepare (assoc (unit large) :seon.render/profile profile))
+        projection (value/prepare (assoc (unit large) :seon.render/profile profile
+                                         :seon.repl/handle 'result/e0123456789ab))
         elapsed-ms (/ (- (System/nanoTime) started) 1e6)
-        cut (last (:seon.print/entries (:seon.render.value/tree projection)))]
-    (is (= (whole (into {} (take kept mixed))) (shown (into {} (take kept mixed))))
-        "at the bound every member shows in held order")
-    (is (= (take kept (whole mixed)) (shown mixed))
-        "beyond the bound the kept members are the held order's first")
-    (is (= (- (count large) kept) (:seon.print/omitted cut)))
-    (is (= :seon.render.profile/max-children (:seon.print/bound-by cut)))
+        entries (:seon.print/entries (:seon.render.value/tree projection))
+        cut (last entries)
+        shown (count (filter vector? entries))]
+    (is (= (take shown (keys large))
+           (map (comp :seon.print/value first) (filter vector? entries)))
+        "the shown members are the map's seq order")
+    (is (= (- (count large) shown) (:seon.print/omitted cut)))
+    (is (= (list 'drop shown 'result/e0123456789ab) (:seon.print/continuation cut)))
+    (is (= :seon.render.profile/token-budget (:seon.print/bound-by cut)))
     (is (< elapsed-ms 1000) "a million-entry map renders within its bound")))
 
 (deftest references-stay-opaque
@@ -543,9 +540,13 @@
    :seon.render.profile/max-children 3
    :seon.render.profile/composition :single-line})
 
-(defn- probe-unit [raw]
+(defn- probe-unit
+  "A unit printed under the probe profile and a session `*print-length*` of 3,
+  the agent's own member bound, so small values show their cuts."
+  [raw]
   (assoc (unit raw)
          :seon.render/profile probe-profile
+         :seon.print/options {:seon.print/length 3}
          :seon.render.value/root 'result/e0123456789ab))
 
 (deftest generated-values-have-deterministic-readable-executable-elisions
@@ -609,9 +610,9 @@
            handle 'result/e0123456789ab
            request (assoc (probe-unit documentation)
                           :seon.repl/handle handle
+                          :seon.print/options {}
                           :seon.render/profile
-                          (assoc probe-profile :seon.render.profile/max-children 64
-                                               :seon.render.profile/max-string-length 24))]
+                          (assoc probe-profile :seon.render.profile/max-string-length 24))]
        (is (string? body))
        (is (> (count body) 24) "the real documentation must exceed the string limit")
        (evaluation/bind-result! ctx handle documentation)
@@ -627,8 +628,8 @@
          (is (= body (sci/eval-form ctx (:seon.print/requery-form cut)))))))))
 
 (deftest ai-realizes-only-the-members-it-prints
-  ;; An endless lazy result prints its first max-children members (3 in the
-  ;; probe profile) then …?, and no member past those is realized.
+  ;; An endless lazy result prints its first members (3 under the probe's
+  ;; `*print-length*`) then …?, and no member past those is realized.
   (let [visits (atom [])
         raw (map (fn [i] (swap! visits conj i) i) (iterate inc 0))
         text (value/render-ai (probe-unit raw))]
@@ -905,7 +906,7 @@
     (is (re-find #"(?s)^\(0 1 2 .*…\?\)" (text (iterate inc 0))))))
 
 (deftest a-seq-past-the-member-bound-is-cut-never-shortened
-  ;; A seq holding more members than max-children shows a named cut, as a
+  ;; A seq holding more members than its member bound shows a named cut, as a
   ;; vector does: a counted seq names its remaining count and bound, and an
   ;; uncounted one (a cons) its pending tail. Dropping members silently
   ;; showed agents `(0 0 0)` for `(0 0 0 0)` (red triage 3, defect 1).
@@ -917,7 +918,7 @@
       (is (= shown (text raw)))
       (is (= {:seon.render.data/total (count raw) :seon.render.data/next-offset 3
               :seon.print/omitted (- (count raw) 3)
-              :seon.print/bound-by :seon.render.profile/max-children}
+              :seon.print/bound-by :seon.print/length}
              (select-keys (cut raw) [:seon.render.data/total :seon.render.data/next-offset
                                      :seon.print/omitted :seon.print/bound-by]))))
     (is (= "(9 1 2 …? (drop 3 result/e0123456789ab))" (text (cons 9 [1 2 3]))))
@@ -1215,13 +1216,16 @@
         text #(:seon.render.value/text (projection %))
         frame ['seon.cluster.agent/evaluate-source! 'invoke "agent.clj" 100]
         frames (vec (repeat 20 frame))]
-    (is (= "[0 0 0 0]" (text [0 0 0 0])) "past the member bound, a tuple is whole")
     (is (= "[0 0 0 …27 (drop 3 result/e0123456789ab)]" (text (vec (repeat 30 0))))
         "a tail larger than its cut is still cut")
-    (is (every? #(= [] (:seon.render.data/path %)) (tree-cuts (projection frames)))
-        "the only cut is the frames' own, never one inside a frame")
-    (is (= (vec (repeat 3 frame))
-           (vec (butlast (edn/read-string (str/replace (text frames) #"…\d+ \(drop 3 result/e0123456789ab\)" ":cut"))))))
+    (let [small (-> (probe-unit frames) (assoc :seon.print/options {})
+                    (assoc-in [:seon.render/profile :seon.render.profile/token-budget] 200))
+          cuts (tree-cuts (value/prepare small))]
+      (is (seq cuts))
+      (is (every? #(= [] (:seon.render.data/path %)) cuts)
+          "the only cut is the frames' own, never one inside a frame")
+      (is (every? #{frame}
+                  (edn/read-string (str/replace (value/render-ai small) #"…\d+ \(drop \d+ result/e0123456789ab\)" "")))))
     (let [strings [(apply str (repeat 40 "x")) (apply str (repeat 400 "y"))]
           capped (assoc-in (probe-unit strings) [:seon.render/profile :seon.render.profile/token-budget] 35)]
       (is (not-any? #(= [0] (:seon.render.data/path %)) (tree-cuts (value/prepare capped)))
@@ -1235,7 +1239,7 @@
   ;; of three objects 1 over. The floor is total: no value fails on its charge.
   (let [wide #(assoc (unit %) :seon.render/profile
                      (assoc probe-profile :seon.render.profile/composition :multiline
-                            :seon.render.profile/max-children 8 :seon.render.profile/max-depth 6))
+                            :seon.render.profile/max-depth 6))
         diagnostics #(:seon.render.value/diagnostics (value/prepare (wide %)))
         tuple (gen/one-of [(gen/vector gen/keyword-ns 1 4) (gen/list gen/keyword-ns)])
         values (gen/recursive-gen
@@ -1275,7 +1279,7 @@
    (fn [connection]
      ;; The agent's own turn fork retains result objects; bind-result! is
      ;; the evaluation's writer of that binding.
-     (let [value {:rows (vec (range 100))}
+     (let [value {:rows (vec (range 5000))}
            ctx (:seon.sci.eval/ctx
                 (evaluation/fork-for-turn {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)
                                            :seon.db/db (db/db connection)
@@ -1291,10 +1295,11 @@
                       (request 'result/e0123456789ab (:seon.render.data/path cut) (:seon.render.data/next-offset cut)))
            next-cut (first (tree-cuts next-page))
            gone ((requiring-resolve 'seon.render.walk/continue) (request 'result/eabsent [] 0))]
-       (is (= [[:rows] 32 100] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.render.data/total) cut)))
-       (is (str/starts-with? (value/render-ai-data next-page) "[32 33 34"))
-       (is (= [[:rows] 64 36] ((juxt :seon.render.data/path :seon.render.data/next-offset :seon.print/omitted) next-cut))
-           "every expansion shows new members and keeps absolute coordinates")
+       (let [k (:seon.render.data/next-offset cut) k2 (:seon.render.data/next-offset next-cut)]
+         (is (= [[:rows] 5000] ((juxt :seon.render.data/path :seon.render.data/total) cut)))
+         (is (str/starts-with? (value/render-ai-data next-page) (str "[" k " " (inc k) " ")))
+         (is (= [[:rows] (- 5000 k2)] ((juxt :seon.render.data/path :seon.print/omitted) next-cut)))
+         (is (< k k2) "every expansion shows new members and keeps absolute coordinates"))
        (is (= :gone (:seon.render.walk/continuation-reason gone)))))))
 
 (deftest one-selection-bounds-both-faces-and-each-cut-expands-in-place
@@ -1445,7 +1450,7 @@
        (is (not (:seon.cluster.eval/error evaluation)))
        (is (< 1000 (:seon.eval/value-tokens evaluation)) "the whole value's estimate is recorded")
        (is (<= (:seon.eval/shown-tokens evaluation) 1100) "the print stays within the value budget")
-       (is (str/includes? shown "(drop 32 (get-in result/elargerender1 [:rows]))"))
+       (is (re-find #"\(drop \d+ \(get-in result/elargerender1 \[:rows\]\)\)" shown))
        ;; The diagnostic holds the renderer's refusal as its offending value
        ;; (which has its own :seon.error/at), so count the render-layer entry.
        (is (= 1 (count (re-seq #":seon.error/layer :seon.render/invocation"
