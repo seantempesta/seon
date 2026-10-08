@@ -649,6 +649,26 @@
              sort
              vec))))
 
+(defn supplied-arguments
+  "Return, per fixed arity of `sym`'s contract, `{:argument-count n :positions
+  #{index} :keys #{key}}`: the positional arguments call preparation supplies
+  by schema name and the map entries it fills. An arglist minus these is the
+  call as an agent writes it."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.fn/sym]
+    [:or [:vector [:map [:argument-count :int] [:positions [:set :int]] [:keys [:set :qualified-keyword]]]]
+     :seon.db/error-result]]}
+  [database sym]
+  (let [entities (db/q database entity-query)
+        current (when-not (db/read-refusal? entities) (snapshot database (db/carried-projection database)))]
+    (or (first (filter db/read-refusal? [entities current]))
+        (vec (for [arity (planned-arities (db/carried-projection database) current sym)
+                   :when (not (:seon.call-preparation/variadic? arity))]
+               {:argument-count (:seon.fn.arity/argument-count arity)
+                :positions (set (keep #(when (:seon.call-preparation/key %) (:seon.fn.argument/index %))
+                                      (:seon.call-preparation/slots arity)))
+                :keys (set (map :seon.call-preparation/entry-key (:seon.call-preparation/entries arity)))})))))
+
 (defn- compiled-plan
   "One identity's invocation plan from its planned contract arities."
   [sym arity-plans]

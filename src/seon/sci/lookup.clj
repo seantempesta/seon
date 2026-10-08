@@ -100,7 +100,8 @@
           :where [?namespace :seon.ns/name ?name]
                  [?function :seon.fn/ns ?namespace]
                  [?function :seon.fn/sym _]
-                 [?function :seon.fn/private? false]]
+                 [?function :seon.fn/private? false]
+                 (not [?function :seon.fn/internal? true])]
         database program-documentation-selector namespace-name))
 
 (defn- documentation-unavailable
@@ -258,6 +259,28 @@
           (assoc :in (if (= 1 (count inputs)) (first inputs) inputs)
                  :supplied (vec (distinct (map #(nth % 2) entries)))))))))
 
+(defn- agent-arglists
+  "`arglists` as an agent calls `sym`: each arglist without the positional
+  arguments and map entries call preparation supplies. Unchanged where the
+  contract plans no supply."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym :seon.schema/value] :seon.schema/value]}
+  [database sym arglists]
+  (let [plans (call-preparation/supplied-arguments database sym)]
+    (if (or (:seon.db/invalid-read plans) (:seon.schema/expected-value plans) (not (seq? arglists)))
+      arglists
+      (let [by-count (into {} (map (juxt :argument-count identity)) plans)]
+        (map (fn [arglist]
+               (if-let [{:keys [positions keys]} (and (vector? arglist) (get by-count (count arglist)))]
+                 (into []
+                       (comp (keep-indexed (fn [index argument] (when-not (positions index) argument)))
+                             (map (fn [argument]
+                                    (if (map? argument)
+                                      (into {} (remove (fn [[_ value]] (keys value))) argument)
+                                      argument))))
+                       arglist)
+                 arglist))
+             arglists)))))
+
 (defn- function-doc-map
   "The documentation of one program row: the SCI Var's doc and arglists, the
   stored contract and, for an accepted override, its JVM-boundary note."
@@ -274,7 +297,9 @@
   ([database row metadata overridden?]
    (merge (when-let [doc (:doc metadata)]
             (docstring-parts doc))
-          {:arglists (or (:arglists metadata) (declaration-absent :seon.fn/arglists))}
+          {:arglists (if-let [arglists (:arglists metadata)]
+                       (agent-arglists database (:seon.fn/sym row) arglists)
+                       (declaration-absent :seon.fn/arglists))}
           (agent-documentation-contract database row)
           (when overridden?
             {:seon.schema.admission/note
@@ -309,7 +334,7 @@
          :functions (mapv (fn [row]
                             (merge {:sym (:seon.fn/sym row)
                                     :arglists (if-let [arglists (:seon.fn/arglists row)]
-                                                (read-arglists arglists)
+                                                (agent-arglists database (:seon.fn/sym row) (read-arglists arglists))
                                                 (declaration-absent :seon.fn/arglists))}
                                    (when-let [doc (:seon.fn/doc row)]
                                      {:doc (:summary (docstring-parts doc))})

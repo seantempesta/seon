@@ -124,3 +124,23 @@
      (is (= (:seon.help/lines (bootstrap/help-value @connection agent-id))
             (:seon.repl/value (support/reply (agent-text "(help)" agent-id running))))
          "the reply is one EDN form whose value is the help lines"))))
+
+(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-no-schema-registration}}
+  help-teaches-the-schema-registration-form
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [lines (:seon.repl/value (support/reply (agent-text "(help)" agent-id running)))
+           heads (set (map first (mapcat taught-forms lines)))]
+       (is (contains? heads 'seon.schema/register!) "help teaches the registration form")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.lookup/dir-shows-internal-functions-and-supplied-arguments}}
+  dir-lists-what-an-agent-calls-as-an-agent-calls-it
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [functions (into {} (map (juxt :sym :arglists))
+                           (:seon.repl/value (support/reply (agent-text "(dir my.program)" agent-id running))))
+           leaves (set (tree-seq coll? seq (vec (vals functions))))]
+       (is (not (contains? functions 'my.program/supplied-context)) "an internal helper is not listed")
+       (is (= '([sym]) (get functions 'my.program/source)) "a supplied database is not an argument")
+       (is (not-any? leaves [:seon.db/db :my.program/context 'database 'context])
+           "no arglist names a supplied world member")))))

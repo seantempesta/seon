@@ -62,6 +62,17 @@ minutes. Group K is `test/seon/competency*.clj`, `resources/seon/tasks/seon.comp
 
 Later rows stay in the ledger: T9 after F7, T15 after A1 and F6, conflict tasks after the merge rows.
 
+## Results
+
+- **E1 (task wording; [e0-e1](../../../research/agent-platform/2026-10-08/bench/e0-e1.md)): typed beats prose, so typed
+  is the task default.** Write a task's intent with the fully qualified names the work touches: the function or
+  schema keyword to create or change (`comp.order/qty`, `comp.geo/area`), the library functions it calls
+  (`seon.schema/register!`), the namespace that owns it, and the test name with its namespace, and list those
+  symbols in `:seon.task/must-read`. Prose naming only the behavior cost the agent its calls searching for the
+  owner (T2 1 of 5 green against 4 of 5; T3 2 of 5 against 5 of 5; T1 and T4 under the noise threshold).
+  Where the typed form still fails, the missing name belongs in the help or the block (a `dir` that lists only what
+  an agent calls; a help line teaching `seon.schema/register!`), not in a longer intent.
+
 ## Findings recorded while carding
 
 - The edit hook evaluates a changed test file in the lane's SCI branch, where `seon.test-support` is not loaded, so
