@@ -11,6 +11,8 @@
             [clojure.core.async.flow :as-alias flow]
             [seon.config :as config]
             [seon.cluster.process :as cluster.process]
+            [seon.cache]
+            [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -1844,11 +1846,46 @@
 
 (declare request-refusal)
 
+(defn- commit-facts
+  "The branch `commit-id` was written on and its parent commits; nil when the store lacks the commit."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id]
+                  [:maybe [:tuple :seon.store/branch [:vector :seon.source/commit-id]]]]}
+  [store commit-id]
+  (seon.cache/lookup ::commit-facts commit-id (constantly 160)
+                     #(when-let [database (source/commit-database store commit-id)]
+                        (try [(get-in database [:config :branch]) (vec (get-in database [:meta :datahike/parents]))]
+                             (finally (source/release! [database]))))))
+
+(defn- fork-commit
+  "The commit `candidate`'s branch was forked at: the nearest ancestor of its head written on another
+  branch (its own head when it has written nothing); nil when its history is unavailable."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.db/database-value] [:maybe :seon.source/commit-id]]}
+  [store candidate]
+  (let [branch (get-in candidate [:config :branch])]
+    (loop [commit (db/commit-id candidate)]
+      (when-let [[written parents] (when commit (commit-facts store commit))]
+        (if (not= branch written)
+          commit
+          ;; A commit written here has one parent written here, unless it was the first.
+          (recur (or (some #(when (= branch (first (commit-facts store %))) %) parents)
+                     (first parents))))))))
+
+(defn- change-base
+  "The commit a check of `candidate` compares against: the adopted source commit `recorded` for the
+  cluster's own branch; for any other branch the commit it was forked at, so what its source branch
+  changed before the fork is never this branch's change."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
+                  :seon.source/commit-id]}
+  [store cluster candidate recorded]
+  (if (= (cluster.branch/cluster-branch cluster) (get-in candidate [:config :branch]))
+    recorded
+    (or (fork-commit store candidate) recorded)))
+
 (defn changes
   "What a check of `execution` must reach: the declarations its program holds
-  at other behavior digests than the published commit its test world starts
-  from (`behavior-differences`: a docstring-only change is none), of what
-  `clean-request-handle` overlays onto that world.
+  at other behavior digests than its base (`change-base`: the published commit
+  on the cluster's own branch, the fork commit on any other), so a branch's
+  change is its own (`behavior-differences`: a docstring-only change is none).
   A namespace identity is a binding change; it stays only when the namespace
   declares something a test can reach. Equal programs refuse by name: there
   is no change to check."
@@ -1865,7 +1902,7 @@
             candidate (db/db (:seon.db/connection execution))
             families (vec (:seon.program/compared-families
                            (program/declaration-families (db/carried-projection candidate))))
-            world (source/database store base)
+            world (source/database store (change-base store (:seon.cluster/name execution) candidate base))
             differences (digest-differences world candidate families)
             identities (when (vector? differences) (apply into (behavior-differences world candidate differences)))
             declaring (when identities
@@ -1879,7 +1916,7 @@
               (not (sequential? declaring)) declaring
               (empty? changed)
               (request-refusal :seon.test/policy-unscoped
-                               "My program equals the published commit my tests start from: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
+                               "My program equals my base (the published commit, or the commit my branch was forked at): there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
                                base)
               :else changed)))))
 

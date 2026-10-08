@@ -27,8 +27,9 @@
   "Check the tests reaching my change as one request and return its answer.
 
   My change is `:seon.test/changed` when I name it, otherwise every
-  declaration my program holds at another digest than the published program
-  my tests start from (`seon.test/changes`). My acquired context and
+  declaration my program holds at another digest than my base: the commit my
+  branch was forked at, or on the cluster's own branch the published program
+  (`seon.test/changes`). My acquired context and
   connection are supplied by call preparation. Each reaching test runs on its
   own branch off my current commit, isolated from my writes and from the
   other tests; its result is recorded on my connection. `:seon.test/passed?`

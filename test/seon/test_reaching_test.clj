@@ -648,3 +648,20 @@
     (is (= 20 (count uncalled)))
     (is (= 19 (- (reads uncalled) (reads (take 1 uncalled))))
         "one caller seek per further seed, every other read once")))))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/every-eval-request-reports-unrelated-reds-as-reaching}}
+  a-branchs-change-is-what-it-changed-since-its-fork
+ ;; A branch forked from its cluster inherits what the cluster changed since its
+ ;; published commit; that change is the cluster's, never the branch's, so the
+ ;; tests it reaches are not the branch's reaching tests.
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (let [child (agent/acquire-context! (support/execution-handle connection) nil {:seon.agent/isolate? true})
+         branch (:seon.db/connection child)]
+    (try
+     (is (= :seon.test/policy-unscoped (:seon.test/selection-refusal (sut/changes child branch)))
+         "a fresh branch has changed nothing")
+     (define! branch '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+     (is (= [[:seon.fn/sym 'reach.fixture/b]] (sut/changes child branch)) "only its own definition")
+     (finally (agent/release-context! child)))))))
