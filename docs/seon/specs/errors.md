@@ -268,11 +268,14 @@ different classes at one frame, are different rows. Member names reuse installed
 (`:seon.error/occurrence-count`, `:seon.error/shown`) [U: P1 registry search].
 
 **Opening.** The writer function reads the row on the in-transaction database. It OPENS when the row is absent or
-resolved (below). An opening writes, in the same home transaction, ONE message to root, its content the error's
-message, referring to the row (`:seon.message/error`, new, so the message renders the recorded error as data). It
-creates no task (owner, 2026-10-07): the error comes back to the agent whose call caused it, and that agent or root
-triages it into a task with a failing test through `seon.task/create!`, one per defect class. Tasks linked by
-`:seon.task/faults` exist only from before that ruling. A repeat increments the count and updates `latest-digest`/`latest-at`; it sends nothing.
+resolved (below). An opening writes, in the same home transaction, one generated task from the triage template
+(`seon.task/generate-tx`, ledger RT-7, RT-8, RT-12) assigned to the function's steward if one is held, else to root:
+a question about the error row whose answer is a decision (the owner tasks it filed, each with a red reproduction, or
+no action with a reason), its proof the generic `seon.task-question-test/root-decided`. The row refs it as
+`:seon.error/task`; the assignment is the one notification (an assignment is a wake), and no message is sent. The
+agent whose call caused the error is never the assignee: the error comes back to it in its reply. A repeat increments
+the count and updates `latest-digest`/`latest-at`; it writes no task. (This supersedes the 2026-10-07 "creates no
+task" rule, per AGENTS.md "with a count, a task and one notification".)
 
 **Every occurrence is attached and delivered.** The recorder returns a receipt `{signature count opened?}` for repeats
 too; the boundary assocs it as `:seon.error/recorded`. The settlement stores the signature on the evaluation or provider

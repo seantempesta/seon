@@ -62,7 +62,7 @@ to files without a merge (`my.program/write-branch!`, installed) and commit by b
 
 | Form | Git | Answers | Today |
 |---|---|---|---|
-| `(my.program/request-merge!)` / `{:seon.merge/norms [...]}` | `git request-pull`; open a merge request | the open request; the agent waits | `propose-merge!` program.clj:416 |
+| `(my.program/request-merge!)` / `{:seon.merge/norms [...]}` | `git request-pull`; open a merge request | the open request, assigned to root in the same transaction (ledger RT-9); the agent waits | `propose-merge!` program.clj:416 |
 | `(my.program/merge-requests)` | the forge's open list | open requests at the home | `proposals` program.clj:473 |
 | `(my.program/diff {:seon.merge/request m})`, or with a symbol | `git diff main...branch [-- path]` | the diff value (§2) | `diff` is the agent's own branch only (program.clj:974); `declaration-diff` program.clj:991 folds in |
 | `(my.program/merge! {:seon.merge/request m})` | `git merge` | merged, or stopped with the merge branch kept (§4) | `prepare-merge!` program.clj:513 and `accept-merge!` program.clj:547 |
@@ -207,8 +207,10 @@ norm becomes its own root task.
   origin tag (root is an agent with a merge task): at start it derives the open requests at the home, then listens for
   new and updated ones, and calls `merge!` for each. Same
   function, same writer; no second path and no model needed, so a provider-less root merges too.
-- **Stop.** A stopped automatic merge keeps the merge branch, records why on the request, and sends one message to
-  root. The stop shows in root's current-state block, not its history. Root then reviews by hand (§1 forms).
+- **Stop.** A stopped automatic merge keeps the merge branch and records why on the request; the request stays the
+  task root holds (it was assigned to root when it opened, ledger RT-9, RT-11), so the stop shows in root's
+  current-state block, not its history, and no message is sent. A stop the flow cannot classify asks root a question
+  about the request (RT-7). Root then reviews by hand (§1 forms).
 
 ## 6. Conflict cases
 

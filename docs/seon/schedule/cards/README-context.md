@@ -62,7 +62,7 @@ itself).
 2. Keep `:transcript` the default until the matrix, `:chat` by agent overlay only.
 3. Only `:chat`; delete `:transcript`.
 
-**Q-CX3 (CX-2). Root's model turns.** ANSWERED (owner 2026-10-08): root gets model turns only for an assigned root task (e.g. a merge request); a wake alone never starts one. With "a model turn only with an assignment", root (no assignment) no longer
+**Q-CX3 (CX-2). Root's model turns.** ANSWERED (owner 2026-10-08): root gets model turns only for an assigned root task (e.g. a merge request); a wake alone never starts one. How root's work becomes assigned tasks: [README-root-tasks](README-root-tasks.md) (RT-1 … RT-14). With "a model turn only with an assignment", root (no assignment) no longer
 gets model turns from error notifications or messages. Today merge requests are root tasks worked through the
 ordinary REPL by our orchestrator, so nothing is lost.
 1. **(recommended)** Accept: a root model turn needs an assigned root task (a merge request is one).
