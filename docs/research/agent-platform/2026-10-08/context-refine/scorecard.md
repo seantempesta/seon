@@ -75,5 +75,34 @@ Total: 9565 tokens, 56 rule failures over 18 forms.
 | help placeholder (root ask, `seon.bootstrap/help-teaches-a-placeholder-checkout-path`) | a9e2bcf6d | help drops the `write-branch!` line and the `"..."` send line; regression `seon.help-test/help-teaches-no-placeholder-value` |
 | handled message stays unread (`seon.context/a-handled-message-stays-unread-in-every-later-pass`) | 15ef7b9b4 | the block's unread section leaves out messages a closed turn handled; regression `seon.context-test/a-message-a-closed-turn-handled-leaves-the-unread-section`; live red on live-flash-4's branch (cebe98c3e8bc handled by turn 6c3450afa886, still unread) |
 | printed help map as system message (`seon.context/the-system-message-is-the-printed-help-map-not-its-render`) | edfa957c1 | model-context answers a `:seon.render/request-error` refusal when help's render did not run; regression `seon.context-test/a-request-that-cannot-run-the-help-render-answers-a-refusal` |
+| error replies say each thing once (finding 4) | 32bc482b0 | `seon.error/reply-value` adds `:seon.error/type`, drops a cause link's message equal to the shown one, drops `:seon.instrument/declared-arities` when arglists are shown; selecting an error's keys at the REPL had printed "Error evidence is unavailable."; regression `seon.error-test/an-error-reply-names-its-type-and-says-each-thing-once` |
 
-AFTER needs root's restart to load the commits above into default; the corpus is re-run then.
+## AFTER 1 (default restarted onto 795a770c2 at 14:40Z and reset: help, unread and model-context fixes loaded; the error reply fix 32bc482b0 landed after it)
+
+| # | Form | Tokens / ceiling | Failing rules | Noise | Duplicates |
+|---|------|------------------|---------------|-------|------------|
+| 1 | help | 443 / 450 | data | - | - |
+| 2 | current-state, unread | 214 / 150 | size | - | - |
+| 3 | current-state, red proof | 135 / 700 | - | - | - |
+| 4 | doc fn | 339 / 300 | size | - | - |
+| 5 | source seon fn | 252 / 300 | - | - | - |
+| 6 | source library fn | 576 / 400 | size | - | - |
+| 7 | dir ns | 282 / 300 | - | - | - |
+| 8 | defn | 115 / 80 | size | - | - |
+| 9 | failing test step | 193 / 300 | noise | :seon.source/commit-id :seon.turn/id | - |
+| 10 | contract refusal | 263 / 200 | noise tail next type size | :seon.source/commit-id :seon.turn/id | - |
+| 11 | arity error | 315 / 150 | noise tail next type size | :seon.source/commit-id :seon.turn/id | - |
+| 12 | unresolved symbol | 227 / 120 | noise tail next type size | :seon.source/commit-id :seon.turn/id | - |
+| 13 | uninstalled attribute | 324 / 150 | noise duplicate tail type size | :seon.source/commit-id :seon.turn/id | Bad entity attribute :corpus/n x2 |
+| 14 | big query (cut) | 2229 / 1600 | noise tail size | :seon.source/commit-id :seon.turn/id | - |
+| 15 | my.program/breaks | 2110 / 600 | noise tail size | :seon.source/commit-id :seon.turn/id | - |
+| 16 | my.test/check | 287 / 250 | noise tail size | :seon.source/commit-id :seon.turn/id | - |
+| 17 | my.message/inbox | 238 / 150 | noise tail size | :seon.source/commit-id :seon.turn/id | - |
+| 18 | runtime_status | 504 / 800 | - | - | - |
+
+Total: 9046 tokens, 38 rule failures over 18 forms.
+
+Row 3 is not comparable: the reset store has no live-flash-4 task, so the block has no task section. The tests block
+no longer follows reads before the agent defines a test (rows 1-8: another lane's landing); from row 9 on, after the
+corpus defines its red test, every reply still carries it with the pass and commit ids (finding 1, routed). Help is
+443 tokens with no placeholder; its reply still fails `data` (the AI render is spliced raw into `:value`).
