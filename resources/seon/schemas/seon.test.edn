@@ -338,7 +338,7 @@
    [:seon.test.timing/run-ms :seon.test.timing/run-ms]
    [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]
  :seon.test/run-result
- [:map
+ [:map {:seon.render/ai seon.render.test/render-run-result-ai}
   [:seon.test.run/id :seon.test.run/id]
   [:seon.test.run/policy :seon.test.run/policy]
   [:seon.test.run/basis-t :seon.test.run/basis-t]

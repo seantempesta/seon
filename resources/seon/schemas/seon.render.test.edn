@@ -1,4 +1,18 @@
-{:seon.render.test/run-view
+{:seon.render.test/run-result-view
+ [:map {:description "A finished run's AI face: tests run, assertions passed, failed and erred, and each failed assertion's test, expected and actual."}
+  [:seon.test.run/id :seon.test.run/id]
+  [:seon.test/passed? {:optional true} :seon.test/passed?]
+  [:seon.test/elapsed-ms {:optional true} :seon.test/elapsed-ms]
+  [:seon.render.test/test [:int {:min 0}]]
+  [:seon.render.test/pass [:int {:min 0}]]
+  [:seon.render.test/fail [:int {:min 0}]]
+  [:seon.render.test/error [:int {:min 0}]]
+  [:seon.render.test/failures {:optional true}
+   [:vector [:map [:seon.test/sym :seon.test/sym]
+             [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
+             [:seon.test.failure/actual {:optional true} :seon.test.failure/actual]
+             [:seon.test/failure-message {:optional true} :seon.test/failure-message]]]]]
+ :seon.render.test/run-view
  [:map {:description "A test run as its AI face shows it: when, at what basis on which branch, its members' outcomes counted, and the red ones by name."}
   [:seon.test.run/id {:optional true} :seon.test.run/id]
   [:seon.test.run/at {:optional true} :seon.test.run/at]

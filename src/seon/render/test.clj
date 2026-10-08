@@ -106,6 +106,31 @@
                    :seon.render.test/outcomes (update-vals outcomes count))
       (seq red) (assoc :seon.render.test/red (vec red)))))
 
+(defn- failure-rows
+  "One row per failed assertion of a red member: its test, expected and actual as the runner bounded them."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [member]
+  (if-let [reports (seq (:seon.test.failure/reports member))]
+    (mapv #(assoc (select-keys % [:seon.test.failure/expected :seon.test.failure/actual])
+                  :seon.test/sym (:seon.test/sym member))
+          reports)
+    [(select-keys member [:seon.test/sym :seon.test/failure-message])]))
+
+(defn render-run-result-ai
+  "A finished run as data: how many tests ran, assertions passed, failed and erred, and each failed assertion's test, expected and actual."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.test/run-result-view]}
+  [unit]
+  (let [run (or (:seon.render/value unit) unit)
+        members (:seon.test/results run)
+        total (fn [k] (transduce (map #(get % k 0)) + 0 members))
+        red (filter #(pos? (+ (get % :seon.test/fail-count 0) (get % :seon.test/error-count 0))) members)]
+    (cond-> (assoc (select-keys run [:seon.test.run/id :seon.test/passed? :seon.test/elapsed-ms])
+                   :seon.render.test/test (count members)
+                   :seon.render.test/pass (total :seon.test/pass-count)
+                   :seon.render.test/fail (total :seon.test/fail-count)
+                   :seon.render.test/error (total :seon.test/error-count))
+      (seq red) (assoc :seon.render.test/failures (into [] (mapcat failure-rows) red)))))
+
 (defn render-run-form
   "The read that finds this run whole again. Shown, never executed."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/read-form]}
