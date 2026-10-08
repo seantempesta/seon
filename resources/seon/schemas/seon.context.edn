@@ -87,19 +87,7 @@
                [:map {:description "Model calls left against the current wake and the held task's status."}
                 [:my.agent/turns-left :my.agent/turns-left]
                 [:seon.task/status {:optional true} :seon.task/status]],
-:name [:or :symbol :qualified-keyword]
-               :project [:string {:min 1}]
-               :revision [:string {:min 40 :max 40}]
-               :pin [:map [:seon.context/project :seon.context/project] [:seon.context/revision :seon.context/revision]]
-               :must-read [:map [:seon.context/name :seon.context/name]
-                           [:arglists {:optional true} [:sequential [:vector :symbol]]]
-                           [:seon.fn/spec {:optional true} :seon.fn/spec]
-                           [:doc {:optional true} :string]
-                           [:seon.context/pin {:optional true} :seon.context/pin]
-                           [:seon.context/schema-form {:optional true} :seon.schema/value]
-                           [:seon.render/operations [:vector :seon.render/read-form]]]
-               :name-problem [:map [:seon.context/name :seon.context/name] [:seon.context/problem [:enum :unresolved]]]
-               :must-reads [:vector [:or :seon.context/must-read :seon.context/name-problem]]
+               :must-reads [:vector {:description "Each reference the held task makes, resolved or as its problem."} [:or :seon.ref/resolved :seon.ref/problem]]
                :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
                :proof-failure [:map {:description "A red proof's first failing report as data."}
                                [:test :seon.test/sym] [:expected {:optional true} :string]

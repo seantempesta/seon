@@ -34,7 +34,7 @@
   {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
   [running agent-id code]
   (let [answer (json/read-str (mcp/call (json/write-str {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (test-support/reply (get (first (get answer "content")) "text")))))
+    (:seon.repl/value (test-support/mcp-reply answer))))
 
 (defn- block
   "The current-state block of `agent-id` as `seon.mcp/call` answers it, read back as data."
@@ -43,7 +43,7 @@
   (let [answer (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" "(seon.context/current-state)"
                                                                       "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (test-support/reply (get (first (get answer "content")) "text")))))
+    (:seon.repl/value (test-support/mcp-reply answer))))
 
 (deftest current-state-shows-the-current-task-declaration
   (test-support/with-running-agent
@@ -108,7 +108,7 @@
        (task/assign! {:seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
        (let [[names operations] (shown running agent-id
-                                       "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.context/name reads) (:seon.render/operations (second reads))])")]
+                                       "(let [reads (:seon.context/must-reads (seon.context/current-state))] [(mapv :seon.ref/name reads) (:seon.render/operations (second reads))])")]
          (is (= ['seon.task/agent-task 'seon.task/home :seon.task/intent] names))
          (is (some #{'(doc seon.task/home)} operations)))))))
 
@@ -121,7 +121,7 @@
                                             :seon.task/intent "Fix `tq.cs/missing`."}))]
        (task/assign! {:seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
-       (is (= [{:seon.context/name 'tq.cs/missing :seon.context/problem :unresolved}]
+       (is (= [{:seon.ref/name 'tq.cs/missing :seon.ref/problem-kind :unresolved :seon.ref/line 1}]
               (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")))))))
 
 (deftest a-library-symbol-resolves-with-its-pinned-revision
@@ -134,9 +134,9 @@
        (task/assign! {:seon.db/connection connection :seon.task/assigned id
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
        (let [[entry] (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")
-             pin (:seon.context/pin entry)
+             pin (:seon.ref/pin entry)
              path (mapv str (iterator-seq (.iterator (java.nio.file.Paths/get (.toURI (io/resource "malli/core.cljc"))))))]
-         (is (= "malli" (:seon.context/project pin)))
-         (is (= 40 (count (:seon.context/revision pin))))
-         (is (some #{(:seon.context/revision pin)} path))
+         (is (= "malli" (:seon.ref/project pin)))
+         (is (= 40 (count (:seon.ref/revision pin))))
+         (is (some #{(:seon.ref/revision pin)} path))
          (is (seq (:arglists entry))))))))

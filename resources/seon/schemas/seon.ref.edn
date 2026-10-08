@@ -1,0 +1,47 @@
+#:seon.ref{:name [:or {:description "A referenced Seon or library definition: a qualified symbol or a schema key."} :qualified-symbol :qualified-keyword]
+           :path [:string {:min 1 :description "A checkout-relative path, an RFC 3986 relative reference."}]
+           :anchor [:string {:min 1 :description "A heading's anchor, as GitHub and commonmark's heading-anchor extension derive it."}]
+           :line [:int {:min 1 :description "A 1-based line in the text, as an editor shows it."}]
+           :line-count [:int {:min 0}]
+           :level [:int {:min 1 :max 6}]
+           :heading :string
+           :span :string
+           :link :string
+           :heading-entry [:map [:seon.ref/level :seon.ref/level] [:seon.ref/heading :seon.ref/heading]
+                           [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/line :seon.ref/line]]
+           :span-entry [:map [:seon.ref/span :seon.ref/span] [:seon.ref/line :seon.ref/line]]
+           :link-entry [:map [:seon.ref/link :seon.ref/link] [:seon.ref/line :seon.ref/line]]
+           :document [:map {:description "Markdown text's headings and its code spans and links in document order; fenced and indented code contribute nothing."}
+                      [:seon.ref/headings [:vector :seon.ref/heading-entry]]
+                      [:seon.ref/spans [:vector [:or :seon.ref/span-entry :seon.ref/link-entry]]]
+                      [:seon.ref/line-count :seon.ref/line-count]]
+           :problem-kind [:enum :unresolved :anchor-missing :line-reference]
+           :candidate [:or
+                       [:map [:seon.ref/name :seon.ref/name] [:seon.ref/line {:optional true} :seon.ref/line]]
+                       [:map [:seon.ref/path :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor]
+                        [:seon.ref/problem-kind {:optional true} [:enum :line-reference]]
+                        [:seon.ref/line {:optional true} :seon.ref/line]]]
+           :source [:map {:description "Markdown text that can carry references: an intent or docstring alone, a doc with its path."}
+                    [:seon.ref/text :string]
+                    [:seon.ref/names {:optional true} [:set :seon.ref/name]]
+                    [:seon.ref/document-path {:optional true} :seon.ref/path]]
+           :problem [:map {:description "A reference that does not resolve, and why."}
+                     [:seon.ref/problem-kind :seon.ref/problem-kind]
+                     [:seon.ref/line {:optional true} :seon.ref/line]
+                     [:seon.ref/name {:optional true} :seon.ref/name]
+                     [:seon.ref/path {:optional true} :seon.ref/path]
+                     [:seon.ref/anchor {:optional true} :seon.ref/anchor]]
+           :project [:string {:min 1}]
+           :revision [:string {:min 40 :max 40}]
+           :pin [:map {:description "The reference-code project and pinned revision a library definition loads from."}
+                 [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
+           :schema-form :seon.schema/value
+           :resolved [:map {:description "A name resolved to its current definition, with the forms that read it."}
+                      [:seon.ref/name :seon.ref/name]
+                      [:seon.ref/line {:optional true} :seon.ref/line]
+                      [:arglists {:optional true} [:sequential [:vector :symbol]]]
+                      [:seon.fn/spec {:optional true} :seon.fn/spec]
+                      [:doc {:optional true} :string]
+                      [:seon.ref/pin {:optional true} :seon.ref/pin]
+                      [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
+                      [:seon.render/operations [:vector :seon.render/read-form]]]}

@@ -1,0 +1,222 @@
+(ns seon.ref
+  "References in Markdown text (a task intent, a doc, a docstring), found by one
+  parse and resolved by one rule: a code span is a candidate name or path, a
+  link is a path."
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
+            [edamame.core :as edamame]
+            [seon.cache :as cache]
+            [seon.db :as db]
+            [seon.fs :as fs]
+            [seon.schema :as schema]
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.eval :as sci.eval])
+  (:import [java.net URI URISyntaxException]
+           [org.commonmark.ext.front.matter YamlFrontMatterExtension]
+           [org.commonmark.ext.heading.anchor IdGenerator]
+           [org.commonmark.node AbstractVisitor Code FencedCodeBlock Heading IndentedCodeBlock Link Node SourceSpan]
+           [org.commonmark.parser IncludeSourceSpans Parser]
+           [org.commonmark.renderer.text TextContentRenderer]))
+
+(schema.edn/load! {})
+
+;;; ---------------------------------------------------------------------------
+;;; One parse per text
+;;; ---------------------------------------------------------------------------
+
+(def ^:private ^Parser parser
+  (-> (Parser/builder)
+      (.extensions [(YamlFrontMatterExtension/create)])
+      (.includeSourceSpans IncludeSourceSpans/BLOCKS_AND_INLINES)
+      .build))
+
+(def ^:private ^TextContentRenderer text-renderer (.build (TextContentRenderer/builder)))
+
+(defn- parsed
+  "The headings and the code spans and links of `text`, in document order."
+  {:malli/schema [:=> [:cat :string] :seon.ref/document]}
+  [^String text]
+  (let [ids (.build (IdGenerator/builder))
+        headings (java.util.ArrayList.)
+        spans (java.util.ArrayList.)
+        ;; commonmark's 0-based line index as the line an editor shows
+        line (fn [^Node node] (inc (.getLineIndex ^SourceSpan (first (.getSourceSpans node)))))]
+    (.accept (.parse parser text)
+             (proxy [AbstractVisitor] []
+               (visit [node]
+                 (condp instance? node
+                   Heading (let [heading (str/trim (.render text-renderer ^Node node))]
+                             (.add headings {:seon.ref/level (.getLevel ^Heading node) :seon.ref/heading heading
+                                             :seon.ref/anchor (.generateId ids heading) :seon.ref/line (line node)})
+                             (proxy-super visitChildren node))
+                   Code (.add spans {:seon.ref/span (.getLiteral ^Code node) :seon.ref/line (line node)})
+                   Link (do (.add spans {:seon.ref/link (.getDestination ^Link node) :seon.ref/line (line node)})
+                            (proxy-super visitChildren node))
+                   ;; code is never a reference
+                   FencedCodeBlock nil
+                   IndentedCodeBlock nil
+                   (proxy-super visitChildren node)))))
+    {:seon.ref/headings (vec headings)
+     :seon.ref/spans (vec spans)
+     :seon.ref/line-count (count (str/split-lines text))}))
+
+(defn document
+  "Markdown text's headings and reference candidates, parsed once per digest."
+  {:malli/schema [:=> [:cat :string] :seon.ref/document]}
+  [^String text]
+  (cache/lookup ::document (schema/sha-256 [(.getBytes text "UTF-8")])
+                #(* 64 (+ (count (:seon.ref/headings %)) (count (:seon.ref/spans %))))
+                #(parsed text)))
+
+;;; ---------------------------------------------------------------------------
+;;; Candidates
+;;; ---------------------------------------------------------------------------
+
+(defn- relative
+  "A relative reference's path, with its fragment as the anchor; nil when it names no path."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] [:or :nil :seon.ref/candidate]]}
+  [path fragment]
+  (when (seq path)
+    (cond-> {:seon.ref/path path} (seq fragment) (assoc :seon.ref/anchor fragment))))
+
+(defn- link-candidate
+  "A link destination read as RFC 3986: a scheme is not a reference; a relative one resolves against the document's directory."
+  {:malli/schema [:=> [:cat [:maybe :seon.ref/path] :string] [:or :nil :seon.ref/candidate]]}
+  [document-path destination]
+  (let [^URI uri (try (URI. destination)
+                      ;; a destination that is not a URI is still a path, unresolved
+                      (catch URISyntaxException _ nil))
+        ^URI based (cond (nil? uri) nil
+                         (.getScheme uri) nil
+                         document-path (.normalize (.resolve (URI. nil nil document-path nil) uri))
+                         :else (.normalize uri))]
+    (cond
+      (nil? uri) {:seon.ref/path destination}
+      based (relative (.getPath based) (.getFragment based)))))
+
+(defn- line-citation
+  "The path part of a `path:N` or `path:A-B` citation, or nil."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [span]
+  (when-let [colon (str/last-index-of span ":")]
+    (let [suffix (subs span (inc colon))
+          [from to] (if-let [dash (str/index-of suffix "-")] [(subs suffix 0 dash) (subs suffix (inc dash))] [suffix])]
+      (when (and (parse-long from) (or (nil? to) (parse-long to)))
+        (subs span 0 colon)))))
+
+(defn- span-candidate
+  "A code span read as a based path, a line citation, a qualified name, or nil (prose)."
+  {:malli/schema [:=> [:cat [:set :string] :string] [:or :nil :seon.ref/candidate]]}
+  [roots span]
+  (let [segment (subs span 0 (or (some #(str/index-of span %) ["/" "#" ":"]) (count span)))]
+    (if (contains? roots segment)
+      (if-let [cited (line-citation span)]
+        {:seon.ref/problem-kind :line-reference :seon.ref/path cited}
+        (or (try (let [uri (URI. span)] (relative (.getPath uri) (.getFragment uri)))
+                 ;; a based span that is not a URI is still a path, unresolved
+                 (catch URISyntaxException _ nil))
+            {:seon.ref/path span}))
+      (let [form (try (edamame/parse-string span)
+                      ;; a span that does not read is prose
+                      (catch Exception _ nil))]
+        (when (or (qualified-symbol? form) (qualified-keyword? form))
+          {:seon.ref/name form})))))
+
+(defn- candidate
+  "One span or link read as a reference: a qualified name, a based path with an optional anchor, a line citation, or nil (prose)."
+  {:malli/schema [:=> [:cat [:set :string] [:maybe :seon.ref/path] [:or :seon.ref/span-entry :seon.ref/link-entry]]
+                  [:maybe :seon.ref/candidate]]}
+  [roots document-path entry]
+  (if-let [destination (:seon.ref/link entry)]
+    (if (str/starts-with? destination "#")
+      ;; an anchor alone names the document itself
+      (when document-path (relative document-path (subs destination 1)))
+      (link-candidate document-path destination))
+    (span-candidate roots (:seon.ref/span entry))))
+
+;;; ---------------------------------------------------------------------------
+;;; Resolution
+;;; ---------------------------------------------------------------------------
+
+(defn- pinned-revision
+  "The reference-code project and pinned revision a loaded resource URL names, or nil when it is not under a pin."
+  {:malli/schema [:=> [:cat :string] [:or :nil :seon.ref/pin]]}
+  [url]
+  (when (str/starts-with? url "file:")
+    (let [parts (mapv str (iterator-seq (.iterator (java.nio.file.Paths/get (URI. url)))))
+          [project revision] (rest (drop-while #(not= "pins" %) parts))]
+      (when (and revision (str/starts-with? project "reference-code-"))
+        {:seon.ref/project (subs project 15) :seon.ref/revision revision}))))
+
+(defn- library-name
+  "A qualified symbol resolved read-only from the host's loaded Vars, with its pinned revision."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.ref/resolved :seon.ref/problem]]}
+  [reference]
+  (let [v (when (find-ns (symbol (namespace reference))) (find-var reference))
+        m (meta v)
+        pin (some-> (:file m) io/resource str pinned-revision)]
+    (if v
+      (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference) (list 'clojure.repl/source reference)]}
+        (:arglists m) (assoc :arglists (:arglists m))
+        (:doc m) (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts (:doc m))))))
+        pin (assoc :seon.ref/pin pin))
+      {:seon.ref/name reference :seon.ref/problem-kind :unresolved})))
+
+(defn- resolve-name
+  "One referenced name resolved to its current definition on `database`, or a problem."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
+                  [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+  [database reference]
+  (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved}
+        operations [(list 'doc reference) (list 'clojure.repl/source reference)]]
+    (if (qualified-keyword? reference)
+      (let [found (sci.eval/schema-documentation database reference reference)]
+        (cond
+          (:seon.sci.eval/documentation-unavailable found) unresolved
+          (:seon.error/at found) found
+          :else {:seon.ref/name reference :seon.ref/schema-form (:form found)
+                 :seon.render/operations [(list 'doc reference)]}))
+      (let [function (db/pull database [:seon.fn/sym :seon.fn/arglists :seon.fn/spec :seon.fn/doc] [:seon.fn/sym reference])
+            test-entity (when-not (:seon.fn/sym function) (db/pull database [:seon.test/sym] [:seon.test/sym reference]))]
+        (cond
+          (:seon.error/at function) function
+          (:seon.fn/sym function)
+          (cond-> {:seon.ref/name reference :seon.render/operations operations}
+            (:seon.fn/arglists function) (assoc :arglists ; stored text read back as data until PR-25
+                                                (edamame/parse-string (:seon.fn/arglists function)))
+            (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
+            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts (:seon.fn/doc function)))))))
+          (:seon.error/at test-entity) test-entity
+          (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations operations}
+          :else (library-name reference))))))
+
+(defn- answer
+  "One candidate resolved on `database`, or its problem, at its line."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/candidate]
+                  [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
+  [database {:seon.ref/keys [line problem-kind] reference :seon.ref/name :as found}]
+  (let [resolved (cond
+                   reference (resolve-name database reference)
+                   problem-kind found
+                   ;; a path resolves once CS-01c3's resolve-path lands
+                   :else (assoc found :seon.ref/problem-kind :unresolved))]
+    (cond-> resolved (and line (not (:seon.error/at resolved))) (assoc :seon.ref/line line))))
+
+(defn references
+  "Each reference `source`'s text makes, resolved on `database` or a problem.
+
+  Held names come first, sorted, then the text's in first-seen order."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/source]
+                  [:vector [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]]}
+  [database {:seon.ref/keys [text names document-path]}]
+  (let [roots (set (.list (io/file (fs/source-directory))))
+        held (map (fn [reference] {:seon.ref/name reference}) (sort names))
+        found (keep (fn [entry] (some-> (candidate roots document-path entry)
+                                        (assoc :seon.ref/line (:seon.ref/line entry))))
+                    (:seon.ref/spans (document text)))
+        identity-of (juxt :seon.ref/name :seon.ref/path :seon.ref/anchor :seon.ref/problem-kind)]
+    (->> (concat held found)
+         (reduce (fn [[seen kept] c] (if (seen (identity-of c)) [seen kept] [(conj seen (identity-of c)) (conj kept c)]))
+                 [#{} []])
+         second
+         (mapv #(answer database %)))))
