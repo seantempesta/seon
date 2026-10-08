@@ -12,4 +12,10 @@
   :kind :function
   :intent "`seon.fn-test/fixture-observations-survive-static-admission-and-the-fold` (fn_test.clj:1656) is red on HEAD and on default: the runtime batch entity for a deftest carrying ^{`:seon.test/fixture-observation` ...} has no `:seon.test/fixture-observation` (line 1671 asserts it). Found while fixing the check JVM's dependency analysis (410 pass / 2 fail / 8 error, then 494 / 1 / 0). Correct: the metadata reaches the stored test entity. Done when that deftest is green."
   :must-read #{seon.batch/evaluate-batch}
-  :evidence #{"docs/research/agent-platform/2026-10-07/check-analysis/analysis-notes.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-07/check-analysis/analysis-notes.md"}}
+ #:seon.task{:name "a-request-cost-counts-only-the-evaluation-arm"
+             :kind :function
+             :intent "`seon.batch/arm-measures` sums the allocation of the evaluation arms only, so `:seon.cost/alloc-mb` of a request that defines one function and one test reads 22 MB while the JVM allocated 1.0 GB (default f54e73c83, 2026-10-09: 709 MB on virtual threads in the test step, 296 MB on pool threads, 37 MB on the writer thread; JFR in the evidence). The agent cannot see the cost its request caused. Done when `seon.batch/request-cost` carries the allocation of the stages that ran for the request (test step and settlement included) or names the stages it excludes as data, and the 1.0 GB request reports within 2x of it."
+             :must-read #{seon.batch/arm-measures seon.batch/request-cost seon.test/run}
+             :evidence #{"docs/research/agent-platform/2026-10-09/slow-alloc.md"}}
+]

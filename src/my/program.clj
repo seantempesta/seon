@@ -907,9 +907,9 @@
   (my.program/sizes 'seon.task)"
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol] :map]}
   [database ns-sym]
-  (let [rows (->> (concat (db/q database '[:find ?s ?src :in $ ?n :where [?e :seon.fn/ns ?ns] [?ns :seon.ns/name ?n]
+  (let [rows (->> (concat (db/q database '[:find ?s ?src :in $ ?n :where [?ns :seon.ns/name ?n] [?e :seon.fn/ns ?ns]
                                            [?e :seon.fn/sym ?s] [?e :seon.fn/source ?src]] ns-sym)
-                          (db/q database '[:find ?s ?src :in $ ?n :where [?e :seon.test/ns ?ns] [?ns :seon.ns/name ?n]
+                          (db/q database '[:find ?s ?src :in $ ?n :where [?ns :seon.ns/name ?n] [?e :seon.test/ns ?ns]
                                            [?e :seon.test/sym ?s] [?e :seon.test/source ?src]] ns-sym))
                   (map (fn [[sym src]] [sym (count (str/split-lines src))]))
                   (sort-by (juxt #(- (second %)) #(str (first %)))))]

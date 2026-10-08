@@ -20,4 +20,10 @@
              :kind :function
              :intent "`seon.maintenance/collect!` now applies `seon.cluster.registry/retention-cutoff` (`:seon.config.db/snapshot-window-ms`, shipped as one hour since f048f1251), but no scheduled collection has yet completed on default, so its reclamation is unmeasured. Before that change every commit's rewritten index nodes were permanent: measured 2026-09-28, a commit rewrites 0.3-1.2 MB of nodes, default made 7,646 commits in 24 h, and data/store grew from 102,589,464 to 107,773,192 KB in about ten minutes while this lane's own probe wrote ~40 MB. Owner rule: health and probes must never be a drain, and up to ~1 GB/day is acceptable only if the daily collection reclaims it. Done when the scheduled collection applies a declared snapshot window to live branches (older commits beyond it reclaimed, branch heads and held values kept), with the bytes reclaimed per run recorded, and the store's daily growth measured against it."
              :must-read #{seon.maintenance/collect! seon.cluster.registry/collect! seon.cluster.registry/retention-cutoff}
-             :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/health-recording-2026-09-28.md"}}
+ #:seon.task{:name "the-first-collection-of-a-785000-file-store-is-unmeasured"
+             :kind :function
+             :intent "`seon.maintenance/collect!` is scheduled daily at 03:00 UTC (`root/maintenance/compact-schedule`, seeded 2026-10-08T21:09Z, so it has never fired) over a store of 788,000 files, 4.1 GB, 93% of them index nodes written in the last day, with a one-hour `:seon.config.db/snapshot-window-ms`. Its mark phase (`seon.cluster.registry/collect!`) counts every key and walks every roster branch's history, twice. Nobody has measured its time or heap at this size on a 4 GB heap. Done when a supervised dry run (`:seon.operator.collect/dry-run? true`) has recorded its mark duration, peak heap and candidate count in the evidence, and the first scheduled run is shown to finish inside a stated bound."
+             :must-read #{seon.maintenance/collect! seon.cluster.registry/collect!}
+             :evidence #{"docs/research/agent-platform/2026-10-09/slow-alloc.md"}}
+]
