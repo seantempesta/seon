@@ -1,5 +1,6 @@
 (ns seon.db-overhead-test
   (:require [clojure.test :refer [deftest is]]
+            [datahike.api :as d]
             [seon.batch :as batch]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -110,3 +111,30 @@
          (is (pos? (:seon.schema.usage/checked check)))
          (is (zero? (:seon.schema.usage/failing check))
              "registration reconstructs the stored values with the same write plans"))))))
+
+(deftest ^{:seon/tasks #{'seon.db/datoms-decodes-every-natively-typed-datom}} datoms-chooses-each-attribute-decoder-once
+  ;; Default, 2026-10-08: an AEVT read of :seon.fn/calls (107,203 datoms) cost
+  ;; 13.6 ms in the read body against 0.9 ms through Datahike, asking every
+  ;; datom's attribute and decoding each bridged value under its own projection.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           declarations (#'seon.db/read-declarations database 'seon.db/datoms)
+           encoded? #(#'seon.db/edn-encoded? declarations %)
+           raw (vec (d/datoms database :eavt))
+           bridged (into #{} (comp (map :a) (filter encoded?)) raw)
+           {:seon.db-overhead/keys [value by-function]} (observe #(db/datoms database :eavt))]
+       (is (seq bridged) "the read holds bridged values")
+       (is (= (mapv (fn [datom]
+                      {:e (:e datom) :a (:a datom)
+                       :v (if (encoded? (:a datom))
+                            (schema.datahike/decode-attribute-value (:a datom) (:v datom))
+                            (:v datom))
+                       :tx (:tx datom) :added (:added datom)})
+                    raw)
+              value)
+           "native values pass through and bridged values decode as before")
+       (is (zero? (get by-function 'seon.schema.datahike/decode-attribute-value-in 0))
+           "no bridged value resolves its decoder again")
+       (is (<= (get by-function 'seon.schema.datahike/attribute-decoder-in 0) (count bridged))
+           "a decoder is chosen once per bridged attribute of the read")))))

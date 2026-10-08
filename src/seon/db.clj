@@ -36,7 +36,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [malli.registry :as mr])
-  (:import [datahike.db AsOfDB DB HistoricalDB SinceDB]
+  (:import [datahike.datom Datom]
+           [datahike.db AsOfDB DB HistoricalDB SinceDB]
            [java.util.concurrent TimeoutException]
            [datalog.parser.type And BindColl BindTuple BindScalar Constant FindColl FindRel FindScalar
             FindTuple Not Or Pattern Pull RulesVar Variable]))
@@ -3131,30 +3132,56 @@
   ([database entity-id]
    (entity-call database entity-id)))
 
-(defn- datom->data
-  [declarations database datom]
-  (let [stored-attribute (:a datom)
-        attribute (:ident (db.utils/attr-info database stored-attribute))
-        value (:v datom)]
-    {:e (:e datom)
-     :a stored-attribute
-     :v (if (and (keyword? attribute)
-                 (edn-encoded? declarations attribute))
-          (decode-attribute-value declarations attribute value)
-          (decode-attribute-maps declarations value))
-     :tx (:tx datom)
-     :added (:added datom)}))
+(defn- attribute-value-decoder
+  "The function decoding one attribute's stored values, chosen once per read.
+  A natively typed attribute's values are already ordinary data; an EDN-bridged
+  one decodes through its storage decoder; an attribute with no installed type
+  keeps the walk over nested attribute maps."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value :seon.schema/value] :seon.instrument/callable]}
+  [declarations database stored-attribute]
+  (let [attribute (:ident (db.utils/attr-info database stored-attribute))]
+    (cond
+      (and (keyword? attribute) (edn-encoded? declarations attribute))
+      (ask-declarations declarations #(schema.datahike/attribute-decoder-in % attribute))
+
+      (and (keyword? attribute)
+           (get-in declarations [::installed-schema attribute :db/valueType]))
+      identity
+
+      :else
+      #(decode-attribute-maps declarations %))))
+
+(defn- datoms->data
+  "Ordinary datom maps with decoded values, one decoder chosen per attribute."
+  [declarations database host-datoms]
+  ;; Uncontracted: the caller's armed output validates every map once, and
+  ;; a contract here would validate the same vector a second time.
+  (->> host-datoms
+       (reduce (fn [[decoders out] ^Datom datom]
+                 (let [attribute (.-a datom)
+                       decode (or (get decoders attribute)
+                                  (attribute-value-decoder declarations database attribute))
+                       tx (.-tx datom)]
+                   [(assoc decoders attribute decode)
+                    (conj! out {:e (.-e datom)
+                                :a attribute
+                                :v (decode (.-v datom))
+                                :tx (if (pos? tx) tx (- tx))
+                                :added (pos? tx)})]))
+               [{} (transient [])])
+       second
+       persistent!))
 
 (defn- decode-index-page
   [declarations database page]
   (update page :datahike.index-page/datoms
           (fn [page-datoms]
-            (mapv (fn [datom]
-                    (let [decoded (datom->data declarations database datom)]
-                      (cond-> decoded
-                        (not= (:v datom) (:v decoded))
-                        (assoc :seon.db/stored-value (:v datom)))))
-                  page-datoms))))
+            (mapv (fn [datom decoded]
+                    (cond-> decoded
+                      (not= (:v datom) (:v decoded))
+                      (assoc :seon.db/stored-value (:v datom))))
+                  page-datoms
+                  (datoms->data declarations database page-datoms)))))
 
 (defn- index-read-dependencies
   "The dependency plan and index pattern of one read of `index` under the
@@ -3190,40 +3217,6 @@
        entity (assoc :seon.db/pattern-entity entity)
        (some? value) (assoc :seon.db/pattern-value value))}))
 
-(defn- datoms-call
-  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value] [:or :nil [:sequential :seon.schema/value]]] [:or :seon.db/datoms :seon.db/invalid-read-error]]}
-  [database arguments]
-  (if-not (db.utils/db? database)
-    (refused-read database 'seon.db/datoms)
-    (try
-      ;; Datahike's index cursor is lazy and each element is a host Datom.
-      ;; Realize both layers here so no process-local cursor escapes to SCI.
-      (with-declarations database 'seon.db/datoms
-       (fn [declarations]
-        (let [options (first arguments)
-              index (if (map? options) (:index options) options)
-              components (if (map? options) (:components options) (rest arguments))
-              ;; Datahike answers an AVET read of an attribute it does not
-              ;; index with no datoms, which a reader takes for absence.
-              _ (when (and (= :avet index) (keyword? (first components))
-                           (not (db.utils/indexing? database (first components))))
-                  (throw (ex-info (str "An AVET read of " (first components) " finds nothing: the attribute is not indexed.")
-                                  {:seon.error/expected :db/index :seon.error/offending (first components)})))
-              result (mapv #(datom->data declarations database %)
-                           (apply d/datoms database arguments))
-              {plan :datahike.read/dependency-plan pattern :seon.db/read-index-pattern}
-              (index-read-dependencies database index components)]
-          (append-read-evidence!
-           (cond-> {:seon.db/db database
-                    :seon.db/source-argument-position 0
-                    :datahike.read/dependency-plan plan}
-             (instance? DB database)
-             (assoc :seon.db/read-index-patterns [pattern])))
-          result)))
-      (catch clojure.lang.ExceptionInfo cause
-        (append-database-evidence! database :all)
-        (dependency-error 'seon.db/datoms cause)))))
-
 (defn- datoms-call-valid?
   {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]] :boolean]}
   [[arguments _result]]
@@ -3240,9 +3233,40 @@
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.db/invalid-read-error] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
-  (if (or (keyword? database-or-index) (:index database-or-index))
-    (datoms-call (current-database-value) (cons database-or-index arguments))
-    (datoms-call database-or-index arguments)))
+  ;; One armed function: its output contract validates every datom map once.
+  (let [ambient? (or (keyword? database-or-index) (:index database-or-index))
+        database (if ambient? (current-database-value) database-or-index)
+        arguments (if ambient? (cons database-or-index arguments) arguments)]
+    (if-not (db.utils/db? database)
+      (refused-read database 'seon.db/datoms)
+      (try
+        ;; Datahike's index cursor is lazy and each element is a host Datom.
+        ;; Realize both layers here so no process-local cursor escapes to SCI.
+        (with-declarations database 'seon.db/datoms
+         (fn [declarations]
+          (let [options (first arguments)
+                index (if (map? options) (:index options) options)
+                components (if (map? options) (:components options) (rest arguments))
+                ;; Datahike answers an AVET read of an attribute it does not
+                ;; index with no datoms, which a reader takes for absence.
+                _ (when (and (= :avet index) (keyword? (first components))
+                             (not (db.utils/indexing? database (first components))))
+                    (throw (ex-info (str "An AVET read of " (first components) " finds nothing: the attribute is not indexed.")
+                                    {:seon.error/expected :db/index :seon.error/offending (first components)})))
+                result (datoms->data declarations database
+                                     (apply d/datoms database arguments))
+                {plan :datahike.read/dependency-plan pattern :seon.db/read-index-pattern}
+                (index-read-dependencies database index components)]
+            (append-read-evidence!
+             (cond-> {:seon.db/db database
+                      :seon.db/source-argument-position 0
+                      :datahike.read/dependency-plan plan}
+               (instance? DB database)
+               (assoc :seon.db/read-index-patterns [pattern])))
+            result)))
+        (catch clojure.lang.ExceptionInfo cause
+          (append-database-evidence! database :all)
+          (dependency-error 'seon.db/datoms cause))))))
 
 (defn index-page
   "One bounded, decoded page in native Datahike index order."
