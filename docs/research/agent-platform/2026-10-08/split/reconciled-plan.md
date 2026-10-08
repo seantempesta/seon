@@ -15,12 +15,56 @@ why, and it answers every open question with a recommendation checked against HE
 "(HEAD)" were re-read with `git show HEAD:` in this lane. The packets' other anchors come from `a4d438dc6`. Re-derive
 them before you assign a row. The packets' budget codes (L, O, H, I, T, D, F) and assignment contract apply unchanged.
 
+The pass-budget rows PB-01..PB-03 (group C, §3) come from the model-pass profile
+(`docs/research/agent-platform/2026-10-08/model-pass/profile.md`, `81020da6a`) and lane `pass-uncovered`. They cover
+the owners no S-row removed. The owner's budget (2026-10-08) is **20–40 MB of transient allocation per ordinary model
+pass**, excluding the provider call. More is tolerated when it is garbage, but **never GB per pass**, and retained heap
+per agent and per cluster base stays small. A pass never constructs a base context. The cluster has one shared base,
+built up incrementally as its program changes. Each agent forks it once and advances in place.
+
 Already landed: S1-01 (`f50ef6059`) and S1-02 (`438328b34`). S3-01 is in flight as lane `s3-01`, which holds
 `turn.clj`, `turn/batch.clj`, the eval schema and twelve test files, including `test/seon/turn_test.clj` and
 `test/seon/mcp_entrance_test.clj`. Lane `defn-cost2` holds `db.clj`, `program.cljc`, `call_preparation.clj`,
 `db_test.clj` and `schema_test.clj`. Rows that need those files queue behind the two lanes.
 
 ## Evidence gathered in this lane (broken first)
+
+- **A model pass rebuilds a whole base SCI context on ordinary writes (GB class). Measured at HEAD `81020da6a`.** The
+  measurement used a throwaway root `tmp/pass-uncovered/root` (pid 56337), not default. The drivers were
+  `seon.pass-probe` windows and MCP passes, and the forms are committed in `docs/research/agent-platform/2026-10-08/model-pass/base-miss-probes.clj` (`p2`–`p5`). A
+  construction shows as `seon.sci.eval/base-ctx` in the window's armed stages and as a new key in the base cache.
+  - **Model agent**, fixture provider, six passes. Pass 1 builds a base (**872 MB / 584 ms**; base-ctx 123 ms). Passes 2
+    and 3 build none (501 and 542 MB). The `defn` pass builds none (839 MB). The pass **after** the `defn` builds one
+    (**1,360 MB / 829 ms**; base-ctx 224 ms). The next ordinary pass builds none (701 MB).
+  - **MCP SCI agent.** The first pass on a new agent builds one (648 MB / 402 ms; base-ctx 216 ms). Repeat passes build
+    none (34–42 MB / 45–64 ms; fork-for-turn 6 ms). The pass after `(my.agent/settings! {:seon.config.run/max-episode-runs 3})`
+    builds one (318 MB / 228 ms; base-ctx 165 ms). The pass after a one-line `defn` builds one (519 MB / 301 ms; base-ctx
+    247 ms).
+  - **Three causes, all in the base key, not in eviction.** The key is `base-ctx-key` (HEAD `src/seon/sci/eval.clj:3026`),
+    built from `program-identity` → `revision-basis` (`:2930`).
+    1. The basis carries `:datahike.cache/connection-id` and `/generation`, so each agent branch has its own base. All
+       four cached keys named an agent branch connection (`[uuid :agent-…]`). A new agent's first pass therefore
+       rebuilds.
+    2. `acquisition-attributes` (`:2912`) includes `config/dial-attributes`. One agent's settings write moves
+       `:seon.config.ai/*` and `:seon.config.run/*` revisions and invalidates a program it does not change.
+    3. Every program attribute revision is in the key. One `defn` moves `:seon.fn/*`, `:seon.ns/*` and
+       `:seon.program/*`, and the next `acquire!` re-derives the whole program: `load-core-namespaces!`, `build-base-ctx`,
+       and `acquire-program!` over every function and namespace row (`:2352-2500`). Nothing is incremental.
+  - **Where it fires.** The miss lands in the refresh's `acquire-context!` today. After S4-06 deletes the refresh, it lands
+    in `resume-turn`'s `acquire!` (commit `37d11f6a0`, HEAD `src/seon/turn.clj:5153`). That `acquire!` itself is right:
+    it is a no-op (0 ms) when the identity is unchanged. The defect is what the identity contains.
+  - **The cache breaks the cache law.** `base-context-cache` is a `clojure.core.cache` LRU of 4 (`eval.clj:2908-2910`), not a
+    `seon.cache` kind. More than four live branches thrash it, and its misses are not observable in `seon.cache/status`.
+  - **Retained heap is small; the cost is transient.** After three full GCs, the throwaway root held **333 MB** live with
+    four cached bases. Eight new agents, each with one def, added **9 MB** (about **1.2 MB per agent**). Evicting all
+    four bases freed **8 MB** (about **2 MB per base** beyond the structure it shares with the cluster). The GB-class
+    problem is per-pass allocation, not retention.
+  - Existing task `seon.sci.eval/acquisition-rebuilds-the-whole-program` owns this class. PB-01..PB-03 below are its
+    slices.
+- **Other observations from this lane.** The throwaway boot took **73.4 s**, 70 s of it in the `:seon.source/current`
+  layer. That is existing issue `docs/seon/issues/from-zero-boot-takes-minutes.md`. Default reports
+  `seon.schema/call-with-projection-state` max **1,346,204 ms**, under existing tasks `d27179bab996` and
+  `c4ece4f4eec9`.
 
 - **Default is behind HEAD.** `bin/seon status` reports pid 89251, source root `a4d438dc6`, health `:faulted`. The
   open fault is `seon.turn.world/record-fault`: a branch-custody write refusal, 3 occurrences, task `3d2fb1b41dc8`.
@@ -88,6 +132,7 @@ Already landed: S1-01 (`f50ef6059`) and S1-02 (`438328b34`). S3-01 is in flight 
 |---|---|---|
 | S5-03a–j | Ten admission design proofs, one case per lane (notes only, disposable SCI branch) | F (parallel, disjoint notes) |
 | X-01 | Correct the REPL and Flow skills' current claims against HEAD; delete what cannot be verified | G |
+| PB-01 | Must-fix (GB class): one shared cluster base, keyed by loaded-program content in `seon.cache`; the agent's branch overrides are an overlay on its fork. Ready once `eval.clj` is free (held by `repl-p11`) | C (first unstarted C row) |
 | I-Q4 | Inventory of the prompt, walk and capture caller closure, web/debug included, with each survivor's data entrance | H (notes) |
 | I-Q10 | Inventory of the `*open*`, `open-tx`, `recover-tx`, effect, test-attempt and boot recovery caller closure | H (notes) |
 | I-Q14 | Inventory of the disarm/join/backstop proofs, plus the caller deadline path from MCP to `stop-graph!` | H (notes) |
@@ -519,8 +564,62 @@ Q13, not S6-05.
 | S7-02 | Completed proof results from the task home are delivered as input items (Q3 shape) | `src/seon/test/runner.clj:1546,1971`, `src/my/agent.clj` (inputs), result/input schemas, `test/seon/test_test.clj` | new `seon.test-test/proof-input-delivers-only-completed-current-evidence` | I/T | S4-05b, S6-02b | B/E |
 | S7-03 | Completion only from fresh proofs of the changed reach, by the idempotent home writer (Q16) | `src/seon/task.clj:698`, `src/seon/test.clj:72,1562`, `test/seon/test_test.clj`, `test/seon/task_ingestion_test.clj` | new `seon.task-ingestion-test/a-task-completes-only-from-fresh-proofs-after-its-change`. Existing `seon.test-test/recording-preserves-admission-and-refuses-a-deleted-definition` | T/F | S7-02, S6-06b, Q16 | E |
 
+### PB pass budget (group C; Opus: acquisition is boot-critical)
+
+The base context becomes **one shared base per cluster, a function of the JVM's loaded program**. It is built once per
+loaded commit and then advanced by changed namespaces (PB-03). An agent's branch differences (agent-authored rows
+whose digest differs from the loaded one, plus their reverse closure) form an **overlay applied only on that agent's
+fork**. The overlay advances by changed definition digests (PB-02). The agent's context forks once and advances in place
+at idle boundaries (PB-02b). No pass constructs a base. `acquire!` already advances a held context in place and carries
+the context's own Vars (HEAD `eval.clj:3209`); it keeps that role. The base's identity, the derivation's inputs and the
+per-pass regeneration change.
+
+What disappears:
+- the revision-basis base key, meaning connection id, generation, dial revisions and whole-program revisions (`base-ctx-key:3026`);
+- the `clojure.core.cache` LRU of 4 (`:2908`);
+- whole-program re-derivation on every program change;
+- per-pass `regenerate-agent-context!` when nothing changed.
+
+Cost follows the changed definitions and their closure, not the program.
+
+| Id | Change | Files | Proof tests (data) and budget row | Deps |
+|---|---|---|---|---|
+| PB-01 | Split `derive-base-ctx`/`acquire-program!` into two parts. The **cluster base** loads core namespaces, builds the ctx and caches the program snapshot from the **loaded** value. It lives in a `seon.cache` kind `:seon.sci.eval/base-context`, keyed by `[loaded commit id, projection identity, recorder]` and weighed by its function-row count. The **overlay** computes the authored overrides against the loaded digests plus their `seon.fn/reverse-closure`, interprets them and arms them with the branch's current dial values on the caller's fork (`copy-base-ctx`). `acquired-database?` compares the definition digests and the loaded commit, never dial or connection revisions. A dial change re-arms only the overlay's interpreted wrappers, and a ctx records the dial values it armed with. Delete `base-ctx-key`'s revision key, `program-cache-policy`'s base entry and the LRU. Contracts: `base-ctx [database arm-request] -> ctx` is unchanged; a new private `overlay! [ctx database] -> acquisition`. | `src/seon/sci/eval.clj`, `resources/seon/schemas/seon.sci.eval.edn`, `test/seon/sci/branch_execution_test.clj`, `test/seon/sci/acquisition_attributes_test.clj` (deleted with the dial/attribute basis if no caller remains, else converted), `test/seon/cluster/evaluate_source_test.clj` | New `seon.sci.branch-execution-test/agent-branches-and-a-settings-write-share-the-cluster-base`. Two new branches' first acquisitions, a repeat acquisition and an acquisition after a dial write give **zero** `:seon.cache/misses` for `:seon.sci.eval/base-context` in `(seon.cache/status)` after the cluster base exists. Each branch's overlay is exactly its authored overrides plus their closure. New `seon.cluster.evaluate-source-test/a-second-model-pass-and-a-settings-write-construct-no-base` (fixture provider, base misses asserted as data). Existing, kept green: `…branch-execution-test/a-base-context-is-memoized-by-its-program-and-each-caller-gets-its-own-fork`, `…/two-concurrent-acquisitions-of-one-program-derive-it-once`, `…/branch-definitions-and-unchanged-callers-share-one-context`, `…/a-branch-forked-before-a-platform-change-binds-the-loaded-compiled-var`, `…/an-override-of-a-declaration-the-indexer-marks-host-bound-refuses-by-name`, `seon.cluster.evaluate-source-test/an-armed-agents-run-sees-a-program-change-committed-by-another-writer`. **Budget row** (throwaway root, `seon.pass-probe/run-model "default" 3 #{2}` plus the `p3` MCP sequence of `base-miss-probes.clj`): a new agent's first pass and the pass after a settings write show no `seon.sci.eval/base-ctx` stage. MCP first pass ≤ 50 MB / 100 ms (today 648 MB / 402 ms); after settings ≤ 50 MB / 100 ms (today 318 MB / 228 ms). Retained probe (`p4`/`p5` form: live heap after three `System/gc`, eight agents): one base per loaded program, ≤ 2 MB retained per agent (today 333 MB baseline, +1.2 MB per agent, about 2 MB per extra base) | `repl-p11` releases `eval.clj`; independent of S4 (S4-06 only moves where the miss lands) |
+| PB-02 | The overlay advances incrementally. The ctx's program snapshot holds the definition-digest map it acquired. `acquire!` diffs the branch's `function-digests` (memoized per commit) against it. It installs added and changed rows plus their `reverse-closure` on the ctx in place (`install-row!`), unmaps removed ones, and pulls only those rows and their namespaces. Unchanged digests do no read and no install. A loaded-commit change re-forks from the advanced cluster base (PB-03) and re-applies the overlay. | `src/seon/sci/eval.clj`, `resources/seon/schemas/seon.sci.eval.edn`, `test/seon/sci/branch_execution_test.clj`, `test/seon/cluster/evaluate_source_test.clj`, `test/seon/sci/eval_test.clj` | New `seon.sci.branch-execution-test/a-one-definition-change-installs-only-its-closure`: zero base misses; the installed set equals `#{changed} ∪ closure`; a private def's object is `identical?` before and after; the changed definition is visible. New `seon.cluster.evaluate-source-test/a-pass-after-a-definition-constructs-no-base` (model pass, fixture provider). Existing, converted to the advance: `…branch-execution-test/a-data-only-commit-reuses-the-acquired-program-and-a-program-entity-reacquires`, `…/a-fork-taken-after-a-program-entity-commit-holds-that-entity`, `…/an-unchanged-host-bound-caller-of-a-changed-definition-runs-as-compiled`, `…/interpreted-callers-resolve-unchanged-names-to-compiled-vars`, `seon.sci.eval-test/database-provenance-regenerates-the-base-and-reverts-for-retained-forks`. **Budget row**: the MCP pass after a one-line `defn` ≤ 60 MB / 100 ms (today 519 MB / 301 ms). The model pass after a `defn` shows no `base-ctx` stage and drops by ≥ 400 MB (today 1,360 MB / 829 ms) | PB-01 |
+| PB-02b | Fork once, advance in place. `fork-for-turn` with a carried agent ctx whose acquired overlay and base are unchanged since its last pass returns that ctx without `regenerate-agent-context!` (`:2732`). Regeneration runs only after PB-02 advanced the overlay or PB-03 the base. This is the owner's "forks once and advances in place" shape, not a budget item (the fork costs 6–7 ms / ~5 MB). | `src/seon/sci/eval.clj`, `test/seon/sci/eval_test.clj` | New `seon.sci.eval-test/an-unchanged-program-pass-reuses-the-agents-context`: the same ctx `:env` atom and the same private Var objects, with an `alter-var-root` of an inherited Var still carried. Existing `seon.sci.eval-test/acquired-source-context-forks-have-branch-custody-and-private-defs`, `…/acquired-source-context-forks-own-their-lazy-program-state`, `…/sci-fork-copies-existing-var-roots-on-write`. **Budget row**: `fork-for-turn` ≤ 1 ms on an unchanged pass (today 6–7 ms per call, 2 per model pass) | PB-02 |
+| PB-03 | Adoption advances the cluster base. When the loaded commit moves, the new base entry is a fork of the previous one with only the reloaded namespaces' Vars re-copied (the changed set `cluster/refresh-source!` already holds). It is keyed by `[previous base key, changed namespace digests]`, and nothing re-derives the whole program. This is outside any pass, and it completes "built up incrementally, never rebuilt". | `src/seon/sci/eval.clj`, `src/seon/cluster.clj` (passes the changed set), `test/seon/sci/branch_execution_test.clj` | Converted `seon.sci.branch-execution-test/an-adoption-record-moves-the-loaded-program-every-acquisition-compares-against` (one advance, zero derivations). New `…/an-adoption-advances-the-cluster-base-by-its-reloaded-namespaces`. **Budget row**: adopting one changed namespace costs ≤ 50 MB / 100 ms in the base (today a full derivation of 428 MB / 180–215 ms) | PB-02 |
+
+Accepted as measured, not sliced (owner, 2026-10-08: transient garbage above 40 MB is tolerated, never GB). No accepted
+owner threatens the envelope at today's sizes:
+- the surviving writer after S5/S6/P14 (one checked commit, 13–14 MB, 21–30 ms; existing tasks
+  `seon.db/every-commit-validates-its-write-report-three-ways`, `seon.db/the-checked-writer-is-slow-on-a-fresh-branch`);
+- the armer/provider/query residual (3–7 MB, `ai/complete` 3 ms).
+
+Watch: the writer's owning-value validation grows with an agent's turn history (37 µs per turn, the second task). If a
+long-lived agent's settlement passes 40 MB or 100 ms, that task becomes a slice.
+
+### Pass budget after all slices (projection, owner by owner)
+
+Warm ordinary model pass after opening/input, excluding the provider call. Estimates come from measured surviving work
+(profile tables and this lane's probes). They are not measurements of the end state; the PB and S budget rows measure it.
+
+| Owner | Today, first / warm (MB, ms) | Removed by | Projected after all slices (MB, ms) |
+|---|---|---|---|
+| Base construction | 428 / 0 on a hit; a miss on every new agent, settings write or `defn` (648–1,360 MB passes) | PB-01, PB-02, PB-03 | **0** in any pass. A `defn`'s next pass pays only its overlay delta (est. 5–20 MB). Adoption pays a base advance outside passes |
+| Context projection, render, prompt | 405 / 350; 190–200 ms | S4-02b, S4-03, S4-04, S4-06, S4-07b | 3–10 MB, < 10 ms (held transcript append; provider request serialization still ∝ transmitted history) |
+| Checked writer (seven commits) | 97–125; 140–175 ms | S4-06/07b, S5, S6-04, P14 | **accepted** one commit: 10–18 MB, 15–30 ms |
+| Evaluate/record remainder | 8–18; 2–24 ms | P6/P7/P8/P13, S5-05/07, S6-03 | 2–8 MB, 5–15 ms |
+| Refresh bookkeeping | 12–17; inside 165–357 ms | S4-06 | 0 |
+| Context fork/regeneration (2 calls) | 11–13; 10–15 ms | S4-06 (one fork), PB-02b | < 1 MB, ≤ 1 ms on an unchanged pass |
+| Work/episode derivation | 6–10; 6–8 ms | S6-05/07 | 2–4 MB, 2–4 ms |
+| Armer/provider/query residual | 3–7; ~3 ms | none | **accepted** 3–7 MB, ~3 ms |
+| **Total** | 785–928 first, 473–578 warm; 375–675 ms | all above | **≈ 20–45 MB, 30–70 ms**, at the 20–40 MB target with garbage-only overshoot. Retained: one base per loaded program plus ≤ 2 MB per agent |
+
 ### Critical path and parallel launch now
 
+- **Must-fix first in C:** PB-01 → PB-02 → PB-02b → PB-03 start as soon as `repl-p11` releases `eval.clj`. They go
+  ahead of every unstarted C row because they remove a GB-class per-pass cost. PB-01 and PB-02 can land before S4. If S4-06
+  lands first, the miss moves to `resume-turn`'s `acquire!` and is still removed by PB-01/02.
 - **In series:** C: S1-04 → S7-01 → S1-05 → S1-06 → S1-07a → S1-07b, with S1-08 between any two C rows after S1-04.
   Then S1-09 (needs S1-03) → S1-10 → S1-11.
 - **In parallel now:** X-01; I-Q4, I-Q10 and I-Q14; S5-03a–j; S1-03 (after Q1); S1-04 (after Q17).
