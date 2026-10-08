@@ -264,6 +264,10 @@ accepted recommendation as installation evidence. Coverage includes all accepted
 
 ## Landing and verification
 
+The mechanical slice committed through `bin/lane commit` as `29ddc7b6b`: **70 Markdown files**, **505 lines added**,
+**207 removed**, **net +298**. The audit supplies most of the added prose. The lane gate confirmed documentation
+only, skipped publication/boot, and committed the named claimed paths. This landing entry is a separate doc update.
+
 Only Markdown changed: source/test lines added or removed: **0/0**. No program function, contract or runtime
 configuration changed; no test reaches the prose. The installed `bin/lane` documentation-only gate expressly skips
 publication and JVM boot when no `--test` is supplied. Applying program tests to this slice would contradict
