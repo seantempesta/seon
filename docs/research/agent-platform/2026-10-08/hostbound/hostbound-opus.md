@@ -1,0 +1,280 @@
+---
+title: "Host-bound code and platform changes: what an agent can prove at its REPL, and what root does for the rest"
+type: research
+status: active
+created: 2026-10-08
+lane: hostbound-opus
+---
+
+# Host-bound code and platform changes from an agent's REPL
+
+What exists: an agent's branch runs in a fork of the cluster base SCI context. The base binds every loaded program
+function to its compiled JVM Var root (`seon.sci.eval/install-first-party-namespaces!`); acquiring a branch interprets
+the branch's overridden functions plus their whole static reverse closure from stored source
+(`seon.sci.eval/interpret-overlay!` over `seon.fn/reverse-closure`); a host-bound declaration
+(`:seon.fn/host-bound?`, from `seon.fn/host-bound-callers`) keeps its compiled Var or refuses by name
+(`seon.sci.eval/install-row!`). Platform loops (the eval path, the writer, Flow procs, boot) run the JVM's compiled
+Vars and see a change only after the commit is loaded by a new JVM (`bin/seon start --head`). Platform changes are
+proven today by the throwaway check JVM (`bin/seon check`). Principal approach of this note: keep that split, make the
+boundary visible as **execution evidence** instead of guessing it from the call graph, make the interpreted side cheap
+(lazy) and complete (same eval request), and turn the throwaway check into a **root-owned merge step whose result is
+data on the agent's task**.
+
+Measured on default (commit `6a244149d` loaded, HEAD `8bfd1c3aa`), 2026-10-08 17:20-18:30 JST, agent
+`hostbound-opus-probe` (branch `:agent-75d011efa023`) and JVM-mode reads. Default was `:degraded` throughout
+(10 over-bound warnings, 26 errored receipts, `seon.cache` at 511.5 of 512 MB).
+
+## 0. Decisions for the owner, ranked
+
+| # | Decision | Recommendation | Why first |
+|---|---|---|---|
+| D1 | What proves a branch change: the static reach (today) or what actually executed | **Execution evidence** (RF-3 option 1): a member records the definition digests whose interpreted bodies it executed; a gate (RF-2, `merge!`) accepts a changed digest only when a green member executed it | the static reach is wrong in both directions (§1.3): it lists 106 tests for `seon.id/digest`, and it misses every indirect call |
+| D2 | Where platform changes are proven | **Root-owned isolated run as a merge step** (option A, §2), on a **warm check JVM** that reloads the changed files instead of booting (A2); results land as an ordinary test run on the merge request | it is the only option that runs the real compiled code without changing the shared JVM, and it removes the 2-4 minute boot and queue |
+| D3 | How much the branch interprets | **Lazy closure**: bind each reverse-closure member to a stub that interprets on first call; same rule inside the eval request as after it | one override of a widely used function costs 4.7-12.9 s per acquisition today (§1.2); the same eval request sees a different program than the next (§1.1) |
+| D4 | Who writes files and commits | **`merge!` writes back and commits** (root's task); the agent never needs the checkout; root batches the restart that loads it | the JVM loads an immutable archive, so a merged program reaches the JVM only through a commit and a restart (§4 step 10) |
+| D5 | What a test an agent writes can call | Test namespaces' Vars in the agent's SCI on `require`, and SCI `binding` of a host dynamic Var binds the host Var (fork change) | test helpers are absent from every agent context today (§3, measured 0 publics) |
+
+Square pegs the owner should rule on are in §5 (P1 two program stores; P2 "a branch never changes the platform"
+versus "agents fix the system"; P3 static reach as evidence).
+
+## 1. What an agent's branch can and cannot reach
+
+### 1.1 The mechanism, measured
+
+| Probe (agent `hostbound-opus-probe`) | Result |
+|---|---|
+| `(in-ns 'seon.id) (defn digest … "zzzzzzzzzzzz")` then, **same eval request**, `[(seon.id/digest 12 [1]) (seon.id/evaluation "a" 1)]` | `["zzzzzzzzzzzz" "2838520d49f8"]`: the core caller `seon.id/evaluation` still ran the compiled `digest` |
+| **next eval request**, `(seon.id/evaluation "a" 1)` | `"zzzzzzzzzzzz"`: acquisition interpreted the caller from source |
+| JVM mode, `(seon.id/digest 12 [1])` | `"c7cfebc92d5d"`: the host Var is untouched; nothing leaked to the platform |
+| next request, `(my.test/check {:seon.test/changed ['seon.id/digest]})` | refused inside `seon.test.runner/program-digest` (its armed output contract saw `"zzzzzzzzzzzz"`): the **test runner itself** ran interpreted on the branch, because it is in `digest`'s reverse closure |
+
+So the rule today: an overridden function and its whole static reverse closure are interpreted in the branch fork
+after the eval request settles (`interpret-overlay!`); inside the eval request that defined it, only agent-authored
+callers are re-interpreted (`seon.sci.eval/inherited-callers` filters on `::agent-authored?`, LR-STALE2). That is a
+REPL-law gap: the forms after a `defn` see a different program than the next eval request does.
+
+The last row is the second finding: interpreting the reverse closure also interprets **platform code that the agent's
+own tools call** (`my.test/check` → `seon.test/run` → `seon.test.runner/program-digest`). A branch change to a deep
+function can break the agent's own test tool on its branch. That is sound Clojure (it is what a reload would do) but it
+means a platform-reaching change makes the agent's tools run its change.
+
+### 1.2 Cost of interpreting the closure
+
+| Measure (JVM mode, default) | Value |
+|---|---|
+| `seon.fn/reverse-closure` of `seon.id/digest` | 1,490 ms; 2,349 affected symbols, 21 of them host-bound (of 85 on default) |
+| `seon.sci.eval/base-ctx` of my branch (one override, 2,350 interpreted) | 12,868 ms first, 4,668 ms again (not cached) |
+| `base-ctx` of main | 30 ms |
+| raw `sci/eval-string*` of 400 core function sources in a fork | 133 ms total, about 0.33 ms each (342 evaluated; the 58 failures are aliases my raw probe did not install, e.g. `io/file`, `gen/one-of`) |
+| an eval request on that branch through `seon.mcp/call`, agent context carried | 98-110 ms wall |
+
+The carried agent context hides the acquisition from ordinary eval requests, but every fresh acquisition of such a
+branch (a restart, and, if each test member acquires its own branch off the commit, every member: **hypothesis, not
+measured**; it would explain the pilot's 15 s `my.test/check`) pays 4.7-12.9 s. Over 1 s is a finding: task
+`seon.sci.eval/a-branch-overriding-a-widely-called-function-acquires-in-seconds` (EDN in §6).
+
+### 1.3 What stays unreachable, by cause
+
+Interpreting the closure covers ordinary Clojure called from SCI. What it cannot cover, with the reason:
+
+1. **Host-bound declarations** (85 on default). `reify`, `proxy`, `deftype`, `defrecord`, `definterface`, `import`, and
+   JVM macros from namespaces SCI does not interpret (`clojure.core.async/go` reads compiler locals from `&env`). Their
+   compiled bodies call compiled Vars, so a branch change below them is invisible through them. In `digest`'s closure:
+   `seon.flow/join-graph!`, `seon.cluster/serve!`, `seon.sci.eval/install-row!`, `seon.cluster.store/open-store!`,
+   `seon.fault/unfold!` and 16 more.
+2. **Compiled entry points the platform drives itself.** The eval path (`seon.mcp/call` → `seon.batch` → recording),
+   transaction functions on the writer thread (`[:db.fn/call adoption-guard-tx …]`), Flow procs (their transforms are
+   Vars), `d/listen` listeners, schedule handlers, the web handler, boot. The overlay lives only in the agent's SCI
+   context; these loops run the JVM's Vars. By the owner's rule ("a branch never changes the platform") this is
+   correct, not a bug: the agent's own eval request must not run its half-written evaluator.
+3. **Indirect references.** The static call graph (`:seon.fn/calls`) misses values captured at load time: a `def` of a
+   map of functions, `defmethod` bodies, protocol extensions, a Var named in a Malli schema (`#'seon.db/connection-object?`
+   in `:seon.db/connection`), `requiring-resolve`, clojure.test fixtures registered with `use-fixtures`, Flow step
+   symbols. A test reaching such a function through an indirect hop runs compiled code and its green proves nothing
+   about the branch. No static fix exists; this is why D1 asks for execution evidence.
+4. **Host dynamic Vars.** `(binding [seon.db/*read-evidence-sink* sink] …)` in SCI binds SCI's copy only; host code
+   reading the Var sees nothing (pilot friction 5). A test cannot observe reads, profiles or any dynamic-Var-carried
+   behavior of compiled code.
+5. **Not program entities at all.** Schema resources (`resources/seon/schemas`), `config/`, `deps.edn`, `bin/`,
+   `script/`, submodule pins, boot order. These need a JVM that boots them.
+6. **Test namespaces.** Absent from the agent's SCI (§3).
+
+Where interpreting more stops being sound:
+- **Identity.** An interpreted function is a new object. Code comparing functions (`identical?`, a cache keyed by a
+  function, a registry holding the compiled object) sees two worlds. Same for types: a `defrecord` re-evaluated in
+  SCI is another class, so `instance?` across worlds fails; that is why such declarations are host-bound.
+- **State.** Re-evaluating a `def` of an atom or a `defonce` makes new state. The overlay interprets function rows
+  only, which keeps this sound; it must stay that way.
+- **Termination.** SCI interrupts interpreted code only (AGENTS.md "Bound admission"); more interpreted platform code
+  is more interruptible, not less, so this does not limit it.
+- **Speed.** Interpreted platform code is slower than compiled; I did not measure the factor for the runner. A test
+  bound that fires only on a branch is the symptom to watch.
+
+Extending LR-STALE2 to core callers inside the eval request is sound under the same rules (it is what the next eval
+request already does). Extending interpretation beyond the static closure is not possible without execution
+observation, and beyond host-bound declarations is not possible in SCI at all.
+
+## 2. For what remains: options
+
+The remaining set is (1), (2), (5) and the indirect part of (3) when the indirect hop is compiled platform code.
+Each option below with guarantee, cost, how the agent sees results and how root reviews.
+
+| Option | Guarantee | Cost | Agent sees | Root reviews |
+|---|---|---|---|---|
+| **A. Root-run isolated JVM as a merge step.** The agent changes the code on its branch, its interpretable proofs run there; `merge!` sees changed digests with no executed evidence (D1) or a file class from §1.3 (5), and runs the isolated check as part of the merge, on the merge branch's write-back archive; the run is stored as `:seon.test.run` on the merge request | real compiled code, fresh boot from the exact archive, the store a disposable copy | today 2 min 20 s - 3 min 35 s per check plus queueing for one of two slots (repl-first §1; pilot: 207 s, 126 s of it waiting) | the merge request's run in its current-state block: red members as data, through the value printer | the diff value plus the stored run; nothing new to learn |
+| **A2. A warm check JVM** owned by root (a throwaway root kept booted on a disposable store at the main commit); each isolated run sends the changed files, reloads them (`clj-reload` or `require :reload` in order), runs the named tests, then resets to the main commit | as A for function bodies; weaker for boot, schema publication and dependency changes, which still take a fresh boot | one JVM resident (heap cap 4 GB by dial, actual much less unmeasured); a run is reload (30-1,600 ms per namespace, PB-03a) plus tests | same as A | same as A |
+| B. Per-agent hot-reload JVM | compiled semantics per agent | one JVM per agent: a second store (the store lock is single-process), boot 38 s (`ready-ms` 38,157 on default), memory per agent; 16 GB fits two or three | its own REPL, a second entrance | two worlds to diff |
+| C. clj-reload in the main JVM on a disposable branch | none: a reload replaces global Var roots for every cluster and agent | cheap | — | — |
+| D. A second Clojure runtime in a child classloader in-process (shimdandy pattern) | compiled semantics | a second full Seon load in the heap, the same store-lock problem, classloader leaks | — | — |
+| E. Make platform code interpretable: thin host-bound shells around pure functions | moves code from (1)/(2) into the interpretable set | refactors, one per shell | its ordinary branch proofs | ordinary merge |
+
+C is refused: it is a reload, which is adoption, and adoption is root's after merge. D adds a second system. B is A2
+per agent with a second store and no reviewer; it fails the 16 GB rule with more than two agents.
+
+**Recommendation: E as a standing direction, D1 for everything interpretable, A for the rest, A2 when the check
+queue is the bottleneck.** The agent's flow does not change: `defn` on its branch, proofs run, `request-merge!`. What
+changes is that `merge!` knows, from execution evidence, which changed digests no green member executed, and for
+those (and for every non-program path) it runs the isolated check as one of its steps and keeps the merge branch
+until it is green. Root's restart (`start --head`) after a landing is unchanged.
+
+Guarantee of the combination: every merged digest either executed interpreted under a green member on the merge
+branch, or ran compiled under a green member of the isolated check. Nothing merges on reach alone.
+
+## 3. Agent-friendly fixtures
+
+What an agent at its REPL needs to write and run a test: `deftest` in the test namespace, the helpers that namespace
+uses, a world to run in, and a way to run exactly that test.
+
+| Need | Today | Change |
+|---|---|---|
+| `deftest` in a file-backed test namespace | refused by the writer's digest check (pilot friction 3); fixed in `7f0458ffd` at HEAD, not yet loaded on default | prove after the next restart |
+| helpers (`seon.test-support/with-database`, `agent-value`, `evaluate`) | **0 public Vars** in the agent's SCI for `seon.test-support`, `my.program-test`, `seon.id-test`; the JVM holds 53, 7, 7; the database holds 67 rows for `seon.test-support` (64 not host-bound) | install a test namespace's Vars when the agent `require`s it (SCI's `:load-fn` seam: host `require`, then the same copy `install-first-party-namespaces!` does), or include loaded test namespaces in the base; cause to verify first: the base skips a namespace that `find-ns` did not hold when the base was built, or the namespace set excludes test roots |
+| the world | `with-database` is already the right thing: a branch off the member's commit through `seon.cluster.agent/acquire-context!`, released after; the runner already gives each member its own branch | nothing new; teach it in the skill as the one fixture, and keep `fresh-store?` for store-global subjects |
+| run exactly one test | `my.test/check` selects by reach only; naming a test as changed refuses (pilot friction 11); `seon.test/run` with `:seon.test/identities` exists but its `:seon.test/execution` is not supplied to an agent's call (measured: refused, missing `:seon.test/execution`) | `my.test/check` accepts `:seon.test/identities` (the request schema already has the key) |
+| helpers the agent writes that need its world | an agent-authored function declaring `:my.program/context` and `:seon.db/connection` in its map argument is **not supplied** (measured: `hostbound.scratch/probe-run` refused, missing both) | supply fills declared world members in a map argument for agent-authored functions too (AGENTS.md "Supply defaults"; pilot friction 12 is the same class) |
+| observe compiled behavior (reads, allocation, calls) | SCI `binding` of a host dynamic Var does not reach host code | fork change in SCI: binding a copied host dynamic Var also pushes the host thread binding (owner: fork freely); plus the eval-alloc measure for cost proofs |
+| failure output | clojure.test's reporter prints into `:out` | the runner's report as data (RF-6 row 6) |
+
+The test-support namespace is 1,309 lines mixing two audiences: agent-facing fixtures (`with-database`,
+`fork-cluster-ctx`, `agent-value`, `evaluate`, `reply`, `refusal-data`) and platform fixtures (published roots,
+operator roots, file stores, provider servers). Split it: the agent-facing part is small and interpretable; the platform
+part is what option A runs.
+
+## 4. The change → merge path end to end, step by step
+
+| # | Step | Works today? | Fix |
+|---|---|---|---|
+| 1 | `defn` on the agent's branch | yes, 1-56 ms | — |
+| 2 | later forms in the same eval request call through core callers | **no**: core callers run compiled until the next request (§1.1) | D3: re-interpret core callers in the request as acquisition does, lazily |
+| 3 | tests reaching the change run automatically (F4a) | not observed on my probe: the Var render listed 106 pending tests and offered `my.test/check` | verify F4a on the loaded commit; with 106 reaching tests the 10 s bound leaves most pending |
+| 4 | the reaching set | static reach; 2,349 callers and 106 tests for one deep function | keep as the selector, but D1 decides proof |
+| 5 | each test runs the branch's code | yes for the interpreted closure; no below host-bound members, through indirect hops, or in platform loops (§1.3) | D1 records what executed; D2 for the rest |
+| 6 | acquisition cost of such a branch | 4.7-12.9 s per acquisition | D3 lazy stubs; cache the overlay by loaded commit plus override digests, not by branch commit |
+| 7 | write-back (`my.program/write-branch!`) | yes (pilot: 52-484 ms), with frictions: undigested `in-ns` namespaces block it (pilot 8), same-request call answers a merge message (pilot 10) | those tasks |
+| 8 | commit | `bin/lane commit` always boots the check (207 s in the pilot); `seon.cluster.branch-evidence/branch-evidence` landed (`871a28901`) but is not wired | RF-2 wiring, with D1 as its proof rule |
+| 9 | merge request and `merge!` | gaps G1-G11 (merge.md §7): new contracted functions cannot arm on the merge branch, schemas block diff, tools throw, merge lands on the checked-out branch | merge.md rows; add the isolated step (D2) |
+| 10 | the merged program reaches the JVM | only by commit and restart: default runs from the immutable archive `data/source/6a244149…` (its `user.dir`, `seon.fs/source-directory` and classpath), so `require :reload` can only reload the archive's bytes, and development adoption refuses bytes that differ (`verify-development-sources!`) | D4: `merge!` writes back and commits; root batches `start --head` |
+| 11 | RED-5 (cached program classes shadow reload) | default has no program classes on its classpath (`seon/id__init.class` resolves to nothing); only check JVMs use them | RED-5 only matters for A2's warm JVM: it must reload from source |
+| 12 | the agent's next context | branch survives restart; private SCI defs do not (repl-first friction 10); the agent sees the merge result only by polling the request | the merge request's state in the agent's current-state block |
+
+## 5. Square pegs
+
+**P1. Two program stores.** The JVM loads files from a git archive; SCI interprets Datahike program entities. An
+agent's change is a database change; landing it is a file change plus a git commit plus a restart. Every gate
+(write-back's reindex proof, RF-2's file = branch check) exists to keep the two equal. Options:
+1. Database first, files derived (recommended): `merge!` writes back and commits as one root step; the agent never
+   touches files; RF-2 is root's tool, not the agent's. Cost: `merge!` grows a git step; root owns the checkout.
+2. Files first: an agent branch is a git branch and the database indexes it. Cost: agents edit files, losing the
+   REPL as the medium; contradicts "files are the write-back".
+3. Keep both equal by gates (today). Cost: two merges and two proofs per change, and lanes keep hitting the seams
+   (pilot frictions 8-10).
+
+**P2. "A branch never changes the platform" versus "agents fix the system from the REPL".** Both are right; they meet
+at platform code. Options:
+1. Accept the split (recommended): the interpretable part is proven at the REPL, the rest by root's isolated step
+   (D2), and E shrinks the rest over time.
+2. Per-agent JVMs (B): full compiled fidelity, at 16 GB fits two agents.
+3. Let a development cluster's agents reload the shared JVM: fast, but every other agent runs the change; only safe
+   with one agent.
+
+**P3. Static reach as evidence.** The call graph selects tests well enough but cannot prove execution (§1.3, 3). RF-3
+option 1 makes evidence positive. Options: execution evidence (recommended); static classification of platform
+callers (over-classifies: nearly everything is reached from a compiled caller); a declared platform flag (a roster,
+forbidden).
+
+**P4. Whole-closure interpretation.** Interpreting 2,350 functions to change one is whole-program work for any widely
+called function. The lazy stub (D3) makes cost follow what executes: each closure member's SCI Var holds a function
+that interprets the member's source on its first call and replaces its own root. Cost per acquisition: one stub per
+member (a Var root assignment) plus the closure walk, which must itself drop below 1 s (LR-STALE3 family).
+
+## 6. Rows, cards and tasks this implies
+
+Cards (proposed ids; root assigns):
+
+- **HB-1 Execution evidence** (= RF-3 option 1; Opus). The runner records per member the definition digests of the
+  branch's interpreted bodies that executed (SCI's call hook already counts calls per armed Var). RF-2 and `merge!`
+  accept a changed digest only when a green member executed it. Proof:
+  `seon.test.runner-test/a-member-records-the-branch-digests-it-executed`, plus one test where a reaching test passes
+  through a `defmethod` hop and the change is reported unexecuted.
+- **HB-2 Same-request core callers** (Opus, one REPL path). The forms after a `defn` see it through core callers as the
+  next eval request does. Proof: `seon.repl-differential-test/a-core-caller-sees-a-same-request-redefinition`
+  (`(seon.id/evaluation "a" 1)` after redefining `seon.id/digest` answers the new value in the same request).
+- **HB-3 Lazy closure overlay** (Opus). `interpret-overlay!` binds stubs; cost follows executed members. Proof: the
+  acquisition of a branch overriding `seon.id/digest` under 200 ms, and HB-2 green.
+- **HB-4 Test namespaces in the agent's SCI** (Sonnet after the cause is verified). Proof:
+  `(count (ns-publics 'seon.test-support))` positive in an agent context, and an agent `deftest` using
+  `support/with-database` runs green through `seon.mcp/call`.
+- **HB-5 `my.test/check` runs named tests** (Sonnet). `:seon.test/identities` accepted. Proof: naming one test runs
+  exactly it.
+- **HB-6 Host dynamic binding from SCI** (Opus, SCI fork). Proof: `(binding [seon.db/*read-evidence-sink* s]
+  (seon.db/q …))` in SCI appends to `s`.
+- **HB-7 Isolated run as a merge step** (Opus, merge spec). `merge!` runs the isolated check when D1 leaves a digest
+  unexecuted or a non-program path changed; the run is stored on the request. Proof: a merge request changing a
+  host-bound function stops with the isolated run named, then merges when it is green.
+- **HB-8 Warm check JVM** (research then Opus; only if the queue stays the bottleneck after RF-2). Research: how
+  clj-reload (`reference-code/clj-reload`) orders unload and reload, keeps `defonce`, and whether a reset to the main
+  commit is cheaper than a reboot.
+
+Tasks for their owners (the task resources are held by lane `task-census`; EDN ready to add):
+
+```clojure
+;; resources/seon/tasks/seon.sci.eval.edn
+#:seon.task{:name "a-branch-overriding-a-widely-called-function-acquires-in-seconds"
+            :kind :function
+            :intent "`seon.sci.eval/base-ctx` of a branch whose only change is `seon.id/digest` interprets its whole reverse closure (2,350 functions) and takes 12.9 s first, 4.7 s again (main: 30 ms); `seon.fn/reverse-closure` alone is 1.5 s. Done when acquisition cost follows the closure members that execute."
+            :must-read #{seon.sci.eval/interpret-overlay! seon.fn/reverse-closure}
+            :evidence #{"docs/research/agent-platform/2026-10-08/hostbound/hostbound-opus.md"}}
+#:seon.task{:name "a-core-caller-runs-compiled-in-the-request-that-redefines-its-callee"
+            :kind :function
+            :intent "After `(defn seon.id/digest …)` on a branch, `(seon.id/evaluation \"a\" 1)` in the same eval request runs the compiled `digest`; the next request runs the branch's. `inherited-callers` re-interprets only agent-authored callers. Done when the same request answers as the next one."
+            :must-read #{seon.sci.eval/inherited-callers seon.sci.eval/reinterpret-inherited-callers!}
+            :evidence #{"docs/research/agent-platform/2026-10-08/hostbound/hostbound-opus.md"}}
+#:seon.task{:name "test-namespaces-have-no-vars-in-the-agent-context"
+            :kind :function
+            :intent "`seon.test-support`, `my.program-test` and `seon.id-test` have 0 public Vars in an agent's SCI context while the JVM holds 53, 7 and 7. Done when a test namespace's Vars resolve in the agent's context once it is required."
+            :must-read #{seon.sci.eval/install-first-party-namespaces! seon.test-support/with-database}
+            :evidence #{"docs/research/agent-platform/2026-10-08/hostbound/hostbound-opus.md"}}
+
+;; resources/seon/tasks/seon.sci.edn (or the owner of supply)
+#:seon.task{:name "an-agent-function-is-not-supplied-its-world-members"
+            :kind :function
+            :intent "An agent-authored function whose map argument declares `:my.program/context` and `:seon.db/connection` refuses both as missing when called with `{:ids …}`; first-party functions are supplied. Done when supply fills declared world members for agent-authored functions."
+            :must-read #{my.test/check}
+            :evidence #{"docs/research/agent-platform/2026-10-08/hostbound/hostbound-opus.md"}}
+```
+
+## 7. Proposed split (owner message: extra lanes)
+
+The note answers the five questions at design level. Three parts are bigger than one note and want their own lanes:
+(1) HB-1 execution evidence design and its gate rule, Opus, with SCI's call hook as the seam; (2) HB-8 research on
+warm reload JVMs (clj-reload, tools.namespace, nREPL `load-file`, Babashka), Sonnet with web access; (3) the
+test-support split and HB-4/HB-5, Sonnet.
+
+## 8. Limits of this note
+
+- Not measured: the per-member acquisition hypothesis (§1.2), the interpretation slowdown factor, the warm check JVM's
+  memory, whether F4a ran on my probe or was simply not installed on `6a244149d`.
+- The 400-source interpretation probe used `sci/eval-string*` without installing each namespace's aliases; the real
+  install path (`install-function-from-database!`) does, so the 15% failures are my probe's, not the program's.
+- All probes ran on my own agent branch or read-only in JVM mode; default's program and JVM Vars were not changed
+  (verified: `(seon.id/digest 12 [1])` in JVM mode answers the compiled value).
