@@ -87,6 +87,11 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 - **Wire formats are experiments**: transcript, chat turns and prefix continuation are adapters over stored exchanges
   chosen by configuration; measure provider token counts, never assume. Lives in: agent-loop.md §3.4; ledger CS-03a-c.
 
+- **The 2,000-token default is per eval reply, not the context (owner 2026-10-08).** "each eval can output 2000 tokens
+  btw not the entire context ... a hairy task should pull in a lot of helpful references and context we shouldn't be
+  limiting it to 2000 tokens." The current-state block has its own budget dial, a fraction of the model's context
+  window (default 0.1). Lives in: agent-loop.md §2 "Context tokens"; card CS-02.
+
 ## 4. Tasks and tests
 
 - **Tasks replace plan/steps.** Steps are shelved; their best, simplest parts may move into tasks later. Now: tasks
