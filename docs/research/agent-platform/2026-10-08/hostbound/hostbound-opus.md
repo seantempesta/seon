@@ -20,15 +20,15 @@ boundary visible as **execution evidence** instead of guessing it from the call 
 (lazy) and complete (same eval request), and turn the throwaway check into a **root-owned merge step whose result is
 data on the agent's task**.
 
-Measured on default (commit `6a244149d` loaded, HEAD `8bfd1c3aa`), 2026-10-08 17:20-18:30 JST, agent
-`hostbound-opus-probe` (branch `:agent-75d011efa023`) and JVM-mode reads. Default was `:degraded` throughout
-(10 over-bound warnings, 26 errored receipts, `seon.cache` at 511.5 of 512 MB).
+Measured on default (commit `6a244149d` loaded, HEAD `8bfd1c3aa`), 2026-10-08 17:19-17:45 JST, agents
+`hostbound-opus-probe`…`probe4` (own branches) and JVM-mode reads. Default was `:degraded` before its 08:30Z restart
+(10 over-bound warnings, 26 errored receipts, `seon.cache` at 511.5 of 512 MB) and `:faulted` after it.
 
 ## 0. Decisions for the owner, ranked
 
 | # | Decision | Recommendation | Why first |
 |---|---|---|---|
-| D1 | What proves a branch change: the static reach (today) or what actually executed | **Execution evidence** (RF-3 option 1): a member records the definition digests whose interpreted bodies it executed; a gate (RF-2, `merge!`) accepts a changed digest only when a green member executed it | the static reach is wrong in both directions (§1.3): it lists 106 tests for `seon.id/digest`, and it misses every indirect call |
+| D1 | What proves a branch change: the static reach (today) or what actually executed | **Execution evidence** (RF-3 option 1): a member records the definition digests whose interpreted bodies it executed; a gate (RF-2, `merge!`) accepts a changed digest only when a green member executed it, in a run whose runner is the loaded program (§1.4) | the static reach is wrong in both directions (§1.3): it lists 106 tests for `seon.id/digest`, and it misses every indirect call; and a run driven through the branch's own runner can certify itself (§1.4) |
 | D2 | Where platform changes are proven | **Root's `merge!` proves what the branch could not** (option A, §2): resources and schema files by the in-JVM rehearsal (seconds), unexecuted or host code by the throwaway JVM (minutes), results stored as an ordinary test run on the merge request; a **warm check JVM** (A2) only if the queue stays the bottleneck | the only option that runs the real compiled code without changing the shared JVM; "root does these things" is exactly the merge step |
 | D3 | How much the branch interprets | **Lazy closure**: bind each reverse-closure member to a stub that interprets on first call; same rule inside the eval request as after it | one override of a widely used function costs 4.7-12.9 s per acquisition today (§1.2); the same eval request sees a different program than the next (§1.1) |
 | D4 | Who writes files and commits | **`merge!` writes back and commits** (root's task); the agent never needs the checkout; root batches the restart that loads it | the JVM loads an immutable archive, so a merged program reaches the JVM only through a commit and a restart (§4 step 10) |
@@ -75,7 +75,7 @@ means a platform-reaching change makes the agent's tools run its change.
 The carried agent context hides the acquisition from ordinary eval requests. A test request acquires the candidate
 once on a fork and each member forks that (`seon.test` request world: "Acquired once on a fork, never on the
 execution's own context: each member forks this"), so the cost is per test request, not per member: every test
-request on such a branch, and so every automatic test step after an eval request once F4b lands, pays about 5 s
+request on such a branch, and so every automatic test step after an eval request (F4b, loaded at the restart), pays about 5 s
 before its first test runs. A `my.test/check` on the second branch ran over 32 s before the MCP bridge gave up and was
 lost to the restart; its total is not measured. Over 1 s is a finding: task
 `seon.sci.eval/a-branch-overriding-a-widely-called-function-acquires-in-seconds` (EDN in §6).
@@ -134,6 +134,23 @@ Extending LR-STALE2 to core callers inside the eval request is sound under the s
 request already does). Extending interpretation beyond the static closure is not possible without execution
 observation, and beyond host-bound declarations is not possible in SCI at all.
 
+### 1.4 The judge must not run the defendant's code
+
+The §1.1 refusal came from `my.test/check` called at the agent's REPL: its SCI stack trace named `my.test/check` and,
+in the earlier attempt, `seon.test/run` at its source line 2236, so both ran **interpreted from the branch** because
+both are in `seon.id/digest`'s reverse closure. A branch that changes anything under the runner (reach digests,
+result capture, the report) therefore tests itself with its own changed runner when the agent calls `my.test/check`.
+A change that makes the runner report green would certify itself.
+
+The automatic step (F4b) and root's `merge!` are entered from compiled code (`seon.turn`, root's merge task), so their
+runner is the loaded platform even when the members interpret the branch. The rule that follows, and that RF-2 and
+`merge!` must apply: **evidence counts only from a run whose runner is the loaded program** (the run records its
+runner's program identity: the loaded commit), never from a run driven through interpreted platform code. Options:
+1. (recommended) Record the runner identity on each run and refuse others as evidence; the agent may still call
+   `my.test/check` on its branch to see what its changed runner does, which is useful when the runner is the subject.
+2. Make the `my.*` tools always bind their compiled Var on a branch (a branch cannot change its own tools). Simpler,
+   but an agent fixing `my.test/check` can then never try its fix at the REPL.
+
 ## 2. For what remains: options
 
 The remaining set is (1), (2), (5) and the indirect part of (3) when the indirect hop is compiled platform code.
@@ -173,6 +190,20 @@ until it is green. Root's restart (`start --head`) after a landing is unchanged.
 Guarantee of the combination: every merged digest either executed interpreted under a green member on the merge
 branch, or ran compiled under a green member of the isolated check. Nothing merges on reach alone.
 
+What the agent does at its REPL, per case (the same forms in every case; only what proves it differs):
+
+| The agent changes | At its REPL | Its reply shows | Then |
+|---|---|---|---|
+| an ordinary function | `in-ns`, `defn`; the step runs proofs and reaching tests | reaching results, with each changed digest marked executed or not (D1) | `request-merge!` |
+| a function under a host-bound caller or a platform loop | the same `defn`; it can call the function directly and test it directly | the digest marked "not executed by any green member", with the reason (the host-bound caller or the compiled entrance it sits under) | `request-merge!`; `merge!` adds the isolated run |
+| a host-bound declaration (`reify`, a type, `go`) | the `defn` is recorded (agent branches do anything); `install-row!` answers its refusal ("must change through the loaded source files") as the evaluation's value and binds a refusing root for later calls (read in source, not probed here) | "host-bound: proven by root's isolated run at merge" as data, with the request form | `request-merge!`; the isolated run is its only proof |
+| a schema | `register!` on its branch; its data writes see it | the usual | `request-merge!`; write-back plus rehearsal at merge |
+| a dependency or fork pin | nothing at the REPL: it is not a program entity | — | a root task; root runs the throwaway check and restarts |
+
+Outside lanes follow the same rule through RF-2: `bin/lane commit --branch-evidence` accepts the executed digests and
+sends the rest to `bin/seon check`, so a lane changing ordinary functions never boots a JVM, and a lane changing the
+evaluator still does.
+
 ## 3. Agent-friendly fixtures
 
 What an agent at its REPL needs to write and run a test: `deftest` in the test namespace, the helpers that namespace
@@ -208,7 +239,7 @@ part is what option A runs.
 | 9 | merge request and `merge!` | gaps G1-G11 (merge.md §7): new contracted functions cannot arm on the merge branch, schemas block diff, tools throw, merge lands on the checked-out branch | merge.md rows; add the isolated step (D2) |
 | 10 | the merged program reaches the JVM | only by commit and restart: default runs from the immutable archive `data/source/6a244149…` (its `user.dir`, `seon.fs/source-directory` and classpath), so `require :reload` can only reload the archive's bytes, and development adoption refuses bytes that differ (`verify-development-sources!`) | D4: `merge!` writes back and commits; root batches `start --head` |
 | 11 | RED-5 (cached program classes shadow reload) | default has no program classes on its classpath (`seon/id__init.class` resolves to nothing); only check JVMs use them | RED-5 only matters for A2's warm JVM: it must reload from source |
-| 12 | the agent's next context | branch survives restart; private SCI defs do not (repl-first friction 10); the agent sees the merge result only by polling the request | the merge request's state in the agent's current-state block |
+| 12 | the agent's next context | a branch survived a restart in the repl-first run but mine did not (§6, other findings); private SCI defs never survive (repl-first friction 10); the agent sees the merge result only by polling the request | the merge request's state in the agent's current-state block |
 
 ## 5. Square pegs
 
@@ -257,15 +288,16 @@ Cards (proposed ids; root assigns):
   interpreted calls count in the `:seon.profile/context` cell apart from `:seon.profile/host` (measured: `my.test/check`
   has both). The cells are process-cumulative, so a member needs its own capture (the armed wrapper reports into a sink
   bound for the member and conveyed to its threads), not a before/after diff that concurrent members pollute. RF-2 and
-  `merge!` accept a changed digest only when a green member executed it. Proof:
+  `merge!` accept a changed digest only when a green member executed it, in a run that records its runner as the
+  loaded program (§1.4). Proof:
   `seon.test.runner-test/a-member-records-the-branch-digests-it-executed`, plus one test where a reaching test passes
   through a `defmethod` hop and the change is reported unexecuted.
 - **HB-2 Same-request core callers** (Opus, one REPL path). The forms after a `defn` see it through core callers as the
   next eval request does. Proof: `seon.repl-differential-test/a-core-caller-sees-a-same-request-redefinition`
   (`(seon.id/evaluation "a" 1)` after redefining `seon.id/digest` answers the new value in the same request).
 - **HB-3 Lazy closure overlay** (Opus). `interpret-overlay!` binds stubs; cost follows executed members. Proof: the
-  acquisition of a branch overriding `seon.id/digest` under 200 ms, and HB-2 green.
-- **HB-4 Test namespaces in the agent's SCI** (Sonnet after the cause is verified). Proof:
+  acquisition of a branch overriding `seon.id/digest` costs the closure walk (itself under 1 s) plus the members a test executes, and HB-2 green.
+- **HB-4 Test namespaces in the agent's SCI** (Opus: base construction; cause verified in §3). Proof:
   `(count (ns-publics 'seon.test-support))` positive in an agent context, and an agent `deftest` using
   `support/with-database` runs green through `seon.mcp/call`.
 - **HB-5 `my.test/check` runs named tests** (Sonnet). `:seon.test/identities` accepted. Proof: naming one test runs
@@ -275,6 +307,11 @@ Cards (proposed ids; root assigns):
 - **HB-7 Isolated run as a merge step** (Opus, merge spec). `merge!` runs the isolated check when D1 leaves a digest
   unexecuted or a non-program path changed; the run is stored on the request. Proof: a merge request changing a
   host-bound function stops with the isolated run named, then merges when it is green.
+- **HB-9 A host-bound change answers its route** (Sonnet). `install-row!`'s refusal "must change through the loaded
+  source files" tells a product agent to do what it cannot. It becomes data naming the route: the change is recorded
+  on the branch and is proven by root's isolated run at merge, with the `request-merge!` form. Proof: a branch
+  redefinition of a host-bound function answers `:seon.sci.eval/proven-at-merge` (or the variant the errors spec
+  names) and `my.program/diff` lists it.
 - **HB-8 Warm check JVM** (research then Opus; only if the queue stays the bottleneck after RF-2). Research: how
   clj-reload (`reference-code/clj-reload`) orders unload and reload, keeps `defonce`, and whether a reset to the main
   commit is cheaper than a reboot.
