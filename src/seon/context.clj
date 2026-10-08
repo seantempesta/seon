@@ -43,6 +43,7 @@
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [clojure.string :as str]
             [seon.bootstrap :as bootstrap]
+            [seon.cluster.message :as message]
             [seon.error.refusal]
             [seon.ai.tokens :as tokens]
             [seon.eval]
@@ -375,11 +376,12 @@
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status. Sections are
-  absent when empty.
+  absent when empty. `:seon.context/unread` holds the agent's undelivered messages
+  oldest first, each once with its id, sender, instant and content.
 
   ## Costs
 
-  One assignment query, one task pull and the turn count."
+  One assignment query, one task pull, the turn count and one pull per unread message."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :seon.context/current-state :seon.error/value]]}
   [database agent-id]
@@ -391,21 +393,24 @@
                  (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))
         left (turn/turns-left database agent-id)
         proven (when held (proofs database (:seon.task/sym held)))
+        unread (message/inbox database agent-id)
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
-    (or (some #(when (:seon.error/at %) %) (concat [handle held left proven] reads))
+    (or (some #(when (:seon.error/at %) %) (concat [handle held left proven unread] reads))
         (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
                                        held (assoc :seon.task/status (if (zero? left) :capped :working)))}
           held (assoc :seon.context/task held)
           proven (assoc :seon.context/proofs proven)
-          (seq reads) (assoc :seon.context/must-reads reads)))))
+          (seq reads) (assoc :seon.context/must-reads reads)
+          (seq unread) (assoc :seon.context/unread {:seon.context/items unread
+                                                    :seon.render/operations ['(my.message/inbox)]})))))
 
 (defn current-state-ai
   "The block's sections as the agent reads them: the task by symbol and declaration, without its handle.
   The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/turns])
+  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/unread :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------

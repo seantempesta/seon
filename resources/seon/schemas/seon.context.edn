@@ -101,12 +101,16 @@
                :proofs [:map {:description "Counts by status, then each proof in symbol order."}
                         [:seon.context/counts [:map-of :seon.context/proof-status [:int {:min 1}]]]
                         [:seon.context/proof-list [:vector :seon.context/proof]]]
+               :unread [:map {:description "The agent's undelivered messages, oldest first, each once with its identity, and the form that reads them again."}
+                        [:seon.context/items :my.message/inbox]
+                        [:seon.render/operations [:vector :seon.render/read-form]]]
                :current-state
                [:map {:description "The current-state block's data, derived at each model call from stored facts and never stored; sections are absent when empty."
                       :seon.render/ai seon.context/current-state-ai}
                 [:seon.context/task {:optional true} :seon.context/task]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
+                [:seon.context/unread {:optional true} :seon.context/unread]
                 [:seon.context/turns :seon.context/turns]],
                :exchanges [:vector {:description "The agent's own model exchanges in agent order: each call row carrying a model attempt, its evaluations as the REPL showed them."} [:string {:min 1}]]
                :model-context
@@ -121,6 +125,7 @@
                   [:seon.task/must-read {:optional true} :seon.task/must-read]]]
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
+                [:seon.context/unread {:optional true} :seon.context/unread]
                 [:seon.context/turns :seon.context/turns]],
                :selection-refused-error
                [:and :seon.error/base

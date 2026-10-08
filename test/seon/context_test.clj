@@ -152,3 +152,18 @@
          (is (= 40 (count (:seon.ref/revision pin))))
          (is (some #{(:seon.ref/revision pin)} path))
          (is (seq (:arglists entry))))))))
+
+(deftest ^{:seon/tasks #{'seon.context/a-message-to-the-agent-is-not-in-the-model-context}}
+  unread-shows-each-undelivered-item-once-with-its-identity
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (is (nil? (:seon.context/unread (block running agent-id))) "no unread message, no section")
+     (shown running agent-id
+            (str "(mapv (fn [content] (my.message/send {:my.message/to \"" agent-id "\" :my.message/content content})) [\"a\" \"b\"])"))
+     ;; a message wakes its recipient, whose run then refuses a concurrent eval request: read the block's owner
+     (let [unread (:seon.context/unread (context/current-state (db/db connection) agent-id))
+           items (:seon.context/items unread)]
+       (is (= ["a" "b"] (mapv :my.message/content items)))
+       (is (= 2 (count (set (map :my.message/id items)))) "each item once, with its own identity")
+       (is (every? :my.message/at items))
+       (is (some #{'(my.message/inbox)} (:seon.render/operations unread)))))))
