@@ -2,8 +2,7 @@
   "Arming at the write: each observed definition's contract is armed on the
   exact Var written, under the batch's arming projection, before the next
   expression runs. The write observer stages (`seon.sci.observe`) call it."
-  (:require [sci.core :as sci]
-            [seon.db :as db]
+  (:require [seon.db :as db]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
             [seon.sci.kernel :as kernel]))
@@ -35,20 +34,13 @@
                                         [k {:seon.schema.admission/source :agent}])))
                     forms))))))
 
-(defn- refusing-root
-  {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] ifn?]}
-  [sym t]
-  (let [refusal (ex-info (str sym " is unavailable: its contract did not arm; the cause says why.")
-                         {:seon.error/member :seon.fn/spec :seon.fn/sym sym} t)]
-    (fn [& _] (throw refusal))))
-
 (defn arm!
   "Arm the observed Var's contract at its write, under the batch's arming
   projection, and mark it the installed definition of its name in this
   context: the live Var is the evaluated definition, so a call by name (the
   install gate's generated calls, a render) never installs it again from a
-  stored row. A contract that cannot arm leaves a root that refuses by name;
-  the definition still answers its Var. Answers the write with what arming
+  stored row. A contract that cannot arm leaves the function callable as written, with the
+  cause beside the write as `:seon.batch/arm-error`. Answers the write with what arming
   did."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} working {v :var :as write}]
@@ -65,7 +57,6 @@
          (arming-projection request working) working)
         (assoc write :seon.batch/armed true)
         (catch Throwable t
-          (sci/alter-var-root v (constantly (refusing-root sym t)))
           (assoc write :seon.batch/arm-error (ex-message t)))))))
 
 (defn write-event
