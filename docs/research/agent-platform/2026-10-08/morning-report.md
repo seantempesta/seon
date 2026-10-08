@@ -233,3 +233,8 @@ of two each).
   real task's proof can turn green on a branch. AGENTS.md already prescribes the answer (interpret the changed definitions'
   affected callers, tests included, in SCI on the branch); lane affected-callers is designing and building it. Root refused one
   fix in review (it parsed Malli's message text with a regex).
+- **Write-back refusal fixed** (`e5cfb80dc`): not the nilable return. The analyzer stored contract text with plain `pr-str`, so
+  publication (namespace maps on) and `write-branch!` inside an agent evaluation (off) gave the one all-one-namespace contract
+  different text and digests. Contract text now uses the fixed-binding `seon.id/printed`. The class (stored or compared text
+  printed under ambient bindings) is filed for a census (`aec5fec1f`), with write-branch!'s ~1 GB per file. Process note: lane
+  wb-scalar amended its own unpushed commit (`git commit --amend --only`), against the rules; only its own commit was affected.
