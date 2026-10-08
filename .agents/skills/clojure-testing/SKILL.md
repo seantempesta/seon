@@ -30,8 +30,8 @@ Add none when one of these holds:
    or lint already performs. Name the installed check before relying on it.
 7. **The claim is a wall-clock time.** Profile it and record the number as evidence; the runner holds the bound.
    Deterministic work counts (cache misses, recomputations, query counts) are different: when the spec states them,
-   test them. Context-specific cache counts await the owner's context redesign; the rejected agent-loop §3
-   design does not establish an implementation requirement.
+   test them. Context costs follow the approved three-part context (agent-loop.md §2, §3.4): what a
+   test asserts there is the count its spec states.
 
 Otherwise, if an agent or a user would notice the break, write one test through the entrance, asserting data.
 
