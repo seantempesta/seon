@@ -1,7 +1,10 @@
 (ns seon.turn-test
   (:require [clojure.core.async :as async]
             [clojure.string :as str]
+            [clojure.data.json :as json]
             [clojure.test :refer [deftest is testing]]
+            [datahike.versioning :as versioning]
+            [seon.mcp :as mcp]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
@@ -1922,3 +1925,32 @@
     (is (= [:seon.ns/name 'user] (:seon.cluster.eval/ns held)))
     (is (= report (#'turn/with-saved report {0 held} []))
         "the contract admits the held form; a settlement that saved none adds nothing")))
+
+(defn- commits-since
+  "The commit ids on `connection`'s head after commit `before`, walking parents."
+  [connection before]
+  (loop [head (versioning/commit-as-db connection (versioning/commit-id @connection)) found []]
+    (let [cid (versioning/commit-id head)]
+      (if (or (= cid before) (nil? head))
+        found
+        (recur (versioning/commit-as-db connection (first (versioning/parent-commit-ids head)))
+               (conj found cid))))))
+
+(defn- counted-request
+  "[reply transactions-counted commits-made] of `code` run through `seon.mcp/call`."
+  [running agent-id connection mode code]
+  (let [before (versioning/commit-id @connection)
+        reply (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                        "arguments" {"cluster" running "agent" agent-id
+                                                                     "mode" mode "code" code}})))]
+    [(:seon.cost/transactions (support/mcp-request reply)) (count (commits-since connection before))]))
+
+(deftest a-replys-transactions-are-its-durable-commits
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (counted-request running agent-id connection "sci" ":ping")
+     (is (= [1 1] (counted-request running agent-id connection "sci" ":ping")) "an SCI ping commits its recording")
+     (is (= [1 1] (counted-request running agent-id connection "jvm" "(+ 1 2)")) "a JVM request commits its recording")
+     (let [[counted made] (counted-request running agent-id connection "sci"
+                                           "(in-ns 'cc.one) (defn twice [x] (* 2 x))")]
+       (is (= made counted) "a defn's reply counts the commits its branch advanced")))))
