@@ -8,4 +8,10 @@
   :kind :function
   :intent "`seon.sci.eval-instrumentation-test/an-instrumented-dev-cluster-builds-an-attempt-ready-prompt` boots one real development cluster with `seon.cluster.boot/start!` and ran 49.9 s (declared bound 5 s; throwaway JVM check on 7a9ceb44a with two other check JVMs running). Over ten seconds needs an issue: profile start! on an empty store, name the armed functions that dominate and fix them. Done when the same test measures under its declared bound."
   :must-read #{seon.cluster.boot/start!}
-  :evidence #{"docs/research/agent-platform/2026-10-08/review/red-triage.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/review/red-triage.md"}}
+
+ #:seon.task{:name "one-cluster-without-a-database-fails-the-whole-status"
+  :kind :function
+  :intent "`bin/seon status` failed whole (exit 1) on default at 17:35 with `seon.health/render-ai refused argument 0 at [:seon.db/db]` from `seon.cluster.boot/request!`'s `:status` branch, and answered OK on the next call: one running instance had no store connection at that moment (a start or stop in the same JVM), so `request!` built the render unit without `:seon.db/db`, while `render-ai` already handles an absent database (`(if database ...)`) but its contract `:seon.render/unit` requires it. One cluster's missing database must neither fail the other clusters' rows nor the status: fix the contract or the caller at the producer, and render that instance's row as its readiness. Proof: a status request with one instance lacking `:seon.boot/cluster-connection` answers every row, the incomplete one as data."
+  :must-read #{seon.cluster.boot/request! seon.health/render-ai}
+  :evidence #{"docs/research/agent-platform/2026-10-08/model-pass/base-roster.md"}}]
