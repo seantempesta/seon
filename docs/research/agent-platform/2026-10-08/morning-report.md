@@ -249,3 +249,9 @@ of two each).
   (test namespaces aliasing the code under test as `sut` and tagging tasks); lane interp-test is on it. Root refused one fix in review
   (it parsed Malli's message text again; the task now says to work from the schema). Hygiene: 67 of 74 "open" tasks with tagged
   proofs are already green, never retired (lane retire-green).
+- **Interpreted file test fixed** (`bb934b396`): `resolve-test` read the shared test Var's metadata without the member's SCI
+  context and saw the base's stub (the same per-context read class as H3; the ctx-audit had flagged this site as "correct only
+  while the test world is built from the branch"). The live shape is proven: an agent's redefinition, a `sut`-aliased test
+  namespace, a task-tagged file proof, green in the agent's own test step. Follow-ups running (lane test-ctx): the two
+  remaining `seon.test` sites, and the step's red check telling a failed assertion from an error (`769c4a843`'s proof passed
+  while this bug existed). Fan-out 8 running on `bb934b396`.
