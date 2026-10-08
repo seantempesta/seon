@@ -156,3 +156,8 @@ of two each).
 - **SCI-5** bumped (`ea6fa74ef`, fork f8a2542d A1). Seon's proof is still partly red (raw thread and executor read the first
   definition; future is right): the integration risk the card flagged. Lane sci5-seon is diagnosing which context the
   fn captures.
+- **SCI-5 complete** (`c22814cdb`, fork 41194667): the remaining red was clj-kondo storing its own SCI context as the global
+  root of `*ctx*` on load, so "no context" never fired on raw threads. A stored root is now no thread's own context. Proven
+  on a throwaway JVM with `check --at`: raw thread, executor and future all read the current definition, and SCI-1's
+  inheritance proofs stay green. Help regression from `8b0efd5d7` (unresolvable example, over the token cap) is being
+  fixed (lane help-cap); `081f7eab6` stops help encouraging commented-out code.
