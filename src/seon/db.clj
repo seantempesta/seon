@@ -1745,6 +1745,96 @@
                                    :seon.error/offending boots}))
       :else (own))))
 
+(defn- projection-builder
+  "The loaded builder (`loaded-builder`) every projection key of `origin`
+  names; a converged identity's memo is read here, since one more armed call
+  per read doubled the hit cost."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/digest]}
+  [origin]
+  (let [loaded (or (some-> (find-ns 'seon.sci.eval) (ns-resolve 'loaded-identity) deref deref) {})
+        instances (some-> (find-ns 'seon.operator.runtime) (ns-resolve 'running-instances)
+                          deref deref vals)
+        boots (into #{} (keep :seon.source/commit-id) instances)
+        commit (when-not (:seon.error/at loaded)
+                 (or (:seon.source/commit-id loaded) (when (= 1 (count boots)) (first boots))))]
+    (or (some-> (when commit (cache/lookup projection-cache [::builder commit])) deref)
+        (loaded-builder origin loaded instances))))
+
+(defn- held-projection
+  "The projection already derived for the native value `database` under its
+  revision key (durable or value tier) or its commit; nil when none is held.
+  Derives and waits for nothing."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] [:maybe :seon.schema/projection]]}
+  [builder database]
+  (let [revision-key (assoc (projection-cache-key database) ::builder builder)
+        commit (:datahike.value/commit-id (datahike.db/committed-value-identity database))
+        realized (fn [cell] (when (and cell (realized? cell)) @cell))]
+    (or (realized (cache/lookup projection-cache revision-key))
+        (realized (cache/lookup value-projection-cache [builder revision-key]))
+        (when commit (realized (cache/lookup projection-cache [::commit commit builder]))))))
+
+(def ^:private declaration-attribute?
+  (set schema/projection-attributes))
+
+(defn- advanced-key
+  "The value-tier key of a report's projection advanced from its basis
+  `before`: the basis's revision key and the declaration datoms `written`."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value [:sequential :seon.schema/value]]
+                  :seon.schema/value]}
+  [builder before written]
+  [::advanced builder (projection-cache-key before) (mapv (juxt :e :a :v :tx :added) written)])
+
+(defn- written-declarations
+  "The declaration datoms of `report`'s `:tx-data` when both its values are
+  native and carry revisions; nil otherwise or when it wrote none."
+  {:malli/schema [:=> [:cat :map] [:maybe [:vector :seon.schema/value]]]}
+  [{before :db-before after :db-after tx-data :tx-data}]
+  (when (and (instance? DB before) (instance? DB after)
+             (:datahike.cache/connection-id (:cache-context before))
+             (:datahike.cache/connection-id (:cache-context after)))
+    (not-empty (into [] (filter #(declaration-attribute? (:a %))) tx-data))))
+
+(defn- speculative-report-projection
+  "The projection of a writer's speculative report's `:db-after`, advanced
+  from its basis's held projection by the declaration datoms the report wrote
+  (`schema/advance-projection`) and memoized in the value tier under
+  `advanced-key` and that value's revision key, so its later reads and its
+  commit (`hold-committed-projection!`) share the derivation. Nil when it
+  wrote no declaration, the basis holds no projection or the base cannot be
+  advanced from; the caller then derives as before."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
+  [{before :db-before after :db-after :as report}]
+  (when-let [written (written-declarations report)]
+    (let [builder (projection-builder after)]
+      (when-let [base (held-projection builder before)]
+        (let [cell (cache/lookup-or-miss value-projection-cache (advanced-key builder before written)
+                                         (fn [_] (delay (schema/advance-projection before after base written))))]
+          (when @cell
+            (cache/lookup-or-miss value-projection-cache
+                                  [builder (assoc (projection-cache-key after) ::builder builder)]
+                                  (fn [_] cell))
+            @cell))))))
+
+(defn- hold-committed-projection!
+  "Hold a committed report's projection, derived from its speculative value
+  (`speculative-report-projection`), under its `:db-after`'s revision key and
+  commit when that value is exactly its basis plus the report's datoms: no
+  later transaction committed in its batch (`:max-tx` names this report's
+  transaction). Derives nothing. Returns the report."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] :seon.db/transaction-report]}
+  [{before :db-before after :db-after tx-data :tx-data :as report}]
+  (when-let [written (written-declarations report)]
+    (when-let [committed (datahike.db/committed-value-identity after)]
+      (when (= (:max-tx after) (:tx (first tx-data)))
+        (let [builder (projection-builder after)]
+          (when-let [cell (cache/lookup value-projection-cache (advanced-key builder before written))]
+            (when (and (realized? cell) @cell)
+              (cache/lookup-or-miss projection-cache (assoc (projection-cache-key after) ::builder builder)
+                                    (fn [_] cell))
+              (cache/lookup-or-miss projection-cache [::commit (:datahike.value/commit-id committed) builder]
+                                    (fn [_] cell))))))))
+  report)
+
 (defn carried-projection
   "Derive this database value's projection, memoized by what it reads.
 
@@ -1769,14 +1859,7 @@
         origin (if as-of? (schema-database database) source)
         ;; The JVM's loaded builder (`loaded-builder`); a converged identity's
         ;; memo is read here, since one more armed call per read doubled the hit cost.
-        builder (delay (let [loaded (or (some-> (find-ns 'seon.sci.eval) (ns-resolve 'loaded-identity) deref deref) {})
-                             instances (some-> (find-ns 'seon.operator.runtime) (ns-resolve 'running-instances)
-                                               deref deref vals)
-                             boots (into #{} (keep :seon.source/commit-id) instances)
-                             commit (when-not (:seon.error/at loaded)
-                                      (or (:seon.source/commit-id loaded) (when (= 1 (count boots)) (first boots))))]
-                         (or (some-> (when commit (cache/lookup projection-cache [::builder commit])) deref)
-                             (loaded-builder origin loaded instances))))
+        builder (delay (projection-builder origin))
         ;; An as-of view keys by its own declaration datoms, never its origin's.
         ;; An uncommitted origin (the writer's in-transaction value) names them
         ;; by its revision key and the time point: within one connection an
@@ -5496,7 +5579,9 @@
   [prepared report]
   (let [database (:db-after report)
         declared? (declares-program? database)
-        projection (if declared? (carried-projection database) prepared)]
+        projection (if declared?
+                     (or (speculative-report-projection report) (carried-projection database))
+                     prepared)]
     (when declared?
       (let [[schema-keys function-symbols] (written-declaration-identities report)]
         (when (or (seq schema-keys) (seq function-symbols))
@@ -5843,7 +5928,8 @@
                                [:seon.db/connection-identity
                                 :seon.store/branch])
                   :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
-              report))))
+              (cond-> report
+                (and (:db-after report) (not (:parents request))) hold-committed-projection!)))))
     (catch Throwable throwable
       (write-refusal database transaction throwable))))
 

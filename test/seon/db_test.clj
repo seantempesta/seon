@@ -774,6 +774,41 @@
                      (vals @@#'db/projection-cache))
            "no speculative projection entered the committed cache")))))
 
+;; CLASS: a definition write's projection read every declaration datom of
+;; the program. Each contracted `defn` keyed its speculative value and then
+;; its commit by `declaration-content-key` (about 30,000 datoms copied per
+;; call, four calls per defn request on default), then `load-projection`
+;; walked three whole AEVT ranges to find the one changed row.
+(deftest ^{:seon/tasks #{'seon.db/a-definition-write-reads-every-declaration-datom-for-its-projection-key}}
+  a-definition-write-keys-its-projection-by-its-own-datoms
+  (test-support/with-database
+   (fn [connection]
+     (is (some? (:db-after (db/transact! connection [(test-support/namespace-entity (db/db connection)
+                                                                                      'sample.projection-key)]))))
+     (let [sym 'sample.projection-key/call
+           members [:seon.schema.projection/forms :seon.schema.projection/function-contracts
+                    :seon.schema.projection/schema-admissions :seon.schema.projection/function-admissions
+                    :seon.schema.projection/definition-strings]]
+       (doseq [output [:int :string]]
+         (let [head (db/db connection)
+               _ (db/carried-projection head)
+               tx-data (test-support/replacement-tx
+                        head [:seon.fn/sym sym]
+                        (str "(defn call {:malli/schema [:=> [:cat :int] " output "]} [x] x)") {})
+               [projection calls] (test-support/armed-calls
+                                   '#{seon.db/declaration-content-key seon.schema/load-projection}
+                                   #(when (:db-after (db/transact! connection tx-data))
+                                      (db/carried-projection (db/db connection))))
+               stored (db/pull (db/db connection) [:seon.fn/spec] [:seon.fn/sym sym])]
+           (is (some? projection) "the definition commits")
+           (is (= (:seon.fn/spec stored) (get-in projection [:seon.schema.projection/definition-strings sym]))
+               "the committed value reads the written contract")
+           (is (zero? (get calls 'seon.db/declaration-content-key)) "no declaration datom is copied for a key")
+           (is (zero? (get calls 'seon.schema/load-projection)) "no declaration range is walked")
+           (is (= (select-keys (schema/load-projection (db/db connection)) members)
+                  (select-keys projection members))
+               "the advanced projection is the one a full derivation gives")))))))
+
 ;; CLASS: a per-read whole-program derivation during boot. Before a boot
 ;; instance names its commit, an uncommitted value's builder identity was
 ;; derived on every projection read: a transaction function comparing stored

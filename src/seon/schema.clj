@@ -3148,46 +3148,122 @@
   (reduce-kv (fn [kept identity _] (if (contains? held identity) kept (dissoc kept identity)))
              population population))
 
+(defn- projection-advanced-by
+  "The projection advanced from the complete `base` by the changed rows of
+  `schema-range` and `contract-range`, every population passed through `retain`."
+  {:malli/schema [:=> [:cat ::projection :map :map [:fn clojure.core/ifn?]] ::projection]}
+  [base schema-range contract-range retain]
+  (let [recorded (merge (::recorded schema-range) (::recorded contract-range))
+        admission-for (fn [attribute identity]
+                        (get recorded [attribute identity] (unrecorded-admission)))
+        strings (:seon.schema.projection/definition-strings base)
+        schemas (parsed-rows (::rows schema-range) schema-identity "schema" :seon.schema/key
+                             (:seon.schema.projection/forms base) strings admission-for)
+        contracts (parsed-rows (::rows contract-range) contract-identity "function contract"
+                               :seon.fn/sym (:seon.schema.projection/function-contracts base)
+                               strings admission-for)
+        advanced (fn [member parsed parsed-member-key]
+                   (parsed-member (retain (get base member)) parsed parsed-member-key))]
+    (projection-of-population
+     {:seon.schema/forms (advanced :seon.schema.projection/forms schemas :seon.schema.parsed/form)
+      :seon.schema/function-contracts
+      (advanced :seon.schema.projection/function-contracts contracts :seon.schema.parsed/form)
+      :seon.schema/schema-admissions
+      (advanced :seon.schema.projection/schema-admissions schemas :seon.schema.parsed/admission)
+      :seon.schema/function-admissions
+      (advanced :seon.schema.projection/function-admissions contracts :seon.schema.parsed/admission)
+      :seon.schema/definition-strings
+      (parsed-member (advanced :seon.schema.projection/definition-strings schemas
+                               :seon.schema.parsed/string)
+                     contracts :seon.schema.parsed/string)
+      :seon.schema/artifact-exports #{}
+      :seon.schema/pure-predicate-symbols #{}}
+     base)))
+
+(defn- advanceable-base?
+  "True when `db` is a native value and `base` a complete projection a replacement advances from."
+  {:malli/schema [:=> [:cat :seon.db/database-value ::projection] :boolean]}
+  [db base]
+  (and (instance? datahike.db.DB db)
+       (incremental-base? base)
+       (contains? base :seon.schema.projection/definition-strings)))
+
 (defn- advanced-projection
   "The projection of `db`'s declarations advanced from the complete `base` by
   the rows whose text or admission differs and the identities no row holds;
   nil when `base` cannot be advanced from or a row is duplicated."
   {:malli/schema [:=> [:cat :seon.db/database-value ::projection] [:maybe ::projection]]}
   [db base]
-  (when (and (instance? datahike.db.DB db)
-             (incremental-base? base)
-             (contains? base :seon.schema.projection/definition-strings))
+  (when (advanceable-base? db base)
     (when-let [schema-range (range-differences db :seon.schema/key :seon.schema/form base #{})]
       (when-let [contract-range (range-differences db :seon.fn/sym :seon.fn/spec base
                                                    (::held schema-range))]
-        (let [held (::held contract-range)
-              recorded (merge (::recorded schema-range) (::recorded contract-range))
-              admission-for (fn [attribute identity]
-                              (get recorded [attribute identity] (unrecorded-admission)))
-              strings (:seon.schema.projection/definition-strings base)
-              schemas (parsed-rows (::rows schema-range) schema-identity "schema" :seon.schema/key
-                                   (:seon.schema.projection/forms base) strings admission-for)
-              contracts (parsed-rows (::rows contract-range) contract-identity "function contract"
-                                     :seon.fn/sym (:seon.schema.projection/function-contracts base)
-                                     strings admission-for)
-              advanced (fn [member parsed parsed-member-key]
-                         (parsed-member (retained-population (get base member) held)
-                                        parsed parsed-member-key))]
-          (projection-of-population
-           {:seon.schema/forms (advanced :seon.schema.projection/forms schemas :seon.schema.parsed/form)
-            :seon.schema/function-contracts
-            (advanced :seon.schema.projection/function-contracts contracts :seon.schema.parsed/form)
-            :seon.schema/schema-admissions
-            (advanced :seon.schema.projection/schema-admissions schemas :seon.schema.parsed/admission)
-            :seon.schema/function-admissions
-            (advanced :seon.schema.projection/function-admissions contracts :seon.schema.parsed/admission)
-            :seon.schema/definition-strings
-            (parsed-member (advanced :seon.schema.projection/definition-strings schemas
-                                     :seon.schema.parsed/string)
-                           contracts :seon.schema.parsed/string)
-            :seon.schema/artifact-exports #{}
-            :seon.schema/pure-predicate-symbols #{}}
-           base))))))
+        (let [held (::held contract-range)]
+          (projection-advanced-by base schema-range contract-range
+                                  #(retained-population % held)))))))
+
+(defn- entity-row
+  "The declaration row entity `e` holds in `db` for one range, as
+  `[raw-identity value-datom source]`; nil when it holds no row."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int :qualified-keyword :qualified-keyword]
+                  [:maybe [:tuple :seon.schema/value :seon.schema/value [:maybe :keyword]]]]}
+  [db e identity-attribute value-attribute]
+  (let [installed (dbi/-schema db)
+        one (fn [attribute] (when (get installed attribute) (first (d/datoms db :eavt e attribute))))]
+    (when-let [identity-datom (one identity-attribute)]
+      (when-let [value (one value-attribute)]
+        [(:v identity-datom) value (:v (one :seon.schema.admission/source))]))))
+
+(defn- entity-differences
+  "One range's rows among `entities` whose text or admission in `db` differs
+  from `base`, the projection of `before`, with the identities those entities
+  held in `before` and hold in `db` (`range-differences` over written entities)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :int]
+                       :qualified-keyword :qualified-keyword ::projection]
+                  :map]}
+  [before db entities identity-attribute value-attribute base]
+  (let [strings (:seon.schema.projection/definition-strings base)
+        schema-admissions (:seon.schema.projection/schema-admissions base)
+        function-admissions (:seon.schema.projection/function-admissions base)
+        identity-of (fn [raw] (if (string? raw) (symbol raw) raw))]
+    (reduce
+     (fn [differences e]
+       (let [[old-raw] (entity-row before e identity-attribute value-attribute)
+             [raw value source] (entity-row db e identity-attribute value-attribute)
+             differences (cond-> differences old-raw (update ::left conj (identity-of old-raw)))]
+         (if-not raw
+           differences
+           (let [identity (identity-of raw)
+                 prior (get (if (keyword? identity) schema-admissions function-admissions) identity)
+                 differences (update differences ::held conj identity)]
+             (if (and (= (:v value) (get strings identity))
+                      (= source (:seon.schema.admission/source prior))
+                      (= (nil? source) (contains? prior :seon.schema.admission/note)))
+               differences
+               (cond-> (update differences ::rows conj [raw (:v value) (:tx value)])
+                 source (assoc-in [::recorded [identity-attribute raw]]
+                                  {:seon.schema.admission/source source})))))))
+     {::rows [] ::left #{} ::held #{} ::recorded {}}
+     entities)))
+
+(defn advance-projection
+  "The projection of `db`, which `written` (the declaration datoms of one
+  report's `:tx-data`) separates from `before`, advanced from `base`, the
+  projection of `before`: only the written entities are read. Nil when `base`
+  cannot be advanced from."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value ::projection
+                       [:sequential :seon.schema/value]]
+                  [:maybe ::projection]]}
+  [before db base written]
+  (when (and (advanceable-base? db base) (instance? datahike.db.DB before))
+    (let [entities (into #{} (map :e) written)
+          schema-range (entity-differences before db entities :seon.schema/key :seon.schema/form base)
+          contract-range (entity-differences before db entities :seon.fn/sym :seon.fn/spec base)
+          ;; An identity an entity left is gone unless a written entity holds it now.
+          gone (set/difference (into (::left schema-range) (::left contract-range))
+                               (into (::held schema-range) (::held contract-range)))]
+      (projection-advanced-by base schema-range contract-range
+                              #(reduce dissoc % gone)))))
 
 (defn- refuse-projection-source
   "Typed refusal naming the value handed in place of a database.
