@@ -303,11 +303,22 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   cases, Errors, Known issues) only on public `my.*` docstrings; cross-cutting knowledge in Markdown pages. A
   backticked span reading as one fully qualified symbol or keyword is a reference; a task's is `ns/task-name`, its
   identity derived from namespace and name. A definition or test names its tasks with `:seon/tasks` metadata (on a
-  deftest, `^{…}` before the name); the deftests naming a task are its success tests. Target: the index resolves
-  backticked references into the subject's context and reports one resolving to nothing as a problem on that var, and
-  `:seon/tasks` holds `ns/task-name` symbols (today derived handle strings). No dates,
+  deftest, `^{…}` before the name); the deftests naming a task are its success tests; `:seon/tasks` holds
+  `ns/task-name` symbols. Target: the index resolves backticked references into the subject's context and reports one
+  resolving to nothing as a problem on that var. No dates,
   measurements, history or `file:line` in source: costs are profile evidence. Known issues reference their task.
   Never author what the call graph already derives.
+- **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
+  the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
+  name; the task is `ns/name`), `:seon.task/intent` (what must become true, short), `:seon.task/must-read` (fully
+  qualified symbols) and optional `:seon.task/evidence` (paths). Its proofs are the deftests carrying `ns/name` in
+  `:seon/tasks`, never prose: write or tag the proving test when you file the task; a task already green proves nothing.
+  References are typed by plain EDN and must resolve: code is a backticked fully qualified symbol (Seon or library,
+  e.g. `` `malli.core/validator` ``), a schema a backticked fully qualified keyword, any other file a relative path
+  whose first segment names its base (the checkout, or `reference-code/<project>` at its pinned revision) with
+  `#heading` anchors. Never write a file or line for code: they are derived from the Var or the analysis. Evidence
+  never points into gitignored `tmp/`. Ingestion reports an unresolved reference as a problem on the task. Retire a
+  task in the commit that deletes its subject or makes it moot.
 - **Use the agreed words** ("Words and where they come from" above). Keep JVM REPL and SCI evaluation, live result
   and printed value distinct; cite legacy identifiers without reviving retired terms. Correct language in scope or
   file its issue. Source comments use `;` for prose, `;;` above forms, `;;;` for runtime structure.
