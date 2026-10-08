@@ -127,7 +127,7 @@
  ; separate ceiling). Reading more is plain Clojure on result/eN (each cut
  ; prints its continuation form), or (seon.print/full result/eN) opts one
  ; evaluation into printing the value whole.
- :seon.config.render.agent/token-budget 1500
+ :seon.config.render.agent/token-budget 2000
  ; Unit: nested structural nodes retained in the visible face.
  :seon.config.render.agent/max-depth 8
  ; Unit: children retained per collection node.
