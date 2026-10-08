@@ -191,3 +191,7 @@ of two each).
   executable Var; rule recorded: never redefine an existing proof at root). Agents needed 21-24 calls with 16-31 repeated
   forms. Platform blockers found: `write-branch!` refused all three branches (unchanged functions "reindex differently", 0.8-1.5 GB
   per refusal; lane writeback fixing); the call cap counts per wake, not per run (agents reached 24 under a cap of 16; AE-5).
+- **Cache weights fixed** (`dc79b069f`; measured `ef52aa7d1`): reach kinds were charged 358 MB for 74 MB real (4.3×), now 1.02×;
+  reach-declarations no longer cached. Fresh occupancy 506 → 201 MB, 0 evictions over 11 requests, warm `reach-digests` 21-40 →
+  0.2-0.4 ms. Two P1 growths exposed (lane step-growth): the test step grows with the tests already on a branch (483 → 946 ms
+  over 7 trivial requests, +20 reads each), and reach-attribute is keyed per revision (+7 MB per request).
