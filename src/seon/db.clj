@@ -35,8 +35,7 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
-            [malli.registry :as mr]
-            [seon.schema.internal :as internal])
+            [malli.registry :as mr])
   (:import [datahike.db AsOfDB DB HistoricalDB SinceDB]
            [java.util.concurrent TimeoutException]
            [datalog.parser.type And BindColl BindTuple BindScalar Constant FindColl FindRel FindScalar
@@ -3620,26 +3619,24 @@
   (if (db.utils/entid database lookup-ref) [] (vec tx-data)))
 
 (defn- write-entity-schemas
-  "Identity attribute -> every entity schema requiring that attribute."
-  [projection]
-  (schema/projection-cache-value
-   projection ::write-required-identity-schemas
-   (fn []
-     (let [forms (:seon.schema.projection/forms projection)]
-       (reduce-kv
-        (fn [by-identity schema-key _authored]
-          (let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
-            (if (and (internal/entity-schema? compiled)
-                     (:seon.db/attributes (internal/entity-properties compiled)))
-              (reduce
-               (fn [result [attribute options]]
-                 (if (and (not (and (map? options) (:optional options)))
-                          (schema/identity-attr? projection attribute))
-                   (update result attribute (fnil conj []) schema-key)
-                   result))
-               by-identity (internal/entity-entries compiled))
-              by-identity)))
-        {} forms)))))
+  "The entity schemas requiring each requested identity attribute."
+  {:malli/schema [:function [:=> [:cat :seon.schema/projection] [:map-of :keyword [:vector :keyword]]]
+                  [:=> [:cat :seon.schema/projection [:maybe [:sequential :keyword]]] [:map-of :keyword [:vector :keyword]]]]}
+  ([projection]
+   (write-entity-schemas projection (keys (:seon.schema.projection/shape-index projection))))
+  ([projection attributes]
+   (let [shapes (:seon.schema.projection/shape-rows projection)
+         index (:seon.schema.projection/shape-index projection)]
+     (into {}
+           (keep (fn [attribute]
+                   (when (schema/identity-attr? projection attribute)
+                     (let [schemas (filterv (fn [k]
+                                              (let [shape (get shapes k)]
+                                                (and (:seon.schema/entity? shape)
+                                                     (contains? (:seon.schema/required-attrs shape) attribute))))
+                                            (get index attribute []))]
+                       (when (seq schemas) [attribute schemas])))))
+           attributes))))
 
 (defn- write-problem
   "One refused write as a problem description (`seon.error/explain-problem`).
@@ -3790,8 +3787,10 @@
           (comp (filter #(= best (rank %))) (mapcat :missing)) candidates)))
 
 (defn- write-map-error
+  "The first refusal of an authored entity map, including missing-key advice."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map [:vector :seon.schema/value]] [:maybe :seon.error/base]]}
   [database projection entity-map path]
-  (let [schemas (write-entity-schemas projection)
+  (let [schemas (write-entity-schemas projection (keys entity-map))
         schema-keys
         (distinct
          (mapcat (fn [attribute]
@@ -3908,6 +3907,13 @@
                           (sort-by ::position (get by-attribute attribute)))])))
           present)))
 
+(defn- write-attribute-plans
+  "Return the retained write plan for each attribute the writer asks for."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value] [:=> [:cat :keyword] :map]]}
+  [projection database]
+  (fn [attribute]
+    (write-attribute-plan projection attribute (db.utils/multival? database attribute))))
+
 (defn- write-entity-value
   "Read a resulting entity as logical values without expanding reference
    graphs: each cardinality-many value in its declared collection
@@ -3916,13 +3922,11 @@
    the value's `::cells` metadata, so the owned-value walk counts them as
    visited. `refuse!`, when given, receives a vector storage fault and a
    vector attribute's datom stored outside a cell."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:map-of [:or :keyword :int] :map]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:=> [:cat :keyword] :map]
                        :seon.db/entity-id [:* [:or :nil :seon.instrument/callable]]]
                   :map]}
   [database projection attribute-plans entity-id & [visit-child refuse!]]
-  (let [plan (fn [attribute]
-               (or (get attribute-plans attribute)
-                   (write-attribute-plan projection attribute (db.utils/multival? database attribute))))
+  (let [plan attribute-plans
         entity-datoms (d/datoms database :eavt entity-id)
         cell? (some #(= :seon.db.vector/position (:a %)) entity-datoms)
         cell-attribute? (when (and refuse! (not cell?))
@@ -3966,13 +3970,13 @@
   "Validate the whole resulting entity, including identities present before a
    retraction. `entity-map` is [[write-entity-value]]'s logical value, each many
    value already in its declared collection."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:map-of [:or :keyword :int] :map]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:=> [:cat :keyword] :map]
                        :seon.db/entity-id :map :map [:? [:sequential :keyword]]]
                   [:or :nil :seon.db.write/entity-refusal]]}
   [_database projection _attribute-plans entity-id identities entity-map & [owned-schemas]]
   (when (seq entity-map)
     (let [forms (:seon.schema.projection/forms projection)
-          schemas (write-entity-schemas projection)
+          schemas (write-entity-schemas projection (keys identities))
           schema-keys (distinct (concat owned-schemas (mapcat #(get schemas %) (keys identities))))]
       (some
        (fn [schema-key]
@@ -4056,8 +4060,9 @@
       :else
       (let [entities (into [] (comp (map :e) (dedupe) (take (inc stored-check-limit)))
                            (d/datoms database :aevt k))
+            plans (write-attribute-plans projection database)
             failing (into [] (keep (fn [entity-id]
-                                     (let [value (get (write-entity-value database projection {} entity-id) k)]
+                                     (let [value (get (write-entity-value database projection plans entity-id) k)]
                                        (when-not (valid? value) [entity-id value]))))
                           (take stored-check-limit entities))]
         (cond-> {:seon.schema.usage/checked (min stored-check-limit (count entities))
@@ -4092,9 +4097,7 @@
    identity attributes as `::changed-identity-attributes`, the arity gate's input."
   {:seon/tasks #{'seon.db/the-checked-writer-is-slow-on-a-fresh-branch}
    :malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
-                       ;; Datahike's `:schema` also maps each attribute's entity
-                       ;; id to its ident, so the plans carry integer keys too.
-                       [:map-of [:or :keyword :int] :map] [:set :qualified-keyword]]
+                       [:=> [:cat :keyword] :map] [:set :qualified-keyword]]
                   [:or :seon.db/error-result
                    [:map [:seon.db/changed-identity-attributes [:set :qualified-keyword]]]]]}
   [projection report attribute-plans identity-attrs]
@@ -4877,27 +4880,6 @@
   (set/union (set (identity-attributes (:db-before report)))
              (set (identity-attributes (:db-after report)))))
 
-(defn- write-attribute-plans
-  "The write plan for every attribute installed in `database`, a function
-  of the projection and that installed schema. Datahike's schema also maps
-  each attribute entity's id to its ident (`893 :some/attr`); datoms name
-  attributes by ident, so only ident keys have plans."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value]
-                  [:map-of :keyword :map]]}
-  [projection database]
-  (schema/projection-cache-value
-   projection [::write-attribute-plans (dbi/-schema database)]
-   #(into {}
-          (comp
-           (filter (comp keyword? key))
-           (map (fn [[attribute installed]]
-                 [attribute (write-attribute-plan
-                             projection attribute
-                             (= :db.cardinality/many
-                                (:db/cardinality installed)))])))
-          (merge datahike.schema/implicit-schema-spec
-                 (dbi/-schema database)))))
-
 ;; `seon.program` and `seon.fn` require `seon.db` (through `seon.fn.schema-shape`).
 (defonce ^:private program-definition-digest
   (delay (requiring-resolve 'seon.program/definition-digest)))
@@ -4931,7 +4913,7 @@
    ref) or submitted (a map): its attributes without `:db/id`, nested
    components as values, peers as entity ids, collections in their declared
    shape."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map :seon.schema/value] :map]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:=> [:cat :keyword] :map] :seon.schema/value] :map]}
   [database projection plans component]
   (into {}
         (keep (fn [[a v]]
@@ -5299,7 +5281,7 @@
      (some (fn [datom]
              (when (:added datom)
                (let [attribute (:a datom)
-                     plan (get attribute-plans attribute)
+                     plan (attribute-plans attribute)
                      value ((or (::decode plan) identity) (:v datom))
                      validate (::validate plan)]
                  (when (or (not (or (get (dbi/-schema database) attribute)

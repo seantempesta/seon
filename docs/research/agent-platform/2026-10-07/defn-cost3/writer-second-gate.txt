@@ -1,0 +1,13 @@
+== lane defn-cost3 commits: Validate only the written attributes and candidate owning schemas
+== clj-kondo --lint src script test --cache false --parallel (candidate tree e31d49c75233)
+== bin/seon check src/seon/db.clj test/seon/db_overhead_test.clj docs/research/agent-platform/2026-10-07/defn-cost3/ --test seon.db-overhead-test/final-validation-asks-cell-storage-of-written-attributes-only --test seon.db-test/a-declared-but-uninstalled-write-key-keeps-the-missing-key-hint --test seon.db-test/turn-write-schema-does-not-include-error-observations --test seon.db.schema-retirement-test/retiring-an-identity-attribute-with-entities-is-admitted --test seon.owned-value-test/a-transaction-entity-root-reaches-the-arity-gate --test seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes --test seon.schema.projection-writer-test/the-writer-derives-from-its-database-never-a-stale-stamp --test seon.schema.vector-storage-test/comparisons-see-order-only-where-storage-keeps-it
+SEON check FAILED (exit 1): The candidate 5322d5d6f6b5d26f235e148edff22052444b0cb8 is red: run faa597f23af5 / executed 8 / reused 0 / pass 44 / fail 1 / error 0 / 5712 ms / passed? false DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261008T093309.224.edn
+run faa597f23af5 / executed 8 / reused 0 / pass 44 / fail 1 / error 0 / 5712 ms / passed? false
+red seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes: fail test/seon/render/ns_test.clj:202
+a stored-data check judges each entity's reconstructed value, once, at registration
+every stored intent is shorter than 400 characters
+expected: (=
+ (:seon.schema.usage/checked check)
+ (:seon.schema.usage/failing check))
+actual: (not (= 200 56))
+LANE REFUSED: bin/seon check failed; nothing committed

@@ -1,0 +1,54 @@
+== lane defn-cost3 commits: Validate only the written attributes and candidate owning schemas
+== clj-kondo --lint src script test --cache false --parallel (candidate tree a335401a4b04)
+== bin/seon check src/seon/db.clj test/seon/db_overhead_test.clj docs/research/agent-platform/2026-10-07/defn-cost3/ --test seon.db-overhead-test/final-validation-asks-cell-storage-of-written-attributes-only --test seon.db-test/a-declared-but-uninstalled-write-key-keeps-the-missing-key-hint --test seon.db-test/turn-write-schema-does-not-include-error-observations --test seon.db.schema-retirement-test/retiring-an-identity-attribute-with-entities-is-admitted --test seon.owned-value-test/a-transaction-entity-root-reaches-the-arity-gate --test seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes --test seon.schema.projection-writer-test/the-writer-derives-from-its-database-never-a-stale-stamp --test seon.schema.vector-storage-test/comparisons-see-order-only-where-storage-keeps-it
+SEON check FAILED (exit 1): The candidate 479383d28f51d3090218dde37844e35bd1aeca0d is red: run aefd2ce2c4ad / executed 8 / reused 0 / pass 41 / fail 0 / error 1 / 6219 ms / passed? false DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261008T093041.889.edn
+run aefd2ce2c4ad / executed 8 / reused 0 / pass 41 / fail 0 / error 1 / 6219 ms / passed? false
+red seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes: error
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "java.lang.NullPointerException",
+  :message "Cannot invoke \"clojure.lang.IFn.invoke(Object)\"",
+  :frames
+    [[seon.db$write_entity_value$fn__5035 invoke "db.clj" 3933]
+     [seon.db$write_entity_value invokeStatic "db.clj" 3928]
+     [seon.db$write_entity_value doInvoke "db.clj" 3910]
+     [seon.db$stored_value_check$fn__5077 invoke "db.clj" 4057]
+     [seon.db$stored_value_check invokeStatic "db.clj" 4056]
+     [seon.db$stored_value_check invoke "db.clj" 4009]
+     [seon.render.ns_test$fn__577814$fn__577815 invoke "ns_test.clj" 200]
+     [seon.test_support$run_database_body$fn__573786$fn__573787 invoke
+      "test_support.clj" 831]
+     [seon.schema$call_with_projection_state invokeStatic "schema.clj"
+      1152]
+     [seon.schema$call_with_projection_state invoke "schema.clj" 1145]
+     [seon.test_support$run_database_body$fn__573786 invoke
+      "test_support.clj" 826]
+     [seon.db$call_with_custody invokeStatic "db.clj" 458]
+     [seon.db$call_with_custody invoke "db.clj" 430]
+     [seon.test_support$run_database_body invokeStatic
+      "test_support.clj" 824]
+     [seon.test_support$run_database_body invoke "test_support.clj" 817]
+     [seon.test_support$with_branched_database invokeStatic
+      "test_support.clj" 882]
+     [seon.test_support$with_branched_database invoke "test_support.clj"
+      869]
+     [seon.test_support$with_database invokeStatic "test_support.clj"
+      910]
+     [seon.test_support$with_database invoke "test_support.clj" 885]
+     [seon.test_support$with_database invokeStatic "test_support.clj"
+      906]
+     [seon.test_support$with_database invoke "test_support.clj" 885]
+     [seon.render.ns_test$fn__577814 invokeStatic "ns_test.clj" 161]
+     [seon.render.ns_test$fn__577814 invoke "ns_test.clj" 158]
+     [seon.test.runner$run_selected_tests invokeStatic "runner.clj" 497]
+     [seon.test.runner$run_selected_tests invoke "runner.clj" 466]
+     [seon.test.runner$run_vars_BANG_$fn__15408$fn__15409 invoke
+      "runner.clj" 416]
+     [seon.db$call_with_custody invokeStatic "db.clj" 458]
+     [seon.db$call_with_custody invoke "db.clj" 430]
+     [seon.test.runner$run_vars_BANG_$fn__15408 invoke "runner.clj" 415]
+     [seon.test.runner$run_vars_BANG_ invokeStatic "runner.clj" 407]
+     [seon.test.runner$run_vars_BANG_ invoke "runner.clj" 384]
+     [seon.test.runner$run_var_BANG_ invokeStatic "runner.clj" 463]
+     …16]}]
+LANE REFUSED: bin/seon check failed; nothing committed

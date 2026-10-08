@@ -92,9 +92,16 @@
            entities (into #{} (map :e) (:tx-data report))
            read-datoms (into [] (mapcat #(db/datoms after :eavt %)) entities)
            bound (+ (count (:tx-data report)) (count read-datoms))
-           asked (get by-function 'seon.schema.datahike/vector-shaped-attr-in? 0)]
+           asked (get by-function 'seon.schema.datahike/vector-shaped-attr-in? 0)
+           plans (get by-function 'seon.db/write-attribute-plan 0)]
        (is (nil? value) "the agent write passes final validation")
        (is (< bound (count (:seon.schema.projection/forms projection)))
            "the bound is below the registry, so asking every form exceeds it")
        (is (<= asked bound)
-           "cell storage is asked per attribute the write holds, never per registry form")))))
+           "cell storage is asked per attribute the write holds, never per registry form")
+       (is (<= plans (* 4 bound))
+           "write plans follow attempted datoms and the before/after owning values")
+       (let [check (db/stored-value-check after :seon.agent/id :string)]
+         (is (pos? (:seon.schema.usage/checked check)))
+         (is (zero? (:seon.schema.usage/failing check))
+             "registration reconstructs the stored values with the same write plans"))))))

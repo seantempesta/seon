@@ -45,4 +45,4 @@ for path,names in files.items():
 code.extend(arming)
 # The JVM reader accepts the cljc conditional through read-cond allow.
 request=json.dumps({'name':'eval_clj','arguments':{'cluster':'default','agent':'defn-cost3-host','mode':'jvm','code':'\n'.join(code)}})
-open(output,'w').write('(seon.mcp/call '+json.dumps(request)+')')
+open(output,'w').write('(seon.mcp/call (str '+' '.join(json.dumps(request[i:i+12000]) for i in range(0,len(request),12000))+'))')
