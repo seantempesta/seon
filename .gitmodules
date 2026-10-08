@@ -121,3 +121,6 @@
 [submodule "reference-code/CLM"]
 	path = reference-code/CLM
 	url = https://github.com/Contrastive-LM/CLM.git
+[submodule "reference-code/aero"]
+	path = reference-code/aero
+	url = https://github.com/juxt/aero.git
