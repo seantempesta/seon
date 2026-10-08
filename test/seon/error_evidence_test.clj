@@ -58,6 +58,9 @@
              {:keys [capped? inline]} (occurrence-evidence connection [:seon.error/operation operation])]
          (is (true? capped?))
          (is (not (str/includes? inline tail)) "the inline text is capped")
+         (is (<= (count (.getBytes ^String inline "UTF-8"))
+                 (:seon.config.error/max-evidence-bytes (config/effective (db/db connection) "evidence-turn")))
+             "the stored data-edn fits the fault family's evidence bound")
          (is (< elapsed-ms 1000.0) "one turn fault settlement stays within its bound"))))))
 
 (deftest a-capped-core-fault-says-it-is-capped

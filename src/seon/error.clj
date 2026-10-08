@@ -708,7 +708,13 @@
      ;; A digest the caller stated keeps: a cluster copy names the version that
      ;; ran on its origin branch (`seon.fault/record!`), which the throwable's
      ;; own observation cannot know.
-     :seon.error/source (cond-> (merge observation result)
+     ;; The occurrence stores the source's declared members over the fact's
+     ;; (`commit-tx`), so a data-edn the observation carried whole would
+     ;; replace the fitted one: the source keeps what the fact kept.
+     :seon.error/source (cond-> (merge (cond-> observation
+                                         (contains? observation :seon.error/data-edn)
+                                         (assoc :seon.error/data-edn (:seon.error/data-edn fact)))
+                                       result)
                           (and (nil? (:seon.error/producer-digest observation))
                                (string? (:seon.error/producer-digest (:seon.error/source request))))
                           (assoc :seon.error/producer-digest
