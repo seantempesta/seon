@@ -1796,65 +1796,65 @@
   (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
 
 (defn- declared-callers
-  "The caller entities of each declared invocation target, keyed by the
-  target's symbol: the relation `declared-reference-rules` states, read from
-  the datoms of the few attributes that declare it (capabilities, attributes
-  declared `:seon.fn/reference-to :seon.fn/sym`, `:seon.fn/invokes` and the
-  attributes it names), never the whole program. A data row names a target
-  by a stored symbol or by a reference to its function row.
-
-  ## Costs
-
-  Proportional to those attributes' datoms (about 700 on default,
-  2026-09-27), where the whole-program Datalog took 55-303 ms on a fresh head."
-  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value]
-                  [:map-of :qualified-symbol [:set :int]]]}
-  [read! database]
-  (let [datoms (fn [& arguments] (read! (apply db/datoms database arguments)))
-        installed (:schema (db/schema-database database))
-        ;; Datalog's `[(symbol? ?v)]` saw the stored value, so only a stored
-        ;; symbol names a target, and an entity id names its function row: an
-        ;; attribute storing neither (a string render form) declares no edge.
-        naming? #(#{:db.type/symbol :db.type/ref :db.type/long} (get-in installed [% :db/valueType]))
-        referring (for [{declaration :e v :v} (datoms :aevt :seon.fn/reference-to)
-                        :when (= :seon.fn/sym v)
-                        {attribute :v} (datoms :eavt declaration :seon.schema/key)]
-                    attribute)
-        invokers (into [] (filter (comp naming? :v)) (datoms :aevt :seon.fn/invokes))
-        ;; Each declaring attribute's datoms, read once.
-        held (into {} (map (fn [attribute] [attribute (datoms :aevt attribute)]))
-                   (distinct (concat [:seon.effect/capability] referring (map :v invokers))))
-        capabilities (held :seon.effect/capability)
-        referred (into [] (mapcat held) (distinct referring))
-        ;; Every entity and every named symbol is resolved in ONE bound read
-        ;; each: a read per entity recorded ~510 read-evidence rows (mostly
-        ;; schema rows holding render refs, which have no `:seon.fn/sym`) into
-        ;; every run that rendered a Var (defn-datoms, 2026-09-28).
-        symbol-of (into {} (read! (db/q '[:find ?e ?s :in $ [?e ...] :where [?e :seon.fn/sym ?s]]
-                                        database
-                                        (vec (distinct (concat (map :e capabilities) (map :e referred)
-                                                               (filter int? (map :v referred))
-                                                               (filter int? (mapcat #(map :v %) (vals held)))))))))
-        named (set (read! (db/q '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]]
-                                database
-                                (vec (distinct (concat (map :v capabilities)
-                                                       (filter symbol? (mapcat #(map :v %) (vals held)))))))))
-        target (fn [v] (if (int? v) (symbol-of v) (when (named v) v)))
-        edges (concat
-               (for [{caller :e v :v} capabilities
-                     :when (and (symbol-of caller) (named v))]
-                 [caller v])
-               (for [{caller :e v :v} referred
-                     :let [target-symbol (when (int? v) (symbol-of v))]
-                     :when (and target-symbol (symbol-of caller))]
-                 [caller target-symbol])
-               (for [{caller :e attribute :v} invokers
-                     {v :v} (held attribute)
-                     :let [target-symbol (target v)]
-                     :when target-symbol]
-                 [caller target-symbol]))]
-    (reduce (fn [incoming [caller target-symbol]] (update incoming target-symbol (fnil conj #{}) caller))
-            {} edges)))
+  "The caller entities of the requested declared invocation targets."
+  {:malli/schema [:function
+                  [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value] [:map-of :qualified-symbol [:set :int]]]
+                  [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value [:maybe [:sequential :qualified-symbol]]] [:map-of :qualified-symbol [:set :int]]]]}
+  ([read! database] (declared-callers read! database nil))
+  ([read! database targets]
+   (let [requested (when (some? targets)
+                     (filterv :seon.fn/sym
+                              (read! (db/pull-many database [:db/id :seon.fn/sym]
+                                                  (mapv #(vector :seon.fn/sym %) (distinct targets))))))]
+     (if (and (some? targets) (empty? requested))
+       {}
+       (let [datoms (fn [& arguments] (read! (apply db/datoms database arguments)))
+             installed (:schema (db/schema-database database))
+             naming? #(#{:db.type/symbol :db.type/ref :db.type/long} (get-in installed [% :db/valueType]))
+             referring (into #{}
+                             (comp (filter #(= :seon.fn/sym (:v %)))
+                                   (mapcat #(map :v (datoms :eavt (:e %) :seon.schema/key))))
+                             (datoms :aevt :seon.fn/reference-to))
+             invokers (filterv (comp naming? :v) (datoms :aevt :seon.fn/invokes))
+             attributes (into (conj referring :seon.effect/capability) (map :v) invokers)
+             held
+             (into {}
+                   (map (fn [attribute]
+                          (let [properties (get installed attribute)
+                                symbolic? (= :db.type/symbol (:db/valueType properties))
+                                values (when requested (into #{} (map (if symbolic? :seon.fn/sym :db/id)) requested))
+                                indexed? (or (:db/index properties) (:db/unique properties)
+                                             (= :db.type/ref (:db/valueType properties)))
+                                rows (if (and values indexed?)
+                                       (mapcat #(datoms :avet attribute %) values)
+                                       (datoms :aevt attribute))]
+                            [attribute (into [] (if values (filter #(values (:v %))) identity) rows)])))
+                   attributes)
+             capabilities (get held :seon.effect/capability)
+             referred (mapcat held referring)
+             symbol-of (into {} (keep (fn [row] (when (:seon.fn/sym row) [(:db/id row) (:seon.fn/sym row)])))
+                             (read! (db/pull-many database [:db/id :seon.fn/sym]
+                                                  (vec (distinct (concat (map :e capabilities) (map :e referred)
+                                                                         (filter int? (mapcat #(map :v %) (vals held)))))))))
+             named (if requested
+                     (into #{} (map :seon.fn/sym) requested)
+                     (into #{} (keep :seon.fn/sym)
+                           (read! (db/pull-many database [:seon.fn/sym]
+                                                (mapv #(vector :seon.fn/sym %)
+                                                      (distinct (filter symbol? (mapcat #(map :v %) (vals held)))))))))
+             target (fn [v] (if (int? v) (get symbol-of v) (when (named v) v)))
+             edges (concat
+                    (for [{caller :e v :v} capabilities
+                          :when (and (symbol-of caller) (named v))] [caller v])
+                    (for [{caller :e v :v} referred
+                          :let [named-target (when (int? v) (symbol-of v))]
+                          :when (and named-target (symbol-of caller))] [caller named-target])
+                    (for [{caller :e attribute :v} invokers
+                          {v :v} (get held attribute)
+                          :let [named-target (target v)]
+                          :when named-target] [caller named-target]))]
+         (reduce (fn [incoming [caller target]] (update incoming target (fnil conj #{}) caller))
+                 {} edges))))))
 
 (defn- gate-set-in
   "Reverse-walk names, including a seed whose definition has been removed."
@@ -1924,82 +1924,71 @@
                 {} (distinct function-symbols))))))
 
 (defn- identity-names
-  "`[attribute symbol]` of each identity entity in `entities`, in one bound query."
+  "`[attribute symbol]` of each requested identity entity, read in one batch."
   {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value [:set :int]]
                   [:map-of :int [:tuple :keyword :qualified-symbol]]]}
   [read! database entities]
   (into {} (map (fn [[entity attribute named]] [entity [attribute named]]))
-        (read! (db/q '[:find ?entity ?attribute ?symbol :in $ [?entity ...] [?attribute ...]
-                       :where [?entity ?attribute ?symbol]]
-                     database (vec entities) [:seon.fn/sym :seon.test/sym]))))
+        (into #{}
+              (mapcat (fn [row]
+                        (keep (fn [attribute]
+                                (when-let [named (get row attribute)] [(:db/id row) attribute named]))
+                              [:seon.fn/sym :seon.test/sym])))
+              (read! (db/pull-many database [:db/id :seon.fn/sym :seon.test/sym] (vec entities))))))
 
 (defn- call-reach
-  "The tests exercising `seeds`: each test calling a seed or calling a function
-  that calls one (owner 2026-09-26: the tests of A and of A's callers), and a
-  seed that is itself a test. The edges are `:seon.fn/calls` (a capability
-  owner's handler is one, `var-row`), the declared invocation edges
-  ([[declared-callers]]) and `:seon.test/subject`. A symbol mention
-  (`:seon.fn/references`, a file's unresolved references) calls nothing, so it
-  selects nothing: a test quoting `'a/b` is not a test of `a/b`."
+  "The tests exercising `seeds` or their direct callers, plus tests named as seeds.
+  Declared invocation edges and test subjects count; symbol mentions do not."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database seeds]
   (try
     (let [read! read-or-throw!
           named (fn [entities] (identity-names read! database entities))
-          declared (declared-callers read! database)
+          declared #(declared-callers read! database %)
           ;; Entities naming each target by `attribute`, one index read per pair.
           referrers (fn [attribute targets]
                       (into #{} (mapcat #(map :e (read! (db/datoms database :avet attribute %)))) targets))
-          seed-callers (into (referrers :seon.fn/calls seeds) (mapcat declared) seeds)
+          seed-callers (into (referrers :seon.fn/calls seeds) (mapcat val (declared seeds)))
           callers (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.fn/sym attribute) symbol)))
                         (named seed-callers))
           added (remove (set seeds) callers)
           frontier (into (set seeds) callers)
           reaching (-> seed-callers
                        (into (referrers :seon.fn/calls added))
-                       (into (mapcat declared) added)
+                       (into (mapcat val (declared added)))
                        (into (referrers :seon.test/subject frontier)))]
       (vec (sort (into (into #{} (keep (fn [[_ [attribute symbol]]] (when (= :seon.test/sym attribute) symbol)))
                              (named reaching))
-                       (read! (db/q '[:find [?symbol ...] :in $ [?symbol ...] :where [_ :seon.test/sym ?symbol]]
-                                    database (vec seeds)))))))
+                       (keep :seon.test/sym
+                             (read! (db/pull-many database [:seon.test/sym]
+                                                 (mapv #(vector :seon.test/sym %) seeds))))))))
     (catch clojure.lang.ExceptionInfo failure
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
 (defn reverse-closure
-  "The functions that transitively call `seeds`, and the tests exercising them.
-
-  `:seon.fn/affected` walks call reach to its fixed point: each function that
-  calls a seed or an already reached function through `:seon.fn/calls` or a
-  declared invocation edge, plus each seed that is a function row. A symbol
-  mention calls nothing (owner 2026-09-26), so a quoted `'a/b` reaches nothing:
-  on default a leaf's mention-inclusive closure was 530 functions and its call
-  closure 1 (perf-profile 2026-09-26). `:seon.fn/tests` is test selection's
-  answer for the same seeds ([[call-reach]]). One bound query per level; no
-  whole-program index."
+  "The transitive callers of `seeds` and the tests selected by `seon.fn/call-reach`.
+  Declared invocation edges count; symbol mentions do not."
   {:malli/schema [:=> [:cat :seon.fn/gate-request]
                   [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
   [{database :seon.db/db seeds :seon.fn/seeds}]
   (try
     (let [read! read-or-throw!
           seeds (vec seeds)
-          declared (declared-callers read! database)
+          declared #(declared-callers read! database %)
           functions (fn [entities]
                       (into #{} (keep (fn [[_ [attribute named]]]
                                         (when (= :seon.fn/sym attribute) named)))
                             (identity-names read! database entities)))
-          present (set (read! (db/q '[:find [?symbol ...] :in $ [?symbol ...]
-                                      :where [_ :seon.fn/sym ?symbol]]
-                                    database seeds)))
+          present (into #{} (keep :seon.fn/sym)
+                        (read! (db/pull-many database [:seon.fn/sym]
+                                            (mapv #(vector :seon.fn/sym %) seeds))))
           affected
           (loop [frontier seeds seen (set seeds) affected present]
             (if (empty? frontier)
               affected
-              (let [callers (into (set (read! (db/q '[:find [?caller ...] :in $ [?target ...]
-                                                      :where [?caller :seon.fn/calls ?target]]
-                                                    database frontier)))
-                                  (mapcat declared) frontier)
+              (let [callers (into (into #{} (mapcat #(map :e (read! (db/datoms database :avet :seon.fn/calls %)))) frontier)
+                                  (mapcat val (declared frontier)))
                     fresh (vec (remove seen (functions callers)))]
                 (recur fresh (into seen fresh) (into affected fresh)))))
           tests (read! (call-reach database seeds))]

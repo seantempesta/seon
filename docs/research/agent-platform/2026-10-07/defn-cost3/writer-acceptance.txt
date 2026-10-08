@@ -1,0 +1,36 @@
+== lane defn-cost3 commits: Validate only the written attributes and candidate owning schemas
+== clj-kondo --lint src script test --cache false --parallel (candidate tree bf3b54df9931)
+== bin/seon check src/seon/db.clj test/seon/db_overhead_test.clj docs/research/agent-platform/2026-10-07/defn-cost3/ --test seon.db-overhead-test/final-validation-asks-cell-storage-of-written-attributes-only --test seon.db-test/a-declared-but-uninstalled-write-key-keeps-the-missing-key-hint --test seon.db-test/turn-write-schema-does-not-include-error-observations --test seon.db.schema-retirement-test/retiring-an-identity-attribute-with-entities-is-admitted --test seon.owned-value-test/a-transaction-entity-root-reaches-the-arity-gate --test seon.schema.projection-writer-test/the-writer-derives-from-its-database-never-a-stale-stamp --test seon.schema.vector-storage-test/comparisons-see-order-only-where-storage-keeps-it
+SEON check OK total-ms 59688
+run 143a32abe042 / executed 7 / reused 0 / pass 31 / fail 0 / error 0 / 4636 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 46253, :seon.operator/test-phases {:seon.operator/tests-ms 4743, :seon.operator/slot-wait-ms 0, :seon.boot/ready-ms 36712, :seon.operator/archive-ms 1008, :seon.operator/classpath-ms 550, :seon.operator/prepare-ms 2927, :seon.operator/share-ms 1335, :seon.operator/boot-ms 43908, :seon.operator/source-ms 2893}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 3413, :adopted-ms 977}, :seon.source/built? true, :seon.cluster/adopted-identities 304, :seon.source/git-sha "003b44cc90d0f5779895872447a0f9eebba70b45", :seon.operator/phases #:seon.operator{:archive-ms 1224, :rehearsal-ms 4505, :total-ms 59688}, :seon.boot/start-instant #inst "2026-10-08T00:34:20.847-00:00", :seon.operator/test-summary "run 143a32abe042 / executed 7 / reused 0 / pass 31 / fail 0 / error 0 / 4636 ms / passed? true", :seon.source/commit-id #uuid "6ac6e572-e86c-5e5c-9ff1-f3c71ee70182"}
+linting took 5496ms, errors: 0, warnings: 1455
+== proved in 60 s; committing under .git/lane-commit.lock
+[refactor/agent-platform 4455e4917] Validate only the written attributes and candidate owning schemas
+ 29 files changed, 2804 insertions(+), 62 deletions(-)
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/final-deep.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/final-paired.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/final-rank.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/heap.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/install-reach.py
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/install-writer.py
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/parent-final-deep.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/parent-final-paired.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/parent-final-rank.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/reach-change.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/reach-tests.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/registry-acceptance.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/registry-deep.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/registry-rank.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-change-repeat.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-change-valid.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-change.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-deep.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-first-gate.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-parent-repeat.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-parent-test.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-parent-valid.edn
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-rank.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-second-gate.txt
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/writer-tests.txt
+4455e4917 Validate only the written attributes and candidate owning schemas

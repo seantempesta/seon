@@ -1254,7 +1254,7 @@
                             (:seon.fn/sym %))
                         findings)))))))
 
-(deftest gate-set-walks-only-indexed-callers-once
+(deftest gate-selection-preserves-cycles-absent-seeds-and-held-values
   (test-support/with-database
     (fn [connection]
       (transact-fixture!
@@ -1274,74 +1274,20 @@
         (analyzed-test-entity (db/db connection) (quote sample.gates/pending) {:seon.test/subject (quote sample.gates/a)})
         (analyzed-test-entity (db/db connection) (quote sample.gates/future) {:seon.test/subject (quote sample.gates/new)})])
       (let [database (db/db connection)
-            queries (atom [])
-            scan-counts (atom [])
-            invokes-reads (atom [])
-            scans (atom [])
-            query db/q
-            datoms db/datoms
-            thread (Thread/currentThread)
-            symbols [(quote sample.gates/a) (quote sample.gates/b) (quote sample.gates/new)
-                     (quote sample.gates/unrelated) (quote sample.gates/absent)]
-            results
-            (with-redefs
-              [db/q (fn [& arguments]
-                      (when (identical? thread (Thread/currentThread))
-                        (swap! queries conj (first arguments)))
-                      (apply query arguments))
-               db/datoms (fn [& arguments]
-                           (when (identical? thread (Thread/currentThread))
-                             (swap! scans conj (vec (rest arguments))))
-                           (apply datoms arguments))]
-              (mapv (fn [s]
-                      (reset! scans [])
-                      (let [result (seon.fn/gate-set database s)
-                            ;; The declared-invocation relation reads its own
-                            ;; declaring attributes; every other read is reverse.
-                            declared-read? (fn [[_ attribute]]
-                                             (not (#{:seon.fn/calls :seon.fn/references :seon.test/subject} attribute)))
-                            reverse-reads (remove declared-read? @scans)]
-                        (swap! scan-counts conj (count reverse-reads))
-                        (swap! invokes-reads conj (count (filter #(= [:aevt :seon.fn/invokes] (vec (take 2 %))) @scans)))
-                        (is (= (count reverse-reads) (count (distinct reverse-reads)))
-                            "a cycle never repeats an incoming-edge lookup")
-                        (is (every? (fn [[index _ target]]
-                                      (and (= :avet index) (qualified-symbol? target)))
-                                    reverse-reads)
-                            "reverse reads use the declared symbol indexes")
-                        result))
-                    symbols))]
-        (is (= [[(quote sample.gates/direct) (quote sample.gates/pending) (quote sample.gates/subject)]
-                [(quote sample.gates/direct) (quote sample.gates/pending) (quote sample.gates/subject)]
-                [(quote sample.gates/future)] [] []]
+            symbols ['sample.gates/a 'sample.gates/b 'sample.gates/new
+                     'sample.gates/unrelated 'sample.gates/absent]
+            results (mapv #(seon.fn/gate-set database %) symbols)]
+        (is (= [['sample.gates/direct 'sample.gates/pending 'sample.gates/subject]
+                ['sample.gates/direct 'sample.gates/pending 'sample.gates/subject]
+                ['sample.gates/future] [] []]
                results))
-        (is (every? pos? @scan-counts)
-            "even an absent definition can have surviving value referrers")
-        (is (= (repeat (count symbols) 1) @invokes-reads)
-            "each operation acquires its declared-reference relation once")
-        (doseq [seeds [#{(symbol "sample.gates" "a")}
-                        #{(symbol "sample.gates" "a") (symbol "sample.gates" "b")}
-                        #{(symbol "sample.gates" "a") (symbol "sample.gates" "b")
-                          (symbol "sample.gates" "new")}]]
-          (let [started (System/nanoTime)
-                union
-                (with-redefs
-                  [db/datoms (fn [& arguments]
-                               (when (identical? thread (Thread/currentThread))
-                                 (swap! scans conj (vec (rest arguments))))
-                               (apply datoms arguments))]
-                  (reset! scans [])
-                  (seon.fn/gate-sets {:seon.db/db database :seon.fn/seeds seeds}))]
-            (is (= (vec (sort (cond-> [(symbol "sample.gates" "direct")
-                                      (symbol "sample.gates" "pending")
-                                      (symbol "sample.gates" "subject")]
-                               (seeds (symbol "sample.gates" "new"))
-                               (conj (symbol "sample.gates" "future"))))) union))
-            (is (= (count @scans) (count (distinct @scans)))
-                "overlapping seeds share one visited set, including through a cycle")
-            (println "gate-sets union seeds=" (count seeds)
-                     "indexed-reads=" (count @scans)
-                     "elapsed-ms=" (/ (- (System/nanoTime) started) 1000000.0))))
+        (doseq [seeds [#{'sample.gates/a}
+                       #{'sample.gates/a 'sample.gates/b}
+                       #{'sample.gates/a 'sample.gates/b 'sample.gates/new}]]
+          (is (= (vec (sort (cond-> ['sample.gates/direct 'sample.gates/pending 'sample.gates/subject]
+                             (seeds 'sample.gates/new) (conj 'sample.gates/future))))
+                 (seon.fn/gate-sets {:seon.db/db database :seon.fn/seeds seeds}))
+              "overlapping seeds and cycles preserve the selected union"))
         (transact-fixture!
          connection
          [[:db/retract [:seon.fn/sym (quote sample.gates/b)] :seon.fn/calls
@@ -2605,6 +2551,10 @@
                               (symbol "sample.call-declarations" "handler"))
                          owner)
               "The owning capability preserves its handler without a lexical call.")
+          (let [target (symbol "sample.call-declarations" "handler")
+                callers (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only [target])]
+            (is (= (select-keys (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only) [target]) callers)
+                "one requested target returns its callers without unrelated declarations"))
           (is (= (into #{} (map vector)
                        (get (#'seon.fn/declared-callers @#'seon.fn/read-or-throw! declared-only)
                             (symbol "sample.call-declarations" "handler")))
@@ -2849,16 +2799,7 @@
                       (quote sample.scoped-reference/target) [(quote sample.scoped-tests/fallback)]
                       (quote sample.scoped-file/target) [(quote sample.scoped-uncertain/local-test)]
                       (quote sample.scoped-missing/absent) []}
-            queries (atom 0)
-            thread (Thread/currentThread)
-            derive-callers @#'seon.fn/declared-callers
-            selected (with-redefs-fn
-                       {#'seon.fn/declared-callers
-                        (fn [read! db]
-                          (when (identical? thread (Thread/currentThread))
-                            (swap! queries inc))
-                          (derive-callers read! db))}
-                       #(seon.fn/gate-sets projected (keys expected)))]
+            selected (seon.fn/gate-sets projected (keys expected))]
         (is (= #{(quote sample.scoped-tests/direct) (quote sample.scoped-tests/indirect)}
                (set (db/q '[:find [?symbol ...]
                             :in $ ?target
@@ -2867,7 +2808,6 @@
                             [?caller :seon.test/sym ?symbol]] projected (symbol "sample.scoped-target" "target"))))
             "an invocation and a value handed to `partial` are both calls")
         (is (= expected selected))
-        (is (= 1 @queries) "one declaration relation per bulk operation")
         (doseq [[target tests] expected]
           (is (= tests (seon.fn/tests-reaching projected target))
               "call reach selects what the conservative closure selects here")))

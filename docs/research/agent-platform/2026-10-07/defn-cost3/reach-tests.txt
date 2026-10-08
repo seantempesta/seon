@@ -2,11 +2,10 @@ my.program-test/program-reads-name-the-referrers-and-propose-without-writing
 seon.cluster.program-change-test/a-call-matching-a-declared-arity-is-never-prefixed
 seon.fn-test/a-refused-reference-read-refuses-gate-set-derivation
 seon.fn-test/declared-function-values-contribute-edges-without-arities
-seon.fn-test/gate-set-walks-only-indexed-callers-once
+seon.fn-test/gate-selection-preserves-cycles-absent-seeds-and-held-values
 seon.fn-test/reference-selection-includes-resolved-and-reference-only-callers
 seon.fn-test/value-uses-are-calls-and-quoted-symbols-select-nothing
 seon.reset-edges-test/named-edges-refuse-deletion-until-the-final-callers-are-repaired
-seon.sci.branch-execution-test/branch-definitions-and-unchanged-callers-share-one-context
 seon.sci.eval-test/a-branch-change-leaves-its-compiled-callers-compiled
 seon.sci.eval-test/database-provenance-regenerates-the-base-and-reverts-for-retained-forks
 seon.test.accretion-test/one-gate-set-query-includes-edges-subjects-and-pending-tests

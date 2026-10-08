@@ -1,0 +1,104 @@
+SEON check FAILED (exit 1): The candidate 4455e49177ba833b10d888c5c62bf52a908fd1fd is red: run d134895a3bb8 / executed 1 / reused 0 / pass 4 / fail 0 / error 1 / 2919 ms / passed? false DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261008T094404.300.edn
+run d134895a3bb8 / executed 1 / reused 0 / pass 4 / fail 0 / error 1 / 2919 ms / passed? false
+red seon.sci.branch-execution-test/branch-definitions-and-unchanged-callers-share-one-context: error test/seon/sci/branch_execution_test.clj:37
+Uncaught exception, not in assertion.
+expected: nil
+actual: [#:seon.error{:throwable-class "clojure.lang.ExceptionInfo",
+  :message "No declaration was produced.",
+  :data
+    {:seon.cluster.eval/ns [:seon.ns/name seon.sci.eval-test],
+     :seon.eval/allocated-bytes 43768,
+     :seon.eval/duration-ms 1,
+     :seon.eval/elisions 0,
+     :seon.eval/renderer seon.render.var/render-ai,
+     :seon.eval/shown-tokens 233,
+     :seon.eval/value-class "sci.lang.Var",
+     :seon.eval/value-tokens 233,
+     :seon.print/options #:seon.print{:length nil, :level nil},
+     :seon.sci.admit/value "#object[sci.lang.Var 0x4fc1a8f5]",
+     :seon.sci.eval/ending-ns seon.sci.eval-test,
+     :seon.eval/shown
+       "{:seon.render.var/contract :missing,
+ :seon.render.var/counts {:seon.render.var/pending 21},
+ :seon.render.var/symbol seon.sci.eva"…+617,
+     :seon.batch/reads
+       [{:seon.db/source-argument-position 0,
+         :seon.db/db
+           {:db-name :realities-proof-a,
+            :t 536870929,
+            :datahike/commit-id
+              #uuid "6ac6e751-9d21-54fd-a6d7-20b4a7ada154"},
+         :datahike.read/dependency-plan
+           {:datahike.query.dependency/sources [{…3}]},
+         :seon.db/read-request
+           #:seon.db{:read-operation :pull, :pull-arguments [[*] …1]},
+         :seon.db/read-result
+           {:seon.config.maintenance/min-usable-bytes 53687091200,
+            :seon.config.render.agent/max-children 32,
+            :seon.config.maintenance/log-retained-files 4,
+            :seon.config.operator/event-silence-backstop-ms 30000,
+            :seon.print/level 8,
+            :seon.config.web/max-search-results 10,
+            :seon.config.operator/boot-bound-ms 300000,
+            :seon.config.ai/api-key-variable "DEEPSEEK_API_KEY",
+            :seon.config.eval/time-limit-ms 30000,
+            :seon.config.web/max-redirects 5,
+            :seon.config.fs/max-read-bytes 16777216,
+            :seon.config.cache/max-bytes 512000000,
+            :seon.config.eval.result/max-collection 8192,
+            :seon.config/cluster "realities-proof",
+            :seon.print/length 32,
+            :seon.config.render/coalesce-ms 16,
+            :seon.config.error/escalate-to "root",
+            :seon.config.agent/turn-completion-backstop-ms 600000,
+            :seon.test/check-time-limit-ms 120000,
+            :seon.config.ai/model "deepseek-flash",
+            :seon.config.shell/inline-output-bytes 4096,
+            :seon.config.ai/stop ["user=>"],
+            :seon.config.fs/max-write-bytes 16777216,
+            …51}}
+        {:seon.db/source-argument-position 0,
+         :seon.db/read-result {:db/id 5762},
+         :seon.db/db {…3},
+         :datahike.read/dependency-plan {…1},
+         :seon.db/read-request {…2},
+         :seon.db/read-index-patterns [{…2} …4]}
+        {:seon.db/source-argument-position 0,
+         :seon.db/db {…3},
+         :datahike.read/dependency-plan {…1},
+         :seon.db/read-index-patterns [{…1}]}
+        …46],
+     :seon.sci.admit/record
+       #:seon.eval{:fn-entries 0,
+        :host-interop-count 0,
+        :duration-ms 0,
+        :allocated-bytes 43768,
+        :outcome :ok}},
+  :frames
+    [[seon.sci.branch_execution_test$declare_BANG_ invokeStatic
+      "branch_execution_test.clj" 37]
+     [seon.sci.branch_execution_test$declare_BANG_ invoke
+      "branch_execution_test.clj" 31]
+     [seon.sci.branch_execution_test$fn__545042$fn__545043$fn__545044$fn__545061$fn__545062
+      invoke "branch_execution_test.clj" 116]
+     [seon.sci.branch_execution_test$on_branch$fn__545030 invoke
+      "branch_execution_test.clj" 55]
+     [seon.db$call_with_custody invokeStatic "db.clj" 458]
+     [seon.db$call_with_custody invoke "db.clj" 430]
+     [seon.sci.branch_execution_test$on_branch invokeStatic
+      "branch_execution_test.clj" 55]
+     [seon.sci.branch_execution_test$on_branch invoke
+      "branch_execution_test.clj" 42]
+     [seon.sci.branch_execution_test$fn__545042$fn__545043$fn__545044$fn__545061
+      invoke "branch_execution_test.clj" 112]
+     [seon.sci.branch_execution_test$on_branch$fn__545030 invoke
+      "branch_execution_test.clj" 55]
+     [seon.db$call_with_custody invokeStatic "db.clj" 458]
+     [seon.db$call_with_custody invoke "db.clj" 430]
+     [seon.sci.branch_execution_test$on_branch invokeStatic
+      "branch_execution_test.clj" 55]
+     [seon.sci.branch_execution_test$on_branch invoke
+      "branch_execution_test.clj" 42]
+     [seon.sci.branch_execution_test$fn__545042$fn__545043$fn__545044
+      invoke "branch_execution_test.clj" 110]
+     …44]}]

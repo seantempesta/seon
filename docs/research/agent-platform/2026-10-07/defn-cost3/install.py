@@ -22,7 +22,7 @@ def form(source,name):
     raise ValueError(name)
 
 version=sys.argv[1]; output=sys.argv[2]
-files={'src/seon/schema.clj':['projection-registry','projection-with-declarations']}
+files={'src/seon/schema.clj':['projection-registry','projection-with-declarations','replacement-base']}
 code=[]; arming=[]
 for path,names in files.items():
     source=open(path).read() if version=='change' else subprocess.check_output(['git','show',version+':'+path],text=True)
