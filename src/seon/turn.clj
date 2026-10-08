@@ -3133,7 +3133,8 @@
          ": " (name reason) ".")))
 
 (defn- settle-batch-refusal!
-  "Settle every begun ordinal after the atomic turn settlement is refused.
+  "Settle every begun ordinal after the atomic turn settlement is refused:
+  the receipts are `:saved` when the run closed with them, else `:unrecorded`.
   When this settlement is refused too, the run is closed, one core fault is
   recorded, and the answer is the original refusal carrying that fault's
   `:seon.fault/recorded` receipt, with the second refusal as `:outcome`."
@@ -3146,7 +3147,8 @@
      [:prepared [:vector [:map [:seon.turn.loop/receipt :seon.turn.loop/terminal-request]]]]
      [:outcome [:or :seon.db/transaction-report :seon.error/value]]
      [:refused-outcome :seon.error/value]
-     [:saved {:optional true} [:vector :seon.cluster.eval/settle-request]]]]}
+     [:saved {:optional true} [:vector :seon.cluster.eval/settle-request]]
+     [:unrecorded {:optional true} [:vector :seon.cluster.eval/settle-request]]]]}
   [cluster requests prepared refusal changes]
   (let [connection (:seon.db/connection cluster)
         {now :seon.turn.loop/now
@@ -3223,11 +3225,12 @@
                  connection (:seon.blob/staged-writes transaction)
                  #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
     (if (:db-after outcome)
-      (cond-> {:prepared prepared
-               :outcome outcome
-               :refused-outcome refusal}
-        ;; the writer applies the receipts only while the run was open
-        (and run-id (closed-in? outcome run-id)) (assoc :saved receipts))
+      ;; the writer applies the receipts only while the run was open; a run
+      ;; that never opened still answers them, each naming the refusal
+      (assoc {:prepared prepared
+              :outcome outcome
+              :refused-outcome refusal}
+             (if (and run-id (closed-in? outcome run-id)) :saved :unrecorded) receipts)
       ;; A REFUSED REFUSAL SETTLEMENT IS A VALUE ON THE REPLY, never a throw
       ;; past it (sweep 2026-09-27 item 1: the caller saw "awaited channel
       ;; closed"). The run closes as for any escaped terminal
@@ -3245,6 +3248,7 @@
                                    :seon.agent/id agent-id})]
         {:prepared prepared
          :outcome outcome
+         :unrecorded receipts
          :refused-outcome (assoc refusal :seon.fault/recorded receipt)}))))
 
 (defn settle!
@@ -4523,7 +4527,7 @@
                                       {:settle (/ (- (System/nanoTime) settle-start) 1e6)})
                                :seon.cost/counts (:seon.cost/counts evaluated))
                 saved #(staged (with-saved % (into {} (map (juxt :seon.cluster.eval/ordinal :seon.turn.loop/admitted-form)) gated)
-                                 (:saved settlement [])))]
+                                 (or (:saved settlement) (:unrecorded settlement) [])))]
             (if-let [refusal (:refused-outcome settlement)]
               ;; a refused settlement keeps every evaluated value (OQ1): the
               ;; live definitions stay private to this fork, nothing restores

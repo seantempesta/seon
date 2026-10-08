@@ -85,17 +85,20 @@
                  #(agent/evaluate-source! (assoc custody :seon.agent/segmenter 'seon.turn/code-sources
                                                  :seon.cluster.reply/text source)))]
     (if-let [run-id (:seon.turn/id result)]
-      {:seon.turn/id run-id
-       ;; the run read on the reply's own value
-       :receipts (drive/run-receipts (:seon.db/db result) [run-id])}
+      (cond-> {:seon.turn/id run-id
+               ;; the run read on the reply's own value
+               :receipts (drive/run-receipts (:seon.db/db result) [run-id])}
+        ;; a run refused before it opened recorded no receipt
+        (:seon.turn.loop/refusal result) (assoc :seon.turn.loop/refusal (:seon.turn.loop/refusal result)))
       result)))
 
 (defn- hosted-run!
   "One ordinary run of the hosted agent: its evaluations' shown text, in order,
-  or the refusal the submission answered."
+  or the refusal the submission answered (a run refused before it opened
+  recorded none)."
   [hosted source]
-  (let [result (hosted-run-receipts hosted source)]
-    (if-let [receipts (:receipts result)]
+  (let [{receipts :receipts :as result} (hosted-run-receipts hosted source)]
+    (if (seq receipts)
       (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %)) receipts)
       result)))
 

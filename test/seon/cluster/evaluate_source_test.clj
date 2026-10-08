@@ -284,12 +284,10 @@
        (is (= :seon.sci.reader/form
               (:seon.error/member (:seon.batch/error-value (ex-data (:seon.batch/error (second jvm)))))))))))
 
-(deftest ^{:seon/tasks #{'seon.cluster.agent/a-run-refused-before-it-opens-answers-no-values}}
-  a-run-whose-open-is-refused-still-answers-its-values
+(deftest a-run-whose-open-is-refused-still-answers-its-values
   ;; A form that closes its own agent's admission outside the run's custody
-  ;; leaves the run unopenable: the settlement is refused, and the answer was
-  ;; that refusal alone, every evaluated value dropped (lane what-broke,
-  ;; 2026-10-09). The path is total: the values return, the refusal beside them.
+  ;; leaves the run unopenable and its settlement refused. The path is total:
+  ;; the values return, unrecorded, the refusal beside them.
   (with-armed-agent
    (fn [{:keys [agent-id code]}]
      (code (str "(defn close-my-admission! \"Closes my admission outside my run's custody.\""

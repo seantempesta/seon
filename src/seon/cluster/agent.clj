@@ -787,7 +787,8 @@
   The run is one value from submission to settlement: the agent's turn proc
   receives it on its request port and answers on its reply port after the one
   transaction that opens, evaluates and settles it. A run the writer refuses
-  to open answers its refusal. At the bound the answer is the await's
+  to open answers its evaluated values, unrecorded, with the refusal beside
+  them. At the bound the answer is the await's
   declared timeout carrying the run id; a pass that escaped answers its error
   value as the refusal, and one a stop ended closes its reply (the await's
   closed error); nothing replays. The run starts
@@ -822,18 +823,19 @@
               ;; THE ANSWER IS THE SETTLEMENT'S OWN VALUE. The pass reports the
               ;; database its terminal settlement left (`:seon.turn.loop/basis`);
               ;; callers read the run there, never on a later connection value.
-              ;; A settlement the writer refused before the run opened (admission
-              ;; closed at retirement) left no run: its refusal is the answer.
+              ;; A settlement the writer refused before the run opened left no
+              ;; run; with no evaluated form to answer, its refusal is the answer.
               (and (:seon.turn.loop/refusal answer)
+                   (empty? (:seon.turn.loop/evaluated-sources answer))
                    (let [basis (:seon.turn.loop/basis answer)]
                      (or (nil? basis)
                          (nil? (db/q '[:find ?run . :in $ ?id :where [?run :seon.turn/id ?id]]
                                      basis run-id)))))
               (assoc (:seon.turn.loop/refusal answer) :seon.agent/refused-source-agent agent-id)
 
-              ;; A run that opened keeps what its settlement said: a refused
-              ;; settlement's values are its receipts on the basis, and the
-              ;; refusal is answered beside them, never dropped.
+              ;; A refused settlement keeps every evaluated value (recorded when
+              ;; the run opened, else answered unrecorded, each naming the
+              ;; refusal), and the refusal is answered beside them, never dropped.
               (:seon.turn.loop/outcome answer)
               (cond-> (merge {:seon.turn/id run-id}
                              (select-keys answer [:seon.turn.loop/refusal :seon.turn.loop/evaluated-sources :seon.turn.loop/tests
