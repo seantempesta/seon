@@ -13,7 +13,7 @@
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (support/reply (get (first (get result "content")) "text")))))
+    (:seon.repl/value (support/mcp-reply result))))
 
 (deftest ^{:seon/tasks #{'seon.test/check-fails-on-agent-registered-schemas}}
   a-branch-registered-schema-contracting-a-function-checks-green
@@ -52,6 +52,6 @@
        (let [reply (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                              "arguments" {"code" (str "(my.test/check {:seon.test/changed '[" ns-name "/g " ns-name "/g-test]})")
                                                                           "agent" agent-id "cluster" running}})))
-             check (support/reply (get (first (get reply "content")) "text"))]
+             check (support/mcp-reply reply)]
          (is (false? (:seon.test/passed? (:seon.repl/value check))) "the test failed")
          (is (nil? (:seon.repl/out check)) "stored failure reports are the record, not the echo"))))))
