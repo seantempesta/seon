@@ -21,10 +21,11 @@ Order of work and status: [the ledger](../schedule/agent-loop-ledger.md), the on
 under `docs/research/agent-platform/2026-10-07/` and `2026-10-08/` (model-pass profile, memory report, PB-01 notes);
 this spec states targets, never measurements.
 
-Three mechanisms have redesigns under `docs/research/agent-platform/2026-10-08/redo/`, awaiting the owner's approval
-and answers to their questions; this spec states the laws they implement: finishing a task (`task-finish.md`: §3.5),
-the pass and its recording (`pass-and-recording.md`: §3.1, §3.3, §3.4 delivery), merge acceptance
-(`merge-acceptance.md`: merge.md §3-§5). When the owner approves one, its mechanism is folded into the owning section
+Mechanisms redesigned under `docs/research/agent-platform/2026-10-08/redo/`: finishing a task (`task-finish.md`), as
+amended by the owner on 2026-10-08 (tests run as a serial step; all relevant tests, not only proofs), is folded into
+§1.7 and §3.5; merging (`merge-acceptance.md`, in git's words) is folded into merge.md. The pass and its recording
+(`pass-and-recording.md`: §3.1, §3.3, §3.4 delivery) and the entrants (`entrants.md`) await the owner's approval of
+their designs; this spec states the laws they implement, and an approved mechanism is folded into its owning section
 here in place.
 
 ## 1. Laws
@@ -50,13 +51,17 @@ here in place.
    current item appears once, in its current version. Nothing in the history is re-executed or re-rendered.
 5. **Exchanges are data; wire formats are adapters** over them, selected per model (§3.4).
 6. **Standard lookups return data** on SCI's `clojure.repl`; `(help)` teaches only what its commit installs (§3.7).
-7. **Work ends by proofs.** A task needs proofs (deftests naming it in `:seon/tasks`) before it is assigned, and a
-   proof already green does not prove new work. During work only the task's proofs run, automatically, off the pass;
-   every other test reaching the change runs once at merge, on the combined program. A work task completes when its
-   proofs pass on the combined program after root, or root's auto-accept policy, accepts the merge. A question task
-   completes when its proof passes on the agent's answer; nothing merges. An impossible task is given back early with
-   a required reason, never claimed. Proof status reaches the agent only through the current-state block. (Mechanism:
-   `redo/task-finish.md`.)
+7. **Work ends by proofs; every relevant test runs by itself.** A task needs proofs (deftests naming it in
+   `:seon/tasks`) before it is assigned, and a proof already green does not prove new work. After every pass that
+   changes code, the task's proofs and then every test reaching the change run automatically on the agent's branch,
+   as a serial step inside the pass, recorded with that pass (§3.5); the agent never has to call `my.test/check`. A
+   test the change broke is a blocker the agent sees and fixes, as in any intentional refactoring. The step has a time
+   bound: proofs first, reaching tests after, and what the bound leaves continues at the next pass, shown as pending.
+   A code task requests a merge when its proofs are green and no test its change broke is red; `merge!` runs the
+   relevant tests again on the merged program and commits only when every one is green (merge.md §4). A task whose
+   proofs read an answer completes when they pass on the agent's answer; nothing merges. An impossible task is given
+   back early with a required reason, never claimed. Test status reaches a model agent through the current-state
+   block and an MCP agent through the reply.
 8. **Budgets** (§2). A model pass costs no more than an ordinary pass of the same forms, provider call excluded.
    Transient allocation is garbage-collected and never GB per operation; retained memory stays small. An ordinary
    operation over 1 s, or any GB-class allocation, is stop-and-fix in the turn it is seen, never parked behind a
@@ -80,7 +85,7 @@ forms are excluded.
 | definition (one-line `defn`) | < 300 ms | < 30 MB | 1 |
 | the pass after a definition | < 150 ms | < 10 MB | 1 |
 | current-state block, rendered at each model call | < 10 ms | < 2 MB | 0 (read only) |
-| proof scheduling inside a pass that changed definitions | < 5 ms | < 1 MB | 0 |
+| the test step after a pass that changed code (Seon's work, test bodies excluded) | within the step bound; the next pass waits no longer than the bound | as the one-test check per request; never GB (a branch's first reaching check included) | the test requests' own, as §3.2 |
 | reply forgiveness scan, per 28.6 KB reply | ≤ 3 ms | ≤ 8 MB | — |
 | history append (each pass) | < 10 ms | ≤ 3× the appended text | — |
 | one-test check (runner setup, selection, recording, cleanup) | < 300 ms cold, < 150 ms warm | < 20 MB | as §3.2 |
@@ -127,14 +132,15 @@ one cursor, as at a REPL, for each form:
 once per pass:
     ANALYZE one clj-kondo run over the pass's code, joined to the captured observations by span;
             skipped when nothing was defined; JVM passes have no SCI observation and no analysis
-    RECORD  ONE transaction at the writer on the current head: evaluation rows, program facts
+    RECORD  ONE transaction at the writer on the branch's tip: evaluation rows, program facts
             (the final state; dangling references as findings), the call row, agent facts,
             delivered items, error occurrences; staged blobs published around the commit
     FINISH  each reply = its shown result + diagnostics accumulated through RECORD, composed by
             the value printer from already-printed units; a later failure (recording included)
             is a diagnostic beside the value, never a replacement for it
-    SCHEDULE when the pass changed what the task's proofs reach: one offer to the agent's proof
-            work (§3.5); never awaited by the pass
+    TEST    when the pass changed code: the task's proofs, then the tests reaching the change, on the
+            agent's branch, serially, up to the step bound (§3.5); each request carries the pass id,
+            so its results are recorded with the pass; the reply carries the step's summary as data
 ```
 
 The record is the agent's evidence, not a second execution: nothing in RECORD re-reads a mutable Var, re-runs a form
@@ -220,15 +226,22 @@ messages and errors are unread items shown in the block; `(help)` is the prefix,
 **The current-state block.** One value, `seon.context/current-state [database agent-id]`, read at the call from
 stored facts (a database value, never a connection), rendered by its declared AI render pair into pruned data in this
 order, and printed by the value printer under the block budget. Sections, each absent when empty:
-- **Task**: the task's current declaration (intent, must-reads, ordered steps), read at the task home's current head.
-  A task revised by root or the user is a review: the update advances the assignment's revision in the same
-  transaction, so the block always shows the current declaration and never an older one.
+- **Task**: the task's current declaration (intent and the names it references), read at the task home's current
+  main. A task revised by root or the user is a review: the update advances the assignment's revision in the same
+  transaction, so the block always shows the current declaration and never an older one. Task steps are shelved
+  (owner 2026-10-08): the block shows none; the simplest parts of steps may later move into tasks themselves.
 - **Proofs**: each proof test by name with its current stored source, printed as code (whole for an ordinary deftest),
-  and its status: `:green`, `:red`, `:pending` (no result whose tested program holds the definitions the proof now
-  reaches) or `:running`. Never a latest-green boolean. A red proof adds data, `{:test sym :expected … :actual …
-  :message …}`, from the stored failure report. Counts head the section.
-- **Must-reads**: each reference's current arglists, contract and first docstring line, with `(doc sym)` and
-  `(clojure.repl/source sym)` offered as operations. An agent that runs them sees the result in its own history.
+  and its status: `:green`, `:red` or `:pending` (no result whose tested program holds the definitions the proof now
+  reaches, including tests the step bound left for the next pass). Never a latest-green boolean, never `:running`
+  (tests run serially inside the pass). A red proof adds data, `{:test sym :expected … :actual … :message …}`, from the
+  stored failure report. Counts head the section.
+- **Broken tests**: tests reaching the agent's change, not its proofs, that are red on its branch, each as the same
+  data as a red proof, plus the count still pending. These are blockers the agent fixes. A test already red at the
+  merge base is marked so; it does not block the merge request and stops `merge!` for root.
+- **Must-reads**: built automatically from what the task names: its must-reads and the fully qualified symbols and
+  keywords backticked in its intent, each resolved to its current definition: arglists, contract and first docstring
+  line, with `(doc sym)` and `(clojure.repl/source sym)` offered as operations. A name resolving to nothing shows as a
+  problem on the task. An agent that runs the operations sees the result in its own history.
 - **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model pass, each with
   its identity; `(my.agent/inputs)` is the operation that shows them all.
 - **Turns**: model calls left against the current outside wake, and the task's status.
@@ -248,8 +261,17 @@ until it is shown. A change in what the assigner wants is a task revision, not a
 
 **History.** An exchange is a pass's call row and its evaluations with source and shown text. The proc holds the
 assignment's exchanges as values and appends each finished exchange; it reads ordered history once, at proc start or
-a new assignment. Origins are `:model`, `:outside` and `:test`; only `:model` exchanges reach the model. Handles keep
-their identity across restarts and answer gone-value data after their runtime is lost. When prefix + history + block
+a new assignment. Only exchanges whose call row carries a model attempt reach the model; there is no origin tag
+(ledger §3.15). Handles keep their identity across restarts and answer gone-value data after their runtime is lost.
+Live results are held in `seon.cache` as an LRU kind (`:seon.repl/result`, keyed by evaluation id) under its
+configured byte budget, with no count limit; an evicted result's handle answers gone-value data with its saved shown
+text. Values the agent keeps in its own Vars are unaffected.
+
+**Storage roles** (`docs/research/agent-platform/2026-10-08/storage-roles/storage-roles.md`): the cache holds the full
+live value; a database fact holds small facts plus shown text up to 4096 bytes
+(`:seon.config.eval.result/blob-threshold`, UTF-8 bytes); a blob holds anything larger, the fact keeping its digest
+and size, staged and published with that fact's transaction; no second printed copy of a value is ever stored.
+Seon's own diagnostics follow the same rule: the full error maps under a result handle, their shown text stored. When prefix + history + block
 exceed the provider's window, the call refuses with an error the owner sees; nothing is clipped.
 
 **Wire formats.** One pure adapter, `seon.ai/messages [wrapping prefix exchanges block] → messages`, one branch per
@@ -283,18 +305,23 @@ the web never reads the proc's memory.
 | no form (prose only), or only read errors | disposition `:wait`; the original wake is answered |
 | provider failure or context refusal | counted call, no evaluations, answeredness unchanged, terminal reply |
 | call cap reached | disposition `:capped`; one message to the assigner; the next outside wake resumes |
-| the task's proofs all green | success (§1.7); who proposes and how a question task completes: `redo/task-finish.md` |
+| the task's proofs all green and no broken test | a code task requests a merge (merge.md §1) and the agent waits; a task whose proofs read an answer is done at the task home; nothing merges |
 | a proof recorded red after the agent's answered basis | work: the agent is woken, even after `:wait`, and the block shows the red data |
 | the bail form with a required reason | disposition `:bailed`; the task goes back to the assigner, who is notified |
 | a newer outside wake | answered by the next pass, whatever the disposition |
 
-**Proofs run automatically.** After a pass that changed what the task's proofs reach, exactly those proofs run as one
-request through the one test entrance (`seon.test/run`), off the pass: the pass offers its change and never waits.
-One request per agent is in flight; a started request runs to its actual exit and records; changes arriving meanwhile
-are checked by the next request, so nothing is dropped and nothing overlaps; pending work is rederivable from
-committed facts after a crash. A member whose recorded green still holds is answered from the record. The model is not
-held for the run: it acts on what the block shows. Selection, scheduling and the completion contract:
-`redo/task-finish.md`.
+**Tests run automatically, inside the pass.** After RECORD of a pass whose effect evidence shows a program, answer or
+data write (`answer!`, `transact!` and `register!` included), the agent's proc runs, through the one test entrance
+(`seon.test/run`) on the agent's branch: first the task's proofs, as one request naming exactly them; then the tests
+reaching the pass's change, as one reaching request. Each request carries the pass id, so its results are recorded
+with that pass. The step is serial: the next submission or model call starts after it, so the next block or reply
+shows real results and nothing is ever `:running`. It has a time bound (a cluster configuration dial): proofs always
+first, reaching tests after; when the bound fires, a started member runs to its actual exit and records, and the
+tests not yet run continue at the next pass's step and show as pending. A newer pass's change supersedes the queued
+tests of the older program (the last version wins). A member whose recorded green still holds for the program it now
+reaches is answered from the record, so an unchanged test costs a lookup. At proc start, tests left unfinished are
+derived from stored evidence. The test requests' own writes and merge-request bookkeeping never trigger the step.
+There is no proof proc and no running or dirty state.
 
 - A committed model reply advances answered to the basis its context presented and records the delivery of the unread
   items its block showed. Outside and test passes never answer.
@@ -345,13 +372,14 @@ completion's cross-branch crash window with idempotent recovery. Capture-before-
 - **Variant.** A run's variant is its agent's settings overlay (model, wrapping, entrance, cap). No run entity: the run
   is the agent, its task is its assignment.
 - **Environment.** Each run is a fresh agent on its own branch and SCI fork of the target cluster. Setup runs as an
-  outside pass before assignment; the branch is unlinked after scoring.
-- **Merging.** Root is whoever holds the merge task, the orchestrator or a Seon model agent, through the ordinary
-  REPL; a Seon agent must find root's job easy. Root diffs the branch against the target head and enforces integrity
-  there: dangling references, contracts, schema against target data, and the task's proofs plus root's chosen
-  regressions on the combined program. Auto-accept is root's policy, configured on the target. Mechanics: merge.md.
+  outside pass before assignment; the branch is deleted after scoring.
+- **Merging.** Root is whoever holds the merge request, the orchestrator or a Seon model agent, through the ordinary
+  REPL; a Seon agent must find root's job easy. Root diffs the source branch against the target branch and enforces
+  integrity there: dangling references, contracts, schema against the target's data, and the task's proofs, the tests
+  reaching the change and root's chosen tests on the merged program. `merge!` commits when every test is green;
+  automatic merging is root's choice, configured on the target. Mechanics: merge.md.
 - **Scoring** reads stored facts only: proof member counts, passes, tokens, read-error types, imitation notes,
-  latency, merge outcome, bail reason. Proofs and scoring cost no provider call. The suite runs the competency spec's
+  latency, merge outcome, bail reason. Tests and scoring cost no provider call. The suite runs the competency spec's
   task × wrapping × entrance × model matrix, DeepSeek flash first, every run ending in the real merge flow.
 
 ## 4. Order of work
@@ -390,19 +418,34 @@ store before its slice lands.
    memory; many agents on a 16 GB machine; one shared, incrementally advanced base per cluster.
 9. **Context is dynamic for current state** (§3.4): static prefix, own history, one block rendered per call; no
    opening or input pass; agents see their proofs' current source and status.
-10. **Only the task's proofs run during work**; regressions run once at merge on the combined program. A work task
-    completes when its proofs pass on the combined program after acceptance; a question task when its proof passes on
-    the answer.
-11. **Root review and auto-accept**: every competency run ends in the real merge flow; the suite includes an
-    impossible task (bail), conflicting refactors against a moving target, and root's job done by an agent.
+10. **All relevant tests run automatically** (revised in the afternoon; it supersedes "only the task's proofs during
+    work, regressions once at merge"): after a pass that changes code, the task's proofs and the tests reaching the
+    change run on the agent's branch, as a serial step inside the pass recorded with its forms, the last version
+    winning; a broken test is a blocker the agent sees and fixes; no hand-called `my.test/check`.
+11. **Root review and automatic merging**: every competency run ends in the real merge flow; `merge!` commits when
+    every test on the merge branch is green; the suite includes an impossible task (bail), conflicting refactors
+    against a moving target, and root's job done by an agent.
 12. **One debug view**: the context exactly as sent, from the same assembly function, printed by the HTML face.
 13. **Presentation**: no clipping outside the value printer; errors printed by it as data; elision forms are plain
     clojure.core; terse Clojure messages; lean core values with renders as cliffs notes; a 2,000-token raw-return
     bound with declared bulk exemptions; the `seon.print/*budget*` override.
+14. **Tasks first; steps shelved**: the task system replaces the plan/steps feature; the simplest parts of steps may
+    later move into tasks. The priority is tasks running, with the current-state block built automatically from the
+    names the task references (§3.4).
+15. **No kinds**: what a thing is follows from its positive data, validated by a base Malli schema plus specific
+    schemas composed over it, as errors are. A question task is a task whose proofs read an answer.
+16. **Git's words** for branches and merges: main, branch, checked-out branch, merge request, source and target
+    branch, merge base, merge branch, ours and theirs, unmerged, behind, norm; one `merge!`; a merge lands on the
+    request's target branch; a newer green commit updates the same open merge request (merge.md).
+17. **Live results** are held in `seon.cache` as an LRU under its byte budget, with no count limit (§3.4).
+18. **Seon's own diagnostics** are stored like any REPL form result: the full value cached, the value printer's shown
+    text stored, inline up to 4096 bytes and as a blob above (the storage roles, §3.4).
+19. **A definition's pointer to the evaluation that made it is dropped at merge**; the source file becomes the record.
+20. **Nested definitions** are known the way SCI knows them (its Var write hook), never by parsing text.
+21. **Cross-branch revisions** for content-keyed caches: the change to our Datahike fork is approved.
 
 Open:
 - **Subtree counts** (Datahike fork): child counts in branch nodes, counting at each split, or a recount job.
 - **Delimiter repair in code mode.** The law (§1.3) reads code as is; `seon.sci.forgive` also repairs delimiters for
   MCP code. Recommendation: repair code-mode text too, with the same repair notes beside the value, since an MCP agent
   benefits as a model does and the scan is the same; then §1.3 says so.
-- **Live result retention bound** (ledger MEM-03): recommendation there.

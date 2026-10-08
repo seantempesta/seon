@@ -1,202 +1,249 @@
 ---
 type: spec
-status: proposed (2026-10-08); §3-§5 under redesign
+status: approved in part (2026-10-08): git vocabulary, one merge!, target branch, norms, merge when every test is green
+revised: 2026-10-08
 tags: [spec, merge, root]
 ---
-# Merge: root reviews and takes an agent's branch
+# Merge: root reviews and merges an agent's branch
 
-What exists: an agent proposes its branch (`my.program/propose-merge!`), root prepares the proposal on a fresh
-branch S of its head and runs the proofs there (`prepare-merge!`), then accepts exactly what S tested
-(`accept-merge!`); the writer checks the replaced rows' digests. Data flow: proposal row at the task home → three-way
-digest comparison (base, branch, head) → one reconcile transaction onto S → test run on S → one guarded
-transaction onto root's head. The approach stays: functions of database values, the three-way value as the diff,
-and Datahike commits with merge parents. This spec makes it easy and adds review, repair and auto-acceptance.
+What exists: an agent opens a merge request for its branch (today `my.program/propose-merge!`), root tests the merge on
+a fresh merge branch off the target (today `prepare-merge!`), then merges exactly what was tested (today
+`accept-merge!`); the writer checks the replaced rows' digests. Data flow: the merge request at the task home →
+three-way digest comparison (merge base, ours, theirs) → one transaction onto the merge branch → test run on the merge
+branch → one guarded merge commit onto the target branch. The approach stays: functions of database values, the
+three-way value as the diff, and Datahike commits with merge parents. This spec names everything in git's words, folds
+prepare and accept into one `merge!`, and adds review, resolution, norms and automatic merging.
 
-Root is whoever holds a merge task: the orchestrator through MCP or a Seon model agent. It is an ordinary task done
+Root is whoever holds a merge request: the orchestrator through MCP or a Seon model agent. It is an ordinary task done
 through the ordinary REPL in root's own context. Nothing here is a second entrance, and a Seon agent must find root's
 job easy. The competency suite (`docs/research/agent-platform/2026-10-08/competency/competency-spec.md` §1-2) uses
-this mechanism; this spec owns it. Order and status of the M slices: [the ledger](../schedule/agent-loop-ledger.md)
-§3.10.
+this mechanism; this spec owns it. Order and status of the slices: [the ledger](../schedule/agent-loop-ledger.md)
+§3.10 (merge), §3.16 (git renames) and §3.15 (no kinds).
 
-**Under redesign** (`docs/research/agent-platform/2026-10-08/redo/merge-acceptance.md`): §3-§5 below. Both reviews
-found that prepare refuses a conflict before any repair world exists, that a data migration on S never reaches the
-head, that acceptance checks only the carried rows' digests although a new caller or data row can arrive on the head
-after prepare, that `:no-new-red` treats unknown head evidence as green, that no execution owner runs the policy on
-a provider-less root, and that installed accept gates on reaching members, which CLAUDE.md forbids. The diff value
-(§2), identity selection, digest checks and proof execution stay.
+**Words.** Git's, where git's meaning holds (map and reasons:
+`docs/research/agent-platform/2026-10-08/git-vocab/git-vocab.md`, approved 2026-10-08). **Main** is a cluster's
+branch (today `:cluster-<name>`, `seon.cluster.branch/cluster-branch`, renamed `main-branch`); "the tip of main" is its
+latest commit. An agent's **branch** is where it works; its **checked-out branch** is the branch its context holds
+(internally, custody). A **merge request** asks to merge a **source branch** into a **target branch** (GitLab's pair;
+GitHub's head and base already mean other things here). The **merge base** is the newest common ancestor. The **merge
+branch** is where a merge is tested and resolved, off the target. In a conflict, **ours** is the target and **theirs**
+is the source, as in `git merge`; Seon never rebases, so the words never swap. An **unmerged** identity is a conflict
+not yet resolved. **Behind** lists what the target changed since the merge base. A **norm** (Datahike's word) is the
+data change a merge carries. No invented short labels: never "S", "candidate", "head" or "proposal".
 
-Owner rulings this spec applies (2026-10-08): an agent may make any REPL-valid change on its branch, conflicting
-ones included (redefinitions, refactors, renames, schema changes); its branch never refuses them. Integrity is
-judged at root's diff and merge. Acceptance is automatic when root's criteria pass. Only the task's proofs run during
-the agent's work; the regressions reaching the change run once here, on the combined program.
+Owner rulings this spec applies (2026-10-08): an agent may make any REPL-valid change on its branch, conflicting ones
+included (redefinitions, refactors, renames, schema changes); its branch never refuses them. Integrity is judged at
+root's diff and merge. During work, the task's proofs and every test reaching the change run automatically on the
+agent's branch ([agent-loop.md](agent-loop.md) §1.7, §3.5); at merge they run again on the merged program. `merge!`
+commits when the merge is clean and every test on the merge branch is green, and otherwise stops with the merge branch
+kept. A newer green commit updates the same open merge request, as a push does. A definition's pointer to the
+evaluation that made it is dropped at merge: the source file becomes the record.
 
-## 1. The merge task
+## 1. The merge request
 
 **What root holds.**
-- The merge task (`:seon.task/kind :merge`, written by `seon.task/propose!` src/seon/task.clj:655) at the task
-  home, with its proposal row: branch, commit, proved proof digests, run id, program digest.
-- The agent's world: its branch (read through `compare-branch`, src/seon/cluster/source.clj:824) and its proposal.
-- The merge branch S, forked from the target head by `candidate-gate!` (src/seon/cluster.clj:2642), with the
-  delta applied.
-- Its own context on the target: `accept-merge!` lands on the branch root's context holds
-  (src/my/program.clj:547). For root that is its cluster; for a scratch reviewer it is the reviewer's branch.
+- The merge request at the task home: a task carrying `:seon.merge/source-branch`, `:seon.merge/source-commit`,
+  `:seon.merge/target-branch`, `:seon.merge/proofs` (each proof with its definition digest), `:seon.merge/run` and
+  `:seon.merge/program-digest`, plus optional `:seon.merge/norms`. A task is a merge request because it carries
+  `:seon.merge/source-branch`, validated by a specific Malli schema composed over the task schema; there is no kind
+  (ledger §3.15). Today: `seon.task/propose!` (src/seon/task.clj:655) writes `:seon.task/kind :merge` and a separate
+  proposal row; the rename slice folds the proposal row into the request (ledger §3.16, merge request data).
+- The source branch, read through `compare-branch` (src/seon/cluster/source.clj:824).
+- The merge branch, created off the target by `merge!` and named on the request as `:seon.merge/merge-branch`. It is
+  kept until the request closes (today `candidate-gate!` src/seon/cluster.clj:2642 creates it and nothing keeps it).
+- The target branch, fixed when the request opens: by default the main the source branch was branched from, or a
+  branch the agent names. A merge always lands on the request's target branch, never on whatever root has checked
+  out. Today `accept-merge!` lands on root's checked-out branch (src/my/program.clj:547), which put a dogfood merge on
+  a scratch branch while the home recorded it accepted (§9 item 4).
 
-**Steps** (each one form; each answer offers the next form as `:seon.render/operations`):
+**Forms** (each answer offers the next forms as `:seon.render/operations`):
 
-| # | Form | Answers | Installed |
+| Form | Git | Answers | Today |
 |---|---|---|---|
-| 1 | `(my.program/proposals)` | open proposals at the home | yes, program.clj:473 |
-| 2 | `(my.program/diff {:seon.task/merge m})` | the diff value (§2) | TARGET (today `diff` is the agent's own branch only, program.clj:974) |
-| 3 | `(my.program/prepare-merge! {:seon.task/merge m})` | S, the run, red members, the diff value | yes, program.clj:513; keeps S on conflict: TARGET |
-| 4 | `(my.program/take! …)` / `(my.program/drop! …)` / ordinary forms on S | repair (§3) | TARGET |
-| 5 | `(my.program/accept-merge! prepared)` | merge commit, identities, run | yes, program.clj:547 |
-| 5' | `(my.program/decline! {:seon.task/merge m :seon.task/reason "…"})` | closed task, agent told | TARGET (today `seon.task/decide!` task.clj:679, no reason, agent not told) |
+| `(my.program/request-merge!)` / `{:seon.merge/norms [...]}` | `git request-pull`; open a merge request | the open request; the agent waits | `propose-merge!` program.clj:416 |
+| `(my.program/merge-requests)` | the forge's open list | open requests at the home | `proposals` program.clj:473 |
+| `(my.program/diff {:seon.merge/request m})`, or with a symbol | `git diff main...branch [-- path]` | the diff value (§2) | `diff` is the agent's own branch only (program.clj:974); `declaration-diff` program.clj:991 folds in |
+| `(my.program/merge! {:seon.merge/request m})` | `git merge` | merged, or stopped with the merge branch kept (§4) | `prepare-merge!` program.clj:513 and `accept-merge!` program.clj:547 |
+| `(my.program/merge! {… :seon.merge/no-commit true})` | `git merge --no-commit` | stopped before committing, to review | — |
+| `(my.program/checkout! {… :seon.merge/side :theirs :seon.program/identities #{id}})` | `git checkout --theirs -- path` | the identity copied onto the merge branch (§3) | target `take!`/`drop!` |
+| ordinary forms (`in-ns`, `defn`, `my.program/ns-unmap!`) | edit and `git add` | the merge branch changed (§3) | — |
+| `(my.program/abort-merge! {:seon.merge/request m})` | `git merge --abort` | the merge branch deleted; the request stays open | — |
+| `(my.program/close-merge-request! {… :seon.merge/reason "…"})` | close a merge request | closed; the source agent is told | `seon.task/decide!` task.clj:679, no reason, agent not told |
 
 **Evidence** (all stored facts, consumers named):
-- the proposal row (consumer: `proposals`, prepare);
-- the run on S, `:seon.test.run/id`, with every member's result (consumer: accept, the score);
-- the merge commit with parents head, S and the agent's commit (consumer: write-back, history);
-- on the merge task: `:seon.task/outcome` (installed), and TARGET `:seon.task/accepted-by` (`:policy` or `:root`),
-  `:seon.task/review-run`, `:seon.task/held` (failed criteria), `:seon.task/target` (branch and merge commit; today
-  the outcome is written at the home even when the merge landed on another branch).
+- the merge request's data above (consumers: `merge-requests`, `merge!`, the score);
+- the run on the merge branch, `:seon.test.run/id`, with every member's result (consumers: `merge!`, the score);
+- the merge commit on the target, with parents the target's tip, the merge branch and the source commit (an octopus
+  merge, valid in git; consumers: write-back, history);
+- on the request: `:seon.merge/merge-commit` present means merged, `:seon.merge/close-reason` present means closed,
+  neither means open (positive data replaces today's `:seon.task/outcome` enum); a stopped merge records why it
+  stopped (unmerged identities, red tests, failed integrity) as data on the request; who merged
+  (`:seon.merge/merged-by`, root or the automatic merge).
+
+**Updating a request.** The agent requests a merge when its proofs are green on its branch and no test its change
+broke is red (agent-loop.md §3.5). A newer green commit on the same source branch updates the same open request's
+`:seon.merge/source-commit` and proofs, as a push updates an open merge request; Datahike history answers the earlier
+versions. A `merge!` in progress on an older source commit stops as superseded and keeps its merge branch, so root's
+resolutions are never overwritten. The agent goes to `:wait` when it requests; its branch is deleted only after the
+merge and the agent's actual exit.
 
 ## 2. The diff value
 
 One value, from `compare-branch` (source.clj:824) and `seon.program/three-way` (src/seon/program.cljc:704): every
-compared declaration family (`:seon.fn/sym`, `:seon.test/sym`, `:seon.ns/name`, `:seon.schema/key`) classified by
-its base, branch and head digests. TARGET shape, keyed by identity, small and digest-only:
+compared declaration family (`:seon.fn/sym`, `:seon.test/sym`, `:seon.ns/name`, `:seon.schema/key`) classified by its
+merge-base, ours and theirs digests. Target shape, keyed by identity, small and digest-only:
 
 ```clojure
-{:seon.merge/branch :agent-…  :seon.merge/base #uuid "…"  :seon.merge/head #uuid "…"
- :seon.merge/added     [{:id [:seon.fn/sym a/f] :after "d1…"}]
- :seon.merge/changed   [{:id [:seon.fn/sym a/g] :before "d0…" :after "d2…"}]
- :seon.merge/removed   [{:id [:seon.fn/sym a/h] :before "d3…"}]
- :seon.merge/head-only [{:id [:seon.fn/sym a/k] :before "d4…" :after "d5…"}]   ; changed on the target since the fork
- :seon.merge/conflicts [{:id [:seon.fn/sym a/g] :base "d0…" :branch "d2…" :head "d6…"}]
- :seon.merge/dangling  [{:caller a/k :calls a/h}]                 ; on the merged value
- :seon.merge/schema    [{:id [:seon.schema/key :a/line] :refused 70 :checked 200 :readers [a/f]}]
- :seon.render/operations [(my.program/declaration-diff {:seon.task/merge "…" :id [:seon.fn/sym a/g]})
-                          (my.program/prepare-merge! {:seon.task/merge "…"})]}
+{:seon.merge/source-branch :agent-…  :seon.merge/merge-base #uuid "…"  :seon.merge/target-commit #uuid "…"
+ :seon.merge/added     [{:id [:seon.fn/sym a/f] :theirs "d1…"}]
+ :seon.merge/modified  [{:id [:seon.fn/sym a/g] :base "d0…" :theirs "d2…"}]
+ :seon.merge/deleted   [{:id [:seon.fn/sym a/h] :base "d3…"}]
+ :seon.merge/behind    [{:id [:seon.fn/sym a/k] :base "d4…" :ours "d5…"}]   ; the target changed it since the merge base
+ :seon.merge/conflicts [{:id [:seon.fn/sym a/g] :base "d0…" :ours "d6…" :theirs "d2…"}]
+ :seon.merge/dangling  [{:caller a/k :calls a/h}]                          ; on the merged value
+ :seon.merge/schema    [{:id [:seon.schema/key :a/line] :refused 70 :readers [a/f]}]
+ :seon.render/operations [(my.program/diff {:seon.merge/request "…"} 'a/g)
+                          (my.program/merge! {:seon.merge/request "…"})]}
 ```
 
-- **Conflict kinds.**
-  - Same entity changed on both sides (three-way `:conflict`, installed).
+Today's three-way keys rename with it (`changed-on-branch` → `:seon.program/modified`, `retracted` → `deleted`,
+`changed-on-head` → `modified-ours`; ledger §3.16, the diff value).
+
+- **What blocks a clean merge.**
+  - Same identity changed on both sides (three-way `:conflict`, installed).
   - A dangling caller: a declaration on the merged value whose `:seon.fn/calls` names a symbol with no declaration.
-    Calls are symbol values, not refs (resources/seon/schemas/seon.fn.edn:49), so the writer cannot refuse it: TARGET
-    (M5).
-  - A schema the target's data violates: for each added, changed or removed `:seon.schema/key`, the head's refused
-    value count from `seon.db/registration-check` (src/seon/db.clj:4077) and the declarations reading the key: TARGET
-    (M6).
-- **Cost.** Proportional to the declarations changed since the fork: one merge-base walk, digests of the changed
-  identities only, one dangling query over the merged callers of removed symbols. No whole-program work.
-- **AI render.** Counts per section, then the entries above with one `declaration-diff` form each. No source text.
-- **HTML render.** One row per identity: kind, symbol, side, a status mark (added, changed, removed, conflict,
-  dangling, schema refusal), and take/drop operations. Source pairs open on demand through `declaration-diff`.
+    Calls are symbol values, not refs (resources/seon/schemas/seon.fn.edn:49), so the writer cannot refuse it on the
+    source branch; `merge!` checks it.
+  - A schema the target's data violates: for each added, modified or deleted `:seon.schema/key`, the target's refused
+    value count from `seon.db/registration-check` (src/seon/db.clj:4077) and the declarations reading the key. The
+    check is complete, or it answers a typed unknown that stops the merge; a sample is never integrity.
+- **Cost.** Proportional to the declarations changed since the merge base: one merge-base walk, digests of the changed
+  identities only, one dangling query over the merged callers of deleted symbols. No whole-program work.
+- **AI render.** Counts per section, then the entries above with one `diff` form each. No source text.
+- **HTML render.** One row per identity: family, symbol, side, a status mark (added, modified, deleted, behind,
+  conflict, dangling, schema refusal), and `checkout!` operations. Source pairs open on demand through `diff` with the
+  symbol.
 
-## 3. Taking by identity, repair on S
+## 3. Resolving on the merge branch
 
-- **Take** `(my.program/take! {:seon.task/merge m :seon.program/identities #{[:seon.fn/sym a/f]}})`: copy the
-  branch's rows for those identities onto S, as `prepare-merge!`'s selection does today (`:seon.program/identities`,
-  source.clj:886-893), but onto the kept S instead of a new one. A selected declaration reaching an unselected change
-  refuses by name (`unselected-reach`, source.clj:759, installed).
-- **Drop**: restore the head's row on S (or retract an added one). It is the same operation with the head as source.
-- **Repair**: root evaluates ordinary forms with S as custody (`in-ns`, `defn`, `my.program/ns-unmap!`). A conflict
-  is resolved by writing the combined definition on S. Nothing is re-proposed.
-- After a take, drop or repair, S's run is stale; accept already refuses a program written since the run
-  (`program-written-since?`, source.clj:1007). Root re-runs with `(my.test/check …)` on S, or `prepare-merge!` re-runs
-  on the kept S.
+- **The merge branch always exists after `merge!` starts.** It holds the target's program plus every non-conflicting
+  change. Each conflicted identity keeps ours (the target's row) and is listed in `:seon.merge/unmerged`. Git writes
+  conflict markers into files; Seon writes none, so never look for `<<<<<<<` in source.
+- **Checkout** `(my.program/checkout! {:seon.merge/request m :seon.merge/side :theirs :seon.program/identities #{id}})`
+  copies the source branch's rows for those identities onto the merge branch; `:ours` restores the target's row (or
+  retracts an added one). It works on any identity, conflicted or not, like `git checkout <branch> -- <path>`. Today's
+  `unselected-reach` refusal (source.clj:759) is deleted: a dangling caller is a finding in the diff value and `merge!`
+  checks it.
+- **Edit.** The holder of a merge request evaluates with the merge branch checked out, as a work task checks out the
+  agent's own branch, so resolution is ordinary REPL forms (`in-ns`, `defn`, `my.program/ns-unmap!`). A conflict is
+  resolved by writing the combined definition.
+- Any write to an identity on the merge branch (a checkout or a `defn`) resolves it: it leaves
+  `:seon.merge/unmerged`, as `git add` marks a path resolved. Any such write makes the last run stale
+  (`program-written-since?` src/seon/test/runner.clj:1187); the next `merge!` runs the tests again.
 
-TARGET: S kept and named on the merge task (`:seon.task/candidate`), retired when the task closes. Today a refused
-or red prepare leaves S unrecorded in the roster (task `seon.cluster.source/a-red-prepare-leaks-its-candidate-branch`).
+## 4. `merge!`
 
-## 4. Acceptance
+One verb, as `git merge`: `(my.program/merge! {:seon.merge/request m})`.
 
-Installed (`seon.cluster.source/accept-merge!`, source.clj:941):
-- the named run was recorded on S and every task proof is green there;
-- S's program is unwritten since the run;
-- every function the merge carries has a complete `:malli/schema`;
-- every added or replaced function reaches a green member of the run (an installed defect: CLAUDE.md shows
-  reaching-test counts and never gates on them; removed by the acceptance redesign);
-- no task handle the program names is missing on the target (`seon.task/candidate-dangling`, task.clj:360);
-- the writer refuses, before any datom lands, a carried row whose digest on the head moved since prepare
-  (`declarations-held-tx`, source.clj:795);
-- the merge commit's parents are the head, S and the agent's commit; the merge task closes `:accepted`; S and the
-  agent's branch retire as detached io work.
+1. **Start or continue.** With no merge branch, create it off the target's tip and apply the non-conflicting changes
+   (§3). With a kept merge branch, continue on it. If the target moved since, merge the target's new tip into the kept
+   merge branch (GitHub's "Update branch", never a rebase: no commit is rewritten), which keeps root's resolutions.
+2. **Norms.** Run each norm the request names on the merge branch, in order, after the program changes, so the tests
+   and the schema check see converted data.
+3. **Test.** Run, on the merge branch: the task's proofs, every test reaching the final change, and root's chosen
+   tests (`:seon.test/identities`). The selection and every result are stored. Reaching-test counts are shown, not
+   gated: the installed `uncovered` gate (source.clj:996-998) is deleted.
+4. **Commit or stop.** Commit when all hold:
+   - `:seon.merge/unmerged` is empty;
+   - every test of the run is green (unknown evidence never merges; a test already red on the target also stops the
+     merge, for root);
+   - integrity: every carried function contracted, every task handle the program names exists on the target, no
+     dangling caller, the schema check complete and holding, the merge branch's program unwritten since the run;
+   - `:seon.merge/no-commit` is absent.
 
-Shown, not gated: the whole run's tally and its red non-proof members. TARGET additions:
-- root's chosen tests (`:seon.test/identities` beside the proofs) run in the same run on S;
-- the dangling and schema checks of §2 refuse unless root takes them as findings explicitly;
-- an accept onto the cluster head advances it; an accept onto any other branch records `:seon.task/target` so the
-  outcome names where the program went.
+   Otherwise stop: the merge branch is kept, and the answer is the unmerged identities, the red tests, the failed
+   checks and the forms to run next (`diff`, `checkout!`, `merge!`, `abort-merge!`).
+5. **The merge commit.** One transaction onto the target branch, guarded by the target's tip at the run
+   (`registry/head-guard-tx`, src/seon/cluster/registry.clj:157), carrying the program rows the merge tested, each
+   norm's transaction data and the closed request. Each norm's transaction data is computed outside the writer from
+   the target's value at that tip (no agent code on the writer thread); if the tip moved, `merge!` goes back to step 1
+   once, then stops. The writer also refuses a carried row whose digest on the target moved (`declarations-held-tx`,
+   source.clj:795). Program rows carry no pointer to the evaluation that made them: an agent definition's
+   `:seon.program/defined-in` is dropped here, and write-back supplies the file. Parents: the target's tip, the merge
+   branch and the source commit. Afterwards the merge branch is deleted, and the source branch after its agent's
+   actual exit.
 
-## 5. Auto-accept policy (TARGET, M1-M2, M5-M6)
+**Norms** (Datahike's concept: `reference-code/datahike/src/datahike/norm/norm.clj` at e5453d96, `ensure-norms!`
+:204, recorded as `:tx/norm` :142-158, never twice :31). A branch carries program, never the target's data: an agent
+that splits `:user/name` into `:user/first` and `:user/last` fixes its own rows, but the target's rows stay old. A norm
+is an ordinary contracted function `[:=> [:cat :seon.db/database-value] :seon.db/tx-data]`: pure, it reads a database
+value and returns the transaction data that converts it. It is program, so it merges like any `defn`, and the agent's
+proofs test it on its own rows. The request names its norms in order, `:seon.merge/norms [app.user/split-name]`. The
+merge commit records each norm's symbol and definition digest, and `merge!` skips a norm the target already records.
+Seon takes the concept and its rule, not `ensure-norms!` itself, which reads EDN resources and transacts each norm
+separately; the merge must commit program and converted data in one transaction. A norm's size is bounded by measured
+scan, output and time on the merge branch; one past the bound stops the merge and becomes its own root task (the bound
+is ledger MA-8b's owner question).
 
-- **Configuration.** `:seon.config.merge/auto-accept` on the target cluster's configuration facts, a set of
-  criteria. Absent means every proposal waits for root. Root-owned: it lives on the target, never in
-  `seon.config/defaults`.
-- **Runner.** `my.program/review!` in root's context: on the merge message `propose-merge!` already sends,
-  root's wake calls it. It calls `prepare-merge!`, checks each criterion on the answer, and when all pass calls
-  `accept-merge!` with `:seon.task/accepted-by :policy`. Same functions, same writer; no second path.
-- **Criteria** (each on S):
+## 5. Automatic merging
 
-| Criterion | Holds when | Reads |
-|---|---|---|
-| `:proofs-green` | every task proof green | the run (installed check) |
-| `:no-conflict` | three-way `:conflict` empty | the diff value |
-| `:no-dangling` | no caller names a missing symbol | M5 |
-| `:schema-holds` | no changed or removed key refuses head data or leaves a reader | M6 |
-| `:no-new-red` | no reaching member red on S that is green on the head | M2 |
-
-- **Hold.** The proposal stays open, S is kept, `:seon.task/held` records the failed criteria, and one message to
-  root names them. Root then reviews by hand (§1 steps 2-5).
+- **Configuration.** `:seon.config.merge/auto-merge` on the target cluster's configuration facts. Present: each new or
+  updated merge request is merged automatically. Absent: every request waits for root. Root-owned: it lives on the
+  target, never in `seon.config/defaults`.
+- **Runner.** Root's ordinary serialized agent path, entered by a schedule handler with its own call row: at start it
+  derives the open requests at the home, then listens for new and updated ones, and calls `merge!` for each. Same
+  function, same writer; no second path and no model needed, so a provider-less root merges too.
+- **Stop.** A stopped automatic merge keeps the merge branch, records why on the request, and sends one message to
+  root. The stop shows in root's current-state block, not its history. Root then reviews by hand (§1 forms).
 
 ## 6. Conflict cases
 
-| Case | Branch | Head (meanwhile) | Expected |
+| Case | Theirs (the source branch) | Ours (the target, meanwhile) | Expected |
 |---|---|---|---|
-| Rename vs new caller | `f` renamed `g`, callers updated, `f` removed | new `k` calls `f` | three-way clean; `:dangling [{:caller k :calls f}]`; policy holds `#{:no-dangling}`; root repairs `k` on S to call `g`, re-runs, accepts |
-| Contract change vs body change | `f`'s `:malli/schema` changed | `f`'s body changed | one declaration digest each side: `:conflict` on `f`; root writes the combined `defn` on S; accept refuses until the run is fresh |
-| Schema evolution vs target data | `:a/line` narrowed | stored rows using `:a/line` | `:schema [{:refused n …}]`; holds `#{:schema-holds}`; root's outcome (a target-side migration or a decline) is under redesign: a migration on S does not reach the head |
-| Two agents, one namespace | A adds `f`, B adds `g` in `ns` | A accepted first | per-declaration three-way: `f`, `g` disjoint, B clean (a definition keeps its namespace row since `76daa8fd5`) |
-| Same function, two agents | both change `f` | A accepted first | B `:conflict` on `f`; held; root takes one or writes the combination |
+| Rename vs new caller | `f` renamed `g`, callers updated, `f` deleted | new `k` calls `f` | three-way clean; `:dangling [{:caller k :calls f}]`; `merge!` stops; root edits `k` on the merge branch to call `g`; `merge!` again commits |
+| Contract change vs body change | `f`'s `:malli/schema` changed | `f`'s body changed | one declaration digest each side: conflict on `f`, unmerged; root writes the combined `defn` on the merge branch; `merge!` reruns and commits |
+| Schema evolution vs target data | `:a/line` narrowed | stored rows using `:a/line` | without a norm, `:schema [{:refused n …}]` stops the merge; with the request naming a norm, the norm converts the target's rows (including rows written after the test) and the merge commits |
+| Two agents, one namespace | A adds `f`, B adds `g` in `ns` | A merged first | per-declaration three-way: `f`, `g` disjoint, B clean (a definition keeps its namespace row since `76daa8fd5`) |
+| Same function, two agents | both change `f` | A merged first | B: conflict on `f`, unmerged; root checks out one side or writes the combination |
 
 ## 7. What exists and what is missing
 
-Exists (file:line at `81020da6a`):
-- proposal, proofs gate and message: `my.program/propose-merge!` program.clj:416, `seon.task/propose!` task.clj:655;
-- open proposals: `my.program/proposals` program.clj:473;
+Exists (file:line at `81020da6a`, today's names):
+- request and proofs gate and message: `my.program/propose-merge!` program.clj:416, `seon.task/propose!` task.clj:655;
+- open requests: `my.program/proposals` program.clj:473;
 - comparison: `compare-branch` source.clj:824, `merge-base` source.clj:727, `three-way` program.cljc:704;
 - the agent's own diff: `my.program/diff` program.clj:974, `declaration-diff` program.clj:991;
-- prepare with selection and file proof: source.clj:847, program.clj:513;
-- accept with its checks: source.clj:941, program.clj:547; write-back source.clj:1265;
+- test merge with selection and file proof: source.clj:847, program.clj:513;
+- commit with its checks: source.clj:941, program.clj:547; write-back source.clj:1265;
 - close: `seon.task/decide!` task.clj:679; branches: `my.agent/create-branch!` agent.clj:117, `retire-branch!`
-  agent.clj:168.
+  agent.clj:168 (renamed `branch!` and `delete-branch!`, Datahike's names).
 
-Missing or broken, found by the dogfood (§8):
+Missing or broken, found by the dogfood (§9):
 
 | # | Gap | Task |
 |---|---|---|
-| G1 | a new contracted function cannot arm on S: its proof is green on the branch and red on S ("this context holds no Var to arm its contract on") | `seon.cluster.source/a-new-function-cannot-arm-in-the-merge-gate` |
-| G2 | one registered schema on a branch makes `diff`, compare and prepare refuse the whole comparison (`changed-identities` scope, program.cljc:700) | `seon.cluster.source/a-branch-schema-blocks-diff-and-merge` |
-| G3 | the proof run cannot see a branch-registered schema, so propose fails | `seon.test/check-fails-on-agent-registered-schemas` |
-| G4 | propose and prepare throw instead of returning their error | `my.program/merge-tools-throw-instead-of-returning` |
-| G5 | a test-only new namespace throws entity-id/missing at prepare | `seon.cluster.source/a-test-only-namespace-throws-at-prepare` |
-| G6 | every `defn` rewrote its namespace row: false conflicts, ns doc stripped on accept (fixed `76daa8fd5`, M8) | `seon.turn.batch/a-defn-rewrites-its-namespace-row` |
-| G7 | root cannot diff a proposal from its own context | `my.program/root-cannot-diff-a-proposal` |
-| G8 | accept cannot retire a hosted proposer's branch (open fault) | `my.program/accept-cannot-retire-a-hosted-proposers-branch` |
-| G9 | a red or refused prepare leaks S | `seon.cluster.source/a-red-prepare-leaks-its-candidate-branch` |
-| G10 | prepare costs seconds | `my.program/the-merge-prepare-costs-three-seconds-and-400k-calls` |
-| G11 | no kept S, take/drop, dangling, schema check, policy, decline with reason, `:seon.task/target` | slices below |
+| G1 | a new contracted function cannot arm on the merge branch: its proof is green on the source branch and red on the merge branch ("this context holds no Var to arm its contract on") | `seon.cluster.source/a-new-function-cannot-arm-in-the-merge-gate` |
+| G2 | one registered schema on a branch makes `diff`, compare and the test merge refuse the whole comparison (`changed-identities` scope, program.cljc:700) | `seon.cluster.source/a-branch-schema-blocks-diff-and-merge` |
+| G3 | the proof run cannot see a branch-registered schema, so the merge request fails | `seon.test/check-fails-on-agent-registered-schemas` |
+| G4 | requesting and merging throw instead of returning their error | `my.program/merge-tools-throw-instead-of-returning` |
+| G5 | a test-only new namespace throws entity-id/missing at the test merge | `seon.cluster.source/a-test-only-namespace-throws-at-prepare` |
+| G6 | every `defn` rewrote its namespace row: false conflicts, ns doc stripped on merge (fixed `76daa8fd5`) | `seon.turn.batch/a-defn-rewrites-its-namespace-row` |
+| G7 | root cannot diff a merge request from its own context | `my.program/root-cannot-diff-a-proposal` |
+| G8 | merging cannot delete a hosted source branch (open fault) | `my.program/accept-cannot-retire-a-hosted-proposers-branch` |
+| G9 | a red or refused test merge leaks its merge branch | `seon.cluster.source/a-red-prepare-leaks-its-candidate-branch` |
+| G10 | the test merge costs seconds | `my.program/the-merge-prepare-costs-three-seconds-and-400k-calls` |
+| G11 | no kept merge branch, `checkout!`, dangling, schema check, automatic merge, close with reason, target branch, norms | ledger §3.10 |
 
-**Slices.** The M ids (M0, M1-M7, M9-M13) are rows of [the ledger](../schedule/agent-loop-ledger.md) §3.10, with
-their proofs, order and status; M8 landed in `76daa8fd5`. Proofs assert data through MCP `eval_clj`, on a disposable
-target branch or the `competency` cluster, never default's program.
+**Slices.** Rows of [the ledger](../schedule/agent-loop-ledger.md) §3.10 (merge), §3.16 (renames into these words) and
+§3.15 (the merge request without a kind), with their proofs, order and status. Proofs assert data through MCP
+`eval_clj`, on a disposable target branch or the `competency` cluster, never default's program.
 
 ## 8. Costs, measured 2026-10-08
 
-Default at `81020da6a`, warm JVM, MCP `eval_clj` SCI, wall time by `System/nanoTime` around the call, one sample each.
+Default at `81020da6a`, warm JVM, MCP `eval_clj` SCI, wall time by `System/nanoTime` around the call, one sample each
+(today's function names).
 
-| Step | Measured | Budget (TARGET) |
+| Step | Measured | Budget (target) |
 |---|---|---|
 | `proposals` | 39 ms, 212 calls | < 50 ms |
 | `seon.task/assign!` | 41-54 ms (479 ms first call), ~820 calls | < 100 ms |
@@ -214,22 +261,22 @@ transaction or the retire submission). Profile before ranking. Prepare's calls a
 
 ## 9. Dogfood record (2026-10-08)
 
-Agents `mcp/merge-dogfood` to `…7` proposed; reviewers `mcp/merge-root-dogfood…4` held disposable branches off
-default as targets. Default's program was not changed. Every branch and S was retired; the open merge tasks were
-declined.
+Agents `mcp/merge-dogfood` to `…7` requested merges; reviewers `mcp/merge-root-dogfood…4` held disposable branches
+off default as targets. Default's program was not changed. Every branch and merge branch was deleted; the open merge
+requests were closed.
 
-1. A branch with a registered schema could not propose: `propose-merge!` threw `:malli.core/invalid-schema` (G3, G4),
-   even after the contract stopped naming the schema.
-2. A function and test in a new namespace proposed green (1.05 s) and prepared red (G1). The same with one function
-   (G1 again).
-3. A test-only new namespace threw at prepare in 77 ms (G5).
-4. A docstring change to `seon.task/step-summary` with a proof in `seon.task` proposed (0.9 s), prepared with the
-   proof green and one unrelated reaching red shown (2.8 s), and accepted onto the reviewer branch (1.78 s). The
-   home recorded the merge task `:accepted` although the merge landed on a scratch branch (§1, `:seon.task/target`).
-   The accept's retire of the proposer's branch failed and recorded an open fault (G8).
+1. A branch with a registered schema could not request a merge: `propose-merge!` threw `:malli.core/invalid-schema`
+   (G3, G4), even after the contract stopped naming the schema.
+2. A function and test in a new namespace requested green (1.05 s) and tested red on the merge branch (G1). The same
+   with one function (G1 again).
+3. A test-only new namespace threw at the test merge in 77 ms (G5).
+4. A docstring change to `seon.task/step-summary` with a proof in `seon.task` requested (0.9 s), tested with the proof
+   green and one unrelated reaching red shown (2.8 s), and merged onto the reviewer's checked-out branch (1.78 s). The
+   home recorded the request accepted although the merge landed on a scratch branch: hence the target branch (§1).
+   Deleting the source branch failed and recorded an open fault (G8).
 5. Root's review needed JVM mode, `seon.operator.runtime/running-instances` for the store, and
-   `seon.cluster.source/compare-branch` to see what a proposal changes (G7).
-6. A reviewer branch forked before a proposal does not see it: proposals live at the home. `review!` and
-   `proposals` read the home, not the reviewer's branch.
+   `seon.cluster.source/compare-branch` to see what a merge request changes (G7).
+6. A reviewer branch made before a merge request does not see it: requests live at the home. Automatic merging and
+   `merge-requests` read the home, not the reviewer's branch.
 7. Test failures print to the run's `:out` through `clojure.test`'s reporter, a value printed outside the value
    printer.
