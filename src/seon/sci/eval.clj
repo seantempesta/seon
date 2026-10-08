@@ -120,6 +120,7 @@
             [sci.interrupt :as sci.interrupt]
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
+            [seon.fn.analyzer :as analyzer]
             [seon.cache]
             [seon.batch]
             [seon.db :as db]
@@ -2180,14 +2181,17 @@
   "`clojure.repl/source-fn` for the evaluating context: SCI's `source` macro
   calls it (`reference-code/sci/src/sci/impl/namespaces.cljc:2436`); the
   symbol resolves in the calling SCI namespace; the stored row answers, else
-  the host's loaded Var reads its pinned file from the classpath."
+  the host's loaded Var reads its pinned file from the classpath, else a dependency
+  namespace that is not loaded reads its pinned file from the dependency cache's row."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [requested]
   (let [resolved (sci/resolve (sci.ctx-store/get-ctx) requested)
         {var-ns :ns var-name :name} (meta resolved)
         qualified (if resolved (symbol (str var-ns) (str var-name)) requested)]
     (or (stored-source (db/db) qualified)
-        (when (namespace qualified) (repl/source-fn qualified)))))
+        (when (namespace qualified)
+          (or (repl/source-fn qualified)
+              (::analyzer/source (analyzer/unloaded-definition qualified)))))))
 
 (defn- install-program-doc!
   "Install REPL macros without capturing program facts or a database value."

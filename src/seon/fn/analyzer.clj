@@ -6,6 +6,7 @@
             [clj-kondo.impl.utils :as kondo.utils]
             [clj-kondo.impl.rewrite-clj.reader :as kondo.reader]
             [clojure.edn :as edn]
+            [edamame.core :as edamame]
             [clojure.walk :as walk]
             [malli.core :as m]
             [clj-kondo.impl.version :as kondo.version]
@@ -418,6 +419,60 @@
                            :config-dir config-directory :config analysis-config})
           (spit marker ""))))
     filled))
+
+(defn cached-namespace
+  "kondo's cached analysis of the dependency namespace `namespace-name`, read and never written; nil when unanalyzed.
+
+  Its `:filename` is the file in the pinned extract; a Clojure namespace holds its vars beside it, a
+  ClojureScript-capable one under `:clj`."
+  {:malli/schema [:=> [:cat :symbol] [:maybe :map]]}
+  [namespace-name]
+  (let [root (kondo.core/resolve-cache-dir config-directory true cache-directory)]
+    (some #(kondo.cache/from-cache-1 root % namespace-name) [:clj :cljc])))
+
+(defn- defined-arglists
+  "The parameter vectors of a `defn`, `defn-` or `defmacro` form, single or multi-arity; nil for any other form."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe [:vector [:vector :seon.schema/value]]]]}
+  [form]
+  (when (and (seq? form) (#{'defn 'defn- 'defmacro} (first form)))
+    (let [more (drop-while (complement #(or (vector? %) (seq? %))) (drop 2 form))]
+      (if (vector? (first more))
+        [(first more)]
+        (not-empty (vec (keep #(when (and (seq? %) (vector? (first %))) (first %)) more)))))))
+
+(defn- defined-doc
+  "The docstring of a `def`-family form, or nil."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :string]]}
+  [form]
+  (when (seq? form)
+    (let [doc (nth form 2 nil)]
+      (when (string? doc) doc))))
+
+(defn unloaded-definition
+  "The definition of `qualified`, a var of a dependency namespace that is not loaded, from kondo's dependency
+  cache and the one form it names, or nil.
+
+  Gives the pinned file's URL, the definition's row, its source text, and the docstring and parameter vectors
+  the form declares. Never loads the namespace."
+  {:malli/schema [:=> [:cat :qualified-symbol]
+                  [:maybe [:map [::url :string] [::row :int] [::source :string] [::arglists {:optional true} [:vector [:vector :seon.schema/value]]]
+                           [::doc {:optional true} :string]]]]}
+  [qualified]
+  (let [namespace-name (symbol (namespace qualified))
+        entry (cached-namespace namespace-name)
+        {:keys [row col]} (or (get-in entry [:clj (symbol (name qualified))]) (get entry (symbol (name qualified))))
+        base (-> (str namespace-name) (str/replace "-" "_") (str/replace "." "/"))
+        url (or (some #(io/resource (str base %)) [".clj" ".cljc"])
+                (let [file (io/file (str (:filename entry)))] (when (.isFile file) (.toURL file))))]
+    (when (and row url)
+      (let [lines (subvec (vec (str/split-lines (slurp url))) (dec row))
+            text (str/join "\n" (cond-> lines (> col 1) (update 0 #(subs % (dec col)))))
+            form (edamame/parse-string text {:all true :read-cond :allow :features #{:clj} :auto-resolve-ns true
+                                             :readers (fn [_] identity)})
+            source (str/join "\n" (take (inc (- (:end-row (meta form)) (:row (meta form)))) (str/split-lines text)))]
+        (cond-> {::url (str url) ::row row ::source source}
+          (defined-arglists form) (assoc ::arglists (defined-arglists form))
+          (defined-doc form) (assoc ::doc (defined-doc form)))))))
 
 (defn forget-namespaces!
   "Remove superseded declarations from one explicitly owned resolver cache."

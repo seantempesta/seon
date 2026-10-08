@@ -9,6 +9,7 @@
             [seon.cache :as cache]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
+            [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -152,16 +153,21 @@
         {:seon.ref/project (subs project 15) :seon.ref/revision revision}))))
 
 (defn- library-name
-  "A qualified symbol resolved read-only from the host's loaded Vars, with its pinned revision."
+  "A qualified symbol resolved read-only from the host's loaded Vars, else, when its namespace is not loaded,
+  from the dependency cache's definition (never loading it), with its pinned revision."
   {:malli/schema [:=> [:cat :qualified-symbol] [:or :seon.ref/resolved :seon.ref/problem]]}
   [reference]
-  (let [v (when (find-ns (symbol (namespace reference))) (find-var reference))
+  (let [loaded? (find-ns (symbol (namespace reference)))
+        v (when loaded? (find-var reference))
         m (meta v)
-        pin (some-> (:file m) io/resource str pinned-revision)]
-    (if v
+        unloaded (when-not loaded? (analyzer/unloaded-definition reference))
+        pin (some-> (if v (some-> (:file m) io/resource str) (::analyzer/url unloaded)) pinned-revision)
+        arglists (or (:arglists m) (::analyzer/arglists unloaded))
+        doc (or (:doc m) (::analyzer/doc unloaded))]
+    (if (or v unloaded)
       (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference) (list 'clojure.repl/source reference)]}
-        (:arglists m) (assoc :arglists (:arglists m))
-        (:doc m) (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts (:doc m))))))
+        arglists (assoc :arglists arglists)
+        doc (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts doc)))))
         pin (assoc :seon.ref/pin pin))
       {:seon.ref/name reference :seon.ref/problem-kind :unresolved})))
 

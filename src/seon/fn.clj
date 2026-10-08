@@ -24,8 +24,6 @@
             [malli.error :as me]
             [malli.registry :as mr]
             [seon.schema.internal :as schema.internal]
-            [clj-kondo.impl.cache :as kondo.cache]
-            [clj-kondo.impl.core :as kondo.core]
             [clj-kondo.impl.utils :as kondo.utils]
             [seon.test.accretion :as accretion])
   (:import [java.nio.charset StandardCharsets]
@@ -924,11 +922,8 @@
   Each entry is kondo's own cached namespace (`from-cache-1`, :23), absent when unanalyzed."
   {:malli/schema [:=> [:cat [:set :symbol]] [:map-of :symbol :map]]}
   [namespaces]
-  (let [root (kondo.core/resolve-cache-dir analyzer/config-directory true analyzer/cache-directory)]
-    (into {} (keep (fn [namespace-name]
-                     (some->> (some #(kondo.cache/from-cache-1 root % namespace-name) [:clj :cljc])
-                              (vector namespace-name))))
-          namespaces)))
+  (into {} (keep (fn [namespace-name] (some->> (analyzer/cached-namespace namespace-name) (vector namespace-name))))
+        namespaces))
 
 (defn- with-dependency-analysis
   "Resolve the usages a cacheless analysis left unanalyzed against `dependencies`:

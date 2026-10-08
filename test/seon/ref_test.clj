@@ -52,6 +52,18 @@
      (is (= ['([{:seon.print/keys [node children]}])]
             (shown running agent-id "(mapv :arglists (seon.ref/references {:seon.ref/text \"`seon.print/close-frame`\"}))"))))))
 
+(deftest ^{:seon/tasks #{'seon.ref/unloaded-library-names-answer-unresolved}} an-unloaded-library-name-resolves-from-the-dependency-cache
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [code (str "(let [found (seon.ref/references {:seon.ref/text \"`seon.operator/check!` `rewrite-clj.paredit/slurp-backward` `rewrite-clj.paredit/nope`\"})]"
+                     " (mapv (fn [r] (-> r (select-keys [:seon.ref/name :seon.ref/problem-kind :arglists :seon.ref/pin]) (update :seon.ref/pin :seon.ref/project))) found))")
+           [operator slurp-backward absent] (shown running agent-id code)
+           source (shown running agent-id "(with-out-str (clojure.repl/source rewrite-clj.paredit/slurp-backward))")]
+       (is (= '[[request] nil] [(first (:arglists operator)) (:seon.ref/problem-kind operator)]))
+       (is (= {:arglists '([zloc]) :seon.ref/pin "rewrite-clj"} (select-keys slurp-backward [:arglists :seon.ref/pin])))
+       (is (= :unresolved (:seon.ref/problem-kind absent)))
+       (is (str/starts-with? source "(defn ^{:deprecated"))))))
+
 (deftest a-doc-section-reads-with-its-headings-below-and-size
   (test-support/with-running-agent
    (fn [running agent-id _]
