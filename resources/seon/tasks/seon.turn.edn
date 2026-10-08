@@ -231,4 +231,18 @@
  #:seon.task{:name "turns-left-allocates-836-kilobytes-per-call"
              :kind :function
              :intent "seon.turn/turns-left (max-episode-runs plus episode-runs over the agent's runs) allocates about 836 KB per call (lane cs01a's report, 2026-10-08), and the current-state block calls it on every model call; what it must do is read one dial and count the agent's own runs in the current session. Done when one call's allocation follows the agent's session runs (measured with seon.pass-probe/window on parent and change), with a test asserting the count as data."
-             :must-read #{seon.turn/turns-left seon.turn/episode-runs seon.turn/max-episode-runs}}]
+             :must-read #{seon.turn/turns-left seon.turn/episode-runs seon.turn/max-episode-runs}}
+
+ #:seon.task{:name "the-test-step-results-never-reach-the-eval-reply"
+             :kind :function
+             :intent "seon.turn/step puts :seon.turn.loop/tests (the proofs' and the reaching tests' summaries, F4a/F4b) on the pass report, but seon.cluster.agent/evaluate-source! answers only select-keys of :seon.turn.loop/refusal and :seon.turn.loop/evaluated-sources, so the MCP eval_clj reply never shows a red proof or a red reaching test; the agent learns of it only by calling my.test/check or reading recorded results (observed in seon.cluster.turn-test/a-defn-breaking-a-reaching-test-shows-it-red-on-the-next-call, which can assert only the recorded result). Done when the summary reaches the reply as data and that test asserts :seon.turn.loop/reaching :seon.turn.loop/red from the reply."
+             :must-read #{seon.turn/step seon.cluster.agent/evaluate-source!}}
+ #:seon.task{:name "an-executed-test-request-allocates-seven-hundred-megabytes-in-the-step"
+             :kind :function
+             :intent "Measured on default (2026-10-08, F4a running, seon.pass-probe/window as agent impl-f4b): an eval pass that evaluates a form costs 61-112 MB allocated and 85-120 ms with the proofs request answering from the record (seon.test/run 4-12 ms); the pass that changes code so a proof executes costs 865 MB and 586 ms (seon.test/run 440 ms, seon.test/select 76 ms), about 700 MB over the unchanged pass for one test world. Within the card's 400 ms interim for time, but the memory per executed request is the cost to bring down. Done when an executed one-test request allocates under 100 MB (seon.pass-probe/window on parent and change)."
+             :must-read #{seon.test/run seon.test/select seon.turn/step}}
+
+ #:seon.task{:name "two-branches-share-reach-declarations-is-red-beside-the-turn-tests"
+             :kind :function
+             :intent "seon.test-reaching-test/two-branches-of-one-program-share-reach-declarations is red when run in one JVM with seon.cluster.turn-test (check run d5281e6ec4d3, with F4b's automatic test step): seon.test.runner/retained-declarations answers nil for the parent (the 'derived once' and 'unrelated write keeps the key' assertions fail), and the test is green alone (check run 32238f76c1b8, 99 passes). Root hypothesis: cache eviction. The process cache is full (510 of 512 MB, 21 evictions of reach-related entries per the Opus landed review) and the step's test worlds add pressure, so the test asserts a retention that eviction legitimately drops. Proper fix: the base weighed correctly and held in the cluster's own registry (review finding #3), and the test not depending on cache retention. Filed here because seon.test.runner.edn is held by lane task-census; move it there. Done when the test is green whatever runs beside it, by the cause found."
+             :must-read #{seon.test.runner/reach-declarations seon.test.runner/reach-revision-key}}]

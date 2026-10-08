@@ -246,7 +246,10 @@
                         (:seon.agent/id custody) cluster-name)
         (:seon.turn.loop/refusal answer)
         (-> (update 0 conj (printed (:seon.turn.loop/refusal answer) code database cluster-name))
-            (assoc 1 true)))
+            (assoc 1 true))
+        ;; the pass's automatic test step (proofs, then the tests reaching the change)
+        (:seon.turn.loop/tests answer)
+        (update 0 conj (printed (select-keys answer [:seon.turn.loop/tests]) code database cluster-name)))
       [[(printed answer code (db/db (get-in custody [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true])))
 
 (defn- pages-changed!

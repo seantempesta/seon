@@ -65,6 +65,8 @@
   (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
+(defonce ^:private test-changes
+  (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private context-capture-tx
   (delay (requiring-resolve 'seon.context/capture-tx)))
 
@@ -5658,7 +5660,8 @@
 
 (defn- agent-dial
   "One agent dial: the agent's overlay, else the handle's carried value, else
-  the cluster's effective config; nil only when none of them declares it.
+  the cluster's effective config; nil only when none of them declares it. A
+  declared false is a value.
 
   A refused overlay or config read is RETURNED, the declared error it is; it
   never falls through to the next source as if it were absent."
@@ -5669,10 +5672,10 @@
   (let [overlay (ai/agent-overlay database agent-id)]
     (if (:seon.error/at overlay)
       overlay
-      (or (get overlay dial)
-          (get cluster dial)
-          (let [effective (config/effective database (:seon.cluster/name cluster))]
-            (if (:seon.error/at effective) effective (get effective dial)))))))
+      (if-let [[_ value] (or (find overlay dial) (find cluster dial))]
+        value
+        (let [effective (config/effective database (:seon.cluster/name cluster))]
+          (if (:seon.error/at effective) effective (get effective dial)))))))
 
 (defn- dial-absent
   "The declared refusal of a turn dial no source declares: the cluster names
@@ -5897,29 +5900,69 @@
           :else (into (set (edges home)) (edges database)))))
 
 (defn- run-proofs
-  "Run the held task's proofs on the agent's branch as one test request; nil when there are none."
-  {:malli/schema [:=> [:cat :map :seon.agent/id]
+  "Run the proofs of the task `agent-id` holds on `execution` as one test request; nil when there are none."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
-  [cluster agent-id]
-  (let [execution (@cluster-agent-acquire-context! cluster agent-id)
-        connection (:seon.db/connection execution)
+  [execution agent-id]
+  (let [connection (:seon.db/connection execution)
         proofs (task-proofs (db/db connection) agent-id)]
     (cond (:seon.error/at proofs) proofs
           (empty? proofs) nil
           :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
                             :seon.test/policy :named :seon.test/identities proofs}))))
 
-(defn- summary
-  "The test step's result as the reply shows it: pass, and the red tests' names."
-  {:malli/schema [:=> [:cat :seon.turn/id [:or :seon.test/run-result :seon.error/value]] :seon.turn.loop/test-summary]}
-  [pass-id run]
+(defn- run-reaching
+  "Run the tests reaching the branch's change, after the proofs, as one request; nil when the branch equals its base."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle]
+                  [:or :nil :seon.test/run-result :seon.error/value]]}
+  [execution]
+  (let [connection (:seon.db/connection execution)
+        changed (@test-changes execution connection)]
+    (cond (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) nil
+          (:seon.error/at changed) changed
+          :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
+                            :seon.test/policy :named :seon.test/changed (vec changed)}))))
+
+(defn- request-summary
+  "One test request's result as the reply shows it: pass, and the red tests' names."
+  {:malli/schema [:=> [:cat [:or :seon.test/run-result :seon.error/value]] :seon.turn.loop/request-summary]}
+  [run]
   (if (:seon.error/at run)
-    {:seon.turn/id pass-id :seon.turn.loop/test-error run}
-    {:seon.turn/id pass-id
-     :seon.test/passed? (:seon.test/passed? run)
+    {:seon.turn.loop/test-error run}
+    {:seon.test/passed? (:seon.test/passed? run)
      :seon.turn.loop/red (vec (for [r (:seon.test/results run)
                                     :when (pos? (+ (:seon.test/fail-count r) (:seon.test/error-count r)))]
                                 (:seon.test/sym r)))}))
+
+(defn- summary
+  "The test step's results as the reply shows them, one summary per request that ran; nil when none ran."
+  {:malli/schema [:=> [:cat :seon.turn/id [:maybe :map] [:maybe :map]] [:maybe :seon.turn.loop/test-summary]]}
+  [pass-id proofs reaching]
+  (when (or proofs reaching)
+    (cond-> {:seon.turn/id pass-id}
+      proofs (assoc :seon.turn.loop/proofs (request-summary proofs))
+      reaching (assoc :seon.turn.loop/reaching (request-summary reaching)))))
+
+(defn- test-step
+  "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
+  acquisition of the agent's world. A throw from either becomes the error beside the pass's values,
+  never a replacement for them; nil when no request ran."
+  {:malli/schema [:=> [:cat :map :seon.agent/id :seon.turn/id] [:maybe :seon.turn.loop/test-summary]]}
+  [cluster agent-id pass-id]
+  (let [pass-id pass-id]
+    (try
+      (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
+            execution (@cluster-agent-acquire-context! cluster agent-id)]
+        (summary pass-id (when proofs? (run-proofs execution agent-id)) (run-reaching execution)))
+      (catch Throwable failure
+        {:seon.turn/id pass-id
+         :seon.turn.loop/proofs
+         {:seon.turn.loop/test-error
+          (or (error/refusal failure)
+              (seon.error.refusal/diagnostic
+               (Date.) :seon.turn/test-step `test-step
+               {:seon.error/message "The automatic test step threw; the pass's values stand."
+                :seon.error/exception-class (.getName (class failure))}))}}))))
 
 (defn step
   "The turn transform, in Flow's four arities: ONE episode pass.
@@ -6095,13 +6138,17 @@
                                     refusal refusals bound)))
                           ;; THE PROOFS RUN AFTER A PASS THAT EVALUATED A FORM, serially inside
                           ;; the pass: the reply and the next pass see the result.
-                          tests (when (and (step-due? report) (not (:seon.turn.loop/refusal report)))
-                                  (run-proofs cluster agent-id))
+                          ;; THE TESTS REACHING THE CHANGE RUN AFTER THE PROOFS, in the same
+                          ;; step, on one acquisition of the agent's world.
+                          ;; THE TESTS RUN AFTER A PASS THAT EVALUATED A FORM, serially inside the
+                          ;; pass; their failure rides beside the values (test-step).
+                          tests (when (and (step-due? report) (not (:seon.turn.loop/refusal report))
+                                           (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
+                                  (test-step cluster agent-id (:seon.turn/id report)))
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
                                                     park (assoc :seon.turn.loop/refusal park)
-                                                    tests (assoc :seon.turn.loop/tests
-                                                                 (summary (:seon.turn/id report) tests)))))]
+                                                    tests (assoc :seon.turn.loop/tests tests))))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete

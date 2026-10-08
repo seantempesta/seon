@@ -835,7 +835,7 @@
               ;; refusal is answered beside them, never dropped.
               (:seon.turn.loop/outcome answer)
               (cond-> (merge {:seon.turn/id run-id}
-                             (select-keys answer [:seon.turn.loop/refusal :seon.turn.loop/evaluated-sources]))
+                             (select-keys answer [:seon.turn.loop/refusal :seon.turn.loop/evaluated-sources :seon.turn.loop/tests]))
                 (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer)))
               ;; At the bound the run may still settle: the timeout carries its id.
               ;; A closed reply (retirement stopped the graph first) settled nothing.

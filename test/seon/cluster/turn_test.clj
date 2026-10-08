@@ -189,6 +189,11 @@
         (test-support/await-event! completion ::render-proc-stopped
                                   (constantly true) 5000)))))
 
+(def ^:dynamic *test-step?*
+  "Whether `with-cluster`'s cluster runs the automatic test step. Off: these tests assert recording, and the
+  step's test worlds fill the shared reach cache that seon.test-reaching-test reads."
+  false)
+
 (defn- with-cluster
   "Drive `body` against one live cluster, optionally under a stand-in evaluator.
 
@@ -220,6 +225,7 @@
               :seon.boot/cluster-name "turn-test"
               :seon.config/manifest
               {:seon.config.run/max-episode-runs 100
+               :seon.config.test/step? *test-step?*
                :seon.config.ai/endpoint "http://127.0.0.1:1/v1"
                :seon.config.ai/model "probe"
                :seon.config.ai/max-tokens 32
@@ -2941,3 +2947,27 @@
      (let [results (seon.test.runner/latest-results (db/db connection) ['tq.f4/area-test])]
        (is (= 1 (count results)))
        (is (= 1 (:seon.test/fail-count (first results))) "the automatic step recorded the red result")))))
+
+(deftest ^{:seon.test/long "Four evaluations, each followed by the step's test worlds (about 0.45 s per executed request on default, whole test 7.9 s)."
+           :seon.test/long-ms 30000}
+  a-defn-breaking-a-reaching-test-shows-it-red-on-the-next-call
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (agent-eval running agent-id "(ns tq.f4) (defn area [r] (* r r))")
+     (agent-eval running agent-id "(in-ns 'tq.f4-test) (clojure.test/deftest perimeter-uses-area (clojure.test/is (= 8 (* 4 (tq.f4/area 1) 2))))")
+     (agent-eval running agent-id "(in-ns 'tq.f4) (clojure.test/deftest ^{:seon/tasks #{'tq.f4/area}} area-test (clojure.test/is (= 4 (tq.f4/area 2))))")
+     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                 :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/kind :function
+                                                 :seon.task/intent "Square."}))]
+       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+     (let [reply (agent-eval running agent-id "(in-ns 'tq.f4) (defn area [r] (* 3 r))")
+           reaching (get-in reply [:seon.turn.loop/tests :seon.turn.loop/reaching])
+           results (seon.test.runner/latest-results (db/db connection) ['tq.f4-test/perimeter-uses-area])]
+       (is (some #{'tq.f4-test/perimeter-uses-area} (:seon.turn.loop/red reaching)))
+       (is (= 1 (:seon.test/fail-count (first results))) "the reaching step recorded the red result")))))
+
+(deftest a-throwing-test-step-answers-its-error-beside-the-pass
+  (let [summary (#'seon.turn/test-step {} "agent-x" "r1")]
+    (is (= "r1" (:seon.turn/id summary)))
+    (is (:seon.error/message (get-in summary [:seon.turn.loop/proofs :seon.turn.loop/test-error])))))

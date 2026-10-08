@@ -1,2 +1,9 @@
 #:seon.config.test{:auto-check-cases
-                   [:int {:min 0, :seon.config/dial true}]}
+                   [:int {:min 0, :seon.config/dial true}]
+                   :step?
+                   [:boolean
+                    {:seon.config/display-label "Test step" :seon.config/optional true,
+                     :description
+                     "True: a pass that evaluated a form runs the held task's proofs and the tests reaching the branch's change before it answers. False: no automatic test step; an agent runs its tests by request.",
+                     :seon.config/default true,
+                     :seon.config/dial true}]}

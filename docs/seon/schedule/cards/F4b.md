@@ -53,6 +53,17 @@ One `eval_clj` as the agent redefines `area` so that test fails. Assert from the
 
 `--test seon.cluster.turn-test seon.turn-test seon.mcp-entrance-test seon.test-reaching-test`.
 
+## Notes (root ruling 2026-10-08)
+
+- The step is the dial `:seon.config.test/step?` (`resources/seon/schemas/seon.config.test.edn`, default true; an absent
+  value runs the step). `a-batched-turn-commits-only-queryable-definition-facts` and
+  `ns-unmap-retracts-the-owned-function-after-the-terminal-commit` test recording, not testing, so their setup turns
+  it off; every other test keeps the default. `agent-dial` returns a declared false (it fell through `or` before).
+- `with-cluster` in `seon.cluster.turn-test` defaults the step off (`*test-step?*`): those tests are not about testing and the step's test worlds fill the shared reach cache. The proof deftest uses `with-running-agent`, which keeps it on.
+- Known red at landing: `seon.test-reaching-test/two-branches-of-one-program-share-reach-declarations` (task `seon.turn/two-branches-share-reach-declarations-is-red-beside-the-turn-tests`).
+- `seon.cluster.agent/evaluate-source!` keeps `:seon.turn.loop/tests` and `seon.mcp/sci-run` prints it as the last
+  reply entry, so the proof asserts the reply data.
+
 ## Cost
 
 Follows the reaching tests' reach inputs, never the program, except `seon.test/changes`' digest comparison of the

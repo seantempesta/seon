@@ -1820,27 +1820,32 @@
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
                   [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
   [execution recording]
-  (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
-        base (world-base recording (:seon.cluster/name execution))
-        candidate (db/db (:seon.db/connection execution))
-        families (vec (:seon.program/compared-families
-                       (program/declaration-families (db/carried-projection candidate))))
-        differences (digest-differences (source/database store base) candidate families)
-        identities (when (vector? differences) (apply into differences))
-        declaring (when identities
-                    (db/q '[:find [?name ...] :in $ [?name ...]
-                            :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
-                          candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))
-        changed (when (sequential? declaring)
-                  (vec (sort print/compare-values (filter (fn [[a v]] (or (not= :seon.ns/name a) (some #{v} declaring)))
-                                               identities))))]
-    (cond (:seon.error/at differences) differences
-          (not (sequential? declaring)) declaring
-          (empty? changed)
-          (request-refusal :seon.test/policy-unscoped
-                           "My program equals the published commit my tests start from: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
-                           base)
-          :else changed)))
+  (let [base (:seon.source/commit-id
+              (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name (:seon.cluster/name execution)]))]
+    (if (nil? base)
+      (request-refusal :seon.test/policy-unscoped
+                       "The cluster records no adopted source commit to compare my program against: there is no change to check."
+                       (:seon.cluster/name execution))
+      (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
+            candidate (db/db (:seon.db/connection execution))
+            families (vec (:seon.program/compared-families
+                           (program/declaration-families (db/carried-projection candidate))))
+            differences (digest-differences (source/database store base) candidate families)
+            identities (when (vector? differences) (apply into differences))
+            declaring (when identities
+                        (db/q '[:find [?name ...] :in $ [?name ...]
+                                :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
+                              candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))
+            changed (when (sequential? declaring)
+                      (vec (sort print/compare-values (filter (fn [[a v]] (or (not= :seon.ns/name a) (some #{v} declaring)))
+                                                              identities))))]
+        (cond (:seon.error/at differences) differences
+              (not (sequential? declaring)) declaring
+              (empty? changed)
+              (request-refusal :seon.test/policy-unscoped
+                               "My program equals the published commit my tests start from: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
+                               base)
+              :else changed)))))
 
 (defn- clean-request-handle
   "Acquire the request's world: the loaded published program, boot's facts and
