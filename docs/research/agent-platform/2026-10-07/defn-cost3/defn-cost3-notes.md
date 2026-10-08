@@ -86,7 +86,7 @@ Three continuation options, ordered by scope: (1) retain these proven reductions
 
 Native follow-up: query.cljc:3061 inheritable-entry calls compatible-source-keys? before checking whether a retained bucket even has this query key. It constructs source-member comparisons for irrelevant buckets. That is O(retained result-source buckets), already covered by seon.turn/each-form-of-a-pass-costs-megabytes; the two broad reach queries eliminated here no longer pay it. Native serialization/node cost is not declared inevitable. Projection residuals remain under seon.schema/a-declaration-write-reloads-the-whole-projection and seon.schema/a-function-contract-changes-the-schema-projection; writer/read residuals under seon.db/every-commit-validates-its-write-report-three-ways and seon.db/the-query-wrapper-costs-36x-datahike. Error observation was deliberately skipped for S5. One new task was created through seon.task/create! on this lane's throwaway root (36 ms, id c78d9d2e5a4b), then copied to its EDN declaration: seon.sci.branch-execution-test/branch-proof-expects-a-retired-evaluation-row. It preserves the exact parent proof and names the success test. No new test tags name database-only tasks.
 
-Default needs root's normal batched adoption/restart for landed code, not a reset because of this lane. Cleanup and final acceptance still pending.
+Default needs root's normal batched adoption/restart for landed code, not a reset because of this lane. Final acceptance and cleanup are recorded below.
 
 
 ## Declaration-only projection correction: EQUIVALENT
@@ -96,3 +96,19 @@ Final inspection found a correctness edge case after the first writer landing: `
 The same paired probe after this guard remains 147.262 MB / 156.817 ms / 45,369 armed calls per defn; ordinary 39.168 MB / 46.964 ms / 10,473 calls; after-defn 73.665 MB / 92.230 ms / 95,078 calls. Every pass completes, no error, one own commit. Compared with the preceding final probe the target allocation is unchanged within 0.55 MB and time within 7.61 ms; after-defn timing varies although its work count is unchanged. The guard does not traverse or compile a complete projection. Full projection acquisition is still the separately recorded unresolved O(program) owner.
 
 At final inspection the throwaway status retained the initial nil-sequence prototype's two settlement faults and 15 deliberately replaced JVM roots. Its over-bound test owner observations were runner 2,899 ms, clean-request-handle 2,706 ms and system-turn 1,170 ms. No later canonical pass failed. These are retained evidence, not a claim the throwaway is pristine. Default had been independently replaced by root during the work; this lane never operated on its process.
+
+
+## Landing and cleanup
+
+| commit | change | src + / - | tests + / - | named proof |
+|---|---|---:|---:|---|
+| 4c28e748f | retain unaffected registry entries | 16 / 17 | 10 / 0 | 53 tests, 605 assertions, zero failures/errors, 61,836 ms |
+| 4455e4917 | writer plans and candidate schemas follow the value | 38 / 56 | 9 / 2 | 7 tests, 31 assertions, zero failures/errors, 4,636 ms |
+| b20762d6b | target-bounded test reach and native identity reads | 82 / 93 | 19 / 79 | 13 tests, 131 assertions, zero failures/errors, 6,641 ms |
+| bd63ce073 | preserve declaration-only projection validation | 11 / 14 | 5 / 0 | 6 tests, 30 assertions, zero failures/errors, 8,167 ms |
+
+Net source -33 lines, tests -38, combined **-71**. Notes, scripts and task data are separate. Every code commit used bin/lane commit with its named reaching tests; no push, merge, worktree, foreign-file edit or foreign-session message. The broad tiers remain root's work. Five demonstrated parent-red vars are listed above, individually; unavailable proof was never counted green. No browser paint was measured by this backend allocation probe.
+
+Final correction candidate 592fde37d8ff, run 8ca756d28561: publication 3,003 ms, adoption 1,026 ms, ready 39,359 ms, boot 46,332 ms, full gate 65,611 ms. Full-tree lint before it: 4,734 ms, zero errors / 1,455 warnings; candidate lint 5,127 ms, zero errors / 1,455 warnings. Reach gate candidate 9847764ba468, run 16c4176c2fad: publication 4,426 ms, adoption 1,552 ms, ready 43,219 ms, boot 47,649 ms, full gate 67,059 ms; candidate lint 5,699 ms, zero errors / 1,455 warnings. These are explicitly authorized throwaway publication/boot/proof costs, not sub-second passes; they remain visible rather than being described as cheap.
+
+Stopped only tmp/defn-cost3/root through bin/seon down after checking pid 27789 / start 2026-10-08T00:07:32.657Z. The operator reports actual exit, ps confirms no such process, and lsof finds no holders under the owned root. The owning PTY shell exited. Its 644 MB disposable root was removed without following its cache symlinks; raw JFRs and scratch envelopes remain in tmp/defn-cost3, and reusable scripts, exact probe rows, rank outputs, final runtime status and gate receipts are committed here. No owned JVM or shell remains. This lane never stopped, reset, restarted or prototyped in default.

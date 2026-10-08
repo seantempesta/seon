@@ -1,0 +1,12 @@
+== lane defn-cost3 commits: Retain owning validation for declaration-only projections
+== clj-kondo --lint src script test --cache false --parallel (candidate tree 592fde37d8ff)
+== bin/seon check src/seon/schema.clj src/seon/db.clj test/seon/db_overhead_test.clj docs/research/agent-platform/2026-10-07/defn-cost3/ --test seon.db-overhead-test/declaration-projections-retain-owning-schema-validation --test seon.db-overhead-test/final-validation-asks-cell-storage-of-written-attributes-only --test seon.db-test/a-declared-but-uninstalled-write-key-keeps-the-missing-key-hint --test seon.db-test/turn-write-schema-does-not-include-error-observations --test seon.schema-test/an-incremental-projection-equals-its-full-build --test seon.schema.registry-retention-test/a-partial-retained-registry-keeps-the-dependency-defaults
+SEON check OK total-ms 65611
+run 8ca756d28561 / executed 6 / reused 0 / pass 30 / fail 0 / error 0 / 8167 ms / passed? true
+{:seon.operator/tests-passed? true, :seon.boot/pid 51487, :seon.operator/test-phases {:seon.operator/tests-ms 8243, :seon.operator/slot-wait-ms 0, :seon.boot/ready-ms 39359, :seon.operator/archive-ms 921, :seon.operator/classpath-ms 550, :seon.operator/prepare-ms 3656, :seon.operator/share-ms 2148, :seon.operator/boot-ms 46332, :seon.operator/source-ms 3619}, :seon.cluster/phase-ms #:seon.cluster{:published-ms 3003, :adopted-ms 1026}, :seon.source/built? true, :seon.cluster/adopted-identities 198, :seon.source/git-sha "262a828574ac99e8046775a12778fc05e933a2f3", :seon.operator/phases #:seon.operator{:archive-ms 1092, :rehearsal-ms 4158, :total-ms 65611}, :seon.boot/start-instant #inst "2026-10-08T00:48:01.614-00:00", :seon.operator/test-summary "run 8ca756d28561 / executed 6 / reused 0 / pass 30 / fail 0 / error 0 / 8167 ms / passed? true", :seon.source/commit-id #uuid "6ac6e884-4fe5-57dd-af1e-6df8bd0d34cd"}
+linting took 5127ms, errors: 0, warnings: 1455
+== proved in 66 s; committing under .git/lane-commit.lock
+[refactor/agent-platform bd63ce073] Retain owning validation for declaration-only projections
+ 6 files changed, 40 insertions(+), 16 deletions(-)
+ create mode 100644 docs/research/agent-platform/2026-10-07/defn-cost3/reach-acceptance.txt
+bd63ce073 Retain owning validation for declaration-only projections
