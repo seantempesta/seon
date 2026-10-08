@@ -5055,8 +5055,8 @@
   (into [] (remove :seon.test/unchanged) (:seon.test/results run)))
 
 (defn- request-summary
-  "What one test request executed, as the reply shows it: whether all of it passed, the red tests' names and the
-  tests left pending. A result answered from its record is not shown again."
+  "What one test request executed, as the reply shows it: whether all of it passed, the red tests' names (those
+  that ended in an error rather than a failed assertion also in `:seon.turn.loop/errored`) and the tests left pending. A result answered from its record is not shown again."
   {:malli/schema [:=> [:cat [:or :seon.test/run-result :seon.error/value]] :seon.turn.loop/request-summary]}
   [run]
   (if (:seon.error/at run)
@@ -5064,9 +5064,11 @@
     (let [pending (pending-syms run)
           red (vec (for [r (executed run)
                          :when (pos? (+ (:seon.test/fail-count r) (:seon.test/error-count r)))]
-                     (:seon.test/sym r)))]
+                     (:seon.test/sym r)))
+          errored (vec (for [r (executed run) :when (pos? (:seon.test/error-count r))] (:seon.test/sym r)))]
       (cond-> {:seon.test/passed? (and (empty? red) (empty? pending))
                :seon.turn.loop/red red}
+        (seq errored) (assoc :seon.turn.loop/errored errored)
         (seq pending) (assoc :seon.turn.loop/pending pending)))))
 
 (defn- summary

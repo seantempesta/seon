@@ -123,8 +123,9 @@
          (is (= [3 3 3] (answered (str in-shared "(defn g7 [] 3) [(k7) (h7) (g7)]") fresh running))))))))
 
 (defn- step-red
-  "The tests the step of `agent-id`'s pass over `code` ran red, proofs and reaching tests, with the last form's value."
-  {:malli/schema [:=> [:cat :string :string :string] [:map [:value :seon.schema/value] [:red [:set :symbol]] [:passed? [:maybe :boolean]]]]}
+  "The tests the step of `agent-id`'s pass over `code` ran red, proofs and reaching tests, with the last form's value;
+  `:errored` is the red tests that ended in an error (no executable Var, a thrown body), not a failed assertion."
+  {:malli/schema [:=> [:cat :string :string :string] [:map [:value :seon.schema/value] [:red [:set :symbol]] [:errored [:set :symbol]] [:passed? [:maybe :boolean]]]]}
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))
@@ -133,7 +134,9 @@
     {:value (:seon.repl/value (last (filter #(contains? % :seon.repl/value) items)))
      :passed? (get-in tests [:seon.turn.loop/reaching :seon.test/passed?])
      :red (into #{} (mapcat #(get-in tests [% :seon.turn.loop/red]))
-                [:seon.turn.loop/proofs :seon.turn.loop/reaching])}))
+                [:seon.turn.loop/proofs :seon.turn.loop/reaching])
+     :errored (into #{} (mapcat #(get-in tests [% :seon.turn.loop/errored]))
+                    [:seon.turn.loop/proofs :seon.turn.loop/reaching])}))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}}
   an-inherited-test-sees-the-branch-redefinition
@@ -211,9 +214,12 @@
   a-file-test-runs-the-branch-redefinition-of-a-file-function
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [{:keys [red]} (step-red descending-member-problem (str "branch-" agent-id) running)]
-       (is (contains? red 'seon.error-test/a-map-for-a-sequential-is-refused-as-the-map)
-           "the file test, green on the loaded program, ran the branch's definition through the compiled caller")))))
+     (let [{:keys [red errored]} (step-red descending-member-problem (str "branch-" agent-id) running)
+           test-sym 'seon.error-test/a-map-for-a-sequential-is-refused-as-the-map]
+       (is (contains? red test-sym)
+           "the file test, green on the loaded program, ran the branch's definition through the compiled caller")
+       (is (not (contains? errored test-sym))
+           "it failed an assertion against the branch's definition; an error (no executable Var) is not that red")))))
 
 (def ^:private equal-doc-line
   "A branch definition of the file function `seon.render.ns/first-doc-line`
