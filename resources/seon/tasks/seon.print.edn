@@ -37,4 +37,8 @@
              :kind :function
              :intent "`(vec (repeat 400 {:a 1 :b \"two\" :c [1 2 3]}))` shows 311 tokens of the 1,500-token budget because `:seon.render.profile/max-children` (32) cuts the vector at 32 members while 1,189 tokens are unspent (default 2026-10-08), while the 2,000-entry map spends 1,388 tokens on 32 fat entries: the child count, not the token budget, decides what a collection shows. Done when members are admitted until the profile's token budget is spent (the count cap only a backstop) and a regression shows 400 small maps filling the budget, each cut naming its count and a clojure.core continuation."
              :must-read #{seon.render.value/render-ai-data}
-             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+#:seon.task{:name "stored-or-compared-text-printed-under-ambient-bindings"
+             :kind :function
+             :intent "`seon.fn` stored a contract's text with plain `pr-str`, so publication (namespace maps on) and an agent evaluation (off) stored different text and digests for the same contract, and `*print-length*` made `seon.schema/canonical-definition` refuse every contract (fixed for those owners in e5cfb80dc with `seon.id/printed`). Census every `pr-str`/`prn-str`/`print-str` whose output is stored, hashed, compared or sorted in src/ and convert each to data comparison or `seon.id/printed` (AGENTS.md: one printer; identity is a structural digest, never printed text; ledger PR-24, PR-17)."
+             :must-read #{seon.id/printed}}]
