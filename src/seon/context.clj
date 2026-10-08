@@ -9,6 +9,7 @@
             [seon.cluster.message :as message]
             [seon.error.refusal]
             [seon.eval]
+            [seon.render]
             [seon.repl :as repl]
             [seon.sci.eval :as sci.eval]
             [seon.ref :as ref]
@@ -213,9 +214,14 @@
   (let [request (assoc request :seon.db/db database :seon.agent/id agent-id)
         history (exchanges database agent-id)
         block (current-state database agent-id)
-        shown #(:seon.eval/shown (sci.eval/shown-result %1 %2 nil))]
-    (or (some #(when (:seon.error/at %) %) [history block])
-        {:seon.ai/system (shown (bootstrap/help-value database agent-id) request)
+        profile (seon.render/request-profile request)
+        shown #(:seon.eval/shown (sci.eval/shown-result %1 %2 nil))
+        system (shown (bootstrap/help-value database agent-id) request)
+        ;; the root call names the producer whose declared AI render shows the block
+        prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))]
+    ;; a request with no context or profile cannot render: that refusal is the answer, never
+    ;; the printed help map as the system message
+    (or (some #(when (:seon.error/at %) %) [history block profile])
+        {:seon.ai/system system
          :seon.context/exchanges history
-         ;; the root call names the producer whose declared AI render shows the block
-         :seon.ai/prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))})))
+         :seon.ai/prompt prompt})))

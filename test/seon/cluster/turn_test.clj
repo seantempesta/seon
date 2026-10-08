@@ -38,6 +38,7 @@
             [seon.schema.edn :as schema.edn]
             [clojure.data.json]
             [seon.bootstrap]
+            [seon.context]
             [seon.eval.drive]
             [seon.id]
             [seon.mcp]
@@ -3021,7 +3022,10 @@
            help (seon.bootstrap/render-help-ai (seon.bootstrap/help-value (db/db connection) agent-id))]
        (is (= 3 (count sent)) "three model passes reached the provider")
        (is (every? #(= help (system %)) messages) "the system message is help's shown text")
+       (is (not-any? #(str/includes? (system %) ":seon.render/ai") messages) "not the printed help map")
        (is (str/includes? help-reply help) "the same text (help) shows at the agent's REPL")
+       (is (= :seon.render/request-error (:seon.error/type (seon.context/model-context (db/db connection) {} agent-id)))
+           "a request that cannot render help is an error, never the printed help map as the system message")
        (is (every? some? [first-user second-user third-user]))
        (is (str/includes? second-user "(defn area [r] (* r r))") "the first pass's form is in the history")
        (doseq [text [second-user third-user]]
