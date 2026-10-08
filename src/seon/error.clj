@@ -891,24 +891,31 @@
         described-problem (cond-> problem missing? (dissoc :type))
         message (or (me/error-message described-problem {:unknown false})
                     "the declared schema")
-        expected (schema-expectation described-problem)]
+        expected (schema-expectation described-problem)
+        missing-key (last path)
+        ;; the same name the caller's map holds under another namespace
+        held-key (when (and missing? (qualified-keyword? missing-key) (map? parent))
+                   (some #(when (and (qualified-keyword? %) (= (name %) (name missing-key))) %)
+                         (keys parent)))]
     (cond-> {:seon.error/path (vec path)
      :seon.error/argument argument
      :seon.error/expected expected-form
      :seon.error/expected-description
      (cond
-       missing? (str "the required key " (pr-str (last path)) " with " expected)
+       missing? (str "the required key " (pr-str missing-key) " with " expected)
        member? (str "a collection member satisfying " expected)
        :else expected)
      :seon.error/offending (if (and missing? (map? parent)) parent (:value problem))
      :seon.error/actual-description
      (cond
-       missing? (str "a map missing " (pr-str (last path)))
+       missing? (str "a map missing " (pr-str missing-key))
        member? (str "a collection member that is " (value-description (:value problem)))
        :else (value-description (:value problem)))
      :seon.error/fix
      (cond
-       missing? (str "Supply " (pr-str (last path)) " with " expected ".")
+       missing? (str "Supply " (pr-str missing-key) " with " expected "."
+                     (when held-key
+                       (str " The map holds " held-key " with the same name under another namespace.")))
        (and (= :vector schema-type) (sequential? (:value problem))
             (not (vector? (:value problem))))
        "Convert the sequence with vec before calling the function."
