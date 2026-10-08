@@ -229,9 +229,18 @@
    [:seon.program/count {:optional true} [:int {:min 0}]]
    [:seon.program/macros {:optional true} [:set :qualified-symbol]]
    [:seon.program/subjects {:optional true} [:set :qualified-symbol]]]]
+ :seon.program/cut
+ [:map {:description "A relation group too large to show: its size and the form that lists it."}
+  [:seon.program/count [:int {:min 0}]]
+  [:seon.render/operations :seon.render/operations]]
+ :seon.program/breakage-view
+ [:map {:description "A breakage as its AI face shows it: callers once, as call sites; a group over the profile's children is a :seon.program/cut."}
+  [:seon.program/subject :seon.program/subject]
+  [:seon.program/identity :seon.program/identity]
+  [:seon.program/unknown :seon.program/unknown]]
  :seon.program/breakage
  [:map {:description "Pure program-fact read. Empty relation groups are absent; unknown coverage is always explicit."
-        :seon.render/ai seon.render.value/render-ai
+        :seon.render/ai my.program/render-breakage-ai
         :seon.render/html seon.render.value/render-html}
   [:seon.program/subject :seon.program/subject]
   [:seon.program/identity :seon.program/identity]

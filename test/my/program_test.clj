@@ -1,5 +1,6 @@
 (ns my.program-test
-  (:require [clojure.string]
+  (:require [clojure.data.json :as json]
+            [clojure.string]
             [clojure.test :refer [deftest is testing]]
             [my.program :as program]
             [seon.config :as config]
@@ -8,6 +9,7 @@
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
+            [seon.mcp :as mcp]
             [seon.env :as env]
             [seon.error :as error]
             [seon.program :as seon-program]
@@ -302,3 +304,20 @@
     (is (clojure.string/includes? (:source found) "Read one declaration's source") "the source carries its docstring")
     (is (not (contains? found :doc)) "the docstring is not repeated beside the source")
     (is (= 'my.program/source (:sym found)))))
+
+(deftest ^{:seon/tasks #{'my.program/breaks-of-a-widely-used-function-shows-its-callers-twice}}
+  breaks-of-a-widely-used-function-shows-each-caller-once-and-counts-what-it-cuts
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [code "(my.program/breaks {:seon.program/subject 'seon.db/pull})"
+           result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                            "arguments" {"code" code "agent" agent-id "cluster" running}})))
+           shown (:seon.repl/value (support/mcp-reply result))
+           gating (:seon.program/gating shown)]
+       (is (= 'seon.db/pull (:seon.program/subject shown)))
+       (is (not (contains? shown :seon.program/callers)) "every caller is shown once, as a call site")
+       (is (pos-int? (get-in shown [:seon.program/call-sites :seon.program/count])))
+       (is (pos-int? (:seon.program/count gating)))
+       (is (= [(list :seon.program/gating (list 'my.program/breaks {:seon.program/subject (list 'quote 'seon.db/pull)}))]
+              (:seon.render/operations gating))
+           "a cut group offers the form that lists it")))))

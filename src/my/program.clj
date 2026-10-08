@@ -298,6 +298,28 @@
                 {:seon.program/gap :contract-shapes-unknown
                  :seon.program/message "The proposed contract has not run through the candidate test gate; these referrers are suspects, not proven contract violations."})))))
 
+(defn render-breakage-ai
+  "A breakage as an agent acts on it: callers once, as call sites; each relation
+  whole when it fits the render profile's children, else its count and the form
+  that lists it."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.program/breakage-view]}
+  [unit]
+  (let [report (:seon.render/value unit)
+        limit (get-in unit [:seon.render/profile :seon.render.profile/max-children])
+        subject (:seon.program/subject report)
+        request {:seon.program/subject (if (symbol? subject) (list 'quote subject) subject)}
+        cut? (fn [[relation group]]
+               (and limit (not= :seon.program/unknown relation) (coll? group) (not (map? group))
+                    (< limit (count group))))]
+    (into {}
+          (map (fn [[relation group :as entry]]
+                 (if (cut? entry)
+                   [relation {:seon.program/count (count group)
+                              :seon.render/operations [(list relation (list 'my.program/breaks request))]}]
+                   entry)))
+          ;; every caller is named by its call sites
+          (cond-> report (:seon.program/call-sites report) (dissoc :seon.program/callers)))))
+
 (defn- entity-facts
   "`entity`'s attributes at `database` (`seon.db/stored-entity`): refs remain
    entity ids, and a stored vector reads whole, in order, from its cells."
