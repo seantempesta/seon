@@ -17,6 +17,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.batch :as batch]
             [seon.cache]
+            [seon.problems]
             [seon.test-support :as support]
             [seon.turn :as turn]
             [seon.turn.batch :as turn.batch]
@@ -300,6 +301,20 @@
            "every evaluated form's value is answered")
        (is (some? (:seon.error/type (:seon.turn.loop/refusal result)))
            "the refused settlement is answered beside the values")))))
+
+(deftest ^{:seon/tasks #{'seon.error.refusal/an-interpreted-callback-is-blamed-on-the-compiled-function-calling-it}}
+  an-agents-mistake-inside-a-compiled-callers-callback-records-no-fault
+  ;; The agent's closure passes nil to an armed function; the compiled function
+  ;; that called the closure did nothing wrong. The refusal is delivered on the
+  ;; form and is never recorded as an open fault against first-party code.
+  (with-armed-agent
+   (fn [{:keys [connection code]}]
+     (let [result (code "(seon.db/call-with-custody {} #(seon.db/transact! nil []))")]
+       (is (some? (:seon.cluster.eval/error (:seon.sci.eval/evaluation (first (:seon.turn.loop/evaluated-sources result)))))
+           "the refusal is delivered on the form")
+       (is (empty? (filterv #(= 'seon.db/call-with-custody (get-in % [:seon.error/fact :seon.error/producer]))
+                            (seon.problems/open-faults (db/db connection))))
+           "no open fault blames the compiled caller of the agent's closure")))))
 
 (deftest a-pass-captures-definitions-realized-after-the-form-body
   (with-armed-agent
