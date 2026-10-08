@@ -70,6 +70,42 @@ root.
   read silence, missing subjects or stale observations as health.
 - **Add no hypothetical restrictions.** A restriction names the correctness failure it prevents or is deleted.
 
+## Words and where they come from
+
+Say what the owning project says, with its meaning. Before working with a concept, read that project's source under
+`reference-code/<project>` at its pinned revision (`git -C reference-code/<project> rev-parse HEAD`) and Seon's caller
+of it; never guess an API or a guarantee from memory. Seams per area: [reference code](docs/seon/architecture/reference-code.md).
+Words genuinely ours are coined once in [vocabulary](docs/seon/architecture/vocabulary.md). Never invent a word where
+one exists, and never rebuild what a project already does: use it and delete ours. Keeping our own version needs the
+owner's decision, with the project's gap stated. Retired words survive in code only until their rename slice lands;
+never use them in new code or prose.
+
+| Concept | Say | Project (read `reference-code/…`) | Retired words |
+|---|---|---|---|
+| one submission of forms; its stages | eval request; `:read` `:eval` `:print` `:caught` | [clojure.main](https://github.com/clojure/clojure) `clojure`, [nREPL](https://github.com/nrepl/nrepl) `nrepl` | pass, batch |
+| what comes back to the agent | reply (a map shaped like prepl's); printed value | `clojure.core.server` prepl in `clojure`; `nrepl` | envelope, shown text |
+| a transaction and its answer | the recording transaction; tx-report | [Datahike](https://github.com/replikativ/datahike) `datahike` (our fork: seantempesta/datahike) | settlement, receipt |
+| branches and merging | branch, main, checked-out branch, merge request, source and target branch, merge base, merge branch, ours and theirs, unmerged, delete branch; data conversions are norms | git; `datahike` `versioning.cljc` (`branch!`, `delete-branch!`, `merge!`), `datahike.norm.norm` | proposal, unlink, retire, custody, migration |
+| function contracts | function schema; instrument, instrumented; registry; validate; defaults | [Malli](https://github.com/metosin/malli) `malli` (`malli.instrument`, `malli.registry`, `default-value-transformer`) | armed, arming, projection, admission (for validation), supply |
+| per-evaluation dynamic state | bindings (`binding`, `bound-fn*`) | `clojure` `core.clj` | world, environment, scope |
+| agent interpreters | SCI context, `sci/init`, `sci/fork` | [SCI](https://github.com/babashka/sci) `sci` (our fork) | — |
+| reading Clojure text; editing source | the SCI/edamame reader; rewrite-clj for source edits | [edamame](https://github.com/borkdude/edamame) `edamame`, [rewrite-clj](https://github.com/clj-commons/rewrite-clj) `rewrite-clj` | hand string parsing, regex over code |
+| tests | test var, report maps, generative check | `clojure.test` in `clojure`; `malli.generator/check`; [Kaocha](https://github.com/lambdaisland/kaocha) `kaocha` | member, accretion test, gate set |
+| reloading code | reload (`require :reload`) | [clj-reload](https://github.com/tonsky/clj-reload) `clj-reload` | adoption |
+| static analysis | analysis, findings `{:type :level :message :row :col}` | [clj-kondo](https://github.com/clj-kondo/clj-kondo) `clj-kondo` | — |
+| failures | error (`ex-info`, `ex-data`, `Throwable->map`, `ex-triage`); recorded error | `clojure` `core.clj`, `main.clj` | fault, diagnostic |
+| printing values | value printer, elision, elision form, budget (like `*print-length*`) | [Fipp](https://github.com/brandonbloom/fipp) `fipp`; [Clerk](https://github.com/nextjournal/clerk) `clerk` elision | dig form, second printers |
+| derived-value caching | `seon.cache` kinds and their stats | [Caffeine](https://github.com/ben-manes/caffeine) (Maven jar; `recordStats`) | our own hit counters, `memoize`, atoms |
+| agent execution | flow, proc, step-fn, `:transform` | [core.async](https://github.com/clojure/core.async) `core.async` (`clojure.core.async.flow`) | situation, disposition |
+| durable bytes | store, blob | [konserve](https://github.com/replikativ/konserve) `konserve` (our fork) | — |
+
+Seon's own words (record each in [vocabulary](docs/seon/architecture/vocabulary.md) when you touch it):
+**task** (intent plus the tests that prove it done); **proof** (a deftest naming its task in `:seon/tasks`);
+**reaching test** (a test whose call graph reaches a changed definition); **turn** (one model call and the evaluation
+of its reply); **render function** (schema-specific; returns pruned data for the value printer); **current-state
+block** (rendered fresh at each model call, never stored); **write-back** (accepted entities written to files);
+**wake** (a listened fact newer than the agent's **answered t**).
+
 ## How to work
 
 1. **Understand.** Read the owning spec, Git history, dependency source and first-party caller before designing.
@@ -255,10 +291,9 @@ root.
   `:seon/tasks` holds `ns/task-name` symbols (today derived handle strings). No dates,
   measurements, history or `file:line` in source: costs are profile evidence. Known issues reference their task.
   Never author what the call graph already derives.
-- **Use grounded vocabulary** ([vocabulary](docs/seon/architecture/vocabulary.md)): Clojure's term, then the
-  dependency's, then a justified new term recorded once. Keep JVM REPL and SCI evaluation, live result and shown text
-  distinct; cite legacy identifiers without reviving retired terms. Correct language in scope or file its issue.
-  Source comments use `;` for prose, `;;` above forms, `;;;` for runtime structure.
+- **Use the agreed words** ("Words and where they come from" above). Keep JVM REPL and SCI evaluation, live result
+  and printed value distinct; cite legacy identifiers without reviving retired terms. Correct language in scope or
+  file its issue. Source comments use `;` for prose, `;;` above forms, `;;;` for runtime structure.
 
 ## Failure and execution
 
