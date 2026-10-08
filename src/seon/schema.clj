@@ -595,22 +595,17 @@
   {:malli/schema
    [:function
     [:=> [:cat :map :map] [:fn malli.registry/registry?]]
-    [:=> [:cat :map :map :map :map] [:fn malli.registry/registry?]]]}
+    [:=> [:cat :map :map :map :map] [:fn malli.registry/registry?]]
+    [:=> [:cat :map :map :map :map [:tuple [:set :keyword] [:set :qualified-symbol]]] [:fn malli.registry/registry?]]]}
   ([forms predicate-functions]
    (projection-registry forms predicate-functions {} {}))
   ([forms predicate-functions contracts retained]
-   (let [definitions
-         (if (seq retained)
-           (reduce
-            (fn [changed population]
-              (reduce-kv
-               (fn [changed identity definition]
-                 (if (contains? retained identity)
-                   changed
-                   (assoc changed identity definition)))
-               changed population))
-            {} [forms contracts])
-           (merge {} forms contracts))
+   (projection-registry forms predicate-functions contracts retained
+                        [(into #{} (remove #(contains? retained %)) (keys forms))
+                         (into #{} (remove #(contains? retained %)) (keys contracts))]))
+  ([forms predicate-functions contracts retained [schema-keys function-symbols]]
+   (let [definitions (merge (select-keys forms schema-keys)
+                            (select-keys contracts function-symbols))
          predicate-functions
          (reduce (fn [bindings predicate]
                    (if (contains? bindings predicate)
@@ -629,21 +624,24 @@
               ((if (qualified-symbol? identity) m/function-schema m/schema)
                definition {:registry scope}))))]
      (try
-       (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
+       (doseq [identity (sort-by str schema-keys)]
          ;; Only what makes the projection compilable. Authoring rules judge
          ;; a new or changed declaration at its admission (`register!`,
          ;; `projection-with-schema`, the edit hook), never an existing
          ;; population: an as-of view keeps the rules that admitted it.
          (internal/assert-compilable-schema!
           forms identity (get forms identity) {:registry registry}))
-       (doseq [identity (sort-by str (remove #(contains? retained %) (keys contracts)))]
+       (doseq [identity (sort-by str function-symbols)]
          (mr/schema registry identity))
        (catch Exception failure
          (refuse-unresolved-reference!
           {:seon.error/operation 'seon.schema/projection-registry
            :seon.schema/definitions (merge {} forms contracts)
            :seon.error/throwable failure})))
-     (mr/fast-registry (mr/schemas registry)))))
+     (mr/simple-registry
+      (reduce (fn [entries identity] (assoc entries identity (mr/schema registry identity)))
+              (merge retained (m/default-schemas))
+              (keys definitions))))))
 
 (defn canonical-definition
   "Return one Malli definition as durable EDN.
@@ -2729,7 +2727,8 @@
             (apply dissoc (mr/schemas old-registry)
                    (concat affected-keys removed-keys affected-fns removed-fns))
             registry
-            (projection-registry forms predicate-functions function-contracts retained)
+            (projection-registry forms predicate-functions function-contracts retained
+                                 [affected-keys affected-fns])
             old-function-dependencies
             (:seon.schema.projection/function-dependencies projection)
             function-dependencies

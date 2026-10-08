@@ -1,0 +1,150 @@
+== lane defn-cost3 commits: Derive replacement registries from their affected declarations
+== clj-kondo --lint src script test --cache false --parallel (candidate tree 3a0df98d67db)
+== bin/seon check src/seon/schema.clj docs/research/agent-platform/2026-10-07/defn-cost3/ --test seon.cache-calibration-test/the-packaged-declaration-projection-is-one-entry --test seon.cluster-test/a-derivation-key-follows-what-its-file-derivation-reads --test seon.cluster.derivation-keys-test/file-keys-follow-transitive-schema-content --test seon.cluster.derivation-keys-test/root-render-properties-do-not-rederive-schema-consumers --test seon.config-test/every-agent-dial-has-a-declared-settings-entity --test seon.config-test/sparse-file-reading-does-not-compile-a-second-time --test seon.db-overhead-test/write-plan-selects-storage-once-for-all-values --test seon.error.refusal-test/constructor-output-keeps-the-producing-contract --test seon.fn-test/fresh-population-flattens-with-its-supplied-declarations --test seon.fn-test/incremental-tempid-rewrite-follows-the-installed-attribute-type --test seon.fs.jvm-test/an-absent-path-answers-the-not-found-error-type --test seon.instrument-test/a-later-database-value-of-the-same-program-keeps-every-wrapper --test seon.instrument-test/acquisition-carries-one-effective-policy-to-every-wrapper --test seon.instrument-test/adoption-arms-only-the-named-identity --test seon.instrument-test/adoption-disarms-a-retired-contract --test seon.instrument-test/applying-uses-the-acquired-projection-without-publishing-it --test seon.instrument-test/boot-arming-arms-only-the-published-program --test seon.instrument-test/contract-problems-are-semantic-once-never-a-serialized-print-tree --test seon.instrument-test/one-uncompilable-contract-refuses-alone-and-the-rest-arm --test seon.instrument-test/re-evaluating-a-defn-silently-strips-instrumentation --test seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities --test seon.render.web-test/an-attribute-description-comes-from-the-projection-form --test seon.schema-in-place-test/a-kept-vector-many-attribute-drops-only-refused-members --test seon.schema-in-place-test/a-required-key-retires-with-its-entity-schema-in-one-transaction --test seon.schema-in-place-test/a-tightened-form-drops-only-the-values-it-refuses --test seon.schema-test/a-component-bearing-entity-validates-its-own-declared-shape --test seon.schema-test/a-nilable-value-schema-is-refused-at-admission-never-at-build --test seon.schema-test/a-predicate-namespace-that-fails-to-load-is-not-an-unresolved-predicate --test seon.schema-test/a-projection-with-no-bound-predicates-compiles-every-declared-shape --test seon.schema-test/an-incremental-build-resolves-against-the-projection-in-hand --test seon.schema-test/an-incremental-projection-equals-its-full-build --test seon.schema-test/an-undeclared-reference-refuses-as-the-declared-schema-refusal --test seon.schema-test/canonical-definition-keeps-admitted-predicate-symbols --test seon.schema-test/canonical-mutual-recursion-refuses-but-local-recursion-is-supported --test seon.schema-test/committed-entities-open-without-re-admission-and-writes-are-admitted --test seon.schema-test/direct-references-follow-the-declaration-world --test seon.schema-test/equal-inputs-answer-the-built-projection --test seon.schema-test/one-declaration-validates-only-its-dependency-closure --test seon.schema-test/render-declarations-require-a-contract-that-accepts-their-shape --test seon.schema-test/retained-generation-recompiles-dependent-roots --test seon.schema-test/retiring-a-referenced-member-names-every-referrer --test seon.schema-usage-guard-test/schema-removal-refuses-schema-and-function-dependencies --test seon.schema.admission-gate-test/an-undefined-slot-is-advice-a-stored-one-is-refused --test seon.schema.datahike-test/edn-backed-attributes-have-one-canonical-datahike-round-trip --test seon.schema.datahike-test/error-members-cannot-carry-another-entitys-upsert-identity --test seon.schema.datahike-test/fixed-tuples-derive-native-ordered-storage --test seon.schema.datahike-test/repeated-canonical-storage-is-decoded-once --test seon.schema.declaration-population-test/an-unhanded-declaration-projection-refuses-without-reading-resources --test seon.schema.edn-test/one-resource-is-one-population --test seon.schema.projection-acquisition-test/stored-declarations-reuse-only-identical-supplied-definitions --test seon.sci.admit.declaration-population-test/a-supplied-projection-is-used-and-resolves-nothing --test seon.sci.admit.declaration-population-test/an-admission-resolves-the-declaration-population-at-most-once --test seon.shell.jvm-test/environment-overrides-use-the-supplied-generation --test seon.test.accretion-test/every-packaged-schema-answers-generatability-as-a-boolean --test seon.transact-feedback-test/bad-value-type
+check: 2 throwaway JVMs already run; waiting for a slot
+SEON check FAILED (exit 1): The candidate 329ed52e3b3b57c174a26cb6a9e235a774e16f59 is red: run 31b3a3380f54 / executed 55 / reused 0 / pass 652 / fail 7 / error 0 / 65150 ms / passed? false DIAGNOSTIC: /Users/sean/src/seon/data/clusters/default/logs/operator-check-20261008T091549.106.edn
+run 31b3a3380f54 / executed 55 / reused 0 / pass 652 / fail 7 / error 0 / 65150 ms / passed? false
+red seon.config-test/every-agent-dial-has-a-declared-settings-entity: fail
+Test seon.config-test/every-agent-dial-has-a-declared-settings-entity exceeded its declared duration: 5523.52925 ms; bound 5000 ms.
+expected: {:seon.test/time-limit-ms 5000}
+actual: {:seon.test/elapsed-ms 5523.52925}
+red seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities: fail test/seon/program_test.clj:1442
+expected: (= (get indexed identity) (get evaluated identity))
+actual: (not
+ (=
+  {:seon.ns/name sample.s1,
+   :seon.ns/requires #{clojure.test seon.schema},
+   :seon.ns/source
+     "(ns sample.s1 (:require [clojure.test :refer [deftest is]] [seon.schema :as schema]))",
+   :seon.program/definition-digest
+     "1b733ff5151a66549114fc90460f5d7ba82b2cf537f16aa6324f7c11f792721a",
+   :seon.ns/aliases
+     #{#:seon.ns.alias{:local schema, :target-ns seon.schema}},
+   :seon.ns/refers
+     #{#:seon.ns.refer{:local deftest,
+        :target-name deftest,
+        :target-ns clojure.test}
+       #:seon.ns.refer{:local is,
+        :target-name is,
+        :target-ns clojure.test}}}
+  {:seon.ns/name sample.s1,
+   :seon.ns/requires #{clojure.test seon.schema},
+   :seon.ns/source "(ns sample.s1)",
+   :seon.program/definition-digest
+     "1652c32bddf315d1d0f688e3ab1287727db2a38fd8673406024d15ab33a6a9d8",
+   :seon.ns/aliases
+     #{#:seon.ns.alias{:local schema, :target-ns seon.schema}},
+   :seon.ns/refers
+     #{#:seon.ns.refer{:local deftest,
+        :target-name deftest,
+        :target-ns clojure.test}
+       #:seon.ns.refer{:local is,
+        :target-name is,
+        :target-ns clojure.test}}}))
+
+fail test/seon/program_test.clj:1442
+expected: (= (get indexed identity) (get evaluated identity))
+actual: (not
+ (=
+  {:seon.fn/sym sample.s1/left,
+   :seon.fn/arglists "([x])",
+   :seon.fn/defined-by clojure.core/defn,
+   :seon.fn/doc-order 3,
+   :seon.fn/host-bound? false,
+   :seon.fn/inline? false,
+   :seon.fn/ns [:seon.ns/name sample.s1],
+   :seon.fn/private? false,
+   :seon.fn/doc "Count down through the paired function.",
+   :seon.fn/source
+     "(defn left \"Count down through the paired function.\" {:malli/schema [:=> [:cat :sample.s1/value] :int] :seon.fn/doc-order 3} [x] (if (pos? x) (right (dec x)) 0))",
+   :seon.fn/spec "[:=> [:cat :sample.s1/value] :int]",
+   :seon.program/definition-digest
+     "775a927ef4040ce42785c8b3dae3164d72e91d636bfe870ed9ce859493aa9403",
+   :seon.fn/arities
+     [#:seon.fn.arity{:argument-count 1,
+       :arity "1",
+       :input-refs #{:sample.s1/value},
+       :max 1,
+       :min 1,
+       :arguments
+         [#:seon.fn.argument{:rest? false,
+          :binding
+          #:seon.fn.binding{:form "x", :shape :symbol, :symbol x}}]}],
+   :seon.fn/call-arities
+     #{[clojure.core/dec 1]
+       [sample.s1/right 1]
+       [clojure.core/if 3]
+       [clojure.core/pos? 1]
+       [clojure.core/defn 5]},
+   :seon.fn/calls
+     #{clojure.core/dec clojure.core/pos? clojure.core/if
+       clojure.core/defn sample.s1/right}}
+  {:seon.fn/sym sample.s1/left,
+   :seon.fn/arglists "([x])",
+   :seon.fn/defined-by clojure.core/defn,
+   :seon.fn/doc-order 3,
+   :seon.fn/host-bound? false,
+   :seon.fn/inline? false,
+   :seon.fn/ns [:seon.ns/name sample.s1],
+   :seon.fn/private? false,
+   :seon.fn/doc "Count down through the paired function.",
+   :seon.fn/source
+     "(defn left \"Count down through the paired function.\" {:malli/schema [:=> [:cat :sample.s1/value] :int] :seon.fn/doc-order 3} [x] (if (pos? x) (right (dec x)) 0))",
+   :seon.fn/spec "[:=> [:cat :sample.s1/value] :int]",
+   :seon.program/definition-digest
+     "775a927ef4040ce42785c8b3dae3164d72e91d636bfe870ed9ce859493aa9403",
+   :seon.fn/arities
+     [#:seon.fn.arity{:argument-count 1,
+       :arity "1",
+       :input-refs #{:sample.s1/value},
+       :max 1,
+       :min 1,
+       :arguments
+         [#:seon.fn.argument{:rest? false,
+          :binding
+          #:seon.fn.binding{:form "x", :shape :symbol, :symbol x}}]}],
+   :seon.fn/call-arities
+     #{[clojure.core/dec 1]
+       [clojure.core/if 3]
+       [clojure.core/pos? 1]
+       [clojure.core/defn 5]},
+   :seon.fn/calls
+     #{clojure.core/dec clojure.core/pos? clojure.core/if
+       clojure.core/defn}}))
+red seon.schema.admission-gate-test/an-undefined-slot-is-advice-a-stored-one-is-refused: fail test/seon/schema/admission_gate_test.clj:281
+a stored attribute schema :any is refused: it needs a storable type
+expected: (=
+ #:seon.schema.datahike{:attr :undefined-slot.fixture/stored,
+  :form :any,
+  :value-type-unavailable true}
+ (ex-data refusal))
+actual: (not
+ (=
+  #:seon.schema.datahike{:attr :undefined-slot.fixture/stored,
+   :form :any,
+   :value-type-unavailable true}
+  {:seon.error/at #inst "2026-10-08T00:15:40.783Z",
+   :seon.error/layer :seon.schema.datahike/storage,
+   :seon.error/operation seon.schema.datahike/attribute-declaration,
+   :seon.schema.datahike/attr :undefined-slot.fixture/stored,
+   :seon.schema.datahike/form :any,
+   :seon.schema.datahike/unstorable-attribute
+     :undefined-slot.fixture/stored,
+   :seon.schema.datahike/value-type-unavailable true,
+   :seon.error/message
+     "A stored attribute needs a storable Datahike value type, and this Malli form has none. Register a concrete storable shape."}))
+red seon.transact-feedback-test/bad-value-type: fail test/seon/transact_feedback_test.clj:70
+the supplied projection owns constraints on the same attribute
+expected: (= attribute (:seon.db/attribute result))
+actual: (not (= :seon.task/intent nil))
+
+fail test/seon/transact_feedback_test.clj:71
+the supplied projection owns constraints on the same attribute
+expected: (= offending (:seon.db/offending result))
+actual: (not (= "short" nil))
+
+fail test/seon/transact_feedback_test.clj:76
+the supplied projection owns constraints on the same attribute
+expected: (= path (:seon.db/path result))
+actual: (not (= [0 3] nil))
+LANE REFUSED: bin/seon check failed; nothing committed

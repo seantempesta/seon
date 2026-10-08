@@ -1,10 +1,20 @@
 (ns seon.schema.registry-retention-test
   "A projection's lifetime never extends the world of a callable armed under it."
   (:require [clojure.test :refer [deftest is]]
+            [malli.core :as m]
             [seon.config :as config]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.test-support :as test-support]))
+
+(deftest a-partial-retained-registry-keeps-the-dependency-defaults
+  (let [forms {::value :int}
+        supplied (schema/declaration-projection forms)
+        projection (schema/build-projection forms {} {:seon.schema/projection supplied})
+        options (:seon.schema.projection/compile-options projection)]
+    (is (m/validate :int 1 options))
+    (is (not (m/validate :int "one" options)))
+    (is (m/validate ::value 1 options))))
 
 (defn- wrap-and-forget!
   "Arm one interpreted callable closing over a fresh world, call it, and
