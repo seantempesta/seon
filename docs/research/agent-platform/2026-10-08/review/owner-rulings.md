@@ -228,6 +228,12 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 ## 8. Printing and messages
 
+- **The display budget is tuned by feedback, not guessed (owner 2026-10-08).** "We guessed at the budget. I want agents
+  to tune it via feedback." The budget stays a dial with the per-form override; the system records, per reply, what
+  was shown and cut and whether the agent then dug in (ran an elision form, re-read the value, raised the budget) or
+  ignored it, and reports per value schema where the budget is too small or too large; agents report budget friction
+  as tasks; the dial's default and any per-schema adjustment follow that evidence. Lives in: reply census; row PR-30.
+
 - **One value printer; no clipping anywhere else.** "No clipping outside of the one value printer. I know agents are
   always doing this to cheat on budgets." A printer gap is fixed in the printer with general rules, never
   special-cased; review refuses `subs`/`take`/truncate/`pr-str` display outside the printer. Lives in: AGENTS.md
