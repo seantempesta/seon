@@ -774,20 +774,9 @@
                (filter qualified-keyword?)
                (map (fn [schema-key]
                       [schema-key [:ref schema-key]])))
-              canonical-keys)
-        all-schemas
-        (delay
-          (merge (mr/-schemas defaults)
-                 (mr/-schemas fallback)
-                 references))]
-    (reify
-      mr/Registry
-      (-schema [_ type]
-        (or (mr/-schema defaults type)
-            (get references type)
-            (mr/-schema fallback type)))
-      (-schemas [_]
-        @all-schemas))))
+              canonical-keys)]
+    ;; Lookup order: Malli defaults, then canonical references, then fallback.
+    (mr/composite-registry defaults references fallback)))
 
 (defn- canonical-reference-graph
   "Direct canonical references without eagerly expanding canonical forms."
@@ -1309,16 +1298,17 @@
   (let [defaults (mr/fast-registry
                   (assoc (m/default-schemas) :fn
                          (m/-simple-schema {:type :fn :pred any? :min 1 :max 1})))]
-    (reify
-      mr/Registry
-      (-schema [_ type]
-        (or (mr/-schema defaults type)
-            ;; Canonical names and loaded Var references remain opaque here.
-            ;; The armer's supplied var-registry resolves Vars later; syntax
-            ;; preparation must neither dereference them nor reject them.
-            (when (or (keyword? type) (qualified-symbol? type) (var? type))
-              (m/-simple-schema {:type type :pred any? :min 0 :max nil}))))
-      (-schemas [_] (mr/-schemas defaults)))))
+    (mr/composite-registry
+     defaults
+     (reify
+       mr/Registry
+       (-schema [_ type]
+         ;; Canonical names and loaded Var references remain opaque here.
+         ;; The armer's supplied var-registry resolves Vars later; syntax
+         ;; preparation must neither dereference them nor reject them.
+         (when (or (keyword? type) (qualified-symbol? type) (var? type))
+           (m/-simple-schema {:type type :pred any? :min 0 :max nil})))
+       (-schemas [_])))))
 
 (defn structural-schema
   "Compile syntax for preparation, with references opaque and predicates inert.
