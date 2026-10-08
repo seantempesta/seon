@@ -134,8 +134,8 @@
                                                 :seon.competency/strategy :defaults :seon.competency/settings settings}]
                        :seon.competency/runs 2 :seon.competency/poll-ms 100 :seon.competency/deadline-ms 60000})]
           (is (= (repeat 4 {:seon.competency/green? true :seon.competency/calls-to-green 1
-                            :seon.competency/model-calls 2 :seon.competency/no-form-calls 1
-                            :seon.competency/terminal :waiting :seon.competency/retired? true
+                            :seon.competency/model-calls 1 :seon.competency/no-form-calls 0
+                            :seon.competency/terminal :done :seon.competency/retired? true
                             :seon.competency/max-episode-runs 3})
                  (map #(-> (select-keys % [:seon.competency/green? :seon.competency/calls-to-green
                                            :seon.competency/model-calls :seon.competency/no-form-calls
@@ -143,7 +143,7 @@
                            (assoc :seon.competency/max-episode-runs
                                   (get-in % [:seon.competency/variant :seon.config.run/max-episode-runs])))
                       grades))
-              "each run turned its proof green in one call, replied with no form and waited, carries its variant and was retired")
+              "each run turned its proof green in one call and was done without another, carries its variant and was retired")
           (is (= [['seon.competency/area-is-contracted 2 2 1] ['seon.competency/area-is-contracted-typed 2 2 1]]
                  (mapv (juxt :seon.competency/task :seon.competency/runs :seon.competency/green
                              :seon.competency/calls-to-green-median)

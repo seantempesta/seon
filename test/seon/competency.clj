@@ -209,16 +209,18 @@
 
 (defn- run-state
   "Where the run of `agent-id` stands on its branch `database`: `:running` while a model call or a test member
-  is open; then `:waiting` once its last reply leaves the turn loop nothing to continue (`seon.turn`'s own
+  is open; then `:done` once `seon.context/task-done?` holds (the loop stops calling the model once every proof
+  is green, so no later reply is ever left to read), `:waiting` once its last reply leaves the turn loop nothing to continue (`seon.turn`'s own
   rule: no evaluated form, a disposition or a failed attempt), `:capped` once `cap` calls closed; else
   `:running`."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id pos-int?] [:enum :running :waiting :capped]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id pos-int?] [:enum :running :done :waiting :capped]]}
   [database agent-id cap]
   (let [calls (model-calls database agent-id)
         testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]
                        database)]
     (cond (or (empty? calls) (some #(nil? (:seon.turn/closed-tx %)) calls) testing?) :running
-          ;; the loop's own continuation rule, read rather than restated
+          ;; the loop's own rules, read rather than restated
+          (context/task-done? database agent-id) :done
           (not (@#'turn/continuing-reply? database agent-id)) :waiting
           (<= cap (count calls)) :capped
           :else :running)))
