@@ -328,11 +328,13 @@
       (let [[answers calls]
             (support/armed-calls
              '#{seon.schema.datahike/attribute-declaration
+                seon.error.refusal/diagnostic
                 seon.schema.datahike/malli->datahike-attr-in}
              #(mapv (fn [_] (schema.datahike/storable-attribute-in? projection ::unstorable))
                     (range n)))]
         (is (= (vec (repeat n false)) answers))
-        (is (= n (get calls 'seon.schema.datahike/attribute-declaration)))
+        (is (zero? (get calls 'seon.schema.datahike/attribute-declaration 0)))
+        (is (zero? (get calls 'seon.error.refusal/diagnostic 0)))
         (is (zero? (get calls 'seon.schema.datahike/malli->datahike-attr-in 0)))))
     (let [refusal (schema.datahike/attribute-declaration projection ::absent)]
       (is (= ::absent (:seon.schema.datahike/unstorable-attribute refusal)))

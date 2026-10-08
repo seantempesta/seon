@@ -33,10 +33,6 @@
    :qualified-symbol :db.type/symbol
    :tuple :db.type/tuple})
 
-(defn- registration-form
-  [attr schema-form]
-  (pr-str (list 'schema/register! attr schema-form)))
-
 (defn- literal->datahike-value-type
   [literal]
   (cond
@@ -154,12 +150,7 @@
     (m/-cached compiled ::compiled-storage #(fold % #{}))))
 
 (defn attribute-declaration
-  "Derive a native declaration from the supplied generation's retained root,
-  or the refusal naming why the attribute has none: no registered schema, a
-  value with no native Datahike type, a secondary-only attribute that is not
-  float-valued. The refusal is a value: `declared-storable?` asks this for
-  every optional member of every entity root (73,492 refusals in 1.8 M calls
-  on default, 2026-09-28), which as thrown exceptions was control flow."
+  "A native declaration, or the diagnostic explaining why the attribute is unstorable."
   {:malli/schema [:=> [:cat :map :qualified-keyword]
                   [:or :map :seon.schema.datahike/unstorable-attribute-error]]}
   [projection attribute]
@@ -171,9 +162,7 @@
                                 :seon.error/message message
                                 ::attr attribute ::unstorable-attribute attribute})))]
    (if-not (m/schema? root)
-    (refused (str "The attribute has no registered schema. Run "
-                  (registration-form attribute :string)
-                  " with the intended concrete type before transacting it.")
+    (refused "The attribute has no registered schema."
              {::attribute-absent attribute})
    (let [{::keys [value-type cardinality properties tuple-types refusal]}
         (compiled-storage root)
@@ -216,11 +205,17 @@
       declaration)))
 
 (defn- declared-storable?
-  "Whether `attribute`'s declaration maps to a Datahike attribute: false for
-  `attribute-declaration`'s refusal; any other failure propagates whole."
+  "Whether the compiled attribute has a native storage type, without constructing a diagnostic."
   {:malli/schema [:=> [:cat :map :qualified-keyword] :boolean]}
   [projection attribute]
-  (not (:seon.error/at (attribute-declaration projection attribute))))
+  (boolean
+   (when-let [root (mr/schema (:seon.schema.projection/registry projection) attribute)]
+     (when (m/schema? root)
+       (let [{::keys [value-type properties refusal]} (compiled-storage root)
+             value-type (if (= :seon.db/ref attribute) :db.type/ref value-type)]
+         (and (not refusal) (some? value-type)
+              (or (not (:db.secondary/only properties))
+                  (contains? #{:db.type/float :db.type/double} value-type))))))))
 
 (defn assert-storable-schema!
   "Refuse an error declaration whose members could upsert another entity."
