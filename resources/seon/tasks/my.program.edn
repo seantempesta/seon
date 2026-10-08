@@ -73,8 +73,8 @@
  #:seon.task{:name "breaks-on-a-namespace-subject-takes-five-seconds"
              :kind :function
              :intent "`my.program/breaks` on the namespace subject seon.turn took 5542 ms and 5876 ms on default's JVM, against 183 ms for the function subject `seon.render.value/render-ai`, so the test schema-and-namespace-reads-keep-different-connections-distinct exceeds its 5000 ms bound. Find what the namespace branch of breaks is proportional to (owned declarations, gate names, requiring namespaces) and make it sub-second; done when that test passes inside its bound."
-             :must-read #{my.program/breaks}
-             :evidence #{"docs/seon/specs/merge.md"}}
+             :must-read #{my.program/breaks seon.fn/gate-sets seon.fn/gating-tests}
+             :evidence #{"docs/seon/specs/merge.md" "docs/seon/schedule/cards/PB-15.md"}}
 
  #:seon.task{:name "write-branch-writes-files-the-lane-has-not-claimed"
              :kind :function

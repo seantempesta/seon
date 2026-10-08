@@ -12,6 +12,7 @@
             [seon.program :as seon-program]
             [clojure.java.io :as io]
             [seon.fn :as function]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -85,6 +86,22 @@
                        :seon.schema/property :seon.render/ai}))
        (doseq [report [key-report namespace-report render-report]]
          (is ((schema/projection-validator (schema/handed-projection) :seon.program/breakage) report)))))))
+
+(deftest ^{:seon/tasks #{'my.program/breaks-on-a-namespace-subject-takes-five-seconds}}
+  breaks-on-a-namespace-walks-the-program-once
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           names (+ (count (db/datoms database :aevt :seon.fn/sym))
+                    (count (db/datoms database :aevt :seon.test/sym)))
+           measured (profile/measure #(program/breaks {:seon.db/db database :seon.program/subject 'seon.turn}))
+           reads (:seon.profile/reads measured)]
+       (is (seq (:seon.program/gating (:seon.profile/value measured))))
+       (is (pos? reads) "the measured reads are armed")
+       ;; One reverse walk visits each program name at most once, three index
+       ;; seeks each; a walk per owned function reads the shared reach again.
+       (is (<= reads (+ (* 3 names) 200))
+           "breaks on a namespace reads in proportion to one walk of the program")))))
 
 (deftest past-reach-is-advisory-and-source-history-survives-retraction
   (support/with-database
