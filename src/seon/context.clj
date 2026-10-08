@@ -140,15 +140,32 @@
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
                :seon.context/proof-list entries}))))))
 
+(defn- unshown
+  "The inbox `items` no turn of `agent-id` has handled: a closed model turn's
+  settlement records each message its pass was shown (`seon.turn/close-call`)."
+  {:seon/tasks #{'seon.context/a-handled-message-stays-unread-in-every-later-pass}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :my.message/inbox]
+                  [:or :my.message/inbox :seon.error/value]]}
+  [database agent-id items]
+  (let [handled (db/q '[:find [?id ...] :in $ ?agent-id
+                        :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                        [?turn :seon.turn/handled ?message] [?message :seon.message/id ?id]]
+                      database agent-id)]
+    (if (:seon.error/at handled)
+      handled
+      (into [] (remove (comp (set handled) :my.message/id)) items))))
+
 (defn current-state
   "The current-state block's data for `agent-id`: its held task's declaration as the
   task home reads it now, and its turns left with the task's status. Sections are
   absent when empty. `:seon.context/unread` holds the agent's undelivered messages
-  oldest first, each once with its id, sender, instant and content.
+  no model turn of it was shown yet, oldest first, each once with its id, sender,
+  instant and content.
 
   ## Costs
 
-  One assignment query, one task pull, the turn count and one pull per unread message."
+  One assignment query, one task pull, the turn count, one pull per unread message and
+  one query of the agent's handled messages."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   [:or :seon.context/current-state :seon.error/value]]}
   [database agent-id]
@@ -160,7 +177,8 @@
                  (cond-> pulled (:seon.task/must-read pulled) (update :seon.task/must-read set))))
         left (turn/turns-left database agent-id)
         proven (when held (proofs database (:seon.task/sym held)))
-        unread (message/inbox database agent-id)
+        unread (let [items (message/inbox database agent-id)]
+                 (if (:seon.error/at items) items (unshown database agent-id items)))
         reads (when held (ref/references database {:seon.ref/text (:seon.task/intent held)
                                                    :seon.ref/names (:seon.task/must-read held #{})}))]
     (or (some #(when (:seon.error/at %) %) (concat [handle held left proven unread] reads))

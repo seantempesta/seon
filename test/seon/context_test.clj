@@ -3,11 +3,13 @@
   (:require [clojure.data.json :as json]
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is use-fixtures]]
+            [seon.cluster.agent :as agent]
             [seon.context :as context]
             [seon.db :as db]
             [seon.instrument :as instrument]
             [seon.mcp :as mcp]
             [seon.task :as task]
+            [seon.turn :as turn]
             [seon.test-support :as test-support]))
 
 (def ^:dynamic ^:private *connection* nil)
@@ -166,3 +168,22 @@
        (is (= 2 (count (set (map :my.message/id items)))) "each item once, with its own identity")
        (is (every? :my.message/at items))
        (is (some #{'(my.message/inbox)} (:seon.render/operations unread)))))))
+
+(deftest ^{:seon/tasks #{'seon.context/a-handled-message-stays-unread-in-every-later-pass}}
+  a-message-a-closed-turn-handled-leaves-the-unread-section
+  (test-support/seed-cluster! *connection* "shown-once")
+  (test-support/transacted! *connection* (agent/creation-tx {:seon.agent/id "shown-once"
+                                                             :seon.ns/name 'my.agents.shown-once
+                                                             :seon.cluster/name "shown-once"}))
+  (let [agent-ref [:seon.agent/id "shown-once"]
+        opening {:seon.turn/id "shown-first" :seon.turn/agent agent-ref :seon.turn/opened-tx "datomic.tx"}
+        arrival (fn [id] {:seon.message/id id :seon.message/to agent-ref :seon.message/content id})
+        unread #(mapv :my.message/id (get-in (context/current-state (db/db *connection*) "shown-once")
+                                             [:seon.context/unread :seon.context/items]))]
+    (test-support/transacted! *connection* [(arrival "shown")])
+    (test-support/transacted! *connection* (turn/open-tx opening))
+    (test-support/transacted! *connection* [(arrival "after-open")])
+    (is (= ["shown" "after-open"] (unread)) "an open turn has handled nothing yet")
+    (test-support/transacted! *connection* [[:db/add [:seon.turn/id "shown-first"] :seon.turn/reply-size 1]])
+    (test-support/transacted! *connection* (turn/close-tx {:seon.turn/id "shown-first"}))
+    (is (= ["after-open"] (unread)) "the closed turn's handled message is not unread in the next block")))
