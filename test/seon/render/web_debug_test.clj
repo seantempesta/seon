@@ -70,14 +70,14 @@
        (is (= ";; I should read the plan first."
               (last (first (classed "seon-eval-thinking")))))
        (is (= 1 (count (classed "seon-eval-prompt"))))
-       (is (= "my.agents.thinking-probe=> (my.task/steps {})"
+       (is (= "(my.task/steps {})"
               (last (first (classed "seon-eval-prompt"))))
            "the prompt block no longer carries the comment")
        (is (str/includes? (element-text html) "The plan's shown text.")
            "the result renders through the evaluation schema's HTML pair")
        (is (str/starts-with?
             ai
-            "my.agents.thinking-probe=> ;; I should read the plan first.\n(my.task/steps {})")
+            ";; I should read the plan first.\n(my.task/steps {})")
            "the AI pair keeps the REPL grammar unchanged")
        (doseq [namespace-ref [(get-in saved [:seon.cluster.eval/ns :db/id])
                              [:seon.ns/name 'my.agents.thinking-probe]]]
@@ -89,7 +89,7 @@
            (is (= 1 (count (filter #(= "seon-eval-thinking" (:class (second %)))
                                    blocks))))
            (is (str/includes? (element-text rendered)
-                              "my.agents.thinking-probe=> (my.task/steps {})")
+                              "(my.task/steps {})")
                "namespace references resolve through the carried database")))))))
 
 (deftest blocks-use-the-values-schema-documentation

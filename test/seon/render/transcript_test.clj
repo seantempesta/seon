@@ -29,7 +29,6 @@
 (def ^:private peer-id "transcript-peer")
 ;; An agent's evaluations prompt in the namespace its creation assigned
 ;; (`seon.test-support/agent-tx`: `my.agents.<agent-id>`).
-(def ^:private agent-prompt (str "my.agents." agent-id "=> "))
 (def ^:private caps
   (assoc (config/result-caps (support/effective-config))
          :seon.config.eval.result/max-depth 12
@@ -109,8 +108,8 @@
         (is (= [[:seon.render.transcript/entry :eval "submitted-form"]
                 [:seon.render.transcript/entry :eval "stored-evaluation"]]
                (mapv :seon.render.history/call-id entries)))
-        (is (= [(str agent-prompt "(future-work)")
-                (str agent-prompt "(+ 1 2)\n#:seon.repl{:result result/estored-evaluation, :value 3}")]
+        (is (= ["(future-work)"
+                (str "(+ 1 2)\n#:seon.repl{:result result/estored-evaluation, :value 3}")]
                bytes)
             "a submitted form has a prompt and no response; a settled one
              answers with the one REPL response map")))))
@@ -373,13 +372,11 @@
           (is (str/includes? ai "\"outside-0\""))
           (is (not (str/includes? ai "t=41"))
               "the receipt's read basis remains metadata, not result text")
-          ;; THE PROMPT OPENS THE AGENT'S INPUT, comment included: the
-          ;; comment is part of what the agent typed at that prompt, so it
-          ;; follows `ns=> ` and the form sits on the next line
-          ;; (`seon.repl/input-text`, `src/seon/repl.clj:205`).
+          ;; the comment is part of what the agent sent, so it opens the
+          ;; input and the form sits on the next line (`seon.repl/input-text`)
           (is (str/includes?
                ai
-               (str "my.agents.transcript=> ;; calculate the answer\n"
+               (str ";; calculate the answer\n"
                     "(do (println \"side effect\") (+ 20 22))\n"
                     "#:seon.repl{:result "
                     (admit/result-handle "eval-result") ", "
@@ -568,7 +565,7 @@
         ;; the message is the form that reads it, naming its own identity
         (is (str/includes? ai "(my.message/read "))
         (is (str/includes? ai "\"about-test\""))
-        (is (str/includes? ai (str agent-prompt "(")))
+        (is (str/includes? ai "("))
         (is (str/includes? ai ":value {"))
         (assert-no-session-narration ai)))))
 
@@ -844,7 +841,7 @@
                                          (if (= :receipt-invalid
                                                 (:event-kind
                                                  (get events-by-id id)))
-                                           (str agent-prompt "(")
+                                           "("
                                            (str "(identity " source-index ")"))))))
                     visible-ids)
                    ;; Every entry roots the values it renders, so no reader
@@ -1066,22 +1063,17 @@
 
            (testing "the response the agent reads back"
              (let [joined (str/join "\n" stored-bytes)]
-               ;; THE PROMPT LINE OPENS THE AGENT'S INPUT, comment included:
-               ;; the comment is part of what the agent typed at that prompt,
-               ;; so it follows `ns=> ` and the form sits on the next line
-               ;; (`seon.repl/input-text`, `src/seon/repl.clj:205`).
+               ;; the comment is part of what the agent sent, so it opens the
+               ;; input and the form sits on the next line (`seon.repl/input-text`)
                (is (str/includes?
                     joined
-                    "my.agents.one-grammar=> ;; a definition worth keeping\n(def x 1)")
-                   "the agent's comment, verbatim, on the prompt it introduces")
+                    ";; a definition worth keeping\n(def x 1)")
+                   "the agent's comment, verbatim, before the form it introduces")
                (is (str/includes? joined ":out \"hi\n\"")
                    ":out is its own key, never folded into :value")
                (is (str/includes? joined ":value 41"))
                (is (str/includes? joined ":ns my.agents.probe")
-                   "the form that moved the session says where it landed")
-               (is (= "my.agents.probe=> "
-                      (subs (nth stored-bytes 3) 0 18))
-                   "the fourth prompt line is in the namespace in effect")))
+                   "the form that moved the session says where it landed")))
 
            (testing "every response carries the duration settlement measured"
              (is (seq responses))

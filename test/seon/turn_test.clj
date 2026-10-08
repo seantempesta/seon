@@ -358,7 +358,7 @@
           :seon.eval/shown
           "42"})
         lines (str/split-lines rendered)]
-    (is (= "my.probe=> (+ 40 2)\n#:seon.repl{:result result/e7042, :value 42}"
+    (is (= "(+ 40 2)\n#:seon.repl{:result result/e7042, :value 42}"
            rendered)
         "the handle is the evaluation's own entity id, never its ordinal")
     ;; THE RESPONSE IS ONE DATUM. It may wrap when a value is wide, but the
@@ -379,7 +379,7 @@
                      {:seon.cluster.eval/source "(side-effect)"
                       :seon.cluster.eval/interrupted-at
                       (java.util.Date. 1785500000000)})]
-    (is (str/starts-with? interrupted "user=> (side-effect)"))
+    (is (str/starts-with? interrupted "(side-effect)"))
     (let [reply (support/reply (last (str/split-lines interrupted)))]
       (is (= {:interrupted? true :value? false}
              {:interrupted? (inst? (:seon.repl/interrupted reply))

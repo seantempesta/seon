@@ -56,14 +56,14 @@
                   :seon.repl/handle (admit/result-handle "41")
                   :seon.eval/shown "2"
                   :seon.eval/duration-ms 3})]
-      (is (= (str "my.agents.juniper=> ;; I should check the sum.\n"
+      (is (= (str ";; I should check the sum.\n"
                   "(+ 1 1)\n"
                   "#:seon.repl{:result result/e41, :ms 3, :value 2}")
              emitted))
       (is (= 3 (count (str/split-lines emitted)))
           "prompt and comment, form, response")))
   (testing "no comment means no blank line before the prompt"
-    (is (= (str "my.agents.juniper=> (+ 1 1)\n"
+    (is (= (str "(+ 1 1)\n"
                 "#:seon.repl{:result result/e41, :ms 3, :value 2}")
            (repl/text {:seon.cluster.eval/source "(+ 1 1)"
                        :seon.ns/name 'my.agents.juniper
@@ -87,7 +87,7 @@
     (is (= 1 (count thinking)))
     (is (= ";; I should check the sum." (last (first thinking))))
     (is (= 1 (count prompts)))
-    (is (= "my.agents.juniper=> (+ 1 1)" (last (first prompts)))
+    (is (= "(+ 1 1)" (last (first prompts)))
         "the prompt block no longer carries the comment")
     (is (str/includes? (text-nodes hiccup) "2")
         "the result still renders through the pair"))
@@ -97,7 +97,7 @@
                                     :seon.eval/shown "2"})]
       (is (not (str/includes? (pr-str hiccup) "seon-eval-thinking")))))
   (testing "the AI grammar is unchanged: the comment stays on the prompt line"
-    (is (= (str "my.agents.juniper=> ;; I should check the sum.\n(+ 1 1)\n"
+    (is (= (str ";; I should check the sum.\n(+ 1 1)\n"
                 "#:seon.repl{:value 2}")
            (repl/text {:seon.cluster.eval/comment ";; I should check the sum."
                        :seon.cluster.eval/source "(+ 1 1)"
@@ -268,7 +268,7 @@
           {:seon.cluster.eval/source "(+ 1 1)"
            :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
            :seon.eval/shown "2"})
-         "my.agents.juniper=> (+ 1 1)"))))
+         "(+ 1 1)"))))
 
 (deftest nothing-emitted-is-comment-shaped
   (testing "ruling 45: only the agent's own comment begins with a semicolon"
@@ -285,7 +285,7 @@
 
 (deftest a-running-form-has-a-prompt-and-no-response
   (testing "absence of a terminal fact still means running"
-    (is (= "my.agents.probe=> (range)"
+    (is (= "(range)"
            (repl/text {:seon.cluster.eval/source "(range)"
                        :seon.ns/name 'my.agents.probe
                        :seon.cluster.eval/ordinal 3}))
@@ -504,3 +504,9 @@
           "a reply that writes a form the way the transcript shows it is not cut")
       (is (str/includes? (repl/response emission) stop)
           "a reply that starts writing a result is stopped"))))
+
+(deftest the-transcript-teaches-no-prompt
+  (is (= "(f)" (first (str/split-lines (repl/text {:seon.cluster.eval/source "(f)"
+                                                   :seon.ns/name 'user
+                                                   :seon.eval/shown "3"}))))
+      "the form as sent opens the evaluation: no namespace prompt for a model to copy"))

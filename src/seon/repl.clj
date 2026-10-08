@@ -349,19 +349,17 @@
     (str/trim-newline prose)))
 
 (defn input-text
-  "The prompt line, the agent's comment and its source.
+  "The form as sent: the agent's comment and its source, with no prompt to copy.
 
   The two-argument arity omits the comment for a reader that shows it as its
   own block; the AI grammar always includes it."
   {:malli/schema [:function [:=> [:cat :seon.repl/emission] :string]
                   [:=> [:cat :seon.repl/emission :boolean] :string]]}
   ([emission] (input-text emission true))
-  ([{source :seon.cluster.eval/source prompt-ns :seon.ns/name
-     changed? :seon.repl/changed-since? :as emission}
+  ([{source :seon.cluster.eval/source changed? :seon.repl/changed-since? :as emission}
     comment?]
    (let [prose (thinking-text emission)]
      (str (when changed? ";; changed since your last turn\n")
-          (or prompt-ns 'user) "=> "
           (when (and comment? prose) (str prose "\n"))
           source))))
 
@@ -446,21 +444,15 @@
 
 (defn render-emission-html
   "Colourise one emission without changing a single character of `text`.
-  The prompt, input and response have separate visual roles. Declared AI
+  The input and response have separate visual roles. Declared AI
   responses remain prose; ordinary responses use the lossless Clojure lexer."
   {:malli/schema [:=> [:cat :seon.repl/emission] :seon.render/hiccup]}
   [emission]
   (let [emitted (text emission)
-        prompt (str (or (:seon.ns/name emission) 'user) "=> ")
-        prefix-length (if (:seon.repl/changed-since? emission)
-                        (inc (str/index-of emitted "\n")) 0)
-        prompt-end (+ prefix-length (count prompt))
         input-end (count (input-text emission))
         answer (response emission)]
     [:code {:class "seon-emission-bytes"}
-     (when (pos? prefix-length) (syntax-spans (subs emitted 0 prefix-length)))
-     [:span {:class "seon-syntax-prompt"} (subs emitted prefix-length prompt-end)]
-     (syntax-spans (subs emitted prompt-end input-end))
+     (syntax-spans (subs emitted 0 input-end))
      (when answer
        (list "\n"
              [:span {:class (if (:seon.cluster.eval/error emission)

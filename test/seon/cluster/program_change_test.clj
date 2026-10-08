@@ -200,7 +200,7 @@
     (is (str/includes? (repl/render-ai {:seon.cluster.eval/source "(+ 1 1)"
                                         :seon.cluster.eval/ns {:seon.ns/name 'my.agents.juniper}
                                         :seon.eval/shown "2"})
-                       "my.agents.juniper=> (+ 1 1)")
+                       "(+ 1 1)")
         "a direct render call omitting its database renders")))
 
 (deftest an-explicit-empty-custody-clears-the-callers-world

@@ -27,12 +27,12 @@
                   :seon.cluster.eval/comment ";; I should inspect the entities.\n;; Then I can choose."
                   :seon.cluster.eval/source "(->> entities\n     (map :total))"
                   :seon.eval/shown "[40 60]"}
-        expected "my.agents.juniper=> ;; I should inspect the entities.\n;; Then I can choose.\n(->> entities\n     (map :total))\n#:seon.repl{:value [40 60]}"
+        expected ";; I should inspect the entities.\n;; Then I can choose.\n(->> entities\n     (map :total))\n#:seon.repl{:value [40 60]}"
         html (repl/render-html emission)]
     (is (= expected (repl/text emission)))
     ;; The HTML pair gives the agent's comment its own block (`input-text`).
     (is (= ";; I should inspect the entities.\n;; Then I can choose." (get-in html [2 2])))
-    (is (= "my.agents.juniper=> (->> entities\n     (map :total))"
+    (is (= "(->> entities\n     (map :total))"
            (get-in html [3 1 2])))))
 
 (deftest changed-read-marker-does-not-rewrite-agent-input
@@ -42,8 +42,8 @@
                   :seon.eval/shown "{}"}
         original (repl/text emission)
         changed (assoc emission :seon.repl/changed-since? true)]
-    (is (= "my.agent=> ;; Read the current value.\n(my.task/steps {})\n#:seon.repl{:value {}}"
+    (is (= ";; Read the current value.\n(my.task/steps {})\n#:seon.repl{:value {}}"
            original))
-    (is (= ";; changed since your last turn\nmy.agent=> (my.task/steps {})\n#:seon.repl{:value {}}"
+    (is (= ";; changed since your last turn\n(my.task/steps {})\n#:seon.repl{:value {}}"
            (repl/text changed)))
     (is (= original (repl/text emission)))))
