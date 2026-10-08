@@ -1874,14 +1874,14 @@
       {:seon.fn/affected (set/difference (set/intersection (set (vals identities)) seen) tests)
        :seon.fn/tests (vec (sort (set/intersection tests seen)))})))
 
-(defn- gate-sets-in
-  "Select tests through surviving named edges in one immutable database.
-   Acquire identity and genuine declaration-ref joins once per operation."
-  {:seon/tasks #{'seon.fn/mention-closure-survives-beside-call-reach}
-   :malli/schema [:=> [:cat :seon.db/database-value
-                       [:sequential :qualified-symbol]]
-                  [:or [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
-  [database function-symbols]
+(defn- gate-edges
+  "The program's identities, test names and incoming named edges, read once."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:map [:seon.fn/identities [:map-of :int :qualified-symbol]]
+                        [:seon.fn/tests [:set :qualified-symbol]]
+                        [:seon.fn/incoming [:map-of :qualified-symbol [:set :qualified-symbol]]]]
+                   :seon.db/invalid-read-error]]}
+  [database]
   (let [identity-entities (db/q '[:find ?entity ?symbol
                              :where (or [?entity :seon.fn/sym ?symbol]
                                         [?entity :seon.test/sym ?symbol])] database)
@@ -1899,18 +1899,32 @@
                                 [?caller :seon.effect/capability ?symbol]] database)
         refusal (some #(when (:seon.db/invalid-read %) %)
                       [identity-entities test-symbols declared file-references handlers])]
-    (if refusal
-      refusal
-      (let [identities (into {} identity-entities)
-            incoming (reduce (fn [result [caller target]]
-                               (if-let [caller-symbol (get identities caller)]
-                                 (update result target (fnil conj #{}) caller-symbol)
-                                 result))
-                             {} (concat (for [[target callers] declared caller callers] [caller target])
-                                        file-references handlers))]
+    (or refusal
+        (let [identities (into {} identity-entities)]
+          {:seon.fn/identities identities
+           :seon.fn/tests (set test-symbols)
+           :seon.fn/incoming
+           (reduce (fn [result [caller target]]
+                     (if-let [caller-symbol (get identities caller)]
+                       (update result target (fnil conj #{}) caller-symbol)
+                       result))
+                   {} (concat (for [[target callers] declared caller callers] [caller target])
+                              file-references handlers))}))))
+
+(defn- gate-sets-in
+  "Select tests through surviving named edges in one immutable database.
+   Acquire identity and genuine declaration-ref joins once per operation."
+  {:seon/tasks #{'seon.fn/mention-closure-survives-beside-call-reach}
+   :malli/schema [:=> [:cat :seon.db/database-value
+                       [:sequential :qualified-symbol]]
+                  [:or [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
+  [database function-symbols]
+  (let [edges (gate-edges database)]
+    (if (:seon.db/invalid-read edges)
+      edges
+      (let [{identities :seon.fn/identities tests :seon.fn/tests incoming :seon.fn/incoming} edges]
         (reduce (fn [result function-symbol]
-                  (let [selected (gate-set-in database identities (set test-symbols)
-                                              incoming [function-symbol])]
+                  (let [selected (gate-set-in database identities tests incoming [function-symbol])]
                     (if (:seon.db/invalid-read selected)
                       (reduced selected)
                       (assoc result function-symbol selected))))
@@ -2016,6 +2030,19 @@
      (if (:seon.db/invalid-read result)
        result
        (into {} (map (fn [[sym closure]] [sym (:seon.fn/tests closure)])) result)))))
+
+(defn gating-tests
+  "The tests gating any of `function-symbols`: one reverse walk seeded with all of them."
+  {:seon/tasks #{'my.program/breaks-on-a-namespace-subject-takes-five-seconds}
+   :malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
+  [database function-symbols]
+  (let [edges (gate-edges database)]
+    (if (:seon.db/invalid-read edges)
+      edges
+      (let [{identities :seon.fn/identities tests :seon.fn/tests incoming :seon.fn/incoming} edges
+            closure (gate-set-in database identities tests incoming (vec function-symbols))]
+        (if (:seon.db/invalid-read closure) closure (:seon.fn/tests closure))))))
 
 (defn unresolved-callers
   "Report calls into indexed namespaces with no current function definition.

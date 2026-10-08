@@ -1298,6 +1298,32 @@
         (is (= (first results) (seon.fn/gate-set database (quote sample.gates/a)))
             "the old immutable value keeps its own reach")))))
 
+(deftest gating-tests-equals-the-union-of-per-function-gate-sets
+  (test-support/with-database
+    (fn [connection]
+      (transact-fixture!
+       connection
+       (into [(test-support/namespace-entity @connection 'sample.gating)]
+             (map (fn [s]
+                    (test-support/program-fn-entity (db/db connection) s (str "(defn " (name (symbol s)) " [] nil)"))))
+             ['sample.gating/a 'sample.gating/b 'sample.gating/c 'sample.gating/unrelated]))
+      (transact-fixture!
+       connection
+       [[:db/add [:seon.fn/sym 'sample.gating/a] :seon.fn/calls 'sample.gating/b]
+        [:db/add [:seon.fn/sym 'sample.gating/b] :seon.fn/calls 'sample.gating/a]
+        [:db/add [:seon.fn/sym 'sample.gating/c] :seon.fn/calls 'sample.gating/a]
+        (analyzed-test-entity (db/db connection) 'sample.gating/via-c {:seon.fn/calls #{'sample.gating/c}})
+        (analyzed-test-entity (db/db connection) 'sample.gating/subject-b {:seon.test/subject 'sample.gating/b})
+        (analyzed-test-entity (db/db connection) 'sample.gating/alone {:seon.fn/calls #{'sample.gating/unrelated}})])
+      (let [database (db/db connection)]
+        (doseq [seeds [['sample.gating/a]
+                       ['sample.gating/a 'sample.gating/c 'sample.gating/unrelated 'sample.gating/absent]
+                       ['sample.gating/absent]
+                       []]]
+          (is (= (vec (sort (set (mapcat val (seon.fn/gate-sets database seeds)))))
+                 (seon.fn/gating-tests database seeds))
+              "one walk seeded with every symbol selects the union of the per-symbol walks"))))))
+
 (deftest a-refused-reference-read-refuses-gate-set-derivation
   (test-support/with-database
     (fn [connection]
