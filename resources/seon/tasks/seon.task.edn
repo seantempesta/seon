@@ -42,4 +42,8 @@
              :intent "One `seon.task/assign!` allocated 64.4 MB in 1,407 armed calls and 62 ms on the cluster: `seon.task/task-edges` runs two `or` queries (holders, referrers) and assign! needs only the proofs. A proof is one indexed query from the task's tag; the assignment read allocates under 8 MB."
              :must-read #{seon.task/assign! seon.task/task-edges}
              :evidence #{"docs/seon/schedule/agent-loop-ledger.md#LR-ASSIGNWRITER"}}
+ #:seon.task{:name "open-tasks-whose-proofs-are-green-are-never-retired"
+             :kind :namespace
+             :intent "Choosing fan-out 7's tasks, root ran 74 tagged file proofs of open tasks on main (default e9582ffc7, 2026-10-09, fresh store): 67 were green, among them `seon.error/an-unresolved-symbol-shows-an-empty-neighbour-list`, `seon.db/uninstalled-attribute-candidates-are-alphabetical`, `seon.db/the-missing-connection-refusal-has-no-fix-key`, `seon.bootstrap/help-teaches-a-placeholder-namespace-for-defn` and `my.program/source-repeats-the-docstring`. A task whose every proof is green is done (`seon.context/task-done?`) but stays in `resources/seon/tasks`, so the open list is mostly finished work and picking a red task costs a test run per candidate. Done when ingestion or `bin/lane commit` reports each task whose proofs are all green on the committed program, and the finished entries are retired."
+             :must-read #{seon.context/task-done? seon.task/assign!}}
 ]
