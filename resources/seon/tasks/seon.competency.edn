@@ -1,0 +1,5 @@
+[#:seon.task{:name "area-is-contracted"
+             :kind :function
+             :intent "In namespace comp.geo define area [w h] returning w*h, with the Malli contract [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]. Done when comp.geo/area answers 6 for 2 and 3, refuses -1 with an error value, and carries its contract in :malli/schema metadata. The success test is seon.competency-test/t1-area-is-contracted."
+             :must-read #{}
+             :evidence #{"docs/research/agent-platform/2026-10-08/competency/competency-spec.md"}}]
