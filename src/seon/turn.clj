@@ -41,6 +41,7 @@
             [seon.sci.forgive :as forgive]
             [seon.sci.kernel :as kernel]
             [seon.sci.observe :as observe]
+            [seon.task :as task]
             [seon.turn.batch :as turn.batch]
             [seon.sci.reader :as reader])
   (:import [java.util Date]
@@ -62,6 +63,8 @@
   (delay (requiring-resolve 'seon.cluster.agent/evaluate-source!)))
 (defonce ^:private cluster-prompt-prompt
   (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
+(defonce ^:private test-run
+  (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private context-capture-tx
   (delay (requiring-resolve 'seon.context/capture-tx)))
 
@@ -5874,6 +5877,50 @@
                (async/close! failure-channel)))))))
     backstop))
 
+(defn- step-due?
+  "Whether the pass `report` evaluated at least one form, so the agent's tests may see a change."
+  {:malli/schema [:=> [:cat :seon.turn.loop/turn-report] :boolean]}
+  [report]
+  (pos? (:seon.turn.loop/forms-run report)))
+
+(defn- task-proofs
+  "The proofs of the task `agent-id` holds, read at the task home and on the agent's branch; empty when it holds none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:set :seon.test/sym] :seon.error/value]]}
+  [database agent-id]
+  (let [home (or (some-> (task/home database) db/db) database)
+        handle (task/agent-task home agent-id)
+        sym (when (string? handle)
+              (:seon.task/sym (db/pull home [:seon.task/sym] [:seon.task/id handle])))
+        edges #(:seon.task/proofs (task/task-edges % sym))]
+    (cond (:seon.error/at handle) handle
+          (nil? sym) #{}
+          :else (into (set (edges home)) (edges database)))))
+
+(defn- run-proofs
+  "Run the held task's proofs on the agent's branch as one test request; nil when there are none."
+  {:malli/schema [:=> [:cat :map :seon.agent/id]
+                  [:or :nil :seon.test/run-result :seon.error/value]]}
+  [cluster agent-id]
+  (let [execution (@cluster-agent-acquire-context! cluster agent-id)
+        connection (:seon.db/connection execution)
+        proofs (task-proofs (db/db connection) agent-id)]
+    (cond (:seon.error/at proofs) proofs
+          (empty? proofs) nil
+          :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
+                            :seon.test/policy :named :seon.test/identities proofs}))))
+
+(defn- summary
+  "The test step's result as the reply shows it: pass, and the red tests' names."
+  {:malli/schema [:=> [:cat :seon.turn/id [:or :seon.test/run-result :seon.error/value]] :seon.turn.loop/test-summary]}
+  [pass-id run]
+  (if (:seon.error/at run)
+    {:seon.turn/id pass-id :seon.turn.loop/test-error run}
+    {:seon.turn/id pass-id
+     :seon.test/passed? (:seon.test/passed? run)
+     :seon.turn.loop/red (vec (for [r (:seon.test/results run)
+                                    :when (pos? (+ (:seon.test/fail-count r) (:seon.test/error-count r)))]
+                                (:seon.test/sym r)))}))
+
 (defn step
   "The turn transform, in Flow's four arities: ONE episode pass.
   Settle this agent's orphan (the wedge fence, per-agent), pin one
@@ -6046,9 +6093,15 @@
                                    (record-write-refusal-fault!
                                     cluster agent-id (:seon.turn/id report)
                                     refusal refusals bound)))
+                          ;; THE PROOFS RUN AFTER A PASS THAT EVALUATED A FORM, serially inside
+                          ;; the pass: the reply and the next pass see the result.
+                          tests (when (and (step-due? report) (not (:seon.turn.loop/refusal report)))
+                                  (run-proofs cluster agent-id))
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
-                                                    park (assoc :seon.turn.loop/refusal park))))]
+                                                    park (assoc :seon.turn.loop/refusal park)
+                                                    tests (assoc :seon.turn.loop/tests
+                                                                 (summary (:seon.turn/id report) tests)))))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete

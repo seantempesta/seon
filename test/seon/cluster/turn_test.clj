@@ -36,6 +36,10 @@
             [seon.sci.eval :as sci.eval]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [clojure.data.json]
+            [seon.mcp]
+            [seon.task]
+            [seon.test.runner]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
 
@@ -2910,3 +2914,30 @@
           (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id]))))
           (is (seq ordinals))
           (is (= (count ordinals) (count (distinct ordinals)))))))))
+
+(defn- agent-eval
+  "Evaluate `code` as `agent-id` through `seon.mcp/call`, the reply read back as data."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
+  [running agent-id code]
+  (test-support/reply
+   (get (last (get (clojure.data.json/read-str
+                    (seon.mcp/call (clojure.data.json/write-str
+                                    {"name" "eval_clj"
+                                     "arguments" {"code" code "agent" agent-id "cluster" running}})))
+                   "content"))
+        "text")))
+
+(deftest a-defn-reaching-a-proof-records-its-result-without-a-check-call
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (agent-eval running agent-id "(ns tq.f4) (defn area [r] (* r r))")
+     (agent-eval running agent-id "(in-ns 'tq.f4) (clojure.test/deftest ^{:seon/tasks #{'tq.f4/area}} area-test (clojure.test/is (= 4 (tq.f4/area 2))))")
+     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                 :seon.task/ns 'tq.f4 :seon.task/name "area" :seon.task/kind :function
+                                                 :seon.task/intent "Square."}))]
+       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+     (agent-eval running agent-id "(in-ns 'tq.f4) (defn area [r] (* 3 r))")
+     (let [results (seon.test.runner/latest-results (db/db connection) ['tq.f4/area-test])]
+       (is (= 1 (count results)))
+       (is (= 1 (:seon.test/fail-count (first results))) "the automatic step recorded the red result")))))

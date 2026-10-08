@@ -170,6 +170,12 @@
                   [:map
                    [:seon.agent/id :seon.agent/id]
                    [:seon.turn.loop/idle? :seon.turn.loop/idle?]]],
+                 :test-summary
+                 [:map [:seon.turn/id :seon.turn/id]
+                  [:seon.test/passed? {:optional true} :boolean]
+                  [:seon.turn.loop/red {:optional true} [:vector :seon.test/sym]]
+                  [:seon.turn.loop/test-error {:optional true} :seon.error/value]],
+                 :tests :seon.turn.loop/test-summary,
                  :turn-report
                  [:map
                   [:seon.turn/id {:optional true} :seon.turn/id]
@@ -181,6 +187,7 @@
                    :seon.turn.loop/refusal]
                   [:seon.turn.loop/basis {:optional true}
                    :seon.turn.loop/basis]
+                  [:seon.turn.loop/tests {:optional true} :seon.turn.loop/tests]
                   ; each held form with the receipt the run's settlement saved: its reply
                   [:seon.turn.loop/evaluated-sources {:optional true}
                    :seon.turn.loop/evaluated-sources]],
