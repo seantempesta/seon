@@ -171,9 +171,10 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 
 ## The system: one JVM, many realities
 
-- **Clusters and branches.** A cluster is a Datahike branch plus its agents and shared plumbing; one JVM hosts many.
-  A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to boot. **Unlink**
-  removes a branch from the roster; retention GC reclaims it without per-branch cleanup.
+- **Clusters and branches.** A cluster is a Datahike branch, called main, plus its agents and shared plumbing; one
+  JVM hosts many. A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to
+  boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from the roster; retention
+  GC reclaims its commits without per-branch cleanup.
 - **Boot and configuration.** Boot opens the REPL before store acquisition, then builds process → store → facts →
   flow, publishing readiness at each layer. One process root holds the store's lifetime lock; Datahike serializes
   transactions. Bootstrap selects paths and binds; running configuration is database facts; secrets are
@@ -197,14 +198,15 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
   execution unavailable until exact bytes, behavior and arming converge; never call an unchanged record healthy.
   Ordinary clusters keep their program; selected development clusters adopt explicitly.
-- **Merge is a root task.** An agent proposes only after the tests naming its task pass on its branch; the proposal
-  becomes a merge task. Root works it through the ordinary REPL holding both worlds — a merge branch forked from the
-  cluster head and a copy of the agent's world — with easy tools to move data between them, and chooses exactly what
-  to take by identity from the diff value; the task never lists what to merge. Acceptance requires the task's tests
-  to pass on the combined program plus whatever root chose to run, recorded as evidence; reaching-test counts are
-  shown, not gated. Conflicts stay on the merge branch for repair. The writer checks the touched entities' digests; only
-  root's acceptance advances the cluster pointer, and the agent's branch retires when its merge closes. Local green
-  never implies shared acceptance.
+- **Merge is a root task.** An agent requests a merge only after its proofs pass and no test its change broke is red
+  on its source branch; the merge request is a task. Root works it through the ordinary REPL holding both worlds — a
+  merge branch forked from the target branch (main) and a copy of the agent's world — with easy tools to move data
+  between them, and chooses exactly what to take by identity from the diff value (since the merge base; ours is the
+  target, theirs the source); the task never lists what to merge. `merge!` commits only when every test on the merge
+  branch is green (the proofs, the tests reaching the change and whatever root chose to run, recorded as evidence); a
+  test already red on main stops it for root. Conflicts stay unmerged on the merge branch for repair. Norms run in
+  their listed order. The writer checks the touched entities' digests; only root's merge advances main, and the
+  agent's branch is deleted when its merge request closes. Local green never implies shared acceptance.
 - **Write-back** uses the same gate, checks file bases, stages exact-span changes and reindexes to prove equivalent
   declarations before installation.
 
