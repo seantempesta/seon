@@ -1,10 +1,15 @@
 ---
 type: spec
-status: reviewed
+status: superseded by agent-loop.md (2026-10-08)
 created: 2026-09-28
 tags: [spec, run, one-path]
 ---
 # seon.run — the run fold
+
+**Superseded.** The eval request and its recording are specified in [agent-loop.md](agent-loop.md) §3.1-§3.3 from
+the approved redesign `docs/research/agent-platform/2026-10-08/redo/pass-and-recording.md`; this page is kept as dated
+evidence of the 2026-09-28 measurements. Its targets below were invented numbers and do not bind (owner 2026-10-08: no
+arbitrary targets; judge cost against what the work must do, 10× over it is a defect, report every regression).
 
 Area 1 of the shrink: the one REPL path for one run of forms (read -> evaluate -> record -> print). Today ~12.2k lines
 (`src/seon/batch.clj` 739, `src/seon/turn/batch.clj` 931, `src/seon/turn.clj` 6201, `src/seon/sci/eval.clj` 4221;
@@ -229,7 +234,7 @@ Stages stay values (CLAUDE.md "one pipeline"); a request declares `:seon.run/sta
   shrunk separately. This spec's slice: ~1.5k -> ~1k; the 2k area budget also needs the rest of turn.clj and eval.clj.
 - Wall ms through `seon.mcp/call`: `(+ 1 2)` from 86-111 ms to <=30 ms; one defn from 557-773 ms to <=100 ms; each
   extra defining form from ~450 ms to <=10 ms (no validation in the loop); 20-form reply <100 ms plus one
-  settlement. Measure parent and change on the same probe; fix regressions over 20% or 50 ms.
+  settlement. Measure parent and change on the same probe; report every regression with its numbers.
 - Armed calls: 334 for one `defn` (1.5) to a profile-named count; one fewer `show` per program-changing form.
 - Prints per form: exactly 1 (asserted on data: count of `show` calls per entry). Passes over earlier entries: 0.
 

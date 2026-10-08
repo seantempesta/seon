@@ -48,8 +48,8 @@ the recorder's signature reads layer (`seon.error/signature`), the recorded-erro
 [V]; all move in the same cut.
 
 `:seon.error/world` holds references only. `world-reference` derives the evaluation id with the two-argument
-`(id/evaluation run-id ordinal)` today [V]; after the loop cut the run id is the pass id and the ordinal the position in
-the pass (agent-loop §1), so the formula is unchanged; the world keys it reads (`:seon.turn/id`,
+`(id/evaluation run-id ordinal)` today [V]; after the loop cut the run id is the eval request id and the ordinal the position in
+the eval request (agent-loop §1), so the formula is unchanged; the world keys it reads (`:seon.turn/id`,
 `:seon.batch/ordinal`) change in agent-loop P2.
 
 **Variations.** Each variant is the base plus its own members, in its owner's schema EDN. Seon's registry has no
@@ -177,7 +177,7 @@ producer and world references without overwriting producer-supplied fields.
 
 Entrants, each with exactly one catch [V for location]: the one REPL path (`seon.batch` stage guards, `seon.sci.kernel`);
 MCP (`seon.mcp`); Flow procs (`seon.flow`); boot (`seon.cluster.boot`); web (`seon.render.web` handler); the test runner
-(`seon.test`); agent graphs (`seon.cluster.agent`). The loop pass is an entrant from the loop cut on (agent-loop §2).
+(`seon.test`); agent graphs (`seon.cluster.agent`). The model eval request is an entrant from the loop cut on (agent-loop §2).
 
 ## 4. Contracts
 
@@ -298,7 +298,9 @@ Both are judged on the task home's program: a fix on a branch resolves when root
 there. `seon.task/task-resolution` reads this through `seon.error/resolution` (rewritten in place).
 
 Cost: the home is root's branch, so a branch agent's errored form costs one home transaction before its branch
-settlement (N recorded errors in a pass, N home writes); P4 measures that against the settlement's 100 ms bound.
+recording transaction (N recorded errors in an eval request, N home writes). The expected
+cost follows the recorded errors, one small write each; P4 measures it against that expectation (no arbitrary
+targets: 10× over it is a defect) and against AGENTS.md's 100 ms bound for the recording transaction.
 
 An unknown or refused recording write runs the owner's stop request and prints through `print-unrecorded!`, never
 retried. Goes: `prepare` and the admission stack, `commit-call`/`recording`/`occurred-since` (12 existence reads per

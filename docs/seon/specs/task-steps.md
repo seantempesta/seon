@@ -1,10 +1,14 @@
 ---
 type: spec
-status: reviewed
+status: shelved by the owner (2026-10-08)
 created: 2026-09-28
 tags: [spec, task, plan]
 ---
 # Task steps — tasks take over the plan
+
+**Shelved** (owner 2026-10-08): the task system replaces the plan/steps feature; the priority is tasks running, with
+the current-state block built from what the task names ([agent-loop.md](agent-loop.md) §3.4). The simplest parts of
+steps may later move into tasks; until then nothing here is scheduled (ledger F8, VEC-1).
 
 Owner ruling 2026-09-28: if tasks can provide a plan (ordered steps, persistent across compaction), drop `seon.plan`.
 Verdict: YES, with one added attribute family on the task entity and four `my.task` functions. Tasks lack steps and an

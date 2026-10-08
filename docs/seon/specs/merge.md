@@ -155,8 +155,9 @@ One verb, as `git merge`: `(my.program/merge! {:seon.merge/request m})`.
    gated: the installed `uncovered` gate (source.clj:996-998) is deleted.
 4. **Commit or stop.** Commit when all hold:
    - `:seon.merge/unmerged` is empty;
-   - every test of the run is green (unknown evidence never merges; a test already red on the target also stops the
-     merge, for root);
+   - every test of the run is green (unknown evidence never merges). A test already red on main before the source
+     branch existed (red at the merge base) never blocks the agent's merge request, but it stops the automatic merge
+     and asks root, who decides (owner 2026-10-08);
    - integrity: every carried function contracted, every task handle the program names exists on the target, no
      dangling caller, the schema check complete and holding, the merge branch's program unwritten since the run;
    - `:seon.merge/no-commit` is absent.
@@ -170,8 +171,9 @@ One verb, as `git merge`: `(my.program/merge! {:seon.merge/request m})`.
    once, then stops. The writer also refuses a carried row whose digest on the target moved (`declarations-held-tx`,
    source.clj:795). Program rows carry no pointer to the evaluation that made them: an agent definition's
    `:seon.program/defined-in` is dropped here, and write-back supplies the file. Parents: the target's tip, the merge
-   branch and the source commit. Afterwards the merge branch is deleted, and the source branch after its agent's
-   actual exit.
+   branch and the source commit. Afterwards the merge branch is deleted. The source branch is deleted once its task
+   is done or given back, its merge request is closed (merged or closed with a reason) and its agent has actually
+   exited, so its history and blobs can be collected (owner 2026-10-08; ledger SR-BRANCH, MA-15).
 
 **Norms** (Datahike's concept: `reference-code/datahike/src/datahike/norm/norm.clj` at e5453d96, `ensure-norms!`
 :204, recorded as `:tx/norm` :142-158, never twice :31). A branch carries program, never the target's data: an agent
@@ -245,18 +247,19 @@ Missing or broken, found by the dogfood (§9):
 ## 8. Costs, measured 2026-10-08
 
 Default at `81020da6a`, warm JVM, MCP `eval_clj` SCI, wall time by `System/nanoTime` around the call, one sample each
-(today's function names).
+(today's function names). No arbitrary targets (owner 2026-10-08): each step is judged against what its work must do,
+and 10× over that expectation is a defect to diagnose; AGENTS.md's 1 s and 10 s still apply.
 
-| Step | Measured | Budget (target) |
+| Step | Measured | Expected from the work |
 |---|---|---|
-| `proposals` | 39 ms, 212 calls | < 50 ms |
-| `seon.task/assign!` | 41-54 ms (479 ms first call), ~820 calls | < 100 ms |
-| `propose-merge!` (one proof run on the branch) | 0.46-1.05 s, 39k-159k calls | < 300 ms beyond the proofs' own bodies |
-| compare (the diff, 4 identities) | 174 ms (JVM, `compare-branch`) | < 100 ms |
-| `prepare-merge!`, 1 proof | 1.7 s warm, 175k calls; 8.7 s first call (8.0 s in the run) | < 500 ms beyond the tests' bodies |
+| `proposals` | 39 ms, 212 calls | one query of the open requests at the home |
+| `seon.task/assign!` | 41-54 ms (479 ms first call), ~820 calls | one checked write of the assignment |
+| `propose-merge!` (one proof run on the branch) | 0.46-1.05 s, 39k-159k calls | the proofs' own bodies plus one write of the request |
+| compare (the diff, 4 identities) | 174 ms (JVM, `compare-branch`) | digests of the changed identities only (§2 Cost) |
+| `prepare-merge!`, 1 proof | 1.7 s warm, 175k calls; 8.7 s first call (8.0 s in the run) | the tests' bodies plus one branch and one write of the changes |
 | `prepare-merge!`, 1 proof + 2 reaching tests | 2.8 s, 602k calls | as above |
-| `accept-merge!` refused (red proof) | 135 ms, 2.4k calls | < 100 ms |
-| `accept-merge!` accepted (3 identities) | 1.78 s, 6.2k calls | < 300 ms |
+| `accept-merge!` refused (red proof) | 135 ms, 2.4k calls | a read of the run's results |
+| `accept-merge!` accepted (3 identities) | 1.78 s, 6.2k calls | one guarded transaction of the changed rows |
 | retire 10 branches | 558 ms | — |
 
 The accept's calls are few but its wall time is 1.78 s: the time is outside armed functions (the writer's
