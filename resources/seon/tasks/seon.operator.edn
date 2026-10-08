@@ -1,4 +1,8 @@
-[#:seon.task{:name "a-deep-check-queue-times-out-waiting-for-a-slot"
+[#:seon.task{:name "class-prune-deletes-a-directory-a-check-is-sharing-before-its-jvm-launches"
+             :kind :function
+             :intent "prune-program-classes! spares only class directories named on a live process's classpath, so a directory a check has selected and is sharing (its throwaway JVM not launched yet) is deletable by a concurrent launch's prune. Observed 2026-10-08 with two other check JVMs running: bin/seon check failed in its share phase (share-ms 11064) with NoSuchFileException on target/dev-program-classes/ce2aa921.../seon/test$tally$iter__19767__19771.class; the identical retry passed. Diagnostic: data/clusters/default/logs/operator-check-20261008T160343.511.edn. Done when a directory selected by a pending launch is held from selection to exit, with a regression that prunes concurrently with a share."
+             :must-read #{seon.operator/prune-program-classes!}}
+ #:seon.task{:name "a-deep-check-queue-times-out-waiting-for-a-slot"
              :kind :function
              :intent "With 10 bin/seon check --test runs queued for the 2 throwaway-JVM slots, the last answered 'No throwaway JVM slot freed within its bound' after waiting: the slot wait is capped at the boot bound, not at the queue's expected drain (each check ~50-100 s). Lanes then retry blind. Done when a queued check waits proportionally to the queue ahead of it (or reports its position and expected wait) instead of failing as if a slot were stuck."}
  #:seon.task{:name "check-cannot-run-tests-of-host-bound-namespaces-against-a-candidate"
