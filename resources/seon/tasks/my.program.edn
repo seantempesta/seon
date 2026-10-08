@@ -115,4 +115,9 @@
  #:seon.task{:name "breaks-of-a-widely-used-function-allocates-a-gigabyte"
              :kind :function
              :intent "(my.program/breaks {:seon.program/subject 'seon.db/pull}) at an SCI agent's REPL allocated 1,200 MB in 622 ms (:large-allocation finding; context corpus row 15, default 56f176efc, 2026-10-09); at the JVM REPL the same read plus seon.fn/gating-tests and its render took 410 ms over 343,906 armed calls and 29,184 reads, for 610 call sites and 2,297 gating tests. Its AI render (my.program/render-breakage-ai) is 1 ms. Done when the read's allocation and reads follow its callers and gating set, measured with seon.profile/measure."
-             :must-read #{my.program/breaks seon.fn/gating-tests}}]
+             :must-read #{my.program/breaks seon.fn/gating-tests}}
+ #:seon.task{:name "a-clojure-style-ns-unmap-is-refused-as-a-missing-context"
+             :kind :function
+             :intent "(`my.program/ns-unmap!` 'seon.help-test 'help-teaches-how-a-deftest-names-its-task), the two-argument call of `clojure.core/ns-unmap`, answered \"refused argument 0 `context`: expected :my.program/context (a map), got a symbol seon.help-test\" with the world's whole context schema as its problem (fanout-3 run, default 324461975, 2026-10-09); the call that works takes one qualified symbol. Done when a two-symbol call either unmaps that namespace's name as Clojure does or is refused as an arity error naming the one-symbol form."
+             :must-read #{my.program/ns-unmap!}}
+]
