@@ -2089,7 +2089,8 @@
   `:resume` carries the ordinal the fold restarts at — the first form
   ordinal with no terminal receipt — so a turn never recomputes it;
   when no such ordinal remains the situation is `:close`. With no open
-  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`);
+  turn, the `:open` arm needs a held assignment (`seon.task/agent-task`),
+  read at the task home (`seon.task/home`) where assignments are written;
   then it admits unanswered wakes or continuation of the latest closed
   provider reply under the same turn bound. A reply continues when it
   evaluated a form and returned no completed/wait disposition.
@@ -2127,7 +2128,7 @@
       ;; is about to answer. Handling claims are recorded at settlement.
       ;; A MODEL TURN NEEDS AN ASSIGNMENT: with none held, wakes stay
       ;; unanswered until a task is assigned.
-      (let [held (task/agent-task db agent-id)
+      (let [held (task/agent-task (or (some-> (task/home db) db/db) db) agent-id)
             deferred (when (string? held) (opening-deferred? db agent-id))]
         (cond
           (map? held) held

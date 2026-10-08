@@ -10,11 +10,13 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
+            [seon.cluster.agent :as cluster.agent]
             [seon.db :as db]
             [seon.error :as error]
             [seon.agent :as my.agent]
             [seon.turn :as turn]
             [seon.schema]
+            [seon.task]
             [seon.test-support :as support])
   (:import [java.util Date]))
 
@@ -774,6 +776,26 @@
       (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id :seon.message/id message-id}
              (turn/next-agent-work @connection request))
           "once a task is assigned, the waiting wake opens the turn"))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-branch-agent-assigned-after-its-fork-never-gets-a-model-turn}}
+  a-branch-agent-assigned-after-its-fork-opens-its-model-turn
+  ;; Assignments live at the task home (root's branch); the agent works on its own
+  ;; branch, forked before root assigned it, so the branch never holds the assignment.
+  (with-unassigned-database
+    (fn [home]
+      (configure-agent-bound! home 100)
+      (support/transacted! home [{:seon.agent/id "root" :seon.agent/branch (get-in @home [:config :branch])}])
+      (let [fork (cluster.agent/acquire-context! (support/execution-handle home) nil {:seon.agent/isolate? true})
+            branch (:seon.db/connection fork)]
+        (try
+          (add-trigger! branch)
+          (is (nil? (turn/next-agent-work @branch request)) "unassigned, the wake opens no model turn")
+          (support/assign-task! home agent-id)
+          (is (nil? (seon.task/agent-task @branch agent-id)) "the branch itself never holds the assignment")
+          (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id :seon.message/id message-id}
+                 (turn/next-agent-work @branch request))
+              "assigned at the home after the fork, the waiting wake opens the turn")
+          (finally (cluster.agent/release-context! fork)))))))
 
 (defn- closed-reply!
   "Commit one closed model turn `id` whose reply settled `evaluations` (maps merged onto each row)."
