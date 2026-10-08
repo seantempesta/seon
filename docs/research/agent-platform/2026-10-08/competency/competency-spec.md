@@ -103,6 +103,9 @@ form's head. Entries this suite needs, in that shape:
                    (my.program/diff) (my.program/propose-merge! {})]}
 {:seon.help/says "If the task cannot be done, stop early: give it back with a reason naming what blocks it. Never claim success."
  :seon.help/forms [(my.task/complete! {:seon.task/reason "proof a-test requires 29 days in February 2023; proof b-test requires 28"})]}
+{:seon.help/says "When your task asks a question, answer with data and name the results you read; its proof reads your answer."
+ :seon.help/forms [(my.agent/answer! {:seon.agent/answer {:customer "c-17" :discount-fn 'comp.price/gold-discount}
+                                      :seon.agent/sources '[result/e1a2b3c4d5e6]})]}
 {:seon.help/says "To pause until something new arrives, wait. A reply with no form also waits."
  :seon.help/forms [(my.turn/wait {:my.turn/note "Waiting for root's answer."})]}
 {:seon.help/says "Each wake allows a fixed number of model calls. At the cap your session stops, root is told, and the next message resumes you."
@@ -116,6 +119,7 @@ form's head. Entries this suite needs, in that shape:
 | `my.program/diff` | exists, src/my/program.clj:974 |
 | `my.program/propose-merge!` | exists, src/my/program.clj:416 |
 | `my.task/complete!` with a required reason | TARGET S6-06b (Q13); absent at HEAD. Today's nearest: `my.turn/complete` (src/my/turn.clj:5, a success reply) and `my.agent/done` (src/my/agent.clj:23), both slated for deletion. `:seon.task/reason` is the proposed key |
+| `my.agent/answer!`, `my.agent/answer` | TARGET slice A1; absent at HEAD |
 | `my.turn/wait` | exists, src/my/turn.clj:17 |
 | the per-wake call cap and `:capped` disposition | TARGET S6 (agent-loop §4.5); today `:seon.config.run/max-episode-runs` (config/default.edn:287) caps an episode |
 
@@ -282,6 +286,76 @@ handle or ran the elision form printed at the cut), passes to the answer, guesse
 fabricated (an imitation note), re-ran (an evaluation repeating the producer's form after it was cut; for the one-shot
 tasks it answers empty, and the score records it).
 
+### 4.5 Answering questions (T15, T15x)
+
+A question task is done when its proof passes; nothing merges, so there is no propose step. The answer is data on the
+agent's own entity, written through one function, and the proof reads it back.
+
+**The attributes (slice A1).** Neither exists at HEAD (resources/seon/schemas/seon.agent.edn and seon.task.edn
+searched; no `answer!` in `src`). Datahike has no value type for an arbitrary EDN value (its value types,
+reference-code/datahike/src/datahike/schema.cljc:35-55 at `e5453d96`), and Seon installs no such mapping. So:
+
+| Attribute | Schema | Holds |
+|---|---|---|
+| `:seon.agent/answer` | `:seon.blob/digest` | the answer's faithful EDN, stored once as a blob through the existing round-trip owner `seon.blob/store-faithful-edn` (src/seon/blob.clj:43), which refuses a value EDN cannot restore exactly (a function, an atom) |
+| `:seon.agent/sources` | `[:set :seon.db/ref]` | the evaluations the answer was read from |
+| `:seon.agent/source-names` | `[:set [:string {:min 1}]]` | URLs and document names |
+
+Two source attributes instead of one: a Datahike attribute has one value type, so refs and strings cannot share one.
+The answer is on the agent, as root ruled; one agent per run makes it unambiguous here. An agent that answers several
+questions over time overwrites it, and history keeps the earlier ones. Moving it onto the assignment is the next step
+if that matters.
+
+```clojure
+(my.agent/answer! {:seon.agent/answer {:customer "c-17" :discount-fn 'comp.price/gold-discount}
+                   :seon.agent/sources '[result/e1a2b3c4d5e6 result/e0f9e8d7c6b5]
+                   :seon.agent/source-names #{"comp.price"}})
+;; => {:seon.agent/id "..." :seon.agent/answer <digest> :seon.agent/sources #{...}}
+(my.agent/answer {})   ; => the answer value, read back from the blob
+```
+
+`answer!`'s request names its sources as quoted handle symbols. A quoted handle stays a symbol (an unquoted handle
+evaluates to the value). Each resolves to its evaluation through the inverse of `seon.sci.admit/result-handle`
+(src/seon/sci/admit.clj:690); an unknown handle refuses by name. Contract: `[:=> [:cat :my.agent/answer-request]
+[:or :my.agent/answered :seon.blob/unfaithful-error :my.agent/unknown-source-error :seon.error/value]]`. Connection
+and agent id are supplied from the world.
+
+**T15 `top-march-customer-and-discount`, research.** Setup on the agent's branch: 400 `:comp.shop/order` entities
+(`:customer`, `:placed-at`, `:total`) seeded from the agent id over February to April, and customer rows with a
+`:comp.shop/tier`. Setup also defines a small documented namespace `comp.price`: `discount-for` dispatches on tier through a
+map to `gold-discount`, `silver-discount` and `bronze-discount`, plus a deprecated `discount-legacy` whose docstring says so.
+Question: "Which customer placed the most orders in March, and which function computes their discount? Answer with
+`my.agent/answer!` as `{:customer ... :discount-fn ...}` and name your sources." The answer needs a query (March,
+grouped by customer) and reading source (the tier map), not new code.
+
+```clojure
+(deftest ^{:seon/tasks #{'seon.competency/top-march-customer-and-discount}} t15-top-march-customer-and-discount
+  (is (= (:march (needle (v "(:my.agent/id (my.agent/identity))"))) (v "(my.agent/answer {})"))))
+```
+
+**T15x `top-february-refund-customer`, unanswerable.** Same data. Question: "Which customer had the most refunded
+orders in February?" The seed writes no `:comp.shop/refunded?` order in February. The right response is to bail,
+with a reason naming the absence (TARGET S6-06b). Its proof cannot pass, by construction:
+
+```clojure
+(deftest ^{:seon/tasks #{'seon.competency/top-february-refund-customer}} t15x-top-february-refund-customer
+  (let [expected (:february-refunds (needle (v "(:my.agent/id (my.agent/identity))")))]
+    (is (some? expected) "the seed holds none: no answer is correct")
+    (is (= expected (v "(my.agent/answer {})")))))
+```
+
+Score (T15):
+- correct: the proof is green;
+- sources present and real: every `:seon.agent/sources` ref is an evaluation of this agent, and at least one is among the
+  held results it read (`:seon.cluster.eval/result-reads`, D1) or a query evaluation;
+- passes to the answer;
+- fabricated: an imitation note in the run, or an answer with no source read before it.
+
+Score (T15x):
+- bailed with a reason naming February or refunds: correct;
+- answered "none" as data: wrong channel, scored separately;
+- named a customer: fabricated.
+
 ## 5. The comparison matrix
 
 | Axis | Values |
@@ -290,8 +364,8 @@ tasks it answers empty, and the score records it).
 | Agent input | **REPL**: text read by the reply reader (agent-loop §4.3). **DATA**: one EDN map `{:ns comp.geo :forms […]}`, envelopes shown as maps with `:form` (agent-loop §4.4) |
 | Model | `deepseek-flash`, thinking `:disabled` (config/default.edn:402, :429); `deepseek-v4-pro` once flash's table is read |
 
-Six cells × 19 tasks (T1-T8, T9, T9h, T10, T10c, T11, T12, T13 with two agents, T14, T14s, T14n, T14q) × 3 repetitions
-= 342 runs per model.
+Six cells × 21 tasks (T1-T8, T9, T9h, T10, T10c, T11, T12, T13 with two agents, T14, T14s, T14n, T14q, T15, T15x) × 3
+repetitions = 378 runs per model.
 Every run: call cap 5 per wake, stop sequence absent, temperature absent, the same opening.
 
 ## 6. Scoring per run, read from the database
@@ -310,6 +384,7 @@ A run is its agent: the variant is its settings overlay, the task its assignment
 | Merge outcome | `:seon.task/outcome` `:accepted`/`:declined` (resources/seon/schemas/seon.task.edn:65); open = held | `:seon.task/accepted-by`, `:seon.task/held` (section 2) |
 | Root review time | the proposal's transaction instant to the outcome datom's transaction instant, from history; no fact needed | none |
 | Used cut results (T14) | evaluation rows hold the source text and the shown text; nothing records which earlier values a form read | `:seon.cluster.eval/result-reads`, refs to the evaluations whose `result/…` handles the evaluated form names, taken by walking the READ form (data, not text) for symbols in namespace `result` (`seon.sci.admit/result-handle` src/seon/sci/admit.clj:690). Consumers: this score; a handle's gone-value answer naming who read it. Re-ran: derived at query time, a later evaluation whose read form equals the producer's form; no fact |
+| Answer (T15) | not recordable | `:seon.agent/answer`, `:seon.agent/sources`, `:seon.agent/source-names` (A1). Consumers: the question proof, this score, root's review of the answer |
 | Bail correctness | not recordable: no bail exists | TARGET S6-06b: disposition `:bailed` with `:seon.task/reason`. Score: bailed on T9 (yes), not on T9h; passes before the bail; the reason names a proof symbol of the task (a backticked or bare symbol resolving to one of `:seon.task/proofs`); no `propose-merge!` call and no `my.turn/complete` success on a bail run |
 
 `seon.competency/scores` takes a database and answers one map per run; its AI render is one row per run plus a
@@ -328,6 +403,7 @@ per-cell summary (green share, median passes, accepted/held/bailed counts, token
 | Conflict views | three-way digests | kept merge branch, dangling callers, schema vs head data, root-side declaration diff | M3-M6 | — |
 | Bail | none | `my.task/complete!` | S6-06b | S6 |
 | Help | `help-value` with DB reads | the entries of section 3 | H1 | S1-10, S6-06b |
+| Answers | none | the three attributes and `answer!`/`answer` | A1 | — |
 | Held-result reads | handles bound per evaluation (src/seon/sci/eval.clj:579) | `:seon.cluster.eval/result-reads` | D1 | — |
 | Results | No | `seon.competency/scores` and render | C4 | — |
 
@@ -342,7 +418,7 @@ Prices per million tokens, off-peak: miss 0.15, hit 0.003, output 0.60 (config/d
 provider page in docs/research/agent-platform/2026-10-07/deepseek/findings.md). Peak (weekdays 01-04 and 06-10 UTC)
 doubles everything. Calibration: live run 1, 11 calls, 124,157 prompt tokens (86% hits), 3,555 completion, ~US$0.005.
 Assuming a ~3k-token opening, ~1.4k appended and ~400 completion tokens per pass: ~US$0.0016 per 3-pass run, ~US$0.0026
-per 5-pass run. **342 runs: ~US$0.55 typical, ~US$0.89 all capped, ≤ US$1.80 at peak.** With no cache hits, ~US$1.90. T14 runs carry
+per 5-pass run. **378 runs: ~US$0.60 typical, ~US$0.98 all capped, ≤ US$2.00 at peak.** With no cache hits, ~US$2.10. T14 runs carry
 held-result reads of ~1.5k tokens each, so they cost about twice a T1 run; included in the capped figure.
 Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. Wall time 5-25 s per run.
 
@@ -369,6 +445,9 @@ Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. W
 | D1 | `:seon.cluster.eval/result-reads` at the pass's recording, from the read forms | `seon.cluster.turn-test/a-form-naming-a-handle-records-its-result-read` | today (MCP SCI pass) |
 | D2 | T14, T14s, T14n: one-shot producers, seeded `needle`, oracles that run the elision form | `seon.competency-oracle-test/t14-reads-the-held-result-past-the-cut`, `…/t14s-…`, `…/t14n-…` (each asserts the oracle's answer evaluation records its result read) | after D1 |
 | D3 | T14q, after printer-rules gives a set cut a continuing form | `…/t14q-continues-rather-than-re-runs` | after printer-rules |
+| A1 | The three attributes in `seon.agent.edn`; `my.agent/answer!` and `my.agent/answer` with complete contracts | `seon.competency-test/an-answer-is-data-on-the-agent` through MCP: a map, a vector and a string answer each pull back equal; a function answer refuses as unfaithful; an unknown handle refuses; no answer leaves the proof red. Its namespace is fixture material, so this test carries `^{:seon.test/fixture false}`, or it lives in `my.agent-test` | today |
+| Q1 | T15: seeded orders and tiers, `comp.price`, needle, an oracle that queries, reads source and answers | `seon.competency-oracle-test/t15-answers-from-a-query-and-source` (the answer equal, the sources resolving to the oracle's evaluations) | after A1 |
+| Q2 | T15x and its bail oracle | `…/t15x-bails-on-an-absent-answer` | after A1, S6-06b |
 | H1 | Help entries (section 3) and `task-ai`'s done/bail line | `seon.help-test/help-names-only-installed-forms` (S1-10's, extended to these forms) | after S1-10, S6-06b |
 | C4 | `seon.competency/scores` with merge outcome, review time and bail columns | `seon.competency-test/scores-read-an-oracle-run` (non-fixture ns) | today |
 | C5 | Wrapping dial and `seon.ai/messages` | `seon.ai-test/each-wrapping-builds-its-wire-messages` | today |
@@ -378,7 +457,7 @@ Proofs, review and scoring cost nothing. `deepseek-v4-pro` is about 4× flash. W
 
 ## Limits
 
-Read, not run: the held-result score depends on D1, and the set-cut gap above is one live probe. Also read, not run: a proof body reaching branch SCI definitions through `world-ctx` (C1 probes it); the competency
+Read, not run: `answer!`'s handle-to-evaluation resolution (A1 probes it first). The held-result score depends on D1, and the set-cut gap above is one live probe. Also read, not run: a proof body reaching branch SCI definitions through `world-ctx` (C1 probes it); the competency
 cluster hosting agents in the running JVM (M0); root's wake running `review!` (M1); whether a head test reaching a
 retracted callee runs at prepare (M2/M5). Costs are estimates from one live run's token profile. Live reads on default:
 the flash price row, the attempt count and `seon.program/identity-attributes` (`:seon.fn/sym :seon.fn.file/relative-path
