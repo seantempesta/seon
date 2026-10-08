@@ -60,14 +60,14 @@
            (is (= {:seon.fn/sym 'entity-pairs.fixture/function}
                   (render.ns/function-ai {:seon.db/db database :seon.render/value entity :seon.render/distance 0})))))
        (when (= :seon.test/sym (first entity-lookup))
-         (doseq [[facts expected] [[{} "unrun or incomplete"]
+         (doseq [[facts expected] [[{} nil]
                                    [{:seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0} "pass"]
                                    [{:seon.test/fail-count 1} "fail"]
                                    [{:seon.test/error-count 1} "error"]]]
            (let [value (merge entity facts)
                  test-name (:seon.test/sym value)
                  shown (render.test/render-ai {:seon.render/value value})]
-             (is (= {:seon.test/sym test-name :seon.render.test/state expected}
+             (is (= (cond-> {:seon.test/sym test-name} expected (assoc :seon.render.test/state expected))
                     (select-keys shown [:seon.test/sym :seon.render.test/state])))
              (is (= (list 'seon.test/recorded-result (list 'seon.db/db) (list 'quote test-name))
                     (render.test/render-form {:seon.render/value value}))

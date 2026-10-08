@@ -192,16 +192,19 @@
 
 (defn function-ai
   "A function node as data: its name and doc line; beyond distance zero its
-  authored source as its lines and its contract where the source does not carry it. What it calls
+  authored source as its lines, which hold the doc, and its contract where the source does not carry it. What it calls
   and what calls it are its related data."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render.ns/function-view]}
   [unit]
   (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec}
         (or (:seon.render/value unit) unit)
+        line (first-doc-line doc)
+        near? (pos? (node-distance unit))
+        ;; the authored source carries its docstring, so a shown source is the doc
         named (cond-> {:seon.fn/sym function-name}
-                (first-doc-line doc) (assoc :seon.fn/doc (first-doc-line doc)))]
+                (and line (not (and source near? (str/includes? source line)))) (assoc :seon.fn/doc line))]
     (cond-> named
-      (and source (pos? (node-distance unit))) (assoc :seon.render.ns/source-lines (str/split-lines source))
+      (and source near?) (assoc :seon.render.ns/source-lines (str/split-lines source))
       (and spec (pos? (node-distance unit)) (not (and source (str/includes? source ":malli/schema"))))
       (assoc :seon.fn/spec spec))))
 

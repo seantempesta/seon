@@ -27,14 +27,15 @@
           (merge entity stored result)))
       entity)))
 
-(defn- state [entity]
+(defn- state
+  "The recorded outcome as \"pass\", \"fail\" or \"error\"; nil for a test with no recorded run."
+  [entity]
   (cond
     (pos? (get entity :seon.test/error-count 0)) "error"
     (pos? (get entity :seon.test/fail-count 0)) "fail"
     (and (or (:seon.test/unchanged entity) (pos? (get entity :seon.test/pass-count 0)))
          (= 0 (:seon.test/fail-count entity))
-         (= 0 (:seon.test/error-count entity))) "pass"
-    :else "unrun or incomplete"))
+         (= 0 (:seon.test/error-count entity))) "pass"))
 
 (defn- failures [entity]
   (sort-by (juxt #(get % :seon.test.failure/reported-file "")
@@ -48,7 +49,7 @@
    :seon.test.failure/expected :seon.test.failure/actual])
 
 (defn render-ai
-  "A test's result as data: its name and state; beyond distance zero also
+  "A test's result as data: its name and, once it has run, its state; beyond distance zero also
   where it runs, its failed assertions and, when red, the definitions changed
   since it last passed.
 
@@ -62,7 +63,8 @@
   (let [entity (evidence unit) test-name (:seon.test/sym entity) database (:seon.db/db unit)
         read? (and database (qualified-symbol? test-name))
         shown-state (state entity)
-        named {:seon.test/sym test-name :seon.render.test/state shown-state}]
+        named (cond-> {:seon.test/sym test-name}
+                shown-state (assoc :seon.render.test/state shown-state))]
     (if-not (near? unit)
       named
       (cond-> (merge named
@@ -170,7 +172,7 @@
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity)]
     [:section {:class "seon-family-entry seon-test"}
-     [:h3 (function-link test-name) " — " (state entity)]
+     [:h3 (function-link test-name) " — " (or (state entity) "unrun or incomplete")]
      (when (:seon.test/unchanged entity)
        [:p "Unchanged; reused the result recorded at :t "
         (or (:seon.test/recorded-basis-t entity) "unavailable")

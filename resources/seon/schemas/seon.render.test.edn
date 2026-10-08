@@ -21,9 +21,9 @@
   [:seon.render.test/outcomes [:map-of [:enum :error :fail :pass :unfinished] [:int {:min 0}]]]
   [:seon.render.test/red {:optional true} [:vector :seon.test/sym]]]
  :seon.render.test/view
- [:map {:description "A test's result as its AI face shows it: state, host, failed assertions and, unless green, the definitions changed since it last passed."}
+ [:map {:description "A test's result as its AI face shows it: state once it has run (absent otherwise), host, failed assertions and, unless green, the definitions changed since it last passed."}
   [:seon.test/sym [:maybe :seon.test/sym]]
-  [:seon.render.test/state [:enum "pass" "fail" "error" "unrun or incomplete"]]
+  [:seon.render.test/state {:optional true} [:enum "pass" "fail" "error"]]
   [:seon.test/unchanged {:optional true} :seon.test/unchanged]
   [:seon.test/recorded-basis-t {:optional true} :seon.test/recorded-basis-t]
   [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]

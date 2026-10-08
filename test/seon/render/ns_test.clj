@@ -211,7 +211,8 @@
                      (db/registration-check :seon.task/intent [:string {:min 1}])))
              "an unchanged form reads nothing"))))))
 
-(deftest a-function-renders-its-source-by-name
+(deftest ^{:seon/tasks #{'seon.render.ns/a-function-entity-render-repeats-an-unrun-state-per-test}}
+  a-function-renders-its-source-by-name
   ;; Class regression: the function node is its authored form; what it calls
   ;; and what calls it are its related data (seon.render.walk/related).
   (support/with-database
@@ -227,6 +228,7 @@
         (is (= (str/split-lines (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)))
                (:seon.render.ns/source-lines launcher))
             "the source is its lines, so the printer shows its layout unescaped")
+        (is (not (contains? launcher :seon.fn/doc)) "a shown source carries the doc, so it is not stated twice")
         (is (hiccup/hiccup? (sut/function-html (unit 'seon.flow/start-work-launcher! 1))))))))
 
 (deftest an-agents-namespace-concern-is-its-name-requires-and-definition-count

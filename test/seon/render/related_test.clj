@@ -108,14 +108,15 @@
        (is (= (into #{} (map str) (keys (dissoc (:seon.related/data ai) :seon.related/skipped))) summaries)
            "the HTML face heads a section for each group the AI face returns")))))
 
-(deftest a-distance-zero-test-render-is-its-name-and-state
+(deftest ^{:seon/tasks #{'seon.render.ns/a-function-entity-render-repeats-an-unrun-state-per-test}}
+  a-distance-zero-test-render-is-its-name-and-state
   (support/with-database
    (fn [connection]
      (world! connection)
      (let [shown (render.test/render-ai {:seon.db/db @connection :seon.render/distance 0
                                          :seon.render/value {:seon.test/sym 'rd.a/proves}})]
-       (is (= #{:seon.test/sym :seon.render.test/state} (set (keys shown)))
-           "a test named beside another entity reads no host report")))))
+       (is (= #{:seon.test/sym} (set (keys shown)))
+           "a test named beside another entity reads no host report, and a test that never ran states no outcome")))))
 
 (deftest breadth-first-selection-reads-group-counts-not-every-target
   (doseq [n [1 10 100]]
