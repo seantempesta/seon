@@ -443,6 +443,8 @@ store before its slice lands.
 19. **A definition's pointer to the evaluation that made it is dropped at merge**; the source file becomes the record.
 20. **Nested definitions** are known the way SCI knows them (its Var write hook), never by parsing text.
 21. **Cross-branch revisions** for content-keyed caches: the change to our Datahike fork is approved.
+22. **A test already red on main** before the source branch existed stops the automatic merge and asks root (merge.md §4).
+23. **Norms run in a fixed order**, listed as a vector on the merge request (`:seon.merge/norms`).
 
 Open:
 - **Subtree counts** (Datahike fork): child counts in branch nodes, counting at each split, or a recount job.
