@@ -7,4 +7,8 @@
  #:seon.task{:name "the-current-state-block-misleads-and-is-large"
              :kind :function
              :intent "The current-state block (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08): a proof shows :green with nothing saying a task whose proofs are all green proves nothing; must-read seon.render.value/render-ai shows :seon.ref/line 1 (wrong); :seon.fn/spec prints as a string instead of data; the block draws a :large-value finding against itself (1,108 tokens). Done when each is fixed at its producer (seon.context/current-state, seon.ref) with a regression per item."
-             :must-read #{seon.context/current-state seon.ref/references}}]
+             :must-read #{seon.context/current-state seon.ref/references}}
+ #:seon.task{:name "a-red-proof-shows-printed-strings-and-only-its-first-failure"
+             :kind :function
+             :intent "In `(seon.context/current-state)` a red proof showed its first failing report only, as :expected and :actual strings; between passes the first report flipped between assertions and the model concluded its block was stale (live-agent run, agent live-flash, default 6cc5dbbb4, 2026-10-08). Done when the proof shows every failing assertion in a stable order, its claim as the runner's stored shown text marked as text."
+             :must-read #{seon.context/proofs}}]

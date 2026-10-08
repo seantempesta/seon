@@ -312,16 +312,22 @@
 (def ^:private task-selector
   [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/must-read])
 
-;; A proof's first failing report as the spec's unqualified keys; each present only when the report has it.
-(defn- proof-failure
-  {:malli/schema [:=> [:cat :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]]
-                  [:or :nil :seon.context/proof-failure]]}
-  [sym result]
-  (when-let [report (first (:seon.test.failure/reports result))]
-    (cond-> {:test sym}
-      (:seon.test.failure/expected report) (assoc :expected (:seon.test.failure/expected report))
-      (:seon.test.failure/actual report) (assoc :actual (:seon.test.failure/actual report))
-      (:seon.test.failure/message report) (assoc :message (:seon.test.failure/message report)))))
+;; Every failing assertion of a red proof, in the order `seon.render.test` shows (file, line, report id)
+;; so two passes show the same list. The
+;; runner stores a claim's expected and actual as the printer's shown text; they stay text, marked so.
+(def ^:private failure-keys
+  {:seon.test.failure/type :type :seon.test.failure/message :message
+   :seon.test.failure/testing-contexts :testing :seon.test.failure/reported-file :file
+   :seon.test.failure/line :line :seon.test.failure/expected :expected-text
+   :seon.test.failure/actual :actual-text})
+
+(defn- proof-failures
+  {:malli/schema [:=> [:cat [:or :seon.test/result :seon.test/result-unknown]]
+                  [:or :nil :seon.context/proof-failures]]}
+  [result]
+  (when-let [reports (seq (:seon.test.failure/reports result))]
+    (mapv #(update-keys (select-keys % (keys failure-keys)) failure-keys)
+          (sort-by (juxt #(get % :seon.test.failure/reported-file "") #(get % :seon.test.failure/line 0) :seon.test.report/id) reports))))
 
 (defn- proof-status
   "A proof's status from its latest result and its current reach digest."
@@ -355,8 +361,8 @@
                                   (let [result (by-sym s)
                                         status (proof-status result (get digests s))]
                                     (cond-> {:seon.test/sym s :seon.test/source (sources s) :seon.context/proof-status status}
-                                      (= :red status) (as-> entry (if-let [f (proof-failure s result)]
-                                                                    (assoc entry :seon.context/proof-failure f) entry)))))
+                                      (= :red status) (as-> entry (if-let [f (proof-failures result)]
+                                                                    (assoc entry :seon.context/proof-failures f) entry)))))
                                 names)]
               {:seon.context/counts (frequencies (map :seon.context/proof-status entries))
                :seon.context/proof-list entries}))))))

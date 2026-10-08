@@ -91,18 +91,23 @@
 (def ^:private proof-test
   "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\"))")
 
-(deftest a-red-proof-shows-expected-actual-and-message-as-data
+(def ^:private two-failure-proof-test
+  "(ns tq.cs-test (:require [clojure.test :refer [deftest is]] [tq.cs])) (deftest ^{:seon/tasks #{'tq.cs/shape}} shape (is (= 4 (tq.cs/f 2)) \"doubles\")\n (is (= 9 (tq.cs/f 3)) \"triples\"))")
+
+(deftest ^{:seon/tasks #{'seon.context/a-red-proof-shows-printed-strings-and-only-its-first-failure}}
+  a-red-proof-shows-every-failing-assertion-with-its-claim-as-text
   (test-support/with-running-agent
    (fn [running agent-id connection]
      (proof-task connection agent-id)
      (evaluate running agent-id "(ns tq.cs) (defn f [x] (inc x))")
-     (evaluate running agent-id proof-test)
+     (evaluate running agent-id two-failure-proof-test)
      (evaluate running agent-id "(my.test/check {})")
      (let [proofs (:seon.context/proofs (block running agent-id))
-           failure (:seon.context/proof-failure (first (:seon.context/proof-list proofs)))]
+           failures (:seon.context/proof-failures (first (:seon.context/proof-list proofs)))]
        (is (= {:red 1} (:seon.context/counts proofs)))
-       (is (= "doubles" (:message failure)))
-       (is (re-find #"\(= 4" (:expected failure)))))))
+       (is (= ["doubles" "triples"] (sort (mapv :message failures))) "each failing assertion is shown")
+       (is (every? #(re-find #"\(= \d" (:expected-text %)) failures) "the claim is the runner's stored text, marked as text")
+       (is (every? :actual-text failures))))))
 
 (deftest the-block-resolves-the-names-a-task-references
   (test-support/with-running-agent

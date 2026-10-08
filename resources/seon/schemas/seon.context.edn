@@ -89,12 +89,15 @@
                 [:seon.task/status {:optional true} :seon.task/status]],
                :must-reads [:vector {:description "Each reference the held task makes, resolved or as its problem."} [:or :seon.ref/resolved :seon.ref/problem]]
                :proof-status [:enum {:description "A proof's status by the basis rule: no result for the program it now reaches is pending."} :green :red :pending]
-               :proof-failure [:map {:description "A red proof's first failing report as data."}
-                               [:test :seon.test/sym] [:expected {:optional true} :string]
-                               [:actual {:optional true} :string] [:message {:optional true} :string]]
+               :proof-failure [:map {:description "One failing assertion of a red proof. The expected and actual claims are the printer's shown text, stored by the test runner as text."}
+                               [:type {:optional true} :seon.test.failure/type] [:message {:optional true} :string]
+                               [:testing {:optional true} :seon.test.failure/testing-contexts]
+                               [:file {:optional true} :string] [:line {:optional true} :seon.test.failure/line]
+                               [:expected-text {:optional true} :string] [:actual-text {:optional true} :string]]
+               :proof-failures [:vector {:description "Every failing assertion of a red proof, in a stable order (file, line, report)."} :seon.context/proof-failure]
                :proof [:map [:seon.test/sym :seon.test/sym] [:seon.test/source :seon.test/source]
                        [:seon.context/proof-status :seon.context/proof-status]
-                       [:seon.context/proof-failure {:optional true} :seon.context/proof-failure]]
+                       [:seon.context/proof-failures {:optional true} :seon.context/proof-failures]]
                :proofs [:map {:description "Counts by status, then each proof in symbol order."}
                         [:seon.context/counts [:map-of :seon.context/proof-status [:int {:min 1}]]]
                         [:seon.context/proof-list [:vector :seon.context/proof]]]
