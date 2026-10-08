@@ -26,4 +26,8 @@
  #:seon.task{:name "help-teaches-a-placeholder-namespace-for-defn"
              :kind :function
              :intent "(help) teaches `(in-ns 'my.agents.name)` before defn; a deepseek-flash agent whose task named `live.text/slug` read it and evaluated (in-ns 'my.program), then defined slug in user (live-agent run, default 6cc5dbbb4, 2026-10-08). Done when help says to change a function in the namespace that owns it, e.g. (in-ns 'the.task.ns) then (defn f ...), with no placeholder that names a real namespace prefix."
-             :must-read #{seon.bootstrap/help-value}}]
+             :must-read #{seon.bootstrap/help-value}}
+ #:seon.task{:name "help-teaches-a-placeholder-checkout-path"
+             :kind :function
+             :intent "(help) shows (my.program/write-branch! {:seon.fn/root \"/path/to/checkout\"}) as a line of its own, and a deepseek-flash agent copied it verbatim in the pass after its proof went green (live-agent run 4, default e1a71b7c8, agent live-flash-4, 2026-10-08), spending its last turn on a call that refused (\"Each change needs its source and one file.\", offending live.text/initials, a REPL-defined function with no file). Help teaches an invented path as if it were the call to make, and write-back is root's step on real backlog tasks, not a scratch task's. Done when help names no placeholder path an agent can copy as-is and says when write-back applies, with a bootstrap test asserting no help line carries a placeholder value."
+             :must-read #{seon.bootstrap/help-value my.program/write-branch!}}]
