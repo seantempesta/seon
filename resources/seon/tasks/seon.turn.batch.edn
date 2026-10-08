@@ -68,4 +68,10 @@
              :kind :function
              :intent "Every `deftest` an agent evaluated in a file-backed test namespace (`my.program-test`, `seon.id-test`) was refused by `seon.db`'s write-digest check: the batch digested the row under SCI's live namespace bindings, which lack the namespace's stored refers (`clojure.test/deftest`, `is`), while the writer digests under the row the transaction leaves stored. Done when the producer digests under that row (`seon.turn.batch/stored-namespace-row`). Proof: `seon.turn.batch-test/a-deftest-in-a-namespace-with-stored-refers-is-admitted`."
              :must-read #{seon.turn.batch/derive-form seon.db/definition-digest-of}
-             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+ #:seon.task{:name "a-repl-namespace-row-keeps-neither-doc-nor-source"
+             :kind :function
+             :intent "A namespace created at the REPL is stored as `(ns rtefix2.core)` with no docstring, and evaluating its full `ns` form again does not update the row (`seon.turn.batch/namespace-facts` writes a stored namespace only when its resolver state changed, and `seon.sci.eval/namespace-context-row` derives source and doc from the reader context, not the `ns` form). Its digest then never equals the file's, so the branch-evidence gate reports every agent-authored namespace as differing. High priority for the dogfood loop. Done when evaluating an `ns` form stores that form's docstring and source, and the digest equals the one indexing its file produces. Reported by lane repl-test-edges."
+             :must-read #{seon.turn.batch/namespace-facts seon.sci.eval/namespace-context-row}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+]

@@ -262,4 +262,20 @@
              :kind :function
              :intent "After any program change the agent's context is regenerated: base-bindings snapshots every binding of every namespace in the base (sci/namespace-state) and regenerate-agent-context! walks the whole private layer against it, 6-10 MB per definition pass and up to 30 MB on the pass after (defn-why, 2026-10-08), where SCI's own fork (sci/fork, reference-code/sci/src/sci/core.cljc:334-340) costs 0.6 KB. Cost follows the program's Vars, not the change. Carry only the bindings the change touched (the replaced definitions are already known per row). Done when a one-definition change regenerates a context in under 1 MB."
              :must-read #{seon.sci.eval/base-bindings seon.sci.eval/regenerate-agent-context! seon.sci.eval/fork-for-turn}
-             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
+ #:seon.task{:name "a-file-backed-namespace-has-no-refers-in-the-agent-context"
+             :kind :function
+             :intent "Acquisition installs every program namespace's aliases, imports and requires but its refers as `{}`, and only the lazy install of one of its functions adds them; so `(in-ns 'my.program-test)` sees no `deftest`/`is` refer of its own (they resolve through other paths), `seon.turn.batch/namespace-entity` reports a namespace with no refers, and a REPL `require` in that namespace writes its row back without its stored refers (`seon.turn.batch/namespace-facts` replaces the attributes the live row carries), re-deriving every test's digest without them. Done when entering a stored namespace in SCI holds its stored refers (`seon.sci.eval/install-namespace-bindings!`, which already refuses a missing target by name), proven by a REPL `require` in a test namespace keeping its refers."
+             :must-read #{seon.sci.eval/install-namespace-bindings! seon.turn.batch/namespace-facts}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+ #:seon.task{:name "test-support-has-no-vars-in-the-agent-context"
+             :kind :function
+             :intent "`(count (ns-publics 'seon.test-support))` is 0 in an agent's SCI context and `(resolve 'seon.test-support/with-database)` is nil, while default's JVM has the namespace loaded and the store holds its 67 function rows (admission `:core`). Likely cause, to verify: `install-first-party-namespaces!` binds only namespaces `find-ns` finds when the base context is built, and `seon.test-support` loads later (a test run's `requiring-resolve`), so the agent's context never receives it. Done when the harness Vars resolve in a new agent's context (load the harness before the base context, or bind a host namespace when it first loads), proven by a REPL test using `seon.test-support/with-database` through `seon.mcp/call`."
+             :must-read #{seon.sci.eval/install-first-party-namespaces! seon.test-support/with-database}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+ #:seon.task{:name "an-unloaded-namespace-row-resolves-to-nothing"
+             :kind :function
+             :intent "A file-derived function row in a namespace the JVM never loaded resolves to nothing in SCI: the agent gets \"Unable to resolve symbol\", though `seon.sci.eval` (the comment above `install-caller-host-bindings!`) promises a refusal naming the row when it is called. Done when such a call answers the named refusal. Reported by lane repl-test-edges."
+             :must-read #{seon.sci.eval/install-caller-host-bindings! seon.sci.eval/install-function-from-database!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+]
