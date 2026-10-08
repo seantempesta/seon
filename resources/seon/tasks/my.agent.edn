@@ -21,4 +21,8 @@
  #:seon.task{:name "settings-bang-answers-the-overrides-before-the-write"
              :kind :function
              :intent "(my.agent/settings! {:seon.config.run/max-episode-runs 10}) on an agent with no overrides answered {:my.agent/settings {}}, and the next call (my.agent/settings! {:seon.config.ai/no-provider false :seon.config.run/max-episode-runs 5}) answered {:seon.config.run/max-episode-runs 10}: the reply shows the overrides before its own write (live-agent run, default 6cc5dbbb4, 2026-10-08), though its docstring promises my resulting overrides. The value is rendered by `seon.agent/render-settings-ai`, which re-reads the overrides from the evaluation's database value. Done when the reply shows the overrides the write produced."
-             :must-read #{my.agent/settings! seon.agent/render-settings-ai}}]
+             :must-read #{my.agent/settings! seon.agent/render-settings-ai}}
+ #:seon.task{:name "settings-root-writes-on-main-never-reach-an-agent-on-its-branch"
+             :kind :function
+             :intent "Root's (seon.agent/settings! {:seon.config.ai/no-provider false :seon.config.run/max-episode-runs 5} main-connection \"live-flash-2\") wrote the agent's overrides on main, but the agent works on its branch, whose turn reads its own copy of the agent entity: the branch kept {} (no-provider true from the cluster), so root's wake opened only a system turn and no model pass, while a message root sent landed on the agent's branch (live-agent run 2, default ade6e3059, 2026-10-08). The overrides took effect only when written through the agent's own MCP REPL (my.agent/settings!), an outside row in its history. Agent information lives on the agent: done when the dials root sets for an agent are the ones the agent's pass reads, whichever branch it holds."
+             :must-read #{my.agent/settings! seon.agent/settings! seon.agent/settings}}]
