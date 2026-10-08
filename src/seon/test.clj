@@ -1021,7 +1021,8 @@
             ;; recorded without it is unknown and executes.
             current-reach (let [greens (into [] (keep (fn [[test-symbol _]]
                                                         (when-let [[_ member] (get latest test-symbol)]
-                                                          (when (and (green? member) (one member :seon.test.member/reach-digest))
+                                                          (when (and (green? member) (one member :seon.test.member/reach-digest)
+                                                                     (not (observed-reached test-symbol)))
                                                             test-symbol))))
                                              reuse-candidates)]
                             (if (seq greens) (selection-read! (runner/reach-digests database greens)) {}))
