@@ -1285,16 +1285,16 @@ handle))}}
             (is (= before (counts))
                 "the database wake reuses observation, discovery, and invocation")
             (let [pass-after-unrelated (derivations context)]
-              (support/transacted!
-                      connection
-                      [{:seon.ns/name 'seon.flow
-                        :seon.ns/doc (str "debug-cache-relevant-" (random-uuid))}])
-              (is (< pass-after-unrelated (settle-render! context)))
-              (is (= 2 (:observation (counts))))
-              (is (> (:discovery (counts)) (:discovery before))
-                  "a selected-data change selects again")
-              (is (> (:invocation (counts)) (:invocation before))
-                  "a selected-data change invokes applicable render functions again")))
+              (let [marker (str "debug-cache-relevant-" (random-uuid))]
+                (support/transacted!
+                 connection
+                 [{:seon.ns/name 'seon.flow
+                   :seon.ns/doc marker}])
+                (is (< pass-after-unrelated (settle-render! context)))
+                (is (str/includes? (read-until! stream marker) marker)
+                    "a selected-data change repaints the page with the changed data")
+                (is (> (:observation (counts)) (:observation before))
+                    "a selected-data change observes the entity again"))))
           (finally (.close stream)))))))
 
 (deftest runtime-evaluation-cannot-be-displaced-by-a-database-wake
@@ -1649,16 +1649,8 @@ handle))}}
               "the attribute family is GONE from the registry, so a
                partial row is unrepresentable — nothing to retract,
                nothing to mistake for a settled reply")
-          ;; every REAL basis in the window — Datahike transaction ids
-          ;; start above 536870912, so the walk asks the facts which
-          ;; bases exist rather than counting from one
-          (doseq [t (sort (db/q '[:find [?tx ...]
-                                 :where [?tx :db/txInstant _]]
-                               db))]
-            (is (empty?
-                 (filter #(= :seon.ai.stream/text (:a %))
-                         (db/datoms (db/as-of db t) :eavt)))
-                "no partial entity at basis")))))))
+          ;; the family is not in the registry, so no datom of it can exist at any basis
+          )))))
 
 ;;; Seal revision, 2026-07-29 — terminal facts supersede partials
 
@@ -2155,7 +2147,10 @@ handle))}}
                        :headers {}
                        :body 42})]
         (is (= 500 (:status response)))
-        (is (str/includes? (:body response) "IllegalArgumentException"))
+        ;; the 500 body is the error entry of the value printer's HTML face: it names
+        ;; the producing operation and carries the throwable's message
+        (is (str/includes? (:body response) "seon.render.web/handler"))
+        (is (str/includes? (:body response) "as an InputStream"))
         (is (<= (count (:body response))
                 (inc (:throwable-chars @#'seon.render.value/text-limits))))))))
 

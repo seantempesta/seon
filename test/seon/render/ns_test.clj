@@ -11,7 +11,7 @@
             [seon.test-support :as support])
   )
 
-(deftest identity-reads-stewardship-without-an-agent-cluster-attribute
+(deftest identity-reads-stewardship-from-the-namespace
   (support/with-database
    (fn [connection]
      ;; The first agent created in a namespace stewards it; a later one shares it.
@@ -28,7 +28,7 @@
        (is (= "record-steward"
               (get-in observed [:seon.agent/namespace :seon.ns/steward
                                 :seon.agent/id])))
-       (is (not (contains? observed :seon.agent/cluster)))
+       (is (some? (:seon.agent/cluster observed)) "an agent names its cluster (648369489); the steward comes from the namespace")
        (is (= ['(help)] (:seon.render/operations observed)))
        (is (= (list 'seon.db/pull (list 'quote (second (second (:seon.repl/form (agent/identity-form unit)))))
                     [:seon.agent/id "record-agent"])
@@ -197,10 +197,10 @@
          (is (= (list 'seon.render.schema/usage '(seon.db/db) :seon.task/intent (list 'quote [:string {:min 1}]))
                 (render.schema/render-form (unit [:seon.schema/key :seon.task/intent] 1)))))
        (testing "a stored-data check judges each entity's reconstructed value, once, at registration"
-         (let [check (db/stored-value-check database :seon.task/intent [:string {:min 400}])]
+         (let [check (db/stored-value-check database :seon.task/intent [:string {:max 0}])]
            (is (pos? (:seon.schema.usage/checked check)))
            (is (= (:seon.schema.usage/checked check) (:seon.schema.usage/failing check))
-               "every stored intent is shorter than 400 characters"))
+               "every stored intent is a non-empty string, so none satisfies an empty one"))
          (let [form (clojure.edn/read-string
                      (db/q '[:find ?f . :in $ ?k :where [?s :seon.schema/key ?k] [?s :seon.schema/form ?f]]
                            database :seon.fn.arity/input-refs))
