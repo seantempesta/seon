@@ -24,8 +24,7 @@
             [seon.render.value :as value]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn])
-  (:import (java.nio.charset StandardCharsets)))
+            [seon.schema.edn :as schema.edn]))
 
 (defn var-reference?
   "True for a host or SCI Var reference."
@@ -1418,20 +1417,14 @@
                    (when (= tested-branch (get-in database [:config :branch]))
                      (db/as-of database (:seon.test.run/basis-t run)))
                    database)
-        threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
-        _ (when (seon.error.refusal/error? threshold)
-            (throw (ex-info "Cannot read the assertion blob threshold." threshold)))
         staged (volatile! [])
         stage-field
         (fn [failure field size-key blob-key]
           (if-let [text (get failure field)]
-            (let [size (alength (.getBytes ^String text StandardCharsets/UTF_8))]
-              (if (and threshold (> size threshold))
-                (let [write (blob/stage! connection text)]
-                  (vswap! staged conj write)
-                  (-> failure (dissoc field)
-                      (assoc size-key size blob-key (:seon.blob/digest write))))
-                (assoc failure size-key size)))
+            (let [{fact :seon.blob/fact writes :seon.blob/staged-writes}
+                  (blob/inline-or-stage connection text field size-key blob-key)]
+              (vswap! staged into writes)
+              (merge (dissoc failure field) fact))
             failure))
         ;; THE STORED ERROR IS ADMITTED, NEVER PRINTED WHOLE: its ex-data may
         ;; name an offending value that is an endless lazy sequence (a refused

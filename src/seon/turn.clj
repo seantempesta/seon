@@ -66,12 +66,6 @@
   (delay (requiring-resolve 'seon.context/capture-tx)))
 
 
-(defn- result-blob-threshold
-  [db]
-  (db/q '[:find ?threshold .
-          :where [_ :seon.config.eval.result/blob-threshold ?threshold]]
-        db))
-
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -82,14 +76,9 @@
      [:seon.turn/reply-blob {:optional true} :seon.turn/reply-blob]
      [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
   [connection text]
-  (let [threshold (result-blob-threshold (db/db connection))
-        size (long (count text))
-        staged (when (and threshold (> size threshold))
-                 (blob/stage! connection text))]
-    (cond-> {::reply-size size
-             :seon.blob/staged-writes (cond-> [] staged (conj staged))}
-      staged (assoc ::reply-blob (:seon.blob/digest staged))
-      (nil? staged) (assoc ::reply text))))
+  (let [{fact :seon.blob/fact writes :seon.blob/staged-writes}
+        (blob/inline-or-stage connection text ::reply ::reply-size ::reply-blob)]
+    (assoc fact :seon.blob/staged-writes writes)))
 
 (defn evaluation-facts
   "Project a completed evaluation into its existing settlement facts."

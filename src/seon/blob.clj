@@ -214,6 +214,28 @@
                    (.update octets))]
     (staged-write octets (alength octets) (alength octets) nil digester)))
 
+(defn inline-or-stage
+  "Return `{:seon.blob/fact :seon.blob/staged-writes}` for `text`: its UTF-8 byte
+  size under `size-key`, and the text under `inline-key` at or under the
+  configured blob threshold, else its staged digest under `blob-key`."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :string :keyword :keyword :keyword]
+    [:map
+     [:seon.blob/fact :map]
+     [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
+  [connection text inline-key size-key blob-key]
+  (let [threshold (db/q (db/db connection)
+                        '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]])
+        _ (when (error/error? threshold)
+            (throw (ex-info "Cannot read the blob threshold." threshold)))
+        size (utf8-size text)]
+    (if (and threshold (> size threshold))
+      (let [write (stage! connection text)]
+        {:seon.blob/fact {size-key size, blob-key (:seon.blob/digest write)}
+         :seon.blob/staged-writes [write]})
+      {:seon.blob/fact {inline-key text, size-key size}
+       :seon.blob/staged-writes []})))
+
 (defn stage-binary!
   "Stage binary content without publishing it into the blob store.
 
