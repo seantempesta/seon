@@ -4,7 +4,7 @@
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
 
-(deftest an-evaluation-reply-shows-what-it-allocated
+(deftest an-unmeasured-evaluation-reply-shows-no-allocation
   (support/with-running-agent
    (fn [running agent-id _]
      (let [call (fn [code]
@@ -13,16 +13,14 @@
                                           {"name" "eval_clj"
                                            "arguments" {"cluster" running "agent" agent-id "code" code}})))]
                     (support/mcp-reply reply)))
-           ;; one 50,000,016-byte long array
+           ;; one 50,000,016-byte long array, on the agent's virtual thread
            large (call "(alength (long-array 6250000))")
            small (call "(+ 1 2)")]
        (is (= 6250000 (:seon.repl/value large)))
-       (is (<= 50.0 (:seon.repl/alloc-mb large) 80.0)
-           "a large allocation is measured on the evaluation's virtual thread")
        (is (= 3 (:seon.repl/value small)))
-       (is (<= 0.0 (:seon.repl/alloc-mb small) 5.0)
-           "an arithmetic form allocates next to nothing")
-       (is (not (contains? small :seon.repl/findings)))))))
+       (is (not-any? #(contains? % :seon.repl/alloc-mb) [large small])
+           "a virtual thread has no allocation count: no key, never every thread's total")
+       (is (not-any? #(contains? % :seon.repl/findings) [large small]))))))
 
 (deftest a-measured-call-reports-allocation-and-reads
   (support/with-running-agent

@@ -49,14 +49,6 @@
   (.getCurrentThreadAllocatedBytes
    ^com.sun.management.ThreadMXBean thread-mx))
 
-(defn- jvm-allocated-bytes
-  "Every thread's allocated bytes so far, the measure of an evaluation on a
-  virtual thread, for which HotSpot keeps no count of its own; -1 when the
-  JVM keeps none."
-  []
-  (.getTotalThreadAllocatedBytes
-   ^com.sun.management.ThreadMXBean thread-mx))
-
 (defonce ^:private ^ScheduledThreadPoolExecutor deadline-timer
   (doto (ScheduledThreadPoolExecutor.
          1
@@ -307,6 +299,10 @@
       (:seon.schema/projection ctx)))
 
 (defn- record
+  "The evaluation's record from its arm: entries, host calls, wall ms, the
+  allocation of the arm's platform threads (-1 when the owning thread is
+  virtual and has no count) and the outcome."
+  {:malli/schema [:=> [:cat :seon.sci.kernel/arm :seon.eval/outcome] :seon.sci.admit/record]}
   [armed final-outcome]
   (let [^AtomicLong entries (::entries armed)
         ^longs sampled (::sampled armed)
@@ -321,42 +317,34 @@
      :seon.eval/duration-ms
      (quot (- (System/nanoTime) started-at) 1000000)
      :seon.eval/allocated-bytes
-     (cond
-       (::measurable armed)
+     ;; A virtual thread has no count of its own (JDK 26 answers -1): the
+     ;; evaluation's allocation is unmeasured, never every thread's total.
+     (if (::measurable armed)
        (+ (if owning-thread?
             (max (aget sampled 0) (- (allocated-bytes) allocated-at-start))
             (aget sampled 0))
           (.get adopted-allocated))
-       ;; A virtual thread has no count of its own: every thread's
-       ;; allocation over the evaluation's window, which already holds the
-       ;; adopting threads' and also any unrelated concurrent work.
-       (::jvm-allocated-at-start armed)
-       (max 0 (- (jvm-allocated-bytes) (::jvm-allocated-at-start armed)))
-       :else -1)
+       -1)
      :seon.eval/outcome (or @(::outcome armed) final-outcome)}))
 
 (defn- new-armed
   "The arm VALUE: every counter, latch, and identity one evaluation needs,
   shared by whichever threads serve it. Nothing here is thread-local."
+  {:malli/schema [:=> [:cat] :seon.sci.kernel/arm]}
   []
-  (let [allocated-at-start (allocated-bytes)
-        ;; read only where the thread has no count of its own
-        jvm-allocated-at-start (if (neg? allocated-at-start) (jvm-allocated-bytes) -1)]
-    (cond->
-     {::entries (AtomicLong. 0)
-      ::sampled (long-array 1)
-      ::host-interop-observations (AtomicLong. 0)
-      ::adopted-allocated-bytes (AtomicLong. 0)
-      ::built-in-calls (atom #{})
-      ::reached (AtomicBoolean. false)
-      ::travelled (AtomicBoolean. false)
-      ::outcome (volatile! nil)
-      ::started-at (System/nanoTime)
-      ::owner-thread-id (.threadId (Thread/currentThread))
-      ::allocated-at-start allocated-at-start
-      ::measurable (not (neg? allocated-at-start))}
-      (not (neg? jvm-allocated-at-start))
-      (assoc ::jvm-allocated-at-start jvm-allocated-at-start))))
+  (let [allocated-at-start (allocated-bytes)]
+    {::entries (AtomicLong. 0)
+     ::sampled (long-array 1)
+     ::host-interop-observations (AtomicLong. 0)
+     ::adopted-allocated-bytes (AtomicLong. 0)
+     ::built-in-calls (atom #{})
+     ::reached (AtomicBoolean. false)
+     ::travelled (AtomicBoolean. false)
+     ::outcome (volatile! nil)
+     ::started-at (System/nanoTime)
+     ::owner-thread-id (.threadId (Thread/currentThread))
+     ::allocated-at-start allocated-at-start
+     ::measurable (not (neg? allocated-at-start))}))
 
 (defn- own-arm
   [guard ctx time-limit-ms]
