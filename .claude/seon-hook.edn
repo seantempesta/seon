@@ -47,5 +47,14 @@
  :schema-admission
  {:enabled false}
 
+ ;; The edit hook is the lane's REPL entrance: after a clean lint of a src/ or
+ ;; test/ Clojure file, the changed top-level definitions are evaluated on the
+ ;; lane's branch in the live root (`SEON_LANE`, else the lane claiming the
+ ;; file) and the reaching tests run. `:timeout-ms` bounds each root call; no
+ ;; root, no lane or a root not ready is "lint only".
+ :repl-entrance
+ {:enabled true
+  :timeout-ms 60000}
+
  :feedback
  {:max-tokens 300}}

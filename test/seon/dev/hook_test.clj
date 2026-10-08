@@ -78,3 +78,63 @@
       (is (map? failure))
       (is (str/includes? (:seon.error/message failure) "outcome unknown"))
       (is (< elapsed 500) "Output cannot renew the hook's total wait bound."))))
+
+;; The hook is the lane's REPL entrance: the roots are recorded, never reached.
+(def ^:private entrance-probe
+  '(do
+     (binding [*in* (java.io.StringReader. "{}") *out* (java.io.StringWriter.)]
+       (load-file "bin/seon-hook"))
+     (let [path (str (System/getProperty "user.dir") "/test/seon/dev/hook_entrance_fixture.clj")
+           [unchanged changed] (top-level-definitions path)
+           requests (atom [])
+           config {:lint {:enabled false} :markdown-lint {:enabled false}
+                   :docstring-lint {:enabled false} :shell-writes {:enabled false}
+                   :schema-admission {:enabled false} :contract-compile {:enabled false}
+                   :current-source {:root "." :cluster "default"}}
+           event (json/generate-string {:hook_event_name "PostToolUse" :tool_name "Edit"
+                                        :tool_input {:file_path path}})
+           run (fn [endpoint]
+                 (reset! requests [])
+                 (with-redefs [load-config (constantly config)
+                               entrance-lane (constantly "probe-lane")
+                               operator/advertisement (constantly endpoint)
+                               operator/prepl-value!
+                               (fn [_ form & _]
+                                 (swap! requests conj
+                                        (if (str/starts-with? form "(seon.mcp/call")
+                                          (get-in (json/parse-string (second (read-string form)) true)
+                                                  [:arguments :code])
+                                          form))
+                                 (if (= 1 (count @requests))
+                                   {(:sym unchanged) {:source (:text unchanged) :host-bound? false}
+                                    (:sym changed) {:source "(defn changed [x] x)" :host-bound? false}}
+                                   (json/generate-string {:content [{:type "text" :text "the reply"}]})))]
+                   (binding [*in* (java.io.StringReader. event)]
+                     (let [reply (with-out-str (-main))]
+                       {:requests @requests :reply reply}))))]
+       (prn {:seon.probe/live (run {:seon.boot/prepl-host "127.0.0.1" :seon.boot/prepl-port 1})
+             :seon.probe/down (run nil)
+             :seon.probe/changed-text (:text changed)
+             :seon.probe/unchanged-text (:text unchanged)}))))
+
+(deftest a-clojure-edit-evaluates-its-changed-defn-on-the-lane-branch
+  (let [result (process/run-process!
+                {:seon.operator.subprocess/argv ["bb" "-e" (pr-str entrance-probe)]
+                 :seon.operator.subprocess/directory "."
+                 :seon.operator.subprocess/deadline-ms
+                 (* 1000 support/event-backstop-seconds)})]
+    (is (zero? (:seon.operator.subprocess/exit result)))
+    (when (zero? (:seon.operator.subprocess/exit result))
+      (let [observed (edn/read-string (:seon.operator.subprocess/output result))
+            live (:seon.probe/live observed)
+            [state-form define-request test-request] (:requests live)]
+        (is (= 3 (count (:requests live))) "state read, definitions, reaching tests")
+        (is (str/includes? state-form "my.program/source"))
+        (is (str/includes? define-request (:seon.probe/changed-text observed))
+            "the changed form is sent")
+        (is (not (str/includes? define-request (:seon.probe/unchanged-text observed)))
+            "the form the branch already holds is not sent")
+        (is (str/includes? test-request "my.test/check"))
+        (is (str/includes? (:reply live) "the reply"))
+        (is (empty? (:requests (:seon.probe/down observed))) "no root is asked")
+        (is (str/includes? (:reply (:seon.probe/down observed)) "default unavailable: lint only"))))))

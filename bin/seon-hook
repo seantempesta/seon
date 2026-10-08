@@ -1170,6 +1170,167 @@
          :else nil)})))
 
 ;;; ---------------------------------------------------------------------------
+;;; REPL entrance (the edit hook is the lane's REPL, RF-4)
+;;; ---------------------------------------------------------------------------
+
+;; After a clean lint of a src/ or test/ Clojure file, the top-level
+;; definitions whose text differs from the lane branch's recorded source go
+;; to default as one `eval_clj` request (`seon.mcp/call`), run as the lane's
+;; agent, followed by `my.test/check` over exactly those symbols; the reply
+;; is printed as the value printer made it. Host-bound declarations keep
+;; their compiled Var on a branch, so they are named, not sent. No lane, no
+;; root or a root that is not ready is "lint only" with the reason; nothing
+;; here can refuse an edit.
+
+(defn- claim-lane
+  "The lane whose `bin/lane` claim covers the checkout-relative `relative`."
+  [relative]
+  (let [claims (root-file "tmp/orchestrator/lanes")]
+    (some (fn [^java.io.File file]
+            (when (and (str/ends-with? (.getName file) ".paths")
+                       (some #(or (= % relative)
+                                  (and (str/ends-with? % "/")
+                                       (str/starts-with? relative %)))
+                             (str/split-lines (slurp file))))
+              (str/replace (.getName file) #"\.paths$" "")))
+          (some-> claims .listFiles sort))))
+
+(defn- entrance-lane [absolute-path]
+  (or (not-empty (System/getenv "SEON_LANE"))
+      (claim-lane (subs absolute-path (inc (count repo-root))))))
+
+(defn- span-text
+  "The text of kondo's 1-based, end-exclusive span in `lines`."
+  [lines {:keys [row col end-row end-col]}]
+  (let [slice (subvec lines (dec row) end-row)]
+    (str/join "\n" (-> slice
+                       (update (dec (count slice)) subs 0 (dec end-col))
+                       (update 0 subs (dec col))))))
+
+(defn- top-level-definitions
+  "The file's outermost var definitions as {:sym :text}, in file order."
+  [absolute-path]
+  (let [definitions (->> (get-in (uncached-definition-analysis
+                                  {:seon.hook/file-path absolute-path})
+                                 [:analysis :var-definitions])
+                         (filter :end-row)
+                         (sort-by (juxt :row :col)))
+        lines (vec (str/split (slurp absolute-path) #"\n" -1))
+        within? (fn [inner outer]
+                  (and (not (identical? inner outer))
+                       (<= (:row outer) (:row inner)) (<= (:end-row inner) (:end-row outer))
+                       (or (< (:row outer) (:row inner)) (<= (:col outer) (:col inner)))
+                       (or (< (:end-row inner) (:end-row outer)) (<= (:end-col inner) (:end-col outer)))))]
+    (->> definitions
+         (remove (fn [definition] (some #(within? definition %) definitions)))
+         (mapv (fn [{definition-ns :ns definition-name :name :as definition}]
+                 {:sym (symbol (str definition-ns) (str definition-name))
+                  :text (span-text lines definition)})))))
+
+(defn- branch-state-form
+  "Form answering, for each of `syms`, the lane branch's recorded source and
+  host-bound status (the cluster head's when the lane has no branch yet)."
+  [cluster lane syms]
+  (str "(let [db (seon.db/db (seon.cluster.boot/connection " (pr-str cluster) "))"
+       " branch (:seon.agent/branch (seon.db/pull db [:seon.agent/branch] [:seon.agent/id " (pr-str lane) "]))"
+       " bdb (or (some->> branch (seon.db/branch-database db)) db)]"
+       " (into {} (map (fn [s] [s {:source (:source (my.program/source bdb s))"
+       " :host-bound? (boolean (:seon.fn/host-bound? (seon.db/pull bdb [:seon.fn/host-bound?] [:seon.fn/sym s])))}]))"
+       " (quote " (pr-str syms) ")))"))
+
+(defn- eval-request
+  "The `seon.mcp/call` form evaluating `code` as `lane` in `namespace-name`."
+  [lane namespace-name code]
+  (pr-str (list 'seon.mcp/call
+                (json/generate-string
+                 {:name "eval_clj"
+                  :arguments {:code (str "(in-ns '" namespace-name ")\n" code)
+                              :agent lane}}))))
+
+(defn- entrance-one
+  "The advisory for one edited file: what the lane branch evaluated and the
+  reaching tests' answer, or why the hook stayed lint only."
+  [absolute-path config]
+  (let [relative (subs absolute-path (inc (count repo-root)))
+        lane (entrance-lane absolute-path)
+        settings (get config :repl-entrance {})
+        bound-ms (get settings :timeout-ms 60000)
+        started (System/nanoTime)
+        endpoint (when lane
+                   (operator/advertisement
+                    (str (root-file (get-in config [:current-source :root] "."))) nil))
+        cluster (get-in config [:current-source :cluster] "default")]
+    (cond
+      (not lane)
+      (str "REPL entrance: no lane (set SEON_LANE or bin/lane claim " relative "): lint only")
+
+      (not endpoint)
+      "REPL entrance: default unavailable: lint only"
+
+      :else
+      (let [definitions (top-level-definitions absolute-path)
+            namespace-name (some-> definitions first :sym namespace)]
+        (when (seq definitions)
+          (let [state (operator/prepl-value!
+                       endpoint
+                       (branch-state-form cluster lane (mapv :sym definitions))
+                       bound-ms nil bound-ms)
+                host-bound (filterv #(get-in state [(:sym %) :host-bound?]) definitions)
+                changed (filterv #(and (not (get-in state [(:sym %) :host-bound?]))
+                                       (not= (:text %) (get-in state [(:sym %) :source])))
+                                 definitions)
+                heading (str "REPL entrance (lane " lane
+                             ", " (count definitions) " forms, " (count changed) " changed): ")
+                host-note (when (seq host-bound)
+                            (str "host-bound, throwaway check at commit: "
+                                 (str/join " " (map :sym host-bound))))]
+            (if (empty? changed)
+              (str heading "no changed forms to send (the branch holds the rest)."
+                   (when host-note (str "\n" host-note)))
+              ;; a defn records at settlement, so the reaching tests are a
+              ;; second request: the first one's definitions are not yet
+              ;; program entities inside the same run
+              (let [ask (fn [code]
+                          (let [reply (operator/prepl-value!
+                                       endpoint (eval-request lane namespace-name code)
+                                       bound-ms nil bound-ms)]
+                            (map #(get % "text")
+                                 (get (json/parse-string reply) "content"))))
+                    texts (concat
+                           (ask (str/join "\n\n" (map :text changed)))
+                           (ask (str "(my.test/check {:seon.test/changed (quote "
+                                     (pr-str (mapv :sym changed)) ")})")))]
+                (log! "REPL_ENTRANCE" lane relative
+                      (str "changed=" (count changed))
+                      (str "ms=" (quot (- (System/nanoTime) started) 1000000)))
+                (str heading (quot (- (System/nanoTime) started) 1000000) " ms\n"
+                     (str/join "\n" texts)
+                     (when host-note (str "\n" host-note)))))))))))
+
+(defn- entrance-feedback
+  "Post-edit REPL entrance advisories for the landed Clojure files. A failure
+  is an advisory naming itself, never a refusal."
+  [event config]
+  (when (and (= (:hook_event_name event) "PostToolUse")
+             (get-in config [:repl-entrance :enabled] true))
+    (let [paths (->> (event-file-paths event)
+                     (filter contract-source-path?)
+                     (map absolute-file-path)
+                     (filter #(some-> % io/file .isFile))
+                     vec)]
+      (when (seq paths)
+        (clip-feedback
+         config
+         (str/join "\n\n"
+                   (keep (fn [path]
+                           (try (entrance-one path config)
+                                (catch Exception error
+                                  (log! "REPL_ENTRANCE_ERROR" (.getMessage error))
+                                  (str "ADVISORY — REPL entrance failed, lint only: "
+                                       (:message (failure-cause error))))))
+                         paths)))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Markdown File Detection
 ;;; ---------------------------------------------------------------------------
 
@@ -1600,9 +1761,13 @@
                   lint (clj-kondo-feedback event config)
                   contract (when-not (:seon.hook.lint/refusal lint)
                              (contract-compile-feedback event))
+                  entrance (when-not (or (:seon.hook.lint/refusal lint)
+                                         (:seon.hook.contract/refusal contract))
+                             (entrance-feedback event config))
                   feedback
                   (into [(:seon.hook.lint/feedback lint)
                          (:seon.hook.contract/feedback contract)
+                         entrance
                          (:seon.hook.schema-admission/feedback
                           schema-admission)]
                         feedback)
