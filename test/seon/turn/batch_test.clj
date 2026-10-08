@@ -2,9 +2,16 @@
   "What a pass writes for the namespace a definition or a `require` touches,
   read back from the agent's branch after the real MCP entrance (`seon.mcp/call`)."
   (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
+            [seon.cluster.host :as host]
+            [seon.cluster.source :as source]
             [seon.db :as db]
-            [seon.mcp :as mcp]))
+            [seon.fn :as function]
+            [seon.id :as id]
+            [seon.mcp :as mcp]
+            [seon.operator.runtime :refer [running-instances]]
+            [seon.program :as program]))
 
 (defn- eval!
   "`code` through the MCP entrance as `agent-id`."
@@ -122,3 +129,58 @@
        (is (= "A documented namespace." doc) "the pass keeps the namespace's doc")
        (is (= (db/namespace-digest-of database id {}) digest)
            "the stored digest is the digest of the stored row, doc and tasks included")))))
+
+(deftest ^{:seon/tasks #{'seon.turn.batch/a-repl-require-changes-the-namespace-context-but-not-its-source}}
+  a-repl-require-is-written-back-in-the-ns-form-and-reindexes-equal
+  ;; a new agent id gets its own branch off the cluster head, which holds the indexed file
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running _ connection]
+     (let [suffix (id/id)
+           agent-id (str "ns-form-" suffix)
+           fixture-ns (symbol (str "nsform" suffix ".core"))
+           path (str "src/nsform" suffix "/core.clj")
+           root (str "tmp/ns-form-test-" suffix)
+           file (io/file root path)]
+       (io/make-parents file)
+       (spit file (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.string :as str]))\n\n"
+                       "(defn joined\n  \"Joined words.\"\n  {:malli/schema [:=> [:cat [:sequential :string]] :string]}\n  [words]\n  (str/join \" \" words))\n\n"
+                       "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+       (try
+         (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+           ((requiring-resolve 'seon.test-support/transacted!)
+            connection (function/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           (eval! (str "(in-ns '" fixture-ns ") (require '[clojure.set :as cset])") agent-id running)
+           (eval! "(defn callee\n  \"The union with one.\"\n  {:malli/schema [:=> [:cat [:set :int]] [:set :int]]}\n  [xs]\n  (cset/union xs #{1}))"
+                  agent-id running)
+           ;; `my.program/write-branch!` compares with the cluster's home branch, which this
+           ;; harness's member branch is not: write back between the fork point and the branch head
+           (let [base (db/commit-id (db/db connection))
+                 branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))
+                 agent-connection (-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch)
+                                      ::host/execution :seon.db/connection)
+                 written (source/write-back!
+                          {:seon.db/connection agent-connection :seon.fn/root root
+                           :seon.source/accepted {:seon.program/identities #{[:seon.ns/name fixture-ns]
+                                                                             [:seon.fn/sym (symbol (str fixture-ns) "callee")]}
+                                                  :seon.source/base-commit-id base
+                                                  :seon.source/commit-id (db/commit-id (db/db agent-connection))}})
+                 held (into {} (map (juxt :seon.fn/sym :seon.program/definition-digest))
+                            (db/q '[:find [(pull ?f [:seon.fn/sym :seon.program/definition-digest]) ...]
+                                    :in $ ?n :where [?f :seon.fn/sym ?s] [(namespace ?s) ?ns] [(= ?ns ?n)]]
+                                  (db/db agent-connection) (str fixture-ns)))
+                 reindexed (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+             (is (= {} (select-keys written [:seon.error/message :seon.source/write-back-refused :seon.error/offending]))
+                 "write-back answers no refusal")
+             (is (= [path] (:seon.source/changed-paths written)) "write-back writes the namespace's file")
+             (is (= held (into {} (keep (juxt :seon.fn/sym :seon.program/definition-digest))
+                               (filter :seon.fn/sym reindexed)))
+                 "the written file reindexes to the branch's digests")
+             (is (= {'str 'clojure.string 'cset 'clojure.set}
+                    (into {} (comp (filter #(= fixture-ns (:seon.ns/name %))) (mapcat :seon.ns/aliases)
+                                   (map (juxt :seon.ns.alias/local :seon.ns.alias/target-ns)))
+                          reindexed))
+                 "the written ns form declares the alias the REPL added")))
+         (finally
+           (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+             (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
+           ((requiring-resolve 'seon.test-support/delete-recursively!) root)))))))

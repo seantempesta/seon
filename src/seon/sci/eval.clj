@@ -99,7 +99,9 @@
             [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [datahike.api :as d]
-            [edamame.core :as edamame]
+            [clojure.set :as set]
+            [rewrite-clj.node :as n]
+            [rewrite-clj.zip :as z]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test]
@@ -620,41 +622,106 @@
         (conj program/identity-attributes
               :seon.program/delete-identities)))
 
+(def ^:private namespace-pattern
+  '[* :seon.ns/requires {:seon.ns/aliases [*]} {:seon.ns/imports [*]} {:seon.ns/refers [*]}])
+
+;; `binding-rows` and `row-bindings` round-trip through the stored components,
+;; so a stored row and SCI's live state compare as one shape.
+(defn- binding-delta
+  "What `after` declares that `before` does not (`:added`) and what `before`
+  declares that `after` no longer does (`:removed`): aliases and refers as
+  `local -> target`, requires as a set. Both are `row-bindings` maps."
+  {:malli/schema [:=> [:cat :map :map] [:map [:added :map] [:removed :map]]]}
+  [before after]
+  (let [missing (fn [from in] (into {} (remove (fn [[k v]] (= v (get in k)))) from))]
+    {:added {:aliases (missing (:aliases after) (:aliases before))
+             :refers (missing (:refers after) (:refers before))
+             :requires (set/difference (:requires after) (:requires before))}
+     :removed {:aliases (missing (:aliases before) (:aliases after))
+               :refers (missing (:refers before) (:refers after))}}))
+
+(defn- added-libspecs
+  "One libspec per added alias, refer group and bare require, by target
+  namespace: `[t :as a :refer [x]]`, `:as-alias` when `t` is not required."
+  {:malli/schema [:=> [:cat :map [:set :symbol]] [:vector :seon.schema/value]]}
+  [{:keys [aliases refers requires]} required]
+  (let [aliases-by (update-vals (group-by val aliases) #(sort (map key %)))
+        refers-by (update-vals (group-by (comp symbol namespace val) refers) #(vec (sort (map key %))))
+        targets (sort (into (set requires) (concat (keys aliases-by) (keys refers-by))))]
+    (into []
+          (mapcat (fn [t]
+                    (let [[a & more] (get aliases-by t)
+                          as (if (contains? required t) :as :as-alias)
+                          referred (get refers-by t)]
+                      (cons (cond-> [t] a (conj as a) referred (conj :refer referred))
+                            (map #(vector t as %) more)))))
+          targets)))
+
+(defn- without-removed
+  "`libspec` without the `:as`/`:as-alias` pairs naming a removed alias of its
+  library and without its removed refers; `libspec` itself when it is not a
+  `[lib & options]` vector."
+  {:malli/schema [:=> [:cat :map :seon.schema/value] :seon.schema/value]}
+  [{:keys [aliases refers]} libspec]
+  (let [[lib & options] libspec]
+    (if (and (vector? libspec) (symbol? lib) (even? (count options)))
+      (into [lib] (mapcat (fn [[k v]]
+                            (cond (and (#{:as :as-alias} k) (= lib (get aliases v))) []
+                                  (and (= :refer k) (vector? v))
+                                  [k (into [] (remove #(= (symbol (str lib) (str %)) (get refers %))) v)]
+                                  :else [k v])))
+            (partition 2 options))
+      libspec)))
+
+(defn- declared-source
+  "`text`, an `ns` form declaring the context `before`, edited to declare
+  `after` (both `row-bindings` maps): the libspecs of what `after` adds
+  appended to its `:require` clause, each on its own line aligned with the
+  clause's first libspec, and the aliases and refers it no longer holds
+  removed from their libspecs. rewrite-clj edits only those nodes; the rest
+  of the text stays exact."
+  {:malli/schema [:=> [:cat :seon.ns/source :map :map] :seon.ns/source]}
+  [text before after]
+  (let [{:keys [added removed]} (binding-delta before after)
+        specs (mapv n/coerce (added-libspecs added (:requires after)))
+        form (z/of-string text {:track-position? true})
+        form (if (or (seq (:aliases removed)) (seq (:refers removed)))
+               (z/prewalk form #(and (= :vector (z/tag %))
+                                     (every? (fn [c] (or (n/whitespace-or-comment? c) (n/sexpr-able? c)))
+                                             (n/children (z/node %))))
+                          #(let [libspec (z/sexpr %) edited (without-removed removed libspec)]
+                             (if (= libspec edited) % (z/replace % edited))))
+               form)
+        clause (some-> (z/down form)
+                       (z/find z/right #(and (= :list (z/tag %)) (= :require (some-> % z/down z/sexpr)))))]
+    (z/root-string
+     (cond
+       (empty? specs) form
+       clause (let [first-spec (z/right (z/down clause))
+                    col (if first-spec (second (z/position first-spec)) (+ 10 (second (z/position clause))))]
+                (reduce #(-> %1 (z/append-child* (n/newlines 1)) (z/append-child* (n/spaces (dec col)))
+                             (z/append-child* %2))
+                        clause specs))
+       :else (-> form (z/append-child* (n/newlines 1)) (z/append-child* (n/spaces 2))
+                 (z/append-child* (n/list-node (into [(n/keyword-node :require) (n/spaces 1) (first specs)]
+                                                     (mapcat #(vector (n/newlines 1) (n/spaces 12) %))
+                                                     (rest specs)))))))))
+
 (defn- namespace-source
-  "The `ns` form a namespace declares after the REPL form `form` changed its
-  context: a `require`'s new libspecs spliced into the `:require` clause of the
-  namespace's stored `ns` form, each on its own line aligned with the clause
-  (edamame's locations; the rest of the text stays exact); a new `ns` form when
-  none is stored. Any other form keeps the stored `ns` form. Never the REPL
-  form itself."
-  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.ns/name :seon.schema/value] :seon.ns/source]}
-  [database namespace-name form]
-  (let [text (some-> database (db/pull [:seon.ns/source] [:seon.ns/name namespace-name]) :seon.ns/source)
-        declared (when text (edamame/parse-string text {:all true :read-cond :preserve}))
-        declared? (and (seq? declared) (= 'ns (first declared)))
-        clause (when declared? (some #(when (and (seq? %) (= :require (first %))) %) declared))
-        libspecs (for [arg (rest form) :let [spec (if (and (seq? arg) (= 'quote (first arg))) (second arg) arg)]
-                       :when (not (keyword? spec))
-                       :when (not (some #{spec} (rest clause)))]
-                   spec)
-        ;; The character offset of edamame's 1-based row and column.
-        offset (fn [row col] (+ (dec col) (reduce + (map #(inc (count %)) (take (dec row) (str/split-lines text))))))]
-    (cond
-      (not (and (seq? form) (#{'require 'clojure.core/require} (first form))))
-      (if declared? text (pr-str (list 'ns namespace-name)))
-      (not declared?) (str "(ns " namespace-name "\n  (:require " (str/join " " (map pr-str libspecs)) "))")
-      :else
-      (let [{:keys [end-row end-col col]} (meta (or clause declared))
-            at (dec (offset end-row end-col))
-            lines (if clause
-                    (map #(str "\n" (apply str (repeat (+ col 9) \space)) (pr-str %)) libspecs)
-                    [(str "\n  (:require " (str/join " " (map pr-str libspecs)) ")")])]
-        (str (subs text 0 at) (apply str lines) (subs text at))))))
+  "The `ns` form text declaring `namespace-name`'s context `after`
+  (`row-bindings` shape): its stored `ns` form, or a bare one when none is
+  stored, edited by `declared-source` from the context its stored row declares."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :seon.ns/name :map] :seon.ns/source]}
+  [database namespace-name after]
+  (let [stored (some-> database (db/pull namespace-pattern [:seon.ns/name namespace-name]))]
+    (if-let [text (:seon.ns/source stored)]
+      (declared-source text (row-bindings stored) after)
+      (declared-source (str "(ns " namespace-name ")") {} after))))
 
 ;; Called only through its Var by the fold's namespace facts (`seon.turn.batch`).
 #_{:clj-kondo/ignore [:unused-private-var]}
 (defn- namespace-context-row
-  [projection database namespace-name form before after changed?]
+  [projection database namespace-name before after changed?]
   (when (or changed?
             (not= (select-keys before [:seon.sci.reader/aliases
                                       :seon.sci.reader/refers
@@ -662,13 +729,13 @@
                   (select-keys after [:seon.sci.reader/aliases
                                      :seon.sci.reader/refers
                                      ::imports ::requires])))
-    (program/declaration-row
-     projection
-     (merge
-      {:seon.ns/name namespace-name
-       :seon.ns/source (namespace-source database namespace-name form)}
-      (binding-rows after))
-     :contracted :agent)))
+    (let [rows (binding-rows after)]
+      (program/declaration-row
+       projection
+       (merge {:seon.ns/name namespace-name
+               :seon.ns/source (namespace-source database namespace-name (row-bindings rows))}
+              rows)
+       :contracted :agent))))
 
 (defn- context-projection
   "The latest schema projection held by one live cluster context."
@@ -2197,9 +2264,6 @@
          ::namespace-source source
          ::namespace-admission (when source admission)
          ::agent-authored? (boolean (and source (= :agent admission)))))
-
-(def ^:private namespace-pattern
-  '[* :seon.ns/requires {:seon.ns/aliases [*]} {:seon.ns/imports [*]} {:seon.ns/refers [*]}])
 
 (defn- acquire-program!
   "Acquire the whole program `db` holds, against the JVM's loaded program value.

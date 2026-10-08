@@ -504,7 +504,7 @@
   {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :symbol] :seon.store/transaction-data]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world} db n]
   (or (when (sci/find-ns ctx n)
-        (when-let [row (#'eval/namespace-context-row (db/carried-projection db) db n nil {}
+        (when-let [row (#'eval/namespace-context-row (db/carried-projection db) db n {}
                                                      (#'eval/reader-context ctx n) true)]
           (if-let [stored (dbu/entid db [:seon.ns/name n])]
             ;; a stored namespace changes only the attributes the context row
