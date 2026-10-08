@@ -34,3 +34,20 @@ re-interpretation now uses (LR-STALE3 measured that read at 11-17 ms for 50 call
 `seon.repl-differential-test/an-inherited-test-sees-the-branch-redefinition`: red at the
 fork-only variant (both passes red), green with both landings (bin/seon check, 2 tests,
 7 assertions, 4974 ms).
+
+# A REPL require that closes a namespace cycle (task `seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent`)
+
+Reproduced on default with scratch agent bt-c: `(require 'bt.slug-test)` in `bt.slug` stored
+`bt.slug :seon.ns/requires #{bt.slug-test}`; the step answered the acquisition's cycle
+refusal, and the next eval request returned nothing (wedged in `seon.sci.eval/namespace-order`).
+
+- Producer: `seon.turn.batch/form-facts` refuses a form whose new require or refer target
+  already requires its namespace (stored edges, the ones `namespace-order` orders by), as
+  Clojure refuses a cyclic load. The refusal is the form's facts error beside its value; the
+  namespace's live SCI bindings drop the refused targets, so nothing is stored or carried.
+- Already-stored cycles: `namespace-order` never throws; cyclic namespaces install after the
+  rest in name order, and each is an agent-mistake acquisition refusal (recorded, delivered).
+
+Proof `seon.repl-differential-test/a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers`:
+red at HEAD (3 of 4 assertions: cycle stored, the next request and a fresh agent answer nothing),
+green with the change.

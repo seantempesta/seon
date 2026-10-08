@@ -528,17 +528,72 @@
           (mapv (fn [target] [:db/retractEntity (:seon.program/identity (#'my.program/locate db target))])
                 (sort-by str subjects)))))))
 
+(defn- binding-targets
+  "The namespaces `bindings` load before their namespace: its requires and its refers' namespaces,
+  the edges `seon.sci.eval/namespace-order` orders by."
+  {:malli/schema [:=> [:cat :map] [:set :symbol]]}
+  [{:keys [requires refers]}]
+  (into (set requires) (keep (comp #(some-> % symbol) namespace)) (vals refers)))
+
+(defn- stored-targets
+  "The namespaces `n`'s stored row in `db` loads before it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :symbol]]}
+  [db n]
+  (if (dbu/entid db [:seon.ns/name n])
+    (binding-targets (#'eval/row-bindings (db/pull db @#'eval/namespace-pattern [:seon.ns/name n])))
+    #{}))
+
+(defn- cycle-closing
+  "The targets new in `n`'s live `bindings` whose stored requires in `db` lead back to `n`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol :map] [:set :symbol]]}
+  [db n bindings]
+  (let [leads-back? (fn [target]
+                      (loop [frontier [target] seen #{target}]
+                        (cond (empty? frontier) false
+                              (contains? seen n) true
+                              :else (let [next (into #{} (comp (mapcat #(stored-targets db %)) (remove seen)) frontier)]
+                                      (recur (vec next) (into seen next))))))]
+    (into #{} (filter leads-back?)
+          (disj (reduce disj (binding-targets bindings) (stored-targets db n)) n))))
+
+(defn- refuse-cycle!
+  "The refusal of the form whose require of `closing` from `n` would make the program's
+  namespaces require each other, as Clojure refuses a cyclic load; `n`'s live
+  bindings in `ctx` drop those targets, so the refused require leaves nothing behind."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol :map [:set :symbol]] :seon.error/value]}
+  [ctx n bindings closing]
+  (sci/install-namespace-bindings!
+   ctx n (-> bindings
+             (update :requires #(into #{} (remove closing) %))
+             (update :aliases #(into {} (remove (comp closing val)) %))
+             (update :refers #(into {} (remove (comp closing (fn [target] (some-> target namespace symbol)) val)) %))))
+  (seon.error.refusal/diagnostic
+   (java.util.Date.) :seon.sci.eval/program `form-facts
+   {:seon.error/message (str "Cyclic load dependency: " n " cannot require " (str/join ", " (sort closing))
+                             ", which already requires " n "; the require is refused and nothing is recorded.")
+    :seon.error/offending {n closing}
+    :seon.error/member :seon.ns/requires
+    :seon.error/expected :seon.sci.eval/acyclic-bindings}))
+
 (defn form-facts
   "A program change as transaction data on `db`, or the refusal of a removal
-  whose referrers survive."
-  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.batch/change]
-                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error]]}
-  [request db {:seon.batch/keys [entities removals schema-keys namespaces]}]
+  whose referrers survive, or of a require that would close a namespace cycle."
+  {:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}
+   :malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.batch/change]
+                  [:or :seon.store/transaction-data :seon.program/mutation-refused-error :seon.error/value]]}
+  [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} db {:seon.batch/keys [entities removals schema-keys namespaces]}]
   (let [stx (schema-tx request db schema-keys)
         ;; entities read the schema this change registers
         db' (if (and (seq stx) (seq entities)) (let [w (db/with db stx)] (if (:seon.error/message w) db w)) db)
-        removed (mapv #(removal-facts db' %) removals)]
-    (or (first (filter :seon.error/at removed))
+        removed (mapv #(removal-facts db' %) removals)
+        cyclic (some (fn [n]
+                       (when (sci/find-ns ctx n)
+                         (let [bindings (sci/namespace-bindings ctx n)
+                               closing (cycle-closing db' n bindings)]
+                           (when (seq closing) (refuse-cycle! ctx n bindings closing)))))
+                     (sort namespaces))]
+    (or cyclic
+        (first (filter :seon.error/at removed))
         (-> stx
             (into (mapcat #(namespace-facts request db' %)) (sort namespaces))
             (into (mapcat #(entity-facts db' %)) entities)

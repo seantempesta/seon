@@ -2433,8 +2433,12 @@
    ::agent-authored? (= :agent admission)})
 
 (defn- namespace-order
-  "`namespace-names` ordered so each follows the program namespaces its row binds."
-  {:malli/schema [:=> [:cat [:map-of :symbol :map] [:set :symbol]] [:vector :symbol]]}
+  "`namespace-names` ordered so each follows the program namespaces its row binds,
+  as `::order`. Namespaces whose bindings form a cycle follow the rest in name
+  order, and the bindings still pending are `::cycle`: Clojure loads a namespace
+  once, so a stored cycle never stops the rest of the program."
+  {:malli/schema [:=> [:cat [:map-of :symbol :map] [:set :symbol]]
+                  [:map [::order [:vector :symbol]] [::cycle {:optional true} [:map-of :symbol [:set :symbol]]]]]}
   [namespace-row-by-name namespace-names]
   (loop [remaining (into {}
                          (map (fn [namespace-name]
@@ -2446,29 +2450,33 @@
                                                  (keep (comp symbol namespace) (vals (:refers bindings)))))])))
                          namespace-names)
          ordered []]
-    (if (empty? remaining)
-      ordered
-      (let [ready (->> remaining
-                       (keep (fn [[namespace-name required]] (when (empty? required) namespace-name)))
-                       (sort-by str)
-                       vec)]
-        (when (empty? ready)
-          (throw
-           (ex-info
-            "Program acquisition found a namespace binding cycle."
-            {:seon.error/at (java.util.Date.)
-             :seon.error/layer :seon.sci.eval/program
-             :seon.error/operation 'seon.sci.eval/acquire-program!
-             :seon.error/message "Namespace bindings form a cycle; remove the cyclic dependency before acquisition."
-             :seon.error/offending remaining
-             ::pending-namespaces (set (keys remaining))
-             :seon.error/member :seon.ns/requires
-             :seon.error/expected :seon.sci.eval/acyclic-bindings})))
-        (let [released (set ready)]
-          (recur (into {}
-                       (map (fn [[namespace-name required]] [namespace-name (apply disj required released)]))
-                       (apply dissoc remaining ready))
-                 (into ordered ready)))))))
+    (let [ready (->> remaining
+                     (keep (fn [[namespace-name required]] (when (empty? required) namespace-name)))
+                     (sort-by str)
+                     vec)]
+      (cond
+        (empty? remaining) {::order ordered}
+        (empty? ready) {::order (into ordered (sort-by str (keys remaining))) ::cycle remaining}
+        :else (let [released (set ready)]
+                (recur (into {}
+                             (map (fn [[namespace-name required]] [namespace-name (apply disj required released)]))
+                             (apply dissoc remaining ready))
+                       (into ordered ready)))))))
+
+(defn- cycle-refusals
+  "One acquisition refusal per namespace of `cycle`, the bindings `namespace-order` found cyclic."
+  {:malli/schema [:=> [:cat [:map-of :symbol [:set :symbol]]] [:vector :map]]}
+  [cycle]
+  (into []
+        (map (fn [[namespace-name required]]
+               (acquisition-refusal
+                {:seon.ns/name namespace-name}
+                {:seon.error/message (str namespace-name " and " (str/join ", " (sort required))
+                                          " require each other; remove the require that closes the cycle.")
+                 :seon.error/offending cycle
+                 :seon.error/member :seon.ns/requires
+                 :seon.error/expected :seon.sci.eval/acyclic-bindings})))
+        (sort-by (comp str key) cycle)))
 
 (defn- install-selected!
   "Interpret `function-rows` and `test-rows` on `ctx`, each namespace after the
@@ -2482,9 +2490,12 @@
   [ctx db commit-fault! namespace-row-by-name function-rows test-rows interpreted state]
   (let [function-rows-by-ns (group-by #(nth % 2) function-rows)
         test-rows-by-ns (group-by #(nth % 2) test-rows)
-        order (namespace-order namespace-row-by-name
-                               (into (set (keys namespace-row-by-name))
-                                     (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))
+        {order ::order cycle ::cycle}
+        (namespace-order namespace-row-by-name
+                         (into (set (keys namespace-row-by-name))
+                               (concat (keys function-rows-by-ns) (keys test-rows-by-ns))))
+        ;; a stored cycle is the agent's mistake, delivered as its refusal
+        state (cond-> state cycle (update ::agent-mistakes (fnil into []) (cycle-refusals cycle)))
         install-row
         (fn [state row]
           (try

@@ -5,6 +5,7 @@
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
+            [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
 
@@ -157,3 +158,19 @@
          (let [{:keys [red passed?]} (step-red "(+ 1 1)" brancher running)]
            (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
            (is (true? passed?) "the step ran the reaching tests green")))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}}
+  a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [requires #(set (:seon.ns/requires (db/pull @connection [:seon.ns/requires] [:seon.ns/name %])))]
+       (answered "(in-ns 'scratch.cycle) (clojure.core/refer-clojure) (defn c1 [] 1)" agent-id running)
+       (answered "(ns scratch.cycle-test (:require [scratch.cycle :as c])) (defn c2 [] (c/c1))" agent-id running)
+       (testing "the require that closes the cycle is refused at its form and stores nothing"
+         (is (= :after (answered "(in-ns 'scratch.cycle) (require 'scratch.cycle-test) :after" agent-id running)))
+         (is (not (contains? (requires 'scratch.cycle) 'scratch.cycle-test))))
+       (testing "the next eval request answers"
+         (is (= 3 (answered "(+ 1 2)" agent-id running))))
+       (testing "an agent acquiring a stored cycle still answers"
+         (support/transacted! connection [[:db/add [:seon.ns/name 'scratch.cycle] :seon.ns/requires 'scratch.cycle-test]])
+         (is (= 3 (answered "(+ 1 2)" (str "fresh-" agent-id) running))))))))
