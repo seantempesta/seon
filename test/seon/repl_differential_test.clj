@@ -123,3 +123,37 @@
          (is (= [2 2 2] (answered (str in-shared "(defn g7 [] 2) [(k7) (h7) (g7)]") agent-id running))))
        (testing "an agent's first pass (a fresh fork) redefines a callee the base interpreted"
          (is (= [3 3 3] (answered (str in-shared "(defn g7 [] 3) [(k7) (h7) (g7)]") fresh running))))))))
+
+(defn- step-red
+  "The tests the step of `agent-id`'s pass over `code` ran red, proofs and reaching tests, with the last form's value."
+  {:malli/schema [:=> [:cat :string :string :string] [:map [:value :seon.schema/value] [:red [:set :symbol]] [:passed? [:maybe :boolean]]]]}
+  [code agent-id running]
+  (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                         "arguments" {"code" code "agent" agent-id "cluster" running}})))
+        items (map #(support/reply (get % "text")) (get result "content"))
+        tests (some :seon.turn.loop/tests items)]
+    {:value (:seon.repl/value (last (filter #(contains? % :seon.repl/value) items)))
+     :passed? (get-in tests [:seon.turn.loop/reaching :seon.test/passed?])
+     :red (into #{} (mapcat #(get-in tests [% :seon.turn.loop/red]))
+                [:seon.turn.loop/proofs :seon.turn.loop/reaching])}))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}}
+  an-inherited-test-sees-the-branch-redefinition
+  ;; The fixture agent holds the cluster head's custody (main); a new agent id
+  ;; gets its own branch off it on first use.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [brancher (str "branch-" agent-id)]
+       (answered "(in-ns 'scratch.inherited-test) (clojure.core/refer-clojure) (defn g9 [] 1)" agent-id running)
+       (answered (str "(ns scratch.inherited-test-test (:require [clojure.test :refer [deftest is]]"
+                      " [scratch.inherited-test :as it])) (deftest g9-is-two (is (= 2 (it/g9))))")
+                 agent-id running)
+       (testing "the redefining pass runs the inherited test against the branch's definition"
+         (let [{:keys [value red passed?]} (step-red "(in-ns 'scratch.inherited-test) (defn g9 [] 2) (g9)" brancher running)]
+           (is (= 2 value))
+           (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
+           (is (true? passed?) "the step ran the reaching tests green")))
+       (testing "a later pass still runs it against the branch's definition"
+         (let [{:keys [red passed?]} (step-red "(+ 1 1)" brancher running)]
+           (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
+           (is (true? passed?) "the step ran the reaching tests green")))))))

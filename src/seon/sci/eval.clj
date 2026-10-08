@@ -1443,7 +1443,7 @@
                        (merge metadata (select-keys (meta installed)
                                                     [:sci/generation :ns]))))))))
 
-(declare base-bindings acquired-database?)
+(declare base-bindings acquired-database? stale-reach reinterpret-reach!)
 
 (defn acquired-program
   "Return the database and refusal report actually acquired by this context.
@@ -1564,7 +1564,11 @@
     report :seon.db/transaction-report
     written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
-  (transfer-evaluated-roots! ctx installations)
+  (let [batch (into #{} (keep (comp #(some-> % str symbol) (some-fn :seon.fn/sym :seon.test/sym) :seon.program/row))
+                    installations)
+        functions (into [] (keep (comp :seon.fn/sym :seon.program/row)) installations)
+        previous (into {} (map (fn [sym] [sym (sci/resolve ctx sym)])) functions)]
+    (transfer-evaluated-roots! ctx installations)
     ;; THE COMMITTED VALUE'S PROJECTION: every schema and contract the
     ;; settlement wrote, and every registration an earlier run committed. The
     ;; context's own projection is stale for the latter, so a defn naming a
@@ -1594,7 +1598,14 @@
                   ctx written-on report installations (context-projection ctx)))
         (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
           (swap! (::kernel/program-snapshot target) assoc :seon.db/db db)))
-      installed))
+      ;; A definition that landed in a new Var of `ctx` leaves the callers and
+      ;; tests analyzed against its previous Var calling that one: they are
+      ;; analyzed again here, as one Clojure Var would be seen.
+      (doseq [sym functions
+              :let [before (get previous sym)]
+              :when (and before (not (identical? before (sci/resolve ctx sym))))]
+        (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
+      installed)))
 
 (defn- classpath-locatable?
   "Whether THIS PROCESS's own classpath can serve one namespace's source.
@@ -2720,34 +2731,71 @@
 
 (declare same-program-root?)
 
-(defn- inherited-callers
-  "The agent-authored transitive callers of `function-symbol` in `database`
-  that `ctx` holds as the base's Var or as its own Var holding the base's root."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
-                  [:vector :qualified-symbol]]}
-  [ctx base database function-symbol]
+(defn- inherited?
+  "Whether `ctx` holds the Var at `qualified` as `base`'s Var, or as its own Var holding the base's root."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/ctx :qualified-symbol] :boolean]}
+  [ctx base qualified]
+  (let [path [:namespaces (symbol (namespace qualified)) (symbol (name qualified))]
+        base-var (get-in @(:env base) path)
+        fork-var (get-in @(:env ctx) path)]
+    (boolean (and (sci.utils/var? base-var) (sci.utils/var? fork-var)
+                  (or (identical? base-var fork-var)
+                      (same-program-root? @fork-var @base-var))))))
+
+(defn- stale-reach
+  "The agent-authored transitive callers of `function-symbol` in `database` and
+  the agent-authored test rows reaching it, those `stale?` holds as analyzed
+  against another Var of it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol
+                       [:=> [:cat :qualified-symbol] :boolean]]
+                  [:map [::callers [:vector :qualified-symbol]] [::tests [:vector :map]]]]}
+  [ctx database function-symbol stale?]
   (let [closure (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds #{function-symbol}})
         _ (when (:seon.db/invalid-read closure)
             (throw (ex-info (:seon.error/message closure) closure)))
-        held (:namespaces @(:env base))
-        own (:namespaces @(:env ctx))]
-    (into []
-          (filter (fn [caller]
-                    (let [path [(symbol (namespace caller)) (symbol (name caller))]
-                          base-var (get-in held path)
-                          fork-var (get-in own path)]
-                      (and (sci.utils/var? base-var) (sci.utils/var? fork-var)
-                           (::agent-authored? (kernel/program-function ctx caller))
-                           (or (identical? base-var fork-var)
-                               (same-program-root? @fork-var @base-var))))))
-          (sort (disj (:seon.fn/affected closure) function-symbol)))))
+        tests (filter stale? (sort (:seon.fn/tests closure)))]
+    {::callers (into [] (filter #(and (stale? %) (::agent-authored? (kernel/program-function ctx %))))
+                     (sort (disj (:seon.fn/affected closure) function-symbol)))
+     ::tests (if (empty? tests)
+               []
+               (into [] (filter #(= :agent (:seon.schema.admission/source %)))
+                     (db/pull-many database [:seon.test/sym :seon.test/source :seon.schema.admission/source
+                                             {:seon.test/ns [:seon.ns/name]}]
+                                   (mapv #(vector :seon.test/sym %) tests))))}))
+
+(defn- reinterpret-reach!
+  "Re-interpret `callers` then `tests` from `database` in `ctx`, so each resolves
+  the Vars `ctx` holds now; their symbols."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
+                       [:map [::callers [:vector :qualified-symbol]] [::tests [:vector :map]]]]
+                  [:vector :qualified-symbol]]}
+  [ctx database {callers ::callers tests ::tests}]
+  ;; Re-interpretation is not the form's own definition: no write or
+  ;; expansion of it is observed as the program change.
+  (binding [sci.lang/*write-observer* nil
+            sci.lang/*expansion-observer* nil]
+    ;; Copy every caller and test into this generation before analyzing any:
+    ;; SCI analyzes a body against the Var each name holds then, and `deftest`
+    ;; names its own Var in its body, as `install-selected!` copies first.
+    (doseq [qualified (into callers (map :seon.test/sym) tests)
+            :let [held (sci/resolve ctx qualified)]
+            :when held]
+      (sci/bind-root! ctx held @held))
+    (doseq [caller callers]
+      (install-function-from-database! ctx database caller))
+    (doseq [{{namespace-name :seon.ns/name} :seon.test/ns :as row} tests]
+      (install-row! {:seon.sci.eval/ctx ctx :seon.db/db database
+                     :seon.program/row (assoc row :seon.test/ns [:seon.ns/name namespace-name])})))
+  (into callers (map :seon.test/sym) tests))
 
 (defn reinterpret-inherited-callers!
-  "The base's callers of `function-symbol` re-interpreted in the turn fork `ctx`.
-  When the fork defines it as `sci-var` apart from the base's Var, its callers
-  call that definition in the same pass, as one Clojure Var."
+  "The base's callers of `function-symbol`, then the base's tests reaching it,
+  re-interpreted in the turn fork `ctx`. When the fork defines it as `sci-var`
+  apart from the base's Var, its callers and tests call that definition in the
+  same pass and every later one, as one Clojure Var."
   {:seon/tasks #{'seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass
-                 'seon.sci.eval/a-redefinition-walks-the-reverse-closure-with-its-test-reach}
+                 'seon.sci.eval/a-redefinition-walks-the-reverse-closure-with-its-test-reach
+                 'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}
    :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol :seon.sci.eval/sci-var]
                   [:vector :qualified-symbol]]}
   [ctx database function-symbol sci-var]
@@ -2757,19 +2805,7 @@
                                          (symbol (name function-symbol))]))]
     (if-not (and (sci.utils/var? base-var) (not (identical? base-var sci-var)))
       []
-      (let [callers (inherited-callers ctx base database function-symbol)]
-        ;; Re-interpretation is not the form's own definition: no write or
-        ;; expansion of it is observed as the program change.
-        (binding [sci.lang/*write-observer* nil
-                  sci.lang/*expansion-observer* nil]
-          ;; Copy every caller into this generation before analyzing any, so
-          ;; each caller resolves the others' copies, as `install-selected!` does.
-          (doseq [caller callers
-                  :let [caller-var (sci/resolve ctx caller)]]
-            (sci/bind-root! ctx caller-var @caller-var))
-          (doseq [caller callers]
-            (install-function-from-database! ctx database caller)))
-        callers))))
+      (reinterpret-reach! ctx database (stale-reach ctx database function-symbol #(inherited? ctx base %))))))
 
 (defn- authored-rows
   "The agent-authored program rows of `database`, found by their admission datoms."
