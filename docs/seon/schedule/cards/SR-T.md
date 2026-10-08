@@ -1,11 +1,14 @@
 ---
 title: "SR-T: shell output and web bodies use the one blob threshold"
 type: reference
-status: ready after dials-16gb
+status: retired
 created: 2026-10-08
 ---
 
 # SR-T: Shell output and web bodies use the one blob threshold
+
+**Retired.** Superseded by [SP-3](SP-3.md) (shell and web), [SP-4](SP-4.md) (reasoning) and [SP-1a](SP-1a.md)/[SP-1c](SP-1c.md)
+(error evidence), lane cards-storage-point (`08ab3b0de`). Do not implement this card.
 
 Ledger row SR-T (group E). Source: `storage-audit/storage-audit-opus.md` finding 14, slice T; owner: "inline/blob
 4,096 bytes". Model: Sonnet.

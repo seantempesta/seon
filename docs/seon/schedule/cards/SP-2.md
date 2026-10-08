@@ -45,7 +45,8 @@ so it would need an ambient database, and an inline predicate is an anonymous co
 - ADD `seon.db/text-bound-error` (private)
   `{:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:or :nil :seon.db/error-result]]}`
   `[projection report]`: for each datom in `(:tx-data report)` with `:added`, whose `:a` (attribute ident) is in
-  `inline-text-bounds` and whose `:v` is a string, compare `(seon.blob/utf8-size v)` with
+  `inline-text-bounds` and whose `:v` is a string, compare `(com.google.common.base.Utf8/encodedLength v)` (root's decision: Guava counts
+  UTF-8 bytes without building a byte array; `seon.blob/utf8-size` allocates one) with
   `(get projection dial)`; the first over the bound returns
   `(seon.error.refusal/diagnostic at :seon.db/database-write 'seon.db/transact! {:seon.error/type :seon.db.write/text-over-bound :seon.error/message "Stored text is over the blob threshold; store it with seon.blob/inline-or-stage." :seon.db/attribute a :seon.blob/size n :seon.db.write/bound-dial dial :seon.db.write/bound b})`.
   When the projection carries no value for the dial, nothing is checked (no configuration yet means no evaluation has
@@ -91,6 +92,13 @@ The threshold's default line in `config/default.edn` (moved onto its declaration
 `bin/lane commit <lane> -m "SP-2: the writer refuses stored text over the blob threshold" --test seon.db-write-text-bound-test seon.blob-threshold-test seon.error-result-test seon.error-storage-bytes-test seon.db-test seon.db-transact-shape-test seon.test.one-request-test <every file above>`
 
 ## Dependencies
+
+**Guava as a direct dependency (root's decision).** `deps.edn` gains `com.google.guava/guava {:mvn/version "31.0.1-jre"}`,
+the version the `:test` alias already resolves (`clojure -A:test -Spath`; the base classpath has no Guava today).
+A `deps.edn` change cannot pass `bin/lane commit` (task
+`seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check`), so the bump goes in **root's next
+restart batch**; this card starts after it lands.
+
 
 `src/seon/db.clj` is held by lane `led-cacheb`; `resources/seon/schemas/seon.blob.edn` by `blob-konserve`;
 `seon.error.edn` by SP-1a/SP-1b: start after all three release. Lands before SR-C, SR-F, SP-3's effect follow-up,

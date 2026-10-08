@@ -247,6 +247,7 @@ A row that deletes code goes before any row that would fix the same code; the fi
 - SR-L corrects which attributes are blob references; SR-G2 caches that answer; SR-AUDIT reads it. AU-Q16 option 2
   would delete all three's walk, so SR-L and SR-G2 stay small.
 - SR-P deletes `put!`/`put-binary!` after SR-D (landed), so no later row re-adds a blob writer without a fact.
+- SP-1a deletes `:seon.error/data-edn` (reverting `b233d838f`'s fix with it); SR-T is retired for SP-1a, SP-3, SP-4.
 - AU-Q10 option 1 deletes the read-evidence capture SR-R would shrink: SR-R waits on it.
 - AU-Q12 option 1 rewrites the checked writer: PB-10 waits on it.
 - AU-Q1 option 1 deletes the row machinery and core.cache memo in `call_preparation.clj` (UL-10); SR-J's slice for
@@ -280,7 +281,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-P | [SR-P](SR-P.md) | ready after blob-konserve releases `blob.clj` |
 | SR-L | [SR-L](SR-L.md) | ready after led-cacheb releases `registry.clj` |
 | SR-G2 | — | after SR-L |
-| SR-T | [SR-T](SR-T.md) (shell and web only; fault evidence goes with E-SDELETE) | ready after SR-P, dials-16gb |
+| SR-T | [SR-T](SR-T.md) | retired: superseded by SP-1a, SP-3, SP-4 (cards-storage-point) |
 | SR-S | [SR-S](SR-S.md) | ready |
 | SR-ENUMa | card next | after SR-L, SR-S |
 | SR-ENUMb | — | after SR-ENUMa |
