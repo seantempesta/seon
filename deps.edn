@@ -36,7 +36,7 @@
                       org.replikativ/konserve]}
         org.replikativ/konserve
         {:git/url "https://github.com/seantempesta/konserve"
-         :git/sha "8700ca7a95784bbe5d6fb4dce1d7bc2ad96cbc37"
+         :git/sha "e4334756413917305968333bf305e658c177765d"
          :exclusions [org.clojure/clojurescript
                       org.clojars.mmb90/cljs-cache
                       com.github.pkpkpk/cljs-node-io
@@ -127,12 +127,13 @@
  :aliases
  {;; Dev REPL on the system's source classpath — no AOT, no artifact, no
   ;; operator. The JVM flags are Proximum's SIMD requirements plus the
-  ;; writer-calibrated heap; they ride every -M invocation that loads the
-  ;; database closure.
+  ;; collector; they ride every -M invocation that loads the database
+  ;; closure. The heap cap is not here: the operator passes `-Xmx` from
+  ;; `:seon.config.operator/heap-max-bytes` (config/default.edn).
   :dev
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
-              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=12.5"
+              "-XX:+UseG1GC"
               "-XX:G1PeriodicGCInterval=30000"
               "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"]}
 
@@ -152,11 +153,10 @@
                 ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
                 io.github.clojure/core.async.flow-monitor
                 {:local/root "reference-code/core.async.flow-monitor"}}
-   ;; 8 % of a 128 GB machine (~10 GB) per JVM, measured when several test
-   ;; JVMs ran at once (2026-09-20: 8 of 9 GB swap used at 12.5 %).
+   ;; The heap cap comes from the operator's `-Xmx`, as for :dev.
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
-              "-XX:+UseG1GC" "-XX:MaxRAMPercentage=8"
+              "-XX:+UseG1GC"
               "-XX:G1PeriodicGCInterval=30000"
               "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"
               ;; A heap failure ends the JVM instead of limping into the store.
