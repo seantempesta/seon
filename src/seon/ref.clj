@@ -5,10 +5,12 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [edamame.core :as edamame]
+            [malli.error :as me]
             [seon.ai.tokens :as tokens]
             [seon.cache :as cache]
             [seon.db :as db]
             [seon.error.refusal :as refusal]
+            [seon.fn :as fn]
             [seon.fn.analyzer :as analyzer]
             [seon.fs :as fs]
             [seon.schema :as schema]
@@ -186,8 +188,21 @@
                                                   home
                                                   (or (some-> (get aliases requested) ns-name) requested)))})))
 
+(defn- uses
+  "A program function's direct callers and the tests reaching it on `database`, or the refused read."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+                  [:or [:map [:seon.ref/callers :seon.ref/callers] [:seon.ref/tests :seon.ref/tests]]
+                   :seon.db/invalid-read-error]]}
+  [database function]
+  (let [callers (db/q '[:find [?caller ...] :in $ ?f :where [?e :seon.fn/calls ?f] [?e :seon.fn/sym ?caller]]
+                      database function)
+        tests (fn/gate-set database function)]
+    (or (some #(when (db/read-refusal? %) %) [callers tests])
+        {:seon.ref/callers (vec (sort callers)) :seon.ref/tests tests})))
+
 (defn- resolve-name
-  "One referenced name resolved to its current definition on `database`, or a problem."
+  "One referenced name resolved to its current definition on `database` (a program function with its direct callers
+  and reaching tests), or a problem."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ref/name]
                   [:or :seon.ref/resolved :seon.ref/problem :seon.error/value]]}
   [database reference]
@@ -207,13 +222,23 @@
         (cond
           (:seon.error/at function) function
           (:seon.fn/sym function)
-          (cond-> {:seon.ref/name reference :seon.render/operations operations}
-            (:seon.fn/arglists function) (assoc :arglists (stored-arglists reference (:seon.fn/arglists function)))
-            (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
-            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function)))))))
+          (let [{:seon.ref/keys [callers tests] :as used} (uses database reference)]
+            (if (db/read-refusal? used)
+              used
+              (cond-> {:seon.ref/name reference
+                       :seon.render/operations (into operations
+                                                     [(list 'my.program/callers {:seon.program/subject (list 'quote reference)})
+                                                      (list 'my.program/tests-reaching {:seon.program/subject (list 'quote reference)})])}
+                (:seon.fn/arglists function) (assoc :arglists (stored-arglists reference (:seon.fn/arglists function)))
+                (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
+                (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function))))))
+                (seq callers) (assoc :seon.ref/callers callers)
+                (seq tests) (assoc :seon.ref/tests tests))))
           (:seon.error/at test-entity) test-entity
           (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations operations}
           :else (library-name reference))))))
+
+(declare resolve-path)
 
 (defn- answer
   "One candidate resolved on `database`, or its problem, at its line."
@@ -223,8 +248,7 @@
   (let [resolved (cond
                    reference (resolve-name database reference)
                    problem-kind found
-                   ;; a path resolves once CS-01c3's resolve-path lands
-                   :else (assoc found :seon.ref/problem-kind :unresolved))]
+                   :else (resolve-path found))]
     (cond-> resolved (and line (not (:seon.error/at resolved))) (assoc :seon.ref/line line))))
 
 (defn references
@@ -286,12 +310,6 @@
                             :else (io/file (fs/source-directory)))))]
     (vec (sort (filter #(str/ends-with? % ".md") (.list directory))))))
 
-(defn- common-prefix
-  "The length of the shared leading characters of two strings."
-  {:malli/schema [:=> [:cat :string :string] :int]}
-  [a b]
-  (count (take-while true? (map = a b))))
-
 (defn- section-error
   "The error for a reference with no file or no such heading, naming the nearest."
   {:malli/schema [:=> [:cat :keyword :seon.ref/path [:maybe :seon.ref/anchor] :seon.ref/nearest] :seon.ref/section-error]}
@@ -337,7 +355,7 @@
         (if-not target
           (section-error :heading path anchor
                          (mapv #(select-keys % [:seon.ref/anchor :seon.ref/heading])
-                               (sort-by (comp - #(common-prefix anchor %) :seon.ref/anchor) headings)))
+                               (sort-by (comp #(me/levenshtein anchor %) :seon.ref/anchor) headings)))
           (let [{:seon.ref/keys [level line heading]} target
                 stop (if anchor (section-end headings line level end) end)
                 inside (filter #(and (> (:seon.ref/line %) (if anchor line (dec line))) (< (:seon.ref/line %) stop)) headings)
@@ -351,3 +369,17 @@
                                                                            (section-end headings (:seon.ref/line child) next-level stop))}))}
               anchor (assoc :seon.ref/anchor anchor)
               (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))
+
+(defn- resolve-path
+  "A based path with an optional anchor as its document entry: heading, size, pin and its one read, or a problem."
+  {:malli/schema [:=> [:cat :seon.ref/candidate] [:or :seon.ref/resolved-doc :seon.ref/problem]]}
+  [{:seon.ref/keys [path anchor]}]
+  (let [reference (cond-> path anchor (str "#" anchor))
+        found (section reference)]
+    (case (:seon.ref/section-missing found)
+      :file {:seon.ref/problem-kind :unresolved :seon.ref/path path}
+      :heading {:seon.ref/problem-kind :anchor-missing :seon.ref/path path :seon.ref/anchor anchor}
+      (-> found
+          (dissoc :seon.ref/text :seon.ref/below)
+          (assoc :seon.render/operations [(list 'my.fs/section reference)])))))
+

@@ -37,15 +37,29 @@
                  [:seon.ref/project :seon.ref/project] [:seon.ref/revision :seon.ref/revision]]
            :schema-form :seon.schema/value
            :arglists [:sequential {:description "A function's parameter vectors, destructuring forms included."} [:vector :seon.schema/value]]
-           :resolved [:map {:description "A name resolved to its current definition, with the forms that read it."}
-                      [:seon.ref/name :seon.ref/name]
-                      [:seon.ref/line {:optional true} :seon.ref/line]
-                      [:arglists {:optional true} :seon.ref/arglists]
-                      [:seon.fn/spec {:optional true} :seon.fn/spec]
-                      [:doc {:optional true} :string]
-                      [:seon.ref/pin {:optional true} :seon.ref/pin]
-                      [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
-                      [:seon.render/operations [:vector :seon.render/read-form]]]
+           :callers [:vector {:description "A function's direct callers, sorted."} :seon.fn/sym]
+           :tests [:vector {:description "The tests reaching a function, as `seon.fn/gate-set` selects them."} :seon.test/sym]
+           :resolved-name [:map {:description "A name resolved to its current definition, with the forms that read it; a program function also names its direct callers and reaching tests."}
+                           [:seon.ref/name :seon.ref/name]
+                           [:seon.ref/line {:optional true} :seon.ref/line]
+                           [:arglists {:optional true} :seon.ref/arglists]
+                           [:seon.fn/spec {:optional true} :seon.fn/spec]
+                           [:doc {:optional true} :string]
+                           [:seon.ref/pin {:optional true} :seon.ref/pin]
+                           [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
+                           [:seon.ref/callers {:optional true} :seon.ref/callers]
+                           [:seon.ref/tests {:optional true} :seon.ref/tests]
+                           [:seon.render/operations [:vector :seon.render/read-form]]]
+           :resolved-doc [:map {:description "A based path resolved to its document or anchored section: heading, size, pin and the one read operation, never its text."}
+                          [:seon.ref/path :seon.ref/path]
+                          [:seon.ref/anchor {:optional true} :seon.ref/anchor]
+                          [:seon.ref/heading :seon.ref/heading]
+                          [:seon.ref/tokens :seon.ref/tokens]
+                          [:seon.ref/pin {:optional true} :seon.ref/pin]
+                          [:seon.ref/line {:optional true} :seon.ref/line]
+                          [:seon.render/operations [:vector :seon.render/read-form]]]
+           :resolved [:or {:description "A reference resolved: a name to its definition, or a path to its document."}
+                      :seon.ref/resolved-name :seon.ref/resolved-doc]
            :reference-text [:string {:min 1 :description "A based relative path with an optional #anchor, as an agent writes it."}]
            :file :string
            :location [:map {:description "A doc's file in the loaded commit, with its pin for a reference-code path."}

@@ -150,4 +150,8 @@
  #:seon.task{:name "a-schema-resource-reference-is-no-edge"
              :kind :function
              :intent "A function named only from a schema resource (a `:gen/gen` generator such as `my.fs/content-generator`, a registered `[:fn ...]` predicate such as `my.fs/_content-predicate`) has no `:seon.fn/calls` or `:seon.fn/references` edge, so `seon.contracts/report` lists it as unused, a deletion candidate, though every armed call of a contract naming it uses it (lane contract-gen, 2026-10-09: 8 of 964 uncontracted source functions). Done when the program graph records a schema resource's function references as edges and the report no longer lists them."
-             :must-read #{seon.contracts/report seon.fn/contract-findings}}]
+             :must-read #{seon.contracts/report seon.fn/contract-findings}}
+ #:seon.task{:name "gate-set-walks-the-whole-transitive-closure-to-select-two-levels"
+             :kind :function
+             :intent "`seon.fn/gate-set` answers `seon.fn/closure-walk`'s `::selected` (the tests calling a seed or a direct caller) but `seon.fn/closure-walk` first walks every transitive caller level and derives `::affected` and `::tests` the caller drops. Measured at default fa92a2503 (agent ref-context, 2026-10-09, `seon.profile/measure` of `seon.ref/uses`): `seon.fs/attributes` (2 callers, 1 selected test) takes 22 ms, 40 MB and 209 reads (183 `seon.db/datoms`); `seon.db/pull` takes 98 ms, 192 MB and 1265 reads. `seon.ref/references` now calls it for every referenced program function in a task's block. Done when a selection-only caller walks two levels, so a leaf's cost follows its callers, measured on the same two seeds as a regression on reads."
+             :must-read #{seon.fn/gate-set seon.fn/closure-walk seon.ref/references}}]
