@@ -888,6 +888,41 @@ one "Hello") and 0 assignments.
 | RT-13 | Give-back and the call cap move the assignment to the assigner | one home transaction: reason, retraction, `assign-tx` to the assigner; all-green asks instead; the messages are deleted · card: [RT-13](cards/RT-13.md) | `src/my/task.clj`, `src/seon/task.clj`, `src/seon/turn.clj` (cap arm), tests | `seon.task-ingestion-test/a-given-back-task-is-held-by-its-assigner`, `seon.turn-work-test/a-capped-task-resumes-when-reassigned` | one home transaction, as the message before | F7a, RT-2, RT-3, RT-7, CX-2 | E, B | ready after its deps |
 | RT-14 | Root is woken only by an assignment | the sweep of producers addressing root; the class regression table · card: [RT-14](cards/RT-14.md) | per the sweep, `test/seon/turn_work_test.clj` | `seon.turn-work-test/root-is-woken-only-by-an-assignment` | D | RT-9, RT-11, RT-12, RT-13, CX-2, CX-3, CX-6, CX-8 | B | ready after its deps |
 
+### 3.29 Cost patterns (CO; design: `cost-design/merged.md`, merging `whole-program-per-call.md`, `focused-instrumentation.md`, `cost-design-astra.md`, `check-alloc/check-alloc-astra.md`)
+
+Owner (2026-10-08): find root causes and patterns, not symptoms; keep every contract and make the checks cheap.
+Patterns: **P1** work proportional to everything instead of the change (one mechanism: a derivation keyed by the
+content revisions of what it reads, advanced only from a held delta whose `:db-before` revisions match its entry,
+cold acquisition following the requested closure); **P2** Seon layers wrapping Datahike and Malli at every step;
+**P3** work not derived from need; **P4** copies instead of references; **P5** retention without an owner; **P6**
+cost not attributed to the request that caused it (feedback-design slices 2-5). Order is measured waste per ordinary
+eval request, then per test check; F11 (§3.9) is first: a `:ping` on a branch with four unchanged red reaching tests
+costs 719-794 ms, 460-533 ms of it the test world rebuilt to re-execute them. All parents were measured before
+rip-context lands (default PID 78227, archive `ade6e3059`); the owners below are untouched by it, and each card
+re-measures its parent first. Proofs count calls with `seon.profile/measure` (CO-0), never JVM-wide allocation.
+
+| Id | Title | Change | Files | Proof | Budget | Deps | Group | Status |
+|---|---|---|---|---|---|---|---|---|
+| CO-0 (P6) | A cost proof counts any function's calls | `measure` returns its complete called map; `calls-of` reads one count | `src/seon/profile.clj`, `test/seon/profile_test.clj` | `seon.profile-test/calls-of-counts-a-function-past-the-hot-limit` | D | none | F | ready ([card](cards/CO-0.md)) |
+| CO-1 (P1; W-25 part) | An unchanged branch's change set is a lookup | `seon.test/changes` cached by `[base commit, program-revisions-digest]`; the overlay reuses it, so `digest-differences` runs at most once | `src/seon/test.clj`, `test/seon/test_test.clj` | `seon.test-test/an-unchanged-branch-derives-its-changes-once` | expected ~0.1 ms on a hit; parent 47-58 ms, 48 MB per request on a changed branch | CO-0, F12 (test.clj) | E | ready after its deps ([card](cards/CO-1.md)) |
+| CO-2 (P3) | A request answered from its record writes nothing | when no member must execute, `seon.test/run` returns the records with no admission and no world | `src/seon/test.clj`, `test/seon/test_test.clj` | `seon.test-test/a-request-answered-from-its-record-writes-nothing` | expected ~1 ms; parent `selection-admission` 10-16 ms + one transaction per request | CO-0, F11, CO-1 | E | ready after its deps ([card](cards/CO-2.md)) |
+| CO-3 (P1) | Admission decides by present witnesses | differing present revisions derive the digest without the history query; history only without a witness | `src/seon/test.clj`, `test/seon/test/admission_digest_test.clj` | `seon.test.admission-digest-test/differing-revisions-derive-without-history` | expected O(program attributes); parent 1.09 GB per check window, 1.5 s / 3.36 GB per fallback call | CO-0, CO-2 (test.clj) | E | ready after its deps ([card](cards/CO-3.md)) |
+| CO-4 (P2) | Reach acquisition decodes nothing | `reach-attribute` reads natively typed datoms undecoded (verify W-24 first) | `src/seon/test/runner.clj`, `test/seon/test_reaching_test.clj` | `seon.test-reaching-test/reach-acquisition-decodes-no-datom` | expected Datahike's `d/datoms`; parent `datoms->data` 0.737 GB of reach's 0.77 GB per check | CO-0, W-24 | E | ready after its deps ([card](cards/CO-4.md)) |
+| CO-5 (P1) | Reach acquires the requested closure | frontier walk from the requested tests; per-node reuse by entity content; whole-program callers keep one union walk. Opus | `src/seon/test/runner.clj`, `test/seon/test_reaching_test.clj` | `seon.test-reaching-test/reach-digests-follow-only-changed-closures` (extended: reads unchanged by 200 unrelated declarations) | expected ∝ closure; parent 301 ms / 698 MB cold for 98 of 8,374 names | CO-4 | E | ready after its deps ([card](cards/CO-5.md)) |
+| CO-6 (P1/P3) | Toolkit namespaces follow what they read | `toolkit-namespaces` cached by the content revisions of its five attributes | `src/seon/cluster/instruction.clj`, `test/seon/cluster/instruction_test.clj` | `seon.cluster.instruction-test/toolkit-namespaces-follow-their-attributes` | expected O(5 attributes); parent ≤ 0.325 GB per check | CO-0 | M | ready after its deps ([card](cards/CO-6.md)) |
+| CO-7 (P2) | A schema's predicate is the check, not an armed call | `runtime-predicate` calls the Var root's original; direct calls stay armed. Opus | `src/seon/schema.clj`, `test/seon/schema_test.clj` | `seon.schema-test/a-schema-predicate-calls-the-unarmed-predicate` | expected ~0.01 µs per check; parent ~8 k `database-value?` + ~7.7 k `transaction-report-datom?` armed calls per `:ping` window | CO-0, owner Q2 (`merged.md` §4) | F/E | blocked-on-owner (Q2) ([card](cards/CO-7.md)) |
+| CO-8 (P2) | Identity-only schemas compile to class checks | the six `:seon.schema/identity-only` schemas become `m/-simple-schema` class checks | `src/seon/schema.clj`, `test/seon/schema_test.clj` | `seon.schema-test/identity-only-schemas-are-class-checks` | expected ~0.008 µs; parent 0.15 µs | CO-7 | E | ready after its deps ([card](cards/CO-8.md)) |
+| CO-9 (P2) | A read resolves its projection once | `with-declarations` resolves once and passes narrow inputs. Opus | `src/seon/db.clj`, `test/seon/db_overhead_test.clj` | `seon.db-overhead-test/query-preparation-has-bounded-armed-work` (extended: one `pull`) | expected within 2-3× of Datahike; parent 79 `carried-projection` calls, 39 armed calls, 36 µs per `pull` | CO-0; `db.clj` after rip-context, datoms-decode | E | ready after its deps ([card](cards/CO-9.md)) |
+| CO-10 (P2) | A query aligns its inputs once | delete `q`'s guard; the body's refusal stays in the output union | `src/seon/db.clj`, `test/seon/db_overhead_test.clj` | `seon.db-overhead-test/query-preparation-has-bounded-armed-work` (one alignment) | expected one alignment; parent two (guard 2.9 µs of 47.7 µs) | CO-9, owner Q1 (`merged.md` §4) | E | blocked-on-owner (Q1) ([card](cards/CO-10.md)) |
+| CO-11 (P2) | A contract's scope is honored; an arm that accepts everything is not run | Malli fork `-instrument-f` elides always-true arms; `compiled-wrapper` reads `:scope`, default full. Opus | `reference-code/malli`, `src/seon/instrument.clj`, `test/seon/instrument_test.clj` | `seon.instrument-test/a-contract-declares-its-scope` + the fork test | expected one validator fewer per elided arm | CO-0; FK restart batch | F | ready after its deps ([card](cards/CO-11.md)) |
+| CO-12 (P4/P1) | Name the queries a ping runs | post-rip diagnosis of the `:ping`'s 48 `q` (83 MB pre-rip) by caller; one row per owner | a note under `docs/research/agent-platform/2026-10-08/cost-design/` | the owner table with tasks | profile evidence | rip-context, CO-0 | V | waits on rip-context ([card](cards/CO-12.md)) |
+
+Shelved by `merged.md` D2: reach maps advanced by delta and SCC digest reuse (`whole-program-per-call.md` S3, S4), until
+CO-5's after-`defn` cost is 10× its closure. Same patterns, existing rows: PB-08 (P1/P4, advanced from the writer's
+held report under the contiguity check), PB-10 (P2: helpers take narrow facts derived after the one validation, no
+relaxed report schema), PB-14 (P4/P5), PB-07a/b and PB-11 (P1), LR-BRANCHREACH (P1, with eviction, divergent-sibling
+and merge cases), EN-7 and W-24.
+
 ## 4. Retired and merged ids
 
 | Old id | Now |
@@ -985,7 +1020,8 @@ tasks, filed in `seon.context`, `seon.sci.eval`, `seon.task`, `my.test`, `my.pro
    assertions.
 2. **Tests run by themselves**, in parallel with step 1: one reach cache shared by all branches → proofs run after a
    code-changing pass → reaching tests run after the proofs → the step has a bound and continues → a restarted proc
-   runs what was left; the block shows broken tests. Alongside: assignment needs a proof not yet green; answers are
+   runs what was left; the block shows broken tests; an unchanged red and an unchanged branch cost a lookup, not
+   a rebuilt test world (today a `:ping` with four unchanged reds costs 720-790 ms). Alongside: assignment needs a proof not yet green; answers are
    data on the agent.
 3. **Cut the model pass's memory and fix storage correctness now** (never parked), in two tracks:
    - **The model's context** (the largest owner: 350-405 MB of context projection per model wake, and the first live
@@ -1049,8 +1085,9 @@ the one before it.
 **The same path by row id.**
 1. CS-05b → CS-01c2 → REF-1 → CS-01c5 → CS-01c3 → TASK-CHECK → REF-2; S4-05a → CS-01c4 → CS-02.
    Alongside: S1-06 → S1-07a, S1-08; RED-8; LR-HOOK.
-2. F4c (in flight) → F4d; F12 (high); CS-01d; F11; LR-PROOFREAD. Alongside: A1, LR-PROOFSTATUS, LR-BRANCHRESTART, RF-3.
-3. Context track: CX-1 → CX-2 → CX-3 → CX-6a → CX-6b; CX-4, CX-5, CX-7, CX-12 after CX-1; CX-8 → CX-9 → CX-10;
+2. F4c (in flight) → F4d; F12 (high); CS-01d; F11 → CO-0 → CO-1 → CO-2 → CO-3; LR-PROOFREAD. Alongside: A1, LR-PROOFSTATUS, LR-BRANCHRESTART, RF-3.
+3. Cost patterns (§3.29), after CO-0: CO-4 (after W-24) → CO-5; CO-6; CO-7 → CO-8; CO-9 → CO-10; CO-11 (restart
+   batch); CO-12 after rip-context. Context track: CX-1 → CX-2 → CX-3 → CX-6a → CX-6b; CX-4, CX-5, CX-7, CX-12 after CX-1; CX-8 → CX-9 → CX-10;
    CX-11 after TX-0; CX-13; NK-5 after CX-1. Acquisition and storage track: SR-E; SR-GROW; PB-02's proof → PB-02b →
    PB-03, SR-H → SR-I; RP-0's owner rows; PB-04; LR-STALE3; RED-2; W-27 (GB class); MEM-05 (in flight); DIAL-1, DIAL-19;
    LR-BASEWEIGHT after root's ruling.
@@ -1100,3 +1137,7 @@ without a merge (F5); subtree counts are kept on every write, after verifying th
 4. **Root's work as tasks** (`cards/README-root-tasks.md`): all answered (owner 2026-10-08): Q-RT1 holding is the
    assignment's presence, retracted on completion or give-back; Q-RT2 one question per new error signature; Q-RT3 no
    root help (root's tasks carry its guidance as references); Q-RT4 answers live on the assignment.
+
+5. **The cost patterns' two questions** (`cost-design/merged.md` §4): Q1, delete `seon.db/q`'s guard, which repeats
+   its body's input alignment (recommended; blocks CO-10); Q2, a predicate called from inside a schema stops counting
+   in its own profile cell while its direct calls stay armed (recommended; blocks CO-7).
