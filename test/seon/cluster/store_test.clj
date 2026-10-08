@@ -901,7 +901,7 @@
                 sorted-ms (vec (sort (map :ms rows)))]
             (is (every? #(= 1 (:record-keys %)) rows) "one commit-record key per commit")
             (is (every? #(= 1 (:head-keys %)) rows) "one branch-head key per commit")
-            (is (every? #(< 1024 (:head-bytes %)) rows) "the head holds the fused record today")
+            (is (every? #(> 1024 (:head-bytes %)) rows) "the head only names its commit record")
             (is (every? #(= (:files %) (+ 2 (:node-keys %))) rows) "a commit writes its nodes, one record and one head")
             ;; the baseline later cards tighten: one durable small commit
             (is (< (percentile sorted-ms 0.5) 50.0) "a small commit's p50 stays far under the five-second bound")
