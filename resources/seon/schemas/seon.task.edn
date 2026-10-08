@@ -145,7 +145,7 @@
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
            :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
            :invalid-name :duplicate-name :misplaced-file :revision-conflict :dangling-id
-           :unknown-task :unassigned :revised-since-assignment :no-proofs :unproven :claimed :no-current-step]
+           :unknown-task :unassigned :revised-since-assignment :no-proofs :proofs-green :unproven :claimed :no-current-step]
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:and :seon.error/base

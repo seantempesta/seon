@@ -1,13 +1,15 @@
 (ns seon.task-ingestion-test
   "Task ingestion (spec 7.9-7.16): symbol-valued edges, task EDN with derived handles
   and a revision basis, lookups both ways, and the publication seam's dangling refusal."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.data.json :as json]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.source]
             [seon.db :as db]
             [seon.fn]
+            [seon.mcp :as mcp]
             [seon.task :as task]
             [seon.program :as program]
             [seon.test-support :as test-support]))
@@ -245,14 +247,16 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection (test-support/agent-tx @connection "revisor"))
-     (let [declaration {:seon.db/connection connection :seon.agent/id "revisor" :seon.task/ns 'tq.r
-                        :seon.task/name "shape" :seon.task/kind :function}
-           created (task/create! (assoc declaration :seon.task/intent "First."))
-           id (:seon.task/id created)
+     (admit! connection (entities-of subject-source))
+     (ingest! connection (task-text "First." ""))
+     (let [declaration {:seon.db/connection connection :seon.agent/id "revisor" :seon.task/ns 'tq.a
+                        :seon.task/name "prove-ingestion" :seon.task/kind :function}
+           id handle
            intent #(:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id id]))
            assigned (fn [] (select-keys (task/assignment @connection "revisor" :main) [:seon.task/assigned :seon.task/proofs :seon.error/type]))]
-       (task/assign! {:seon.db/connection connection :seon.task/assigned id :seon.task/agent [:seon.agent/id "revisor"]
-                      :seon.task/branch :main})
+       (is (:seon.task/assignment (task/assign! {:seon.db/connection connection :seon.task/assigned id
+                                                :seon.task/agent [:seon.agent/id "revisor"] :seon.task/branch :main}))
+           "a task whose proof has not run is assigned")
        (is (= id (:seon.task/assigned (assigned))) "the assignment answers before the revision")
        (is (:seon.task/changed? (task/create! (assoc declaration :seon.task/intent "Second."
                                                      :seon.task/basis {id (#'task/declared (db/carried-projection @connection)
@@ -260,3 +264,38 @@
        (is (= "Second." (intent)) "the task shows its revised declaration")
        (is (= id (:seon.task/assigned (assigned))) "the assignment is current without a new assign!")
        (is (nil? (:seon.error/type (assigned))) "the revision is not refused as revised-since-assignment")))))
+
+(deftest assignment-refuses-a-task-without-proofs
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agent-tx @connection "revisor"))
+     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "revisor" :seon.task/ns 'tq.r
+                                            :seon.task/name "bare" :seon.task/kind :function :seon.task/intent "No proof."}))
+           refused (task/assign! {:seon.db/connection connection :seon.task/assigned id
+                                  :seon.task/agent [:seon.agent/id "revisor"] :seon.task/branch :main})]
+       (is (= :no-proofs (:seon.task/refused refused)))
+       (is (nil? (:seon.task/assignment refused)))))))
+
+(defn- evaluate
+  "Evaluates `code` as the agent through `seon.mcp/call`."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :string]}
+  [running agent-id code]
+  (mcp/call (json/write-str {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}})))
+
+(deftest assignment-requires-a-non-green-proof
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.a
+                                            :seon.task/name "prove" :seon.task/kind :function :seon.task/intent "Prove."}))
+           assign #(task/assign! {:seon.db/connection connection :seon.task/assigned id
+                                  :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+           define #(evaluate running agent-id
+                             (str "(ns tq.a (:require [clojure.test :refer [deftest is]])) "
+                                  "(deftest ^{:seon/tasks #{'tq.a/prove}} proves (is (= 1 " % ")))"))]
+       (is (= :no-proofs (:seon.task/refused (assign))))
+       (define 1)
+       (evaluate running agent-id "(my.test/check {})")
+       (is (= :proofs-green (:seon.task/refused (assign))))
+       (define 2)
+       (evaluate running agent-id "(my.test/check {})")
+       (is (:seon.task/assignment (assign)))))))

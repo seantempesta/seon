@@ -87,7 +87,7 @@
                                 :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch}))))
 
 ;;; STEPS: my ordered plan is the steps of the task I hold (spec task-steps). With no task, the first
-;;; plan! or step! makes and claims my own :work task.
+;;; plan! or step! needs a held task: with none, the :work task it would mint is refused for want of a proof.
 
 (defn- unassigned
   "The refusal of a step read or write by an agent holding no task."
@@ -97,7 +97,7 @@
                       {:seon.error/message (str "Agent " agent-id " holds no task, so it has no steps.")
                        :seon.task/refused :unassigned :seon.task/holder 'my.task
                        :seon.error/offending {:seon.agent/id agent-id}
-                       :seon.error/fix "Plan first: (my.task/plan! {:seon.task/steps [\"first step\" \"next step\"]}) makes and claims my own work task."}))
+                       :seon.error/fix "Plan first: (my.task/plan! {:seon.task/steps [\"first step\" \"next step\"]}) needs a task you hold; a task is assigned only with a proof not yet green."}))
 
 (defn- held
   "The handle of the task I hold at the task home, or nil."
@@ -106,7 +106,7 @@
   (task/agent-task (db/db (task/home-connection connection)) agent-id))
 
 (defn- own-task
-  "The handle of the task I hold, else of my own :work task, created and claimed now."
+  "The handle of the task I hold, else the refusal assigning a :work task minted now meets."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                                   [:seon.task/intent {:optional true} :seon.task/intent]]]
                   [:or :seon.task/handle :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}
@@ -126,7 +126,7 @@
             (if (:seon.error/at assigned) assigned (:seon.task/id created)))))))
 
 (defn- steps-of
-  "Apply the step `op` to my own task (made when I hold none)."
+  "Apply the step `op` to my own task (refused when I hold none and the minted task has no proof)."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.agent/id :seon.agent/id]
                                   [:seon.task/intent {:optional true} :seon.task/intent]] :seon.task/step-op]
                   [:or :seon.task/steps-view :seon.task/refused-error :seon.task/conflict-error :seon.error/value]]}

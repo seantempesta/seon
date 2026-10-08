@@ -15,7 +15,8 @@
             [seon.error.refusal :as refusal]
             [seon.fn :as functions]
             [seon.id :as id]
-            [seon.schema :as schema]))
+            [seon.schema :as schema]
+            [seon.test :as test]))
 
 ;;; DECLARATIONS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
 ;;; and proofs are the `:seon.task/tasks` symbols program entities carry.
@@ -497,15 +498,23 @@
     (cond (:seon.error/at revision) revision
           (nil? revision) (refused 'seon.task/assign! :unknown-task 'seon.task handle)
           (not (string? agent-id)) (refused 'seon.task/assign! :unassigned 'seon.task agent)
-          :else (let [assignment (id/id [handle agent-id branch])
-                      report (written connection [{:seon.task/assignment assignment :seon.task/assigned handle
-                                                   :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
-                                                   :seon.task/branch branch}])]
-                  (if (:seon.error/at report)
-                    report
-                    {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
-                     :seon.task/branch branch
-                     :seon.render/operations ['(my.program/propose-merge! {})]})))))
+          :else (let [edges (task-edges database (:seon.task/sym (db/pull database [:seon.task/sym] [:seon.task/id handle])))
+                      proofs (:seon.task/proofs edges)
+                      verified (when (seq proofs) (mapv #(test/verified? database %) proofs))]
+                  (cond (:seon.error/at edges) edges
+                        (empty? proofs) (refused 'seon.task/assign! :no-proofs 'seon.task handle)
+                        (some :seon.error/at verified) (some #(when (:seon.error/at %) %) verified)
+                        (every? true? verified) (refused 'seon.task/assign! :proofs-green 'seon.task
+                                                         {:seon.task/assigned handle :seon.task/proofs proofs})
+                        :else (let [assignment (id/id [handle agent-id branch])
+                                    report (written connection [{:seon.task/assignment assignment :seon.task/assigned handle
+                                                                 :seon.task/revision revision :seon.task/agent [:seon.agent/id agent-id]
+                                                                 :seon.task/branch branch}])]
+                                (if (:seon.error/at report)
+                                  report
+                                  {:seon.task/assignment assignment :seon.task/assigned handle :seon.agent/id agent-id
+                                   :seon.task/branch branch
+                                   :seon.render/operations ['(my.program/propose-merge! {})]})))))))
 
 (defn assignment
   "What `agent-id` on `branch` is assigned in the cluster value `database`: its

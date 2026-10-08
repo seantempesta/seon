@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.repl :as repl]
             [seon.sci.eval :as evaluation]
+            [seon.task-steps-test :as task-steps-test]
             [seon.test-support :as support]))
 
 
@@ -18,6 +19,7 @@
                         (agent/creation-tx {:seon.agent/id "juniper"
                                             :seon.ns/name 'my.agents.juniper
                                             :seon.cluster/name "shown-text"}))
+     (task-steps-test/hold-task! connection "juniper")
      (let [base (support/fork-cluster-ctx connection "shown-text")
            ctx (:seon.sci.eval/ctx
                 (evaluation/fork-for-turn
