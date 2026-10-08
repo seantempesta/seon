@@ -232,3 +232,33 @@ add the columns, or mark those rows `ready after split`.
 - The cache holds 346 of 512 MB.
 - Loaded commit `6ac7343e`.
 - The over-bound rows without a task are recorded above.
+
+## Second round (root accepted findings 1-5, 7, 8; two more rulings)
+
+Applied to the ledger in the follow-up commit:
+
+- **#1:** the context chain is step 3's first track, in `turn.clj` right after the four F4 rows. §5 states that "one
+  commit per model pass" (step 7) waits on owner question 1 and is on the path to the smoke run.
+- **#2:** §5 now names the file order for `eval.clj` and `turn.clj`. S1-00 (lookups into their own namespace) is a
+  proposed row waiting on root after the Astra review.
+- **#3:** F4 no longer depends on S7-01, which is off the path.
+- **#4:**
+  - MA-11 depends on MA-10, MA-3, MA-6 and MA-7.
+  - MA-8a-c and MA-9 follow MA-11 and come before X1-X4, which now also names MA-9.
+  - Old step 6 is off the path, and the steps are renumbered 1-11.
+- **#5:** AT-4 deletes `CountedSlidingBuffer` for `(async/sliding-buffer 1)`.
+- **#7:** MA-8c records `:tx/norm` as Datahike's norm runner does and keeps no record of its own.
+- **#8, splits:** F4 → F4a-d (proofs; reaching tests; bound and continuation, with the queue in Flow proc state;
+  restart) and CS-01c → CS-01c1-4.
+- **#8, columns:**
+  - Files and Budget columns added to the MA, E and C tables.
+  - A Budget column added to the RP, RO, NK, GV, CN, VEC and RED tables.
+  - E-CUT's files stay "named by root's split", and C4's namespace for `scores` is the slice's choice.
+  - The dependency script finds no cycle.
+- **Config dials (§3.24):** DIAL-0 is lane dials-16gb, with MEM-01 folded in. DIAL-1 is the Aero row.
+  - Probe done here: Aero 1.1.6, already in `bb.edn:2`, runs under Babashka. These all answer as documented:
+    - `(read-config … {:profile :dev})` over `#profile`;
+    - `#or [#env SEON_NOPE 4]`;
+    - `#include` of a sibling file.
+  - Aero is not in `deps.edn` yet.
+- **#6:** reinvention rows left for the Astra census, as root asked.
