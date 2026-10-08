@@ -62,4 +62,8 @@
              :must-read #{seon.operator/check! seon.operator/parse-argv}} #:seon.task{:name "a-namespace-check-is-cut-at-one-flat-allowance"
              :kind :function
              :intent "bin/test-check bounded every non-isolated request by the flat :seon.test/check-time-limit-ms (120 s) plus a 30 s transport allowance, so a namespace of declared-long tests stopped at the deadline: seon.cluster.agent-test executed 11 tests and listed ten as pending (not started) at 120299 ms (check --at HEAD, 2026-10-08). The request's bound is now the sum of its tests' declared bounds (seon.test/requested-bound-ms), no lower than the dial and no higher than :seon.config.operator/check-bound-ms; the tally already reports finished results, the unfinished test and the pending tests as data."
-             :must-read #{seon.test/requested-bound-ms seon.test/declared-bound-ms}}]
+             :must-read #{seon.test/requested-bound-ms seon.test/declared-bound-ms}}
+ #:seon.task{:name "a-restart-prunes-the-program-classes-a-starting-check-uses"
+             :kind :function
+             :intent "On 2026-10-09 a `bin/seon start --head` that filled classes for a changed dependency (reference-code/sci) pruned a program-classes directory (target/dev-program-classes/8c25a8da…) while a `bin/seon check` was starting from it; the check's throwaway JVM failed with NoSuchFileException on instaparse/gll$sub_sequence.class and refused the lane commit (retry passed). The prune must never delete classes a starting or live check holds (`seon.operator/prune-program-classes!` and the hold markers of LR-SHARED)."
+             :must-read #{seon.operator/check!}}]
