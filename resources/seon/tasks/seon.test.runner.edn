@@ -61,4 +61,13 @@
  #:seon.task{:name "every-eval-request-reports-unrelated-reds-as-reaching"
              :kind :function
              :intent "Every eval request on default answers :seon.turn.loop/reaching red with tests that do not reach anything it evaluated: (my.agent/branch) by a fresh unassigned agent answered red [live.text-test/initials-of-words, my.program-test/source-shows-the-docstring-once-inside-the-source, seon.html-views-test/the-settings-render-shows-the-overrides-it-was-handed, seon.render.ns-test/a-doc-line-is-the-docstrings-first-sentence] (fanout run, default e1a71b7c8, 2026-10-08), and agent fan-settings, green on its proof, was shown the other agents' proofs as its own reaching reds. An agent cannot tell what its change broke. Done when the reaching set is the tests that reach the eval request's changed definitions, and a request that changed none reports none."
-             :must-read #{seon.test.runner/reach-digests seon.cluster.branch-evidence/branch-evidence}}]
+             :must-read #{seon.test.runner/reach-digests seon.cluster.branch-evidence/branch-evidence}}
+ #:seon.task{:name "a-timed-out-unrelated-test-restarts-in-every-eval-request"
+             :kind :function
+             :intent "After root re-evaluated (ns seon.ref-test ...) on main, every eval request of root and of every agent forked from main (fanout-2 run, default 795a770c2, 2026-10-08; agents fan2-fix, fan2-near, fan2-source) spent 10-26 s in its test step: each started seon.ref-test/a-doc-section-reads-with-its-headings-below-and-size (18.4 s against its 5 s bound), cut it at the step's time limit with its thread still live, and left the namespace's other twelve members pending, so the same work restarted in the next request (eleven recorded \"did not exit within :seon.test/check-time-limit-ms\" failures on main). Each model pass of the three agents cost about 13 s for tests none of them changed. Done when a test that timed out at a commit is not restarted by a later request at the same reach digest, and a request reaching nothing it changed spends no test step on it."
+             :must-read #{seon.turn/run-reaching seon.test/run seon.test.runner/reach-digests}}
+ #:seon.task{:name "a-require-in-a-hub-namespace-reaches-every-test"
+             :kind :function
+             :intent "Agent fan2-near evaluated (in-ns 'seon.db) then (require '[clojure.string :as str] '[malli.core :as m]) on its branch (fanout-2 run, default 795a770c2, 2026-10-08) and defined nothing; its next eval request answered 13 red and about 1,380 pending reaching tests, every test reaching seon.db, because an alias added to the namespace changes every declaration's reach. An exploratory require in a namespace an agent reads is ordinary REPL use. Done when adding an alias no declaration uses reaches no test."
+             :must-read #{seon.test.runner/reach-digests seon.fn/gate-sets}}
+]

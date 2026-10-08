@@ -139,4 +139,8 @@
              :kind :function
              :intent "When the automatic test step's time budget is spent while the first test world is built, `seon.test/run-request` computes a second `remaining-ms` after the first positive check and passes a negative one (-419 on lane dogfood-pb15, turn 133a4f30779a) to `seon.test/member-result`, whose contract requires at least 1: the agent's reply carries a contract error of about 2,000 tokens instead of the unstarted members as pending. Done when the budget is read once after the world is built and a non-positive one stops the run with the remaining members pending, continued at the next step."
              :must-read #{seon.test/run seon.test/member-result seon.turn/run-reaching}}
+ #:seon.task{:name "a-repl-test-after-a-root-ns-form-has-no-executable-var"
+             :kind :function
+             :intent "Root evaluated on main the file's (ns seon.ref-test ...) with two added requires, then the deftest seon.ref-test/a-resolved-function-offers-a-source-form-that-shows-its-source (fanout-2 run, default 795a770c2, 2026-10-08). Called at root's or the agent's REPL it runs, but every test-world run of it, on main and on agent fan2-source's branch after a correct fix, records error 1 with began? false and the failure \"The admitted identity has no executable test Var.\", so its task can never go green. Deftests defined the same way in seon.db-test and seon.transact-feedback-test without an ns form run and fail on their assertions. Done when a deftest root defines at its REPL after an ns form runs in the test world as at the REPL."
+             :must-read #{seon.test/resolve-test seon.test/run}}
 ]

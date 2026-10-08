@@ -10,4 +10,9 @@
  #:seon.task{:name "a-must-read-offers-a-source-form-that-answers-nil"
              :kind :function
              :intent "A must-read entry in an agent's block offers (clojure.repl/source sym) as its operation, and at the agent's REPL that answers nil for Seon functions: agent fan-settings ran (clojure.repl/source seon.agent/render-settings-ai) three times and (clojure.repl/source seon.agent/settings!) once, all nil, across four model turns (fanout run, default e1a71b7c8, 2026-10-08), while (my.program/source 'sym) answers the source. Done when the offered operation shows the source at the agent's REPL, asserted on the operation's evaluated value."
-             :must-read #{seon.ref/references my.program/source}}]
+             :must-read #{seon.ref/references my.program/source}}
+ #:seon.task{:name "a-doc-section-test-takes-eighteen-seconds"
+             :kind :function
+             :intent "seon.ref-test/a-doc-section-reads-with-its-headings-below-and-size took 18,404 ms against its 5,000 ms bound on default 795a770c2 (fanout-2 run, 2026-10-08) and errs on every run, so any request reaching seon.ref-test holds a live thread for it past the step's time limit (see `seon.test.runner/a-timed-out-unrelated-test-restarts-in-every-eval-request`). Done when it passes within its bound, with the measured cost of the (my.fs/section \"AGENTS.md#data-and-contracts\") read it runs through a running agent."
+             :must-read #{my.fs/section seon.test-support/with-running-agent}}
+]
