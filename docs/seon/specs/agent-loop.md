@@ -267,8 +267,10 @@ order, and printed by the value printer under the block budget. Sections, each a
   line, with `(doc sym)` and `(clojure.repl/source sym)` offered as operations. Library names resolve the same way
   (`malli.core/validator`, `datahike.versioning/merge!`, a namespace such as `datahike.norm.norm`): read-only from the
   host's loaded Var, with the project's pinned `reference-code/` revision, and nothing copied into the store.
-  Secondary to symbols, a must-read that is not a Var (a README, a doc page) is a path under
-  `reference-code/<project>/…`, shown with the pinned revision and one read operation. A name resolving to nothing
+  A reference that is not code (a Markdown doc, a README) is a relative path whose first segment names its base (the
+  checkout, or `reference-code/<project>` at its pinned revision) with an optional `#heading`; the block lists it with
+  its size in tokens and one read operation, `(my.fs/section "path#heading")`, which the agent evaluates to pull the
+  section. Task intents, docs and docstrings are parsed for references by one resolver. A name resolving to nothing
   shows as a problem on the task. An agent that runs the operations sees the result in its own history.
 - **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model eval request, each with
   its identity; `(my.message/inbox)` is the operation that shows them all (it is extended for unread items; there is

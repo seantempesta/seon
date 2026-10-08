@@ -109,13 +109,15 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 ## How to work
 
 1. **Understand.** Read the owning spec, Git history, dependency source and first-party caller before designing.
-   Record the pinned revision, `file:line`, guarantee, inputs, recomputation event and cost. Verify a seam exists
+   Record the pinned revision, the seam by fully qualified symbol (a `file:line` only in dated evidence), guarantee,
+   inputs, recomputation event and cost. Verify a seam exists
    upstream before calling it the library's; prefer upstream, improving a maintained fork only to remove real
    duplication. For validation, contracts, instrumentation and error shapes, begin in
    `reference-code/malli/src/malli` and cite the Malli function used. Load
    [data-oriented-clojure](.agents/skills/data-oriented-clojure/SKILL.md) before Clojure design or edits, and the
    REPL, testing, datahike, modeling and flow skills at their boundaries. Verify touched skill claims against
-   `file:line`; a stale skill is a high-priority defect; delete unverifiable claims, never hedge them.
+   the code they name; living documents cite code by symbol (which resolves to file and line), never a hand-written
+   `path:N`; a stale skill is a high-priority defect; delete unverifiable claims, never hedge them.
 2. **Probe.** Start Clojure changes with `bin/seon status` and MCP `runtime_status`; report and record degraded or
    missing tools first. Use `eval_clj` with explicit root and cluster; JVM mode has no custody, so pass the
    connection, e.g. `(seon.cluster.boot/connection "default")`. SCI mode mutates its shared context: keep probes
