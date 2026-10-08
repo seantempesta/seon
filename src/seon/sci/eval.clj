@@ -1554,6 +1554,12 @@
                           installations)]
       (when-let [snapshot (::base-bindings agent-ctx)]
         (reset! snapshot (base-bindings ctx)))
+      ;; The agent's snapshot holds the rows its own definitions committed, so
+      ;; its next regeneration reads them unchanged rather than another writer's.
+      (when-let [agent-snapshot (::kernel/program-snapshot agent-ctx)]
+        (swap! agent-snapshot update :functions merge
+               (select-keys (:functions @(::kernel/program-snapshot ctx))
+                            (keep (comp :seon.fn/sym :seon.program/row) installations))))
       (when (and report written-on
                  (every? :seon.sci.eval/installed installed)
                  (installation-covers-program-change?
@@ -2852,9 +2858,9 @@
   The private layer is what the agent's own evaluation added: Vars its SCI
   generation defined, and Vars at a path the base it forked from never had (a
   namespace it required from the JVM, `load-host-namespace`). Owned private
-  Vars keep their roots, including captured values, and an own definition keeps
-  its Var until another writer changes its row. Inherited program bindings are
-  replaced. A JVM restart has no entering context and
+  Vars keep their roots, including captured values; an own definition keeps its
+  Var, which takes another writer's definition of its row in place. Inherited
+  program bindings are replaced. A JVM restart has no entering context and
   consequently preserves no private objects. No database read restores them.
   An unavailable execution's private layer is the unrestored one, so it
   carries nothing: the context is the base acquired at the branch head."
@@ -2863,6 +2869,7 @@
         layer (sci/namespace-state ctx)
         previous @(::base-bindings ctx)
         current (base-bindings base)
+        base-layer (sci/namespace-state base)
         changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
                                              @(::kernel/program-snapshot base)
                                              [(symbol (str %1) (str %2))]))
@@ -2873,23 +2880,25 @@
               :let [path [namespace-name local-name]
                     root (if (sci.vars/hasRoot entry) @entry absent-intern)
                     held (get current path)
-                    transferred? (boolean (and held (same-program-root? root (first held))))]
+                    transferred? (boolean (and held (same-program-root? root (first held))))
+                    own? (= generation (:sci/generation (meta entry)))
+                    changed (when-not transferred? (changed? namespace-name local-name))
+                    adopted (when (and own? changed (sci.utils/var? (get-in base-layer path)))
+                              (get-in base-layer path))]
               ;; An own Var stays the Var its callers' closures hold, as one
               ;; Clojure Var does: settlement transfers its root into the base
-              ;; under another Var, which never replaces it. Only another
-              ;; writer's change of its row does.
-              :when (if (= generation (:sci/generation (meta entry)))
-                      (or transferred? (not (changed? namespace-name local-name)))
-                      (and (not (contains? previous path))
-                           (not (changed? namespace-name local-name))
-                           (not transferred?)))]
-          [namespace-name local-name entry transferred?])
+              ;; under another Var, and another writer's definition of its row
+              ;; is adopted into it. Only a deleted row drops it.
+              :when (if own?
+                      (or transferred? (not changed) adopted)
+                      (and (not (contains? previous path)) (not changed) (not transferred?)))]
+          [namespace-name local-name entry (or transferred? (some? adopted)) adopted])
         private-names (into #{} (map (fn [[namespace-name local-name _]]
                                       (symbol (str namespace-name) (str local-name))))
                             private-bindings)
-        ;; the base's row of a transferred definition is the current one
-        snapshot-names (into #{} (keep (fn [[namespace-name local-name _ transferred?]]
-                                         (when-not transferred?
+        ;; the base's row of a transferred or adopted definition is the current one
+        snapshot-names (into #{} (keep (fn [[namespace-name local-name _ base-row?]]
+                                         (when-not base-row?
                                            (symbol (str namespace-name) (str local-name)))))
                              private-bindings)
         regenerated
@@ -2908,7 +2917,10 @@
     ;; only their roots would detach private closures from their private Vars.
     ;; Every inherited base Var still belongs to a different generation.
     (swap! (:env regenerated) assoc :sci/generation generation)
-    (doseq [[namespace-name local-name entry] private-bindings]
+    (doseq [[namespace-name local-name entry _ adopted] private-bindings]
+      (when (and adopted (sci.vars/hasRoot adopted))
+        (sci/bind-root! regenerated entry @adopted)
+        (reset-meta! entry (merge (meta adopted) (select-keys (meta entry) [:sci/generation :ns]))))
       (sci/add-namespace! regenerated namespace-name {local-name entry}))
     (doseq [[namespace-name entries] layer
             [local-name entry] entries

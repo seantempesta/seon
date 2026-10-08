@@ -69,3 +69,22 @@
            failures (into {} (map (juxt (comp name :seon.test/sym) :seon.test/fail-count))
                           (:seon.test/results check))]
        (is (= {"other-squares" 1 "other-is-six" 0} failures))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}}
+  another-writer-on-the-cluster-head-neither-hides-nor-freezes-a-callee
+  ;; The fixture agent holds the cluster head's custody (its root, as on default);
+  ;; a second agent created there is another writer of the same branch.
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [other (str "other-" agent-id)
+           in-shared "(in-ns 'scratch.shared-writer) (clojure.core/refer-clojure) "]
+       (support/transacted! connection (support/agent-tx @connection other))
+       (testing "another writer's program change re-acquires the head; the agent's own callee stays its Var"
+         (answered (str in-shared "(defn g6 [] 1) (defn h6 [] (g6))") agent-id running)
+         (answered (str in-shared "(defn unrelated [] 0)") other running)
+         (is (= [2 2] (answered (str in-shared "(defn g6 [] 2) [(h6) (g6)]") agent-id running))))
+       (testing "another writer's redefinition reaches the agent's earlier caller"
+         (answered (str in-shared "(defn g5 [] 1) (defn h5 [] (g5)) [(h5) (g5)]") agent-id running)
+         (answered (str in-shared "(defn g5 [] 7)") other running)
+         (is (= [7 7] (answered (str in-shared "[(h5) (g5)]") agent-id running)))
+         (is (= [8 8] (answered (str in-shared "(defn g5 [] 8) [(h5) (g5)]") agent-id running))))))))

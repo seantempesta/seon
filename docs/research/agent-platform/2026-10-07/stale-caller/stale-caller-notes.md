@@ -71,17 +71,51 @@ that every earlier closure holds. Simpler alternative considered and tried first
 each agent fork in the agent's generation (`own-overlay!`). It had no effect, because the overlay was empty. It also
 re-interpreted per fork, so it was reverted.
 
-## Remaining limitation (hypothesis, not reproduced)
+## Second slice: the cluster head (root) and another writer
 
-Two cases are untested:
+On default after the restart to 3168005b3, root on `:cluster-default` still answered `[2 3]`. Root's base is the cluster
+context, which re-acquired between passes. The fresh `g2` and `h2` Vars belonged to the new base's generation, so the
+transfer rule did not apply. `changed?` was still true because the agent's snapshot never recorded the rows its own
+definitions committed, and the agent's Vars were dropped.
 
-- If another writer changes the row of an agent's own definition (merge, or another agent on the same branch), the
-  agent's Var is dropped. Its callers' closures then keep the old Var.
-- A fresh fork (a restart, or a new agent on a branch with an overlay) inherits the overlay's foreign Vars. A first
-  redefinition there would copy them.
+Fix, at the producers:
 
-Neither was reproduced through an entrance, so neither is filed. Next probe: a regression that drives the MCP pass after
-the agent's execution is released.
+- `install-evaluated-rows!` merges the installed rows' function entries into the agent context's snapshot. Settlement is
+  the owner that knows those rows are the agent's own.
+- `regenerate-agent-context!`, when another writer really changed an own definition's row, keeps the own Var and
+  adopts that definition's root and metadata into it in place, as a reload redefines one Clojure Var. Only a row the
+  base no longer holds drops the Var.
+
+Ablation in a throwaway JVM: without the snapshot record, `[2 2]` read `[1 2]`. Without adoption, `[7 7]` read
+`[1 7]` and `[8 8]` read `[1 8]`. At 3168005b3 all three are red; with both parts, pass 3 / fail 0.
+
+The regression is `seon.repl-differential-test/another-writer-on-the-cluster-head-neither-hides-nor-freezes-a-callee`.
+In a test world the MCP agent `root` is a new id and gets its own branch: the probe showed connection `:agent-ce5b…`,
+while the fixture agent held the cluster head. So the fixture agent is the cluster-head custody, and a second agent
+created on the same branch is the other writer. The earlier `root` row added in this slice tested only a branch, so
+it was removed.
+
+The `seon.sci.arm/write-event` nil `:seon.batch/origin :line` error did not reproduce for me. I sent root's exact
+pass-1 text as root on default and got no error. This path (`regenerate-agent-context!`, `install-evaluated-rows!`)
+writes no batch event or origin, so it cannot produce the error. It belongs to lane eval-defs.
+
+## Remaining limitation (reproduced, filed)
+
+`seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass`: B `(defn k7 [] (g7))`, then
+A `(defn g7 [] 2) [(k7) (g7)]` answers `[1 2]`. The next pass answers `[2 2]`. The same holds for any caller the base
+interpreted before a fresh fork (the first pass after a restart, or a new agent). The fork does not own that caller's
+callee Var, so a `defn` copies it. The task lists three options for root. Model-agent passes go through the same
+`fork-for-turn` and settlement (`seon.turn` calls `install-evaluated-rows!` with `:seon.sci.eval/agent-ctx`), so they
+are covered as MCP is.
+
+Also red at HEAD 3168005b3 and unchanged by this slice: `seon.turn-test/a-definition-changed-since-the-run-read-it-is-refused-at-the-writer`
+and `seon.turn-test/a-form-whose-facts-are-refused-says-it-was-not-admitted` (error). These add to the nine in
+`seon.sci.eval/nine-tests-reaching-acquisition-are-red-at-head`.
+
+Second-slice MCP pass medians (HEAD 3168005b3 against the change, two runs each). Ordinary passes: 30.1-87.9 ms
+(the first HEAD run was noisy) against 32.2-39.8 ms, both about 25.5 MB and 8,200-8,800 calls. Defn passes: 146.6-175.7
+against 137.3-146.5 ms, 111-116 MB in both. After-defn passes: 63-68 against 62-69 ms, 65.5-66.9 MB and about 57,500
+calls in both.
 
 ## Design check
 
