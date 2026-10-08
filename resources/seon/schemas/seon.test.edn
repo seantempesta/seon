@@ -180,6 +180,9 @@
   [:seon.test/class-loader :seon.test/class-loader]]
 :seon.test/changed
  [:vector [:or :qualified-symbol :seon.program/identity]]
+ :seon.test/unreached
+ [:vector {:description "The changed identities no test reaches: nothing ran, so the request has no verdict."} :seon.test/changed-member]
+ :seon.test/changed-member [:or :qualified-symbol :seon.program/identity]
  :seon.test/paths [:vector [:string {:min 1}]]
  :seon.test/namespaces [:vector :seon.ns/name]
  :seon.test/check-time-limit-ms

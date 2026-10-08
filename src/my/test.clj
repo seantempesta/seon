@@ -17,16 +17,24 @@
 
   Example:
   (my.test/check {:seon.test/changed ['my.turn/complete]})"
-  {:malli/schema [:=> [:cat :my.test/check-request]
-                  [:or :seon.test/run-result :seon.error/value]]}
+  {:seon/tasks #{'my.test/a-check-no-test-reaches-reads-as-a-failure}
+   :malli/schema [:=> [:cat :my.test/check-request]
+                  [:or :seon.test/run-result :my.test/unreached-result :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection :as request}]
   (let [changed (or (not-empty (:seon.test/changed request)) (seon.test/changes context connection))]
     (if (:seon.error/at changed)
       changed
-      (seon.test/run {:seon.test/execution context
-                      :seon.test/recording-connection connection
-                      :seon.test/policy :named
-                      :seon.test/changed (vec changed)}))))
+      (let [result (seon.test/run {:seon.test/execution context
+                                   :seon.test/recording-connection connection
+                                   :seon.test/policy :named
+                                   :seon.test/changed (vec changed)})]
+        (if (and (nil? (:seon.error/at result))
+                 (empty? (:seon.test/results result))
+                 (not-any? result [:seon.test/pending :seon.test/unfinished :seon.test/recording-refusal
+                                   :seon.test/destructive-excluded :seon.test/deferred
+                                   :seon.test/long-excluded]))
+          (-> result (dissoc :seon.test/passed?) (assoc :seon.test/unreached (vec changed)))
+          result)))))
 
 (defn run-owned
   "Run one namespace's declared tests as one named request.

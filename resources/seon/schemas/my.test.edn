@@ -3,6 +3,11 @@
   [:seon.db/connection :seon.db/connection]
   [:my.program/context :my.program/context]
   [:seon.test/changed {:optional true} :seon.test/changed]]
+ :my.test/unreached-result
+ [:map {:description "The answer when no test reaches the change: it names the unreached identities and carries no :seon.test/passed?, since nothing ran."}
+  [:seon.test/unreached :seon.test/unreached]
+  [:seon.test/results :seon.test.runner/captured-results]
+  [:seon.test.run/id :seon.test.run/id]]
  :my.test/run-request
  [:map {:description "My namespace's tests: call preparation supplies my acquired context, writer, database and identity."}
   [:seon.db/connection :seon.db/connection]
