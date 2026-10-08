@@ -14,6 +14,6 @@
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/deepseek--report.md"}}
  #:seon.task{:name "a-dsml-tool-call-reply-reads-as-prose"
              :kind :function
-             :intent "deepseek-flash answered 7 of 32 fan-out 5 replies (default 6e4d7a341, :chat wire format, 2026-10-09) with its native tool-call markup ('<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name=...>') instead of Clojure forms, after a form failed on an unresolved alias; the reply read as prose (no form), or its closing tags as symbols ('Unable to resolve symbol: </invoke>'), and the run ended waiting. Done when such a reply is answered with a typed reply error naming the markup and telling the model to write the call as a Clojure form, asserted on reply data."
+             :intent "deepseek-flash answered 7 of 32 fan-out 5 replies (default 6e4d7a341, :chat wire format, 2026-10-09) (fan-out 6 on 6e9b9017c, after the alias fix: 5 of 30) with its native tool-call markup ('<｜｜DSML｜｜ calls> <｜｜DSML｜｜ invoke name=...>') instead of Clojure forms, after a form failed on an unresolved alias; the reply read as prose (no form), or its closing tags as symbols ('Unable to resolve symbol: </invoke>'), and the run ended waiting. Done when such a reply is answered with a typed reply error naming the markup and telling the model to write the call as a Clojure form, asserted on reply data."
              :must-read #{seon.ai/request-body seon.turn/continuing-reply?}}
 ]

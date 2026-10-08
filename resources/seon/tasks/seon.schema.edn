@@ -79,4 +79,9 @@
  #:seon.task{:name "the-durable-projection-cache-evicts-a-commits-entry-across-tests-sharing-a-jvm"
              :kind :function
              :intent "`seon.schema.projection-writer-test/a-new-branch-at-an-equal-commit-reads-the-held-projection` passes alone and with its own namespace but fails (one `seon.db/declaration-content-key` call) when run in one JVM with `seon.db-test` and `seon.schema-test` tests, at HEAD and with PB-08 (2026-10-09): the likely cause is the 24-entry durable projection cache (`seon.db/carried-projection`, `content-projection`) evicting the commit's entry. Either the bound is a dial sized from what projections weigh, or the test owns its cache state."
-             :must-read #{seon.db/carried-projection}}]
+             :must-read #{seon.db/carried-projection}}
+ #:seon.task{:name "an-agent-contract-naming-an-unregistered-schema-is-refused-as-a-platform-fault"
+             :kind :function
+             :intent "An agent's `(defn expected-form {:malli/schema [:=> [:cat :malli.core/schema] :any]} [schema] ...)` in seon.error (fan-out 6, agent fan6-enum, default 6e9b9017c) is refused as `seon.schema/canonical-definition` breaking its own output contract (`:seon.instrument/contract-error`, 'expected :seon.schema/malli-form ..., got a vector. Fix: Change seon/schema.clj:646.'), a fix the agent cannot act on, instead of naming `:malli.core/schema` as a schema the registry does not hold. The reply carries the whole diagnostic map (about 750 tokens: two digests, caller twice, layer, `:at`, the message again inside its problem). Done when such a defn is refused as the agent's error naming the unregistered key and how to register or replace it, asserted on the reply's data."
+             :must-read #{seon.schema/canonical-definition seon.fn/var-entity}}
+]

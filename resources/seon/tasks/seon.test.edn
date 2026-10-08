@@ -172,4 +172,8 @@
              :kind :function
              :intent "Lane ns-form (agent ns-form, default 7f1e250c6, 2026-10-09) evaluated in seon.program-test a deftest carrying ^{:seon/tasks #{'seon.turn.batch/a-repl-require-changes-the-namespace-context-but-not-its-source}} before its name; (resolve ...) answers the Var with :test metadata and clojure.test/test-var runs it, yet (my.test/check {:seon.test/changed [that symbol]}) answers one error, :seon.test/unchanged true, message \"The admitted identity has no executable test Var.\", and the render's :seon.render.test/failures entry carries only the symbol, not that message. Done when check runs the Var the context holds and a failure entry shows its message."
              :must-read #{seon.test/run}}
+ #:seon.task{:name "a-first-deftest-in-a-new-namespace-costs-seconds-of-test-step"
+             :kind :function
+             :intent "On an agent branch (default 6e9b9017c, fan-out 6, agent fan6-key), one eval request `(ns fan6.probe-test (:require [clojure.test :refer [deftest is]]))` plus one deftest calling `seon.error/explain-problem` cost 3,688 ms, of which the test step 3,525 ms, 798,415 armed calls and 8,080 reads; a redefinition of `seon.error/explain-problem` on a fresh branch cost a 2,054 ms test step plus 462 ms apply. The test itself runs in milliseconds. Done when the step for one new test and its reaching proofs costs about the tests' own run, with a `seon.profile/measure` regression."
+             :must-read #{seon.turn/run-reaching seon.test/run-request}}
 ]
