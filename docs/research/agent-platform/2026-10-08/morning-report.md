@@ -179,3 +179,9 @@ of two each).
   expensive cases pay is in `reach-digests` (178 ms / 322 MB after a defn, 115 ms of it the armed `seon.db/datoms` output contract
   checking every datom of 11 whole-attribute reads). Root reversed its own earlier pick and chose cheap datom checks first
   (lane datom-check, P2), then advancing cached reach by the change (P1).
+- **Datom checks already cheap** (lane datom-check, no change): the output contract is ~41 ns per datom (12% of a whole-attribute
+  read); warm `reach-digests` is 21-40 ms. The 178 ms came from cache eviction: seon.cache is at 506 of 512 MB, reach
+  declarations weigh 195 MB with 46% hits and 13 evictions, and weights run ~3× real bytes (task filed by heap-live). That
+  cache-weight error is a root cause of the variance that sent three lanes after the wrong owner; lane cache-weight is
+  fixing the weighers first, then everything gets re-measured. Lesson for the plan: measure with a cache that tells the
+  truth before ranking cost owners.
