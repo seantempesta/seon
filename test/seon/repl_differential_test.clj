@@ -154,10 +154,10 @@
            (is (= 2 value))
            (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
            (is (true? passed?) "the step ran the reaching tests green")))
-       (testing "a later pass still runs it against the branch's definition"
+       (testing "a later pass answers it from its green record, never main's definition"
          (let [{:keys [red passed?]} (step-red "(+ 1 1)" brancher running)]
            (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
-           (is (true? passed?) "the step ran the reaching tests green")))))))
+           (is (nil? passed?) "nothing changed, so the step executed nothing and shows nothing")))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}}
   an-inherited-test-sees-the-branch-redefinition-of-a-contracted-callee
@@ -181,11 +181,11 @@
            (is (= "ab" value))
            (is (not (contains? red 'scratch.contracted-test/slug-lowers)))
            (is (true? passed?) "the step ran the reaching tests green")))
-       (testing "a later eval request in the test namespace still runs it against the branch's definition"
+       (testing "a later eval request in the test namespace evaluates the branch's definition and answers the test from its green record"
          (let [{:keys [value red passed?]} (step-red "(in-ns 'scratch.contracted-test) (c/slug \"AB\")" brancher running)]
            (is (= "ab" value))
            (is (not (contains? red 'scratch.contracted-test/slug-lowers)))
-           (is (true? passed?) "the step ran the reaching tests green")))))))
+           (is (nil? passed?) "nothing changed, so the step executed nothing and shows nothing")))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}}
   a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers

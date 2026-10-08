@@ -2850,9 +2850,23 @@
        (is (some #{'tq.f4-test/perimeter-uses-area} (:seon.turn.loop/red reaching)))
        (is (= 1 (:seon.test/fail-count (first results))) "the reaching step recorded the red result")))))
 
+(deftest ^{:seon/tasks #{'seon.turn/the-reply-tests-block-shows-the-pass-and-commit-ids
+                         'seon.test.runner/every-eval-request-reports-unrelated-reds-as-reaching}
+           :seon.test/long "Four evaluations, each followed by the step's test worlds (about 0.45 s per executed request)."
+           :seon.test/long-ms 30000}
+  the-tests-block-shows-what-the-request-executed-and-nothing-after
+  (test-support/with-running-agent
+   (fn [running agent-id _connection]
+     (agent-eval running agent-id "(ns tq.f4r) (defn area [r] (* r r))")
+     (agent-eval running agent-id "(in-ns 'tq.f4r-test) (clojure.test/deftest perimeter-uses-area (clojure.test/is (= 8 (* 4 (tq.f4r/area 1) 2))))")
+     (let [tests (:seon.turn.loop/tests (agent-eval running agent-id "(in-ns 'tq.f4r) (defn area [r] (* 3 r))"))
+           again (agent-eval running agent-id "(+ 1 2)")]
+       (is (= ['tq.f4r-test/perimeter-uses-area] (get-in tests [:seon.turn.loop/reaching :seon.turn.loop/red])))
+       (is (not-any? #(contains? tests %) [:seon.turn/id :seon.source/commit-id]) "no pass or commit id")
+       (is (nil? (:seon.turn.loop/tests again)) "an unchanged red is answered from its record and not shown again")))))
+
 (deftest a-throwing-test-step-answers-its-error-beside-the-pass
-  (let [summary (#'seon.turn/test-step {} "agent-x" "r1")]
-    (is (= "r1" (:seon.turn/id summary)))
+  (let [summary (#'seon.turn/test-step {} "agent-x")]
     (is (:seon.error/message (get-in summary [:seon.turn.loop/proofs :seon.turn.loop/test-error])))))
 
 (defn- step-dial!

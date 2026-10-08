@@ -177,7 +177,7 @@
                   [:seon.turn.loop/pending {:optional true} [:vector :seon.test/sym]]
                   [:seon.turn.loop/test-error {:optional true} :seon.error/value]],
                  :test-summary
-                 [:map [:seon.turn/id :seon.turn/id]
+                 [:map {:description "What the automatic test step executed: its proofs' and its reaching tests' summaries; the commit they ran on is the queue's and is not shown."}
                   [:seon.source/commit-id {:optional true} :seon.source/commit-id]
                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]],

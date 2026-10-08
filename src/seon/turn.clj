@@ -5000,35 +5000,51 @@
   [run]
   (into (vec (:seon.test/pending run)) (map :seon.test/sym) (:seon.test/unfinished run)))
 
+(defn- executed
+  "The results `run` executed: a result answered from its record (`:seon.test/unchanged`) was shown when it ran."
+  {:malli/schema [:=> [:cat :seon.test/run-result] [:vector :seon.test/result]]}
+  [run]
+  (into [] (remove :seon.test/unchanged) (:seon.test/results run)))
+
 (defn- request-summary
-  "One test request's result as the reply shows it: pass, the red tests' names and the tests left pending."
+  "What one test request executed, as the reply shows it: whether all of it passed, the red tests' names and the
+  tests left pending. A result answered from its record is not shown again."
   {:malli/schema [:=> [:cat [:or :seon.test/run-result :seon.error/value]] :seon.turn.loop/request-summary]}
   [run]
   (if (:seon.error/at run)
     {:seon.turn.loop/test-error run}
-    (let [pending (pending-syms run)]
-      (cond-> {:seon.test/passed? (:seon.test/passed? run)
-               :seon.turn.loop/red (vec (for [r (:seon.test/results run)
-                                              :when (pos? (+ (:seon.test/fail-count r) (:seon.test/error-count r)))]
-                                          (:seon.test/sym r)))}
+    (let [pending (pending-syms run)
+          red (vec (for [r (executed run)
+                         :when (pos? (+ (:seon.test/fail-count r) (:seon.test/error-count r)))]
+                     (:seon.test/sym r)))]
+      (cond-> {:seon.test/passed? (and (empty? red) (empty? pending))
+               :seon.turn.loop/red red}
         (seq pending) (assoc :seon.turn.loop/pending pending)))))
 
 (defn- summary
-  "The test step's results as the reply shows them, one summary per request that ran; nil when none ran."
-  {:malli/schema [:=> [:cat :seon.turn/id [:maybe :map] [:maybe :map]] [:maybe :seon.turn.loop/test-summary]]}
-  [pass-id proofs reaching]
+  "The test step's results, one summary per request that ran, with the commit they ran on for the queue
+  (`summary-queue`); nil when none ran."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :seon.turn.loop/test-summary]]}
+  [proofs reaching]
   (when (or proofs reaching)
-    (cond-> (cond-> {:seon.turn/id pass-id}
-              (some :seon.source/commit-id [reaching proofs])
-              (assoc :seon.source/commit-id (some :seon.source/commit-id [reaching proofs])))
+    (cond-> {}
+      (some :seon.source/commit-id [reaching proofs])
+      (assoc :seon.source/commit-id (some :seon.source/commit-id [reaching proofs]))
       proofs (assoc :seon.turn.loop/proofs (request-summary proofs))
       reaching (assoc :seon.turn.loop/reaching (request-summary reaching)))))
 
+(defn- shown-tests
+  "The step's `tests` as the reply shows them: the summaries alone, the commit being the queue's."
+  {:malli/schema [:=> [:cat :seon.turn.loop/test-summary] :seon.turn.loop/test-summary]}
+  [tests]
+  (dissoc tests :seon.source/commit-id))
+
 (defn- ran-something
-  "`run` unless it executed nothing and left nothing unrun (the condition `my.test/check-now` reads), else nil: an eval request that reaches no test has no test summary."
+  "`run` unless it executed nothing and left nothing unrun (the condition `my.test/check-now` reads), else nil:
+  an eval request whose reached tests all answer from their record has no test summary."
   {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :map]]}
   [run]
-  (when-not (and run (not (:seon.error/at run)) (empty? (:seon.test/results run))
+  (when-not (and run (not (:seon.error/at run)) (empty? (executed run))
                  (not-any? run [:seon.test/pending :seon.test/unfinished :seon.test/recording-refusal
                                 :seon.test/destructive-excluded :seon.test/deferred :seon.test/long-excluded]))
     run))
@@ -5052,25 +5068,23 @@
   take the bound first; the reaching request gets what they left, at least 1 ms, so it selects its tests
   and reports those it did not start as pending. A throw from either becomes the error beside the pass's
   values, never a replacement for them; nil when no request ran."
-  {:malli/schema [:=> [:cat :map :seon.agent/id :seon.turn/id] [:maybe :seon.turn.loop/test-summary]]}
-  [cluster agent-id pass-id]
-  (let [pass-id pass-id]
-    (try
-      (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
-            limit (step-limit-ms cluster agent-id)
-            execution (@cluster-agent-acquire-context! cluster agent-id)
-            proofs (when proofs? (run-proofs execution agent-id limit))
-            left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
-        (summary pass-id (ran-something proofs) (ran-something (run-reaching execution (max 1 left)))))
-      (catch Throwable failure
-        {:seon.turn/id pass-id
-         :seon.turn.loop/proofs
-         {:seon.turn.loop/test-error
-          (or (error/refusal failure)
-              (seon.error.refusal/diagnostic
-               (Date.) :seon.turn/test-step `test-step
-               {:seon.error/message "The automatic test step threw; the pass's values stand."
-                :seon.error/exception-class (.getName (class failure))}))}}))))
+  {:malli/schema [:=> [:cat :map :seon.agent/id] [:maybe :seon.turn.loop/test-summary]]}
+  [cluster agent-id]
+  (try
+    (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
+          limit (step-limit-ms cluster agent-id)
+          execution (@cluster-agent-acquire-context! cluster agent-id)
+          proofs (when proofs? (run-proofs execution agent-id limit))
+          left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
+      (summary (ran-something proofs) (ran-something (run-reaching execution (max 1 left)))))
+    (catch Throwable failure
+      {:seon.turn.loop/proofs
+       {:seon.turn.loop/test-error
+        (or (error/refusal failure)
+            (seon.error.refusal/diagnostic
+             (Date.) :seon.turn/test-step `test-step
+             {:seon.error/message "The automatic test step threw; the pass's values stand."
+              :seon.error/exception-class (.getName (class failure))}))}})))
 
 (defn- queue-of
   "The queue a bounded step leaves for the next pass: the `queued` tests with the commit they were selected on; nil when none."
@@ -5300,7 +5314,7 @@
                           test-start (System/nanoTime)
                           stepped? (and (step-due? report) (not (:seon.turn.loop/refusal report))
                                         (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
-                          tests (when stepped? (test-step cluster agent-id (:seon.turn/id report)))
+                          tests (when stepped? (test-step cluster agent-id))
                           report (cond-> report
                                    stepped? (assoc-in [:seon.turn.loop/stages :test-step]
                                                       (/ (- (System/nanoTime) test-start) 1e6)))
@@ -5313,7 +5327,7 @@
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
                                                     park (assoc :seon.turn.loop/refusal park)
-                                                    tests (assoc :seon.turn.loop/tests tests)
+                                                    tests (assoc :seon.turn.loop/tests (shown-tests tests))
                                                     ;; the pass's own calls (its proc world's sink,
                                                     ;; `seon.cluster.agent/turn-step`) beside its batch's
                                                     (and (:seon.cost/counts report) (:seon.batch/sink seon.batch/*world*))
