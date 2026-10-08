@@ -252,6 +252,13 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   Clojure's wording style, fixes as runnable clojure.core forms, no boilerplate, no internal names the agent cannot
   act on. Lives in: agent-loop.md §1.9; ledger §3.4 (MS rows), PR-20a-d.
 
+- **Root default: the budget override routes (2026-10-08).** A printed result is printed after its form's dynamic
+  bindings end, so `(binding [seon.print/*budget* n] expr)` cannot widen that form's own result (as with
+  `*print-length*`). The override is therefore `(set! seon.print/*budget* n)` for the session and
+  `:seon.print/budget` metadata on a value (`(vary-meta v assoc :seon.print/budget n)`, which a render may also set)
+  for one value; text that cannot carry metadata uses `set!`. Cut markers print as plain readable EDN data, never a
+  custom reader tag. Lives in: rows PR-11, PR-07, PR-29; SR-F's proof form follows these routes.
+
 ## 9. Vocabulary and libraries
 
 - **Fork freely, upstream what's general (owner 2026-10-08).** Where a library lacks a seam we need, change our fork
