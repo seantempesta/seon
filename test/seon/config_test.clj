@@ -532,7 +532,8 @@
               (get effective dial)))
        (is (= 4321 (:seon.config.eval/time-limit-ms effective)))))))
 
-(deftest a-row-written-before-any-required-dial-existed-reads-its-shipped-decision
+(deftest ^{:seon/tasks #{'seon.config/an-agent-branch-forked-before-a-new-required-dial-refuses-every-eval-request}}
+  a-row-written-before-any-required-dial-existed-reads-its-shipped-decision
   ;; Class regression (dial-adopt, 2026-10-08): heap-max-bytes and check-slots
   ;; were added as required dials whose decision lives only in the shipped
   ;; document, and every agent branch forked earlier answered every eval request
