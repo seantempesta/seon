@@ -65,9 +65,15 @@
 
  ; THE byte budget of the process cache (seon.cache, Caffeine): estimated
  ; bytes every derived value Seon keeps may weigh together, evicted by
- ; W-TinyLFU beyond it. About 5% of a 10.5 GB heap (cache-central design
- ; 2026-09-26). Datahike's own caches keep their own dials.
+ ; W-TinyLFU beyond it. An eighth of the 4 GiB heap cap below; it weighed
+ ; 131-169 MB on a fresh store with 30 agents and 346-402 MB on default after
+ ; hours, with no eviction (docs/research/agent-platform/2026-10-08/dials/dials.md).
  :seon.config.cache/max-bytes 512000000
+
+ ; Unit: materialized index nodes in Datahike's node LRU, shared by every
+ ; connection to the store. 8,192 nodes measured about 4.7 KB each, about
+ ; 39 MB (dials.md); it holds a new branch's whole-program read.
+ :seon.config.db/store-cache-size 8192
 
  ; The four caps below are NO LONGER READ BY ADMISSION (2026-09-07: the
  ; display caps were deleted from `seon.sci.admit`; elision happens only at
@@ -341,6 +347,12 @@
  ; complete observed path; repaired in-process boot alone measured 9.154 s.
  ; Ordinary socket/process events retain the separate silence bound above.
  :seon.config.operator/boot-bound-ms 300000
+
+ ; Unit: bytes; the -Xmx of every JVM the operator launches. Sized for a
+ ; 16 GB machine: the OS, browser and editor keep 6-8 GB, Seon gets about
+ ; 6 GB RSS, which is this heap plus metaspace, threads and native memory.
+ ; Twenty simultaneous passes peaked at 1.40 GB heap under it (dials.md).
+ :seon.config.operator/heap-max-bytes 4294967296
 
  ; Full-store export copies every file and re-identifies every reachable commit.
 

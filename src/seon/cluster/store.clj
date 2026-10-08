@@ -12,7 +12,8 @@
   connection to that branch in the process. Datahike's `:self` writer
   owns transaction serialization; `seon.db/transact!` owns transaction
   admission and failure values."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.connections :as connections]
@@ -152,6 +153,14 @@
   [store-dir]
   (str (canonical-path store-dir) ".lock"))
 
+(defn- declared-store-cache-size
+  "The declared default of `:seon.config.db/store-cache-size`, for stores
+  opened without a configuration (boot passes the configured value)."
+  {:malli/schema [:=> [:cat] [:int {:min 1}]]}
+  []
+  (-> (io/resource "seon/schemas/seon.config.db.edn") slurp clojure.edn/read-string
+      :seon.config.db/store-cache-size second :seon.config/default))
+
 (defn datahike-configuration
   "The creation configuration for a cluster store.
   `:file` backend at the CANONICAL path of `store-dir` (the store id
@@ -167,10 +176,13 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.store/dir] [:map]]
-    [:=> [:cat :seon.store/dir :boolean] [:map]]]}
+    [:=> [:cat :seon.store/dir :boolean] [:map]]
+    [:=> [:cat :seon.store/dir :boolean [:int {:min 1}]] [:map]]]}
   ([store-dir]
    (datahike-configuration store-dir true))
   ([store-dir keep-history?]
+   (datahike-configuration store-dir keep-history? (declared-store-cache-size)))
+  ([store-dir keep-history? store-cache-size]
    (let [path (canonical-path store-dir)]
      {:store {:backend :file
               :path path
@@ -199,8 +211,9 @@
       ; nodes, keyed by immutable address. It holds a new branch's first
       ; whole-program read (an agent's acquisition and first form); below
       ; that working set each branch re-reads those nodes from disk into a
-      ; private copy its tree keeps. Not a creation setting: reopens may change it.
-      :store-cache-size 8192
+      ; private copy its tree keeps. Not a creation setting: the first
+      ; connection a process opens sets it (`:seon.config.db/store-cache-size`).
+      :store-cache-size store-cache-size
       :keep-history? keep-history?
       :fuse-index-roots? true
       :index-config {; A commit rewrites every leaf it touches whole, in each of
@@ -519,7 +532,8 @@
                              [:seon.store/destroy? {:optional true} :boolean]
                              [:seon.config.db/keep-history?
                               {:optional true}
-                              :boolean]]]
+                              :boolean]
+                             [:seon.config.db/store-cache-size {:optional true} [:int {:min 1}]]]]
                   :seon.store/store]}
   [{store-dir :seon.store/dir :as request}]
   ;; Before Datahike's first call: its logging goes through Seon's logger.
@@ -566,7 +580,9 @@
             requested? (contains? request :seon.config.db/keep-history?)
             requested (:seon.config.db/keep-history? request)
             creation-configuration
-            (datahike-configuration dir (if requested? requested true))
+            (datahike-configuration dir (if requested? requested true)
+                                    (get request :seon.config.db/store-cache-size
+                                         (declared-store-cache-size)))
             created? (cond
                        (not exists?)
                        (do (create-store! dir creation-configuration) true)

@@ -51,6 +51,15 @@
     (when-not (pos-int? value) (throw (ex-info "Missing operator boot bound." manifest)))
     value))
 
+(defn operator-heap-max-bytes
+  "The configured `-Xmx` of every JVM the operator launches, in bytes."
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
+  (let [value (get manifest :seon.config.operator/heap-max-bytes
+                   (:seon.config.operator/heap-max-bytes @shipped-default-decisions))]
+    (when-not (pos-int? value) (throw (ex-info "Missing operator heap bound." manifest)))
+    value))
+
 (defn operation-bound-ms
   {:malli/schema [:=> [:cat [:map
                             [:seon.operator/command {:optional true} :keyword]
@@ -671,6 +680,19 @@
                  (map #(.getCanonicalPath ^java.io.File %)))
         (sort-by #(- (.lastModified ^java.io.File %)) (.listFiles (io/file root "data/heap")))))
 
+(defn launch-argv
+  "The `clojure` argv that starts one JVM over `source`: its heap capped at the
+  configured `:seon.config.operator/heap-max-bytes`, evaluating `form`."
+  {:malli/schema [:=> [:cat :map :string [:maybe :string] :string :string] [:vector :string]]}
+  [request source classpath heap-dump-path form]
+  (cond-> ["clojure"]
+    classpath (into ["-Scp" classpath])
+    true (into [(str "-J-Xmx" (operator-heap-max-bytes (:seon.config/manifest request)))
+                (str "-J-Dseon.operator.root=" (:seon.operator/managed-root request))
+                (str "-J-Dseon.repository.root=" source)
+                (str "-J-XX:HeapDumpPath=" heap-dump-path)
+                "-M:dev:test" "-e" form])))
+
 (defn- launch-child!
   "Launch one JVM whose program is the directory `source` and return its
   terminal boot value with the coordinates it advertised. A nuke passes
@@ -693,13 +715,8 @@
             program (when reuse-classes? (program-classes (repository-root) source classes))
             program-classes? (boolean (and program (.isDirectory (io/file program))))
             _ (when program (prune-program-classes! (repository-root) program))
-            classpath (start-classpath source classes program)
-            argv (cond-> ["clojure"]
-                   classpath (into ["-Scp" classpath])
-                   true (into [(str "-J-Dseon.operator.root=" root)
-                               (str "-J-Dseon.repository.root=" source)
-                               (str "-J-XX:HeapDumpPath=" (.getCanonicalPath heap))
-                               "-M:dev:test" "-e" (launch-form request (.getLocalPort callback) program)]))
+            argv (launch-argv request source (start-classpath source classes program) (.getCanonicalPath heap)
+                              (launch-form request (.getLocalPort callback) program))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)

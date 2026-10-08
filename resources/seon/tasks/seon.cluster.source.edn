@@ -29,4 +29,12 @@
              :intent "A prepare whose proofs are red leaves its candidate branch (:merge-<id>) in the store roster; only a successful accept retires it, so each refused review leaks one branch. Done when the candidate's lifetime is the merge task's: retired when the task closes (accepted or declined) or when a new prepare replaces it."
              :must-read #{seon.cluster.source/prepare-merge! my.program/accept-merge!}
              :evidence #{"docs/seon/specs/merge.md"}}
+ #:seon.task{:name "a-launch-option-change-in-deps-edn-refuses-every-check"
+             :kind :function
+             :intent "seon.cluster.source/dependency-digests hashes deps.edn's whole bytes, so classify-paths refuses RESTART NEEDED for a change to an alias's :jvm-opts alone, which loads no different dependency (2026-10-08, lane dials-16gb: removing -XX:MaxRAMPercentage from :dev/:test was refused by bin/seon check on default twice, once right after a fresh restart). No deps.edn change can then pass bin/lane commit, because default only ever runs committed bytes. The class cache already keys on deps.edn without launch options (seon.dev.dependency-digest/dependency-declarations). Done when a deps.edn change confined to launch options (:jvm-opts :main-opts :exec-fn :exec-args :ns-default :ns-aliases) publishes and a dependency change still refuses, as a regression."
+             :must-read #{seon.cluster.source/dependency-digests seon.cluster.source/classify-paths}}
+ #:seon.task{:name "a-candidate-script-namespace-is-analyzed-as-the-running-jvms-copy"
+             :kind :function
+             :intent "bin/seon check rehearses a candidate on default, and seon.fn.analyzer lints the checkout's non-program roots (script/) from the running JVM's own source directory, not the candidate's. A candidate that adds a var to seon.operator and a test/ deftest calling it is refused 'Unresolved var: operator/launch-argv' (2026-10-08, lane dials-16gb), so no script change can land with its JVM test in one slice. Done when the rehearsal analyzes the candidate's script/ files and that pair passes, as a regression."
+             :must-read #{seon.fn.analyzer/ensure-dependency-analysis! seon.cluster/rehearse-source!}}
 ]

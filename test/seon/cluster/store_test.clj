@@ -73,6 +73,11 @@
     (is (true? (:result check))
         "lock-file derivation failed")))
 
+(deftest the-node-cache-size-is-the-configured-dial
+  (is (= 8192 (:store-cache-size (store/datahike-configuration "tmp/x/store")))
+      "without a configuration the store takes the dial's declared default")
+  (is (= 1024 (:store-cache-size (store/datahike-configuration "tmp/x/store" true 1024)))))
+
 (deftest configuration-is-the-one-shape
   (let [configuration (store/datahike-configuration "tmp/x/store")
         non-temporal (store/datahike-configuration "tmp/x/store" false)]

@@ -436,12 +436,15 @@
   "The ONE store at `store-dir`, opened on first use and shared after.
 
   A supplied history policy is creation-fixed for the whole operator root.
-  A later cluster in the same JVM must request the held representation."
+  A later cluster in the same JVM must request the held representation. The
+  node-cache size applies only when this call opens the store."
   ([store-dir]
    (acquire-root-store! store-dir ::unspecified-history-policy))
   ([store-dir keep-history?]
    (acquire-root-store! store-dir keep-history? false))
   ([store-dir keep-history? destroy?]
+   (acquire-root-store! store-dir keep-history? destroy? nil))
+  ([store-dir keep-history? destroy? store-cache-size]
    (let [store-key (root-store-key store-dir)
          requested? (not= ::unspecified-history-policy keep-history?)]
      (locking root-store-holder
@@ -464,7 +467,9 @@
          ; open OUTSIDE the map first: a failed open must leave no entry
          (let [request (cond-> {:seon.store/dir store-key :seon.store/destroy? destroy?}
                          requested?
-                         (assoc :seon.config.db/keep-history? keep-history?))
+                         (assoc :seon.config.db/keep-history? keep-history?)
+                         store-cache-size
+                         (assoc :seon.config.db/store-cache-size store-cache-size))
                store (store/open-store! request)]
            (swap! root-store-holder assoc store-key
                   {:seon.store/store store ::holders 1})

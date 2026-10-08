@@ -36,7 +36,6 @@
       :inspect
       {:input-arguments (vec (.getInputArguments (java.lang.management.ManagementFactory/getRuntimeMXBean)))
        :thread-names (frequencies (map #(.getThreadName %) (remove nil? (seq (.getThreadInfo threads (.getAllThreadIds threads))))))
-       :base-cache-count (count @(var-get #'seon.sci.eval/base-context-cache))
        :cache-entries (.estimatedSize (.synchronous (:seon.cache/cache @(var-get #'seon.cache/process))))
        :db-config (select-keys (:config @(:seon.db/connection handle)) [:cache-size :store-cache-size :index-config])}
       :concurrent
