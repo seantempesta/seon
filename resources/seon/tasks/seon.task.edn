@@ -34,7 +34,7 @@
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
  #:seon.task{:name "an-assignment-reads-only-its-proofs"
              :kind :function
-             :intent "One `seon.task/assign!` allocated 64.4 MB in 1,407 armed calls and 62 ms on the cluster: `seon.task/task-edges` runs two `or` queries (holders, referrers) and assign! needs only the proofs. A proof is one indexed query from the task's tag; the assignment read allocates under 8 MB."
+             :intent "One `seon.task/assign!` allocated 64.4 MB in 1,407 armed calls and 62 ms on the cluster: `seon.task/task-edges` runs two `or` queries (holders, referrers) and assign! needs only the proofs. A proof is one indexed query from the task's tag; the assignment read allocates under 8 MB. The proof is not yet trustworthy: at default bb934b396 (2026-10-09, fresh store) it measured 11,681,312 bytes red on main, then went green on fan-out 8 agent fan8-assign's branch, which evaluated only `in-ns` and two `my.program/source` reads and changed nothing; an allocation bound whose outcome depends on the branch or cache state it runs from proves nothing about a fix, so the proof measures what the assignment read itself allocates, the same on every branch for an unchanged program."
              :must-read #{seon.task/assign! seon.task/task-edges}
              :evidence #{"docs/seon/schedule/agent-loop-ledger.md#LR-ASSIGNWRITER"}}
  #:seon.task{:name "open-tasks-whose-proofs-are-green-are-never-retired"
