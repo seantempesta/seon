@@ -1897,7 +1897,9 @@
   request with equal inputs shares its preparation. A checkpoint another caller
   is still preparing refuses this request. The request then owns a private
   branch off the checkpoint's head, which roots that commit for its members,
-  and writes `program-overlay-tx`'s rows there. Checkpoints of every base in
+  and writes `program-overlay-tx`'s rows there. Its context interprets the
+  candidate's definitions over the cluster base (`seon.sci.eval/base-ctx`),
+  so a test the branch inherits calls the branch's callee. Checkpoints of every base in
   use coexist (an agent branch records the commit it was forked at); boot
   retires them all (`registry/retire-unclaimed!`), as the name holds the process."
   {:seon/tasks #{'seon.test/a-test-world-has-no-agent 'seon.test/a-changed-check-builds-a-world-per-request}
@@ -1961,9 +1963,14 @@
           ;; execution's acquisition of the candidate serves the world: no
           ;; whole-program acquisition per request.
           _ (sci.eval/program-equal! database candidate)
-          source (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution)
-                     (:seon.sci.eval/ctx execution))
-          environment (or (env/of execution) (env/of source))
+          ;; The candidate's program from its definitions: the cluster base with
+          ;; the candidate's changes interpreted on a fork (`sci.eval/base-ctx`),
+          ;; never the agent's live context, whose inherited bodies may call a Var
+          ;; its fork replaced (interim until context-owned SCI Var bindings:
+          ;; `seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee`).
+          source (sci.eval/base-ctx candidate)
+          environment (or (env/of execution)
+                          (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution))))
           ;; Acquired once on a fork, never on the execution's own context:
           ;; each member forks this and finds its program by commit. The fork
           ;; acquires `database` itself and refuses when its refusals cannot be
