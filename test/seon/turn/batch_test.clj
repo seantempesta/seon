@@ -184,3 +184,52 @@
            (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
              (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!))
            ((requiring-resolve 'seon.test-support/delete-recursively!) root)))))))
+
+(deftest ^{:seon/tasks #{'seon.schema/a-committed-nilable-return-cannot-be-redefined
+                         'my.program/write-branch-refuses-an-unchanged-nilable-function}}
+  an-unchanged-committed-nilable-contract-is-admitted-and-written-back
+  ;; the nilable-return rule judges a new or changed contract; one equal to
+  ;; the committed contract keeps its committed admission at the REPL and in
+  ;; write-back's reindex
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (let [suffix (id/id)
+           fixture-ns (symbol (str "nilable" suffix ".core"))
+           path (str "src/nilable" suffix "/core.clj")
+           root (str "tmp/nilable-test-" suffix)
+           file (io/file root path)
+           contract "{:malli/schema [:=> [:cat [:sequential :int]] [:maybe :int]]}"
+           row (fn [sym] (db/pull (db/db connection) [:seon.fn/doc :seon.fn/spec]
+                                  [:seon.fn/sym (symbol (str fixture-ns) sym)]))]
+       (io/make-parents file)
+       (spit file (str "(ns " fixture-ns "\n  \"Fixture.\")\n\n"
+                       "(defn head\n  \"The first number.\"\n  " contract "\n  [xs]\n  (first xs))\n\n"
+                       "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+       (try
+         (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+           ((requiring-resolve 'seon.test-support/transacted!)
+            connection (function/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           (let [base (db/commit-id (db/db connection))]
+             (eval! (str "(in-ns '" fixture-ns ")") agent-id running)
+             (eval! (str "(defn head\n  \"The first number, if any.\"\n  " contract "\n  [xs]\n  (first xs))")
+                    agent-id running)
+             (is (= "The first number, if any." (:seon.fn/doc (row "head")))
+                 "a new body under the committed nilable contract is admitted")
+             (eval! "(defn head {:malli/schema [:=> [:cat [:sequential :int]] [:maybe :string]]} [xs] (some-> xs first str))"
+                    agent-id running)
+             (is (= "[:=> [:cat [:sequential :int]] [:maybe :int]]" (:seon.fn/spec (row "head")))
+                 "a changed nilable contract is still refused")
+             (eval! "(defn head\n  \"The first number.\"\n  {:malli/schema [:=> [:cat [:sequential :int]] [:maybe :int]]}\n  [xs]\n  (first xs))"
+                    agent-id running)
+             (eval! "(defn callee\n  \"Add two.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 2))"
+                    agent-id running)
+             (let [written (source/write-back!
+                            {:seon.db/connection connection :seon.fn/root root
+                             :seon.source/accepted {:seon.program/identities #{[:seon.fn/sym (symbol (str fixture-ns) "callee")]}
+                                                    :seon.source/base-commit-id base
+                                                    :seon.source/commit-id (db/commit-id (db/db connection))}})]
+               (is (= {} (select-keys written [:seon.error/message :seon.source/write-back-refused :seon.error/offending]))
+                   "write-back of another function reindexes the unchanged nilable one equal")
+               (is (= [path] (:seon.source/changed-paths written)) "write-back writes the namespace's file"))))
+         (finally
+           ((requiring-resolve 'seon.test-support/delete-recursively!) root)))))))

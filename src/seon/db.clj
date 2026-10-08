@@ -5537,7 +5537,9 @@
   "The schema keys and function symbols whose declaration datoms this report
   asserted or retracted, named as the final value holds them: `[keys symbols]`.
   An identity the write removed has no final name here; the writer's render
-  target check owns a removed renderer."
+  target check owns a removed renderer. A changed admission source alone names
+  nothing: the admission rules judge a new or changed contract, and one equal
+  to the committed contract stays admitted at the REPL, write-back and merge."
   {:malli/schema [:=> [:cat :seon.db/transaction-report]
                   [:tuple [:set :keyword] [:set :qualified-symbol]]]}
   [report]
@@ -5552,9 +5554,6 @@
                  function-symbols]
                 (:seon.fn/sym :seon.fn/spec)
                 [schema-keys
-                 (if-let [f (name-of entity :seon.fn/sym)] (conj function-symbols f) function-symbols)]
-                :seon.schema.admission/source
-                [(if-let [k (name-of entity :seon.schema/key)] (conj schema-keys k) schema-keys)
                  (if-let [f (name-of entity :seon.fn/sym)] (conj function-symbols f) function-symbols)]
                 [schema-keys function-symbols]))
             [#{} #{}]
