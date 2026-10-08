@@ -1138,6 +1138,6 @@ without a merge (F5); subtree counts are kept on every write, after verifying th
    assignment's presence, retracted on completion or give-back; Q-RT2 one question per new error signature; Q-RT3 no
    root help (root's tasks carry its guidance as references); Q-RT4 answers live on the assignment.
 
-5. **The cost patterns' two questions** (`cost-design/merged.md` §4): Q1, delete `seon.db/q`'s guard, which repeats
-   its body's input alignment (recommended; blocks CO-10); Q2, a predicate called from inside a schema stops counting
-   in its own profile cell while its direct calls stay armed (recommended; blocks CO-7).
+5. **The cost patterns' two questions** (`cost-design/merged.md` §4): answered (owner 2026-10-08): Q1 delete
+   `seon.db/q`'s guard (CO-10); Q2 a predicate called from inside a schema skips its own arming and profile cell
+   while its direct calls stay armed and counted (CO-7).
