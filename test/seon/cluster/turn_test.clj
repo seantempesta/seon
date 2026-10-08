@@ -37,6 +37,9 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [clojure.data.json]
+            [seon.bootstrap]
+            [seon.eval.drive]
+            [seon.id]
             [seon.mcp]
             [seon.task]
             [seon.operator.runtime]
@@ -1473,7 +1476,8 @@
             "an as-alias target need not be loaded")
         (is (= 6 (:seon.sci.eval/installed acquired)))))))
 
-(deftest a-lost-model-call-leaves-a-durable-readable-reason
+(deftest ^{:seon/tasks #{'seon.context/a-lost-model-call-is-not-in-the-model-context}}
+  a-lost-model-call-leaves-a-durable-readable-reason
   ;; the drive sat claimed-with-no-plan for 120 s and the operator had to
   ;; reproduce the call by hand to learn it was a missing credential.
   ;; The reason is now a fact, and the next prompt says it.
@@ -2574,7 +2578,8 @@
 ;;; The prompt's cause is the run's recorded trigger
 ;;; ---------------------------------------------------------------------------
 
-(deftest a-run-prompts-from-its-opening-database-value
+(deftest ^{:seon/tasks #{'seon.context/a-message-to-the-agent-is-not-in-the-model-context}}
+  a-run-prompts-from-its-opening-database-value
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
@@ -3088,3 +3093,80 @@
   (test-support/with-running-agent
    (fn [running agent-id _connection]
      (is (nil? (test-support/mcp-tests (eval-result running agent-id "(+ 1 2)")))))))
+
+(defn- model-requests!
+  "Wake `agent-id` once with an outside message and answer its model calls with `replies`; the request
+  documents, once every reply is taken and the agent's last call row is closed."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection [:vector :string]] [:vector :map]]}
+  [running agent-id connection replies]
+  (let [ledger (atom [])
+        closed-calls #(or (db/q '[:find (count ?turn) . :in $ ?agent-id
+                                  :where [?agent :seon.agent/id ?agent-id] [?turn :seon.turn/agent ?agent]
+                                  [?turn :seon.turn/attempts _] [?turn :seon.turn/closed-tx _]]
+                                (db/db connection) agent-id)
+                          0)]
+    (test-support/with-provider
+     ledger (test-support/reply-queue replies)
+     (fn [server]
+       (is (nil? (:seon.repl/error
+                  (agent-eval running agent-id (str "(my.agent/settings! "
+                                         (seon.id/printed (assoc (test-support/provider-config server)
+                                                                 :seon.config.ai/no-provider false))
+                                         ")"))))
+           "the agent's provider settings are accepted")
+       ;; an outside wake comes from no evaluation: written on a thread with no conveyed custody
+       (let [cluster-name (:seon.cluster/name (test-support/execution-handle nil))
+             wake (java.util.concurrent.FutureTask.
+                   ^java.util.concurrent.Callable
+                   #(seon.eval.drive/inbound! connection cluster-name cluster/boot-process-identity
+                                              agent-id "Work your task."))]
+         (.start (Thread. wake))
+         (.get wake))
+       (wake! running agent-id)
+       (loop [tries 600]
+         (when (and (pos? tries) (< (closed-calls) (count replies)))
+           (Thread/sleep 50)
+           (recur (dec tries))))
+       @ledger))))
+
+(deftest ^{:seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
+           :seon.test/long-ms 60000}
+  a-model-request-is-help-own-exchanges-and-the-block-last
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (agent-eval running agent-id "(ns tq.cx1) (defn area [r] r)")
+     (agent-eval running agent-id "(in-ns 'tq.cx1) (clojure.test/deftest ^{:seon/tasks #{'tq.cx1/area}} area-test (clojure.test/is (= 25 (tq.cx1/area 5))))")
+     (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                                 :seon.task/ns 'tq.cx1 :seon.task/name "area" :seon.task/kind :function
+                                                 :seon.task/intent "Square."}))]
+       (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
+                           :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main}))
+     (let [help-reply (str/join (map #(get % "text") (get (eval-result running agent-id "(help)") "content")))
+           _ (agent-eval running agent-id "(+ 1 2)")
+           definition "(in-ns 'tq.cx1)\n(defn area [r] (* r r))"
+           sent (model-requests! running agent-id connection
+                                 [definition "(+ 40 2)" "(seon.run/complete \"squared\")"])
+           messages (mapv #(get % "messages") sent)
+           system (fn [ms] (some #(when (= "system" (get % "role")) (get % "content")) ms))
+           user (fn [ms] (some #(when (= "user" (get % "role")) (get % "content")) ms))
+           [first-user second-user third-user] (mapv user messages)
+           ;; the block's first section is the task; nothing before it in these exchanges shows a block
+           block-start #(str/index-of % "#:seon.context{:task")
+           help (seon.bootstrap/render-help-ai (seon.bootstrap/help-value (db/db connection) agent-id))]
+       (is (= 3 (count sent)) "three model passes reached the provider")
+       (is (every? #(= help (system %)) messages) "the system message is help's shown text")
+       (is (str/includes? help-reply help) "the same text (help) shows at the agent's REPL")
+       (is (every? some? [first-user second-user third-user]))
+       (is (str/includes? second-user "(defn area [r] (* r r))") "the first pass's form is in the history")
+       (doseq [text [second-user third-user]]
+         (is (not (str/includes? text "(+ 1 2)")) "an outside evaluation under the agent's id is not history")
+         (is (not (str/includes? text "seon.error/for-agent")) "no system-turn row is history")
+         (is (not (str/includes? text "turns left")) "no turns frame"))
+       (is (str/includes? third-user "(+ 40 2)") "the second pass's form is in the third request")
+       (is (str/includes? third-user "42") "with its shown reply")
+       (is (= 0 (block-start first-user)) "the first pass has no exchanges: only its block")
+       (is (str/includes? (subs first-user (block-start first-user)) ":red") "the block shows the proof red before the change")
+       (is (str/includes? (subs second-user (block-start second-user)) ":green")
+           "the block, last, shows the proof's status recorded after pass 1's step")
+       (is (str/starts-with? third-user (subs second-user 0 (block-start second-user)))
+           "each request's history is a prefix of the next one's: the provider's prefix cache holds")))))

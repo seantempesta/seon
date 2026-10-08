@@ -41,8 +41,13 @@
   no attempt, a plain interrupted run; kill between capture and attempt
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
-  (:require [seon.error.refusal]
+  (:require [clojure.string :as str]
+            [seon.bootstrap :as bootstrap]
+            [seon.error.refusal]
             [seon.ai.tokens :as tokens]
+            [seon.eval]
+            [seon.repl :as repl]
+            [seon.sci.eval :as sci.eval]
             [seon.ref :as ref]
             [seon.task :as task]
             [seon.test.runner :as runner]
@@ -402,6 +407,47 @@
   [block]
   (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/turns])
     (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
+
+;;; ---------------------------------------------------------------------------
+;;; What a model pass sends
+;;; ---------------------------------------------------------------------------
+
+(def ^:private exchange-selector
+  "An evaluation as `seon.repl/entity-emission` reads it, with its call row's attempts."
+  '[* {:seon.cluster.eval/ns [:db/id :seon.ns/name]}
+    {:seon.cluster.eval/run [:seon.turn/id {:seon.turn/attempts [:db/id]}]}])
+
+(defn- exchanges
+  "The agent's own model exchanges in agent order: one text per call row carrying a model attempt."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :seon.context/exchanges :seon.error/value]]}
+  [database agent-id]
+  (let [evaluations (seon.eval/of-agent database agent-id exchange-selector)]
+    (if (:seon.error/at evaluations)
+      evaluations
+      (->> evaluations
+           (filter #(seq (get-in % [:seon.cluster.eval/run :seon.turn/attempts])))
+           (partition-by #(get-in % [:seon.cluster.eval/run :seon.turn/id]))
+           (mapv (fn [run]
+                   (str/join "\n" (map #(repl/text (repl/entity-emission (assoc % :seon.db/db database))) run))))))))
+
+(defn model-context
+  "What one model pass sends, as shown text.
+
+  The system message is `(help)`; then the agent's own model exchanges; then
+  the current-state block, last. The one assembler the model call reads."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.sci.eval/shown-request :seon.agent/id]
+                  [:or :seon.context/model-context :seon.error/value]]}
+  [database request agent-id]
+  (let [request (assoc request :seon.db/db database :seon.agent/id agent-id)
+        history (exchanges database agent-id)
+        block (current-state database agent-id)
+        shown #(:seon.eval/shown (sci.eval/shown-result %1 %2 nil))]
+    (or (some #(when (:seon.error/at %) %) [history block])
+        {:seon.ai/system (shown (bootstrap/help-value database agent-id) request)
+         :seon.context/exchanges history
+         ;; the root call names the producer whose declared AI render shows the block
+         :seon.ai/prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pre-provider capture

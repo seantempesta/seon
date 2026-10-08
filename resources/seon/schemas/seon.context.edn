@@ -108,6 +108,12 @@
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/turns :seon.context/turns]],
+               :exchanges [:vector {:description "The agent's own model exchanges in agent order: each call row carrying a model attempt, its evaluations as the REPL showed them."} [:string {:min 1}]]
+               :model-context
+               [:map {:description "What one model pass sends: (help)'s shown text as the system message, the agent's own model exchanges, then the current-state block's shown text."}
+                [:seon.ai/system :seon.ai/system]
+                [:seon.context/exchanges :seon.context/exchanges]
+                [:seon.ai/prompt :seon.ai/prompt]]
                :current-state-view
                [:map {:description "The block as the AI face shows it: the task without its handle."}
                 [:seon.context/task {:optional true}

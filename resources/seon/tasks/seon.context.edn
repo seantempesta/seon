@@ -11,4 +11,12 @@
  #:seon.task{:name "a-red-proof-shows-printed-strings-and-only-its-first-failure"
              :kind :function
              :intent "In `(seon.context/current-state)` a red proof showed its first failing report only, as :expected and :actual strings; between passes the first report flipped between assertions and the model concluded its block was stale (live-agent run, agent live-flash, default 6cc5dbbb4, 2026-10-08). Done when the proof shows every failing assertion in a stable order, its claim as the runner's stored shown text marked as text."
-             :must-read #{seon.context/proofs}}]
+             :must-read #{seon.context/proofs}}
+ #:seon.task{:name "a-lost-model-call-is-not-in-the-model-context"
+             :kind :function
+             :intent "Since CX-1 the model's context is (help), its own model exchanges and the block. A model call lost to a provider failure leaves a call row with a failed attempt and no evaluation, so the next model request does not say the call was lost or why (the system turn's fault read used to carry it). Done when the next model request shows the lost call's error: its exchange, or the block's errors section."
+             :must-read #{seon.context/model-context seon.context/current-state}}
+ #:seon.task{:name "a-message-to-the-agent-is-not-in-the-model-context"
+             :kind :function
+             :intent "Since CX-1 the model's context is (help), its own model exchanges and the block; a message sent to the agent (the wake's content, root's instructions) reaches the model nowhere until the block shows unread messages (ledger row CS-01c4). Done when the model request after a message carries that message, once, with its identity."
+             :must-read #{seon.context/model-context seon.context/current-state}}]

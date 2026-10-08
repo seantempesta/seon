@@ -27,7 +27,7 @@
             [seon.config :as config]
             [seon.cluster.agent :as cluster.agent]
             [seon.turn :as turn]
-            [seon.cluster.prompt :as prompt]
+            [seon.context]
 
             [seon.cluster.wake :as wake]
 
@@ -353,7 +353,7 @@
                     connection
                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
 
-       (with-redefs [prompt/prompt (fn [_database _request] refusal)]
+       (with-redefs [seon.context/model-context (fn [_database _request _agent-id] refusal)]
          (let [report
                (turn/turn
                 {:seon.turn.loop/cluster cluster
@@ -498,10 +498,10 @@
               (call-work agent-id "settings-run-1")}
              now)
             (testing "the opening prompt and paid call each resolve once"
-              (is (= 3 (count @overlays))
-                  "profile, prompt and call each read the overlay")
-              (is (= 2 (count @resolutions))
-                  "prompt budget uses opening facts; attempts share call settings")
+              (is (= 2 (count @overlays))
+                  "profile and call each read the overlay; the model context reads none")
+              (is (= 1 (count @resolutions))
+                  "the call resolves its settings once; attempts share them")
               (is (= ["before-apply"]
                      (mapv :seon.ai/model @requests)))
               (is (= [:high]
@@ -547,12 +547,12 @@
               (call-work agent-id "settings-run-2")}
              now)
             (testing "both phases see the next run opened after config apply"
-              (is (= 3 (count @overlays)))
-              (is (= 2 (count @resolutions)))
+              (is (= 2 (count @overlays)))
+              (is (= 1 (count @resolutions)))
               (is (= "after-apply" (:seon.ai/model (last @requests))))
               (is (= :high (:seon.ai/thinking (last @requests))))
               (is (apply = @overlay-values)
-                  "the second run's own three reads still settle on one value")
+                  "the second run's own reads still settle on one value")
               (let [last-entity (last (settings-attempts @connection))]
                 (is (= "after-apply" (:seon.ai/model last-entity)))
                 (is (= "after-apply"

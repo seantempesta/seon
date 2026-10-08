@@ -61,8 +61,8 @@
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 (defonce ^:private cluster-agent-evaluate-source!
   (delay (requiring-resolve 'seon.cluster.agent/evaluate-source!)))
-(defonce ^:private cluster-prompt-prompt
-  (delay (requiring-resolve 'seon.cluster.prompt/prompt)))
+(defonce ^:private context-model-context
+  (delay (requiring-resolve 'seon.context/model-context)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-changes
@@ -4571,39 +4571,31 @@
                    ; reader's fabricated-response event. No fault is submitted.
                    (assoc :seon.sci.eval/event
                           {:seon.sci.reader/error prepared}))))))
-          ;; THE PROMPT REQUEST NAMES THE HELD RUN — `prompt` derives
-          ;; the trigger from the run's own creating transaction
-          ;; (`message/trigger`), never a re-asked queue: the recorded
-          ;; cause is the prompt's cause. One derivation, one owner.
-          ;; NOTHING THROWS INTO THE AGENT LOOP: the prompt owner
-          ;; refuses by throwing (`:seon.turn.loop/no-trigger`, `:seon.turn.loop/missing-input`),
-          ;; and this one call site turns that refusal into the flat
-          ;; error value the loop already records — the same shape a
-          ;; refused transaction takes through `db/transact!`.
+          ;; THE MODEL'S CONTEXT: `(help)` as the system message, the
+          ;; agent's own model exchanges, then its current-state block last,
+          ;; from the one assembler (`seon.context/model-context`) at the
+          ;; observed value. A read refusal is a flat error value the loop
+          ;; records, the same shape a refused transaction takes.
           observed-db (db/db connection)
-          prompt-db (opening-db observed-db run-id)
-          rendered
+          model-context
           (when-not (:seon.config.ai/no-provider settings)
-          (phase
-           ;; The prompt takes the observed value and the run id: its
-           ;; acquisition derives the opening itself (`render/acquire-context!`).
-           ;; Handing it `prompt-db` nested a second as-of whose origin has no
-           ;; committed identity, so every render node re-keyed the projection
-           ;; from declaration datoms (~40 ms each, 36 s per prompt).
-           #(@cluster-prompt-prompt observed-db
-                           {:seon.turn/id run-id
-                            :seon.agent/id agent-id
-                            :seon.db/connection connection
-                            :seon.sci.admit/caps
-                            (:seon.sci.admit/caps cluster)
-                            :seon.sci.eval/ctx
-                            (:seon.sci.eval/ctx cluster)
-                            :seon.sci.eval/time-limit-ms
-                            (:seon.config.eval/time-limit-ms cluster)})))
+            (phase
+             #(@context-model-context observed-db
+                                      {:seon.db/connection connection
+                                       :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                                       :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)}
+                                      agent-id)))
           refusal
-          (when (or (:seon.turn.loop/phase-failed rendered)
-                    (:seon.cluster.prompt/error-agent-id rendered))
-            rendered)
+          (when (or (:seon.turn.loop/phase-failed model-context)
+                    (:seon.error/at model-context))
+            model-context)
+          rendered
+          (when (and model-context (not refusal))
+            {:seon.cluster.prompt/text (str/join "\n\n" (conj (:seon.context/exchanges model-context)
+                                                               (:seon.ai/prompt model-context)))
+             :seon.context/contributions []
+             :seon.db/db observed-db})
           ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
           ;; exact prompt text, the rendered basis and the ordered
           ;; contribution records commit in ONE turn-owned transaction
@@ -4619,13 +4611,9 @@
            (@context-capture-tx
             (if refusal
               {:seon.turn/id run-id
-               ;; The immutable opening value the refused derivation used,
-               ;; never a fresh connection deref after the fact.
-               :seon.db/db (if (or (:seon.turn/missing-opening-datom prompt-db)
-                                   (:seon.db/invalid-read prompt-db)
-                                   (:seon.schema/expected-value prompt-db))
-                             observed-db
-                             prompt-db)
+               ;; The immutable value the refused derivation read, never a
+               ;; fresh connection deref after the fact.
+               :seon.db/db observed-db
                :seon.error/value refusal}
               {:seon.turn/id run-id
                :seon.cluster.prompt/rendered-context rendered}))))
@@ -4654,7 +4642,8 @@
         :else
         (let [completion (ai/complete
                           (db/carried-projection db)
-                          (cond-> (assoc primary :seon.ai/prompt text)
+                          (cond-> (assoc primary :seon.ai/prompt text
+                                         :seon.ai/system (:seon.ai/system model-context))
                             sink (assoc :seon.ai/stream? true
                                         :seon.ai/sink sink)))
               failure (when (or (:seon.ai/unreadable-response-member completion)
