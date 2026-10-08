@@ -1981,3 +1981,12 @@
   (let [refused (schema/unregister! :seon.schema-test/outside)]
     (is (= :seon.schema/unregister-outside-delta (:seon.error/member refused)))
     (is (= :seon.schema-test/outside (:seon.schema/unregister-outside-delta refused)))))
+
+(deftest ^{:seon/tasks #{'seon.schema/build-projection-walks-every-form-before-its-memo}}
+  an-unchanged-population-names-its-predicates-without-walking-its-forms
+  (let [forms {::walked [:fn 'seon.schema/byte-array?] ::plain :int}
+        population-symbols #'schema/population-predicate-symbols
+        first-answer (population-symbols forms {})]
+    (is (= #{'seon.schema/byte-array?} first-answer))
+    (is (identical? first-answer (population-symbols (into {} forms) {}))
+        "An equal population answers the retained set: its forms are not walked again.")))

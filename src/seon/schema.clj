@@ -2109,6 +2109,21 @@
 
 (declare incremental-base? projection-with-declarations)
 
+(defn- population-predicate-symbols
+  "The predicate symbols every form and contract of a population names.
+
+  A function of the population's content, so it is held in `seon.cache` by
+  it: an unchanged population answers by one lookup instead of walking every
+  form. Resolving the symbols stays with the caller, so a predicate defined
+  after a first build is found by the next."
+  {:malli/schema [:=> [:cat :map :map] [:set :qualified-symbol]]}
+  [forms function-contracts]
+  (seon.cache/lookup ::population-predicate-symbols [forms function-contracts]
+                     #(* declaration-predicates-bytes-per-entry (inc (count %)))
+                     #(into (into #{} (mapcat predicate-symbols-in) (vals forms))
+                            (mapcat predicate-symbols-in)
+                            (vals function-contracts))))
+
 (defn- predicate-bindings
   "`supplied` plus the loaded Var each other predicate in `forms` and
    `function-contracts` names ([[runtime-predicate]])."
@@ -2123,9 +2138,7 @@
                 (assoc bindings predicate f)
                 bindings)))
           supplied
-          (into (into #{} (mapcat predicate-symbols-in) (vals forms))
-                (mapcat predicate-symbols-in)
-                (vals function-contracts))))
+          (population-predicate-symbols forms function-contracts)))
 
 (defn- projection-build
   "The build [[build-projection]] memoizes: its whole body over explicit inputs."
