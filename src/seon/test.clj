@@ -2484,10 +2484,14 @@
                     (let [outcome
                     (loop [remaining members outcome outcome]
                       (if-let [test-symbol (first remaining)]
-                        (if-not (pos? (remaining-ms))
+                        ;; The budget is read after the request's world exists (building the
+                        ;; first one can spend it) and never passed on unless positive.
+                        (let [handle (request-handle!)
+                              left (remaining-ms)]
+                        (if-not (pos? left)
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result (request-handle!) since test-symbol (remaining-ms)
+                                (member-result handle since test-symbol left
                                                #(record-exit! test-symbol %)
                                (contains? effect-reach test-symbol))]
                           ;; An unknown loaded program started nothing: this
@@ -2505,7 +2509,7 @@
                                              ::stopped (vec (next remaining)) ::stop-cause :member-unfinished)
                               (and (platform? test-symbol) (not (green? result)))
                               (assoc outcome ::stopped (vec (next remaining)) ::stop-cause :platform-red)
-                              :else (recur (next remaining) outcome))))))
+                              :else (recur (next remaining) outcome)))))))
                         outcome))
                           results (captured @observed)
                           committed (when (seq results)

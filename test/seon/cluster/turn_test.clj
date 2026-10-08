@@ -3044,6 +3044,22 @@
        (is (= 3 (count results)))
        (is (every? #(pos? (long (:seon.test/pass-count % 0))) results) "the next pass ran the queued tests and recorded them")))))
 
+(deftest ^{:seon/tasks #{'seon.test/an-exhausted-step-budget-reports-the-unstarted-members-pending}
+           :seon.test/long "Five evaluations, each followed by the step's test worlds."
+           :seon.test/long-ms 60000}
+  a-budget-spent-acquiring-the-first-world-leaves-the-members-pending
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (two-tests-reaching-area running agent-id connection)
+     ;; Long enough to pass the admission check, shorter than building the first test world.
+     (step-dial! connection 100)
+     (let [tests (test-support/mcp-tests (eval-result running agent-id "(in-ns 'tq.f4c) (defn area [r] (* r r))"))
+           steps (vals (select-keys tests [:seon.turn.loop/proofs :seon.turn.loop/reaching]))]
+       (is (not-any? :seon.turn.loop/test-error steps) "no contract error from a spent budget")
+       (is (= #{'tq.f4c-test/one 'tq.f4c-test/two 'tq.f4c/area-test}
+              (set (mapcat :seon.turn.loop/pending steps)))
+           "every member the budget left unstarted shows as pending")))))
+
 (deftest ^{:seon.test/long "Five evaluations, each followed by the step's test worlds."
            :seon.test/long-ms 60000}
   a-newer-change-supersedes-queued-tests

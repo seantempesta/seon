@@ -135,4 +135,8 @@
              :intent "After an eval request registers a schema, the automatic test step's reaching request answers `:seon.test/coverage-unknown` (\"This changed declaration has no bounded graph selection\", offending `[:seon.schema/key …]`), and a bare `(my.test/check {})` answers the same error without `:seon.error/type`, so every `register!` eval request reports an error in its step (lane fix-branch-schema, after `17e426d36`; that check reply allocated about 1.08 GB). Done when the tests reaching a schema change are selected from the functions and tests whose contracts name that key, and the error carries its type. Blocks the Seon-agent loop for any schema task."
              :must-read #{seon.test/run seon.schema/register! my.test/check}
              :evidence #{"docs/seon/schedule/agent-loop-ledger.md"}}
+ #:seon.task{:name "an-exhausted-step-budget-reports-the-unstarted-members-pending"
+             :kind :function
+             :intent "When the automatic test step's time budget is spent while the first test world is built, `seon.test/run-request` computes a second `remaining-ms` after the first positive check and passes a negative one (-419 on lane dogfood-pb15, turn 133a4f30779a) to `seon.test/member-result`, whose contract requires at least 1: the agent's reply carries a contract error of about 2,000 tokens instead of the unstarted members as pending. Done when the budget is read once after the world is built and a non-positive one stops the run with the remaining members pending, continued at the next step."
+             :must-read #{seon.test/run seon.test/member-result seon.turn/run-reaching}}
 ]
