@@ -43,6 +43,7 @@
   fired; kill after — today's attempt-row story. Nothing re-executes."
   (:require [seon.error.refusal]
             [seon.ai.tokens :as tokens]
+            [seon.task :as task]
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.id :as id]
@@ -301,6 +302,39 @@
                         database agent-id run-t)
                   0)]
           (if (> message-t previous-t) ::current-trigger ::history))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The current-state block
+;;; ---------------------------------------------------------------------------
+
+(def ^:private task-selector
+  [:seon.task/id :seon.task/sym :seon.task/intent :seon.task/must-read])
+
+(defn current-state
+  "The current-state block's data for `agent-id`: its held task's declaration as the
+  task home reads it now, and its turns left with the task's status. Sections are
+  absent when empty.
+
+  ## Costs
+
+  One assignment query, one task pull and the turn count."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :seon.context/current-state :seon.error/value]]}
+  [database agent-id]
+  (let [home (if-let [connection (task/home database)] (db/db connection) database)
+        handle (task/agent-task home agent-id)
+        held (when (string? handle) (db/pull home task-selector [:seon.task/id handle]))
+        left (turn/turns-left database agent-id)]
+    (or (some #(when (:seon.error/at %) %) [handle held left])
+        (cond-> {:seon.context/turns (cond-> {:my.agent/turns-left left}
+                                       held (assoc :seon.task/status (if (zero? left) :capped :working)))}
+          held (assoc :seon.context/task held)))))
+
+(defn current-state-ai
+  "The block as the agent reads it: the task by symbol and declaration, without its handle."
+  {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
+  [block]
+  (cond-> block (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pre-provider capture

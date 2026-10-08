@@ -63,6 +63,7 @@
  :signal [:qualified-keyword {:seon.db/reference-to :seon.schema/key :description "The named warning schema, a predicate over its subject's stored attributes, whose satisfaction the task answers."}]
  :created-by [:and {:description "The agent that wrote a runtime task (7.8); file reconciliation never retracts a task carrying it."} :seon.db/ref]
  :outcome [:enum {:description "Root's decision on a merge task; absence means open."} :accepted :declined]
+ :status [:enum {:description "Where an assigned task stands for its agent: derived from its assignment, proofs and turns, never stored."} :working :requested :done :bailed :capped]
  :revision [:string {:min 64 :max 64 :description "seon.id/digest over a task's declaration: the revision an assignment reviewed (7.16)."}]
  :assignment [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.task/assignment-row
                        :description "seon.id/id over [task agent branch]: root assigning a task to an agent's branch (2.8), written on the cluster."}]
