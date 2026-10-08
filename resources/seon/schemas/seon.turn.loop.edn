@@ -182,6 +182,7 @@
                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]],
                  :tests :seon.turn.loop/test-summary,
+                 :stages :seon.cost/stages,
                  :queue
                  [:map {:description "The tests a bounded test step left for the next pass; the Flow proc's state, dropped when a pass runs its own step."}
                   [:seon.turn.loop/queued [:vector :seon.test/sym]]
@@ -198,6 +199,8 @@
                   [:seon.turn.loop/basis {:optional true}
                    :seon.turn.loop/basis]
                   [:seon.turn.loop/tests {:optional true} :seon.turn.loop/tests]
+                  ; the wall time of each stage the pass ran (fork, the batch's own, settle, test step)
+                  [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]
                   ; each held form with the receipt the run's settlement saved: its reply
                   [:seon.turn.loop/evaluated-sources {:optional true}
                    :seon.turn.loop/evaluated-sources]],
@@ -219,7 +222,8 @@
                  :evaluated-batch
                  [:map {:description "A run's rows through the one REPL path: each form's evaluation as the settlement reads it, and the batch's folded program with the request that folds it, which the caller's one settlement commits."}
                   [:seon.turn.loop/evaluated-sources :seon.turn.loop/evaluated-sources]
-                  [:seon.turn.loop/program [:map [:seon.batch/request :seon.batch/request] [:seon.batch/program :map]]]],
+                  [:seon.turn.loop/program [:map [:seon.batch/request :seon.batch/request] [:seon.batch/program :map]]]
+                  [:seon.batch/timings {:optional true} [:map-of :keyword number?]]],
                  :settlement
                  [:or
                   :seon.turn.loop/evaluation-settlement

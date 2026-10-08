@@ -9,6 +9,7 @@
              [:seon.repl/finding :seon.repl/finding]
              [:seon.repl/fix {:optional true} :seon.repl/fix]]
             :findings [:vector :seon.repl/finding-value]
+            :request :seon.cost/request
             :out-tokens
             [:int {:min 0 :description "Estimated tokens (seon.ai.tokens/estimate) of an evaluation's printed output, derived from the saved output when its reply is rendered."}]
             :directory

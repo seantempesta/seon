@@ -154,7 +154,9 @@
                       ;; the value the run's settlement left (evaluate-source!)
                       [:seon.db/db {:optional true} :seon.db/database-value]
                       ;; each held form with the receipt that settlement saved
-                      [:seon.turn.loop/evaluated-sources {:optional true} :seon.turn.loop/evaluated-sources]],
+                      [:seon.turn.loop/evaluated-sources {:optional true} :seon.turn.loop/evaluated-sources]
+                      ;; the wall time of each stage the run's pass ran
+                      [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]],
                      ;; A source submission as the value its agent's turn proc
                      ;; receives on its bounded request port: the run request
                      ;; (`seon.turn/system-run-call`'s input), its staged reply,

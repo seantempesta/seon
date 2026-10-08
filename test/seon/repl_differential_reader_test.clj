@@ -31,7 +31,7 @@
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (mapv #(support/reply (get % "text")) (get result "content"))))
+    (support/mcp-replies result)))
 
 (defn- settled
   "The settled answer of `text` run by the MCP entrance's pass as `agent-id`, read by `segmenter`."

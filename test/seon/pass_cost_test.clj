@@ -21,7 +21,7 @@
              calls (reduce + 0 (keep #(when (= 'seon.turn/terminal-agent-ordinal (:seon.profile/sym %))
                                        (:seon.profile/calls %))
                                     (:seon.profile/by-calls measured)))
-             values (mapv #(support/reply (get % "text")) (get reply "content"))]
+             values (support/mcp-replies reply)]
          (is (false? (get reply "isError")))
          (is (= (vec (repeat n 2)) (mapv :seon.repl/value values)))
          (is (every? #(not (contains? % :seon.repl/diagnostics)) values))
@@ -41,7 +41,7 @@
                     mark (profile/begin)
                     reply (json/read-str (mcp/call request))
                     measured (profile/explain mark 100000)
-                    values (mapv #(support/reply (get % "text")) (get reply "content"))]
+                    values (support/mcp-replies reply)]
                 (is (false? (get reply "isError")))
                 (is (= (vec (repeat n 2)) (mapv :seon.repl/value values)))
                 (is (every? #(not (contains? % :seon.repl/diagnostics)) values))

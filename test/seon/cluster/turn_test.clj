@@ -2798,13 +2798,15 @@
   "Evaluate `code` as `agent-id` through `seon.mcp/call`, the reply read back as data."
   {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
   [running agent-id code]
-  (test-support/reply
-   (get (last (get (clojure.data.json/read-str
-                    (seon.mcp/call (clojure.data.json/write-str
-                                    {"name" "eval_clj"
-                                     "arguments" {"code" code "agent" agent-id "cluster" running}})))
-                   "content"))
-        "text")))
+  (->> (get (clojure.data.json/read-str
+             (seon.mcp/call (clojure.data.json/write-str
+                             {"name" "eval_clj"
+                              "arguments" {"code" code "agent" agent-id "cluster" running}})))
+            "content")
+       (map #(test-support/reply (get % "text")))
+       ;; the last item that is not the request's cost
+       (remove #(and (map? %) (contains? % :seon.repl/request)))
+       last))
 
 (defn- eval-result
   "Evaluate `code` as `agent-id` through `seon.mcp/call`, the parsed MCP result (read with `test-support/mcp-reply` and `mcp-tests`)."

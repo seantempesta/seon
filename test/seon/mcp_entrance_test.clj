@@ -77,7 +77,7 @@
            run (latest-run-in (db/db connection) agent-id)]
        (is (false? (get result "isError")))
        (is (= (stored-responses connection agent-id run)
-              (mapv #(get % "text") (get result "content")))
+              (support/mcp-texts result))
            "one text per evaluation, exactly the agent's own response")))))
 
 (deftest ^{:seon.test/subject "seon.mcp/jvm-run"} a-jvm-call-is-the-agents-recorded-run-and-its-value-digs-by-handle
@@ -191,8 +191,7 @@
                  :seon.repl/value]]]
          (testing label
            (when before (before))
-           (let [texts (mapv #(get % "text") (get (answer "eval_clj" {"code" code "agent" agent-id "cluster" running})
-                                                  "content"))
+           (let [texts (support/mcp-texts (answer "eval_clj" {"code" code "agent" agent-id "cluster" running}))
                  saved (stored-responses connection agent-id (latest-run-in (db/db connection) agent-id))]
              (is (seq saved) "the run saved its evaluations")
              (is (= saved (subvec texts 0 (min (count texts) (count saved))))
@@ -218,7 +217,7 @@
                saved (stored-responses connection agent-id (latest-run-in (db/db connection) agent-id))]
            (is (every? nil? saved) "the run stored no terminal receipt")
            (is (true? (get result "isError")))
-           (is (= 1 (count (get result "content"))) "only the refusal is answered, never an unsaved value")))))))
+           (is (= 1 (count (support/mcp-texts result))) "only the refusal is answered, never an unsaved value")))))))
 
 (deftest a-jvm-reply-keeps-its-duration-after-an-earlier-run
   (support/with-running-agent

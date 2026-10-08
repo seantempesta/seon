@@ -4241,7 +4241,8 @@
                         :seon.sci.eval/evaluation evaluation}
                  change (assoc :seon.batch/change change))))
            (:seon.batch/entries batch))
-     :seon.turn.loop/program {:seon.batch/request request :seon.batch/program (:seon.batch/program batch {})}}))
+     :seon.turn.loop/program {:seon.batch/request request :seon.batch/program (:seon.batch/program batch {})}
+     :seon.batch/timings (:seon.batch/timings batch {})}))
 
 (defn preview-sources
   "Evaluate authored source once in the assigned agent's fork, persisting nothing.
@@ -4335,6 +4336,7 @@
         agent-id (:seon.agent/id work)
         run-id (:seon.turn/id work)
         base-ctx (:seon.sci.eval/ctx cluster)
+        fork-start (System/nanoTime)
         forked
         (phase
          (fn []
@@ -4356,6 +4358,7 @@
                 (:seon.sci.eval/agent-ctx cluster)
                 (assoc :seon.sci.eval/agent-ctx
                        (:seon.sci.eval/agent-ctx cluster)))))))
+        fork-ms (/ (- (System/nanoTime) fork-start) 1e6)
         trigger (phase #(message/trigger (db/db connection) run-id))
         ;; handles a fresh fork could not bind: a core fault delivered to this
         ;; agent's next context; the turn continues without them
@@ -4455,6 +4458,7 @@
                 ;; the committed value the settlement is written on: the
                 ;; program-change fast path proves no commit came between
                 written-on (db/db connection)
+                settle-start (System/nanoTime)
                 settlement (settle-evaluated! cluster requests
                                           (assoc program :seon.batch/changes
                                                  (into [] (keep (fn [{n :seon.cluster.eval/ordinal c :seon.batch/change}]
@@ -4463,8 +4467,12 @@
                 outcome (:outcome settlement)
                 prepared (:prepared settlement)
                 last-prepared (peek prepared)
-                saved #(with-saved % (into {} (map (juxt :seon.cluster.eval/ordinal :seon.turn.loop/admitted-form)) gated)
-                         (:saved settlement []))]
+                ;; the stage clocks the pass's reply carries (`seon.batch/request-cost`)
+                staged #(assoc % :seon.turn.loop/stages
+                               (merge {:fork fork-ms} (:seon.batch/timings evaluated)
+                                      {:settle (/ (- (System/nanoTime) settle-start) 1e6)}))
+                saved #(staged (with-saved % (into {} (map (juxt :seon.cluster.eval/ordinal :seon.turn.loop/admitted-form)) gated)
+                                 (:saved settlement [])))]
             (if-let [refusal (:refused-outcome settlement)]
               ;; a refused settlement keeps every evaluated value (OQ1): the
               ;; live definitions stay private to this fork, nothing restores
@@ -5285,9 +5293,13 @@
                           ;; step, on one acquisition of the agent's world.
                           ;; THE TESTS RUN AFTER A PASS THAT EVALUATED A FORM, serially inside the
                           ;; pass; their failure rides beside the values (test-step).
-                          tests (when (and (step-due? report) (not (:seon.turn.loop/refusal report))
-                                           (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
-                                  (test-step cluster agent-id (:seon.turn/id report)))
+                          test-start (System/nanoTime)
+                          stepped? (and (step-due? report) (not (:seon.turn.loop/refusal report))
+                                        (not (false? (agent-dial (db/db connection) cluster agent-id :seon.config.test/step?))))
+                          tests (when stepped? (test-step cluster agent-id (:seon.turn/id report)))
+                          report (cond-> report
+                                   stepped? (assoc-in [:seon.turn.loop/stages :test-step]
+                                                      (/ (- (System/nanoTime) test-start) 1e6)))
                           ;; THE QUEUE IS THIS PROC'S STATE: a pass that ran its own step replaces it
                           ;; with what that step left (the new requests cover the older queue on the
                           ;; newer program); any other pass carries it to the idle pass.

@@ -233,24 +233,36 @@
              entries evaluations)
        (boolean (some :seon.cluster.eval/error evaluations))])))
 
+(defn- since-ms
+  "Wall milliseconds since the `System/nanoTime` reading `started`."
+  {:malli/schema [:=> [:cat :int] :double]}
+  [started]
+  (/ (- (System/nanoTime) started) 1e6))
+
 (defn- sci-run
-  "One ordinary SCI run of the agent (`evaluate-source!`, segmented as code)."
-  {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string] [:tuple [:vector :string] :boolean]]}
+  "One ordinary SCI run of the agent (`evaluate-source!`, segmented as code):
+  the texts, whether any failed, and the wall ms of each stage the run's pass
+  ran and of the print."
+  {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string]
+                  [:tuple [:vector :string] :boolean [:map-of :keyword number?]]]}
   [custody code namespace-name cluster-name]
   (let [answer (agent/evaluate-source!
                 (cond-> (assoc custody :seon.agent/segmenter 'seon.turn/code-sources :seon.cluster.reply/text code)
                   namespace-name (assoc :seon.turn/starting-ns [:seon.ns/name namespace-name])))
-        database (:seon.db/db answer)]
-    (if (and database (not (:seon.error/at answer)))
-      (cond-> (observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) database
-                        (:seon.agent/id custody) cluster-name)
-        (:seon.turn.loop/refusal answer)
-        (-> (update 0 conj (printed (:seon.turn.loop/refusal answer) code database cluster-name))
-            (assoc 1 true))
-        ;; the pass's automatic test step (proofs, then the tests reaching the change)
-        (:seon.turn.loop/tests answer)
-        (update 0 conj (printed (select-keys answer [:seon.turn.loop/tests]) code database cluster-name)))
-      [[(printed answer code (db/db (get-in custody [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true])))
+        database (:seon.db/db answer)
+        print-start (System/nanoTime)
+        [texts failed?]
+        (if (and database (not (:seon.error/at answer)))
+          (cond-> (observed (:seon.turn.loop/evaluated-sources answer []) (:seon.turn/id answer) database
+                            (:seon.agent/id custody) cluster-name)
+            (:seon.turn.loop/refusal answer)
+            (-> (update 0 conj (printed (:seon.turn.loop/refusal answer) code database cluster-name))
+                (assoc 1 true))
+            ;; the pass's automatic test step (proofs, then the tests reaching the change)
+            (:seon.turn.loop/tests answer)
+            (update 0 conj (printed (select-keys answer [:seon.turn.loop/tests]) code database cluster-name)))
+          [[(printed answer code (db/db (get-in custody [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true])]
+    [texts failed? (assoc (:seon.turn.loop/stages answer {}) :print (since-ms print-start))]))
 
 (defn- pages-changed!
   "Tell each page channel to re-render when this JVM's loaded code differs
@@ -271,7 +283,8 @@
   Host read and eval, the same show stage (each value bound under its result
   handle in the agent's context), recorded as the agent's run on its branch.
   A run that changed loaded code tells every cluster's pages to re-render."
-  {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string] [:tuple [:vector :string] :boolean]]}
+  {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string]
+                  [:tuple [:vector :string] :boolean [:map-of :keyword number?]]]}
   [{handle :seon.turn.loop/cluster agent-id :seon.agent/id} code namespace-name cluster-name]
   (let [connection (:seon.db/connection handle)
         run-id (id/id)
@@ -289,16 +302,19 @@
         commit (:seon.batch/commit batch)]
     (pages-changed! mark (keep #(get-in % [:seon.render.web/view :seon.render.web/runtime-eval-channel])
                                (vals @runtime/running-instances)))
-    (if-let [after (:seon.batch/after commit)]
-      (observed (turn.batch/evaluated-sources batch) run-id after agent-id cluster-name)
-      ;; nothing was recorded: the fold's own shown texts, and why
-      (let [reply (turn.batch/reply batch)]
-        [(conj (mapv :seon.batch/shown (:seon.batch/evaluations reply))
-               (printed (merge (refused "The run was evaluated but not recorded." :seon.batch/commit
-                                        :seon.batch/applied (:seon.batch/commit reply))
-                               (select-keys reply [:seon.batch/diagnostics]))
-                        code (db/db connection) cluster-name))
-         true]))))
+    (let [print-start (System/nanoTime)
+          [texts failed?]
+          (if-let [after (:seon.batch/after commit)]
+            (observed (turn.batch/evaluated-sources batch) run-id after agent-id cluster-name)
+            ;; nothing was recorded: the fold's own shown texts, and why
+            (let [reply (turn.batch/reply batch)]
+              [(conj (mapv :seon.batch/shown (:seon.batch/evaluations reply))
+                     (printed (merge (refused "The run was evaluated but not recorded." :seon.batch/commit
+                                              :seon.batch/applied (:seon.batch/commit reply))
+                                     (select-keys reply [:seon.batch/diagnostics]))
+                              code (db/db connection) cluster-name))
+               true]))]
+      [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The entrance
@@ -321,21 +337,28 @@
       value)))
 
 (defn- eval-clj
-  "`eval_clj`: the texts and whether any failed."
+  "`eval_clj`: the texts and whether any failed. The last text is the eval
+  request's cost (`:seon.repl/request`), measured from this entrance."
   {:malli/schema [:=> [:cat :map] [:tuple [:vector :string] :boolean]]}
   [{code :seon.mcp/code agent-id :seon.mcp/agent cluster :seon.mcp/cluster mode :seon.mcp/mode
     start :seon.mcp/namespace}]
-  (let [found (instance @runtime/running-instances cluster)
+  (let [started (System/nanoTime)
+        found (instance @runtime/running-instances cluster)
         namespace-name (some-> start symbol)
         custody (when-not (:seon.error/at found)
                   (execution found (or agent-id "root") namespace-name))
-        cluster-name (:seon.cluster/name found)]
-    (cond
-      (:seon.error/at found) [[(printed found code nil nil)] true]
-      (:seon.error/at custody)
-      [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true]
-      (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
-      :else (sci-run custody code namespace-name cluster-name))))
+        cluster-name (:seon.cluster/name found)
+        stages {:custody (since-ms started)}
+        [texts failed? run-stages]
+        (cond
+          (:seon.error/at found) [[(printed found code nil nil)] true {}]
+          (:seon.error/at custody)
+          [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {}]
+          (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
+          :else (sci-run custody code namespace-name cluster-name))]
+    [(conj texts (printed {:seon.repl/request (seon.batch/request-cost started (merge stages run-stages))}
+                          code nil cluster-name))
+     failed?]))
 
 (defn- runtime-status
   "`runtime_status`: the cluster's health report through its AI face, printed."

@@ -151,6 +151,21 @@
   [t0]
   (/ (- (System/nanoTime) t0) 1e6))
 
+(defn tenths
+  "Milliseconds to 0.1, the precision a request's cost shows."
+  {:malli/schema [:=> [:cat number?] :double]}
+  [ms]
+  (/ (Math/round (* 10.0 (double ms))) 10.0))
+
+(defn request-cost
+  "One eval request's cost: wall milliseconds since `started-ns` (a
+  `System/nanoTime` reading at its entrance) and the wall milliseconds of each
+  stage it ran."
+  {:malli/schema [:=> [:cat :int [:map-of :keyword number?]] :seon.cost/request]}
+  [started-ns stages]
+  (cond-> {:seon.cost/ms (tenths (ms-since started-ns))}
+    (seq stages) (assoc :seon.cost/stages (update-vals stages tenths))))
+
 (defn diagnostic
   "One diagnostic: the failing stage, the form it belongs to, the cause."
   {:malli/schema [:=> [:cat :keyword [:maybe :int] :seon.error/throwable] :seon.batch/diagnostic]}

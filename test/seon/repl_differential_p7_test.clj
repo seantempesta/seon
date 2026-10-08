@@ -18,7 +18,7 @@
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (mapv #(support/reply (get % "text")) (get result "content"))))
+    (support/mcp-replies result)))
 
 (deftest repairs-ride-beside-the-form-they-repaired
   (support/with-running-agent

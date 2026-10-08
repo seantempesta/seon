@@ -798,12 +798,38 @@
   [result]
   (mapv (fn [item] (let [text (get item "text")] [text (reply text)])) (get result "content")))
 
+(defn- mcp-evaluation-items
+  "Each [text reply] of a parsed MCP `eval_clj` result that is an evaluation's,
+  never the automatic test step or the request's cost, found by its data."
+  [result]
+  (into [] (remove #(and (map? (second %)) (some (partial contains? (second %))
+                                                  [:seon.turn.loop/tests :seon.repl/request])))
+        (mcp-parsed result)))
+
+(defn mcp-replies
+  "Each evaluation's reply of a parsed MCP `eval_clj` result, in order, read back as data."
+  {:malli/schema [:=> [:cat :map] [:vector :seon.schema/value]]}
+  [result]
+  (mapv second (mcp-evaluation-items result)))
+
+(defn mcp-texts
+  "Each evaluation's reply text of a parsed MCP `eval_clj` result, in order."
+  {:malli/schema [:=> [:cat :map] [:vector :string]]}
+  [result]
+  (mapv first (mcp-evaluation-items result)))
+
 (defn mcp-text
-  "The text of the REPL item of a parsed MCP `eval_clj` result: the last item
-  that is not the automatic test step, found by its data, never by position."
+  "The text of the REPL item of a parsed MCP `eval_clj` result: the last
+  evaluation's, never the test step or the request's cost."
   {:malli/schema [:=> [:cat :map] :string]}
   [result]
-  (first (last (remove #(contains? (second %) :seon.turn.loop/tests) (mcp-parsed result)))))
+  (first (peek (mcp-evaluation-items result))))
+
+(defn mcp-request
+  "The eval request's cost (`:seon.repl/request`) of a parsed MCP `eval_clj` result."
+  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
+  [result]
+  (some #(:seon.repl/request (second %)) (mcp-parsed result)))
 
 (defn mcp-reply
   "The REPL reply map of a parsed MCP `eval_clj` result, never the test step."
