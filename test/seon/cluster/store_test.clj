@@ -20,6 +20,8 @@
             [konserve.filestore :as filestore]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.profile]
+            [konserve.impl.defaults]
             [seon.schema]
             [seon.test-support :as test-support]
             [replikativ.logging]
@@ -823,3 +825,88 @@
       (is (str/includes? line "ERROR"))
       (is (str/includes? line ":datahike/listener-error"))
       (is (< (count line) 600)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The baseline cost of one small commit (commit-cost cards)
+;;; ---------------------------------------------------------------------------
+
+(def ^:private cost-attributes
+  (mapv #(keyword "seon.store.test" (str "cost-" %)) (range 20)))
+
+(def ^:private cost-schema
+  (into probe-schema
+        (map (fn [attribute] {:db/ident attribute
+                              :db/valueType :db.type/long
+                              :db/cardinality :db.cardinality/one}))
+        cost-attributes))
+
+(defn- file-sizes
+  "The store directory's file name -> byte length."
+  [dir]
+  (into {} (comp (filter #(.isFile ^File %)) (map (fn [^File f] [(.getName f) (.length f)])))
+        (file-seq (io/file dir))))
+
+(defn- key-file-name
+  [store-key]
+  (str (konserve.impl.defaults/store-key->uuid-key (konserve.impl.defaults/key->store-key store-key)) ".ksv"))
+
+(defn- small-commit
+  "One commit of 17 assertions over 14 distinct attributes on seeded entities;
+  `n` varies the values so every assertion is a change."
+  [connection n]
+  (test-support/transacted!
+   connection
+   (vec (for [i (range 17)]
+          {:seon.store.test/marker (str "e" (+ (* 17 (mod n 50)) i))
+           (nth cost-attributes (mod i 14)) (+ 1000 (* 31 n) i)}))))
+
+(defn- measured-small-commit
+  "A small commit's wall ms, the keys written by kind, the bytes those files
+  hold after it, and the branch head's bytes."
+  [dir connection n]
+  (let [written (atom [])
+        before (file-sizes dir)
+        hook (fn [{written-key :key value :value}] (swap! written conj [written-key (map? value)]))
+        _ (k/add-write-hook! (:store @connection) ::cost hook)
+        {ms :seon.profile/ms} (seon.profile/measure #(small-commit connection n))
+        _ (k/remove-write-hook! (:store @connection) ::cost)
+        after (file-sizes dir)
+        head-file (key-file-name :db)
+        record? (fn [[written-key map-valued?]] (and (uuid? written-key) map-valued?))
+        written-files (into #{} (map (comp key-file-name first)) @written)]
+    {:ms ms
+     :head-keys (count (filter (comp keyword? first) @written))
+     :record-keys (count (filter record? @written))
+     :node-keys (count (remove (fn [[written-key map-valued?]] (or (keyword? written-key) (and (uuid? written-key) map-valued?))) @written))
+     :files (count written-files)
+     :bytes-written (reduce + (map #(get after % 0) written-files))
+     :head-bytes (get after head-file 0)
+     :new-files (count (remove (set (keys before)) (keys after)))}))
+
+(defn- percentile [sorted fraction]
+  (nth sorted (min (dec (count sorted)) (long (* fraction (count sorted))))))
+
+(deftest a-small-commit-reports-its-milliseconds-files-and-head
+  (let [dir (fresh-dir)]
+    (try
+      (let [opened (store/open-store! {:seon.store/dir dir})
+            connection (:seon.store/connection-object opened)]
+        (try
+          (test-support/transacted! connection cost-schema)
+          (test-support/transacted! connection
+                                    (vec (for [i (range 1000)]
+                                           {:seon.store.test/marker (str "e" i)})))
+          (dotimes [n 5] (small-commit connection n))
+          (let [rows (mapv #(measured-small-commit dir connection (+ 5 %)) (range 20))
+                sorted-ms (vec (sort (map :ms rows)))]
+            (is (every? #(= 1 (:record-keys %)) rows) "one commit-record key per commit")
+            (is (every? #(= 1 (:head-keys %)) rows) "one branch-head key per commit")
+            (is (every? #(< 1024 (:head-bytes %)) rows) "the head holds the fused record today")
+            (is (every? #(= (:files %) (+ 2 (:node-keys %))) rows) "a commit writes its nodes, one record and one head")
+            ;; the baseline later cards tighten: one durable small commit
+            (is (< (percentile sorted-ms 0.5) 50.0) "a small commit's p50 stays far under the five-second bound")
+            (is (every? #(<= (:files %) 10) rows) "a small commit writes a handful of files"))
+          (finally
+            (store/release-store! opened))))
+      (finally
+        (test-support/delete-recursively! (str (io/file dir) "/.."))))))
