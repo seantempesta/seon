@@ -20,7 +20,13 @@
 # temporary index; HEAD, the shared index and the working tree are untouched).
 # clj-kondo lints a `git archive` of that tree, never the working tree, so another
 # lane's half-finished edit refuses nobody else; a commit touching none of
-# those roots skips it (the candidate lints as HEAD). `bin/seon check` (publication,
+# those roots skips it (the candidate lints as HEAD). Changed .clj/.cljc namespace
+# files lint narrowly: only those files, against the first-party analysis of HEAD
+# kept at tmp/orchestrator/lint-cache (brought to HEAD by its changed files under
+# lint-cache.lock). Their callers elsewhere join only when the cache entry's shape
+# (vars, arities, privacy, inferred returns; no positions) changed, found by naming
+# the namespace. Any other path, or more than 150 files, lints all of src script
+# test with --cache false. The gate prints which it ran. `bin/seon check` (publication,
 # adoption, --test) runs alongside it, except for a documentation-only commit
 # (docs/, AGENTS.md, CLAUDE.md or skill Markdown, no --test): documentation is no program input.
 # The commit itself (staged-index check, new-file add, git commit, verification)
@@ -161,19 +167,143 @@ candidate_tree() {
   GIT_INDEX_FILE="$index" git write-tree
 }
 
-# clj-kondo over `git archive TREE` in DIRECTORY. The analyzer's ignored
-# configuration (library imports, generated configs) is linked from the checkout;
-# --cache false reads and writes no cache, as the working-tree lint did.
-lint_candidate() {
-  local tree="$1" directory="$2" entry
+# `git archive TREE` into DIRECTORY (all of src script test, or only the named
+# files) with the analyzer's ignored configuration (library imports, generated
+# configs) linked from the checkout.
+extract_candidate() {
+  local tree="$1" directory="$2" entry; shift 2
   mkdir -p "$directory"
-  git archive --format=tar "$tree" src script test .clj-kondo | tar -x -C "$directory"
+  git archive --format=tar "$tree" .clj-kondo ${@:-src script test} | tar -x -C "$directory"
   while IFS= read -r entry; do
     entry="${entry%/}"
     [[ "$entry" == .clj-kondo/.cache || -e "$directory/$entry" ]] && continue
     mkdir -p "$directory/$(dirname "$entry")"
     ln -s "$root/$entry" "$directory/$entry"
   done < <(git ls-files --others --ignored --exclude-standard --directory -- .clj-kondo)
+}
+
+# The first-party analysis of HEAD's lint inputs, kept at tmp/orchestrator/lint-cache
+# (own cache dir: never the checkout's .clj-kondo/.cache, which a booting JVM
+# reads). Library namespaces are in no cache, here or under --cache false.
+# `_lint-cache-sync` (under lint-cache.lock) brings it to HEAD: the files HEAD
+# changed since the recorded commit are linted into it; a deletion, a
+# .clj-kondo change or no record rebuilds it from the whole of HEAD.
+lint_cache_sync() {
+  local cache="$root/tmp/orchestrator/lint-cache" head recorded changes full="" scratch
+  mkdir -p "$cache"
+  head="$(git rev-parse HEAD)"
+  recorded="$(cat "$cache/commit" 2>/dev/null || true)"
+  [[ "$recorded" == "$head" ]] && return 0
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/lint-cache.XXXXXX")"
+  if [[ -n "$recorded" ]] && changes="$(git diff --name-status --no-renames "$recorded" "$head" -- src script test .clj-kondo 2>/dev/null)"; then
+    if grep -qE $'^D|\t\\.clj-kondo/' <<< "$changes"; then full=1; fi
+  else
+    full=1
+  fi
+  if [[ -n "$full" ]]; then
+    rm -rf -- "$cache/v1" "$cache/commit"
+    extract_candidate "$head" "$scratch/tree"
+    (cd "$scratch/tree" && clj-kondo --lint src script test --cache-dir "$cache" --parallel) > "$scratch/out" 2>&1 || true
+  else
+    local files=()
+    while IFS= read -r changes; do files+=("$changes"); done < <(grep -E $'\t.*\\.clj[cs]?$' <<< "$changes" | cut -f2)
+    if [[ ${#files[@]} -gt 0 ]]; then
+      extract_candidate "$head" "$scratch/tree" "${files[@]}"
+      (cd "$scratch/tree" && clj-kondo --lint "${files[@]}" --cache-dir "$cache" --parallel) > "$scratch/out" 2>&1 || true
+    fi
+  fi
+  echo "$head" > "$cache/commit"
+  rm -rf -- "$scratch"
+}
+
+# The namespace of each changed .clj/.cljc path of src script test (from the
+# path, confirmed by the file's own ns form in TREE), one per line; fails when
+# a path is no namespace file, so the caller lints the whole tree.
+lint_namespaces() {
+  local tree="$1" path ns; shift
+  for path in "$@"; do
+    case "$path" in
+      src/*.clj|src/*.cljc|test/*.clj|test/*.cljc|script/*.clj|script/*.cljc) ;;
+      *) return 1 ;;
+    esac
+    ns="${path#*/}"; ns="${ns%.*}"; ns="${ns//\//.}"; ns="${ns//_/-}"
+    git show "$tree:$path" 2>/dev/null | grep -qE "^\(ns([[:space:]]|[[:space:]].*[[:space:]}])${ns//./\\.}([[:space:])]|\$)" || return 1
+    echo "$ns"
+  done
+}
+
+# The files of src script test that name a namespace: its direct callers.
+lint_callers() {
+  local tree="$1" ns
+  shift
+  for ns in "$@"; do
+    git grep -lE -e "${ns//./\\.}([^-A-Za-z0-9._*+!?<>=]|\$)" "$tree" -- src script test | sed "s/^[^:]*://"
+  done | grep -E '\.clj[cs]?$' | sort -u
+}
+
+# A cache entry's shape: what a caller of the namespace sees (vars, arities,
+# macros, privacy), without positions or file names. Transit-JSON cache codes
+# are resolved; `absent` for a namespace with no entry.
+cache_shape() {
+  python3 - "$1" <<'PY'
+import json, sys
+POS = {"~:row", "~:col", "~:end-row", "~:end-col", "~:name-row", "~:name-col", "~:name-end-row", "~:name-end-col", "~:filename"}
+cache = []
+def code(s): return ord(s[1]) - 48 if len(s) == 2 else (ord(s[1]) - 48) * 44 + ord(s[2]) - 48
+def walk(x, key=False):
+    if isinstance(x, str):
+        if x.startswith("^") and x != "^ " and len(x) <= 3: return cache[code(x)]
+        if len(x) > 3 and (key or x[:2] in ("~:", "~$", "~#")): cache.append(x)
+        return x
+    if isinstance(x, list):
+        if x and x[0] == "^ ": return {walk(k, True): walk(v) for k, v in zip(x[1::2], x[2::2])}
+        return [walk(e) for e in x]
+    return x
+def strip(x):
+    if isinstance(x, dict): return {k: strip(v) for k, v in x.items() if k not in POS}
+    return [strip(e) for e in x] if isinstance(x, list) else x
+try: print(json.dumps(strip(walk(json.load(open(sys.argv[1])))), sort_keys=True))
+except FileNotFoundError: print("absent")
+PY
+}
+
+# Lint the candidate TREE in DIRECTORY for the changed PATHS. Bounded change
+# (every path a namespace file): lint the changed files against the cached
+# first-party analysis of HEAD (lint_cache_sync); a file's callers elsewhere
+# see only its namespace's cache entry, so when that entry's shape is
+# unchanged no caller can newly fail and the changed files are the whole lint,
+# and when it changed the files naming the namespace join. Sound while every
+# other file is HEAD's, which every earlier commit linted. Anything else (a
+# non-namespace path, more than 150 files) lints all of src script test with
+# --cache false.
+lint_candidate() {
+  local tree="$1" directory="$2"; shift 2
+  local namespaces cache="$directory.cache" ns before changed="" callers scope=()
+  if namespaces="$(lint_namespaces "$tree" "$@")"; then
+    perl -MFcntl=:flock -e 'open(my $lock, ">>", shift) or die "lint-cache.lock: $!\n"; flock($lock, LOCK_EX) or die "lint-cache.lock: $!\n";
+                            exit(system(@ARGV) ? 1 : 0);' \
+      "$root/tmp/orchestrator/lint-cache.lock" "$root/bin/lane" _lint-cache-sync
+    rm -rf -- "$cache"
+    cp -R "$root/tmp/orchestrator/lint-cache" "$cache"
+    extract_candidate "$tree" "$directory" "$@"
+    echo "== narrow lint: ${#@} changed files against the cached analysis of HEAD"
+    (cd "$directory" && clj-kondo --lint "$@" --cache-dir "$cache" --parallel) || true
+    for ns in $namespaces; do
+      for lang in clj cljc; do
+        [[ "$(cache_shape "$cache/v1/$lang/$ns.transit.json")" == "$(cache_shape "$root/tmp/orchestrator/lint-cache/v1/$lang/$ns.transit.json")" ]] || changed="$changed $ns"
+      done
+    done
+    [[ -z "$changed" ]] && { echo "== callers not linted: the shape of ${namespaces//$'\n'/ } is unchanged, so no caller can newly fail"; return 0; }
+    while IFS= read -r ns; do scope+=("$ns"); done < <(lint_callers "$tree" $changed)
+    if [[ ${#scope[@]} -le 150 ]]; then
+      echo "== callers of$changed: ${#scope[@]} files linted with the changed files"
+      extract_candidate "$tree" "$directory" "$@" "${scope[@]}"
+      (cd "$directory" && clj-kondo --lint "$@" "${scope[@]}" --cache-dir "$cache" --parallel) || true
+      return 0
+    fi
+  fi
+  echo "== clj-kondo --lint src script test --cache false --parallel (candidate tree ${tree:0:12})"
+  extract_candidate "$tree" "$directory"
   (cd "$directory" && clj-kondo --lint src script test --cache false --parallel)
 }
 
@@ -368,9 +498,8 @@ commit() {
     echo "== no path under src script test .clj-kondo: the candidate lints as HEAD; clj-kondo not run"
     echo "linting took 0ms, errors: 0, (unchanged)" > "$scratch/lint.out"
   else
-    echo "== clj-kondo --lint src script test --cache false --parallel (candidate tree ${tree:0:12})"
     set -m
-    lint_candidate "$tree" "$scratch/candidate" > "$scratch/lint.out" 2>&1 &
+    lint_candidate "$tree" "$scratch/candidate" "${paths[@]}" > "$scratch/lint.out" 2>&1 &
     lint_pid=$!
     set +m
   fi
@@ -521,6 +650,8 @@ case "$command" in
     evidence_trailer="$(mktemp "${TMPDIR:-/tmp}/lane-evidence.XXXXXX")"
     trap 'rm -f -- "$evidence_trailer"' EXIT
     branch_evidence "$evidence_agent" "$evidence_trailer" "$@" ;;
+  _lint-cache-sync) lint_cache_sync ;;
+  _lint-candidate) lint_candidate "$@" ;;
   _commit-locked) commit_locked "$@" ;;
   release) release "$@" ;;
   status) status "$@" ;;

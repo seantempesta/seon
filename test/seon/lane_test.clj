@@ -57,7 +57,7 @@
   (let [dir (scratch)]
     (is (= 2 (:exit (lane dir "claim" "one" "a.txt b.txt"))))
     (is (= 2 (:exit (lane dir "claim" "one" "a.txt\nd/"))))
-    (is (= 2 (:exit (lane dir "claim" "one" "missing.txt"))))
+    (is (= 2 (:exit (lane dir "claim" "one" "nodir/missing.txt"))))
     (is (zero? (:exit (lane dir "claim" "one" "d/" "d/new.txt"))) "a new file under a claimed directory")))
 
 (deftest a-test-list-after-one-test-flag-is-refused
@@ -69,3 +69,34 @@
       (is (= 2 (:exit refused)))
       (is (str/includes? (:err refused) "each test needs its own --test")))
     (is (str/includes? (str (parse)) "each test needs its own --test"))))
+
+(defn- kondo-scratch
+  "A repository whose HEAD holds namespace a.core and its caller b.core."
+  []
+  (let [dir (scratch)
+        put (fn [path text] (io/make-parents (io/file dir path)) (spit (io/file dir path) text))]
+    (put ".clj-kondo/config.edn" "{}")
+    (put "script/s.clj" "(ns s)\n")
+    (put "test/t.clj" "(ns t)\n")
+    (put "src/a/core.clj" "(ns a.core)\n(defn f [x] x)\n")
+    (put "src/b/core.clj" "(ns b.core (:require [a.core :as a]))\n(defn g [] (a/f 1))\n")
+    (sh dir "git" "add" ".clj-kondo" "src" "script" "test")
+    (sh dir "git" "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-m" "code")
+    dir))
+
+(defn- candidate-lint
+  "The narrow lint's output for a.core rewritten to TEXT."
+  [dir text]
+  (spit (io/file dir "src/a/core.clj") text)
+  (sh dir "git" "add" "src/a/core.clj")
+  (let [tree (str/trim (:out (sh dir "git" "write-tree")))]
+    (:out (sh dir "bash" "-c" (str "bin/lane _lint-candidate " tree " " dir "/lint src/a/core.clj 2>&1")))))
+
+(deftest a-body-change-lints-only-its-file-and-an-arity-change-lints-its-callers
+  (let [dir (kondo-scratch)
+        body (candidate-lint dir "(ns a.core)\n(defn f [x] (do 1 x))\n")
+        arity (candidate-lint dir "(ns a.core)\n(defn f [x y] x)\n")]
+    (is (str/includes? body "callers not linted"))
+    (is (str/includes? body "errors: 0"))
+    (is (str/includes? arity "src/b/core.clj:2"))
+    (is (str/includes? arity "is called with 1 arg but expects 2"))))
