@@ -167,4 +167,9 @@
              :kind :function
              :intent "`seon.test.runner/reach-attribute` derives a whole attribute map (about 66 ms to read the eleven reach attributes' 188,000 datoms on default) for every new content revision a branch writes; `seon.test.runner/retire-replaced-revision!` bounds the retained maps to one per branch and attribute, but each eval request still re-reads and rebuilds the attributes it wrote. Done when the test step is handed the eval request's recording transaction report and advances the previous revision's map by its `:tx-data` only when the cached revision equals the report's `:db-before` revision of that attribute (cost-design D1's contiguity check), deriving otherwise, with a regression showing a one-defn request's reach acquisition reads only the datoms it wrote."
              :must-read #{seon.test.runner/reach-attribute seon.turn/test-step seon.db/content-revisions}
-             :evidence #{"docs/research/agent-platform/2026-10-08/cost-design/merged.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/cost-design/merged.md"}}
+ #:seon.task{:name "an-sci-deftest-with-tasks-reports-no-executable-test-var"
+             :kind :function
+             :intent "Lane ns-form (agent ns-form, default 7f1e250c6, 2026-10-09) evaluated in seon.program-test a deftest carrying ^{:seon/tasks #{'seon.turn.batch/a-repl-require-changes-the-namespace-context-but-not-its-source}} before its name; (resolve ...) answers the Var with :test metadata and clojure.test/test-var runs it, yet (my.test/check {:seon.test/changed [that symbol]}) answers one error, :seon.test/unchanged true, message \"The admitted identity has no executable test Var.\", and the render's :seon.render.test/failures entry carries only the symbol, not that message. Done when check runs the Var the context holds and a failure entry shows its message."
+             :must-read #{seon.test/run}}
+]
