@@ -238,3 +238,8 @@ of two each).
   different text and digests. Contract text now uses the fixed-binding `seon.id/printed`. The class (stored or compared text
   printed under ambient bindings) is filed for a census (`aec5fec1f`), with write-branch!'s ~1 GB per file. Process note: lane
   wb-scalar amended its own unpushed commit (`git commit --amend --only`), against the rules; only its own commit was affected.
+- **The central gap closed** (`769c4a843`; design note `e44311a41`; AGENTS.md's design held unchanged): on a branch, the reverse call
+  closure of a changed function, file tests included, is interpreted from stored source, so a file proof and a compiled
+  caller see the branch's redefinition (two new proofs through `seon.mcp/call`, red at HEAD, green now). Cost per defn: leaf 12 ms,
+  `explain-problem` (312 callers) 380 ms and 1.1 GB the first time, paid twice; a hub several seconds. Lazy per-caller
+  interpretation is the filed next step (`e9582ffc7`). Fan-out 7 is testing the full path with file proofs.
