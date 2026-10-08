@@ -11,11 +11,12 @@ Rules:
 - Claim every file with `bin/lane claim LANE PATHS` BEFORE editing or creating it. A claim refuses a file that already has content, even yours.
 - Lint `src script test` with `--cache false`.
 - The throwaway check (`bin/lane commit` without `--branch-evidence`, which boots a JVM from HEAD plus your slice) is for host-bound and platform slices only: a declaration whose `:seon.fn/host-bound?` is true, the evaluator, writer, test runner, boot, schema publication, schema resources, `config/`, `deps.edn`, `bin/`, `script/` and submodule pins. An ordinary function change uses repl-slice.md (`defn` on your branch, branch evidence).
-- Commit via `bin/lane commit LANE -m MSG --test X --test Y PATHS`, one `--test` per name, with the footer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Never amend.
+- Commit via `bin/lane commit LANE -m MSG --test X --test Y PATHS`, one `--test` per name, with the footer naming your own model (`Co-Authored-By: Claude <your model> <noreply@anthropic.com>`; a Sonnet lane does not sign as Opus). Never amend.
 - Name tests that are red on HEAD var by var, and list them.
 - If a test tags a task that exists only in the runtime store, copy that task into its EDN.
 - Prove the slice with tests asserting DATA through the real MCP entrance (`seon.mcp/call`) wherever agent-visible behavior changes.
 - Measure the row's budget, parent against change.
+- Write check logs and scratch output under `<scratchpad>/<lane>/`, never the scratchpad root: sibling lanes share one scratchpad directory and overwrite each other's logs.
 - Never run prototype code in default's JVM, and never stop or reset default.
 - No clipping or printing outside the value printer. Use Clojure terms.
 

@@ -83,4 +83,9 @@
              :kind :function
              :intent "Every evaluation records `:seon.eval/shown-tokens`, `:seon.eval/value-tokens`, `:seon.eval/elisions` and `:seon.eval/value-class`, but not which cuts were made or whether the agent dug in afterwards, so the 1,500-token budget and the 32-child cap are guesses (census of 40 forms, default 2026-10-08). Done when settlement records each reply's cut paths and the later forms that read the result handle (ledger D1, `:seon.cluster.eval/result-reads`), and a report per value class gives elided count, dig-in rate, override use and a recommended budget."
              :must-read #{seon.turn.batch/settle}
-             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+ #:seon.task{:name "a-failed-defn-after-in-ns-leaves-an-unbound-stub-var"
+             :kind :function
+             :intent "Lane impl-cs01c5 (branch impl-cs01c5, 2026-10-08) ran (in-ns 'some.source.ns) and then a defn that was partial or failed, and found an unbound stub Var left in that namespace on its branch (seen on the Var `based-file`). A defn that does not complete must leave the namespace as it was, as Clojure's own failed def would not bind a usable Var. Reported by the lane, not yet reproduced: reproduce with one (in-ns 'scratch.ns) followed by a defn whose body fails to compile, then list the namespace's Vars. Done when a failed or partial defn leaves no Var behind (or the stub is reported as a finding naming it), with a regression through MCP SCI asserting the namespace's Vars before and after."
+             :must-read #{seon.turn.batch/derive-form seon.sci.eval/build-base-ctx}}
+]

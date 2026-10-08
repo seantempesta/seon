@@ -287,4 +287,10 @@
              :kind :function
              :intent "`(clojure.repl/source clojure.core/map)`, `clojure.string/join` and `malli.core/validator` each answer \"Source not found\" with a nil value in an agent's SCI context (default 2026-10-08), though the checkout carries the pinned dependency source under reference-code/ and the CLAUDE.md law says read the dependency first. Done when source of a library var answers its source as the first-party Var does, or a typed unavailable value names where to read it."
              :must-read #{seon.sci.eval/build-base-ctx}
-             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+ #:seon.task{:name "java-io-is-unresolved-in-an-agent-context"
+             :kind :function
+             :intent "Lane impl-cs01c5 (c9a496d6f, 2026-10-08) reported `clojure.java.io` unresolved in its agent's SCI context, so REPL-first work on file-reading code could not run there. Reported by the lane, not yet reproduced: a JVM-mode `eval_clj` of (clojure.java.io/file \"deps.edn\") answers a File on default, so probe the agent SCI mode on a branch first. Done when a form using `clojure.java.io/file` and `clojure.java.io/reader` evaluates in an agent's SCI context, the base context's namespace set naming it, with a regression through the MCP SCI entrance."
+             :must-read #{seon.sci.eval/build-base-ctx}
+             :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+]
