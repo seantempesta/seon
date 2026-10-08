@@ -87,11 +87,15 @@
                [:map {:description "Model calls left against the current wake and the held task's status."}
                 [:my.agent/turns-left :my.agent/turns-left]
                 [:seon.task/status {:optional true} :seon.task/status]],
-:name [:or :qualified-symbol :qualified-keyword]
+:name [:or :symbol :qualified-keyword]
+               :project [:string {:min 1}]
+               :revision [:string {:min 40 :max 40}]
+               :pin [:map [:seon.context/project :seon.context/project] [:seon.context/revision :seon.context/revision]]
                :must-read [:map [:seon.context/name :seon.context/name]
                            [:arglists {:optional true} [:sequential [:vector :symbol]]]
                            [:seon.fn/spec {:optional true} :seon.fn/spec]
                            [:doc {:optional true} :string]
+                           [:seon.context/pin {:optional true} :seon.context/pin]
                            [:seon.context/schema-form {:optional true} :seon.schema/value]
                            [:seon.render/operations [:vector :seon.render/read-form]]]
                :name-problem [:map [:seon.context/name :seon.context/name] [:seon.context/problem [:enum :unresolved]]]

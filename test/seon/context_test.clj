@@ -1,6 +1,7 @@
 (ns seon.context-test
   "Contract proof for context derivation between runs."
   (:require [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is use-fixtures]]
             [seon.context :as context]
             [seon.db :as db]
@@ -33,7 +34,7 @@
   {:malli/schema [:=> [:cat :string :seon.agent/id :string] :seon.schema/value]}
   [running agent-id code]
   (let [answer (json/read-str (mcp/call (json/write-str {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (test-support/reply (get (last (get answer "content")) "text")))))
+    (:seon.repl/value (test-support/reply (get (first (get answer "content")) "text")))))
 
 (defn- block
   "The current-state block of `agent-id` as `seon.mcp/call` answers it, read back as data."
@@ -42,7 +43,7 @@
   (let [answer (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" "(seon.context/current-state)"
                                                                       "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (test-support/reply (get (last (get answer "content")) "text")))))
+    (:seon.repl/value (test-support/reply (get (first (get answer "content")) "text")))))
 
 (deftest current-state-shows-the-current-task-declaration
   (test-support/with-running-agent
@@ -122,3 +123,20 @@
                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
        (is (= [{:seon.context/name 'tq.cs/missing :seon.context/problem :unresolved}]
               (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")))))))
+
+(deftest a-library-symbol-resolves-with-its-pinned-revision
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (let [_ (steps/declare-proof! connection 'tq.cs-test 'library 'tq.cs/library)
+           id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id agent-id :seon.task/ns 'tq.cs
+                                            :seon.task/name "library" :seon.task/kind :function
+                                            :seon.task/intent "Validate with `malli.core/validator`."}))]
+       (task/assign! {:seon.db/connection connection :seon.task/assigned id
+                      :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})
+       (let [[entry] (shown running agent-id "(:seon.context/must-reads (seon.context/current-state))")
+             pin (:seon.context/pin entry)
+             path (mapv str (iterator-seq (.iterator (java.nio.file.Paths/get (.toURI (io/resource "malli/core.cljc"))))))]
+         (is (= "malli" (:seon.context/project pin)))
+         (is (= 40 (count (:seon.context/revision pin))))
+         (is (some #{(:seon.context/revision pin)} path))
+         (is (seq (:arglists entry))))))))
