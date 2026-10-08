@@ -1771,12 +1771,21 @@
           (fs/delete-tree disposable)
           (finally (.close ^java.nio.channels.FileChannel (:seon.operator/channel slot))))))))
 
+(defn- awaited!
+  "The value of `pending`, a future, once it exits; its own exception rethrown
+  unwrapped, so its `ex-data` reaches the caller."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [pending]
+  (try @pending
+       (catch java.util.concurrent.ExecutionException wrapped
+         (throw (or (.getCause wrapped) wrapped)))))
+
 (defn check!
   "Answer whether HEAD plus `:seon.operator/paths` boots on this root's store,
   in its running JVM: the candidate's archive is published and adopted there
-  on disposable branches. With `:seon.operator/tests`, a rehearsal that
-  adopted then boots the candidate in a throwaway JVM and runs those tests
-  there (`candidate-tests!`); a red run refuses. A candidate that is not HEAD
+  on disposable branches. With `:seon.operator/tests`, the candidate boots in
+  a throwaway JVM alongside the rehearsal and runs those tests there
+  (`candidate-tests!`); a refused rehearsal or a red run refuses. A candidate that is not HEAD
   has its archive deleted after; HEAD's is kept for the `start --head` that
   follows."
   {:malli/schema [:=> [:cat :map] :map]}
@@ -1793,18 +1802,25 @@
         _ (hold! (repository-root) source-root)
         archive-ms (elapsed-ms began)]
     (try
-      (let [;; `--at REV` only runs tests on REV's archive: nothing to adopt.
-            rehearsal (when-not at
-                        (connected! (assoc request :seon.source/directory source-root
-                                           :seon.boot/cluster-name (get request :seon.boot/cluster-name "default"))))
+      (let [tests (get request :seon.operator/tests [])
+            ;; The throwaway JVM boots from its own archive while the running
+            ;; JVM rehearses adoption; both are awaited, and either refuses.
+            run (when (seq tests)
+                  (future (candidate-tests! root sha tests (true? (:seon.operator/include-long? request)))))
+            ;; `--at REV` only runs tests on REV's archive: nothing to adopt.
+            rehearsal (try (when-not at
+                             (connected! (assoc request :seon.source/directory source-root
+                                                :seon.boot/cluster-name (get request :seon.boot/cluster-name "default"))))
+                           (catch Exception cause (some-> run awaited!) (throw cause)))
             rehearsal-ms (elapsed-ms began)
-            tests (get request :seon.operator/tests [])
-            run (when (and (seq tests) (not (:seon.error/message rehearsal)))
-                  (candidate-tests! root sha tests (true? (:seon.operator/include-long? request))))
+            run (some-> run awaited!)
             phases {:seon.operator/archive-ms archive-ms
                     :seon.operator/rehearsal-ms (- rehearsal-ms archive-ms)
                     :seon.operator/total-ms (elapsed-ms began)}]
         (cond
+          (:seon.error/message rehearsal)
+          (assoc rehearsal :seon.source/git-sha sha :seon.operator/phases phases
+                 :seon.operator/test-run run)
           (or (nil? run) (:seon.error/message run))
           (assoc (or run rehearsal) :seon.source/git-sha sha :seon.operator/phases phases)
           (:seon.operator/tests-passed? run)
