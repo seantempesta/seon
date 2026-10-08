@@ -34,8 +34,9 @@
   [entities]
   (into {} (keep #(when-let [d (:seon.program/definition-digest %)] [(program/row-identity %) d])) entities))
 
-(defn- submit!
-  "One ordinary agent turn of `text` on `request`'s agent, observed closed."
+(defn submit!
+  "One ordinary agent turn of `text` on `request`'s agent, observed closed; its turn id."
+  {:malli/schema [:=> [:cat :map :string] [:maybe :string]]}
   [request text]
   (let [connection (get-in request [:seon.turn.loop/cluster :seon.db/connection])
         ;; The agent's work is its own branch's: under the member's custody the
@@ -50,9 +51,10 @@
                                                                     [:seon.turn/id run-id])))))
     run-id))
 
-(defn- with-agent!
+(defn with-agent!
   "Create `agent-id` in `fixture-ns` on `connection`'s branch, arm it, call
-  `body` with its request, then disarm it and close its channels."
+  `body` with its request, then disarm it and close its channels; nil."
+  {:malli/schema [:=> [:cat :seon.db/connection :string :string :symbol [:fn clojure.core/ifn?]] :nil]}
   [connection cluster-name agent-id fixture-ns body]
   (let [environment (support/environment cluster-name connection)
         ctx (support/fork-cluster-ctx connection cluster-name)
@@ -75,6 +77,7 @@
         (agent/arm! request)
         (try
           (body request)
+          nil
           (finally
             (agent/disarm! request)
             (doseq [channel [faults (:seon.cluster.wake/channel handle)

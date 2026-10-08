@@ -5,6 +5,12 @@
 #   bin/lane add     LANE PATH...        claim more
 #   bin/lane commit  LANE -m MSG [--test NS]... [--include-long] PATH...
 #                                        lint and check the candidate, then commit exactly PATH...
+#   bin/lane commit  LANE -m MSG --branch-evidence AGENT [--accept-red-before TEST]... PATH...
+#                                        lint, and prove PATH... by AGENT's branch evidence on the
+#                                        live root instead of a throwaway JVM (falls back to the check)
+#   bin/lane evidence AGENT PATH... [-- TEST...]
+#                                        ask the branch-evidence question alone (exit 0 proven, 2 not, 3 unavailable);
+#                                        tests after -- are accepted as red before the change
 #   bin/lane release LANE [PATH...]      drop the named claims, or all of the lane's when none is named
 #   bin/lane status [LANE]               one line per lane with its path count; a lane's paths one per line
 #   bin/lane commit takes each test as its own `--test NS` (never `--test A B C`)
@@ -24,6 +30,17 @@
 #
 # A released path remembers its last holder (tmp/orchestrator/lanes/released.holders):
 # only that lane may re-claim it while the file is still dirty and unclaimed.
+#
+# --branch-evidence AGENT asks the live root one question over its prepl
+# (`seon.cluster.branch-evidence/branch-evidence`): does AGENT's branch declare
+# exactly the committed files' definitions, and is every test reaching what it
+# changed from the cluster head green on its head? Proven, the commit skips
+# `bin/seon check` and carries the branch commit, the verified tests and their
+# run ids as trailers. Only src/ and test/ .clj files qualify; any other path,
+# a changed host-bound declaration, an unanalyzable file, no live root or a
+# root that has not loaded the gate takes the throwaway check, saying why. A
+# file differing from the branch, an unproven or unreached change, or a test
+# red before the change that root did not accept (--accept-red-before) refuses.
 #
 # Refusals (exit 2) name the rule they enforce:
 #   - a path claimed by another lane, or already dirty in the tree (someone else's work in progress);
@@ -228,14 +245,87 @@ staged_only() {
   done < <(git diff --cached --name-only)
 }
 
+# Only source and test Clojure files are judged by branch evidence.
+evidence_paths() {
+  local path
+  for path in "$@"; do
+    case "$path" in
+      src/*.clj|test/*.clj) ;;
+      *) echo "== $path is not a src/ or test/ .clj file: throwaway check required"; return 1 ;;
+    esac
+  done
+}
+
+# Ask the live root whether AGENT's branch proves PATHS (args: AGENT TRAILER PATH... -- ACCEPTED...).
+# Exit 0 proven (trailer lines written), 2 refused, 3 unavailable (take the throwaway check).
+branch_evidence() {
+  local agent="$1" trailer="$2"; shift 2
+  local paths=() accepted=()
+  while [[ $# -gt 0 && "$1" != -- ]]; do paths+=("$1"); shift; done
+  [[ $# -gt 0 ]] && shift
+  accepted=("$@")
+  evidence_paths "${paths[@]}" || return 3
+  echo "== branch evidence: agent $agent, ${#paths[@]} path(s), over the live root's prepl"
+  bb -cp "$root/script:$root/src" -e '
+(require (quote [seon.operator :as operator]))
+(let [[root agent trailer cluster paths accepted] *command-line-args*
+      paths (vec (remove empty? (.split paths "\n")))
+      accepted (into #{} (comp (remove empty?) (map symbol)) (.split accepted "\n"))
+      form (list (quote let)
+                 [(quote main) (list (quote seon.db/db) (list (quote seon.cluster.boot/connection) cluster))
+                  (quote branch) (list (quote seon.db/q) (quote (quote [:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]]))
+                                       (quote main) agent)
+                  (quote gate) (quote (try (requiring-resolve (quote seon.cluster.branch-evidence/branch-evidence)) (catch Exception _ nil)))]
+                 (list (quote cond)
+                       (quote (nil? branch)) {:lane/unavailable (str "agent " agent " holds no branch on cluster " cluster)}
+                       (quote (nil? gate)) {:lane/unavailable "the live root has not loaded seon.cluster.branch-evidence (it runs an older commit)"}
+                       :else (list (quote gate)
+                                   (list (quote get-in) (quote @seon.operator.runtime/running-instances) [cluster :seon.store/store])
+                                   {:seon.store/branch (quote branch) :seon.source/head (list (quote seon.cluster.branch/cluster-branch) cluster) :seon.fn/root root
+                                    :seon.source/paths paths :seon.source/accepted-red-before accepted})))
+      began (System/nanoTime)
+      live (try (operator/live-root-value! root (pr-str form) {})
+                (catch Exception e {:seon.operator/live-process? true
+                                    :seon.operator/value {:lane/unavailable (str "the prepl call failed: " (ex-message e))}}))
+      answer (:seon.operator/value live)
+      ms (long (/ (- (System/nanoTime) began) 1e6))
+      show (fn [k] (when-let [v (seq (get answer k))] (println " " (name k) (pr-str (vec v)))))]
+  (cond
+    (not (:seon.operator/live-process? live)) (do (println "== no live root answers") (System/exit 3))
+    (:lane/unavailable answer) (do (println "==" (:lane/unavailable answer)) (System/exit 3))
+    (:seon.error/at answer) (do (println "== branch evidence refused:" (:seon.error/message answer)) (System/exit 3))
+    :else
+    (do (println (str "== branch evidence answered in " ms " ms: proven " (:seon.source/proven? answer)
+                      ", " (count (:seon.source/changed answer)) " changed declaration(s), "
+                      (count (:seon.source/verified answer)) " verified test(s)"))
+        (run! show [:seon.source/changed :seon.source/differing :seon.source/unanalyzable :seon.source/host-bound
+                    :seon.source/unproven :seon.source/unreached :seon.source/red-before :seon.source/verified])
+        (cond
+          (or (seq (:seon.source/host-bound answer)) (seq (:seon.source/unanalyzable answer)))
+          (do (println "== a changed declaration is host-bound or a file does not analyze: throwaway check required") (System/exit 3))
+          (:seon.source/proven? answer)
+          (do (spit trailer (str "Branch-evidence: agent " agent " commit " (:seon.source/branch-commit-id answer)
+                                 " over head " (:seon.source/head-commit-id answer) "\n"
+                                 (when (seq (:seon.source/verified answer))
+                                   (str "Branch-evidence-tests: " (clojure.string/join " " (:seon.source/verified answer)) "\n"))
+                                 (when (seq (:seon.source/run-ids answer))
+                                   (str "Branch-evidence-runs: " (clojure.string/join " " (:seon.source/run-ids answer)) "\n"))
+                                 (when (seq (:seon.source/red-before answer))
+                                   (str "Branch-evidence-red-before-accepted: " (clojure.string/join " " (:seon.source/red-before answer)) "\n"))))
+              (System/exit 0))
+          :else (System/exit 2)))))' "$root" "$agent" "$trailer" "${SEON_CLUSTER:-default}" "$(printf '%s\n' "${paths[@]}")" "$(printf '%s\n' ${accepted[@]+"${accepted[@]}"})"
+}
+
 commit() {
   local lane="$1"; shift
   valid_lane "$lane"
   [[ -e "$claims/$lane.paths" ]] || refuse "lane $lane has no claims; run bin/lane claim first"
-  local message="" tests=() paths=() path
+  local message="" tests=() paths=() path evidence_agent="" accepted=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -m) message="$2"; shift 2 ;;
+      --branch-evidence) [[ $# -ge 2 ]] || refuse "--branch-evidence needs the agent whose branch proves the paths"; evidence_agent="$2"; shift 2 ;;
+      --accept-red-before) [[ $# -ge 2 ]] || refuse "--accept-red-before needs a test symbol"; accepted+=("$2"); shift 2 ;;
       --test) [[ $# -ge 2 ]] || refuse "--test needs a test name"; tests+=("--test" "$2"); shift 2 ;;
       --include-long) tests+=("--include-long"); shift ;;
       *) paths+=("${1#./}"); shift ;;
@@ -285,7 +375,19 @@ commit() {
     set +m
   fi
 
-  if documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
+  local proven_by_branch=""
+  if [[ -n "$evidence_agent" ]]; then
+    local evidence_status=0
+    branch_evidence "$evidence_agent" "$scratch/trailer" "${paths[@]}" -- ${accepted[@]+"${accepted[@]}"} || evidence_status=$?
+    case "$evidence_status" in
+      0) proven_by_branch=1 ;;
+      2) refuse "branch evidence does not prove ${paths[*]}; nothing committed" ;;
+      *) echo "== branch evidence unavailable (above): falling back to the throwaway check" ;;
+    esac
+  fi
+  if [[ -n "$proven_by_branch" ]]; then
+    echo "== proven by agent $evidence_agent's branch evidence; bin/seon check not run"
+  elif documentation_only "${paths[@]}" && [[ ${#tests[@]} -eq 0 ]]; then
     echo "== documentation only: no program input; bin/seon check not run"
   else
     echo "== bin/seon check ${paths[*]} ${tests[*]+"${tests[*]}"}"
@@ -303,6 +405,7 @@ commit() {
   echo "== proved in $((SECONDS - began)) s; committing under .git/lane-commit.lock"
 
   printf '%s\n' "$message" > "$scratch/message"
+  if [[ -n "$proven_by_branch" ]]; then printf '\n' >> "$scratch/message"; cat "$scratch/trailer" >> "$scratch/message"; fi
   local git_dir
   git_dir="$(git rev-parse --absolute-git-dir)"
   # The lock descriptor is inherited (close-on-exec cleared), so the commit
@@ -408,8 +511,14 @@ command="${1:-status}"; shift || true
 case "$command" in
   claim|add) claim "$@" ;;
   commit) commit "$@" ;;
+  evidence)
+    [[ $# -ge 2 ]] || refuse "evidence needs AGENT and at least one path"
+    evidence_agent="$1"; shift
+    evidence_trailer="$(mktemp "${TMPDIR:-/tmp}/lane-evidence.XXXXXX")"
+    trap 'rm -f -- "$evidence_trailer"' EXIT
+    branch_evidence "$evidence_agent" "$evidence_trailer" "$@" ;;
   _commit-locked) commit_locked "$@" ;;
   release) release "$@" ;;
   status) status "$@" ;;
-  *) sed -n '2,29p' "$0"; exit 1 ;;
+  *) sed -n '2,36p' "$0"; exit 1 ;;
 esac
