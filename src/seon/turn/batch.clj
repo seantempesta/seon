@@ -659,6 +659,53 @@
     (and (nil? shown) (not (contains? entry :seon.batch/error)) (nil? facts-error))
     (assoc :seon.eval/shown "nil")))
 
+(defn- defined-symbols
+  "The symbols one change defines (functions and tests) or removes."
+  {:malli/schema [:=> [:cat :seon.batch/change] [:set :symbol]]}
+  [{entities :seon.batch/entities removals :seon.batch/removals}]
+  (into (set removals) (keep #(or (:seon.fn/sym %) (:seon.test/sym %))) entities))
+
+(defn- prior-uncontracted
+  "The symbols the agent's earlier evaluations recorded as defined without a
+  contract whose function row still has none on `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string] [:set :qualified-symbol]]}
+  [database agent-id]
+  (set (db/q '[:find [?s ...] :in $ ?agent
+               :where [?e :seon.eval/uncontracted ?s]
+               [?e :seon.cluster.eval/run ?t]
+               [?t :seon.turn/agent ?agent]
+               [?f :seon.fn/sym ?s]
+               [(missing? $ ?f :seon.fn/spec)]]
+             database [:seon.agent/id agent-id])))
+
+(defn uncontracted-measures
+  "Per ordinal, for each entry whose change defines functions without
+  `:seon.fn/spec`: `:seon.eval/uncontracted` (those symbols) and
+  `:seon.eval/uncontracted-count`, the agent's uncontracted definitions on its
+  branch after that entry (earlier evaluations' still uncontracted, less what
+  the batch redefined or removed, plus this form's). One query, and only when
+  some entry defines one."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] [:maybe :string] [:sequential :map]]
+                  [:map-of :seon.cluster.eval/ordinal :map]]}
+  [database agent-id entries]
+  (let [own (fn [{change :seon.batch/change}]
+              (into #{} (comp (filter :seon.fn/sym) (remove :seon.fn/spec) (map :seon.fn/sym))
+                    (:seon.batch/entities change)))]
+    (if-not (and database agent-id (some (comp seq own) entries))
+      {}
+      (loop [[entry & more] entries
+             held (prior-uncontracted database agent-id)
+             measures {}]
+        (if-not entry
+          measures
+          (let [added (own entry)
+                held (into (reduce disj held (some-> entry :seon.batch/change defined-symbols)) added)]
+            (recur more held
+                   (cond-> measures
+                     (seq added) (assoc (:seon.batch/ordinal entry)
+                                        {:seon.eval/uncontracted added
+                                         :seon.eval/uncontracted-count (count held)})))))))))
+
 (defn- admitted-form
   "The form one entry read, where it ran."
   {:malli/schema [:=> [:cat :seon.batch/entry] :seon.turn.loop/admitted-form]}
@@ -668,31 +715,34 @@
 
 (defn- evaluation-record
   "One entry as the recording writer's terminal evaluation."
-  {:malli/schema [:=> [:cat :string :seon.batch/entry]
+  {:malli/schema [:=> [:cat :string :seon.batch/entry [:maybe :map]]
                   [:and :seon.cluster.eval/settle-request
                    [:map
                     [:seon.cluster.eval/at :seon.cluster.eval/at]
                     [:seon.cluster.eval/source :seon.cluster.eval/source]
                     [:seon.cluster.eval/ns :seon.cluster.eval/ns]
                     [:seon.cluster.eval/origin [:= :outside]]]]]}
-  [turn-id {ordinal :seon.batch/ordinal :as entry}]
+  [turn-id {ordinal :seon.batch/ordinal :as entry} measures]
   (merge {:seon.turn/id turn-id
           :seon.cluster.eval/ordinal ordinal
           :seon.cluster.eval/at (java.util.Date.)
           :seon.cluster.eval/origin :outside}
          (admitted-form entry)
-         (entry-evaluation entry)))
+         (entry-evaluation entry)
+         measures))
 
 (defn evaluated-sources
   "The batch's settled entries as held forms, each with the terminal facts its
   run recorded (`record-facts`): what the run's reply prints."
   {:malli/schema [:=> [:cat :seon.batch/batch] :seon.turn.loop/evaluated-sources]}
   [batch]
-  (mapv (fn [{ordinal :seon.batch/ordinal :as entry}]
-          {:seon.cluster.eval/ordinal ordinal
-           :seon.turn.loop/admitted-form (admitted-form entry)
-           :seon.sci.eval/evaluation (entry-evaluation entry)})
-        (:seon.batch/entries batch)))
+  (let [measures (uncontracted-measures (:seon.batch/basis batch) (get-in batch [:seon.batch/world :seon.agent/id])
+                                        (:seon.batch/entries batch))]
+    (mapv (fn [{ordinal :seon.batch/ordinal :as entry}]
+            {:seon.cluster.eval/ordinal ordinal
+             :seon.turn.loop/admitted-form (admitted-form entry)
+             :seon.sci.eval/evaluation (merge (entry-evaluation entry) (get measures ordinal))})
+          (:seon.batch/entries batch))))
 
 (defn record-facts
   "The run and its evaluations, through the recording writer."
@@ -710,7 +760,8 @@
          :seon.turn/reply-size (count (:seon.batch/text batch ""))
          :seon.turn/sources (mapv (fn [e] {:seon.cluster.eval/source (or (:seon.batch/source e) "")
                                        :seon.ns/name (or (:seon.batch/ns-before e) 'user)}) entries)
-         :seon.turn/evaluations (mapv #(evaluation-record turn-id %) entries)}]])))
+         :seon.turn/evaluations (let [measures (uncontracted-measures basis agent-id entries)]
+                                  (mapv #(evaluation-record turn-id % (get measures (:seon.batch/ordinal %))) entries))}]])))
 
 (defn revalidate
   "Each form's change re-derived as facts on `head`, in order, through the

@@ -94,9 +94,8 @@
                      [:seon.eval/unstored {:optional true} :seon.eval/unstored]
                      [:seon.eval/value-class {:optional true} :seon.eval/value-class]
                      [:seon.eval/full {:optional true} :seon.eval/full]
-                     [:seon.eval/unadmitted {:optional true} :seon.eval/unadmitted]
-                     [:seon.eval/replaced {:optional true} :seon.eval/replaced]
-                     [:seon.eval/ungeneratable {:optional true} :seon.eval/ungeneratable]
+                     [:seon.eval/uncontracted {:optional true} :seon.eval/uncontracted]
+                     [:seon.eval/uncontracted-count {:optional true} :seon.eval/uncontracted-count]
                      [:seon.eval/print-length
                       {:optional true}
                       :seon.eval/print-length]

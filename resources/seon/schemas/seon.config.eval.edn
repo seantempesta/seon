@@ -22,11 +22,12 @@
                       :seon.repl/finding :large-allocation
                       :seon.repl/fix "Past ten times what an ordinary evaluation allocates: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection); realize only what you need. (seon.profile/measure (fn [] ...)) breaks a suspect call down into allocation, GC, armed calls and reads."}
                      [:<= 400000000]]
-                    [:seon.eval/replaced
+                    [:seon.eval/uncontracted-count
                      {:optional true
-                      :seon.repl/finding :replaced-definition
-                      :seon.repl/fix "The program advanced over these definitions of yours: their changed program entities replaced them in your context. Evaluate yours again to redefine them."}
-                     [:set {:max 0} :qualified-symbol]]
+                      :seon.repl/finding :uncontracted
+                      :seon.repl/with [:seon.eval/uncontracted]
+                      :seon.repl/fix "Contract every function you define: put {:malli/schema [:=> [:cat :int] :int]} (your own input and output schemas) after the docstring or name, e.g. (defn inc2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2)). Uncontracted definitions are refused at merge."}
+                     [:<= 0]]
                     [:seon.repl/out-tokens
                      {:optional true
                       :seon.repl/finding :large-output
