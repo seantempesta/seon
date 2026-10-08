@@ -365,7 +365,11 @@
                 :seon.batch/removals (vec (keep (fn [[k [tag]]] (when (#{:removed :removed-ns :withdrawn} tag) k)) program))
                 :seon.batch/schema-keys schema-keys
                 :seon.batch/namespaces (into (apply disj namespaces removed-ns)
-                                             (keep #(some-> % :seon.fn/ns second)) entities)
+                                             ;; a definition names its namespace only to create it: a stored
+                                             ;; namespace row changes when its resolver state does
+                                             (comp (keep #(some-> % :seon.fn/ns second))
+                                                   (remove #(dbu/entid working [:seon.ns/name %])))
+                                             entities)
                 :seon.batch/private (vec (keep (fn [[_ [tag x]]] (when (#{:private :withdrawn} tag) x)) program))
                 :seon.batch/notes (into (schema-notes request working schema-keys)
                                         (keep (fn [w] (when-let [e (:seon.batch/arm-error w)]
@@ -478,7 +482,12 @@
   (or (when (sci/find-ns ctx n)
         (when-let [row (#'eval/namespace-context-row (db/carried-projection db) db n nil {}
                                                      (#'eval/reader-context ctx n) true)]
-          (entity-facts db row)))
+          (if-let [stored (dbu/entid db [:seon.ns/name n])]
+            ;; a stored namespace changes only the attributes the context row
+            ;; carries: its doc, file, tasks and admission source stay
+            (let [row (dissoc row :seon.schema.admission/source)]
+              (program/exact-replacement-tx (select-keys (db/pull db '[*] stored) (cons :db/id (keys row))) row))
+            (entity-facts db row))))
       []))
 
 (defn- removal-facts
