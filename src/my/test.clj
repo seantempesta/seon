@@ -3,25 +3,12 @@
   (:require [seon.db :as db]
             [seon.test]))
 
-(defn check
-  "Check the tests reaching my change as one request and return its answer.
-
-  My change is `:seon.test/changed` when I name it, otherwise every
-  declaration my program holds at another digest than the published program
-  my tests start from (`seon.test/changes`). My acquired context and
-  connection are supplied by call preparation. Each reaching test runs on its
-  own branch off my current commit, isolated from my writes and from the
-  other tests; its result is recorded on my connection. `:seon.test/passed?`
-  is true only when every reaching test has green evidence. Failure data
-  names the test and its claim.
-
-  Example:
-  (my.test/check {:seon.test/changed ['my.turn/complete]})"
-  {:seon/tasks #{'my.test/a-check-no-test-reaches-reads-as-a-failure}
-   :malli/schema [:=> [:cat :my.test/check-request]
+(defn- check-now
+  "Run the tests reaching `changed` (else my program's change) as one request; nothing reached names it unreached."
+  {:malli/schema [:=> [:cat :my.program/context :seon.db/connection [:or :nil :seon.test/changed]]
                   [:or :seon.test/run-result :my.test/unreached-result :seon.error/value]]}
-  [{context :my.program/context connection :seon.db/connection :as request}]
-  (let [changed (or (not-empty (:seon.test/changed request)) (seon.test/changes context connection))]
+  [context connection changed]
+  (let [changed (or (not-empty changed) (seon.test/changes context connection))]
     (if (:seon.error/at changed)
       changed
       (let [result (seon.test/run {:seon.test/execution context
@@ -35,6 +22,36 @@
                                    :seon.test/long-excluded]))
           (-> result (dissoc :seon.test/passed?) (assoc :seon.test/unreached (vec changed)))
           result)))))
+
+(defn check
+  "Check the tests reaching my change as one request and return its answer.
+
+  My change is `:seon.test/changed` when I name it, otherwise every
+  declaration my program holds at another digest than the published program
+  my tests start from (`seon.test/changes`). My acquired context and
+  connection are supplied by call preparation. Each reaching test runs on its
+  own branch off my current commit, isolated from my writes and from the
+  other tests; its result is recorded on my connection. `:seon.test/passed?`
+  is true only when every reaching test has green evidence. Failure data
+  names the test and its claim. A name an earlier form of this same request
+  defined has no facts until the request records: the answer lists it under
+  `:my.test/after-recording`, and the pass's test step runs its tests right
+  after recording, in the same reply.
+
+  Example:
+  (my.test/check {:seon.test/changed ['my.turn/complete]})"
+  {:seon/tasks #{'my.test/a-check-no-test-reaches-reads-as-a-failure
+                 'my.test/check-in-the-defining-pass-says-the-test-does-not-exist}
+   :malli/schema [:=> [:cat :my.test/check-request]
+                  [:or :seon.test/run-result :my.test/unreached-result :my.test/after-recording-result
+                   :seon.error/value]]}
+  [{context :my.program/context connection :seon.db/connection defined :seon.batch/defined :as request}]
+  (let [named (:seon.test/changed request)
+        after (filterv (or defined #{}) named)
+        now (vec (remove (set after) named))]
+    (cond (empty? after) (check-now context connection named)
+          (empty? now) {:my.test/after-recording after}
+          :else (assoc (check-now context connection now) :my.test/after-recording after))))
 
 (defn run-owned
   "Run one namespace's declared tests as one named request.

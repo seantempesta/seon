@@ -2,7 +2,13 @@
  [:map {:description "The agent protocol receives its acquired program context and writer through call preparation; the changed identities select the reaching tests."}
   [:seon.db/connection :seon.db/connection]
   [:my.program/context :my.program/context]
-  [:seon.test/changed {:optional true} :seon.test/changed]]
+  [:seon.test/changed {:optional true} :seon.test/changed]
+  [:seon.batch/defined {:optional true} :seon.batch/defined]]
+ :my.test/after-recording
+ [:vector {:description "The named identities an earlier form of the same request defined: their tests run right after the request's one recording transaction, in the pass's test step, and their results ride the same reply."} :qualified-symbol]
+ :my.test/after-recording-result
+ [:map {:description "The answer when every named identity was defined earlier in the same request: nothing ran yet; the test step runs them after recording."}
+  [:my.test/after-recording :my.test/after-recording]]
  :my.test/unreached-result
  [:map {:description "The answer when no test reaches the change: it names the unreached identities and carries no :seon.test/passed?, since nothing ran."}
   [:seon.test/unreached :seon.test/unreached]

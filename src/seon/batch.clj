@@ -60,7 +60,8 @@
    :seon.batch/sink :seon.batch/sink
    :seon.sci.eval/ctx :seon.sci.eval/ctx
    :seon.store/store :seon.store/store
-   :seon.agent/routing :seon.agent/routing})
+   :seon.agent/routing :seon.agent/routing
+   :seon.batch/defined :seon.batch/defined})
 
 (defn environment-members
   "The world members an execution's environment holds: its store and its
@@ -371,7 +372,8 @@
         n (:seon.batch/ordinal batch)
         t0 (System/nanoTime)
         base (merge {:seon.batch/ordinal n :seon.batch/form (:seon.batch/form r)} (source-of r (:seon.batch/line-cursor batch)))
-        world (form-world request n)
+        world (cond-> (form-world request n)
+                (seq (:seon.batch/defined batch)) (assoc :seon.batch/defined (:seon.batch/defined batch)))
         ;; the stages read the batch's working value from their request
         request (assoc request :seon.batch/world world :seon.batch/working (:seon.batch/working batch))
         writes (java.util.concurrent.ConcurrentLinkedQueue.)
@@ -510,6 +512,19 @@
     (last-entry batch #(assoc % :seon.batch/ns-before (:seon.batch/ns-before batch)
                               :seon.batch/ns-after ns-after))))
 
+(defn- defined-by
+  "`defined` with the definitions `change` adds, and without those it removes:
+  the request's own definitions so far, which a later form's call reads from
+  its world (`my.test/check` answers that their tests run after recording)."
+  {:malli/schema [:=> [:cat [:maybe :seon.batch/defined] :seon.batch/change] :seon.batch/defined]}
+  [defined {entities :seon.batch/entities removals :seon.batch/removals}]
+  (as-> (or defined #{}) d
+    (into d (keep #(or (:seon.fn/sym %) (:seon.test/sym %))) entities)
+    (reduce (fn [d s] (if (qualified-symbol? s)
+                        (disj d s)
+                        (into #{} (remove #(= (str s) (namespace %))) d)))
+            d removals)))
+
 (defn- apply-pending
   "The last derived change, applied: validated onto the working value through
   the apply stage when another form is about to read it (the working value
@@ -535,6 +550,7 @@
           (cond-> (not refusal)
             (-> (assoc :seon.batch/working after)
                 (update :seon.batch/program #((:seon.batch/fold request) request % change))
+                (update :seon.batch/defined defined-by change)
                 (mark #(assoc % :seon.batch/change change)))
             refusal (mark #(assoc % :seon.batch/facts-error refusal)))
           (clock :apply t0)))
