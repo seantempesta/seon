@@ -120,10 +120,12 @@
                  ;; a based span that is not a URI is still a path, unresolved
                  (catch URISyntaxException _ nil))
             {:seon.ref/path span}))
-      (let [form (try (edamame/parse-string span)
-                      ;; a span that does not read is prose
-                      (catch Exception _ nil))]
-        (when (or (qualified-symbol? form) (qualified-keyword? form))
+      (let [forms (try (edamame/parse-string-all span)
+                       ;; a span that does not read is prose
+                       (catch Exception _ nil))
+            [form & more] forms]
+        ;; only a span of exactly one qualified symbol or keyword is a name
+        (when (and (nil? more) (or (qualified-symbol? form) (qualified-keyword? form)))
           {:seon.ref/name form})))))
 
 (defn- candidate
