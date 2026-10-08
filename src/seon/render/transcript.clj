@@ -318,10 +318,7 @@
   ([db run-id agent-id limit]
    (history db run-id agent-id limit nil))
   ([db run-id agent-id limit selected-run-id]
-   (history db run-id agent-id limit selected-run-id nil))
-  ([db run-id agent-id limit selected-run-id selected-evaluations]
    (let [ids (cond
-               (some? selected-evaluations) {:eval (vec selected-evaluations)}
                selected-run-id (selected-run-entity-ids db selected-run-id limit)
                :else (candidate-entity-ids db agent-id limit))
         messages (pulled-many db message-selector (:message ids))
@@ -559,8 +556,7 @@
       (let [identity-attrs (identity-attributes db)]
         (mapv #(held-entry unit identity-attrs %) evaluated-sources))
       (let [entries (history db (:seon.turn/id unit) agent-id
-                             candidate-count (::selected-run-id unit)
-                             (:seon.context.contribution/evaluations unit))
+                             candidate-count (::selected-run-id unit))
             evaluations (into #{} (keep #(when (= :eval (::kind %)) (get-in % [::entity :db/id])))
                               entries)
             ;; a caller rendering many runs derives the agent's windows once

@@ -321,12 +321,11 @@
                                           [?evaluation :seon.cluster.eval/run ?turn]
                                           [?evaluation :seon.cluster.eval/ordinal 1 ?tx]]
                                         database run))
-           stored (db/pull database [{:seon.cluster.eval/read-evidence [:db/id]} :seon.cluster.eval/executed] evaluation)
+           stored (db/pull database [:seon.cluster.eval/executed] evaluation)
            settled (count (remove #(= "seon.profile.measurement" (namespace (:a %)))
                                   (filter #(= tx (:tx %)) (db/datoms (db/since database (dec tx)) :eavt))))]
        (is (false? (get result "isError")))
-       (is (empty? (:seon.cluster.eval/read-evidence stored)) "a form that binds a Var stores no read evidence")
-       (is (empty? (:seon.cluster.eval/executed stored)) "nor its executed set")
+       (is (empty? (:seon.cluster.eval/executed stored)) "a form stores no executed set")
        (is (< settled 110) "the settlement is proportional to one ns form and one defn")))))
 
 (deftest ^{:seon/tasks #{'seon.mcp/a-thrown-call-clips-its-request-text}}

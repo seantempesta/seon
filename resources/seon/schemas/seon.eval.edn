@@ -17,9 +17,6 @@
               {:optional true}
               [:or :seon.cluster.eval/ns
                [:map [:seon.ns/name :seon.ns/name]]]]
-             [:seon.cluster.eval/read-evidence
-              {:optional true}
-              [:vector :seon.db/read-evidence]]
              [:seon.cluster.eval/read-basis-transaction
               {:optional true}
               :seon.db/basis-t]

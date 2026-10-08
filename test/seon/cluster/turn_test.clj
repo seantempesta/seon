@@ -468,12 +468,6 @@
                         [?evaluation :seon.cluster.eval/read-basis-transaction ?basis ?settlement]
                         [?evaluation :seon.cluster.eval/at _ ?start]
                         [?evaluation :seon.eval/shown _ ?settlement]]
-                      database evaluation-id)
-                evidence
-                (db/q '[:find [(pull ?evidence [*]) ...]
-                        :in $ ?evaluation
-                        :where
-                        [?evaluation :seon.cluster.eval/read-evidence ?evidence]]
                       database evaluation-id)]
             (is (= 3 (count evaluations)))
             (is (str/includes? (:seon.eval/shown definition) "my.agents.agent-a/widgets"))
@@ -483,15 +477,6 @@
             (is (int? read-basis))
             (is (= start-tx read-basis))
             (is (not= settlement-tx read-basis))
-            (is (= #{settlement-tx}
-                   (set (db/q '[:find [?tx ...]
-                                :in $ ?evaluation
-                                :where [?evaluation :seon.cluster.eval/read-evidence _ ?tx]]
-                              database evaluation-id))))
-            (is (seq evidence))
-            (is (every? #(and (int? (:seon.db/source-argument-position %))
-                             (contains? % :datahike.read/dependency-plan)
-                             (map? (:datahike.read/revision %))) evidence))
             (is (int? (:seon.cluster.eval/read-basis-transaction definition))
                 "every evaluation records its database basis")
             (is (every? #(and (nil? (:seon.cluster.eval/error %))

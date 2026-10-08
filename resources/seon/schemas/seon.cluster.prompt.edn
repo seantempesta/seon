@@ -1,8 +1,0 @@
-#:seon.cluster.prompt{:rendered-context
-                      [:map
-                       [:seon.cluster.prompt/text
-                        :seon.cluster.prompt/text]
-                       [:seon.context/contributions
-                        :seon.context/contributions]
-                       [:seon.db/db :seon.db/database-value]],
-                      :text [:string {:min 1}]}

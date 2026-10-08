@@ -1,9 +1,8 @@
 #:seon.context.capture{:basis-t [:int {:min 0}],
                        :capture
                        [:map
-                        {:seon.db/attributes true,
-                         :seon.render/ai seon.context/capture-ai,
-                         :seon.render/html seon.context/capture-html :seon.program/partition :seon.data}
+                        {:seon.db/attributes true :seon.program/partition :seon.data
+                         :description "Retiring with no writer since CX-10: kept only so a store holding captures adopts; deleted after the reset."}
                         [:seon.context.capture/id
                          :seon.context.capture/id]
                         [:seon.context.capture/run

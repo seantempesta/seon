@@ -165,7 +165,6 @@
                                                 (evaluation/of-agent @connection "juniper")))
                            next-prompt (:seon.ai/prompt (second @requests))]
                        (is (= "115" (:seon.eval/shown entry)))
-                       (is (seq (:seon.cluster.eval/read-evidence entry)))
                        (is (and (string? next-prompt)
                                 (str/includes? next-prompt (repl/render-ai entry))))))
                    (is (nil? (async/poll! @faults)))

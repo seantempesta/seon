@@ -1,83 +1,4 @@
-#:seon.context{:capture-request
-               [:or
-                [:map
-                 [:seon.turn/id :seon.turn/id]
-                 [:seon.cluster.prompt/rendered-context
-                  :seon.cluster.prompt/rendered-context]
-                 ]
-                [:map
-                 [:seon.turn/id :seon.turn/id]
-                 [:seon.db/db :seon.db/database-value]
-                 [:seon.error/value :seon.error/value]
-                 ]],
-               :contribution
-               [:map
-                [:seon.render.block/name :seon.render.block/name]
-                [:seon.context.contribution/position
-                 :seon.context.contribution/position]
-                [:seon.context.contribution/text [:string {:min 1}]]
-                [:seon.context.contribution/hash
-                 :seon.context.contribution/hash]
-                [:seon.context.contribution/tokens
-                 :seon.context.contribution/tokens]
-                [:seon.context.contribution/evaluations
-                 {:optional true}
-                 :seon.context.contribution/evaluations]
-                [:seon.error/value
-                 {:optional true}
-                 :seon.error/value]],
-               :contributions [:vector :seon.context/contribution],
-               :selection [:vector :seon.context.contribution/contribution],
-               :append-request
-               [:map
-                [:seon.agent/id :seon.agent/id]
-                [:seon.turn/id :seon.turn/id]
-                [:seon.context.contribution/id :seon.context.contribution/id]],
-               :compact-request
-               [:map
-                [:seon.agent/id :seon.agent/id]
-                [:seon.turn/id :seon.turn/id]
-                [:seon.context.contribution/id :seon.context.contribution/id]
-                [:seon.context.contribution/evaluations
-                 :seon.context.contribution/evaluations]],
-               :remove-request
-               [:map
-                [:seon.agent/id :seon.agent/id]
-                [:seon.context.contribution/id :seon.context.contribution/id]],
-               :comparison-request
-               [:map
-                [:seon.agent/id :seon.agent/id]
-                [:seon.turn/id :seon.turn/id]
-                [:seon.turn.loop/evaluated-sources {:optional true}
-                 :seon.turn.loop/evaluated-sources]
-                [:seon.context.contribution/id :seon.context.contribution/id]],
-               :comparison
-               [:or
-                [:map
-                 [:seon.context.comparison/status [:= :pending]]]
-                [:map
-                 [:seon.context.comparison/status [:= :different-source]]]
-                [:map
-                 [:seon.context.comparison/status [:= :ready]]
-                 [:seon.context.comparison/baseline-evaluations [:vector :seon.db/ref]]
-                 [:seon.turn.loop/evaluated-sources :seon.turn.loop/evaluated-sources]]
-                [:map
-                 [:seon.context.comparison/status [:= :ready]]
-                 [:seon.context.comparison/baseline-evaluations
-                  [:vector :seon.db/ref]]
-                 [:seon.context.comparison/refreshed-evaluations
-                  [:vector :seon.db/ref]]]],
-               :selection-refused
-               [:enum :seon.context/no-such-agent :seon.context/no-such-run
-                :seon.context/foreign-run :seon.context/run-open
-                :seon.context/no-evaluations :seon.context/unfinished-evaluation
-                :seon.context/contribution-conflict
-                :seon.context/no-such-contribution
-                :seon.context/foreign-contribution
-                :seon.context/stale-contribution
-                :seon.context/contribution-run-ambiguous],
-               :selection-agent-id :seon.agent/id
-               :task
+#:seon.context{:task
                [:map {:description "The task an agent holds as its current declaration reads at the task home."}
                 [:seon.task/id :seon.task/id]
                 [:seon.task/sym :seon.task/sym]
@@ -126,9 +47,4 @@
                 [:seon.context/proofs {:optional true} :seon.context/proofs]
                 [:seon.context/must-reads {:optional true} :seon.context/must-reads]
                 [:seon.context/unread {:optional true} :seon.context/unread]
-                [:seon.context/turns :seon.context/turns]],
-               :selection-refused-error
-               [:and :seon.error/base
-                [:map
-                 [:seon.context/selection-agent-id :seon.context/selection-agent-id]
-                 [:seon.context/selection-refused :seon.context/selection-refused]]]}
+                [:seon.context/turns :seon.context/turns]]}

@@ -6,7 +6,6 @@
             [malli.instrument :as mi]
             [seon.config :as config]
             [my.program :as program]
-            [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
@@ -344,9 +343,7 @@
             :program-read (#'program/read-result
                            {:seon.db/db database :seon.program/subject 'sample/missing}
                            'my.program/callers
-                           #(throw (ex-info "The read failed." carrier)))
-            :context-capture (test-support/refusal-data
-                              #(context/capture-tx {:seon.turn/id "refs" :seon.db/db database}))}]
+                           #(throw (ex-info "The read failed." carrier)))}]
        (is (nil? (printed-bytes worlds 16384)) "a copied world is over the bound")
        (doseq [[producer error] produced]
          (testing (name producer)

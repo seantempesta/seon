@@ -114,19 +114,9 @@
       (:seon.cluster.eval/output evaluation)
       (assoc :seon.cluster.eval/output
              (:seon.cluster.eval/output evaluation))
-      (seq (:seon.cluster.eval/read-evidence evaluation))
-      (assoc :seon.cluster.eval/read-evidence
-             (:seon.cluster.eval/read-evidence evaluation))
       (:seon.cluster.eval/read-basis-transaction evaluation)
       (assoc :seon.cluster.eval/read-basis-transaction
              (:seon.cluster.eval/read-basis-transaction evaluation))
-      ;; The durable executed set has one consumer, `code-current?` in the
-      ;; pre-turn refresh, which judges only evaluations holding read evidence
-      ;; (`read-only-evaluation?`); the in-memory set still feeds profile
-      ;; measurement (`settle-batch!`), so it is stored only beside evidence.
-      (and (seq (:seon.cluster.eval/executed evaluation))
-           (seq (:seon.cluster.eval/read-evidence evaluation)))
-      (assoc :seon.cluster.eval/executed (:seon.cluster.eval/executed evaluation))
       (:seon.cluster.eval/code-evidence evaluation)
       (assoc :seon.cluster.eval/code-evidence (:seon.cluster.eval/code-evidence evaluation))
       (:seon.cluster.eval/call-count evaluation)
@@ -1143,25 +1133,6 @@
                  [[:db/add (:db/id receipt) attribute value]]))))
    receipt-terminal-attributes))
 
-(defn- receipt-read-evidence-tx
-  "Component read-evidence rows owned by one terminal receipt."
-  [receipt request]
-  (when-let [evidence (seq (:seon.cluster.eval/read-evidence request))]
-    ;; `seon.db` wraps every `:db.fn/call` with
-    ;; `schema.datahike/encode-call-output-in`, carrying the caller's handed
-    ;; projection into Datahike's writer. Return ordinary transaction data and
-    ;; let that one codec encode the function result. Rebuilding a projection
-    ;; here paid 360--550 ms on every ordinary form settlement and duplicated
-    ;; the outer authority.
-    [{:db/id (:db/id receipt)
-      :seon.cluster.eval/read-evidence
-      (mapv (fn [ordinal entry]
-              (assoc entry :db/id
-                     (str "seon.cluster.eval/read-evidence/"
-                          (:seon.cluster.eval/id receipt) "/" ordinal)))
-            (range)
-            evidence)}]))
-
 (defn- recorded-evaluation
   "The immutable evaluation fields shared by saving and duplicate comparison.
 
@@ -1183,16 +1154,12 @@
      [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
      [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]]]}
   [request]
-  (cond-> (select-keys request
-                       (into [:seon.cluster.eval/id :seon.cluster.eval/ordinal
-                              :seon.cluster.eval/at :seon.cluster.eval/source
-                              :seon.cluster.eval/origin
-                              :seon.cluster.eval/comment]
-                             receipt-terminal-attributes))
-    (seq (:seon.cluster.eval/read-evidence request))
-    (assoc :seon.cluster.eval/read-evidence
-           (set (map #(dissoc % :db/id)
-                     (:seon.cluster.eval/read-evidence request))))))
+  (select-keys request
+               (into [:seon.cluster.eval/id :seon.cluster.eval/ordinal
+                      :seon.cluster.eval/at :seon.cluster.eval/source
+                      :seon.cluster.eval/origin
+                      :seon.cluster.eval/comment]
+                     receipt-terminal-attributes)))
 
 (defn- recorded-run
   "The run fields a duplicate recording compares.
@@ -1209,8 +1176,7 @@
         evaluations
         (db/q '[:find [(pull ?evaluation
                             [* {:seon.eval/renderer-fn [:seon.fn/sym]}
-                             {:seon.cluster.eval/ns [:seon.ns/name]}
-                             {:seon.cluster.eval/read-evidence [*]}]) ...]
+                             {:seon.cluster.eval/ns [:seon.ns/name]}]) ...]
                 :in $ ?run
                 :where [?evaluation :seon.cluster.eval/run ?run]]
               database (:db/id run))]
@@ -1234,7 +1200,7 @@
   "Save completed evaluations atomically without acquiring execution custody.
 
   An identical cached identity is a no-op. Different saved content under that
-  identity refuses; the same transaction can append its context contribution."
+  identity refuses."
   {:malli/schema
    [:=> [:cat :seon.db/database-value ::record-evaluated-call-request]
     :seon.store/transaction-data]}
@@ -1294,9 +1260,7 @@
              (mapcat
               (fn [evaluation]
                 (let [receipt (receipt-row run-eid evaluation)]
-                  (into [receipt] cat
-                        [(receipt-terminal-assertions receipt evaluation)
-                         (receipt-read-evidence-tx receipt evaluation)])))
+                  (into [receipt] (receipt-terminal-assertions receipt evaluation))))
               prepared-evaluations)]))))
 
 (defn record-evaluated-tx
@@ -1304,8 +1268,8 @@
 
   This does not evaluate, install defs, deliver effects, or claim an agent.
   Publish the returned staged blobs around the transaction that saves these
-  facts and adds the context contribution. The captured database supplies the
-  opening commit even when the connection has advanced before Add to context."
+  facts. The captured database supplies the opening commit even when the
+  connection has advanced since."
   {:malli/schema
    [:=> [:cat ::record-evaluated-request]
     [:map
@@ -1380,8 +1344,6 @@
            :seon.cluster.eval/interrupted-at]
           [:seon.cluster.eval/output {:optional true}
            :seon.cluster.eval/output]
-          [:seon.cluster.eval/read-evidence {:optional true}
-           :seon.cluster.eval/read-evidence]
           [:seon.cluster.eval/read-basis-transaction {:optional true}
            :seon.cluster.eval/read-basis-transaction]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]
@@ -1409,8 +1371,7 @@
       (not (terminal? request))
       (refuse! `receipt-settle-call ::no-terminal-fact request))
     (into [] cat
-          [(receipt-read-evidence-tx receipt request)
-           (receipt-reference-assertions receipt request)
+          [(receipt-reference-assertions receipt request)
            (receipt-terminal-assertions receipt request)])))
 
 (defn recover-tx
@@ -2403,11 +2364,7 @@
          ;; belongs in the declared write set — and the class-killer
          ;; that asserts this set is installable is exactly what catches
          ;; a new entity family the boot path never learned about
-         :seon.ai/attempt
-         ;; the pre-provider context capture and its contribution rows
-         ;; are turn-owned commits too (ruling 4, 2026-07-28)
-         :seon.context.capture/capture
-         :seon.context.contribution/contribution]))
+         :seon.ai/attempt]))
 
 (defn disposition
   "The disposition an admitted eval value carries, or nil.
@@ -4240,7 +4197,7 @@
         bound (entry-bindings batch)
         uncontracted (turn.batch/uncontracted-measures basis agent-id (:seon.batch/entries batch))]
     {:seon.turn.loop/evaluated-sources
-     (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before facts-error change] :as entry}]
+     (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before reads facts-error change] :as entry}]
              (let [row (get rows (- ordinal first-ordinal))
                    evaluation (cond-> (merge (select-keys row [:seon.eval/origin])
                                              evaluation shown-map
@@ -4249,6 +4206,9 @@
                                              (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})
+                                ;; in memory only: a page's source preview caches by these reads
+                                (empty? (get bound ordinal))
+                                (assoc :seon.cluster.eval/read-evidence (db/read-evidence reads))
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (get bound ordinal)) (assoc :seon.sci.eval/bindings (get bound ordinal))
                                 ;; only a form that declares has something to admit: a Var bound,

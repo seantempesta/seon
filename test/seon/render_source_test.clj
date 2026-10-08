@@ -328,7 +328,6 @@
                "stored transcript source is never submitted again")
            (is (nil? (:seon.turn/id retained))
                "a run-valued input does not prove what evaluations a renderer displayed")
-           (is (nil? (:seon.context.contribution/evaluations retained)))
            (is (nil? (:seon.render.call/source-run-id retained)))
            (is (= (db/q '[:find (count ?evaluation) .
                           :where [?evaluation :seon.cluster.eval/id]] database)
