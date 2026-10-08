@@ -133,3 +133,7 @@ of two each).
 - **CC-0** (`9df647b67`): a small commit on a fresh production-config store costs p50 13.4 ms, 2-6 files, ~10 KB, with a 3-4 KB
   head. Default's head is ~88 KB with 30-41 node files per commit, so commit cost grows with the store (CC-3/CC-4 target
   it). **CC-1** partial (`745f32362`): JVM requests now count their commit; counting by commit ids is the follow-up.
+- **H3 fixed** (`4c7919e64`): a later-request redefinition of a contracted defn (as a deftest, or with a new arity) was refused
+  because `derive-form` read the shared Var outside the agent's SCI context, so it saw the base's binding. This is a
+  class introduced by SCI-1's per-context Vars; lane ctx-audit is sweeping every JVM-side SCI Var read and write. `:chat` is
+  the shipped default (`937296267`).
