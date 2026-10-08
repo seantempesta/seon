@@ -44,7 +44,7 @@
  #:seon.task{:name "a-reconnect-refuses-a-pass-derived-before-it-connected-is-red"
   :kind :function
   :intent "seon.render.web-test/a-reconnect-refuses-a-pass-derived-before-it-connected (web_test.clj:1538) is red on HEAD with no task. Correct: diagnose by the commit that changed its behavior and fix the producer or retire the assumption. Done when green."
-  :must-read #{seon.render.web/reconnect}
+  :must-read #{seon.render.web/connected-value}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
  #:seon.task{:name "a-route-throw-no-longer-answers-a-bounded-500"
   :kind :function
@@ -54,5 +54,5 @@
  #:seon.task{:name "unrelated-transaction-no-longer-reuses-the-debug-observation"
   :kind :function
   :intent "seon.render.web-test/unrelated-transaction-reuses-debug-observation-and-render-call (web_test.clj:1245) is red on HEAD with no task: an unrelated transaction should reuse the debug observation and render call (cost follows changed inputs) and does not. Correct: diagnose which read now invalidates the cache and fix the producer. Done when green. Note: reconnect-is-repaint-wire-test, also red, measured 10.1 s against a 5 s bound and is tracked by reconnect-wire-test-walks-the-whole-window."
-  :must-read #{seon.render.web/debug-view}
+  :must-read #{seon.render.web/debug-query}
   :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]
