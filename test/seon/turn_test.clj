@@ -1954,3 +1954,12 @@
      (let [[counted made] (counted-request running agent-id connection "sci"
                                            "(in-ns 'cc.one) (defn twice [x] (* 2 x))")]
        (is (= made counted) "a defn's reply counts the commits its branch advanced")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-commented-form-reply-is-answered-without-naming-its-forms}}
+  a-reply-of-commented-forms-names-them
+  (let [r (turn/planned-sources ";; (my.program/source 'seon.db/q)\n;; (+ 1 2)" 'user 100000)]
+    (is (= true (:seon.cluster.reply/no-forms r)))
+    (is (= ["(my.program/source 'seon.db/q)" "(+ 1 2)"] (:seon.cluster.reply/commented-forms r))))
+  (let [r (turn/planned-sources ";; Look at the task first (see below)." 'user 100000)]
+    (is (= true (:seon.cluster.reply/no-forms r)))
+    (is (not (contains? r :seon.cluster.reply/commented-forms)) "prose is not a form")))

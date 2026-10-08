@@ -2301,6 +2301,21 @@
             [line (keyword (name k)) v]))
         repairs))
 
+(defn- commented-forms
+  "The forms that start a line of `text`'s `;` comments once their leading `;`s are removed, in text order.
+
+  A reply that evaluated no form but carries these wrote its code as comments."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [text]
+  (let [uncommented (->> (str/split-lines text)
+                         (keep (fn [line]
+                                 (let [l (str/trim line)]
+                                   (when (str/starts-with? l ";")
+                                     (str/replace-first l #"^;+\s?" "")))))
+                         (str/join "\n"))]
+    (into [] (comp (map :seon.batch/source) (filter #(and (str/starts-with? % "(") (str/includes? (str "\n" uncommented) (str "\n" %)))))
+          (:seon.batch/segments (forgive/segments uncommented :code)))))
+
 (defn- segmented-sources
   "`text`'s forms as a run's ordered sources, found structurally in `mode`
   (`seon.sci.forgive/segments`).
@@ -2313,7 +2328,8 @@
                        :seon.config.eval.result/max-source :string]
                   [:or :seon.cluster.reply/sources :seon.cluster.reply/no-forms-error]]}
   [text namespace-name mode max-source no-form-message]
-  (let [segments (if (> (count text) max-source)
+  (let [commented (when (and (= :reply mode) (<= (count text) max-source)) (commented-forms text))
+        segments (if (> (count text) max-source)
                    [{:seon.batch/source text}]
                    (:seon.batch/segments (forgive/segments text mode)))
         sources (mapv (fn [{source :seon.batch/source c :seon.batch/comment repairs :seon.batch/repairs}]
@@ -2323,10 +2339,14 @@
                       segments)]
     (if (seq sources)
       sources
-      (assoc {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
+      (assoc (cond-> {:seon.cluster.reply/no-forms true :seon.cluster.reply/text text
                   :seon.error/at (Date.) :seon.error/layer :seon.cluster.reply/source
-                  :seon.error/operation `segmented-sources :seon.error/message no-form-message
-                  :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources} :seon.error/type :seon.cluster.reply/no-forms-error))))
+                  :seon.error/operation `segmented-sources
+                  :seon.error/message (if (seq commented)
+                                        (str "Your reply had no form: its code is inside ; comments, so nothing ran. Send it without the leading ;, starting with " (first commented))
+                                        no-form-message)
+                  :seon.error/data {:seon.cluster.reply/text text} :seon.error/expected :seon.cluster.reply/sources}
+                  (seq commented) (assoc :seon.cluster.reply/commented-forms commented)) :seon.error/type :seon.cluster.reply/no-forms-error))))
 
 (defn planned-sources
   "The ordered forms one ordinary source run executes from a model reply.

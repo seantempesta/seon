@@ -35,7 +35,7 @@
    :seon.render/html 'seon.bootstrap/render-help-html
    :seon.help/lines
    ["You are an agent at a REPL on your own branch: an SCI fork of the cluster's program. Only what root merges reaches the cluster."
-    "Your task and its proofs are in your block: (seon.context/current-state). Send forms, and write every sentence as a ;; comment."
+    "Your task and its proofs are in your block: (seon.context/current-state). Send forms; prose goes in ;; comments, code is never commented."
     "Change a function in the namespace that owns it, the one your task's references name: (in-ns 'the.task.ns) then (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). Every function carries a contract."
     "A test proves a task by naming it in the deftest's :seon/tasks metadata, an ns/name symbol: (deftest ^{:seon/tasks #{'comp.text/slug-is-lowercase}} slug-lowercases (is (= \"a-b\" (comp.text/slug \"A B\"))))."
     "Register a schema with (seon.schema/register! :comp.order/qty [:int {:min 1}])."
