@@ -147,4 +147,8 @@
              :kind :function
              :intent "Since `f5e4ec35d` (F11, an unchanged red answered from its record) a task proof that reaches the agent's definitions only through evaluated code, as every `seon.competency-test` proof does through `seon.test-support/agent-value`, keeps its first red: its reach digest does not change when the agent defines `comp.geo/area`, so the step answers the old red and the task never goes green. `seon.competency-grade-test/a-fixture-model-run-grades-green` passes at `100f08747` (`bin/seon check --at 100f08747`, run 1078ca606457) and fails at `f5e4ec35d` (run da39358e68af: proofs {:red 1} after the correct model reply), as does `seon.competency-grade-test/a-launch-grades-each-run`. Done when a task's proofs run again after any eval request that changed the branch's program, while unrelated unchanged reds stay answered from their record."
              :must-read #{seon.test/run seon.turn/run-proofs seon.test-support/agent-value}}
+ #:seon.task{:name "destructive-reach-keeps-a-second-cache"
+             :kind :function
+             :intent "seon.test/destructive-reach memoizes its walk in a clojure.core.cache LRU (threshold 4) held in the schema projection's cache value, beside seon.cache: a second cache with its own bound and no recordStats, which AGENTS.md refuses. Done when the walk is a seon.cache kind keyed by the same content key and clojure.core.cache.wrapped is no longer required by seon.test."
+             :must-read #{seon.test/destructive-reach seon.cache/lookup}}
 ]

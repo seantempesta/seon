@@ -232,4 +232,9 @@
  #:seon.task{:name "the-reply-tests-block-shows-the-pass-and-commit-ids"
              :kind :function
              :intent "Every eval reply after an agent defines a test ends with {:seon.turn.loop/tests {:seon.turn/id .. :seon.source/commit-id #uuid .. :seon.turn.loop/reaching {:seon.test/passed? false :seon.turn.loop/red [..]}}}, about 90 tokens, also after a read that changed nothing; the pass id and commit id have no agent consumer (the commit is there for `seon.turn/summary-queue`) and the reds include tests red on main that nothing on the branch changed, e.g. live.text-test/initials-of-words on every reply of agent context-corpus (context corpus, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when the shown block carries only the verdict and the red and pending names the agent's change reached, and a reply test asserts no :seon.turn/id or :seon.source/commit-id in it."
-             :must-read #{seon.turn/test-step seon.turn/summary seon.turn/summary-queue}}]
+             :must-read #{seon.turn/test-step seon.turn/summary seon.turn/summary-queue}}
+ #:seon.task{:name "a-throwing-test-step-loses-its-cause"
+             :kind :function
+             :intent "When the automatic test step throws a non-refusal (a NullPointerException inside seon.test/changes while lane test-step worked, 2026-10-09), seon.turn/test-step answers only {:seon.error/message \"The automatic test step threw; the pass's values stand.\" :seon.error/exception-class \"java.lang.NullPointerException\"}: no cause chain, no throw site, so the agent and root cannot tell which owner failed without a debug build. A deliberate translation keeps the cause. Done when the step's error carries the cause chain (`:seon.error/chain`) of the thrown exception and a reply test asserts it names the throwing function."
+             :must-read #{seon.turn/test-step seon.error.refusal/diagnostic}}
+]
