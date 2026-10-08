@@ -142,7 +142,14 @@
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC"
               "-XX:G1PeriodicGCInterval=30000"
-              "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"]}
+              "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"
+              ;; Datahike's restored index nodes sit behind SoftReferences
+              ;; (persistent-sorted-set's default ref type); the bounded node
+              ;; LRU (:seon.config.db/store-cache-size) is the configured cache.
+              ;; At the JDK default of 1000 ms per free MB a node read in the
+              ;; last 20-50 minutes survives every collection, System/gc
+              ;; included, and counts as tenured occupancy at the memory gate.
+              "-XX:SoftRefLRUPolicyMSPerMB=10"]}
 
   ;; Rebuild the source-preferred class cache for the dependency namespaces
   ;; reached by `seon.cluster.boot`; first-party source remains uncached.
@@ -166,6 +173,13 @@
               "-XX:+UseG1GC"
               "-XX:G1PeriodicGCInterval=30000"
               "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"
+              ;; Datahike's restored index nodes sit behind SoftReferences
+              ;; (persistent-sorted-set's default ref type); the bounded node
+              ;; LRU (:seon.config.db/store-cache-size) is the configured cache.
+              ;; At the JDK default of 1000 ms per free MB a node read in the
+              ;; last 20-50 minutes survives every collection, System/gc
+              ;; included, and counts as tenured occupancy at the memory gate.
+              "-XX:SoftRefLRUPolicyMSPerMB=10"
               ;; A heap failure ends the JVM instead of limping into the store.
               ;; The operator names the dump directory (<root>/data/heap) at
               ;; launch; this JVM's working directory may be a pruned archive.

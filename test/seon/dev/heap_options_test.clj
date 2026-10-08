@@ -11,3 +11,8 @@
     (is (pos? (option "G1PeriodicGCInterval")))
     (is (<= minimum 20))
     (is (<= minimum maximum 40))))
+
+(deftest softly-held-nodes-age-out-in-seconds
+  (let [options (ManagementFactory/getPlatformMXBean HotSpotDiagnosticMXBean)]
+    (is (<= (Long/parseLong (.getValue (.getVMOption options "SoftRefLRUPolicyMSPerMB"))) 10)
+        "a softly held index node read a minute ago counts as live at the memory gate")))
