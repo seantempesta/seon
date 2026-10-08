@@ -240,3 +240,23 @@
                 ((juxt :seon.task/ns :seon.task/name :seon.task/kind :seon.task/id)
                  (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind :seon.task/id] [:seon.task/sym sym])))))
        (is (= {:seon.task/changed? false} (task/index-tasks! {:seon.db/connection connection :seon.task/files files})))))))
+
+(deftest a-revised-task-shows-on-the-next-call-without-reassignment
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agent-tx @connection "revisor"))
+     (let [declaration {:seon.db/connection connection :seon.agent/id "revisor" :seon.task/ns 'tq.r
+                        :seon.task/name "shape" :seon.task/kind :function}
+           created (task/create! (assoc declaration :seon.task/intent "First."))
+           id (:seon.task/id created)
+           intent #(:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id id]))
+           assigned (fn [] (select-keys (task/assignment @connection "revisor" :main) [:seon.task/assigned :seon.task/proofs :seon.error/type]))]
+       (task/assign! {:seon.db/connection connection :seon.task/assigned id :seon.task/agent [:seon.agent/id "revisor"]
+                      :seon.task/branch :main})
+       (is (= id (:seon.task/assigned (assigned))) "the assignment answers before the revision")
+       (is (:seon.task/changed? (task/create! (assoc declaration :seon.task/intent "Second."
+                                                     :seon.task/basis {id (#'task/declared (db/carried-projection @connection)
+                                                                                           (db/pull @connection '[*] [:seon.task/id id]))}))))
+       (is (= "Second." (intent)) "the task shows its revised declaration")
+       (is (= id (:seon.task/assigned (assigned))) "the assignment is current without a new assign!")
+       (is (nil? (:seon.error/type (assigned))) "the revision is not refused as revised-since-assignment")))))

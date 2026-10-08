@@ -469,7 +469,7 @@
                (select-keys (as-root task/create! (assoc declaration :seon.agent/id "root" :seon.task/intent "Square it."
                                                          :seon.task/basis {task-id declaration}))
                             [:seon.task/changed?])))
-        (is (= ":revised-since-assignment" (refusal)) "a task revised since root assigned it refuses")))))
+        (is (not= ":revised-since-assignment" (refusal)) "a task root revised stays assigned at its new revision")))))
 
 (deftest ^{:seon.test/long "One nested seon.test/run (checkpoint world + one member); 60 s is merge-test's measured bound for one nested run."
            :seon.test/long-ms 60000}

@@ -418,16 +418,30 @@
   (assoc declaration :seon.task/id (task-handle ns name kind) :seon.task/sym (task-sym ns name)
          :seon.task/created-by [:seon.agent/id agent-id]))
 
+(defn advance-assignments-tx
+  "The transaction data moving every assignment of the task `entity` to its declaration's revision.
+  Invoke as `[:db.fn/call seon.task/advance-assignments-tx entity]`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/task] :seon.db/tx-data]}
+  [database entity]
+  (let [revision (->> entity (declared (db/carried-projection database)) vector (id/digest 64))
+        assigned (db/q '[:find ?a ?revision :in $ ?handle
+                         :where [?a :seon.task/assigned ?handle] [?a :seon.task/revision ?revision]]
+                       database (:seon.task/id entity))]
+    (when (read-error assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
+    (into [] (keep (fn [[a current]] (when (not= current revision) [:db/add a :seon.task/revision revision]))) assigned)))
+
 (defn- task-call
   "The task writer's call for `row` against `basis` on the task home of
-  `connection`, or [] when that home already holds its declaration. A revised
-  declaration throws the writer's conflict with base, current and proposed."
+  `connection`, or [] when that home already holds its declaration; a revision
+  also advances the task's assignments. A revised declaration throws the writer's
+  conflict with base, current and proposed."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.task/task :seon.task/basis] :seon.db/tx-data]}
   [connection entity basis]
   (let [handles #{(:seon.task/id entity)}]
     (if (empty? (adopt-tasks-tx (db/db (home-connection connection)) [entity] handles basis))
       []
-      [[:db.fn/call #'adopt-tasks-tx [entity] handles basis]])))
+      [[:db.fn/call #'adopt-tasks-tx [entity] handles basis]
+       [:db.fn/call #'advance-assignments-tx entity]])))
 
 (defn- refusal-data
   "Call `f`; the task writer's thrown refusal answers as its data."
