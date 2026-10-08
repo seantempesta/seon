@@ -597,6 +597,14 @@
                          database symbols attribute)))
                 [:seon.fn/sym :seon.test/sym])))
 
+(defn- behavior-of
+  "`seon.db/behavior-digest` of the function or test `[attribute value]` on `database`; nil for another identity or none."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/declaration-identity] [:maybe :string]]}
+  [database [attribute value]]
+  (when (#{:seon.fn/sym :seon.test/sym} attribute)
+    (some->> (selection-read! (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute value))
+             (db/behavior-digest database))))
+
 (defn- changed-definition-symbols
   "Read assertion and retraction identities in the same lineage, including namespace bindings."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
@@ -618,9 +626,15 @@
                         :where (or [?entity :seon.fn/sym ?symbol]
                                    [?entity :seon.test/sym ?symbol])]
                       history changed-entities))
-        before (definition-digests (db/as-of database basis) (vec direct))
+        as-of (db/as-of database basis)
+        before (definition-digests as-of (vec direct))
         after (definition-digests database (vec direct))
-        direct (filter #(not= (get before %) (get after %)) direct)
+        behavior (fn [database symbol] (some #(behavior-of database [% symbol]) [:seon.fn/sym :seon.test/sym]))
+        ;; A docstring-only change keeps the behavior digest: no test observes it.
+        direct (filter #(and (not= (get before %) (get after %))
+                             (or (nil? (get before %)) (nil? (get after %))
+                                 (not= (behavior as-of %) (behavior database %))))
+                       direct)
         changed-bindings (selection-read!
                     (db/q '[:find [?entity ...] :in $ [?attribute ...]
                             :where [?entity ?attribute]]
@@ -1662,6 +1676,19 @@
           (not (set? changed)) changed
           :else [present changed])))
 
+(defn- behavior-differences
+  "`digest-differences`' `[offered held]` without the declarations `world`
+  and `candidate` both hold at one behavior digest: a docstring-only change
+  is no change a test can observe."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value
+                       [:tuple :seon.program/identity-set :seon.program/identity-set]]
+                  [:tuple :seon.program/identity-set :seon.program/identity-set]]}
+  [world candidate [offered held]]
+  (let [same (into #{} (filter #(when-let [behavior (behavior-of world %)]
+                                   (= behavior (behavior-of candidate %))))
+                   (filter held offered))]
+    [(into #{} (remove same) offered) (into #{} (remove same) held)]))
+
 (defn- program-overlay-tx
   "Transaction data putting `candidate`'s differing program rows onto `world`.
 
@@ -1818,8 +1845,9 @@
 
 (defn changes
   "What a check of `execution` must reach: the declarations its program holds
-  at other definition digests than the published commit its test world
-  starts from, exactly what `clean-request-handle` overlays onto that world.
+  at other behavior digests than the published commit its test world starts
+  from (`behavior-differences`: a docstring-only change is none), of what
+  `clean-request-handle` overlays onto that world.
   A namespace identity is a binding change; it stays only when the namespace
   declares something a test can reach. Equal programs refuse by name: there
   is no change to check."
@@ -1836,8 +1864,9 @@
             candidate (db/db (:seon.db/connection execution))
             families (vec (:seon.program/compared-families
                            (program/declaration-families (db/carried-projection candidate))))
-            differences (digest-differences (source/database store base) candidate families)
-            identities (when (vector? differences) (apply into differences))
+            world (source/database store base)
+            differences (digest-differences world candidate families)
+            identities (when (vector? differences) (apply into (behavior-differences world candidate differences)))
             declaring (when identities
                         (db/q '[:find [?name ...] :in $ [?name ...]
                                 :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]

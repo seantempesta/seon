@@ -2,6 +2,9 @@
   "`my.test/check` through the MCP entrance."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
+            [rewrite-clj.node :as node]
+            [rewrite-clj.parser :as parser]
+            [seon.db :as db]
             [seon.id :as id]
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
@@ -47,3 +50,35 @@
        (is (= {:my.test/after-recording [f]} (:seon.repl/value (nth replies 3))))
        (is (= [(symbol namespace-name "f-test")] (get-in tests [:seon.turn.loop/reaching :seon.turn.loop/red]))
            "the test step ran the reaching test after recording, in the same reply")))))
+
+(defn- edited-defn
+  "`source`, a `(defn name doc attr-map [args] body)` form, with docstring `doc`,
+  and with a `nil` form before its body when `body?`."
+  {:malli/schema [:=> [:cat :string :string :boolean] :string]}
+  [source doc body?]
+  (let [form (parser/parse-string source)
+        children (vec (node/children form))
+        at (into [] (remove #(node/whitespace-or-comment? (nth children %))) (range (count children)))
+        children (assoc children (at 2) (node/string-node doc))
+        args (inc (at 4))]
+    (node/string (node/replace-children form (cond-> children
+                                               body? (#(into (conj (subvec % 0 args) (node/whitespace-node " ") (node/token-node nil))
+                                                             (subvec % args))))))))
+
+(deftest ^{:seon/tasks #{'seon.turn.batch/a-docstring-defn-allocates-half-a-gigabyte}}
+  a-docstring-only-defn-reruns-no-test-and-a-body-change-reruns-its-reaching-tests
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [source (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'seon.task/steps-call]))
+           pass (fn [code]
+                  (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                            "arguments" {"code" (str "(in-ns 'seon.task) " code)
+                                                                         "agent" agent-id "cluster" running}}))))
+           defined? #(= 'seon.task/steps-call (get-in (support/mcp-reply %) [:seon.repl/value :seon.render.var/symbol]))
+           doc-only (pass (edited-defn source "Only the docstring changed." false))
+           body (pass (edited-defn source "Only the docstring changed." true))]
+       (is (defined? doc-only))
+       (is (nil? (support/mcp-tests doc-only)) "a docstring-only change runs no test")
+       (is (defined? body))
+       (is (contains? (support/mcp-tests body) :seon.turn.loop/reaching)
+           "a body change runs the tests reaching it")))))

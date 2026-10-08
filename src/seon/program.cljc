@@ -14,7 +14,9 @@
             ;; CLJ-only: `seon.schema.edn` has no CLJS side, and the two uses
             ;; below already sit inside a `#?(:clj …)` branch.
             #?(:clj [seon.schema.edn :as schema.edn])
-            #?(:clj [seon.cache])))
+            #?(:clj [seon.cache])
+            [rewrite-clj.node :as node]
+            [rewrite-clj.parser :as parser]))
 
 (defn- source-family?
   "Does this identity attribute's property map declare a source declaration
@@ -488,6 +490,34 @@
            (assoc :seon.program/resolver-context
                   (used-resolver-context entity resolver-context)))]
      (id/id parts 64))))
+
+(defn- without-docstring
+  "`source` without its def form's docstring literal `doc`: the form's third
+  child when it reads as exactly `doc` and another form follows it; `source`
+  itself otherwise."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [source doc]
+  (let [form (parser/parse-string source)
+        children (vec (node/children form))
+        forms (into [] (remove #(node/whitespace-or-comment? (nth children %))) (range (count children)))
+        at (get forms 2)
+        candidate (some->> at (nth children))]
+    (if (and candidate (< 3 (count forms)) (node/sexpr-able? candidate) (= doc (node/sexpr candidate)))
+      (node/string (node/replace-children form (into (subvec children 0 at) (subvec children (inc at)))))
+      source)))
+
+(defn behavior-digest
+  "The [[definition-digest]] of `entity` without its documentation: the
+  docstring, its ordering and the docstring literal in its source. Equal to
+  the definition digest for a row with no `:seon.fn/doc`. Test selection and
+  reuse key on it: a test cannot observe a docstring."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]}
+  [entity resolver-context]
+  (if-let [doc (:seon.fn/doc entity)]
+    (definition-digest (cond-> (dissoc entity :seon.fn/doc :seon.fn/doc-order)
+                         (:seon.fn/source entity) (update :seon.fn/source without-docstring doc))
+                       resolver-context)
+    (definition-digest entity resolver-context)))
 
 #?(:clj
    (defn digest-map-refusal

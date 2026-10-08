@@ -4967,6 +4967,8 @@
 ;; `seon.program` and `seon.fn` require `seon.db` (through `seon.fn.schema-shape`).
 (defonce ^:private program-definition-digest
   (delay (requiring-resolve 'seon.program/definition-digest)))
+(defonce ^:private program-behavior-digest
+  (delay (requiring-resolve 'seon.program/behavior-digest)))
 ;; The one owner of a namespace entity's resolver context (`seon.fn` digests with it).
 (defonce ^:private stored-namespace-context
   (delay (requiring-resolve 'seon.fn/stored-namespace-context)))
@@ -5270,6 +5272,30 @@
     (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
     entity-map)
    (some-> namespace-entity (@stored-namespace-context))))
+
+(defn behavior-digest
+  "`seon.program/behavior-digest` of the function or test `entity-id` on
+  `database`: its definition without documentation, from the canonical row
+  and resolver context [[definition-digest-of]] digests. Cached under the
+  stored definition digest, which determines every input; nil for an entity
+  without one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:maybe :seon.program/definition-digest]]}
+  [database entity-id]
+  (when-let [digest (:v (first (d/datoms database :eavt entity-id :seon.program/definition-digest)))]
+    (seon.cache/lookup
+     ::behavior-digest digest (constantly 256)
+     (fn []
+       (let [projection (carried-projection database)
+             identity-attrs (identity-attributes database)
+             entity-map (declaration-value projection database identity-attrs entity-id)
+             namespace-name (second (or (:seon.fn/ns entity-map) (:seon.test/ns entity-map)))
+             namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)]
+         (@program-behavior-digest
+          (@program-canonical-entity
+           (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+           entity-map)
+          (some->> namespace-entity (declaration-value projection database identity-attrs)
+                   (@stored-namespace-context))))))))
 
 (defn- namespace-digests-tx
   "Transaction data re-deriving, on the transaction's own value `database`, the

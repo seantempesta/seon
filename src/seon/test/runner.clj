@@ -758,12 +758,12 @@
   (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
 
 (defn- reach-node
-  "One declaration's contribution to reach: its leaf (the producer's
-  `:seon.program/definition-digest`), the names it reaches (calls, references,
+  "One declaration's contribution to reach: its leaf (`::leaf`, the
+  declaration's behavior digest), the names it reaches (calls, references,
   subject) and the keywords it names (its own and its contract's)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.schema/value]] :map]}
   [row]
-  {::leaf (:seon.program/definition-digest row :seon.error/unknown)
+  {::leaf (::leaf row :seon.error/unknown)
    ::out (cond-> (into (vec (:seon.fn/calls row)) (:seon.fn/references row))
            (:seon.test/subject row) (conj (:seon.test/subject row)))
    ::keys (into (set (:seon.fn/keywords row))
@@ -793,7 +793,8 @@
   branch of one program; a commit writing only test results keeps it."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:map-of :qualified-keyword :uuid]]]}
   [database]
-  (db/content-revisions database (into [:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key :seon.schema/form]
+  (db/content-revisions database (into [:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.fn/doc
+                                        :seon.schema/key :seon.schema/form]
                                        (map first) reach-fact-attributes)))
 
 (defn- reach-attribute
@@ -823,8 +824,8 @@
   "Every function, test and schema declaration on `database`: symbol to row,
   row to definition digest and to its reach facts (calls, references and
   keywords as sets, contract source and test subject as values), schema key
-  to form. Ten attribute reads ([[reach-attribute]]), each cached under its
-  own revision; a committed value's whole answer is cached under all ten
+  to form, and each documented declaration to its docstring. Eleven attribute
+  reads ([[reach-attribute]]), each cached under its own revision; a committed value's whole answer is cached under all eleven
   (`reach-revision-key`). Facts are read whole, never inferred from the
   definition digest: a declaration-population retarget changes an invoker's
   calls under an unchanged digest."
@@ -836,6 +837,7 @@
         #(let [schema-keys (read :seon.schema/key :by-entity)]
            {::rows (merge (read :seon.fn/sym :by-value) (read :seon.test/sym :by-value))
             ::digests (read :seon.program/definition-digest :by-entity)
+            ::documented (read :seon.fn/doc :by-entity)
             ::facts (into {} (map (fn [[attribute many?]]
                                     [attribute (read attribute (if many? :many :by-entity))]))
                           reach-fact-attributes)
@@ -843,8 +845,8 @@
                           (read :seon.schema/form :by-entity))})]
     (if revisions
       (cache/lookup ::reach-declarations revisions
-                    (fn [{::keys [rows digests forms facts]}]
-                      (* 96 (+ (count rows) (count digests) (count forms)
+                    (fn [{::keys [rows digests documented forms facts]}]
+                      (* 96 (+ (count rows) (count digests) (count documented) (count forms)
                                (transduce (comp (mapcat vals) (map #(if (set? %) (count %) 1))) + 0 (vals facts)))))
                     derive-declarations)
       (derive-declarations))))
@@ -864,18 +866,23 @@
       (persistent! resolved))))
 
 (defn- reached-graph
-  "The nodes and schema nodes the requested tests reach. A node is cached
-  under its declaration's whole reach row (digest and graph facts), never
-  under the digest alone: calls derived from the declaration population are
-  not part of the definition digest. A schema node is cached under its form."
+  "The nodes and schema nodes the requested tests reach. A node's leaf is its
+  declaration's behavior digest (`seon.db/behavior-digest`: a docstring edit
+  reaches no test), the stored definition digest itself for an undocumented
+  declaration. A node is cached under its whole reach row (leaf and graph
+  facts), never under the leaf alone: calls derived from the declaration
+  population are not part of the definition digest. A schema node is cached
+  under its form."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                   [:map [::nodes [:map-of :seon.schema/value [:maybe :map]]]
                    [::schemas [:map-of :seon.schema/value [:maybe :map]]]]]}
   [database test-symbols]
-  (let [{::keys [rows digests facts forms]} (reach-declarations database)
+  (let [{::keys [rows digests documented facts forms]} (reach-declarations database)
         node-of (fn [s]
                   (when-let [e (get rows s)]
-                    (let [row (into (if-let [digest (get digests e)] {:seon.program/definition-digest digest} {})
+                    (let [leaf (when-let [digest (get digests e)]
+                                 (if (get documented e) (db/behavior-digest database e) digest))
+                          row (into (if leaf {::leaf leaf} {})
                                     (keep (fn [[attribute by-entity]]
                                             (when-some [v (get by-entity e)] [attribute v])))
                                     facts)]

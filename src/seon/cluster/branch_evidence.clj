@@ -31,6 +31,20 @@
     (merge (zipmap identities (repeat :seon.program/absent))
            (into {} (map (fn [[a v d]] [[a v] d])) found))))
 
+(defn- behavior-changed?
+  "Whether `declaration`, held on `branch` and `head` at different definition
+  digests, differs there in behavior (`seon.db/behavior-digest`): a
+  docstring-only change demands no test. A namespace or a declaration absent
+  on either side is a change."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/declaration-identity] :boolean]}
+  [branch head [attribute value]]
+  (let [behavior (fn [database]
+                   (let [entity (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute value)]
+                     (when (int? entity) (db/behavior-digest database entity))))]
+    (or (not (#{:seon.fn/sym :seon.test/sym} attribute))
+        (let [on-branch (behavior branch)]
+          (or (nil? on-branch) (not= on-branch (behavior head)))))))
+
 (defn- analyzed
   "The rows the ordinary analyzer derives from the working-tree bytes of `path`
   under `root`, read against `branch`; the analyzer's refusal when it refuses."
@@ -47,8 +61,9 @@
 
 (defn- file-evidence
   "One committed file against the branch head and the cluster head: its
-  declarations differing from the branch, the changed ones (branch against
-  head), the removed ones and the changed host-bound functions."
+  declarations differing from the branch (by definition digest), the changed
+  ones (branch against head, by behavior: they demand reaching tests), the
+  removed ones and the changed host-bound functions."
   {:malli/schema [:=> [:cat :seon.fn/root :seon.db/database-value :seon.db/database-value :seon.source/path] :map]}
   [root branch head path]
   (let [rows (analyzed root path branch)]
@@ -58,7 +73,8 @@
             identities (into (set (keys file)) cat [(file-identities branch path) (file-identities head path)])
             on-branch (held branch identities)
             on-head (held head identities)
-            changed (filterv #(not= (on-branch %) (on-head %)) (sort-by str identities))
+            changed (filterv #(and (not= (on-branch %) (on-head %)) (behavior-changed? branch head %))
+                             (sort-by str identities))
             host-bound (into #{} (keep #(when (true? (:seon.fn/host-bound? %)) (:seon.fn/sym %))) rows)]
         {::differing (vec (for [declaration (sort-by str identities)
                                 :let [in-file (get file declaration :seon.program/absent)]
