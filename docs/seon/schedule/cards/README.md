@@ -81,7 +81,11 @@ assign proofless tasks too.
 | CS-01b | [CS-01b](CS-01b.md) | landed `88bfd19cb` |
 | CS-01c1 | [CS-01c1](CS-01c1.md) | in flight (impl-cs01c1) |
 | CS-01c2 | [CS-01c2](CS-01c2.md) | ready after CS-01c1 |
-| CS-01c3 | [CS-01c3](CS-01c3.md) | ready after CS-01c2 |
+| CS-01c3 | [CS-01c3](CS-01c3.md) | ready after REF-1, CS-01c5 |
+| CS-01c5 | [CS-01c5](CS-01c5.md) | ready after REF-1 |
+| REF-1 | [REF-1](REF-1.md) | ready after CS-01c2 |
+| TASK-CHECK | [TASK-CHECK](TASK-CHECK.md) | ready after REF-1, CS-01c3 |
+| REF-2 | [REF-2](REF-2.md) | ready after TASK-CHECK |
 | CS-01c4 | [CS-01c4](CS-01c4.md) | ready after CS-01c1, S4-05a |
 | CS-01d | [CS-01d](CS-01d.md) | ready after CS-01b, F4b |
 | CS-02 | [CS-02](CS-02.md) | ready after its deps (PR-11) |

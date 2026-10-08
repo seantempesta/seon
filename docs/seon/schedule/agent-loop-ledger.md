@@ -307,7 +307,8 @@ from what the task names.
 | CS-01b | The block shows proofs and their status | Proofs: name, stored source, status `:green`/`:red`/`:pending` by the basis rule (no `:running`), reds as `{:test :expected :actual :message}` · card: [CS-01b](cards/CS-01b.md) | `context.clj`, schema, test | `…/a-red-proof-shows-expected-actual-and-message-as-data`, `…/a-proof-result-before-the-latest-reached-definition-is-pending` | L | CS-01a | D | landed `88bfd19cb` |
 | CS-01c1 | The block shows the Seon names a task references | Must-reads built automatically from what the task names: its `:seon.task/must-read` and the fully qualified symbols and keywords backticked in its intent, each resolved to its current definition (arglists, contract, first doc line, `doc`/`source` operations); a name resolving to nothing is a problem on the task · card: [CS-01c1](cards/CS-01c1.md) | `src/seon/context.clj`, `resources/seon/schemas/seon.context.edn`, `test/seon/context_test.clj` | `…/the-block-resolves-the-names-a-task-references`, `…/a-task-naming-a-missing-symbol-shows-a-problem` | L: one pull per named definition | CS-01a | D | in flight (impl-cs01c1) |
 | CS-01c2 | The block shows library names with their pinned revision | A fully qualified library symbol or namespace (`malli.core/validator`, `datahike.versioning/merge!`, `datahike.norm.norm`) resolves read-only from the host's loaded Var: first docstring line, arglists and the project's pinned `reference-code/` revision; nothing stored. Its `doc`/`source` operations answer for library names after S1-06 and S1-08 · card: [CS-01c2](cards/CS-01c2.md) | same | `…/a-library-symbol-resolves-with-its-pinned-revision` | L: a Var lookup per name; the revision read once per loaded commit | CS-01c1 | D | ready |
-| CS-01c3 | The block shows a reference-code path | A must-read that is not a Var (a README or doc page) is a path under `reference-code/<project>/…`, shown with the project's pinned revision and one read operation · card: [CS-01c3](cards/CS-01c3.md) | same | `…/a-reference-code-path-shows-its-revision-and-a-read-form` | L | CS-01c2 | D | ready |
+| CS-01c3 | The block shows a referenced doc | A path that is not code (`docs/…`, `AGENTS.md`, `.agents/skills/…`, or `reference-code/<project>/…` at its pin), with an optional `#heading`, is listed with its heading, size in estimated tokens, pin and one read operation `(my.fs/section …)`; a missing file or heading is a problem · card: [CS-01c3](cards/CS-01c3.md) | `src/seon/ref.clj`, schema, `context_test.clj` | `…/a-referenced-doc-shows-its-heading-size-and-one-read` | L | REF-1, CS-01c5 | D | ready after its deps |
+| CS-01c5 | Read a referenced doc section | `my.fs/section` takes a based path with an optional `#heading` and answers that Markdown section as data (heading, the author's text, the headings below with their sizes, tokens, pin); a missing file or heading is an error naming the nearest; parse by commonmark, cached by content digest in a `seon.cache` kind · card: [CS-01c5](cards/CS-01c5.md) | `src/my/fs.clj`, `src/seon/ref.clj`, `src/seon/test/cache.clj`, schema, `ref_test.clj` | `seon.ref-test/a-doc-section-reads-with-its-headings-below-and-size`, `…/a-missing-heading-names-the-nearest-headings` | L: one file | REF-1 | D | ready after REF-1 |
 | CS-01c4 | The block shows unread messages | Unread: each undelivered item once with its identity, from `my.agent/inputs` (S4-05a) · card: [CS-01c4](cards/CS-01c4.md) | same | `…/unread-shows-each-undelivered-item-once-with-its-identity` | L: follows the unread items | CS-01c1, S4-05a | D | ready after its deps (Q-D answered) |
 | CS-01d | The block shows broken tests | Broken tests: tests reaching the agent's change, not its proofs, red on its branch, as the same data as a red proof, with the pending count; one already red at the merge base marked so · card: [CS-01d](cards/CS-01d.md) | `context.clj`, schema, test | `…/a-test-the-change-broke-shows-as-a-blocker`, `…/a-test-red-at-the-merge-base-is-marked-not-blocking` | L | CS-01b, F4b | D | ready |
 | CS-02 | The block renders under its budget | The block's AI render returns pruned data with its order; the printer prints it under `:seon.print/budget` 2,000 (PR-11's key, one budget mechanism) · card: [CS-02](cards/CS-02.md) | `context.clj`, schema, test, `test/seon/pass_probe.clj` | `…/an-over-budget-block-offers-its-elision-forms`; render-garbage check (PR-12's proof shape) | I | CS-01b, CS-01c1, CS-01c4, PR-11 | D | ready |
@@ -875,12 +876,25 @@ check TASK-CHECK below), then the friction tasks the dogfood lanes file. Pilot: 
 **TASK-CHECK (new row): ingestion reports what makes a task unworkable.** Per task, as problems on the task (never a
 refusal): no tagged proof, a backticked reference resolving to nothing, every subject deleted. Absorbs
 `seon.task/task-text-references-are-never-resolved` and `seon.task/open-tasks-with-all-proofs-green-are-not-flagged`.
-Design and evidence: `docs/research/agent-platform/2026-10-08/task-census/task-census.md` §7. Files: `src/seon/task.clj`,
-its schema, `test/seon/task_ingestion_test.clj`. Status: waits on its card.
+A doc reference's file and `#heading` must exist. Design and evidence:
+`docs/research/agent-platform/2026-10-08/task-census/task-census.md` §7. Files: `src/seon/task.clj`, its schema,
+`test/seon/task_ingestion_test.clj`. Card: [TASK-CHECK](cards/TASK-CHECK.md); ready after REF-1 and CS-01c3.
+
+**REF-1 (new row): one reference resolver everywhere.** Task intents, Markdown docs and docstrings are all Markdown:
+one commonmark parse (cached by content digest) finds code spans and relative links, and one function,
+`seon.ref/references`, resolves each to a Var, a schema key or a based path with `#heading`, or answers a problem. The
+block, TASK-CHECK and the edit hook call it; `seon.context`'s backtick split and `script/seon/dev/citations.clj` are
+deleted. Card: [REF-1](cards/REF-1.md); ready after CS-01c2. Then CS-01c5 → CS-01c3 → TASK-CHECK.
+
+**REF-2 (new row): the edit hook checks references.** After an edit to a `.md` file, a task file or a Clojure file,
+`bin/seon-hook` asks default (through the lane's REPL entrance) for that file's unresolved references and prints them
+through the value printer; with default down it says so and skips; under 1 s per file, measured. A one-time scripted
+sweep lists every doc and task file's problems by owner. Card: [REF-2](cards/REF-2.md); ready after TASK-CHECK.
 
 1. **Tasks show their current state (first).** A task revised by its file shows on the next call, with the end-to-end
    proof → the block shows the current task → the block shows proofs and their status → the block shows the Seon
-   names the task references → library names with their pinned revision → `reference-code/` paths; unread messages
+   names the task references → library names with their pinned revision → one reference resolver → read a doc
+   section → referenced docs (checkout and `reference-code/`, with `#heading`); unread messages
    (with undelivered messages as data) → the block renders under its budget (after: printed output shares the reply's
    budget → one budget for value, diagnostics and cuts → budget override for one form or session). Alongside: `doc` of
    a task and of a test → `dir` answers data, and `source` shows the stored definition or the library's (so the
@@ -943,7 +957,7 @@ the one before it.
   order; S4-07b1 deletes `system-turn`, `virtual-turn!` and `compact!` from `turn.clj` (`:2051`, `:2292`, `:2305`).
 
 **The same path by row id.**
-1. CS-05b → CS-01a → CS-01b → CS-01c1 → CS-01c2 → CS-01c3; S4-05a → CS-01c4 → CS-02 (PR-07 → PR-01 → PR-11).
+1. CS-05b → CS-01a → CS-01b → CS-01c1 → CS-01c2 → REF-1 → CS-01c5 → CS-01c3 → TASK-CHECK → REF-2; S4-05a → CS-01c4 → CS-02 (PR-07 → PR-01 → PR-11).
    Alongside: S1-06 → S1-07a, S1-08; RED-1; RED-3.
 2. LR-CACHEb (in flight) → F4a → F4b → F4c → F4d; CS-01d after F4b. Alongside: S6-06a, A1.
 3. Context track: S4-01 → S4-02a → S4-02b → S4-03 → S4-04 → S4-06 → S4-07a → S4-07b1 → S4-07b2 → S4-07b3; CS-03a →
