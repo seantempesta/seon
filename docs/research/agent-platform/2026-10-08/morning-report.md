@@ -137,3 +137,7 @@ of two each).
   because `derive-form` read the shared Var outside the agent's SCI context, so it saw the base's binding. This is a
   class introduced by SCI-1's per-context Vars; lane ctx-audit is sweeping every JVM-side SCI Var read and write. `:chat` is
   the shipped default (`937296267`).
+- **H1 fixed** (`5fe677bd3`): the bench's 121-form Markdown reply now reads as its 13 real forms (code inside a
+  clojure/clj/cljc/edn fence is code; elsewhere a line is code when it starts a form; a closing fence can't be swallowed by
+  a half-finished form; indented definitions are code). Another data point for decision 1 (RF-3): branch test evidence
+  proves nothing for compiled platform files like the reader.
