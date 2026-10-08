@@ -175,13 +175,9 @@
        (and (boolean (some #(str/starts-with? path (str % "/")) graph-roots))
             (not (source-file? path))))))
 
-(defn gitlink-digests
-  "Digest each submodule's Git pin; snapshot pins take precedence over the live index.
-  The pin is a 40-character commit id, and each digest here is consumed as a
-  64-character `:seon.fn.file/digest` of a directory input
-  (`seon.cluster.source/capture-paths`), so the pin is hashed into that shape:
-  a commit id is not a file digest, and a pin stored raw needs its own attribute."
-  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
+(defn gitlink-pins
+  "Each submodule path's pinned 40-character commit id; snapshot pins take precedence over the live index."
+  {:malli/schema [:=> [:cat :string] [:map-of :string [:string {:min 40 :max 40}]]]}
   [root]
   (let [recorded (io/file root "dependency-pins.txt")
         text (if (.isFile recorded)
@@ -194,9 +190,19 @@
                     (let [tab (.indexOf ^String line "\t")
                           tokens (vec (enumeration-seq
                                        (java.util.StringTokenizer. (subs line 0 tab))))]
-                      [(subs line (inc tab))
-                       (hasch/hash->str (hasch/sha256 (.getBytes ^String (second tokens) "UTF-8")))]))))
+                      [(subs line (inc tab)) (second tokens)]))))
           (str/split-lines text))))
+
+(defn gitlink-digests
+  "Digest each submodule's Git pin; snapshot pins take precedence over the live index.
+  The pin is a 40-character commit id, and each digest here is consumed as a
+  64-character `:seon.fn.file/digest` of a directory input
+  (`seon.cluster.source/capture-paths`), so the pin is hashed into that shape:
+  a commit id is not a file digest, and a pin stored raw needs its own attribute."
+  {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
+  [root]
+  (update-vals (gitlink-pins root)
+               #(hasch/hash->str (hasch/sha256 (.getBytes ^String % "UTF-8")))))
 
 (defn toolchain-dependencies
   "The gate's pinned dependencies plus the analyzer's declared configuration.

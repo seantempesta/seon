@@ -5,12 +5,15 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [edamame.core :as edamame]
+            [seon.ai.tokens :as tokens]
             [seon.cache :as cache]
             [seon.db :as db]
+            [seon.error.refusal :as refusal]
             [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.eval :as sci.eval])
+            [seon.sci.eval :as sci.eval]
+            [seon.test.cache :as test.cache])
   (:import [java.net URI URISyntaxException]
            [org.commonmark.ext.front.matter YamlFrontMatterExtension]
            [org.commonmark.ext.heading.anchor IdGenerator]
@@ -232,3 +235,107 @@
                  [#{} []])
          second
          (mapv #(answer database %)))))
+
+;;; ---------------------------------------------------------------------------
+;;; A doc section
+;;; ---------------------------------------------------------------------------
+
+(defn- based-file
+  "The file a based path names in the loaded commit (a `reference-code/<project>` path in its pinned extract), with
+  its pin; nil when the path leaves its base or names an unpinned project."
+  {:malli/schema [:=> [:cat :string] [:maybe :seon.ref/location]]}
+  [path]
+  (let [source (io/file (fs/source-directory))
+        [base project & more] (str/split path #"/")
+        pins (when (= "reference-code" base) (test.cache/gitlink-pins (.getPath source)))
+        revision (get pins (str "reference-code/" project))
+        [home pin] (if (= "reference-code" base)
+                     (when revision
+                       [(io/file (.getParentFile source) "pins" (str "reference-code-" project) revision)
+                        {:seon.ref/project project :seon.ref/revision revision}])
+                     [source nil])
+        file (when home (io/file home (if pin (str/join "/" more) path)))]
+    (when (and file (.startsWith (.normalize (.toPath file)) (.toPath home)))
+      (cond-> {:seon.ref/file (.getPath file)} pin (assoc :seon.ref/pin pin)))))
+
+(defn locate
+  "A based path's file in the loaded commit, with its pin for a `reference-code/<project>` path, or nil."
+  {:malli/schema [:=> [:cat :seon.ref/path] [:maybe :seon.ref/location]]}
+  [path]
+  (when-let [found (based-file path)]
+    (when (.isFile (io/file (:seon.ref/file found))) found)))
+
+(defn- nearest-files
+  "The Markdown file names in the nearest existing directory above `path`, or the pinned projects."
+  {:malli/schema [:=> [:cat :string] [:vector :string]]}
+  [path]
+  (let [directory (loop [parent (some->> (str/last-index-of path "/") (subs path 0))]
+                    (let [found (when parent (based-file parent))]
+                      (cond (and found (.isDirectory (io/file (:seon.ref/file found)))) (io/file (:seon.ref/file found))
+                            parent (recur (some->> (str/last-index-of parent "/") (subs parent 0)))
+                            :else (io/file (fs/source-directory)))))]
+    (vec (sort (filter #(str/ends-with? % ".md") (.list directory))))))
+
+(defn- common-prefix
+  "The length of the shared leading characters of two strings."
+  {:malli/schema [:=> [:cat :string :string] :int]}
+  [a b]
+  (count (take-while true? (map = a b))))
+
+(defn- section-error
+  "The error for a reference with no file or no such heading, naming the nearest."
+  {:malli/schema [:=> [:cat :keyword :seon.ref/path [:maybe :seon.ref/anchor] :seon.ref/nearest] :seon.ref/section-error]}
+  [missing path anchor nearest]
+  (refusal/diagnostic (java.util.Date.) :seon.ref/section 'seon.ref/section
+                      (cond-> {:seon.error/message (if (= :file missing) "No such file at this reference." "No heading with this anchor.")
+                               :seon.ref/section-missing missing :seon.ref/path path :seon.ref/nearest nearest}
+                        anchor (assoc :seon.ref/anchor anchor))))
+
+(defn- section-end
+  "The line after the section of the heading at `from` of `level`: the next heading at or above its level, else the end."
+  {:malli/schema [:=> [:cat [:vector :seon.ref/heading-entry] :int :int :int] :int]}
+  [headings from level end]
+  (or (some #(when (and (> (:seon.ref/line %) from) (<= (:seon.ref/level %) level)) (:seon.ref/line %)) headings) end))
+
+(defn- span-tokens
+  "The estimated tokens of source lines `from` (1-based) up to `end`."
+  {:malli/schema [:=> [:cat [:vector :string] :int :int] :seon.ref/tokens]}
+  [lines from end]
+  (tokens/estimate (str/join "\n" (subvec lines (dec from) (dec end)))))
+
+(defn section
+  "The Markdown section `reference` names, with the headings below it and its size, or an error naming the nearest."
+  {:malli/schema [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]}
+  [reference]
+  (let [hash-at (str/index-of reference "#")
+        path (cond-> reference hash-at (subs 0 hash-at))
+        anchor (when hash-at (not-empty (subs reference (inc hash-at))))
+        located (locate path)]
+    (if-not located
+      (section-error :file path anchor (nearest-files path))
+      (let [text (slurp (:seon.ref/file located))
+            {:seon.ref/keys [headings line-count]} (document text)
+            lines (vec (str/split-lines text))
+            end (inc line-count)
+            target (if anchor
+                     (first (filter #(= anchor (:seon.ref/anchor %)) headings))
+                     {:seon.ref/level 0 :seon.ref/heading (or (:seon.ref/heading (first (filter #(= 1 (:seon.ref/level %)) headings))) path)
+                      ;; the line after the front matter's closing delimiter
+                      :seon.ref/line (if (= "---" (first lines)) (+ 2 (count (take-while #(not= "---" %) (rest lines)))) 1)})]
+        (if-not target
+          (section-error :heading path anchor
+                         (mapv #(select-keys % [:seon.ref/anchor :seon.ref/heading])
+                               (sort-by (comp - #(common-prefix anchor %) :seon.ref/anchor) headings)))
+          (let [{:seon.ref/keys [level line heading]} target
+                stop (if anchor (section-end headings line level end) end)
+                inside (filter #(and (> (:seon.ref/line %) (if anchor line (dec line))) (< (:seon.ref/line %) stop)) headings)
+                next-level (some->> inside (map :seon.ref/level) (filter #(> % level)) seq (apply min))]
+            (cond-> {:seon.ref/path path :seon.ref/heading heading
+                     :seon.ref/text (str/join "\n" (subvec lines (dec line) (dec stop)))
+                     :seon.ref/tokens (span-tokens lines line stop)
+                     :seon.ref/below (vec (for [child inside :when (= next-level (:seon.ref/level child))]
+                                            {:seon.ref/anchor (:seon.ref/anchor child) :seon.ref/heading (:seon.ref/heading child)
+                                             :seon.ref/tokens (span-tokens lines (:seon.ref/line child)
+                                                                           (section-end headings (:seon.ref/line child) next-level stop))}))}
+              anchor (assoc :seon.ref/anchor anchor)
+              (:seon.ref/pin located) (assoc :seon.ref/pin (:seon.ref/pin located)))))))))

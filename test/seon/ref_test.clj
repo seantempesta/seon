@@ -1,5 +1,6 @@
 (ns seon.ref-test
   (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.mcp :as mcp]
             [seon.test-support :as test-support]))
@@ -50,3 +51,37 @@
    (fn [running agent-id _]
      (is (= ['([{:seon.print/keys [node children]}])]
             (shown running agent-id "(mapv :arglists (seon.ref/references {:seon.ref/text \"`seon.print/close-frame`\"}))"))))))
+
+(deftest a-doc-section-reads-with-its-headings-below-and-size
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [{:seon.ref/keys [heading text tokens below pin]}
+           (shown running agent-id "(my.fs/section \"AGENTS.md#data-and-contracts\")")]
+       (is (= "Data and contracts" heading))
+       (is (str/starts-with? text "## Data and contracts"))
+       (is (not-any? #(str/starts-with? % "## Failure") (str/split-lines text)))
+       (is (pos? tokens))
+       (is (nil? pin))
+       (is (every? :seon.ref/anchor below))))))
+
+(deftest a-reference-code-section-carries-its-pin
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [{:seon.ref/keys [pin heading]} (shown running agent-id "(my.fs/section \"reference-code/malli/README.md#quickstart\")")]
+       (is (= "malli" (:seon.ref/project pin)))
+       (is (= 40 (count (:seon.ref/revision pin))))
+       (is (some? heading))))))
+
+(deftest a-missing-heading-names-the-nearest-headings
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [answer (shown running agent-id "(select-keys (my.fs/section \"AGENTS.md#data-and-contract\") [:seon.ref/section-missing :seon.ref/nearest])")]
+       (is (= :heading (:seon.ref/section-missing answer)))
+       (is (= "data-and-contracts" (:seon.ref/anchor (first (:seon.ref/nearest answer)))))))))
+
+(deftest a-missing-file-names-the-nearest-files
+  (test-support/with-running-agent
+   (fn [running agent-id _]
+     (let [answer (shown running agent-id "(select-keys (my.fs/section \"docs/seon/architecture/NO-SUCH.md\") [:seon.ref/section-missing :seon.ref/nearest])")]
+       (is (= :file (:seon.ref/section-missing answer)))
+       (is (some #{"README.md"} (:seon.ref/nearest answer)))))))

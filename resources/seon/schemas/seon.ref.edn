@@ -45,4 +45,21 @@
                       [:doc {:optional true} :string]
                       [:seon.ref/pin {:optional true} :seon.ref/pin]
                       [:seon.ref/schema-form {:optional true} :seon.ref/schema-form]
-                      [:seon.render/operations [:vector :seon.render/read-form]]]}
+                      [:seon.render/operations [:vector :seon.render/read-form]]]
+           :reference-text [:string {:min 1 :description "A based relative path with an optional #anchor, as an agent writes it."}]
+           :file :string
+           :location [:map {:description "A doc's file in the loaded commit, with its pin for a reference-code path."}
+                      [:seon.ref/file :seon.ref/file] [:seon.ref/pin {:optional true} :seon.ref/pin]]
+           :tokens [:int {:min 0}]
+           :child [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading] [:seon.ref/tokens :seon.ref/tokens]]
+           :text :string
+           :below [:vector :seon.ref/child]
+           :section [:map {:description "A doc section's Markdown, the headings one level below it with their sizes, its size and its pin."}
+                     [:seon.ref/path :seon.ref/path] [:seon.ref/anchor {:optional true} :seon.ref/anchor]
+                     [:seon.ref/heading :seon.ref/heading] [:seon.ref/text :seon.ref/text] [:seon.ref/tokens :seon.ref/tokens]
+                     [:seon.ref/below :seon.ref/below] [:seon.ref/pin {:optional true} :seon.ref/pin]]
+           :section-missing [:enum :file :heading]
+           :nearest [:vector [:or :string [:map [:seon.ref/anchor :seon.ref/anchor] [:seon.ref/heading :seon.ref/heading]]]]
+           :section-error [:and :seon.error/base
+                           [:map [:seon.ref/section-missing :seon.ref/section-missing] [:seon.ref/path :seon.ref/path]
+                            [:seon.ref/anchor {:optional true} :seon.ref/anchor] [:seon.ref/nearest :seon.ref/nearest]]]}

@@ -2,6 +2,7 @@
   "Read, write, inspect, and find files with bounded results."
   (:refer-clojure :exclude [read])
   (:require [seon.fs :as fs]
+            [seon.ref :as ref]
             [clojure.test.check.generators :as gen]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
@@ -107,3 +108,18 @@
    :seon.effect/capability 'seon.fs.jvm/stat}
   [request]
   (effect/request! #'stat request))
+
+(defn section
+  "The section of a referenced doc: its heading, Markdown text, the headings below it, its size and its pin.
+
+  ## Examples
+
+  (my.fs/section \"AGENTS.md#data-and-contracts\")
+  (my.fs/section \"reference-code/malli/README.md#quickstart\")
+
+  ## Errors
+
+  A missing file or heading answers an error naming the nearest files or headings."
+  {:malli/schema [:=> [:cat :seon.ref/reference-text] [:or :seon.ref/section :seon.ref/section-error]]}
+  [reference]
+  (ref/section reference))
