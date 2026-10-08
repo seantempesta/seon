@@ -255,3 +255,6 @@ of two each).
   namespace, a task-tagged file proof, green in the agent's own test step. Follow-ups running (lane test-ctx): the two
   remaining `seon.test` sites, and the step's red check telling a failed assertion from an error (`769c4a843`'s proof passed
   while this bug existed). Fan-out 8 running on `bb934b396`.
+- **Task hygiene** (`6a447487d`): 154 open tasks with tagged proofs checked at HEAD (6 runs); 114 retired (all proofs green), 18 left
+  red (incl. bench T1-T4, red by design), 22 green held back because `src/` functions carry their tags (a separate platform cut).
+  −829 lines.
