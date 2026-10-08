@@ -13,4 +13,9 @@
   :kind :function
   :intent "A whole-database attribute query ([:find ?a (count ?e) :where [?e ?a] [(namespace ?a) ?n] [(contains? ..)]]) over an agent database took 2,153 ms and made 568,597 armed calls, 568,485 of them to seon.schema.datahike/logical-attribute? (datahike.clj:919-923 adds it as a predicate clause evaluated for every datom's attribute). Work is proportional to datoms, not to the distinct attributes the answer names. Correct: the predicate (or the attribute-shape check it implements) runs once per distinct attribute, or the clause is planned over the attribute index. Proof: the same query on a fixed database fixture asserts logical-attribute? calls <= distinct attributes, and the evaluation stays under one second."
   :must-read #{seon.schema.datahike/logical-attribute? seon.db/q}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/macro-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/macro-design.md"}}
+ #:seon.task{:name "an-ordinary-pass-builds-hundreds-of-storability-refusals"
+             :kind :function
+             :intent "One MCP SCI pass calling a contracted one-line function (pf 41) made 128,825 armed calls on default 2026-10-08: attribute-declaration 8,149, storable-attribute-in? 8,263 and 451 seon.error.refusal/diagnostic, about 35 ms. attribute-declaration answers an unstorable member with a full diagnostic (Date, world references, a message built with str and a printed registration form) as control flow, and nothing keeps the answer across passes for an unchanged projection. Correct: storability per attribute is a derived value cached by projection content; the refusal value is built only where a caller delivers it. Proof: a pass calling one contracted function makes zero refusal/diagnostic calls and fewer than 100 attribute-declaration calls."
+             :must-read #{seon.schema.datahike/attribute-declaration seon.schema.datahike/declared-storable?}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/redo-review-opus-redo-review.md"}}]

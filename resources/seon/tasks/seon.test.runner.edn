@@ -48,4 +48,9 @@
             :kind :function,
             :intent
             "A deftest whose body calls an agent function that throws (scratch probe-g throwing (ex-info \"inside test\" {:probe/x 3})) is reported by my.test/check with :seon.test.failure/actual as printed text whose 30 frames are seon.test.runner/seon.sci.eval/seon.test frames: the throw site (probe-g, its SCI location) appears nowhere, and the same text is printed again into the reply's :out (~733 tokens). Correct: the error inside a test is the same flat error an evaluation answers (ex-data whole, the author's SCI stacktrace), stored as data, never printed to :out. Linked: seon.test.runner/failure-evidence-is-stored-as-text (text storage). Proof: a check of a throwing test whose failure names the throwing function's SCI frame.",
-            :must-read #{seon.test.runner/record-tx}}]
+            :must-read #{seon.test.runner/record-tx}}
+ #:seon.task{:name "reach-declarations-misses-on-every-branch"
+             :kind :function
+             :intent "The seon.cache kind :seon.test.runner/reach-declarations held 187 MB (37% of the 512 MB budget) with 0 hits and 11 misses on default 2026-10-08 (seon.cache/status), 1.9 s of load. reach-revision-key keys the whole-program declaration read by Datahike's connection-id, which is [store-id branch-name], plus the connection's generation, so every agent branch, check world, merge branch and member reads all declarations again although branches share immutable indexes and the program is identical. A first one-test check on a new agent allocated 3.8 GB in 1.18 s (seon.pass-probe/run-check). Correct: key the derivation by content the branches share (the reach attributes' index roots or the program digest), so an unchanged program on any branch is a hit. Proof: two checks on two fresh agent branches of one program count one miss and one hit for this kind."
+             :must-read #{seon.test.runner/reach-declarations seon.test.runner/reach-revision-key}
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/redo-review-opus-redo-review.md"}}]

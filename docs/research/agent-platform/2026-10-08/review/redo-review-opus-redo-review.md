@@ -28,6 +28,12 @@ No redesign needs a redo. All four agree on the core: one fold, one recording tr
 refusals, proofs only during work, and integrity at merge. The defects are local, but several sit on the critical path
 (§2.1 and §2.2), so fix them before approving the ledger order.
 
+Landed work (§6): most claims hold on default. Two broke the REPL law: PB-01's overlay keeps an earlier pass's callee
+(F0), and lazy-observe replaces the value when a definition has no source position. Every pass kind measured is
+over its budget except forgiveness and per-agent retention. Two unreasonable costs had no task, and I filed them:
+the reach-declarations cache keyed per branch (187 MB at 0% hits; a first check costs 3.8 GB), and storability
+answered by building 451 error maps per pass.
+
 ## 1. Rulings
 
 | Ruling | TF | RP | MA | EN |
@@ -381,3 +387,69 @@ My probe defined `rro.scratch/{g2,h2,pb}` on the `redo-review-opus` agent branch
     shown text.* ≤ 20 MB per idle agent.
 29. **The `defn`-pass budget** (RP §6 vs AL §2). *Keep AL's < 30 MB as the end state; RP's 60/80 MB is an interim
     row.* The ruling says 20-40 MB per pass.
+
+## 6. Landed work since 2026-10-07 (owner widening: review the work, measure, stop the unreasonable)
+
+Default runs `4b4caf142`, which holds every commit below (`bin/seon status` source root). All measurements were
+single runs on default through `seon.pass-probe` and MCP. They used fresh probe agents (`s0-*`, `rro-*`) and the
+fixture provider, so no paid call was made. Allocation counts every thread, so it is an upper bound on a shared JVM.
+The owner's rule decides each verdict: a cost proportional to the work asked is reasonable; a cost proportional to
+something else (the program, the store, a branch count) or GB-class is unreasonable.
+
+### 6.1 Measurements
+
+| Operation | Measured | Verdict | Likely producer (evidence) | Ledger row |
+|---|---|---|---|---|
+| MCP SCI ordinary pass (2 KB string) | 44-83 ms, **52-129 MB**, 8-11k armed calls, 1 commit | **unreasonable** (budget 20-40 MB for a form that allocates 2 KB) | `seon.turn/fault-window` and `seon.error/observation-selector` 22 ms; `seon.db/with-declarations` 123 calls, 43 ms; `seon.sci.eval/acquire!` 13-39 ms on a pass that changed nothing; storability refusals (below) | S5-05 (fault window), PB-02b (acquire), new task (storability) |
+| MCP SCI `defn` pass | 150-171 ms, **213-236 MB**, 32k calls | **unreasonable** (< 30 MB) | O(program) projection acquisition and writer report validation (defn-cost3 notes; tasks `seon.schema/a-declaration-write-reloads-the-whole-projection`, `seon.db/every-commit-validates-its-write-report-three-ways`) | **none fixes it.** RP-0 only measures, and PB-02 covers acquisition. A row is needed. |
+| the pass after a `defn`, `(pf 41)` | 87-112 ms, 117-119 MB, **127-129k armed calls** | **unreasonable** (one call to a one-line function) | `settle-batch!` 54-58 ms; `attribute-declaration` 8,149 calls and **451 `refusal/diagnostic`** per pass (`src/seon/schema/datahike.clj:155-180` builds a full error with a `str` message as control flow); `projection-cache-value` 438 calls, 37 ms | S5-02 (measurement), EN-8; **new task `seon.schema.datahike/an-ordinary-pass-builds-hundreds-of-storability-refusals`** |
+| model pass, fixture provider (provider 0.2-0.5 ms) | **480-3,106 ms, 687-1,012 MB, 7 commits**, 106-272k calls | **unreasonable** (the owner: "no world") | `open-turn`/`system-turn` 1.2-1.5 s, `cluster.prompt/prompt` 943 ms, `db/transact!` 1,155 ms in the `defn` pass; slower than the profile's 507-886 ms | S4-02b..S4-07b3, RP-10, RP-14, PB-02; C0 is the gate |
+| first one-test check on a new agent | **1,183 ms, 3,805 MB**, 313k calls, 8 attempts; `clean-request-handle` 561 ms | **unreasonable** (GB class) | `:seon.test.runner/reach-declarations` cache: **0 hits, 11 misses, 187 MB (37% of the cache budget)**; the key is the connection id `[store branch]` plus its generation (`runner.clj:791-801`, verified), so every branch re-reads the whole program | F1-F3 and EN-6/7 do not cover the key; **new task `seon.test.runner/reach-declarations-misses-on-every-branch`** |
+| the same check, member reused | 89-94 ms, **119-153 MB**, 41-44k calls | **unreasonable** (budget < 20 MB) | the pass overhead above plus `select` | F1, EN-6 |
+| reply forgiveness, 28.6 KB | 2.5-4.3 ms, 0.7-1.1 MB | reasonable | — | — |
+| retained heap per idle agent (5 agents, 3 passes each, after full GC) | **4.2 MB** | reasonable (≤ 20 MB) | — | — |
+| cluster base context | 38 hits / 2 misses, 23 MB | reasonable (PB-01 holds) | — | — |
+| `:seon.sci.eval/loaded-digests` cache | 40 hits / 42 misses, 60 MB, 2.6 s of load | *uncertain*: a 50% hit rate for a per-commit derivation suggests a per-branch key like the one above | not diagnosed | none |
+| process | live heap 745-944 MB; heap max 11 GB; cache 390-400 of 512 MB | heap max unreasonable on 16 GB | `MaxRAMPercentage` | MEM-01 |
+| 3,000 `println` lines | about 530 lines shown (about 1,500 tokens); elision form `(subs (:seon.cluster.eval/output (seon.db/pull …)) 4660)` | **unreasonable** (R ≤ 260 tokens; ruling line 25: no DB re-pull while the live value exists) | P5's output budget | PR-07 (in flight, out-fix) |
+
+### 6.2 Each landed item
+
+| Item (commit) | Does what it claims? | Rulings | Fragility, second printer, clipping | Measured? |
+|---|---|---|---|---|
+| P0 differential table (`c816e3fde`) | yes | yes | — | n/a |
+| P1 native veto deleted (`ded5e35de`) | **yes**: `(intern *ns* 'iv 5)` then `(alter-var-root #'iv inc)` → 5, 6 | the settlement-side unmap veto remains: reproduced, `(resolve 'pa)` comes back next pass with no diagnostic | — | RP-1 |
+| P2 SCI reader policy (`e21fc4674`) | **yes**: `#?(:clj … :cljs …)` → `:clj-picked` | yes | — | — |
+| P3 namespace kept after a throw (`f9dc29814`) | **yes**: `(in-ns 'rro.other) (throw …) *ns*` → `rro.other` | yes | — | — |
+| P4 malformed contract stays callable (`0667ee448`) | **partly**: `(bad-contract 7)` → 7, still callable next pass. But the diagnostic says "Not admitted to the program … exists in your SCI context only" and carries about 30 JVM frames (about 1,000 tokens of Seon's own bulk) | violates "preserve malformed contracts as data" (no program row) and "Seon never generates bulk" | Seon-generated stack bulk | RP-7 (admission deleted), PR-04 (compact chain) |
+| P5 output through the printer budget (`d78473124`) | the budget applies, but 3,000 lines still show about 1,500 tokens | elision form is not clojure.core on the live value | — | PR-07 in flight |
+| P6 one linear scan (`c98ade404`) | **yes**: 2.5-4.3 ms / ≤ 1.1 MB per 28.6 KB | yes | `subs` only for source spans (legitimate) | measured above |
+| P7a repair notes (`7569761aa`) | yes | stores repairs as a printed `:string` (`seon.cluster.eval.edn:48`), against "store data, not printed text" | printed copy stored | RP-12 |
+| P11 print options leave the base (`666c767f7`) | consistent: base 38 hits / 2 misses | yes | — | — |
+| PB-01 shared base (`6191eace4`, `48191071f`) | **yes** for the base. But the overlay keeps an earlier pass's callee (F0, reproduced `[2 3]`), and `acquire!` still costs 13-39 ms on an unchanged pass | REPL law broken (F0) | overlay advance is fragile until PB-02/F0 | F0, PB-02, PB-02b |
+| M8 namespace row kept (`76daa8fd5`) | not re-probed; its regression is named | yes | — | — |
+| Printer fixes (`131082e0d`, `a423b8b29`, `13b850d30`, out-fix `9c88ae5b8`) | `pr-str` added only inside `seon.print`'s own `literal`; `subs` cuts inside the printer | yes | `a423b8b29` puts `(pr-str path)` into a page URL: transport, not identity, so acceptable but worth one look under PR-24 | PR rows |
+| S1-01..S1-05 lookups (`f50ef6059` … `28c141d56`) | **yes**: `(doc map)` answers data `{:summary :body :arglists}` | `:example ""` is an empty value where absence should be no key | — | L rows |
+| S3-01 origin (`2bf3e10db`) | not probed | yes | — | — |
+| S2b-1 reader rules (`84a3c5e4d`) | Parinfer deleted; one stepper | yes | — | via P6 |
+| redef-arm (`b391c0ef9`, `ca00cfd7e`) | not re-probed | contract still crosses `pr-str` → `edn/read-string` on the arming path (task in `seon.sci.arm.edn`) | a second print/read round trip | existing task, no ledger row |
+| lazy-observe (`b5ff51e4c`) | **contradicted for a definition without source position.** `(def lz (map (fn [i] (eval (list 'def (symbol (str "lzv" i)) i))) (range 2)))` then `lz` shows **`()`** with a `seon.sci.arm/write-event` contract error; only `lzv0` exists. `(eval (list 'def 'ev1 1))` answers the error instead of `#'ev1`, although the def happened. Clojure shows `(#'…/lzv0 #'…/lzv1)`. | **REPL law and "the path is total" both broken**: the value is replaced | `write-event`'s output contract requires a positive line (`arm.clj:62`); `eval`'d forms have none | existing task `seon.sci.arm/a-def-without-line-metadata-refuses-its-origin`, **no ledger row**: add one in §3.2, group C, ready |
+| reader-pos (`e24fda839`) | yes (its regression) | yes | — | — |
+| cost lanes (`e9002e761`, `94affe518`, defn-cost2/3 `97faccb88` `4455e4917` `b20762d6b` `bd63ce073` `4c28e748f`, publish-cost) | defn-cost3 recorded `defn` 147 MB / 157 ms, ordinary 39 MB / 47 ms, after-defn 74 MB / 92 ms on a throwaway root; **not reproduced at that size on default** (213-236, 52-129, 117-119 MB); net −71 lines | yes | five cost commits have no number in their messages (the numbers live in `2026-10-07/defn-cost3/`) | measured; the gap is the shared JVM or the larger store, *uncertain* |
+| 37d11f6a0 acquire before fork | yes, but it adds `acquire!` on every pass (claimed ~109 µs unchanged; measured 13-39 ms in the after-defn and ordinary passes) | — | per-pass cost | PB-02b |
+| doc-fix | no commit by that name in the last 150; the out-fix lane holds uncommitted `render/value.clj` work | — | — | — |
+
+### 6.3 What to stop now (unreasonable, not covered by a ready row)
+
+1. **The reach-declarations cache keyed per branch.** It holds 187 MB at 0% hits, and a first check costs 3.8 GB.
+   New task `seon.test.runner/reach-declarations-misses-on-every-branch`. Recommend a ready ledger row in group E
+   ahead of F1, because F1-F3 cannot reach the budget while every branch re-reads the program.
+2. **Storability answered by building error maps.** That is 451 diagnostics and 8k declarations per ordinary pass.
+   New task `seon.schema.datahike/an-ordinary-pass-builds-hundreds-of-storability-refusals`. Recommend a ready row
+   (group E/F).
+3. **The `defn` pass at 7× its budget.** The projection reload has tasks but no row. RP-0 should become
+   "measure, then fix the top owner", or a PB-row should name `a-declaration-write-reloads-the-whole-projection`.
+4. **`eval`'d definitions replace the value** (the REPL law). An existing task exists with no row. Add it to §3.2
+   (group C, alongside F0).
+5. The model pass, the 3,000-line output and the stack bulk are unreasonable but covered (S4/RP/PB rows, PR-07,
+   PR-04). Keep C0 as the gate.
