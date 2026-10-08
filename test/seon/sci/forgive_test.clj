@@ -77,6 +77,13 @@
                                                             {:seon.batch/line 1 :seon.batch/inserted ")"}]
     :code  "(+ 1 2)"                                       nil))
 
+(deftest each-segment-carries-the-repairs-on-its-lines
+  (are [text repairs] (= repairs (mapv :seon.batch/repairs (:seon.batch/segments (forgive/segments text :code))))
+    "(+ 1 2))"                      [[{:seon.batch/line 1 :seon.batch/dropped ")"}]]
+    "(defn f [x]\n  (+ x 1)\n(f 1)" [[{:seon.batch/line 2 :seon.batch/inserted ")"}] nil]
+    "(f 1)\n(g 2))"                 [nil [{:seon.batch/line 2 :seon.batch/dropped ")"}]]
+    "(+ 1 2)"                       [nil]))
+
 (defn- allocated-reading
   "Bytes this thread allocates segmenting `reply` (-1 on a virtual thread,
   for which HotSpot keeps no count)."

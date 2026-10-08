@@ -119,6 +119,7 @@
              [:seon.cluster.eval/comment
               {:optional true}
               :seon.cluster.eval/comment]
+             [:seon.cluster.eval/repairs {:optional true} :seon.cluster.eval/repairs]
              [:seon.cluster.eval/ordinal
               {:optional true}
               :seon.cluster.eval/ordinal]
@@ -162,6 +163,7 @@
              [:seon.repl/ms {:optional true} :seon.repl/ms]
              [:seon.repl/calls {:optional true} :seon.repl/calls]
              [:seon.repl/repeated {:optional true} :seon.repl/repeated]
+             [:seon.repl/repairs {:optional true} :seon.repl/repairs]
              [:seon.repl/errors {:optional true} :seon.repl/errors]
              [:seon.repl/value {:optional true} :seon.repl/value]
              [:seon.repl/error {:optional true} :seon.repl/error]],
@@ -181,6 +183,10 @@
             [:string
              {:description
               "The armed calls one evaluation's own code made, as seon.cluster.eval/call-count recorded it."}],
+            :repairs
+            [:string
+             {:description
+              "The forgiving scan's repairs on one evaluation's lines, as [line :dropped \"x\"] or [line :inserted \"x\"] data (seon.cluster.eval/repairs), beside its value."}],
             :repeated
             [:string
              {:description

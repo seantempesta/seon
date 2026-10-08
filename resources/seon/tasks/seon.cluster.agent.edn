@@ -23,4 +23,10 @@
             "submit-source-in-projection records :seon.turn/reply-size as (count (pr-str sources)): it prints the segmented sources to count characters, a printer use outside the value printer on every MCP SCI evaluation. Correct: the size is the submitted text's length (the reply it stands for), computed without printing.",
             :must-read #{seon.cluster.agent/submit-source!},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "reply-size-prints-sources-to-measure-them",
+            :kind :function,
+            :intent
+            "`:seon.turn/reply-size` is computed as (count (pr-str sources)) at seon.cluster.agent (~764, submit-source-in-projection) and seon.bootstrap (~310, the root seed run): each prints a value only to count characters, a printer use outside the value printer. Correct: the size is the length of the text the sources were read from (the reply they stand for), counted without printing; both sites convert together. Same defect as seon.cluster.agent/reply-size-is-measured-by-printing-the-sources, which names only the first site.",
+            :must-read #{seon.cluster.agent/submit-source! seon.bootstrap/supervision-tx},
+            :evidence #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]

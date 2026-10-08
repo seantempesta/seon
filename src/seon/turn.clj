@@ -625,7 +625,10 @@
                                (str "namespace:" namespace-name))
                         (:seon.cluster.eval/comment form)
                         (assoc :seon.cluster.eval/comment
-                               (:seon.cluster.eval/comment form)))))))
+                               (:seon.cluster.eval/comment form))
+                        (:seon.cluster.eval/repairs form)
+                        (assoc :seon.cluster.eval/repairs
+                               (:seon.cluster.eval/repairs form)))))))
                 sources)]
     (into namespaces evaluations)))
 
@@ -901,6 +904,7 @@
           [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
           [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
           [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
+          [:seon.cluster.eval/repairs {:optional true} :seon.cluster.eval/repairs]
           [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
           [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]]]
     [:map
@@ -911,11 +915,12 @@
      [:seon.cluster.eval/at {:optional true} :seon.cluster.eval/at]
      [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]
      [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]
+     [:seon.cluster.eval/repairs {:optional true} :seon.cluster.eval/repairs]
      [:seon.cluster.eval/origin {:optional true} :seon.cluster.eval/origin]
      [:seon.cluster.eval/ns {:optional true} :seon.cluster.eval/ns]]]}
   [run-eid request]
   (let [{::keys [id]
-         :seon.cluster.eval/keys [ordinal at source ns comment origin]} request
+         :seon.cluster.eval/keys [ordinal at source ns comment repairs origin]} request
         receipt-id (receipt-identity id ordinal)]
     (cond-> {:db/id receipt-id
              :seon.cluster.eval/id receipt-id
@@ -929,6 +934,7 @@
       ;; The agent's prose is its own fact beside the source it introduces,
       ;; so a prompt line holds exactly the one form it prompts for.
       comment (assoc :seon.cluster.eval/comment comment)
+      repairs (assoc :seon.cluster.eval/repairs repairs)
       ;; WHICH ENTRANT'S PASS RECORDED THIS FORM: a model reply freeze is
       ;; `:model`, a submitted run `:outside`; generated appends write none.
       origin (assoc :seon.cluster.eval/origin origin)
@@ -3010,6 +3016,16 @@
 
 
 
+(defn- repair-text
+  "The repairs as the reply shows them: `[line :dropped \"x\"]` or `[line :inserted \"x\"]` data, printed once."
+  {:malli/schema [:=> [:cat :seon.batch/repairs] :seon.cluster.eval/repairs]}
+  [repairs]
+  (render.value/core-text
+   (mapv (fn [{line :seon.batch/line :as repair}]
+           (let [[k v] (some #(find repair %) [:seon.batch/dropped :seon.batch/inserted])]
+             [line (keyword (name k)) v]))
+         repairs)))
+
 (defn- segmented-sources
   "`text`'s forms as a run's ordered sources, found structurally in `mode`
   (`seon.sci.forgive/segments`).
@@ -3025,9 +3041,10 @@
   (let [segments (if (> (count text) max-source)
                    [{:seon.batch/source text}]
                    (:seon.batch/segments (forgive/segments text mode)))
-        sources (mapv (fn [{source :seon.batch/source c :seon.batch/comment}]
+        sources (mapv (fn [{source :seon.batch/source c :seon.batch/comment repairs :seon.batch/repairs}]
                         (cond-> {:seon.cluster.eval/source source :seon.ns/name namespace-name}
-                          c (assoc :seon.cluster.eval/comment c)))
+                          c (assoc :seon.cluster.eval/comment c)
+                          repairs (assoc :seon.cluster.eval/repairs (repair-text repairs))))
                       segments)]
     (if (seq sources)
       sources
@@ -4281,6 +4298,7 @@
   (->> (db/q '[:find [(pull ?evaluation
                             [:seon.cluster.eval/ordinal
                              :seon.cluster.eval/source
+                             :seon.cluster.eval/repairs
                              :seon.eval/origin
                              :seon.sci.eval/ending-ns
                              {:seon.cluster.eval/ns [:seon.ns/name]}]) ...]
@@ -4296,6 +4314,8 @@
   "One evaluation row projected back into the source the evaluator takes."
   [evaluation]
   (cond-> {:seon.cluster.eval/source (:seon.cluster.eval/source evaluation)}
+    (:seon.cluster.eval/repairs evaluation)
+    (assoc :seon.cluster.eval/repairs (:seon.cluster.eval/repairs evaluation))
     (:seon.eval/origin evaluation)
     (assoc :seon.eval/origin (:seon.eval/origin evaluation))
     (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
@@ -5192,7 +5212,9 @@
                                       (cond-> {:seon.cluster.eval/ordinal (+ first-ordinal i)
                                                :seon.cluster.eval/source (:seon.cluster.eval/source form)
                                                :seon.cluster.eval/ns {:seon.ns/name (or (:seon.ns/name form) (:seon.ns/name submission))}}
-                                        (:seon.eval/origin form) (assoc :seon.eval/origin (:seon.eval/origin form)))))
+                                        (:seon.eval/origin form) (assoc :seon.eval/origin (:seon.eval/origin form))
+                                        (:seon.cluster.eval/repairs form)
+                                        (assoc :seon.cluster.eval/repairs (:seon.cluster.eval/repairs form)))))
                                 (:seon.turn/sources submission))
                           (fold-evaluations database run-id))
             evaluated

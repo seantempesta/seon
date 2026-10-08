@@ -130,6 +130,7 @@
    :seon.repl/repeated
    :seon.repl/errors
    :seon.repl/diagnostics
+   :seon.repl/repairs
    :seon.repl/value
    :seon.repl/error])
 
@@ -223,6 +224,8 @@
                                    (or value (print/string-literal (:seon.cluster.eval/error emission))))
                 :seon.repl/findings (when (seq found) (value/core-text found))
                 :seon.repl/diagnostics diagnostics
+                ;; already the value printer's text (seon.turn/repair-text)
+                :seon.repl/repairs (:seon.cluster.eval/repairs emission)
                 ;; AN EVALUATION BOOT CUT SAYS SO. Without this the response
                 ;; for an interrupted evaluation carried `:ms` alone and read
                 ;; exactly like one still running — absence of signal read as
@@ -545,6 +548,7 @@
                              :seon.cluster.eval/id
                              :seon.cluster.eval/source
                              :seon.cluster.eval/comment
+                             :seon.cluster.eval/repairs
                              :seon.cluster.eval/ordinal
                              :seon.eval/shown
                              :seon.eval/renderer

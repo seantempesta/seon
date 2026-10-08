@@ -410,22 +410,36 @@
                        :else (str "; " l)))))
        (str/join "\n")))
 
+(defn- owned
+  "`segments` with each of `repairs` on the last segment starting at or before
+  its line (`lines` are the segments' start lines), else on the first."
+  {:malli/schema [:=> [:cat [:vector :map] [:vector pos-int?] [:maybe :seon.batch/repairs]] [:vector :map]]}
+  [segments lines repairs]
+  (if (empty? segments)
+    segments
+    (reduce (fn [out {line :seon.batch/line :as repair}]
+              (update-in out [(max 0 (dec (count (take-while #(<= (long %) (long line)) lines)))) :seon.batch/repairs]
+                         (fnil conj []) repair))
+            segments repairs)))
+
 (defn segments
   "Each form's source in the forgiven text, the text above it as its comment.
 
-  The text's repairs ride beside the segments. `mode` is `:reply` by default; a failed read's span is one more source,
-  whose live read answers its error."
+  The text's repairs ride beside the segments, and each segment carries those
+  on its own lines. `mode` is `:reply` by default; a failed read's span is one
+  more source, whose live read answers its error."
   {:malli/schema [:function
                   [:=> [:cat :string] :seon.batch/segmented]
                   [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]]}
   ([text] (segments text :reply))
   ([text mode]
    (let [{t :seon.batch/text spans :seon.batch/spans repairs :seon.batch/repairs} (forgive text mode)]
-     (loop [[[s e] & more] spans prev 0 out []]
+     (loop [[[s e line] & more] spans prev 0 out [] lines []]
        (if-not s
-         (cond-> {:seon.batch/segments out} repairs (assoc :seon.batch/repairs repairs))
+         (cond-> {:seon.batch/segments (owned out lines repairs)} repairs (assoc :seon.batch/repairs repairs))
          (let [source (str/trimr (subs t s e))
-               c (when (< (non-blank t prev s) (long s)) (comment-of (subs t prev s)))]
-           (recur more e (if (no-value? source)
-                           out
-                           (conj out (cond-> {:seon.batch/source source} (seq c) (assoc :seon.batch/comment c)))))))))))
+               c (when (< (non-blank t prev s) (long s)) (comment-of (subs t prev s)))
+               skip? (no-value? source)]
+           (recur more e
+                  (if skip? out (conj out (cond-> {:seon.batch/source source} (seq c) (assoc :seon.batch/comment c))))
+                  (if skip? lines (conj lines line)))))))))

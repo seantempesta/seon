@@ -85,7 +85,10 @@
                [#:seon.batch{:source
                              "(defn- reply-map\n  \"The entries as one `\")",
                              :comment
-                             "; Now I can see the source. Let me look at the surrounding functions:"}],
+                             "; Now I can see the source. Let me look at the surrounding functions:"
+                 :repairs
+                 [#:seon.batch{:line 5, :inserted "\""}
+                #:seon.batch{:line 5, :inserted ")"}]}],
                :repairs
                [#:seon.batch{:line 5, :inserted "\""}
                 #:seon.batch{:line 5, :inserted ")"}]}}
@@ -154,7 +157,10 @@
                 #:seon.batch{:source
                              "(defn- reply-map\n  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}\n  [entries]\n  (when (seq entries)\n    (str \"\")))",
                              :comment
-                             "; The elided value in the test is `\"[0 1 2 …2997 (drop 3 result/ee7b3)]\"` and must come back as `[0 1 2 (symbol \"…2997\") '(drop 3 result/ee7b3)]`. That requires reading it with the `…2997` token as a symbol and `drop 3` as a list. So it must be spliced verbatim into the map (not quoted), because `one-map` reads the whole map and the value position inside it should read as that vector.\n; So the value key for an elided value should be the raw text if it reads as EDN, else the data it decodes to. Let me write `value-text` to return the shown text unchanged (as-is), but have `response-entries` splices it so the map reads back. For the comment case `\"[1 2]\\n;; a trailing diagnostic line\"`, the value key must be `[1 2]` — i.e. the comment must be stripped.\n; Given limited turns, the cleanest fix: in `response-entries`, set the `:seon.repl/value` to `(or (read-shown value tagged-literal) value)` wrapped so it prints as EDN, and for comment-ended text, strip trailing comment lines first. Let me write it and run the test."}],
+                             "; The elided value in the test is `\"[0 1 2 …2997 (drop 3 result/ee7b3)]\"` and must come back as `[0 1 2 (symbol \"…2997\") '(drop 3 result/ee7b3)]`. That requires reading it with the `…2997` token as a symbol and `drop 3` as a list. So it must be spliced verbatim into the map (not quoted), because `one-map` reads the whole map and the value position inside it should read as that vector.\n; So the value key for an elided value should be the raw text if it reads as EDN, else the data it decodes to. Let me write `value-text` to return the shown text unchanged (as-is), but have `response-entries` splices it so the map reads back. For the comment case `\"[1 2]\\n;; a trailing diagnostic line\"`, the value key must be `[1 2]` — i.e. the comment must be stripped.\n; Given limited turns, the cleanest fix: in `response-entries`, set the `:seon.repl/value` to `(or (read-shown value tagged-literal) value)` wrapped so it prints as EDN, and for comment-ended text, strip trailing comment lines first. Let me write it and run the test."
+                 :repairs
+                 [#:seon.batch{:line 37, :inserted "\""}
+                #:seon.batch{:line 37, :inserted ")))"}]}],
                :repairs
                [#:seon.batch{:line 37, :inserted "\""}
                 #:seon.batch{:line 37, :inserted ")))"}]}}
@@ -167,7 +173,10 @@
                              :comment
                              "; I'm nearly out of turns, so let me be decisive. I'll finish the `reply-map` definition using `str` with escaped quotes, then verify against the proof test's elided-value case."}
                 #:seon.batch{:source
-                             "(defn- reply-map\n  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}\n  [entries]\n  (when (seq entries)\n    (let [ends (fn [text] (if (ends-in-comment? text) \"\\n \" \", \"))]\n      (str \"\"))))"}],
+                             "(defn- reply-map\n  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :string]]] [:maybe :string]]}\n  [entries]\n  (when (seq entries)\n    (let [ends (fn [text] (if (ends-in-comment? text) \"\\n \" \", \"))]\n      (str \"\"))))"
+                 :repairs
+                 [#:seon.batch{:line 13, :inserted "\""}
+                #:seon.batch{:line 13, :inserted "))))"}]}],
                :repairs
                [#:seon.batch{:line 13, :inserted "\""}
                 #:seon.batch{:line 13, :inserted "))))"}]}}
