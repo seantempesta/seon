@@ -60,13 +60,15 @@
           (assoc write :seon.batch/arm-error (ex-message t)))))))
 
 (defn write-event
-  "A producer write as the batch records it: the Var's symbol, origin and kind."
+  "A producer write as the batch records it: the Var's symbol, origin and kind.
+  A definition SCI could not locate (made through `eval`) has the origin
+  `{:reason :no-source-position}`; it is admitted, never refused."
   {:malli/schema [:=> [:cat :map] :seon.batch/write]}
   [{op :op the-var :var origin :origin kind :kind namespace-symbol :ns sym :sym root :root :as w}]
   (case op
     :bind (cond-> {:seon.batch/op :bind :seon.batch/kind (or kind :root) :seon.batch/var the-var}
             (var-symbol the-var) (assoc :seon.batch/sym (var-symbol the-var))
-            origin (assoc :seon.batch/origin origin)
+            origin (assoc :seon.batch/origin (if (:line origin) origin {:reason :no-source-position}))
             (:sci.impl/member-of (meta the-var)) (assoc :seon.batch/member-of (:sci.impl/member-of (meta the-var)))
             (contains? w :seon.batch/arm-error) (assoc :seon.batch/arm-error (:seon.batch/arm-error w))
             (fn? root) (assoc :seon.batch/fn? true))

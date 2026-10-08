@@ -79,7 +79,9 @@
  :def-origin [:or
               [:map [:line pos-int?] [:column pos-int?]
                [:end-line {:optional true} pos-int?] [:end-column {:optional true} pos-int?]
-               [:expanded-by {:optional true} :symbol]]]
+               [:expanded-by {:optional true} :symbol]]
+              [:map {:description "A definition no reader located (made through eval): its origin is that it has no source position."}
+               [:reason [:= :no-source-position]]]]
  :origin :seon.batch/def-origin
  :member-of :symbol
  :arm-error :string
