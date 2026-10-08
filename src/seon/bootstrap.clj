@@ -15,13 +15,7 @@
 
 (defn help-value
   "The REPL instructions: literal lines teaching only installed forms."
-  {:seon/tasks #{'seon.bootstrap/help-teaches-the-wrong-tools
-                 'seon.bootstrap/help-is-flagged-as-a-large-value
-                 'seon.bootstrap/session-end-is-taught-three-ways
-                 'seon.bootstrap/help-teaches-a-placeholder-namespace-for-defn
-                 'seon.bootstrap/help-teaches-a-placeholder-checkout-path
-                 'seon.bootstrap/help-teaches-no-schema-registration
-                 'seon.bootstrap/help-does-not-teach-how-a-test-names-a-task}
+  {:seon/tasks #{'seon.bootstrap/session-end-is-taught-three-ways}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.help/help]}
   [database _agent-id]
@@ -46,8 +40,7 @@
 
 (defn render-help-ai
   "Show the help lines, as data."
-  {:seon/tasks #{'seon.bootstrap/the-help-reply-is-not-data}
-   :malli/schema [:=> [:cat :seon.help/help] :seon.help/lines]}
+  {:malli/schema [:=> [:cat :seon.help/help] :seon.help/lines]}
   [instructions]
   (:seon.help/lines instructions))
 

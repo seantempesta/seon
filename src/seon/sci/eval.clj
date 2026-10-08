@@ -1503,8 +1503,7 @@
   "Whether `ctx` interprets the test `test-symbol` from its stored source.
   It does when the test reaches a definition the context's program changed, so
   its body calls that program's definitions, not the compiled ones."
-  {:seon/tasks #{'seon.sci.eval/a-file-derived-proof-never-sees-the-branch-redefinition}
-   :malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] :boolean]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] :boolean]}
   [ctx test-symbol]
   (contains? (some-> (::kernel/program-snapshot ctx) deref ::interpreted-tests) test-symbol))
 
@@ -1514,8 +1513,7 @@
   loaded host namespace, so the caller loads that namespace first (a test
   namespace loads under the test runner's class loader). A test that cannot be
   interpreted answers the acquisition refusal naming it."
-  {:seon/tasks #{'seon.sci.eval/a-file-derived-proof-never-sees-the-branch-redefinition}
-   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
                   [:or :seon.sci.eval/sci-var :seon.sci.eval/row-acquisition-error :seon.sci.eval/interpretation-error]]}
   [ctx database test-symbol]
   (let [namespace-name (symbol (namespace test-symbol))
@@ -2531,9 +2529,7 @@
   re-interpreted in the turn fork `ctx`. When the fork defines it as `sci-var`
   apart from the base's Var, its callers and tests call that definition in the
   same pass and every later one, as one Clojure Var."
-  {:seon/tasks #{'seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass
-                 'seon.sci.eval/a-redefinition-walks-the-reverse-closure-with-its-test-reach
-                 'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}
+  {:seon/tasks #{'seon.sci.eval/a-redefinition-walks-the-reverse-closure-with-its-test-reach}
    :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol :seon.sci.eval/sci-var]
                   [:vector :qualified-symbol]]}
   [ctx database function-symbol sci-var]
@@ -2784,8 +2780,7 @@
   interpreted. A host-bound caller keeps its compiled Var. Once interpreted, a
   caller sees every later redefinition through its context's binding, so a
   repeated change pays only the closure read. The acquisition after it."
-  {:seon/tasks #{'seon.sci.eval/a-branch-redefinition-never-reaches-its-inherited-callers}
-   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:sequential :qualified-symbol]] :map]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:sequential :qualified-symbol]] :map]}
   [ctx database changed]
   ;; Interpreting a stored row is not the form's own definition: no write
   ;; or expansion of it is observed as the program change.
@@ -2802,8 +2797,7 @@
   `promoted` interprets beyond `ctx`'s, as `interpret-affected!` would for
   `changed`; a changed definition the fork does not interpret has its closure
   walked here. The acquisition after it."
-  {:seon/tasks #{'seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice}
-   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:sequential :qualified-symbol]] :map]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:sequential :qualified-symbol]] :map]}
   [ctx database promoted changed]
   (let [held @(::kernel/program-snapshot ctx)
         carried (set (::interpreted promoted))

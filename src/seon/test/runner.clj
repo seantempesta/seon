@@ -1250,8 +1250,7 @@
   such write has the program digest of its `basis-t` value, which lets the
   writer's in-transaction value (no commit id, so no memo) confirm a digest
   its caller derived instead of deriving it again."
-  {:seon/tasks #{'seon.test.runner/admission-filters-the-whole-program-history}
-   :malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
                   [:or :boolean :seon.db/invalid-read-error]]}
   [database basis-t]
   (let [written (db/q '[:find ?entity . :in $ [?attribute ...] :where [?entity ?attribute]]

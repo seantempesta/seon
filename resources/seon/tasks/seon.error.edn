@@ -5,11 +5,6 @@
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"
                          "docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/a-fault-whose-function-is-deleted-never-resolves.md"}}
- #:seon.task{:name "a-missing-key-message-reads-badly"
-             :kind :function
-             :intent "`seon.error/explain-problem` describes a missing key `[:map [:at inst?]]` as 'the required key :at with a value satisfying should be an inst', and an `:=` schema `[:= {:description \"d\"} true]` refusing false as 'a value satisfying should be true': the fallback in `seon.error/schema-expectation` puts Malli's own 'should be' sentence after 'a value satisfying'. Done when neither `:seon.error/expected-description` contains 'satisfying should' or 'with should', the missing one still names :at, and the `:=` one names true. The description comes from the schema, never by reading or trimming Malli's message text (root refused fan6-key's regex and fan7-key's 'should be ' prefix strip). Live instance (fan-out 7): `(my.program/diff {})` refused 'expected the required key :my.program/base-ctx with must be an SCI evaluation context'."
-             :must-read #{seon.error/explain-problem seon.error/schema-expectation malli.error/error-message}
-             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}
  #:seon.task{:name "fault-observation-returns-the-recorded-error"
              :kind :function
              :intent "occurred-since returns each touched error's recorded observation with its references and resolution instead of a signature/message/count summary, and resolution never hides a fault from its window; for-agent reaches the escalation owner of a fault no steward answers for (audit §2.5 items 5-6)."
@@ -90,11 +85,6 @@
              :intent "`seon.error/occurred-since` computes observation-selector whenever its query answers a vector, even an empty one; the selector is held per projection, so the first pass after any declaration write rederives it over the whole registry: 12-13 MB and 13.5 ms of the 94 MB pass after a defn (defn-why, 2026-10-08). Derive the selector only when the window holds an error, and hold it by the schema forms it reads (as `seon.program/program-attributes` now is), not by the projection value. Done when the pass after a defn allocates nothing in observation-selector with no errors in its window."
              :must-read #{seon.error/occurred-since seon.error/observation-selector}
              :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
- #:seon.task{:name "commit-tx-stored-the-whole-admitted-data-edn-over-the-fitted-one"
-             :kind :function
-             :intent "`seon.error/prepare` returned the observation carrying the whole admitted data-edn as `:seon.error/source`, and `seon.error/commit-tx` stores the source's declared members over the fact's, so a map-sourced fault stored 300 KB inline while its fitted fact held 52 bytes (lane fault-data-edn, b233d838f). Fixed: the source keeps the data-edn the fact kept. Done when seon.error-evidence-test/a-capped-turn-fault-says-it-is-capped asserts the stored data-edn fits `:seon.config.error/max-evidence-bytes` (b233d838f). SP-1a (cards/SP-1a.md) deletes `:seon.error/data-edn` and this fix with it: the task is then done by deletion of its producer."
-             :must-read #{seon.error/prepare seon.error/commit-tx}
-             :evidence #{"b233d838f"}}
  #:seon.task{:name "error-notifications-to-root-are-printed-maps"
              :kind :function
              :intent "Error notifications to root are outside messages whose text is a pr-str of the error map (a second printer), delivered through :seon.config.error/escalate-to. Done when the notification carries the error's identity (signature, task, handle) as data and no printed copy."

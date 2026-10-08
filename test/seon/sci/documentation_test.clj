@@ -399,8 +399,7 @@
        (is (contains? (publics) 'clojure.set/union)
            "the public names come from SCI's namespace table, not an evaluated ns-publics call")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.lookup/doc-shows-empty-sections-and-one-return-per-arity}}
-  doc-leaves-out-empty-sections-and-says-a-shared-return-once
+(deftest doc-leaves-out-empty-sections-and-says-a-shared-return-once
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)

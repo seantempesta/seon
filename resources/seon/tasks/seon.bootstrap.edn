@@ -1,14 +1,4 @@
-[#:seon.task{:name "help-teaches-the-wrong-tools"
-             :kind :function
-             :intent "(help) lists 'Tools: my.message, my.turn, seon.bootstrap, seon.db', derived from user's requires, omitting my.program, my.test, my.issue, my.plan and my.agent, and still teaches :out/:result and 'results arrive in your NEXT turn', which the MCP entrance does not show; apropos and find-doc are not referred in user as at clojure.main."
-             :must-read #{seon.bootstrap/help-value}
-             :evidence #{"docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
-                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
- #:seon.task{:name "help-does-not-teach-how-a-test-names-a-task"
-             :kind :function
-             :intent "`seon.bootstrap/help-value` teaches no form showing how a test names the task it proves, the only way a test proves a task. Done when one of its `:seon.help/lines` teaches a deftest form whose name carries `:seon/tasks` metadata naming a task as an ns/name symbol, e.g. (deftest ^{:seon/tasks #{'comp.text/slug-is-lowercase}} slug-lowercases (is (= \"a-b\" (comp.text/slug \"A B\")))), as a line of its own beside the other taught forms."
-             :must-read #{seon.bootstrap/help-value seon.help-test/help-teaches-how-a-deftest-names-its-task}}
-#:seon.task{:name "help-evidence-test-red-on-head"
+[#:seon.task{:name "help-evidence-test-red-on-head"
              :kind :function
              :intent "`seon.help-test/help-evidence-tracks-its-code-version` is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption."
              :must-read #{seon.bootstrap/help-value}
@@ -17,25 +7,4 @@
              :kind :function
              :intent "help-value teaches (`my.agent/done`) as the required last form, though `my.agent/done` takes a request map and documents (`my.agent/done` {}); `seon.cluster.agent/render-situation-ai` says every run ends with `my.turn/complete` or `my.turn/wait`. Done when one session-end form is taught everywhere and a test resolves every form help shows."
              :must-read #{seon.bootstrap/help-value seon.cluster.agent/render-situation-ai my.agent/done}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
- #:seon.task{:name "help-is-flagged-as-a-large-value"
-             :kind :function
-             :intent "(help) answers 1,105 tokens, over the 1,000-token :large-value bound, so its own reply carries the finding telling the agent its query returns more than it should (default 2026-10-08); every model agent's opening evaluates it. Done when help is at most 300 tokens and platform values raise no misuse finding, asserted through MCP."
-             :must-read #{seon.bootstrap/help-value seon.repl/findings}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
- #:seon.task{:name "help-teaches-a-placeholder-namespace-for-defn"
-             :kind :function
-             :intent "(help) teaches `(in-ns 'my.agents.name)` before defn; a deepseek-flash agent whose task named `live.text/slug` read it and evaluated (in-ns 'my.program), then defined slug in user (live-agent run, default 6cc5dbbb4, 2026-10-08). Done when help says to change a function in the namespace that owns it, e.g. (in-ns 'the.task.ns) then (defn f ...), with no placeholder that names a real namespace prefix."
-             :must-read #{seon.bootstrap/help-value}}
- #:seon.task{:name "help-teaches-a-placeholder-checkout-path"
-             :kind :function
-             :intent "(help) shows (my.program/write-branch! {:seon.fn/root \"/path/to/checkout\"}) as a line of its own, and a deepseek-flash agent copied it verbatim in the pass after its proof went green (live-agent run 4, default e1a71b7c8, agent live-flash-4, 2026-10-08), spending its last turn on a call that refused (\"Each change needs its source and one file.\", offending live.text/initials, a REPL-defined function with no file). Help teaches an invented path as if it were the call to make, and write-back is root's step on real backlog tasks, not a scratch task's. Done when help names no placeholder path an agent can copy as-is and says when write-back applies, with a bootstrap test asserting no help line carries a placeholder value."
-             :must-read #{seon.bootstrap/help-value my.program/write-branch!}} #:seon.task{:name "the-help-reply-is-not-data"
-             :kind :function
-             :intent "(help) answered #:seon.repl{.. :value You are an agent ..}: its AI render joined the help lines into one string, spliced raw into :value, so the reply did not read as EDN (context corpus row 1, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Done when the render returns the lines as data and the (help) reply reads as one form whose value is the help lines."
-             :must-read #{seon.bootstrap/render-help-ai seon.context/model-context}}
- #:seon.task{:name "help-teaches-no-schema-registration"
-             :kind :function
-             :intent "Given the prose task \"Register the schema :comp.order/qty as a positive integer\", bench agents (E1 T2 prose, 1 of 5 green, 2026-10-09) searched `dir seon.schema` (about a hundred entries), unrelated docs and regex filters over ns-publics; bench-defaults-quantity-schema-then-function-prose-76167b-4 found `seon.schema/register!` on its sixth and last call. The help names no schema registration form, while the typed wording, which names it, went 4 of 5 green. Done when the help teaches the installed registration form in one line and a prose schema task finds it from the help alone."
-             :must-read #{seon.bootstrap/help-value seon.schema/register!}
-             :evidence #{"docs/research/agent-platform/2026-10-08/bench/e0-e1.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

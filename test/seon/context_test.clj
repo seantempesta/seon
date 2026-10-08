@@ -167,8 +167,7 @@
        (is (every? :my.message/at items))
        (is (some #{'(my.message/inbox)} (:seon.render/operations unread)))))))
 
-(deftest ^{:seon/tasks #{'seon.context/a-handled-message-stays-unread-in-every-later-pass}}
-  a-message-a-closed-turn-handled-leaves-the-unread-section
+(deftest a-message-a-closed-turn-handled-leaves-the-unread-section
   (test-support/seed-cluster! *connection* "shown-once")
   (test-support/transacted! *connection* (agent/creation-tx {:seon.agent/id "shown-once"
                                                              :seon.ns/name 'my.agents.shown-once

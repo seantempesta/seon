@@ -24,8 +24,7 @@
   [code agent-id running]
   (:seon.repl/value (last (filter #(and (map? %) (contains? % :seon.repl/value)) (shown code agent-id running)))))
 
-(deftest ^{:seon/tasks #{'my.test/a-check-no-test-reaches-reads-as-a-failure}}
-  a-check-over-a-change-no-test-reaches-names-it-and-gives-no-verdict
+(deftest a-check-over-a-change-no-test-reaches-names-it-and-gives-no-verdict
   (support/with-running-agent
    (fn [running agent-id _]
      (let [sym (symbol (str "my.agents." agent-id) "unreached-fn")
@@ -35,8 +34,7 @@
        (is (= [] (:seon.test/results check)))
        (is (not (contains? check :seon.test/passed?)))))))
 
-(deftest ^{:seon/tasks #{'my.test/check-in-the-defining-pass-says-the-test-does-not-exist}}
-  a-check-naming-a-definition-of-its-own-request-runs-it-after-recording
+(deftest a-check-naming-a-definition-of-its-own-request-runs-it-after-recording
   (support/with-running-agent
    (fn [running agent-id _]
      (let [namespace-name (str "my.after" (id/id))

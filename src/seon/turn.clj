@@ -2067,8 +2067,7 @@
   "True when the latest closed provider reply ended no session and either evaluated a form or is the
   first reply with no evaluated form after one that did: a reply of prose or only read errors gets one
   more call, whose context shows its diagnostic, and a second such reply in a row waits."
-  {:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}
-   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [latest-t (db/q '[:find (max ?t) . :in $ ?agent-id
                          :where [?agent :seon.agent/id ?agent-id]

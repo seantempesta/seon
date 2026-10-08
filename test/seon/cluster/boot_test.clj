@@ -490,8 +490,7 @@
                   (is (= :acquired (:seon.probe/value acquired))))))))))))
 
 (deftest ^{:seon.test/long "Boots one development cluster and resets it in this JVM: two real start! calls on a published private store."
-           :seon.test/long-ms 240000
-           :seon/tasks #{'seon.cluster.boot/a-reset-drops-the-development-overlay}}
+           :seon.test/long-ms 240000}
   a-reset-development-cluster-keeps-its-overlay
   (with-published-root!
     (fn [root _ _]

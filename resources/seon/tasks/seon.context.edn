@@ -16,10 +16,6 @@
              :intent "The MCP reply for a branch agent's evaluation carries :errors (its open errors with signature, operation and count); the same agent's next model request carries none (repl-dogfood 2026-09-27, then the old prompt; still true of the model context since CX-1). An error is delivered in the reply of the agent that can act on it, the MCP reply and the next model request reading the same saved observation. Done when the model request shows the same error observation the MCP reply shows."
              :must-read #{seon.context/model-context seon.repl/response}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
- #:seon.task{:name "a-handled-message-stays-unread-in-every-later-pass"
-             :kind :function
-             :intent "Root's message cebe98c3e8bc woke agent live-flash-4 (live-agent run 4, default e1a71b7c8, branch :agent-13d811644932, 2026-10-08); its first model turn recorded the wake in :seon.turn/handled, yet `seon.context/current-state` kept the message under :seon.context/unread in the block of all four model passes and after the task went green, since the model never called (my.message/received! \"cebe98c3e8bc\"). The same instruction is resent on every pass and reads as new work. Done when a message the agent's model turn has been shown appears in the block once, not on later passes, and a test asserts the second pass's block has no :seon.context/unread for it."
-             :must-read #{seon.context/current-state my.message/received! seon.turn/next-agent-work}}
  #:seon.task{:name "proofs-of-one-task-allocates-close-to-a-gigabyte"
              :kind :function
              :intent "(`seon.context/proofs` (`seon.db/db`) 'seon.db/the-missing-connection-refusal-has-no-fix-key) at root's SCI REPL allocated 887 MB in 403 ms for one proof (the :large-allocation finding; fanout-3 run, default 324461975, 2026-10-09); the next call for another one-proof task allocated 48 MB in 24 ms. Done when one task's proofs cost in proportion to its proofs, measured with `seon.profile/measure` on a first call."

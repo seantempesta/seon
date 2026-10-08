@@ -107,8 +107,7 @@
          (is (= [7 7] (answered (str in-shared "[(h5) (g5)]") agent-id running)))
          (is (= [8 8] (answered (str in-shared "(defn g5 [] 8) [(h5) (g5)]") agent-id running))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass}}
-  an-inherited-caller-sees-a-same-pass-redefinition
+(deftest an-inherited-caller-sees-a-same-pass-redefinition
   ;; The fixture agent holds the cluster head's custody; the other agents
   ;; created there are other writers of the same branch.
   (support/with-running-agent
@@ -141,8 +140,7 @@
      :errored (into #{} (mapcat #(get-in tests [% :seon.turn.loop/errored]))
                     [:seon.turn.loop/proofs :seon.turn.loop/reaching])}))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}}
-  an-inherited-test-sees-the-branch-redefinition
+(deftest an-inherited-test-sees-the-branch-redefinition
   ;; The fixture agent holds the cluster head's custody (main); a new agent id
   ;; gets its own branch off it on first use.
   (support/with-running-agent
@@ -162,8 +160,7 @@
            (is (not (contains? red 'scratch.inherited-test-test/g9-is-two)))
            (is (nil? passed?) "nothing changed, so the step executed nothing and shows nothing")))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}}
-  an-inherited-test-sees-the-branch-redefinition-of-a-contracted-callee
+(deftest an-inherited-test-sees-the-branch-redefinition-of-a-contracted-callee
   ;; The live shape: main's callee has a contract, so the branch's base arms
   ;; its own copy of it; main's test must still call the branch's definition.
   (support/with-running-agent
@@ -213,8 +210,7 @@
        " (when-let [[member] (reduce (fn [_ member] (when-not (m/validate child member) (reduced [member]))) nil value)]"
        " {:schema child :value member ::collection-type schema-type}))))"))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-file-derived-proof-never-sees-the-branch-redefinition}}
-  a-file-test-runs-the-branch-redefinition-of-a-file-function
+(deftest a-file-test-runs-the-branch-redefinition-of-a-file-function
   (support/with-running-agent
    (fn [running agent-id _]
      (let [{:keys [red errored]} (step-red descending-member-problem (str "branch-" agent-id) running)
@@ -234,8 +230,7 @@
        " stop (str/index-of lines \". \")]"
        " (not-empty (if stop (subs lines 0 (inc stop)) lines))))"))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-file-test-has-no-executable-var-on-a-live-agent-branch}
-           :seon.test/long "the running-agent fixture (2.9 s) and one redefining eval request (2.8 s: test step 1.4 s running the 5 reaching tests, settle 0.5 s; seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice) measured 5.7 s in a check JVM"
+(deftest ^{:seon.test/long "the running-agent fixture (2.9 s) and one redefining eval request (2.8 s: test step 1.4 s running the 5 reaching tests, settle 0.5 s; seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice) measured 5.7 s in a check JVM"
            :seon.test/long-ms 12000}
   a-file-proof-aliasing-its-subject-runs-green-on-the-branch
   ;; `seon.render.ns-test` requires its subject as `sut` and tags its deftests
@@ -248,8 +243,7 @@
            "the file proof ran interpreted against the branch's definition and passed")
        (is (true? passed?) "every test reaching the redefinition ran green")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-branch-redefinition-never-reaches-its-inherited-callers}}
-  an-inherited-file-caller-sees-the-branch-redefinition-of-its-helper
+(deftest an-inherited-file-caller-sees-the-branch-redefinition-of-its-helper
   (support/with-running-agent
    (fn [running agent-id _]
      (let [brancher (str "branch-" agent-id)]
@@ -258,8 +252,7 @@
        (testing "and so does the next eval request"
          (is (= "branch" (answered shown-doc-line brancher running))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice}}
-  promoting-a-closure-costs-its-walk-and-the-callers-called
+(deftest promoting-a-closure-costs-its-walk-and-the-callers-called
   ;; A first redefinition binds the compiled callers of its reverse closure in
   ;; the context; a caller is interpreted only when it is called.
   (support/with-running-agent
@@ -278,8 +271,7 @@
        (is (< 2000 (:callers hub)) "the hub is called from most of the program")
        (is (< (:seon.profile/ms hub) 1000) "promoting a hub's closure is sub-second")))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}}
-  a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
+(deftest a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [requires #(set (:seon.ns/requires (db/pull @connection [:seon.ns/requires] [:seon.ns/name %])))]

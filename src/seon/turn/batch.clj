@@ -585,8 +585,7 @@
 (defn form-facts
   "A program change as transaction data on `db`, or the refusal of a removal
   whose referrers survive, or of a require that would close a namespace cycle."
-  {:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}
-   :malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.batch/change]
+  {:malli/schema [:=> [:cat :seon.batch/request :seon.db/database-value :seon.batch/change]
                   [:or :seon.store/transaction-data :seon.program/mutation-refused-error :seon.error/value]]}
   [{{ctx :seon.sci.eval/ctx} :seon.batch/world :as request} db {:seon.batch/keys [entities removals schema-keys namespaces]}]
   (let [stx (schema-tx request db schema-keys)

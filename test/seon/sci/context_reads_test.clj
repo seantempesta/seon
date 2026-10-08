@@ -35,8 +35,7 @@
   ;; redefinition shares its Var with that base
   (is true))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee}
-           :seon.test/long "two MCP eval requests, each running a test body that spins 400 ms in its test step"
+(deftest ^{:seon.test/long "two MCP eval requests, each running a test body that spins 400 ms in its test step"
            :seon.test/long-ms 15000}
   a-branch-redefinition-of-a-loaded-test-runs-under-its-own-bound
   ;; seon.test reads the test Var's `:seon.test/long-ms` (the SCI time limit)

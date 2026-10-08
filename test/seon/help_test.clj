@@ -78,9 +78,7 @@
                         "content"))]
     (or (first (filter #(str/includes? % ":seon.repl/result") texts)) (first texts))))
 
-(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-the-wrong-tools
-                         'seon.bootstrap/help-is-flagged-as-a-large-value}}
-  help-names-only-installed-forms
+(deftest help-names-only-installed-forms
   (support/with-running-agent
    (fn [running agent-id _]
      (let [text (agent-text "(help)" agent-id running)
@@ -98,16 +96,14 @@
        (is (not (str/includes? text ":large-value")) "help raises no misuse finding")
        (is (<= (tokens/estimate text) 400) "help stays small")))))
 
-(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-a-placeholder-namespace-for-defn}}
-  help-teaches-defn-in-the-namespace-that-owns-the-function
+(deftest help-teaches-defn-in-the-namespace-that-owns-the-function
   (with-help-agent
    (fn [connection]
      (let [text (str/join "\n" (:seon.help/lines (bootstrap/help-value @connection "help")))]
        (is (not (re-find #"in-ns '(my|user)[. ]" text)) "no placeholder or real namespace prefix is taught")
        (is (str/includes? text "the namespace that owns it") "the owner's namespace is the lesson")))))
 
-(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-a-placeholder-checkout-path}}
-  help-teaches-no-placeholder-value
+(deftest help-teaches-no-placeholder-value
   (with-help-agent
    (fn [connection]
      (let [lines (:seon.help/lines (bootstrap/help-value @connection "help"))
@@ -117,16 +113,14 @@
        (is (not-any? #(= 'my.program/write-branch! (first %)) forms)
            "write-back is root's step, not a call help teaches a worker")))))
 
-(deftest ^{:seon/tasks #{'seon.bootstrap/the-help-reply-is-not-data}}
-  the-help-reply-reads-as-data-its-value-the-help-lines
+(deftest the-help-reply-reads-as-data-its-value-the-help-lines
   (support/with-running-agent
    (fn [running agent-id connection]
      (is (= (:seon.help/lines (bootstrap/help-value @connection agent-id))
             (:seon.repl/value (support/reply (agent-text "(help)" agent-id running))))
          "the reply is one EDN form whose value is the help lines"))))
 
-(deftest ^{:seon/tasks #{'seon.bootstrap/help-teaches-no-schema-registration}}
-  help-teaches-the-schema-registration-form
+(deftest help-teaches-the-schema-registration-form
   (support/with-running-agent
    (fn [running agent-id _]
      (let [lines (:seon.repl/value (support/reply (agent-text "(help)" agent-id running)))
@@ -144,8 +138,7 @@
        (is (not-any? leaves [:seon.db/db :my.program/context 'database 'context])
            "no arglist names a supplied world member")))))
 
-(deftest ^{:seon/tasks #{'seon.bootstrap/help-does-not-teach-how-a-test-names-a-task}}
-  help-teaches-how-a-deftest-names-its-task
+(deftest help-teaches-how-a-deftest-names-its-task
   (let [lines (:seon.help/lines (seon.bootstrap/help-value (seon.db/db) "help"))]
     (is (some #(clojure.string/includes? % "(deftest ^{:seon/tasks #{'") lines)
         "help teaches a deftest whose name carries :seon/tasks")))

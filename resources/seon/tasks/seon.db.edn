@@ -1,10 +1,4 @@
-[#:seon.task{:name "the-query-wrapper-costs-36x-datahike"
-             :kind :function
-             :intent "`seon.db/q` costs 107 us and 472 KB for a two-clause query against d/q's 3 us and 6 KB (36x time, 76x allocation): query-patterns/parsed-nodes are tree-seq walked 5 times per call, query-input-values 4 times, and armed private checks add about 70 us (encode-query-request 18, decode-query-result 16, query-value-type-error 12, query-attribute-error 9 us). A trivial root run issues 62 q and 43 pull, 10-35 ms. Compute patterns and input values once per call; db? was fixed in the fork (cefd8a2bf)."
-             :must-read #{seon.db/q}
-             :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"
-                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:name "call-reach-is-recomputed-per-render"
+[#:seon.task{:name "call-reach-is-recomputed-per-render"
              :kind :function
              :intent "stored-call-reach is recomputed on every render call (about 4 ms each; 2.2 GB in one debug-page window). Memoize it per commit and call identity."
              :must-read #{seon.db/stored-call-reach seon.render/render-call}

@@ -6,8 +6,7 @@
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.test.runner/admission-filters-the-whole-program-history}}
-  an-admission-confirms-the-tested-digest-without-deriving-the-program
+(deftest an-admission-confirms-the-tested-digest-without-deriving-the-program
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "admission-revisions")

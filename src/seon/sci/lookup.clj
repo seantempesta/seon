@@ -150,8 +150,7 @@
   cases, Costs, Recommendations, Errors, Known issues, any `## ` heading) or the
   end; the sections around it stay in the body. `Example: (form)` on one line
   yields that form."
-  {:seon/tasks #{'seon.sci.lookup/doc-shows-empty-sections-and-one-return-per-arity}
-   :malli/schema [:=> [:cat :string] [:map [:summary :string] [:body {:optional true} [:string {:min 1}]]
+  {:malli/schema [:=> [:cat :string] [:map [:summary :string] [:body {:optional true} [:string {:min 1}]]
                                       [:example {:optional true} [:string {:min 1}]]]]}
   [docstring]
   (let [lines (mapv str/trim (str/split-lines (or docstring "")))

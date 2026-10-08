@@ -327,8 +327,7 @@
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
     (select-keys (support/mcp-reply result) [:seon.repl/value :seon.repl/error])))
 
-(deftest ^{:seon/tasks #{'my.program/diff-with-a-map-argument-is-refused-as-a-context}}
-  a-map-argument-lacking-world-members-is-filled-from-the-world
+(deftest a-map-argument-lacking-world-members-is-filled-from-the-world
   (support/with-running-agent
    (fn [running agent-id _]
      (let [plain (shown-value "(my.program/diff)" agent-id running)
@@ -337,8 +336,7 @@
        (is (not (contains? with-map :seon.repl/error)) "a map missing world members is not refused as a context")
        (is (= plain with-map) "it answers the same difference")))))
 
-(deftest ^{:seon/tasks #{'my.program/source-shows-code-as-an-escaped-string}}
-  a-declarations-source-is-shown-as-code-not-as-a-string
+(deftest a-declarations-source-is-shown-as-code-not-as-a-string
   (support/with-running-agent
    (fn [running agent-id _]
      (let [shown (:seon.repl/value (shown-value "(my.program/source 'my.program/source)" agent-id running))]
@@ -346,8 +344,7 @@
        (is (and (seq? shown) (= 'defn (first shown))) "it reads as the definition's own code")
        (is (= 'source (second shown)))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/an-unbound-io-function-names-no-alternative}}
-  an-unbound-host-io-function-names-the-seon-tool
+(deftest an-unbound-host-io-function-names-the-seon-tool
   (support/with-running-agent
    (fn [running agent-id _]
      (let [error (:seon.repl/error (shown-value "(slurp \"project.clj\")" agent-id running))]

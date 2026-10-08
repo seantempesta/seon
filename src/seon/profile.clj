@@ -332,8 +332,7 @@
 
 (defn cells
   "Every live cell, host and context."
-  {:seon/tasks #{'seon.profile/reading-the-profile-validates-every-cell}
-   :malli/schema [:=> [:cat] [:vector :seon.profile/held-cell]]}
+  {:malli/schema [:=> [:cat] [:vector :seon.profile/held-cell]]}
   []
   ;; a synchronized set's toArray holds its own lock
   (into [] (mapcat (fn [^java.util.Set members] (.toArray members)))
@@ -517,8 +516,7 @@
 
   One read of the live cells, then one pass over them reading their counters
   directly into one primitive array: no armed call per cell, three longs each."
-  {:seon/tasks #{'seon.profile/begin-validates-every-cell-with-armed-predicates}
-   :malli/schema [:=> [:cat] :seon.profile/mark]}
+  {:malli/schema [:=> [:cat] :seon.profile/mark]}
   []
   (let [held (cells)
         sums (long-array (* 3 (count held)))]

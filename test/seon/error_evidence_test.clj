@@ -32,8 +32,7 @@
     {:capped? (:seon.error/capped? occurrence)
      :inline (:seon.error/data-edn occurrence)}))
 
-(deftest ^{:seon/tasks #{'seon.error/commit-tx-stored-the-whole-admitted-data-edn-over-the-fitted-one}}
-  a-capped-turn-fault-says-it-is-capped
+(deftest a-capped-turn-fault-says-it-is-capped
   (support/with-database
    (fn [connection]
      ;; cluster-handle reads its dials from the named cluster's effective

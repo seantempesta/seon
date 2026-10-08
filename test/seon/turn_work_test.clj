@@ -811,8 +811,7 @@
          evaluations))
   (support/transacted! connection [[:db/add [:seon.turn/id id] :seon.turn/closed-tx "datomic.tx"]]))
 
-(deftest ^{:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}}
-  a-prose-only-reply-gets-one-more-call-and-a-second-waits
+(deftest a-prose-only-reply-gets-one-more-call-and-a-second-waits
   ;; A fixture-model reply with no form settles one row whose read failed: an
   ;; error and no duration, as `seon.turn/read-row` settles it unrun.
   (with-database

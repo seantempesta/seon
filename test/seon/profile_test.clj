@@ -282,9 +282,7 @@
       (is (nat-int? (:seon.db.transaction/ms observed)))
       (is (= {} (profile/transaction-observation world)) "the next observation holds only work done since"))))
 
-(deftest ^{:seon/tasks #{'seon.profile/reading-the-profile-validates-every-cell
-                         'seon.profile/begin-validates-every-cell-with-armed-predicates}}
-  reading-the-profile-checks-no-cell-again
+(deftest reading-the-profile-checks-no-cell-again
   ;; The counters are read directly: the per-cell predicates' own cells are
   ;; the observation, and none of them may move while the profile is read.
   (let [predicates '#{seon.profile/adder? seon.profile/accumulator? seon.profile/histogram?

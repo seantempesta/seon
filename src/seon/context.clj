@@ -161,8 +161,7 @@
 (defn task-done?
   "True when the task `agent-id` holds has proofs and all are green on `database`, the agent's branch:
   the task is done for the agent, pending root's merge, and the turn loop opens no continuation for it."
-  {:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}
-   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :boolean]}
   [database agent-id]
   (let [held (held-task database agent-id)]
     (boolean (and held (not (:seon.error/at held))
@@ -171,8 +170,7 @@
 (defn- unshown
   "The inbox `items` no turn of `agent-id` has handled: a closed model turn's
   settlement records each message its pass was shown (`seon.turn/close-call`)."
-  {:seon/tasks #{'seon.context/a-handled-message-stays-unread-in-every-later-pass}
-   :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :my.message/inbox]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :my.message/inbox]
                   [:or :my.message/inbox :seon.error/value]]}
   [database agent-id items]
   (let [handled (db/q '[:find [?id ...] :in $ ?agent-id

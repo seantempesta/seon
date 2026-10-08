@@ -1699,8 +1699,7 @@
                                                                   :seon.program/not-found 'seon.db/pul})
                                 [:seon.error/in-namespace 'seon.db]))))))
 
-(deftest ^{:seon/tasks #{'seon.error/a-missing-key-message-reads-badly}}
-  a-missing-key-and-an-equals-schema-read-as-one-expectation
+(deftest a-missing-key-and-an-equals-schema-read-as-one-expectation
   (let [missing (:seon.error/expected-description
                  (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:at inst?]] {})))
                                               :seon.error/path [:at] :seon.error/argument "value" :seon.error/parent {}}))

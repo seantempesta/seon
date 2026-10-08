@@ -41,9 +41,7 @@
 
   Example:
   (my.test/check {:seon.test/changed ['my.turn/complete]})"
-  {:seon/tasks #{'my.test/a-check-no-test-reaches-reads-as-a-failure
-                 'my.test/check-in-the-defining-pass-says-the-test-does-not-exist}
-   :malli/schema [:=> [:cat :my.test/check-request]
+  {:malli/schema [:=> [:cat :my.test/check-request]
                   [:or :seon.test/run-result :my.test/unreached-result :my.test/after-recording-result
                    :seon.error/value]]}
   [{context :my.program/context connection :seon.db/connection defined :seon.batch/defined :as request}]

@@ -3009,8 +3009,7 @@
            (recur (dec tries))))
        @ledger)))))
 
-(deftest ^{:seon/tasks #{'seon.turn/the-turn-loop-stops-on-prose-and-runs-past-green}
-           :seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
+(deftest ^{:seon.test/long "Four setup evaluations, each followed by the step's test worlds, then three fixture-model passes."
            :seon.test/long-ms 60000}
   a-model-request-is-help-own-exchanges-and-the-block-last
   (test-support/with-running-agent

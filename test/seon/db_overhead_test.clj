@@ -43,7 +43,7 @@
            :seon.db-overhead/datoms (count (:tx-data report))
            :seon.db-overhead/entities (count (into #{} (map :e) (:tx-data report))))))
 
-(deftest ^{:seon/tasks #{'seon.db/the-query-wrapper-costs-36x-datahike}} query-preparation-has-bounded-armed-work
+(deftest query-preparation-has-bounded-armed-work
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)

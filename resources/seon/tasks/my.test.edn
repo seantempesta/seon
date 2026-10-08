@@ -8,16 +8,6 @@
              :intent "`my.test/run-owned` answers about 800 tokens for one test, with a duplicated :out. Done when the reply is focused through the render (one output, the verdict, the failing assertions' data) and its token size is asserted in a regression."
              :must-read #{my.test/run-owned}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/repl-audit--change.md"}}
- #:seon.task{:name "check-in-the-defining-pass-says-the-test-does-not-exist"
-             :kind :function
-             :intent "(deftest inc3-fails ...) (`my.test/check` {`:seon.test/changed` ['scratch.msgs/inc3-fails]}) in one pass answers \"Changed identity has no definition, history or incoming edge.\" with :expected :complete-comparable-program-evidence (default 2026-10-08); the deftest's facts settle with the pass, and the same call next pass runs it. The defn and deftest record at settlement, so the check cannot see them; also hit by lane impl-hook, RF-4 at 3c15a3434. Done per the owner ruling of 2026-10-08 (a same-submission check runs right after recording, superseding MS-11b): the check answers `:my.test/after-recording` with the names the request defined, no error, and the pass's test step runs their tests right after the one recording transaction, its results in the same reply."
-             :must-read #{my.test/check}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
- #:seon.task{:name "a-check-no-test-reaches-reads-as-a-failure"
-             :kind :function
-             :intent "(`my.test/check` {`:seon.test/changed` [sym]}) for a symbol that no test reaches answers :passed? false with empty :results (lane impl-hook, RF-4 at 3c15a3434), which reads as a failure. Correct: the answer says as data that no test reaches the symbol, distinct from a red run. Proof: a my.test-test deftest (to be written) checking an unreached symbol asserts that datum and no :passed? false."
-             :must-read #{my.test/check}
-             :evidence #{"docs/seon/schedule/cards/RF-4.md"}}
  #:seon.task{:name "test-output-and-an-empty-reaching-run-reach-the-reply"
              :kind :function
              :intent "A `my.test/check` reply carries clojure.test's \"Testing ns\" (and FAIL) lines in `:out`, printed outside the value printer; and the automatic test step reports `:seon.turn.loop/reaching {:seon.test/passed? false :seon.turn.loop/red []}` after an eval request on a fresh agent branch with no change (both observed on default 2026-10-08, agent integrate-2-probe). A one-test check there allocated 2.5 GB in 1.67 s. Done when the report reaches the agent only as data and a reaching run with nothing to run says so instead of `passed? false`. (The pilot's other half, a test named as changed being refused, no longer reproduces.)"
