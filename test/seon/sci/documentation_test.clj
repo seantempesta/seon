@@ -2,6 +2,7 @@
   (:require [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [datahike.api :as d]
             [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
@@ -396,3 +397,24 @@
   (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/open)"}
          (evaluation/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
   (is (= "" (:example (evaluation/docstring-parts "No example here.")))))
+
+(deftest a-refused-schema-read-keeps-its-refusal
+  ;; A database that has not installed the schema attributes refuses the pull;
+  ;; only a successful read that finds no schema is "unavailable".
+  (let [config {:store {:backend :memory :id (random-uuid)} :schema-flexibility :read}
+        _ (d/create-database config)
+        connection (d/connect config)
+        refused (#'evaluation/schema-documentation (d/db connection) :a/b :a/b)]
+    (is (db/read-refusal? refused))
+    (is (not (contains? refused :seon.sci.eval/documentation-unavailable)))
+    (d/release connection)
+    (d/delete-database config)))
+
+(deftest namespace-publics-need-no-evaluated-form
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           publics #(set (:publics (#'evaluation/namespace-documentation ctx (db/db connection) 'clojure.set 'clojure.set)))]
+       (sci/eval-string* ctx "(ns-unmap 'clojure.core 'ns-publics)")
+       (is (contains? (publics) 'clojure.set/union)
+           "the public names come from SCI's namespace table, not an evaluated ns-publics call")))))

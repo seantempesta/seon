@@ -2059,8 +2059,10 @@
                   [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [database key authored]
   (let [row (db/pull database [:seon.schema/key :seon.schema/form] [:seon.schema/key key])]
-    (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row) (not (:seon.schema/form row)))
-      (if (:seon.schema/form row) row (documentation-unavailable authored))
+    (cond
+      (db/read-refusal? row) row
+      (not (:seon.schema/form row)) (documentation-unavailable authored)
+      :else
       (let [form (edn/read-string (:seon.schema/form row))
             description (when (and (vector? form) (map? (second form))) (:description (second form)))]
         (cond-> {:key key :form form}
@@ -2073,18 +2075,18 @@
                   [:or :seon.sci.eval/namespace-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [ctx database namespace-name authored]
   (let [row (db/pull database [:seon.ns/name :seon.ns/doc] [:seon.ns/name namespace-name])
-        functions (when-not (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+        functions (when-not (db/read-refusal? row)
                     (program-documentation database namespace-name))
         sci-ns (sci/find-ns ctx namespace-name)]
     (cond
-      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
-      (or (:seon.db/invalid-read functions) (:seon.schema/expected-value functions)) functions
+      (db/read-refusal? row) row
+      (db/read-refusal? functions) functions
       (not (or sci-ns (:seon.ns/name row) (seq functions))) (documentation-unavailable authored)
       :else
       (let [doc (or (:seon.ns/doc row) (:doc (meta sci-ns)))
             scoped (when sci-ns
                      (map #(symbol (str namespace-name) (str %))
-                          (keys (sci/eval-form ctx (list 'ns-publics (list 'quote namespace-name))))))]
+                          (keys (sci.namespaces/sci-ns-publics* ctx sci-ns))))]
         (merge (when doc (docstring-parts doc))
                {:publics (vec (sort (distinct (concat (map :seon.fn/sym functions) scoped))))})))))
 
