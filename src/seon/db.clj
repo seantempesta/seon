@@ -9,6 +9,7 @@
             [editscript.core :as editscript]
             [editscript.edit :as editscript.edit]
             [malli.core :as m]
+            [malli.error]
             [datahike.api :as d]
             [datahike.connector :as connector]
             [datahike.connections :as connections]
@@ -345,17 +346,20 @@
 (defn- missing-connection-error
   {:malli/schema [:=> [:cat :string] :seon.schema/validation-refusal]}
   [needed]
-  (schema-refusal
-   'seon.db/missing-connection-error :seon.db/connection nil
-   (str "This read needs " needed
-        ", and no cluster connection is bound on this thread. Custody is "
-        "elided only inside an agent evaluation; elsewhere — a raw or "
-        "virtual thread, a fixture, a REPL — pass the database value or "
-        "connection explicitly, as in (db/pull db selector eid). "
-        "At a development REPL, (seon.cluster.boot/connection \"default\") "
-        "supplies that connection.")
-   {::binding 'seon.db/*conn*
-    ::needed needed}))
+  (assoc
+   (schema-refusal
+    'seon.db/missing-connection-error :seon.db/connection nil
+    (str "This read needs " needed
+         ", and no cluster connection is bound on this thread. Custody is "
+         "elided only inside an agent evaluation; elsewhere — a raw or "
+         "virtual thread, a fixture, a REPL — the database value or "
+         "connection must be passed explicitly.")
+    {::binding 'seon.db/*conn*
+     ::needed needed})
+   :seon.error/fix
+   (str "Pass the database value explicitly, as in (db/pull db selector eid); "
+        "at a development REPL, (seon.cluster.boot/connection \"default\") "
+        "supplies that connection.")))
 
 (defn- current-database-value
   []
@@ -1999,12 +2003,13 @@
   (boolean (get (dbi/-schema (schema-database database)) attribute)))
 
 (defn- registered-attribute-candidates
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :map] :keyword] [:vector :qualified-keyword]]}
   [declarations attribute]
-  (let [same-namespace
-        (when (qualified-keyword? attribute)
-          (filter #(= (namespace attribute) (namespace %))
-                  (keys declarations)))]
-    (into [] (take 12) (or (seq same-namespace) (keys declarations)))))
+  (let [requested (str attribute)]
+    ;; each distance once, then the twelve nearest (ties by name)
+    (into [] (comp (take 12) (map peek))
+          (sort (map (fn [candidate] [(malli.error/levenshtein requested (str candidate)) (str candidate) candidate])
+                     (keys declarations))))))
 
 (defn- attribute-observation
   [database attribute]

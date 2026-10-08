@@ -703,7 +703,7 @@
                                       :seon.schema/validation-refusal result))
     (is (= :seon.db/connection (:seon.schema/expected-value result)))
     (is (nil? (:seon.schema/refused-value result)))
-    (is (str/includes? (:seon.error/message result)
+    (is (str/includes? (:seon.error/fix result)
                        "(seon.cluster.boot/connection \"default\")"))
     (is (= 'seon.db/*conn*
            (get-in result [:seon.error/data :seon.db/binding])))))

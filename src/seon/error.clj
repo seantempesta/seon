@@ -1922,7 +1922,8 @@
     only when it has no arglists), and
     `:seon.instrument/caller`, the call's place in the agent's code.
   - `:seon.error/in-namespace`: when a name was not found, the names its
-    namespace declares nearest to it by spelling, at most eight.
+    namespace declares nearest to it by spelling, at most eight; absent
+    when it declares none.
   - `:seon.error/sources`: where each function the refusal names (a
     removal's callers, at most three) mentions the blocked subject.
   - `:seon.error/chain`: for a thrown failure that is no structural refusal
@@ -1995,7 +1996,9 @@
                                    (:seon.error/chain error))]
                    (when (or (< 1 (count links)) (some :seon.error/data links))
                      links)))
-         arity? (contains? error :seon.instrument/declared-arities)]
+         arity? (contains? error :seon.instrument/declared-arities)
+         ;; an empty name list is no key; a refused read is shown as it is
+         in-namespace (when (and database namespace-name) (names-in database namespace-name missing))]
      (cond-> {}
        (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)
@@ -2015,8 +2018,8 @@
        (assoc :seon.instrument/declared-arities (:seon.instrument/declared-arities error))
        (string? (:seon.instrument/caller error))
        (assoc :seon.instrument/caller (:seon.instrument/caller error))
-       (and database namespace-name)
-       (assoc :seon.error/in-namespace {namespace-name (names-in database namespace-name missing)})
+       (seq in-namespace)
+       (assoc :seon.error/in-namespace {namespace-name in-namespace})
        (and database (seq referenced) (qualified-symbol? (:seon.program/blocked-subject error)))
        (assoc :seon.error/sources (call-lines database referenced (:seon.program/blocked-subject error)))
        chain (assoc :seon.error/chain chain)
