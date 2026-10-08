@@ -307,18 +307,42 @@
     (or (vector? source-identity) (int? source-identity))
     (list 'seon.db/pull (list 'quote '[*]) (list 'quote source-identity))))
 
+(defn path-form
+  "The plain `clojure.core` form that reads `path` (`path-step`s) from
+  `source`: runs of keys and indices as one `get-in`, a map's entry `i` as
+  `(key (nth (seq x) i))` or `(val (nth (seq x) i))`, a set's or seq's member
+  `i` as `(nth (seq x) i)`. The source itself for an empty path.
+
+      (path-form 'result/e7b3 [:rows 0 [:seon.render.data/nth 2]])
+      ;; => (nth (seq (get-in result/e7b3 [:rows 0])) 2)"
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.render.data/path] :seon.schema/value]}
+  [source path]
+  (let [plain? #(or (keyword? %) (nat-int? %))
+        flush (fn [[target run]] (if (seq run) (list 'get-in target run) target))]
+    (flush
+     (reduce (fn [[target run :as state] step]
+               (if (plain? step)
+                 [target (conj run step)]
+                 (let [target (flush state)
+                       [tag index part] step
+                       member (list 'nth (list 'seq target) index)]
+                   [(if (= tag :seon.render.data/entry)
+                      (list (if (= part :seon.render.data/key) 'key 'val) member)
+                      member)
+                    []])))
+             [source []]
+             path))))
+
 (defn- requery-form
   [source-identity path]
   (when-let [source (requery-source source-identity)]
-    (list 'seon.print/value-at source
-          (if (some #(or (symbol? %) (coll? %)) path)
-            (list 'quote path) path))))
+    (let [form (path-form source (vec path))]
+      (if (seq? form) form (list 'get-in form [])))))
 
 (defn continuation
-  "The copyable form that reads what one elision omitted, from its next
-  offset: `(drop n …)` for members, `(subs … n)` for characters, over the
-  cut's path reached with plain `get-in` when every step is a key or index
-  and with `seon.print/value-at` when a step is typed. Nil when the cut has no
+  "The copyable `clojure.core` form that reads what one elision omitted,
+  from its next offset: `(drop n …)` for members, `(subs … n)` for
+  characters, over the cut's path (`path-form`). Nil when the cut has no
   source to read from (its `::requery-refusal` says why). A cut of a whole
   collection at the root is the handle itself, a symbol, which reads it all.
 
@@ -328,10 +352,7 @@
   [{::keys [requery-id elision-unit] path :seon.render.data/path
     next-offset :seon.render.data/next-offset}]
   (when-let [source (requery-source requery-id)]
-    (let [path (vec path)
-          target (cond (empty? path) source
-                       (every? #(or (keyword? %) (nat-int? %)) path) (list 'get-in source path)
-                       :else (list 'seon.print/value-at source (list 'quote path)))
+    (let [target (path-form source (vec path))
           offset (or next-offset 0)]
       (cond (zero? offset) target
             (= :characters elision-unit) (list 'subs target offset)

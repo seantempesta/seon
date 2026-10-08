@@ -472,8 +472,7 @@
       ;; One cut face carrying the form that reads the rest (owner 2026-09-27).
       (is (str/includes? text (str "…" (- (count raw) kept) " (drop " kept " result/e0123456789ab)]")))
       (is (not (str/includes? text ";;")) "no legend: the cut's own form says how to read on")
-      (is (= '(seon.print/value-at result/e0123456789ab [])
-             (:seon.print/requery-form elision))))
+      (is (= '(get-in result/e0123456789ab []) (:seon.print/requery-form elision))))
     (is (str/includes? html "seon-print-elision")
         "HTML shows the one selection, not a second unbounded one")
     (is (not (str/includes? html ">99<")))))
@@ -646,7 +645,7 @@
     (is (= raw (edn/read-string text)) "the literal reads back as the string")
     (is (= 2 (count (str/split-lines text))) "a newline stays a line break")
     (is (= [:payload/text] (:seon.render.data/path node)))
-    (is (= '(seon.print/value-at result/e0123456789ab [:payload/text])
+    (is (= '(get-in result/e0123456789ab [:payload/text])
            (:seon.print/requery-form node)))
     (is (= (count large) (:seon.render.data/total node)))
     (is (pos? (:seon.print/omitted node)))
@@ -796,7 +795,6 @@
        (is (= (count (:seon.print/prefix cut))
               (:seon.render.data/next-offset cut)))
        ;; And the reader can ask again rather than being told a refusal.
-       (is (= 'seon.print/value-at (first (:seon.print/requery-form cut))))
        (evaluation/bind-result! ctx 'result/e0123456789ab (:seon.sci.admit/value result))
        (is (= (:seon.sci.admit/value result)
               (sci/eval-form ctx (:seon.print/requery-form cut))))))))
@@ -1412,7 +1410,7 @@
       (is (str/includes? (value/render-ai (probe-unit (apply str (repeat 5000 "ab"))))
                          " (subs result/e0123456789ab "))
       (let [text (value/render-ai (probe-unit (into (sorted-map) (map (fn [i] [i i])) (range 10))))]
-        (is (str/includes? text "…7 result/e0123456789ab}"))
+        (is (str/includes? text "…7 (drop 3 result/e0123456789ab)}"))
         (is (not (str/includes? text ":seon.render.value/failure")))))
     (clojure.test/testing "seon.print/full prints the value whole and says so"
       (let [whole (value/prepare (probe-unit (print/full raw)))]

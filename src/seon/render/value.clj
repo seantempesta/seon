@@ -656,6 +656,16 @@
            (and (string? v) (> (count v) scalar-bound)) 1
            :else 0)]))
 
+(defn- sorts?
+  "True when `held-order` shows `x`'s members in an order of its own rather
+  than its `seq` order: an exact map or hash set of at most 64 exact keywords."
+  {:malli/schema [:=> [:cat :seon.schema/value [:fn clojure.core/ifn?]] :boolean]}
+  [x key-of]
+  (boolean
+   (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet clojure.lang.PersistentArrayMap} (class x))
+        (<= (count x) sorted-bound)
+        (every? #(identical? (class (key-of %)) clojure.lang.Keyword) x))))
+
 (defn- held-order
   "Members in held order, each `[index member]` with `index` its place in
   `seq`. An exact map or hash set of at most 64 exact keywords shows identity
@@ -666,9 +676,7 @@
   [x identity-attributes key-of]
   (let [members (map-indexed vector x)
         c (class x)]
-    (if (and (#{clojure.lang.PersistentHashMap clojure.lang.PersistentHashSet clojure.lang.PersistentArrayMap} c)
-             (<= (count x) sorted-bound)
-             (every? #(identical? (class (key-of (second %))) clojure.lang.Keyword) members))
+    (if (sorts? x key-of)
       (sort-by (fn [[index member]]
                  (let [k (key-of member)]
                    (into (member-rank member identity-attributes k)
@@ -738,6 +746,7 @@
         {:kind :map :face ::print/map :open "{" :close "}" :total (count x) :indexed? true
          :lookup? lookup?
          :entity? (boolean (and lookup? (or (find x :db/id) (some #(find x %) identity-attributes))))
+         :sorted? (sorts? x key)
          :members (held-order x identity-attributes key)})
       (#{clojure.lang.PersistentVector clojure.lang.MapEntry} c)
       {:kind :coll :face ::print/vector :open "[" :close "]" :total (count x) :members (seq x)}
@@ -745,6 +754,7 @@
       ;; and seq read that array (datahike/java/QueryResult.java).
       (#{clojure.lang.PersistentHashSet clojure.lang.PersistentTreeSet datahike.java.QueryResult} c)
       {:kind :coll :face ::print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
+       :sorted? (sorts? x identity)
        :members (held-order x identity-attributes identity)}
       ;; Every seq and every other Sequential prints as a list, as Clojure's
       ;; printer prints it; a vector type prints as a vector.
@@ -859,10 +869,11 @@
 
 (defn- node-continuation
   "The form a cut of `node` prints to read its rest (`seon.print/continuation`):
-  from the next offset for a sequence or string; the whole collection for a
-  map or set, whose shown order is not its iteration order, so `drop` would
-  not name the rest; render text's `(seon.print/full result/…)`. Nil without
-  a source, and for a long keyword or symbol."
+  from the next offset for a sequence, string, or a map or set shown in its
+  `seq` order; the whole collection for a map or set shown sorted
+  (`sorts?`), where `drop` would not name the rest; render text's
+  `(seon.print/full result/…)`. Nil without a source, and for a long keyword
+  or symbol."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.print/continuation]]}
   [node]
   (if (:raw? node)
@@ -874,7 +885,7 @@
                                  (:pending? node) :pending
                                  :else :children)
       :seon.render.data/path (:path node)
-      :seon.render.data/next-offset (cond (:indexed? node) 0
+      :seon.render.data/next-offset (cond (:sorted? node) 0
                                           (= :string (:kind node)) (+ (:base node 0) (:shown node))
                                           :else (+ (:base node 0) (:n node)))}))))
 
@@ -1104,7 +1115,7 @@
                    :string (let [node (assoc base :kind :string :value (:value c) :total (:total c))
                                  shown (string-shown node (:value c) (:max-string context))]
                              (assoc node :shown shown :shown-width (escaped-width (:value c) 0 shown)))
-                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :lookup? :entity?])
+                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup? :entity?])
                           {:pending (:members c) :outside (:prefix c)}))))
         node (if (= :leaf (:kind node)) (assoc node :width (leaf-width (:node node) depth)) node)]
     (assoc node :flat (flat-width node))))
@@ -1246,7 +1257,11 @@
             [[{:kind :entry :id entry-id :depth (:depth parent) :indent indent :parent (:id parent)
                :kids [(:id k) (:id v)] :n 0 :sum 0} k v] entry-id])
           (let [c (make-node context member next-id depth
-                             (conj (:path parent) (if (:indexed? parent) [:seon.render.data/nth index] index))
+                             ;; `get-in` reads an index of a vector only: a seq's
+                             ;; member is a typed step, read with `nth`.
+                             (conj (:path parent) (if (or (:indexed? parent) (not= ::print/vector (:face parent)))
+                                                    [:seon.render.data/nth index]
+                                                    index))
                              (:id parent) {:indent indent})]
             [[c] next-id]))
         added (mapv #(assoc % :level (:level work)) added)
@@ -1449,28 +1464,32 @@
       cut)))
 
 (defn- fold-collapsed-tail
-  "The selected nodes with each sequence's trailing members that show nothing
-  but their own cut (collapsed, not one member admitted) folded into the
-  sequence's tail cut, which already names their count and reads them: a
-  row with no identity says less than the count. Folded only when the tail
-  cut costs no more than the members it replaces, so the charge still bounds
-  the text."
+  "The selected nodes with each collection's trailing members that show
+  nothing but their own cut (collapsed, not one member admitted; a map entry
+  whose value is so) folded into the collection's tail cut, which already
+  names their count and reads them: a row with no identity says less than the
+  count. Only a collection shown in its `seq` order folds (a sorted one's cut
+  is the whole value), and only when the tail cut costs no more than the
+  members it replaces, so the charge still bounds the text."
   {:malli/schema [:=> [:cat [:map-of :int :map]] [:map-of :int :map]]}
   [nodes]
   (reduce-kv
    (fn [nodes id node]
      (let [kids (:kids node)
-           folded (when (and (= :coll (:kind node)) (not (:indexed? node)) (seq kids))
-                    (take-while #(let [kid (get nodes %)]
-                                   (and (#{:map :coll} (:kind kid)) (zero? (:n kid)) (more? kid)))
-                                (rseq kids)))
+           collapsed? (fn [kid-id]
+                        (let [kid (get nodes kid-id)
+                              kid (if (= :entry (:kind kid)) (get nodes (second (:kids kid))) kid)]
+                          (and (#{:map :coll} (:kind kid)) (zero? (:n kid)) (more? kid))))
+           folded (when (and (#{:map :coll} (:kind node)) (not (:sorted? node)) (seq kids))
+                    (take-while collapsed? (rseq kids)))
            kept (- (count kids) (count folded))
            shrunk (assoc node :kids (subvec kids 0 kept) :n kept)
-           ;; Each member and the cut carry one separator.
-           before (+ (transduce (map #(inc (:flat (get nodes %)))) + 0 folded)
-                     (if (more? node) (inc (count (cut-text node))) 0))]
-       (if (and (seq folded) (pos? kept) (<= (inc (count (cut-text shrunk))) before))
-         (-> (apply dissoc nodes folded) (assoc id shrunk))
+           ;; Each member and the cut carry one separator; a map's two.
+           gap (if (= :map (:kind node)) 2 1)
+           before (+ (transduce (map #(+ gap (:flat (get nodes %)))) + 0 folded)
+                     (if (more? node) (+ gap (count (cut-text node))) 0))]
+       (if (and (seq folded) (pos? kept) (<= (+ gap (count (cut-text shrunk))) before))
+         (-> (apply dissoc nodes (mapcat #(cons % (:kids (get nodes %))) folded)) (assoc id shrunk))
          nodes)))
    nodes nodes))
 
@@ -1607,6 +1626,7 @@
              (merge (select-keys (:seon.render.value/options unit) [:seon.print/length :seon.print/level])
                     (select-keys (:seon.print/options unit) [:seon.print/length :seon.print/level]))
              database (:seon.db/db unit)
+             budget-tokens (:seon.render.profile/token-budget profile)
              ;; Nested selection reads the one profile this value prints
              ;; under and the one viewer, derived here once per value.
              selecting? (and (:seon.sci.eval/ctx unit)
@@ -1617,7 +1637,7 @@
                       :requery (select-keys profile [:seon.print/requery-id :seon.print/requery-refusal])
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
                       :width (:seon.print/width options)
-                      :budget (tokens/estimate-chars (:seon.render.profile/token-budget profile))
+                      :budget (tokens/estimate-chars budget-tokens)
                       :reserve reserve
                       :max-children (cond-> (:seon.render.profile/max-children profile)
                                       (int? length) (min length))
