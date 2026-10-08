@@ -151,3 +151,34 @@
       (is (= ["-J-Xmx1073741824"]
              (xmx {:seon.operator/managed-root "/root"
                    :seon.config/manifest {:seon.config.operator/heap-max-bytes 1073741824}}))))))
+
+(deftest check-slots-are-granted-in-ticket-order
+  ;; One slot, a holder, then three waiters filed 150 ms apart (the first behind
+  ;; a ticket whose process is dead): they must acquire in filing order.
+  (let [root (str (.getCanonicalFile (java.io.File. (str "tmp/operator-check-test-" (random-uuid)))))
+        pid (.pid (java.lang.ProcessHandle/current))
+        dead (let [p (.start (ProcessBuilder. ["true"]))] (.waitFor p) (.pid p))
+        order (atom [])
+        hold (#'operator/check-slot! root 20000 1 pid)
+        waiter (fn [label]
+                 (future (let [slot (#'operator/check-slot! root 20000 1 pid)]
+                           (swap! order conj label)
+                           (Thread/sleep 100)
+                           (.close (:seon.operator/channel slot)))))]
+    (try
+      (spit (doto (java.io.File. root (format "data/check/queue/%015d-%d" 1 dead)) (-> .getParentFile .mkdirs)) "")
+      (let [futures (vec (for [label [:a :b :c]]
+                           (do (Thread/sleep 150) (waiter label))))]
+        (.close (:seon.operator/channel hold))
+        (run! deref futures)
+        (is (= [:a :b :c] @order))
+        (is (empty? (.listFiles (java.io.File. root "data/check/queue")))
+            "granted tickets and the dead one are gone"))
+      (finally (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. root))))))))
+
+(deftest the-check-slot-count-is-a-dial
+  ;; Resolved at run time: the rehearsal analyzes the running JVM's script/,
+  ;; which lacks a var this commit adds (see c62a1d6b1).
+  (let [slots (requiring-resolve 'seon.operator/operator-check-slots)]
+    (is (= 2 (slots nil)))
+    (is (= 1 (slots {:seon.config.operator/check-slots 1})))))

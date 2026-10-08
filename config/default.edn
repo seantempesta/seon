@@ -354,6 +354,11 @@
  ; Twenty simultaneous passes peaked at 1.40 GB heap under it (dials.md).
  :seon.config.operator/heap-max-bytes 4294967296
 
+ ; Unit: throwaway check JVMs one root runs at once; further checks queue
+ ; first come, first served. Each holds a 4 GiB heap (above), so two fit a
+ ; 16 GB machine beside the running default.
+ :seon.config.operator/check-slots 2
+
  ; Full-store export copies every file and re-identifies every reachable commit.
 
  ; THE VIEW'S PORT IS EXPLICITLY ABSENT, and absence is the state: with

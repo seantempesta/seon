@@ -1521,37 +1521,88 @@
 ;;; analysis cache is a private copy, since the candidate's bytes are not the
 ;;; published program this root's cache follows.
 
-(def ^:private check-slots
-  "Throwaway JVMs one root runs at once; further checks wait for a slot."
-  2)
+(defn operator-check-slots
+  "The configured number of throwaway check JVMs one root runs at once."
+  {:malli/schema [:=> [:cat [:maybe :seon.config/manifest]] [:int {:min 1}]]}
+  [manifest]
+  (let [value (get manifest :seon.config.operator/check-slots
+                   (:seon.config.operator/check-slots @shipped-default-decisions))]
+    (when-not (pos-int? value) (throw (ex-info "Missing operator check slot count." manifest)))
+    value))
+
+(defn- live-tickets
+  "The queue directory's tickets, oldest first, as `[file pid]`. A ticket whose
+  process is gone is deleted and left out, so a dead check never blocks the queue."
+  {:malli/schema [:=> [:cat :any] [:vector :any]]}
+  [queue]
+  (vec (for [file (sort-by #(.getName ^java.io.File %) (.listFiles ^java.io.File queue))
+             :let [pid (parse-long (second (str/split (.getName ^java.io.File file) #"-")))
+                   alive? (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) .isAlive)]
+             :when (if alive? true (do (fs/delete-if-exists file) false))]
+         [file pid])))
+
+(defn- try-slot!
+  "The held lock of slot `n` under `directory` with this process's pid written
+  in it, or nil when another process or a waiter of this JVM holds it."
+  {:malli/schema [:=> [:cat :any :int :int] [:maybe :map]]}
+  [directory n pid]
+  (let [channel (.getChannel (java.io.RandomAccessFile.
+                              (io/file directory (str "slot-" n ".lock")) "rw"))
+        lock (try (.tryLock channel)
+                  (catch Exception overlap ; this JVM's own waiter holds it (bb lacks the class)
+                    (when-not (= "java.nio.channels.OverlappingFileLockException"
+                                 (.getName (class overlap)))
+                      (throw overlap))
+                    nil))]
+    (if lock
+      (do (.truncate channel 0)
+          (.write channel (java.nio.ByteBuffer/wrap (.getBytes (str pid))))
+          {:seon.operator/slot n :seon.operator/channel channel})
+      (do (.close channel) nil))))
+
+(defn- slot-holders
+  "The pids written in the slot files under `directory`."
+  {:malli/schema [:=> [:cat :any :int] [:vector :string]]}
+  [directory slots]
+  (vec (for [n (range slots)
+             :let [file (io/file directory (str "slot-" n ".lock"))]
+             :when (.isFile file)
+             :let [text (str/trim (slurp file))]
+             :when (seq text)]
+         text)))
 
 (defn- check-slot!
   "A held slot lock under `root`'s `data/check` (`{:seon.operator/slot n}` plus
-  its channel, whose close releases it), awaited within `bound` ms. The lock is
-  the OS's, so a check that dies releases its slot."
-  {:malli/schema [:=> [:cat :string [:int {:min 1}]] :map]}
-  [root bound]
+  its channel, whose close releases it), awaited within `bound` ms among
+  `slots` slots. First come, first served: a waiter files a ticket
+  `queue/<epoch-ms>-<pid>` and only the oldest live ticket takes a free slot.
+  The lock is the OS's, so a check that dies releases its slot, and its ticket
+  is skipped by the pid check."
+  {:malli/schema [:=> [:cat :string [:int {:min 1}] [:int {:min 1}] :int] :map]}
+  [root bound slots pid]
   (let [directory (doto (io/file root "data/check") .mkdirs)
+        queue (doto (io/file directory "queue") .mkdirs)
+        ticket (io/file queue (format "%015d-%d" (System/currentTimeMillis) pid))
+        _ (fs/create-file ticket)
         began (System/nanoTime)]
-    (loop [announced? false]
-      (or (some (fn [slot]
-                  (let [channel (.getChannel (java.io.RandomAccessFile.
-                                              (io/file directory (str "slot-" slot ".lock")) "rw"))
-                        ;; One check per operator process: no lock of this JVM overlaps.
-                        lock (.tryLock channel)]
-                    (if lock
-                      {:seon.operator/slot slot :seon.operator/channel channel}
-                      (do (.close channel) nil))))
-                (range check-slots))
-          (do (when (< bound (elapsed-ms began))
-                (fail! "No throwaway JVM slot freed within its bound."
-                       {:seon.operator/slots check-slots :seon.operator/timeout-ms bound}))
-              (when-not announced?
-                (binding [*out* *err*]
-                  (println (str "check: " check-slots " throwaway JVMs already run; waiting for a slot"))
-                  (flush)))
-              (Thread/sleep 1000)
-              (recur true))))))
+    (try
+      (loop [announced? false]
+        (let [tickets (live-tickets queue)
+              position (first (keep-indexed (fn [i [file _]] (when (= file ticket) i)) tickets))
+              slot (when (zero? (or position 0)) (some #(try-slot! directory % pid) (range slots)))]
+          (or slot
+              (do (when (< bound (elapsed-ms began))
+                    (fail! "No throwaway JVM slot freed within its bound."
+                           {:seon.operator/slots slots :seon.operator/timeout-ms bound}))
+                  (when-not announced?
+                    (binding [*out* *err*]
+                      (println (str "check: queue position " (inc (or position 0)) " of " (count tickets)
+                                    "; " slots " throwaway JVMs run, held by pids "
+                                    (str/join " " (slot-holders directory slots))))
+                      (flush)))
+                  (Thread/sleep 200)
+                  (recur true)))))
+      (finally (fs/delete-if-exists ticket)))))
 
 (defn- test-check-arguments
   "`bin/test-check` arguments for the check's `--test` values: `NS/NAME` names
@@ -1595,7 +1646,8 @@
   {:malli/schema [:=> [:cat :string :string [:vector :string] :boolean] :map]}
   [root sha tests include-long?]
   (let [began (System/nanoTime)
-        slot (check-slot! root (operator-boot-bound-ms {}))
+        slot (check-slot! root (operator-boot-bound-ms {}) (operator-check-slots {})
+                           (.pid (java.lang.ProcessHandle/current)))
         waited-ms (elapsed-ms began)
         disposable (.getCanonicalPath
                     (doto (io/file root "data/check"

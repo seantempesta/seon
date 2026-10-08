@@ -3,4 +3,6 @@
                        :boot-bound-ms
                        [:int {:seon.config/display-label "Cold boot bound" :seon.config/display-divisor 1000 :seon.config/display-unit "s" :min 1 :seon.config/dial true}]
                        :heap-max-bytes
-                       [:int {:seon.config/display-label "JVM heap cap" :seon.config/display-unit "bytes" :min 268435456 :seon.config/dial true :description "The -Xmx in bytes of every JVM the operator launches (start, nuke, check). Read from bootstrap configuration before the JVM exists, so never from the host's RAM."}]}
+                       [:int {:seon.config/display-label "JVM heap cap" :seon.config/display-unit "bytes" :min 268435456 :seon.config/dial true :description "The -Xmx in bytes of every JVM the operator launches (start, nuke, check). Read from bootstrap configuration before the JVM exists, so never from the host's RAM."}]
+                       :check-slots
+                       [:int {:seon.config/display-label "Check JVM slots" :min 1 :seon.config/dial true :description "How many throwaway check JVMs one root runs at once; further checks wait in a first-come first-served queue. Each holds the JVM heap cap."}]}
