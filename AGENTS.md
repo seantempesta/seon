@@ -91,6 +91,7 @@ only until their rename lands; never use them in new code or prose.
 | static analysis | [clj-kondo](https://github.com/clj-kondo/clj-kondo) analysis and findings | own analyzers |
 | errors | `ex-info`, `ex-data`, `Throwable->map`, `clojure.main/ex-triage` | "fault", own exception printers |
 | printing | [fipp](https://github.com/brandonbloom/fipp) via the one value printer; `*print-length*`-style budget | a second printer, `pr-str` copies |
+| configuration files | `aero.core/read-config` with `#profile`, `#env`, `#include`, `#ref` ([aero](https://github.com/juxt/aero)); Malli validates the result | own EDN loaders, profile or precedence code |
 | caching | [Caffeine](https://github.com/ben-manes/caffeine) via `seon.cache`, its `recordStats` | own counters, `memoize`, atoms |
 | agent execution | `clojure.core.async.flow` procs and step-fns ([core.async](https://github.com/clojure/core.async)) | own schedulers, state tags |
 | durable bytes | [konserve](https://github.com/replikativ/konserve) (our fork) | own stores |
