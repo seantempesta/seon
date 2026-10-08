@@ -17,7 +17,7 @@
            record (fn [route] (fn [& _] (swap! calls conj route) nil))
            config {:lint {:enabled false} :markdown-lint {:enabled false}
                    :docstring-lint {:enabled false} :shell-writes {:enabled false}
-                   :review {:enabled false} :schema-admission {:enabled false}
+                   :schema-admission {:enabled false}
                    :contract-compile {:enabled false}}
            events [{:tool_name "Edit" :tool_input {:file_path "src/seon/id.clj"}}
                    {:tool_name "Write" :tool_input {:file_path "resources/seon/schemas/error.edn"}}
