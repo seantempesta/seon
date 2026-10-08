@@ -10,6 +10,7 @@ Rules:
 - Do exactly your one row, about 15-30 minutes. Make no design decision beyond the row. If HEAD disagrees with the row, stop and report the options.
 - Claim every file with `bin/lane claim LANE PATHS` BEFORE editing or creating it. A claim refuses a file that already has content, even yours.
 - Lint `src script test` with `--cache false`.
+- The throwaway check (`bin/lane commit` without `--branch-evidence`, which boots a JVM from HEAD plus your slice) is for host-bound and platform slices only: a declaration whose `:seon.fn/host-bound?` is true, the evaluator, writer, test runner, boot, schema publication, schema resources, `config/`, `deps.edn`, `bin/`, `script/` and submodule pins. An ordinary function change uses repl-slice.md (`defn` on your branch, branch evidence).
 - Commit via `bin/lane commit LANE -m MSG --test X --test Y PATHS`, one `--test` per name, with the footer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Never amend.
 - Name tests that are red on HEAD var by var, and list them.
 - If a test tags a task that exists only in the runtime store, copy that task into its EDN.

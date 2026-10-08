@@ -1,0 +1,35 @@
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -432,16 +432,22 @@
+   and input evidence; past observed reach is diagnostic. Unknown or red cannot reuse green. Record completion even
+   with no armed calls; a recording failure is not success. Keep one regression per behavior class, and destructive
+   isolation until proven confined.
+-- **Prove each slice before it lands; run the broad tiers centrally.** A lane commits through `bin/lane commit LANE
+-  -m MSG --test NS... PATHS`, which runs `bin/seon check PATHS --test NS...`: the candidate archive (HEAD plus the
+-  slice) is published and adopted on disposable branches, then a throwaway JVM boots from it on a disposable store
+-  and runs the named tests through the one runner; any red, boot failure or lint error refuses the commit. Name the
+-  tests reaching the change. Root restarts default after each landing and runs platform/affected integration and the
+-  bulk tier once, not per edit. Classify each red from stored runs by the commit that changed its
+-  behavior, then delete tests of deleted machinery, update retired assumptions or fix the surviving owner; replacement
+-  behavior tests land with the cut; never wholesale-triage reds. Gate inputs are `seon.test.cache/input-roots`:
+-  documentation never publishes or widens gates; fix a tool that does so before proceeding. HEAD must load and the
+-  named probe answer.
++- **Prove each slice before it lands; run the broad tiers centrally.** An ordinary function changes REPL-first: the
++  lane `defn`s it on its own branch in the main JVM, the reaching tests run there incrementally (unchanged green
++  members reused by reach digest), and the file is written back from the branch. It commits through `bin/lane commit
++  LANE --branch-evidence AGENT PATHS`, which checks that each committed file declares exactly its branch's definition
++  digests and that every test reaching them holds green evidence current on that branch, lints, and boots no JVM; a
++  changed declaration no test reaches is unproven. Host-bound and platform slices (a declaration SCI cannot
++  interpret, the evaluator, writer, test runner, boot, schema publication, schema resources, configuration,
++  dependencies, `bin/` and `script/`) commit through `bin/lane commit LANE -m MSG --test NS... PATHS`, which runs
++  `bin/seon check`: the candidate archive (HEAD plus the slice) is published and adopted on disposable branches, then
++  a throwaway JVM boots from it and runs the named tests through the one runner; any red, boot failure or lint error
++  refuses the commit. Name the tests reaching the change. Root restarts default after each landing and runs
++  platform/affected integration and the bulk tier once, not per edit. Classify each red from stored runs by the
++  commit that changed its behavior, then delete tests of deleted machinery, update retired assumptions or fix the
++  surviving owner; replacement behavior tests land with the cut; never wholesale-triage reds. Gate inputs are
++  `seon.test.cache/input-roots`: documentation never publishes or widens gates; fix a tool that does so before
++  proceeding. HEAD must load and the named probe answer.
+ - **Make bounds honest.** Tests fail beyond their declared bound, default five seconds; a longer bound carries a
+   reason naming the measured operation, its numbers in profile evidence. Distinguish acquisition from warm execution; priming never
+   excuses a timeout. The [testing skill](.agents/skills/clojure-testing/SKILL.md) names installed enforcement.
