@@ -258,7 +258,15 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   refuse invalidating deletion, optional refs may sweep, components cascade. Repair surviving declaration references
   in the same transaction or refuse; never invent placeholder functions or tests.
 - **Separate storage from observation.** Store a value when it must outlive its subject; a stored copy of a value
-  (recorded error evidence, an effect's result) is the value printer's shown text plus ids, nothing more. Derive pulled shapes and
+  (recorded error evidence, an effect's result) is the value printer's shown text plus ids, nothing more.
+- **Three places, one decision.** The full live value lives once, in `seon.cache` under its result handle (an LRU
+  under the configured byte budget). Datahike holds small facts and shown text up to the one threshold dial
+  (`:seon.config.eval.result/blob-threshold`, UTF-8 bytes); anything larger is a konserve blob (immutable, compressed)
+  staged and committed in the same transaction as the fact holding its digest and size. The form is decided once,
+  where the stored form is produced, by `seon.blob/inline-or-stage`; no other dial or step re-decides it. Never build a
+  big value and trim it later: produce the stored form at the source and pass references, not copies. Stored-text
+  attributes carry the registered bounded schema, so the checked writer refuses an oversized value and a later
+  re-copy fails loudly at its source. Derive pulled shapes and
   attribute lists from entity schemas and selectors: a hand list beside a schema silently drops the next key. Never
   silently truncate pulls. Require each function's and test's analysis digest:
   an empty cardinality-many is not proof of work.
