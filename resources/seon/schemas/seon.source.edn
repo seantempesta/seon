@@ -169,4 +169,36 @@
               [:map
                [:seon.source/test-input-digest {:optional true} :seon.source/test-input-digest]
                [:seon.source/digest :seon.source/digest]
-               [:seon.source/relative-file-digests :seon.source/relative-file-digests]]}
+               [:seon.source/relative-file-digests :seon.source/relative-file-digests]]
+              :paths [:vector {:min 1} :seon.source/path],
+              :accepted-red-before [:set {:description "Tests red before a branch's change that root accepts at its commit."} :seon.test/sym],
+              :branch-evidence-request
+              [:map {:description "What the commit gate asks of a store: does this branch prove these working-tree files of the checkout at root, against the head it forked from?"}
+               [:seon.store/branch :seon.store/branch]
+               [:seon.source/head :seon.source/head] [:seon.fn/root :seon.fn/root] [:seon.source/paths :seon.source/paths]
+               [:seon.source/accepted-red-before {:optional true} :seon.source/accepted-red-before]],
+              :head [:and {:description "The branch whose head a lane's changes are judged against: its cluster's branch."} :seon.store/branch],
+              :declaration :seon.program/declaration-identity,
+              :file-digest :seon.program/digest-or-absence,
+              :branch-digest :seon.program/digest-or-absence,
+              :differing-declaration
+              [:map {:description "A declaration whose working-tree file digest is not the branch head's."}
+               [:seon.source/path :seon.source/path] [:seon.source/declaration :seon.source/declaration]
+               [:seon.source/file-digest :seon.source/file-digest] [:seon.source/branch-digest :seon.source/branch-digest]],
+              :proven? :boolean,
+              :branch-commit-id :seon.source/commit-id,
+              :head-commit-id :seon.source/commit-id,
+              :changed [:vector :seon.program/declaration-identity],
+              :differing [:vector :seon.source/differing-declaration],
+              :unanalyzable [:vector :seon.source/path],
+              :host-bound [:vector :qualified-symbol],
+              :verified [:vector :seon.test/sym],
+              :unproven [:vector :seon.test/sym],
+              :unreached [:vector :qualified-symbol],
+              :red-before [:vector :seon.test/sym],
+              :run-ids [:vector :seon.test.run/id],
+              :branch-evidence
+              [:map {:description "The commit gate's answer: proven? only when no file differs from the branch, no changed declaration is host-bound, every reaching test is verified on the branch head and every changed function is reached; red-before tests count only when accepted."}
+               :seon.source/proven? :seon.source/branch-commit-id :seon.source/head-commit-id :seon.source/changed
+               :seon.source/differing :seon.source/unanalyzable :seon.source/host-bound :seon.source/verified
+               :seon.source/unproven :seon.source/unreached :seon.source/red-before :seon.source/run-ids]}

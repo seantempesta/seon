@@ -1,0 +1,24 @@
+[#:seon.task{:name "a-branch-change-to-an-unloaded-fixture-namespace-cannot-run-its-tests"
+             :kind :function
+             :intent "The proof of the commit gate, test/seon/cluster/branch_evidence_test.clj (uncommitted, lane impl-rf2), is red in the throwaway check. With seon.test/run called directly on the branch's acquired context after seon.test-support/replacement-tx, the named fixture tests refuse: 'Host-bound declaration <ns>/callee must change through the loaded source files.' (`seon.test/arm-first-loads!`); the same run on H executes both. Driven through the agent path instead (seon.cluster.write-back-test/with-agent! and submit!, the tests authored by an agent on H, the replacement and my.test/check by a lane agent on the branch), file-equals-branch and changed pass, but `seon.test/reaching` of the changed callee answers [] on the branch, so no test is verified and the callee reads as unreached (check run 40563f4cb0c3: 12 pass, 5 fail). Hypothesis, unverified: the agent-authored deftests carry no :seon.fn/calls edge to the fixture functions that `seon.fn/call-reach` walks. Done when that test is green and the gate commits with it."
+             :must-read #{seon.test/reaching seon.cluster.branch-evidence/branch-evidence}}
+ #:seon.task{:name "a-schema-registered-on-a-branch-is-invisible-to-its-test-run"
+             :kind :function
+             :intent "After `seon.schema/register!` of :seon.source/accepted-red-before on agent impl-rf2's branch (answered :seon.schema.usage/new? true), `my.test/check` on that branch threw :malli.core/invalid-schema for that key, 7.4 s and 138,645 calls in. Each register! also cost 270-380 ms and about 32,700 calls. Done when a branch-registered key compiles in the branch's test run and one registration is under 50 ms."
+             :must-read #{seon.schema/register! my.test/check}}
+ #:seon.task{:name "the-branch-evidence-gate-rarely-sees-red-before-on-main"
+             :kind :function
+             :intent "Default's main holds no recorded result for any of the 30 tests reaching seon.cluster.branch/cluster-branch (2026-10-08): tests run in throwaway JVMs, not on main. A test red before a lane's change therefore reads as unproven, not red-before, unless root runs it on main first. Done when main carries current results for the tests the gate asks about (root's merge or a scheduled run), or the gate takes red-before evidence from an unchanged fork of the head."
+             :must-read #{seon.cluster.branch-evidence/branch-evidence seon.test/recorded-result}}
+ #:seon.task{:name "an-agent-check-costs-ten-times-its-one-test"
+             :kind :function
+             :intent "my.test/check {:seon.test/changed [seon.agent/archived?]} on a lane branch took 6.4 s and 8.9 s for one test whose run was 0.53 s (acquire 95 ms), about 110,000 calls, seon.schema/projection-cache-value about 19,000 times (2026-10-08). A defn and its check in one eval request recorded evidence for the pre-defn digest, so the branch-evidence gate correctly refused it as unproven until a second check. Done when one reaching test's check is under 1.5 s and evidence from a defn plus check in one request is current."
+             :must-read #{my.test/check seon.test/run}}
+ #:seon.task{:name "a-printer-failure-answers-unprintable-without-its-cause"
+             :kind :function
+             :intent "A JVM eval_clj whose value was [rows kw (keys @conn)] answered `#unprintable[clojure.lang.PersistentVector java.lang.ClassCastException]` with no diagnostic naming the failing member or cause (2026-10-08, agent impl-rf2). Done when the printer shows the printable members and names the failing path, with its error delivered beside the value."
+             :must-read #{seon.mcp/call}}
+ #:seon.task{:name "agent-identity-prints-its-id-into-the-message"
+             :kind :function
+             :intent "seon.agent/identity builds :seon.error/message with (pr-str agent-id), a second printer; the id is already the :seon.agent/no-such-agent member. No test reaches seon.agent/identity, so the branch-evidence gate refuses its change as unreached. Done when the message is fixed text and a test reaches the function."
+             :must-read #{seon.agent/identity}}]

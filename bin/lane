@@ -89,10 +89,12 @@ holders="$claims/released.holders"
 # The lane that last released PATH, or nothing.
 last_holder() { awk -F'\t' -v p="$1" '$1 == p { lane = $2 } END { if (lane != "") print lane }' "$holders" 2>/dev/null || true; }
 
-# Under a claimed directory a path may be new; otherwise it must exist.
+# A path exists, is a new file in an existing directory (nobody's work yet, so
+# a lane holding a sibling file never blocks it), or lies under a claimed directory.
 exists_or_new_under() {
   local lane="$1" path="$2"; shift 2
   [[ -e "$path" ]] && return 0
+  [[ "$path" != */ && -d "$(dirname "$path")" ]] && return 0
   local entry
   for entry in "$@" $(cat "$claims/$lane.paths" 2>/dev/null); do
     [[ "$entry" == */ && "$path" == "$entry"* && -d "$entry" ]] && return 0
