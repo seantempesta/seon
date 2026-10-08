@@ -75,28 +75,33 @@ here in place.
 
 ## 2. Budgets
 
-Measured each slice by `seon.pass-probe` (`test/seon/pass_probe.clj`): wall ms, allocated bytes, checked calls,
-transactions attempted and durable, store bytes, tokens. Seon's work only: the provider call and the agent's own
-forms are excluded.
+Owner 2026-10-08: no arbitrary targets. Every cost is judged against what the work must do: an expectation from first
+principles (what the work is proportional to and the rough cost that implies), the measured parent and change, and
+10× or more over the expectation is a defect to diagnose; any regression is reported. The owner's own numbers are
+rulings: a model pass at 20-40 MB transient is fine and never GB; many agents on a 16 GB machine; small retained
+memory; a core function's raw return under 2,000 estimated tokens; forgiveness within milliseconds and a few MB per
+reply; CLAUDE.md's 1 s and 10 s. Measured each slice by `seon.pass-probe` (`test/seon/pass_probe.clj`): wall ms,
+allocated bytes, checked calls, transactions attempted and durable, store bytes, tokens. Seon's work only: the
+provider call and the agent's own forms are excluded.
 
-| Pass kind | Time | Transient allocation | Machinery txs |
-|---|---|---|---|
-| ordinary (no definitions), model passes included | < 200 ms | 20-40 MB, collected; never GB | 1 |
-| definition (one-line `defn`) | < 300 ms | < 30 MB | 1 |
-| the pass after a definition | < 150 ms | < 10 MB | 1 |
-| current-state block, rendered at each model call | < 10 ms | < 2 MB | 0 (read only) |
-| the test step after a pass that changed code (Seon's work, test bodies excluded) | within the step bound; the next pass waits no longer than the bound | as the one-test check per request; never GB (a branch's first reaching check included) | the test requests' own, as §3.2 |
-| reply forgiveness scan, per 28.6 KB reply | ≤ 3 ms | ≤ 8 MB | — |
-| history append (each pass) | < 10 ms | ≤ 3× the appended text | — |
-| one-test check (runner setup, selection, recording, cleanup) | < 300 ms cold, < 150 ms warm | < 20 MB | as §3.2 |
-| a new error signature | — | — | +1 at the task home |
+| Pass kind | Expected from the work | Machinery txs |
+|---|---|---|
+| ordinary (no definitions), model passes included | read, evaluate and print the forms, then one recording transaction of the datoms they produced: follows the forms, not the program or the history; a model pass within the owner's 20-40 MB, never GB | 1 |
+| definition (one-line `defn`) | as ordinary, plus one analysis of the form and a few program datoms (the expectation table of ledger RP-0) | 1 |
+| the pass after a definition | as ordinary: nothing is rebuilt for an unchanged program | 1 |
+| current-state block, rendered at each model call | follows the task, its proofs and the unread items shown; a handful of pulls, no whole-program work | 0 (read only) |
+| the test step after a pass that changed code (Seon's work, test bodies excluded) | follows the selected tests and their reach inputs, never the program; the next pass waits no longer than the step bound; never GB (a branch's first reaching check included) | the test requests' own, as §3.2 |
+| reply forgiveness scan | one linear scan of the reply: milliseconds and a few MB (owner) | — |
+| history append (each pass) | follows the appended text | — |
+| one-test check (runner setup, selection, recording, cleanup) | follows the one member's reach inputs | as §3.2 |
+| a new error signature | — | +1 at the task home |
 
-| Retained scope | Budget |
+| Retained scope | Expected |
 |---|---|
-| machine | the whole process on a 16 GB machine beside the user's work: heap cap 4 GB, RSS ≤ 6 GB (root's proposed targets for the owner's 16 GB requirement) |
+| machine | the whole process on the owner's 16 GB machine beside the user's work (root proposes a 4 GB heap cap and RSS ≤ 6 GB; ledger MEM-01) |
 | cluster | one shared base SCI context per loaded program, advanced incrementally; agents fork it; no pass constructs a base |
-| agent | ≤ 20 MB live heap after a full GC per idle agent |
-| concurrent passes | N simultaneous passes stay inside the heap cap; nothing allocates a GB |
+| agent | live heap after a full GC per idle agent follows the values it holds, under the one cache's byte budget |
+| concurrent passes | N simultaneous passes stay inside the machine's memory; nothing allocates a GB |
 
 **Output.** A core function's raw return stays under 2,000 estimated tokens in ordinary use; declared bulk-data
 functions (reading a document, say) are exempt; an oversized return is a profile finding on that function. The value
@@ -114,7 +119,7 @@ an overlay per agent branch advanced by changed definitions, one fork advanced i
 prompt and refresh: deleted by the three-part context (held history appended per pass, block rendered per call).
 Seven machinery commits: one. The surviving writer's floor (13-14 MB) and the armer, provider and query residual
 (3-7 MB) are accepted as measured. Work derivation: once per pass. No competency model run starts until
-`seon.pass-probe/run-model` reports a model pass inside the ordinary row.
+`seon.pass-probe/run-model` reports a model pass within the owner's 20-40 MB with no owner 10× over its expectation.
 
 ## 3. Design
 
@@ -467,4 +472,17 @@ store before its slice lands.
     block and at the agent's REPL (§3.4, §3.7).
 30. **`*1 *2 *3 *e`** are bound at an agent's REPL only if easy and cheap; lowest priority.
 
-Open: the ledger's §6 lists the questions still open for the owner.
+31. **Nested definitions are saved**: a `defn` inside another form is saved from its own source span (SCI's write
+    hook plus the analyzer's span) like any definition; one that closes over a local stays live-only with a short note
+    to define it at top level.
+32. **A code task with no change**: proofs green and no change against main is done after checking main still holds
+    the tested program; nothing merges.
+33. **Datahike subtree counts** are kept on every write in our fork of the sorted set, after verifying that ordinary
+    writes drop them (a store in the old format needs a reset, not fork code); ledger §3.23.
+34. **Know what things are**: evaluated code is classified from SCI's observation (the Var written and its metadata),
+    file text from clj-kondo's analysis, schemas from the Malli registry; never from a form's head or a regex.
+35. **No arbitrary targets** (§2): cost is judged against what the work must do; 10× over the expectation is a
+    defect to diagnose.
+
+Open: the ledger's §6 lists the questions still open for the owner (approval of the pass-and-recording and entrants
+redesigns, asked after the transaction census lands).
