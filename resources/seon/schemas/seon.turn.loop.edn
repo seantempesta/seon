@@ -201,6 +201,8 @@
                   [:seon.turn.loop/tests {:optional true} :seon.turn.loop/tests]
                   ; the wall time of each stage the pass ran (fork, the batch's own, settle, test step)
                   [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]
+                  ; the armed calls, reads and transactions of the pass's worlds
+                  [:seon.cost/counts {:optional true} :seon.cost/counts]
                   ; each held form with the receipt the run's settlement saved: its reply
                   [:seon.turn.loop/evaluated-sources {:optional true}
                    :seon.turn.loop/evaluated-sources]],
@@ -223,7 +225,8 @@
                  [:map {:description "A run's rows through the one REPL path: each form's evaluation as the settlement reads it, and the batch's folded program with the request that folds it, which the caller's one settlement commits."}
                   [:seon.turn.loop/evaluated-sources :seon.turn.loop/evaluated-sources]
                   [:seon.turn.loop/program [:map [:seon.batch/request :seon.batch/request] [:seon.batch/program :map]]]
-                  [:seon.batch/timings {:optional true} [:map-of :keyword number?]]],
+                  [:seon.batch/timings {:optional true} [:map-of :keyword number?]]
+                  [:seon.cost/counts {:optional true} :seon.cost/counts]],
                  :settlement
                  [:or
                   :seon.turn.loop/evaluation-settlement

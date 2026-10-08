@@ -159,11 +159,11 @@
 
 (defn request-cost
   "One eval request's cost: wall milliseconds since `started-ns` (a
-  `System/nanoTime` reading at its entrance) and the wall milliseconds of each
-  stage it ran."
-  {:malli/schema [:=> [:cat :int [:map-of :keyword number?]] :seon.cost/request]}
-  [started-ns stages]
-  (cond-> {:seon.cost/ms (tenths (ms-since started-ns))}
+  `System/nanoTime` reading at its entrance), the wall milliseconds of each
+  stage it ran and the counts its worlds' sinks hold, when measured."
+  {:malli/schema [:=> [:cat :int [:map-of :keyword number?] [:maybe :seon.cost/counts]] :seon.cost/request]}
+  [started-ns stages counts]
+  (cond-> (merge {:seon.cost/ms (tenths (ms-since started-ns))} counts)
     (seq stages) (assoc :seon.cost/stages (update-vals stages tenths))))
 
 (defn diagnostic

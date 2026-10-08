@@ -1,6 +1,7 @@
 (ns seon.request-cost-test
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
+            [seon.db :as db]
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
 
@@ -34,3 +35,28 @@
        (is (pos? total))
        (is (<= (reduce + (vals stages)) (+ total 0.5)))
        (is (every? #(contains? stages %) [:custody :evaluate :settle :print]))))))
+
+(deftest a-request-counts-its-own-calls-reads-and-transactions
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [_warm (answer running agent-id "sci" ":ping")
+           ping (support/mcp-request (answer running agent-id "sci" ":ping"))
+           pulls (support/mcp-request
+                  (answer running agent-id "sci"
+                          "(seon.db/pull '[:db/ident] [:db/ident :db/ident]) (seon.db/pull '[:db/ident] [:db/ident :db/ident]) (seon.db/pull '[:db/ident] [:db/ident :db/ident])"))
+           ;; another thread reads the same database throughout the next request
+           stop (java.util.concurrent.atomic.AtomicBoolean.)
+           made (java.util.concurrent.atomic.AtomicLong.)
+           noise (.start (Thread/ofPlatform)
+                         ^Runnable (fn [] (while (not (.get stop))
+                                            (db/pull (db/db connection) '[:db/ident] [:db/ident :db/ident])
+                                            (.incrementAndGet made))))
+           noisy (support/mcp-request (answer running agent-id "sci" ":ping"))
+           _ (.set stop true)
+           _ (.join ^Thread noise (java.time.Duration/ofSeconds 1))]
+       (is (pos? (:seon.cost/calls ping)))
+       (is (pos? (:seon.cost/transactions ping)) "the request's settlement commits")
+       (is (<= 3 (- (:seon.cost/reads pulls) (:seon.cost/reads ping))))
+       (is (pos? (.get made)))
+       (is (= (:seon.cost/reads ping) (:seon.cost/reads noisy))
+           "another thread's reads are not this request's")))))

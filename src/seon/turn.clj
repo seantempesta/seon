@@ -22,6 +22,7 @@
             [seon.fault :as fault]
             [seon.flow :as seon.flow]
             [seon.id :as id]
+            [seon.profile :as profile]
             [seon.profile.measurement :as measurement]
             [seon.program :as program]
             [seon.render.value :as render.value]
@@ -4242,7 +4243,8 @@
                  change (assoc :seon.batch/change change))))
            (:seon.batch/entries batch))
      :seon.turn.loop/program {:seon.batch/request request :seon.batch/program (:seon.batch/program batch {})}
-     :seon.batch/timings (:seon.batch/timings batch {})}))
+     :seon.batch/timings (:seon.batch/timings batch {})
+     :seon.cost/counts (profile/sink-counts (:seon.batch/sink world))}))
 
 (defn preview-sources
   "Evaluate authored source once in the assigned agent's fork, persisting nothing.
@@ -4470,7 +4472,8 @@
                 ;; the stage clocks the pass's reply carries (`seon.batch/request-cost`)
                 staged #(assoc % :seon.turn.loop/stages
                                (merge {:fork fork-ms} (:seon.batch/timings evaluated)
-                                      {:settle (/ (- (System/nanoTime) settle-start) 1e6)}))
+                                      {:settle (/ (- (System/nanoTime) settle-start) 1e6)})
+                               :seon.cost/counts (:seon.cost/counts evaluated))
                 saved #(staged (with-saved % (into {} (map (juxt :seon.cluster.eval/ordinal :seon.turn.loop/admitted-form)) gated)
                                  (:saved settlement [])))]
             (if-let [refusal (:refused-outcome settlement)]
@@ -5309,7 +5312,11 @@
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
                                                     park (assoc :seon.turn.loop/refusal park)
-                                                    tests (assoc :seon.turn.loop/tests tests))))]
+                                                    tests (assoc :seon.turn.loop/tests tests)
+                                                    ;; the pass's own calls (its proc world's sink,
+                                                    ;; `seon.cluster.agent/turn-step`) beside its batch's
+                                                    (and (:seon.cost/counts report) (:seon.batch/sink seon.batch/*world*))
+                                                    (update :seon.cost/counts #(merge-with + % (profile/sink-counts (:seon.batch/sink seon.batch/*world*)))))))]
                ;; Run closure is an armer wake because first-agent
                ;; supervision is derived from closed-run and root-idle facts.
                ;; The signal is disposable: the armer re-derives the complete

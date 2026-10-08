@@ -156,7 +156,8 @@
                       ;; each held form with the receipt that settlement saved
                       [:seon.turn.loop/evaluated-sources {:optional true} :seon.turn.loop/evaluated-sources]
                       ;; the wall time of each stage the run's pass ran
-                      [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]],
+                      [:seon.turn.loop/stages {:optional true} :seon.turn.loop/stages]
+                      [:seon.cost/counts {:optional true} :seon.cost/counts]],
                      ;; A source submission as the value its agent's turn proc
                      ;; receives on its bounded request port: the run request
                      ;; (`seon.turn/system-run-call`'s input), its staged reply,

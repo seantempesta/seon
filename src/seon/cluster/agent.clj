@@ -72,6 +72,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.string :as str]
             [seon.await :as await]
+            [seon.batch]
             [seon.bootstrap :as bootstrap]
             [seon.ai :as ai]
             [seon.turn :as turn]
@@ -530,7 +531,11 @@
   ([state transition] (turn/step state transition))
   ([state input message]
    (let [^AtomicReference holder
-         (:seon.agent/turn-thread (:seon.turn.loop/cluster state))]
+         (:seon.agent/turn-thread (:seon.turn.loop/cluster state))
+         world seon.batch/*world*]
+     ;; THE PASS COUNTS ITS OWN CALLS: a fresh sink in the proc's world for this one
+     ;; transform, which `seon.turn/step` reads into its reply's cost
+     (with-bindings (if world {#'seon.batch/*world* (assoc world :seon.batch/sink (seon.batch/sink))} {})
      (if-not holder
        (turn/step state input message)
        (do
@@ -550,7 +555,7 @@
              (locking holder
                (.set holder nil)
                ;; a stop's interrupt, already served
-               (Thread/interrupted)))))))))
+               (Thread/interrupted))))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The ONE blueprint
@@ -832,7 +837,7 @@
               (:seon.turn.loop/outcome answer)
               (cond-> (merge {:seon.turn/id run-id}
                              (select-keys answer [:seon.turn.loop/refusal :seon.turn.loop/evaluated-sources :seon.turn.loop/tests
-                                                 :seon.turn.loop/stages]))
+                                                 :seon.turn.loop/stages :seon.cost/counts]))
                 (:seon.turn.loop/basis answer) (assoc :seon.db/db (:seon.turn.loop/basis answer)))
               ;; At the bound the run may still settle: the timeout carries its id.
               ;; A closed reply (retirement stopped the graph first) settled nothing.

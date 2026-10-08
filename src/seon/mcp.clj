@@ -19,6 +19,7 @@
             [malli.json-schema :as json-schema]
             [my.agent]
             [seon.batch]
+            [seon.profile :as profile]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.host :as host]
@@ -244,7 +245,7 @@
   the texts, whether any failed, and the wall ms of each stage the run's pass
   ran and of the print."
   {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string]
-                  [:tuple [:vector :string] :boolean [:map-of :keyword number?]]]}
+                  [:tuple [:vector :string] :boolean [:map-of :keyword number?] [:maybe :seon.cost/counts]]]}
   [custody code namespace-name cluster-name]
   (let [answer (agent/evaluate-source!
                 (cond-> (assoc custody :seon.agent/segmenter 'seon.turn/code-sources :seon.cluster.reply/text code)
@@ -262,7 +263,8 @@
             (:seon.turn.loop/tests answer)
             (update 0 conj (printed (select-keys answer [:seon.turn.loop/tests]) code database cluster-name)))
           [[(printed answer code (db/db (get-in custody [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true])]
-    [texts failed? (assoc (:seon.turn.loop/stages answer {}) :print (since-ms print-start))]))
+    [texts failed? (assoc (:seon.turn.loop/stages answer {}) :print (since-ms print-start))
+     (:seon.cost/counts answer)]))
 
 (defn- pages-changed!
   "Tell each page channel to re-render when this JVM's loaded code differs
@@ -284,7 +286,7 @@
   handle in the agent's context), recorded as the agent's run on its branch.
   A run that changed loaded code tells every cluster's pages to re-render."
   {:malli/schema [:=> [:cat :map :string [:maybe :symbol] :string]
-                  [:tuple [:vector :string] :boolean [:map-of :keyword number?]]]}
+                  [:tuple [:vector :string] :boolean [:map-of :keyword number?] [:maybe :seon.cost/counts]]]}
   [{handle :seon.turn.loop/cluster agent-id :seon.agent/id} code namespace-name cluster-name]
   (let [connection (:seon.db/connection handle)
         run-id (id/id)
@@ -314,7 +316,8 @@
                                      (select-keys reply [:seon.batch/diagnostics]))
                               code (db/db connection) cluster-name))
                true]))]
-      [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))])))
+      [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))
+       (profile/sink-counts (:seon.batch/sink world))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The entrance
@@ -349,14 +352,14 @@
                   (execution found (or agent-id "root") namespace-name))
         cluster-name (:seon.cluster/name found)
         stages {:custody (since-ms started)}
-        [texts failed? run-stages]
+        [texts failed? run-stages counts]
         (cond
-          (:seon.error/at found) [[(printed found code nil nil)] true {}]
+          (:seon.error/at found) [[(printed found code nil nil)] true {} nil]
           (:seon.error/at custody)
-          [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {}]
+          [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {} nil]
           (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
           :else (sci-run custody code namespace-name cluster-name))]
-    [(conj texts (printed {:seon.repl/request (seon.batch/request-cost started (merge stages run-stages))}
+    [(conj texts (printed {:seon.repl/request (seon.batch/request-cost started (merge stages run-stages) counts)}
                           code nil cluster-name))
      failed?]))
 

@@ -456,7 +456,8 @@
   this call then marks (the sink's counters own the mark, so nothing beside
   them holds state). Milliseconds come from the world's `:seon.batch/stamped-ns`
   (the fold's start instant, moved to now here) and are absent without it.
-  Empty for no world, no sink, or work under the floor; definitions whose
+  Empty for no world, no sink, no stamp clock (a turn proc's pass counts its
+  calls for its reply's cost, not for a transaction), or work under the floor; definitions whose
   digest is unknown count in calls but are named nowhere. Two threads stamping
   one world at once split its work between their transactions.
 
@@ -466,7 +467,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :seon.profile/transaction-observation]}
   [world]
   (let [sink (:seon.batch/sink world)]
-    (if-not (instance? ConcurrentHashMap sink)
+    (if-not (and (instance? ConcurrentHashMap sink) (:seon.batch/stamped-ns world))
       {}
       (let [worked (into []
                          (keep (fn [[k counter]]
@@ -642,6 +643,23 @@
   "The `seon.db` functions that read a database value: the armed calls
   `measure` counts as reads."
   #{'seon.db/q 'seon.db/pull 'seon.db/pull-many 'seon.db/entity 'seon.db/datoms})
+
+(def transaction-entrances
+  "The `seon.db` function each commit attempt passes through once: the armed
+  calls a request's cost counts as transactions."
+  #{'seon.db/transact-call})
+
+(defn sink-counts
+  "A call sink's armed calls, the reads among them (`read-entrances`) and the
+  transactions (`transaction-entrances`)."
+  {:malli/schema [:=> [:cat :seon.batch/sink] :seon.cost/counts]}
+  [sink]
+  (reduce-kv (fn [counts sym n]
+               (cond-> (update counts :seon.cost/calls + n)
+                 (read-entrances sym) (update :seon.cost/reads + n)
+                 (transaction-entrances sym) (update :seon.cost/transactions + n)))
+             {:seon.cost/calls 0 :seon.cost/reads 0 :seon.cost/transactions 0}
+             (seon.batch/calls sink)))
 
 (defn measure
   "Call `f` once and return its value beside what the call cost, read from

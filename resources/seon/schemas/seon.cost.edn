@@ -3,7 +3,19 @@
  :seon.cost/stages
  [:map-of {:description "Wall milliseconds, to 0.1, of each stage of one eval request, each stage once and disjoint: :custody (the entrance choosing the agent's branch), :fork (the agent's context acquired and forked), :read, :evaluate (every form), :derive, :facts, :apply (seon.batch's own clock), :settle (the one recording transaction and the installation of what it defined), :test-step (the proofs and the tests reaching the change), :print (the reply printed). Their sum is at most :seon.cost/ms; the rest is submission and queue wait."}
   :keyword :seon.cost/ms]
+ :seon.cost/calls
+ [:int {:min 0 :description "Armed calls the request's pass made in its own worlds (the turn proc's pass, its batch, the bodies its test step ran), each entry counted once in the world it entered; the entrance's custody and print are outside them."}]
+ :seon.cost/reads
+ [:int {:min 0 :description "The calls among :seon.cost/calls to a seon.db read entrance (seon.profile/read-entrances)."}]
+ :seon.cost/transactions
+ [:int {:min 0 :description "The commit attempts among :seon.cost/calls (seon.profile/transaction-entrances)."}]
+ :seon.cost/counts
+ [:map [:seon.cost/calls :seon.cost/calls] [:seon.cost/reads :seon.cost/reads]
+  [:seon.cost/transactions :seon.cost/transactions]]
  :seon.cost/request
  [:map {:description "What one eval request cost, every number this request's own; a measure that is unavailable is absent."}
   [:seon.cost/ms :seon.cost/ms]
-  [:seon.cost/stages {:optional true} :seon.cost/stages]]}
+  [:seon.cost/stages {:optional true} :seon.cost/stages]
+  [:seon.cost/calls {:optional true} :seon.cost/calls]
+  [:seon.cost/reads {:optional true} :seon.cost/reads]
+  [:seon.cost/transactions {:optional true} :seon.cost/transactions]]}
