@@ -123,7 +123,8 @@
   [rule value]
   (boolean (some #{rule} (tree-seq coll? seq value))))
 
-(deftest a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged
+(deftest ^{:seon/tasks #{'seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt}}
+  a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
       ;; Hosting writes the agent's home entity on the cluster by design
@@ -134,7 +135,7 @@
             probe [:seon.fn/sym (symbol (str host-ns) "host-probe")]]
         (is (= branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/solo"])))
             "hosting's one allowed parent write: the agent's home entity names its branch")
-        (is (= ["#'my.agents.host-probe/host-probe"]
+        (is (= ["{:seon.render.var/symbol my.agents.host-probe/host-probe}"]
                (hosted-run! hosted "(defn host-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")))
         (is (= ["2"] (hosted-run! hosted "(host-probe 1)")) "the agent's next run calls its def")
         (let [task-id (id/id)]
@@ -163,7 +164,7 @@
     (fn [{:keys [handle branch!]}]
       (let [hosted (host-on! handle (branch!) "mcp/expander")
             probe [:seon.fn/sym (symbol (str host-ns) "expanding-probe")]]
-        (is (= ["#'my.agents.host-probe/expanding-probe"]
+        (is (= ["{:seon.render.var/symbol my.agents.host-probe/expanding-probe}"]
                (hosted-run! hosted (str "(defn- expanding-probe \"Bump positives.\" {:malli/schema [:=> [:cat :int] :int]}"
                                         " [x] (case x 0 0 (cond-> x (pos? x) inc)))"))))
         (is (some? (:seon.program/definition-digest
@@ -336,18 +337,19 @@
                                   [:seon.fn/ns :seon.ns/name])
             before (file-entity)]
         (is (= "src/seon/id.clj" (get-in before [:seon.fn/file :seon.fn.file/relative-path])))
-        (is (= "#'seon.id/switch-probe"
+        (is (= "{:seon.render.var/symbol seon.id/switch-probe}"
                (last (hosted-run! hosted "(in-ns 'seon.id)\n(defn switch-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"))))
         (is (= before (file-entity)) "the file namespace's entity is unchanged")
         (is (= 'seon.id (namespace-of 'seon.id/switch-probe)) "the definition references the namespace")
         (testing "a namespace the switch brings into being exists for the definitions made in it"
-          (is (= "#'my.agents.switch-fresh/fresh-probe"
+          (is (= "{:seon.render.var/symbol my.agents.switch-fresh/fresh-probe}"
                  (last (hosted-run! hosted "(in-ns 'my.agents.switch-fresh)\n(defn fresh-probe \"Add two.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))"))))
           (is (= 'my.agents.switch-fresh (namespace-of 'my.agents.switch-fresh/fresh-probe)))
-          (is (nil? (:seon.ns/source (db/pull (database) [:seon.ns/source] [:seon.ns/name 'my.agents.switch-fresh])))
-              "the switch's text is not the namespace's source"))
+          (is (= "(ns my.agents.switch-fresh)"
+                 (:seon.ns/source (db/pull (database) [:seon.ns/source] [:seon.ns/name 'my.agents.switch-fresh])))
+              "the namespace's source is its generated ns form, never the switch's text"))
         (testing "a definition after a nested switch names a namespace no form declared"
-          (is (= "#'my.agents.switch-nested/nested-probe"
+          (is (= "{:seon.render.var/symbol my.agents.switch-nested/nested-probe}"
                  (last (hosted-run! hosted "(do (in-ns 'my.agents.switch-nested) nil)\n(defn nested-probe \"Add three.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 3))"))))
           (is (= 'my.agents.switch-nested (namespace-of 'my.agents.switch-nested/nested-probe))))
         (testing "an ns form declares its namespace with its requires and aliases"
@@ -392,9 +394,9 @@
     (fn [{:keys [handle connection branch!]}]
       (support/transacted! connection (support/agent-tx @connection "root"))
       (let [hosted (host-on! handle (branch!) "mcp/creator")
-            create #(str "(seon.task/create! {:seon.task/ns '" host-ns " :seon.task/name \"trim titles\""
+            create #(str "(seon.task/create! {:seon.task/ns '" host-ns " :seon.task/name \"trim-titles\""
                          " :seon.task/kind :function :seon.task/intent " (pr-str %) "})")
-            task-id (task/task-handle host-ns "trim titles" :function)]
+            task-id (task/task-handle host-ns "trim-titles" :function)]
         (is (= ["true"] (hosted-run! hosted (str "(:seon.task/changed? " (create "Trim titles.") ")"))))
         (is (= ["false"] (hosted-run! hosted (str "(:seon.task/changed? " (create "Trim titles.") ")")))
             "the same declaration again finds the task and changes nothing")
@@ -484,7 +486,8 @@
                                                   "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
         (is (= "[true [[seon.task-steps-test/step-appends-and-is-current-when-none-is 0 nil]]]" shown))))))
 
-(deftest a-refused-deletion-is-its-forms-refusal-and-the-run-closes
+(deftest ^{:seon/tasks #{'seon.cluster.host/a-refused-deletion-reaches-the-deleting-forms-receipt}}
+  a-refused-deletion-is-its-forms-refusal-and-the-run-closes
   ;; Before, one refused declaration replaced every form's shown text with the
   ;; refusal; a refusal for a value the receipt could not store left the run open.
   ;; The fold refuses a deletion whose referrers survive at that form's own facts
