@@ -233,13 +233,25 @@
         history (exchanges database agent-id)
         block (current-state database agent-id)
         profile (seon.render/request-profile request)
-        shown #(:seon.eval/shown (sci.eval/shown-result %1 %2 nil))
+        shown #(sci.eval/shown-result %1 %2 nil)
         system (shown (bootstrap/help-value database agent-id) request)
         ;; the root call names the producer whose declared AI render shows the block
-        prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))]
+        prompt (shown block (assoc request :seon.render.call/function 'seon.context/current-state))
+        ;; help carries its own AI render: a request that cannot run it (no context or no
+        ;; caps) prints the help map whole, with no renderer; that is a refusal, never the
+        ;; system message
+        unrendered (not (:seon.eval/renderer system))]
     ;; a request with no context or profile cannot render: that refusal is the answer, never
     ;; the printed help map as the system message
     (or (some #(when (:seon.error/at %) %) [history block profile])
-        {:seon.ai/system system
+        (when unrendered
+          (seon.error.refusal/diagnostic
+           (java.util.Date.) :seon.context/model-context `model-context
+           (cond-> {:seon.error/type :seon.render/request-error
+                    :seon.error/message "The help render did not run, so the system message would be the printed help map."
+                    :seon.error/fix "Carry the turn's context, caps and time limit, as the model pass does."}
+             (:seon.cluster.eval/diagnostics system)
+             (assoc :seon.cluster.eval/diagnostics (:seon.cluster.eval/diagnostics system)))))
+        {:seon.ai/system (:seon.eval/shown system)
          :seon.context/exchanges history
-         :seon.ai/prompt prompt})))
+         :seon.ai/prompt (:seon.eval/shown prompt)})))

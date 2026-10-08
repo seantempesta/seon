@@ -187,3 +187,14 @@
     (test-support/transacted! *connection* [[:db/add [:seon.turn/id "shown-first"] :seon.turn/reply-size 1]])
     (test-support/transacted! *connection* (turn/close-tx {:seon.turn/id "shown-first"}))
     (is (= ["after-open"] (unread)) "the closed turn's handled message is not unread in the next block")))
+
+(deftest ^{:seon/tasks #{'seon.context/the-system-message-is-the-printed-help-map-not-its-render}}
+  a-request-that-cannot-run-the-help-render-answers-a-refusal
+  (test-support/seed-cluster! *connection* "unrendered")
+  (test-support/transacted! *connection* (agent/creation-tx {:seon.agent/id "unrendered"
+                                                             :seon.ns/name 'my.agents.unrendered
+                                                             :seon.cluster/name "unrendered"}))
+  ;; a profile but no context, caps or time limit: the help render cannot run
+  (let [answer (context/model-context (db/db *connection*) {:seon.boot/cluster-name "unrendered"} "unrendered")]
+    (is (= :seon.render/request-error (:seon.error/type answer)))
+    (is (not (contains? answer :seon.ai/system)) "never the printed help map as the system message")))
