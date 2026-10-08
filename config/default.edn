@@ -386,8 +386,6 @@
  ; Calibrate against real fetches and record the numbers.
  ; Unit: bytes streamed through one complete response read.
  :seon.config.web/max-response-bytes 16777216
- ; Unit: bytes retained inline before the body rides the blob tier.
- :seon.config.web/max-inline-bytes 8192
  ; Unit: redirect hops followed before one fetch refuses.
  :seon.config.web/max-redirects 5
  ; Unit: milliseconds for one outbound request. A remote host is

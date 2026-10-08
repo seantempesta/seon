@@ -1,6 +1,4 @@
-#:seon.config.web{:max-inline-bytes
-                  [:int {:min 1, :seon.config/dial true}],
-                  :max-redirects
+#:seon.config.web{:max-redirects
                   [:int {:min 0, :seon.config/dial true}],
                   :max-response-bytes
                   [:int {:min 1, :seon.config/dial true}],
