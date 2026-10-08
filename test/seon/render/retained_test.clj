@@ -1,12 +1,10 @@
 (ns seon.render.retained-test
-  (:require [clojure.core.async.flow :as flow]
-            [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
-            [seon.render.web-test :as web-test]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
@@ -133,71 +131,3 @@
             (is (not (render/same-committed-database? (db/db connection) (db/db other))))
             (is (= "other connection"
                    (render/render-call (assoc (request) :seon.db/db (db/db other))))))))))))
-
-(deftest adoption-of-an-unrelated-namespace-re-renders-zero-evaluations
-  (#'web-test/with-server
-   (fn [connection _server context]
-     (flow/pause (:graph context))
-     (is (:db-after
-          (db/transact! connection
-            (into [{:seon.turn/id "retained-adoption"
-                    :seon.turn/agent [:seon.agent/id "root"]
-                    :seon.turn/opened-tx "datomic.tx"}]
-                  (for [ordinal (range 2)]
-                    {:seon.cluster.eval/id (str "retained-adoption-" ordinal)
-                     :seon.cluster.eval/run [:seon.turn/id "retained-adoption"]
-                     :seon.cluster.eval/ordinal ordinal
-                     :seon.cluster.eval/at (java.util.Date.)
-                     :seon.cluster.eval/source (str ordinal)
-                     :seon.eval/shown (str ordinal)})))))
-     (let [ctx (:ctx context)
-           request (fn []
-                     {:seon.db/db (db/db connection) :seon.db/connection connection
-                      :seon.agent/id "root" :seon.sci.eval/ctx ctx
-                      :seon.sci.admit/caps (config/result-caps config/defaults)
-                      :seon.sci.eval/time-limit-ms (* 1000 support/event-backstop-seconds)
-                      :seon.render/profile (render/agent-render-profile config/defaults)})
-           ;; The render pair's armed counters (host and SCI context) observe
-           ;; its invocations; no Var is redefined.
-           renders (fn [thunk] (let [[result calls] (support/armed-calls '#{seon.repl/render-ai} thunk)]
-                                 [result (get calls 'seon.repl/render-ai)]))
-           [before calls] (renders #(render/acquire-context! (request)))
-           snapshot @(:seon.sci.kernel/program-snapshot ctx)
-           namespace-entity (db/pull (db/db connection) [:seon.ns/source]
-                                     [:seon.ns/name 'seon.schedule])]
-       (is (string? (:seon.cluster.prompt/text before)))
-       (is (= 2 calls) "both saved evaluations use the real SCI render pair")
-       (is (string? (:seon.ns/source namespace-entity)))
-       (is (:db-after
-            (db/transact! connection
-              [[:db/add [:seon.ns/name 'seon.schedule]
-                :seon.ns/source (str (:seon.ns/source namespace-entity) "\n")]
-               [:db/add [:seon.cluster/name "web-test"]
-                :seon.source/commit-id #uuid "f54229d7-54eb-472d-9ae8-917a0f97af71"]])))
-       ;; The same acquisition owner used by development adoption replaces
-       ;; the program snapshot; a stamp-only test would miss this defect.
-       (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
-                          :seon.schema/projection (kernel/context-projection ctx)})
-       (is (not (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx))))
-       (let [[again calls] (renders #(render/acquire-context! (request)))]
-         (is (= (:seon.cluster.prompt/text before) (:seon.cluster.prompt/text again)))
-         (is (zero? calls) "unrelated adopted source re-renders zero evaluations"))
-       (is (:db-after
-            (db/transact! connection [[:db/add [:seon.cluster.eval/id "retained-adoption-0"]
-                                       :seon.eval/shown "changed shown text"]])))
-       (let [[after calls] (renders #(render/acquire-context! (request)))]
-         (is (not= (:seon.cluster.prompt/text before) (:seon.cluster.prompt/text after)))
-         (is (= 1 calls) "only the evaluation with changed shown text re-renders"))
-       (let [renderer (db/pull (db/db connection) [:seon.fn/source]
-                               [:seon.fn/sym 'seon.repl/render-ai])]
-         (is (string? (:seon.fn/source renderer)))
-         (is (:db-after
-              (db/transact! connection [(support/revision (db/db connection) [:seon.fn/sym 'seon.repl/render-ai]
-                                                           {:seon.fn/source (str (:seon.fn/source renderer) "\n")})])))
-         (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
-                            :seon.schema/projection (kernel/context-projection ctx)})
-         (is (= 2 (second (renders #(render/acquire-context! (request)))))
-             "a changed render pair invalidates both evaluations"))
-       (is (= 2 (second (renders #(render/acquire-context!
-                                   (update-in (request) [:seon.render/profile :seon.render.profile/token-budget] inc)))))
-           "the render profile remains an invocation input")))))

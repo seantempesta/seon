@@ -8,8 +8,7 @@
             [seon.eval :as evaluation]
             [seon.flow :as flow]
             [seon.test :as tests]
-            [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.test-support :as support]))
 
 (defn exercise!
   "Probe declaration calls through ordinary virtual turns on the supplied connection."
@@ -39,7 +38,7 @@
             request {:seon.turn.loop/cluster handle :seon.agent/routing routing
                      :seon.agent/id agent-id}
             submit (fn [source]
-                     (let [result (turn/virtual-turn! (assoc request :seon.cluster.reply/text source))
+                     (let [result (agent/evaluate-source! (assoc request :seon.cluster.reply/text source))
                            turn-id (:seon.turn/id result)]
                        (when-not turn-id (throw (ex-info "Virtual turn refused" result)))
                        (try

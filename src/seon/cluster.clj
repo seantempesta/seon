@@ -34,7 +34,6 @@
             [datahike.api :as d]
             [datahike.gc-guard :as gc-guard]
             [datahike.schema]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -3104,19 +3103,13 @@
          :inst
          :seon.agent/creation-request]
     :seon.store/transaction-data]}
-  [db process now
-   {agent-id :seon.agent/id
-    namespace-name :seon.ns/name
-    :as request}]
+  [db _process _now {agent-id :seon.agent/id :as request}]
   (if (db/q '[:find ?agent .
              :in $ ?agent-id
              :where [?agent :seon.agent/id ?agent-id]]
            db agent-id)
     []
-    (into (cluster.agent/creation-tx request)
-          (bootstrap/seed-tx
-           db
-           {:seon.agent/id agent-id :seon.cluster/name (:seon.cluster/name request) :seon.ns/name namespace-name :seon.db.process/id process :seon.turn/opened-tx "datomic.tx"}))))
+    (cluster.agent/creation-tx request)))
 
 (defn ensure-entity!
   "Create one absent agent atomically and return its durable useful identity.
@@ -3143,35 +3136,25 @@
       ;; current committed value, not the rest of the transaction report.
       (let [database (db/db connection)
             agent-id (:seon.agent/id request)
-            bootstrap-run-id (bootstrap/run-id agent-id)
             agent
             (db/pull database
                      '[:seon.agent/id
                        {:seon.agent/namespace [:seon.ns/name]}]
                      [:seon.agent/id agent-id])
-            run-agent-id
-            (db/q '[:find ?agent-id .
-                    :in $ ?run-id
-                    :where
-                    [?run :seon.turn/id ?run-id]
-                    [?run :seon.turn/agent ?agent]
-                    [?agent :seon.agent/id ?agent-id]]
-                  database bootstrap-run-id)
             namespace-name
             (get-in agent [:seon.agent/namespace :seon.ns/name])
             cluster-name (config/agent-cluster database agent-id)]
-        (if (and namespace-name (string? cluster-name) (= agent-id run-agent-id))
+        (if (and namespace-name (string? cluster-name))
           {:seon.agent/id agent-id
            :seon.ns/name namespace-name
-           :seon.cluster/name cluster-name
-           :seon.turn/id bootstrap-run-id}
+           :seon.cluster/name cluster-name}
           {:seon.agent/creation-incomplete agent-id
            :seon.error/at (java.util.Date.)
            :seon.error/layer :seon.cluster/operation
            :seon.error/operation 'seon.cluster/ensure-entity!
            :seon.error/message
            (str "Agent " (pr-str agent-id)
-                " committed without its namespace, cluster, or bootstrap run.")
+                " committed without its namespace or cluster.")
            :seon.error/data {:seon.agent/id agent-id}})))))
 
 (defn seed-root-agent!

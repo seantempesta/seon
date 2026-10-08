@@ -9,7 +9,6 @@
             [datahike.core :as datahike]
             [sci.core :as sci]
             [seon.ai :as ai]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.message :as message]
@@ -72,14 +71,12 @@
 (defn- authored-receipt-count
   [db agent-id]
   (db/q '[:find (count ?receipt) .
-         :in $ ?agent-id ?bootstrap-run-id
+         :in $ ?agent-id
          :where
          [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
-         [?run :seon.turn/id ?run-id]
-         [(not= ?run-id ?bootstrap-run-id)]
          [?receipt :seon.cluster.eval/run ?run]]
-       db agent-id (bootstrap/run-id agent-id)))
+       db agent-id))
 
 (defn- semantic-result
   [result-edn]
@@ -88,16 +85,14 @@
 (defn- authored-result
   [db agent-id ordinal]
   (db/q '[:find ?result .
-         :in $ ?agent-id ?bootstrap-run-id ?ordinal
+         :in $ ?agent-id ?ordinal
          :where
          [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
-         [?run :seon.turn/id ?run-id]
-         [(not= ?run-id ?bootstrap-run-id)]
          [?receipt :seon.cluster.eval/run ?run]
          [?receipt :seon.cluster.eval/ordinal ?ordinal]
          [?receipt :seon.cluster.eval/result-edn ?result]]
-       db agent-id (bootstrap/run-id agent-id) ordinal))
+       db agent-id ordinal))
 
 (defn- active-agent-id
   "The agent whose durable run is currently open."
@@ -123,24 +118,12 @@
 (defn- agent-authored-closed-run-count
   [db agent-id]
   (db/q '[:find (count ?run) .
-         :in $ ?agent-id ?bootstrap-run-id
+         :in $ ?agent-id
          :where
          [?agent :seon.agent/id ?agent-id]
          [?run :seon.turn/agent ?agent]
-         [?run :seon.turn/id ?run-id]
-         [(not= ?run-id ?bootstrap-run-id)]
          [?run :seon.turn/closed-tx _]]
-       db agent-id (bootstrap/run-id agent-id)))
-
-(defn- await-bootstrap!
-  [connection agent-id]
-  (await-commit!
-   connection
-   (fn [db]
-     (:seon.turn/closed-tx
-      (db/pull db [:seon.turn/closed-tx]
-              [:seon.turn/id (bootstrap/run-id agent-id)])))
-   (constantly nil)))
+       db agent-id))
 
 (defn- authored-program-settled?
   "The complete first-agent plan committed, including its final disposition."
@@ -175,7 +158,6 @@
                              :seon.boot/root root})
             connection (:seon.boot/cluster-connection first-instance)]
         (try
-          (await-bootstrap! connection "root")
           (cluster/ensure-entity!
            connection
            (get-in first-instance
@@ -184,7 +166,6 @@
            {:seon.agent/id "restart-a"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-a})
-          (await-bootstrap! connection "restart-a")
           (with-redefs
             [ai/complete
              (fn [_projection _]
@@ -354,7 +335,6 @@
            {:seon.agent/id "restart-b"
             :seon.cluster/name cluster-name
             :seon.ns/name 'my.agents.restart-b})
-          (await-bootstrap! connection "restart-b")
           (with-redefs
             [ai/complete
              (fn [_projection _]

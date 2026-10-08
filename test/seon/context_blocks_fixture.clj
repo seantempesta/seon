@@ -8,8 +8,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.id :as id]
-            [seon.schema :as schema]
-            [seon.turn :as turn]))
+            [seon.schema :as schema]))
 
 ; The live installer and loop regression share these ordinary declarations.
 ; The scenario's orders are DURABLE datoms on every cluster that seeds it, so
@@ -47,7 +46,7 @@
   "Find the customer with the largest order total with a contracted function and a test, add an order of 40 for them, and tell me the customer and both totals.")
 
 (defn- checked [result]
-  ;; Debt: db/transact! and turn/system-turn retain generic error outputs.
+  ;; Debt: db/transact! retains generic error outputs.
   (when (and (:seon.error/at result) (:seon.error/layer result) (:seon.error/operation result))
     (throw (ex-info (str "Juniper fixture operation failed: " (pr-str result)) result)))
   result)
@@ -116,7 +115,7 @@
                                          (async/offer! event true))))
         (let [result
               (try
-                (let [submitted (turn/virtual-turn! (assoc request :seon.cluster.reply/text source))]
+                (let [submitted (agent/evaluate-source! (assoc request :seon.cluster.reply/text source))]
                   (if (contains? #{:seon.turn/agent-already-running :seon.turn/run-exists}
                                  (:seon.turn/rule submitted))
                     (do
@@ -242,11 +241,6 @@
                              {:seon.cluster/name cluster-name})))
            (finally (async/close! ack)))))
      settings-fn)
-    (let [opening (checked (turn/system-turn {:seon.turn.loop/cluster handle
-                                              :seon.agent/id "juniper"
-                                              :seon.turn/write? true}))]
-      (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
-                   :seon.agent/id "juniper"})
-      (merge (declared! handle)
-             (select-keys opening
-                          [:seon.turn/id :seon.error/at :seon.error/layer :seon.error/operation :seon.error/message]))))))
+    (agent/arm! {:seon.turn.loop/cluster handle :seon.agent/routing routing
+                 :seon.agent/id "juniper"})
+    (declared! handle))))

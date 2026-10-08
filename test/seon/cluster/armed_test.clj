@@ -29,7 +29,6 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.ai :as ai]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
@@ -62,7 +61,7 @@
         (d/unlisten connection key)))))
 
 (defn- with-cluster
-  "Boot one real cluster, await its bootstrap plan, and always stop it."
+  "Boot one real cluster and always stop it."
   [name body]
   (let [root (str "tmp/armed-test/" name)]
     (test-support/delete-recursively! root)
@@ -70,15 +69,6 @@
     (let [instance (boot/start! {:seon.boot/cluster-name name
                                     :seon.boot/root root})]
       (try
-        (await-fact
-         (:seon.boot/cluster-connection instance)
-         (fn [db]
-           (db/q '[:find ?closed-at .
-                  :in $ ?run-id
-                  :where
-                  [?run :seon.turn/id ?run-id]
-                  [?run :seon.turn/closed-tx ?closed-at]]
-                db (bootstrap/run-id "root"))))
         (body instance)
         (finally
           (boot/stop! instance))))))
@@ -181,16 +171,6 @@
           right (boot/start! {:seon.boot/cluster-name "live-right"
                                  :seon.boot/root root})]
       (try
-        (doseq [instance [left right]]
-          (await-fact
-           (:seon.boot/cluster-connection instance)
-           (fn [db]
-             (db/q '[:find ?closed-at .
-                    :in $ ?run-id
-                    :where
-                    [?run :seon.turn/id ?run-id]
-                    [?run :seon.turn/closed-tx ?closed-at]]
-                  db (bootstrap/run-id "root")))))
         (let [left-handle (:seon.turn.loop/cluster left)
               right-handle (:seon.turn.loop/cluster right)
               left-ctx (:seon.sci.eval/ctx left-handle)

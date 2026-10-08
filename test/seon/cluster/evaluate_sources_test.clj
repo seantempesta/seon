@@ -168,11 +168,6 @@
                                            [?evaluation :seon.cluster.eval/run ?run]]
                                          @connection "saved-preview"))]
              (is (some? (:db-after committed)))
-             (is (= "saved-preview"
-                    (:seon.turn/id
-                     (db/pull (turn/opening-db @connection "saved-preview")
-                              [:seon.turn/id]
-                              [:seon.turn/id "saved-preview"]))))
              (is (= raw-source (:seon.turn/reply saved)))
              ;; `closed-tx` IS THE TRANSACTION, never an instant: the saved
              ;; recording points at the transaction that wrote it, so the

@@ -10,7 +10,7 @@
            :my.shell/error :my.turn/error
            :seon.agent/error :seon.agent.graph/error :seon.ai/request-error
            :seon.boot/error :seon.bootstrap/error
-           :seon.cluster/error :seon.cluster.prompt/error :seon.cluster.registry/error
+           :seon.cluster/error :seon.cluster.registry/error
            :seon.cluster.reply/error :seon.cluster.source/error :seon.cluster.store/error
            :seon.cluster.wake/error :seon.config/error :seon.config/rule-error
            :seon.db.availability/error :seon.db.read/error :seon.db.write/error :seon.db.write/validation-refusal

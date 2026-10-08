@@ -372,35 +372,6 @@
                 (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
                      :seon.turn.work/next derived))))))))))
 
-(deftest a-generated-run-resumes-then-requests-one-more-form
-  (with-database
-    (fn [connection]
-      (open-run! connection {})
-      (support/transacted!
-              connection
-              [[:db/retract [:seon.turn/id run-id]
-                :seon.turn.work/situation :call]
-               [:db/add [:seon.turn/id run-id]
-                :seon.turn.work/situation :generate]
-               {:seon.cluster.eval/id (str run-id "-0")
-                :seon.cluster.eval/run [:seon.turn/id run-id]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/at now
-                :seon.cluster.eval/source "(help)"}])
-      (is (= {:seon.turn.work/situation :resume
-              :seon.turn/id run-id
-              :seon.agent/id agent-id
-              :seon.cluster.eval/ordinal 0}
-             (turn/next-agent-work @connection request)))
-      (terminal-receipt! connection 0 "{:introduced 'my.turn}")
-      (let [derived (turn/next-agent-work @connection request)]
-        (is (= {:seon.turn.work/situation :generate
-                :seon.turn/id run-id
-                :seon.agent/id agent-id}
-               derived))
-        (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-             :seon.turn.work/next derived))))))
-
 (deftest comment-only-input-is-recorded-but-never-becomes-eval-work
   (with-database
     (fn [connection]

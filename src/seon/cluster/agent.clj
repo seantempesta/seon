@@ -389,7 +389,6 @@
       (str "You are agent " (:seon.agent/id situation)
            " in namespace "
            (second (:seon.agent/namespace-ref situation)) ". "
-           "Your opening is generated from live facts. "
            "You have " (:seon.agent/unread-message-count situation)
            " unread message"
            (when-not (= 1 (:seon.agent/unread-message-count situation))
@@ -410,8 +409,7 @@
   [unit]
   (when-let [agent-id (:seon.agent/id unit)]
     (str "Agent " agent-id " · namespace " (:seon.ns/name unit)
-         " · cluster " (:seon.cluster/name unit)
-         " · bootstrap run " (:seon.turn/id unit) ".")))
+         " · cluster " (:seon.cluster/name unit) ".")))
 
 (defn render-creation-html
   "`:seon.render/html` — the compact agent-creation result card."
@@ -423,9 +421,7 @@
      [:h3 (str "Agent " agent-id)]
      [:dl
       [:div [:dt "Namespace"] [:dd [:code (str (:seon.ns/name unit))]]]
-      [:div [:dt "Cluster"] [:dd (:seon.cluster/name unit)]]
-      [:div [:dt "Opening turn"]
-       [:dd [:code (:seon.turn/id unit)]]]]]))
+      [:div [:dt "Cluster"] [:dd (:seon.cluster/name unit)]]]]))
 
 (defn assigned-to
   "Agent ids assigned to work in `namespace-name`, sorted; empty only when none.
@@ -1671,59 +1667,9 @@
                                 :where [?agent :seon.agent/id ?id]
                                 [(get-else $ ?agent :seon.agent/branch ::none) ?branch]]
                               db))
-           unarmed (remove #(contains? (:seon.agent/armed @routing) %) agents)
-           non-root-agents (remove #{"root"} agents)
-           ;; First-agent supervision is root's, so only root's own armer runs it.
-           first-agent (when (and (some #{"root"} agents) (= 1 (count non-root-agents)))
-                         (first non-root-agents))]
+           unarmed (remove #(contains? (:seon.agent/armed @routing) %) agents)]
        (doseq [agent-id (sort (agents-to-arm db (set unarmed)))]
          (arm! {:seon.turn.loop/cluster handle
                 :seon.agent/id agent-id
                 :seon.agent/routing routing}))
-       ;; Supervision is a fact-derived transition, never a wait inside this
-       ;; proc. Agent creation and every run closure wake the armer; each pass
-       ;; either commits the now-eligible transition or parks for the next
-       ;; fact. Thus later arm wakes cannot queue behind a generated opening.
-       (when first-agent
-         (let [database @connection
-               worker-closed?
-               (some?
-                (db/q '[:find ?closed .
-                        :in $ ?run-id
-                        :where
-                        [?run :seon.turn/id ?run-id]
-                        [?run :seon.turn/closed-tx ?closed]]
-                      database (bootstrap/run-id first-agent)))
-               root-eid
-               (db/q '[:find ?root .
-                       :where [?root :seon.agent/id "root"]]
-                     database)
-               root-idle?
-               (and root-eid
-                    (nil?
-                     (db/q '[:find ?run .
-                             :in $ ?root
-                             :where [?run :seon.turn/agent ?root]
-                             (not [?run :seon.turn/closed-tx])]
-                           database root-eid)))]
-           (when (and worker-closed? root-idle?)
-             (let [supervision-tx
-                   (bootstrap/supervision-tx
-                    database
-                    (:seon.db.process/id handle)
-                    first-agent)]
-               (when (seq supervision-tx)
-                 (let [result (db/transact! connection supervision-tx)]
-                   (when (or (:seon.db.write.attempt/request-id result)
-                             (:seon.db/invalid-read result) (:seon.schema/expected-value result))
-                     (throw
-                      (ex-info
-                       "Root's first-agent supervision run did not commit."
-                       {:seon.agent/supervision-not-committed true
-                        :seon.error/message
-                        "Root's first-agent supervision run did not commit."
-                        :seon.error/data result}))))
-                 (if-let [root (armed routing "root")]
-                   (async/offer! (:seon.cluster.wake/channel root) :seon.agent/wake)
-                   (async/offer! (:seon.cluster.wake/channel handle) :seon.agent/wake)))))))
        [state nil]))))

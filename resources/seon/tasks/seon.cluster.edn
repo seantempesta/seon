@@ -68,8 +68,4 @@
              :kind :function
              :intent "disarm-agents! declares [:or :nil `:seon.await/timeout-error`] and its docstring says a join that misses its bound answers the await owner's timeout value, but stop-graph! throws turn-completion-failure!'s ex-info (agent.clj:1402,1523-1530) and disarm-agents! has no handling around `seon.cluster.agent/disarm!`. Only the view, armer and cluster-graph joins answer a value; an agent join throws through `seon.cluster.boot/stop!` and `seon.cluster.host/stop!`. disarm! and disarm-agents! must return the typed timeout error naming the missing exit, keep the resources, and every caller (stop-owned-graphs!, arm!, `seon.cluster.boot/stop!`, `seon.cluster.host/stop!`) handle the returned value. Proof: a stuck agent's disarm! and a cluster stop with one stuck agent return the typed error and still stop the other agents."
              :must-read #{seon.cluster/disarm-agents! seon.cluster.agent/disarm!}
-             :evidence #{"docs/research/agent-platform/2026-10-08/inventory/q14-exit-deadline.md"}}
- #:seon.task{:name "new-agents-are-seeded-with-a-demo-task"
-             :kind :function
-             :intent "Every new agent, root included, is seeded with an old demo task: seon.cluster/ensure-entity-call adds seon.bootstrap/seed-tx (a :generate bootstrap turn plus an outside message \"Define a durable contracted function named largest ...\" naming attributes that no longer exist), so an agent works a demo before any assignment; contradicts \"a model agent launches only on an assigned task with proofs\". About 29 call sites depend on it; a cut is planned (lane model-loop). Done when ensure-entity-call seeds no turn or message and the callers are converted."
-             :must-read #{seon.cluster/ensure-entity-call seon.bootstrap/seed-tx}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/inventory/q14-exit-deadline.md"}}]

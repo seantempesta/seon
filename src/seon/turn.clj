@@ -26,7 +26,6 @@
             [seon.program :as program]
             [seon.render.value :as render.value]
             [seon.render :as render]
-            [seon.render.walk :as walk]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
@@ -59,18 +58,12 @@
 ;;; call (AGENTS §2.1: never fetch an input at call time).
 (defonce ^:private cluster-agent-acquire-context!
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
-(defonce ^:private cluster-agent-evaluate-source!
-  (delay (requiring-resolve 'seon.cluster.agent/evaluate-source!)))
 (defonce ^:private context-model-context
   (delay (requiring-resolve 'seon.context/model-context)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-changes
   (delay (requiring-resolve 'seon.test/changes)))
-(defonce ^:private context-capture-tx
-  (delay (requiring-resolve 'seon.context/capture-tx)))
-
-
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -245,28 +238,6 @@
      (count
       (filter #(>= (:seon.cluster.eval/ordinal %) ordinal)
               evaluations))}))
-
-(defn opening-db
-  "The database value this run opened on.
-
-  The opening transaction is derived from the identity datom. Datahike
-  `as-of` includes that transaction, so facts asserted with the opening are
-  visible and every later transaction is absent by construction."
-  {:malli/schema [:=> [:cat :seon.db/database-value ::id]
-                  [:or :seon.db/database-value :seon.db/invalid-read-error :seon.turn/missing-opening-datom-error]]}
-  [database id]
-  (let [opening-tx
-        (db/q '[:find ?tx .
-                :in $ ?id
-                :where
-                [?run :seon.turn/id ?id ?tx]]
-              database id)]
-    (cond
-      (:seon.db/invalid-read opening-tx) opening-tx
-      opening-tx (db/as-of database opening-tx)
-      :else (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation 'seon.turn/opening-db
-             {:seon.error/message "The run has no opening datom."
-       :seon.error/data {::id id} :seon.turn/missing-opening-datom true}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Transitions — pure functions OF THE MID-TRANSACTION DATABASE VALUE,
@@ -784,72 +755,6 @@
   (try (system-run-call database request)
        (catch clojure.lang.ExceptionInfo refused
          (if (::rule (ex-data refused)) [] (throw refused)))))
-
-(defn append-generated-call
-  "Append one system-authored form to an open generated turn.
-
-  The requested ordinal must equal the number of forms already present, so
-  forms append without gaps. An opening appends all its forms in the one
-  transaction that settles them (`generate-turn`). A digest-backed run cannot
-  enter this path."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.turn/generated-form-request]
-                  :seon.store/transaction-data]}
-  [db request]
-  (let [{::keys [id]
-         receipt-at :seon.cluster.eval/at
-         ordinal :seon.cluster.eval/ordinal
-         source :seon.cluster.eval/source
-         comment :seon.cluster.eval/comment
-         namespace-name :seon.ns/name} request
-        held (require-open-run db `append-generated-call request)
-        run-eid (:db/id held)
-        expected
-        (long (or (db/q '[:find (count ?form) .
-                          :in $ ?run
-                          :where [?form :seon.cluster.eval/run ?run]]
-                        db run-eid)
-                  0))]
-    (when (some? (::reply-size held))
-      (refuse! `append-generated-call ::plan-frozen request))
-    (when-not (= :generate (:seon.turn.work/situation held))
-      (refuse! `append-generated-call ::not-generate-situation request))
-    (when-not (= expected ordinal)
-      (refuse! `append-generated-call ::generated-ordinal request))
-    (receipt-start-call
-     db
-     (cond-> {::id id
-              :seon.cluster.eval/ordinal ordinal
-              :seon.cluster.eval/at receipt-at
-              :seon.cluster.eval/source source
-              :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
-       (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
-       comment (assoc :seon.cluster.eval/comment comment)))))
-
-(defn append-generated-tx
-  "Transaction data appending one dependency-ready generated form."
-  {:malli/schema [:=> [:cat :seon.turn/generated-form-request]
-                  :seon.store/transaction-data]}
-  [request]
-  [[:db.fn/call #'append-generated-call request]])
-
-(defn generated-run-tx
-  "Open one zero-form generated system turn."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.turn/generated-run-request]
-                  :seon.store/transaction-data]}
-  [_database request]
-  (let [{agent-id :seon.agent/id
-         run-id ::id
-         opened-at ::opened-tx
-         starting-ns ::starting-ns
-         trigger ::trigger} request
-        namespace-name (if (vector? starting-ns)
-                         (second starting-ns)
-                         starting-ns)]
-    (open-tx
-     (cond-> {::id run-id ::agent [:seon.agent/id agent-id] ::starting-ns [:seon.ns/name namespace-name] :seon.turn.work/situation :generate ::opened-tx "datomic.tx"}
-       trigger (assoc ::trigger trigger)))))
 
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
@@ -1708,627 +1613,6 @@
 ;; Debug controls enter higher execution layers only when called; those layers
 ;; depend on the writer transitions above during namespace loading.
 
-(defn- source-events [source]
-  (reader/read {:seon.sci.reader/text (:seon.cluster.eval/source source)
-                :seon.sci.reader/ns (:seon.ns/name source)
-                :seon.config.eval.result/max-source
-                (count (:seon.cluster.eval/source source))}))
-
-(defn- source-key [source]
-  (let [events (source-events source)]
-    [(:seon.ns/name source)
-     (if (vector? events)
-       (mapv :seon.sci.reader/form events)
-       (:seon.cluster.eval/source source))]))
-
-(defn- unit-read
-  "What a rendered unit shows and the read that finds it again: its declared
-  form face (`seon.render/render-form-value`: a schema's own requery, else the
-  structural pull), as source text with its comment. The unit is an entity
-  (`lookup`) or one attribute of one (`[entity attribute]`)."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value :seon.agent/id :map]
-                  [:map [:seon.cluster.eval/source :seon.cluster.eval/source]
-                   [:seon.cluster.eval/comment {:optional true} :seon.cluster.eval/comment]]]}
-  [handle database agent-id {lookup :seon.render.walk/lookup}]
-  (let [[entity attribute] (if (vector? (first lookup)) lookup [lookup nil])
-        value (if attribute
-                (get (db/pull database [attribute] entity) attribute)
-                (db/pull database '[*] entity))
-        form (render/render-form-value
-              (cond-> {:seon.db/db database
-                       :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                       :seon.sci.admit/caps (:seon.sci.admit/caps handle)
-                       :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)
-                       :seon.agent/id agent-id
-                       :seon.render/value value
-                       :seon.render.value/root entity}
-                attribute (assoc :seon.render.walk/attribute attribute)))
-        entry (cond
-                (:seon.repl/form form) form
-                (and (map? form) (:seon.error/message form))
-                ;; no form face could be selected: the structural read
-                {:seon.repl/form (if attribute
-                                   (list 'get (list 'seon.db/pull (list 'quote [attribute]) entity) attribute)
-                                   (list 'seon.db/pull (list 'quote '[*]) entity))}
-                :else {:seon.repl/form form})]
-    (cond-> {:seon.cluster.eval/source (id/printed (:seon.repl/form entry))}
-      (:seon.repl/comment entry) (assoc :seon.cluster.eval/comment (:seon.repl/comment entry)))))
-
-(defn- declared-sources
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value
-                       :seon.agent/id :seon.ns/name]
-                  [:or [:map [:seon.turn/forms :seon.cluster.reply/sources]
-                         [:seon.render.walk/units :seon.render.walk/units]]
-                   :seon.turn/system-refused-error]]}
-  [handle database agent-id namespace-name]
-  (let [calls (atom {})
-        invocations (atom {})
-        units (walk/neighborhood
-               {:seon.db/db database
-                :seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                :seon.render.walk/lookup [:seon.agent/id agent-id]
-                :seon.render/output :seon.render/ai
-                :seon.render/captured-calls calls
-                :seon.render/captured-invocations invocations
-                :seon.sci.admit/caps (:seon.sci.admit/caps handle)
-                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})]
-    (or (some (fn [unit]
-                (let [failure (:seon.error/value unit)]
-                  (when-not (and (:seon.print/bound-by failure)
-                                 (:seon.render.walk/limit failure)
-                                 (:seon.render.walk/continuation-subject failure))
-                    (when failure
-                      (assoc failure :seon.turn/refused-system-agent agent-id))))) units)
-        (let [sources (reduce
-         (fn [sources unit]
-           (if (:seon.cluster.reply/no-forms sources)
-             (reduced sources)
-           (let [lookup (:seon.render.walk/lookup unit)
-                 call-id [:seon.render/ai lookup (:seon.render/distance unit)]
-                 call (get @calls call-id)
-                 blocks (or (:seon.render/source-blocks call)
-                            (when-let [text (:seon.render.call/source call)]
-                              [{:seon.render/source text}]))
-                 data (:seon.render/output unit)]
-             (if (and (empty? blocks) (some? data) (not (string? data)) (not (:seon.error/value unit)))
-               ;; A DATA RENDER (renders return data, owner 313e81181): its AI
-               ;; face is the unit's shown value, printed by the value printer
-               ;; and never evaluated; its source is the read that finds the
-               ;; data again, and its read evidence is the render's own.
-               (conj sources
-                     (merge
-                     (unit-read handle database agent-id unit)
-                     {:seon.ns/name namespace-name
-                      :seon.render.walk/lookup lookup
-                      :seon.turn/rendered
-                      (cond-> {:seon.sci.admit/value data}
-                        (seq (:seon.render.call/read-evidence call))
-                        (assoc :seon.cluster.eval/read-evidence (:seon.render.call/read-evidence call)))}))
-             (reduce
-              (fn [sources block]
-                (let [parsed (code-sources
-                              (:seon.render/source block) namespace-name
-                              (get-in handle [:seon.sci.admit/caps
-                                              :seon.config.eval.result/max-source]))]
-                  (if (:seon.cluster.reply/no-forms parsed)
-                    (reduced parsed)
-                    (into sources
-                          (map #(cond-> (assoc % :seon.render.walk/lookup lookup)
-                                  (:seon.eval/origin block)
-                                  (assoc :seon.eval/origin (:seon.eval/origin block))))
-                          parsed))))
-              sources blocks)))))
-         [] units)]
-          (if (:seon.cluster.reply/no-forms sources)
-            (assoc sources :seon.turn/refused-system-agent agent-id)
-            {:seon.turn/forms sources :seon.render.walk/units units})))))
-
-(defn- latest-evaluations
-  "The latest evaluation of each distinct source this agent evaluated, with
-  its read evidence. Evidence is decoded for the kept evaluations only: every
-  evaluation is folded with its evidence as references, then the kept ones'
-  evidence is pulled whole. Decoding every stored plan of root's 146
-  evaluations was 3.8 s of each system turn; the kept 23 take 0.5 s, and
-  bounded plans (`seon.db/append-read-evidence!`) take the rest (default,
-  2026-09-27)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:map-of [:tuple [:maybe :seon.ns/name] :seon.schema/value]
-                   :seon.db/pulled-entity]]}
-  [database agent-id]
-  (let [latest
-        (reduce
-         (fn [latest [basis _ evaluation]]
-           (let [source (assoc evaluation :seon.ns/name
-                               (get-in evaluation [:seon.cluster.eval/ns :seon.ns/name])
-                               :seon.turn/basis-t basis)
-                 shown (repl/shown-value (:seon.eval/shown evaluation ""))
-                 previous (get latest (source-key source))
-                 shown (if (and previous (map? shown) (:seon.repl/changes shown)
-                                (not= :model (:seon.cluster.eval/origin evaluation))
-                                (not= :call (get-in evaluation [:seon.cluster.eval/run
-                                                              :seon.turn.work/situation])))
-                         (db/apply-diff (:seon.repl/shown-value previous)
-                                        (:seon.repl/changes shown))
-                         shown)
-                 source (assoc source :seon.repl/shown-value shown)]
-             (assoc latest (source-key source) source)))
-         {}
-         (sort-by (juxt first second)
-                  (db/q '[:find ?t ?ordinal
-                          (pull ?evaluation
-                                [* {:seon.cluster.eval/ns [:seon.ns/name]}
-                                 {:seon.cluster.eval/run [:db/id :seon.turn.work/situation]}
-                                 {:seon.cluster.eval/read-evidence [:db/id]}])
-                          :in $ ?id
-                          :where [?agent :seon.agent/id ?id]
-                          [?turn :seon.turn/agent ?agent]
-                          [?turn :seon.turn/id _ ?t]
-                          [?evaluation :seon.cluster.eval/run ?turn]
-                          [?evaluation :seon.cluster.eval/ordinal ?ordinal]
-                          [?evaluation :seon.cluster.eval/source]]
-                        database agent-id)))
-        evidence (into {}
-                       (db/q '[:find ?evaluation
-                               (pull ?evaluation [{:seon.cluster.eval/read-evidence [*]}])
-                               :in $ [?evaluation ...]]
-                             database
-                             (into [] (comp (filter (comp seq :seon.cluster.eval/read-evidence))
-                                            (map :db/id))
-                                   (vals latest))))]
-    (update-vals latest
-                 (fn [evaluation]
-                   (if-let [held (get-in evidence [(:db/id evaluation)
-                                                   :seon.cluster.eval/read-evidence])]
-                     (assoc evaluation :seon.cluster.eval/read-evidence held)
-                     evaluation)))))
-
-(defn- read-only-evaluation?
-  "True when a successful evaluation only read this agent's database, so a
-  system turn may evaluate it again. Every read must name this database's
-  committed connection (`:datahike.cache/connection-id`, the identity Datahike
-  keys its query cache on, datahike db.cljc:444): a read of another branch or
-  of an uncommitted value is what a merge, a test run or a write-back does on
-  its way to writing there, and this database holds no receipt for it (root's
-  prepare-merge!, accept-merge! and write-back! evaluations were promoted,
-  2026-09-26). Absent receipts and effects are necessary, not sufficient."
-  [database evaluation]
-  (let [events (source-events evaluation)
-        evaluation-id (:db/id evaluation)
-        run-id (get-in evaluation [:seon.cluster.eval/run :db/id])
-        evidence (:seon.cluster.eval/read-evidence evaluation)
-        own (:datahike.cache/connection-id (:cache-context database))]
-    (and (nil? (:seon.cluster.eval/error evaluation))
-         (seq evidence)
-         (some? own)
-         (every? #(= own (get-in % [:datahike.read/revision :datahike.cache/connection-id]))
-                 evidence)
-         (vector? events)
-         (not-any? #(program/declaration-row (db/carried-projection database) % :all :agent) events)
-         (nil? (db/q '[:find ?transaction . :in $ ?evaluation
-                        :where [?transaction :seon.db/receipt ?evaluation]]
-                      database evaluation-id))
-         (nil? (db/q '[:find ?effect . :in $ ?turn ?ordinal
-                        :where [?effect :seon.effect/run ?turn]
-                        [?effect :seon.effect/form-ordinal ?ordinal]]
-                      database run-id (:seon.cluster.eval/ordinal evaluation))))))
-
-(declare generated-read-fault evaluate-sources phase)
-
-(defn- code-currency
-  "Each symbol the kept evaluations executed -> its current definition digest
-  in `database` (absent: no such definition now), in one query."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :seon.db/pulled-entity]]
-                  [:map-of :qualified-symbol :seon.program/definition-digest]]}
-  [database evaluations]
-  (let [syms (into #{} (comp (mapcat :seon.cluster.eval/executed) (map first)) evaluations)]
-    (if (empty? syms)
-      {}
-      (into {} (db/q '[:find ?sym ?digest :in $ [?sym ...]
-                       :where (or [?e :seon.fn/sym ?sym] [?e :seon.test/sym ?sym])
-                       [?e :seon.program/definition-digest ?digest]]
-                     database syms)))))
-
-(defn- code-current?
-  "Whether a kept evaluation's code evidence is current: complete, and every
-  definition it executed is still its symbol's current one. Unknown, pending or
-  absent evidence (recorded before the one path) is not: the unit re-runs, and
-  its re-run records its evidence."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :seon.program/definition-digest] :seon.db/pulled-entity] :boolean]}
-  [current previous]
-  (and (= :complete (:seon.cluster.eval/code-evidence previous))
-       (every? (fn [[sym digest]] (= digest (get current sym))) (:seon.cluster.eval/executed previous))))
-
-(defn- system-plan
-  "The opening's sources and the agent's retained reads, each with its status
-  against its latest evaluation: none, unchanged (its read evidence is
-  current) or changed."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.reply/sources
-                       [:map-of [:tuple [:maybe :seon.ns/name] :seon.schema/value] :seon.db/pulled-entity]]
-                  [:vector [:map [:seon.turn/status [:enum :none :unchanged :changed :pending]]]]]}
-  [database declared latest]
-  (let [current-digest (code-currency database (vec (vals latest)))]
-  (into []
-        (comp
-         (filter #(let [previous (get latest (source-key %))]
-                    (or (nil? previous)
-                        (read-only-evaluation? database previous))))
-         (map
-          (fn [source]
-            (let [previous (get latest (source-key source))
-                  evidence (:seon.cluster.eval/read-evidence previous)
-                  basis (:seon.cluster.eval/read-basis-transaction previous)
-                  status (cond
-                           (nil? previous) :none
-                           ;; its own work has not exited: never a second run of it
-                           (kernel/pending? (:seon.cluster.eval/id previous)) :pending
-                           (not (db/read-evidence-current? database evidence)) :changed
-                           (not (code-current? current-digest previous)) :changed
-                           :else :unchanged)]
-              (cond-> (assoc (select-keys source
-                                         [:seon.cluster.eval/source
-                                          :seon.cluster.eval/comment
-                                          :seon.ns/name :seon.render.walk/lookup :seon.eval/origin
-                                          :seon.turn/rendered])
-                             :seon.turn/status status)
-                basis (assoc :seon.cluster.eval/read-basis-transaction basis))))))
-        (second
-         (reduce (fn [[seen sources] source]
-                   (let [source-identity (source-key source)]
-                     (if (contains? seen source-identity)
-                       [seen sources]
-                       [(conj seen source-identity) (conj sources source)])))
-                 [#{} []]
-                 (concat declared
-                         ;; Agent reads remain callable on demand. Only reads
-                         ;; independent of turn-taking can become generated reads.
-                         (filter #(and (read-only-evaluation? database %)
-                                       (nil? (generated-read-fault
-                                               database %
-                                               (select-keys % [:seon.cluster.eval/read-evidence]))))
-                                 (sort-by (juxt :seon.turn/basis-t
-                                                :seon.cluster.eval/ordinal)
-                                          (vals latest)))))))))
-
-(defn- generated-read-fault
-  "Check read dependencies, independent of the evaluator or stored entity shape.
-  Callers hand the captured evidence; reference expansion is not an input to this check."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.reply/form
-                       [:map [:seon.cluster.eval/read-evidence {:optional true}
-                              [:vector :seon.db/read-evidence]]]]
-                  [:or :nil :seon.turn/generated-read-depends-on-turns-error]]}
-  [database source dependencies]
-  (let [inert (wake/inert-attributes database)
-        identities (set (db/identity-attributes database))
-        evidence (:seon.cluster.eval/read-evidence dependencies)
-        offending (into (sorted-set)
-                        (mapcat (fn [read]
-                                  (let [position (:seon.db/source-argument-position read)
-                                        source (some #(when (= position (:datahike.query.source/argument-position %)) %)
-                                                     (get-in read [:datahike.read/dependency-plan
-                                                                   :datahike.query.dependency/sources]))
-                                        patterns (:seon.db/read-index-patterns source)
-                                        ;; Freshness uses these complete patterns before
-                                        ;; the conservative attribute revision as well.
-                                        ;; A pattern bound to one existing entity sees only that
-                                        ;; entity's datoms, and turn-taking asserts new entities
-                                        ;; (turns, evaluations, attempts). Such a pattern names
-                                        ;; turn-taking only through an attribute that entity can
-                                        ;; change: a non-identity attribute it names, or, bound to
-                                        ;; the entity alone, an attribute the entity holds (the
-                                        ;; agent's `:my.agent/turns-left`). An identity names the
-                                        ;; entity and never changes; resolving a message ref to
-                                        ;; its identity probes every identity attribute (root's
-                                        ;; `seon.error/for-agent` opening read, 2026-09-26).
-                                        attributes (if (and patterns
-                                                            (every? #(or (:seon.db/pattern-attribute %)
-                                                                         (:seon.db/pattern-entity %))
-                                                                    patterns))
-                                                     (mapcat (fn [{entity :seon.db/pattern-entity
-                                                                   attribute :seon.db/pattern-attribute}]
-                                                               (cond
-                                                                 (nil? entity) [attribute]
-                                                                 (nil? attribute) (map :a (db/datoms database :eavt entity))
-                                                                 (identities attribute) []
-                                                                 :else [attribute]))
-                                                             patterns)
-                                                     (get-in read [:datahike.read/revision
-                                                                   :datahike.read/attributes]))]
-                                    ;; `:all` is the UNKNOWN attribute set of a
-                                    ;; whole-database scan — a program-graph
-                                    ;; cache refresh reading `[?e ?a]` over a
-                                    ;; bound attribute collection states no
-                                    ;; dependency on any particular attribute.
-                                    ;; Answering it with the whole inert set
-                                    ;; FABRICATED 68 dependencies the read never
-                                    ;; had. A generated
-                                    ;; read only depends on turn-taking when its
-                                    ;; evidence NAMES a turn attribute; whether
-                                    ;; an unnarrowed read must regenerate is
-                                    ;; decided by its own authority — the
-                                    ;; shown-value comparison in `system-turn`
-                                    ;; and `db/read-evidence-current?`.
-                                    (when-not (= :all attributes)
-                                      (filter inert attributes)))))
-                        evidence)]
-    (when (seq offending)
-      (assoc (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
-       {:seon.turn/generated-read-attributes offending
-        :seon.error/message "A generated context read depends on the agent's own turn-taking."
-        :seon.error/member :seon.cluster.eval/source
-        :seon.error/expected :seon.wake/context-inert
-        :seon.error/offending (:seon.cluster.eval/source source)
-        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})}) :seon.error/type :seon.turn/generated-read-depends-on-turns-error))))
-
-(defn system-turn
-  "Project the declared opening and every distinct retained read form.
-  Unchanged reads contribute no evaluation. With write? true, save the exact
-  evaluated sources as one closed system turn with no provider attempt."
-  {:malli/schema [:=> [:cat :seon.turn/system-request]
-                  [:or :seon.turn/system-result :seon.turn/system-refused-error]]}
-  [{handle :seon.turn.loop/cluster
-    agent-id :seon.agent/id
-    write? :seon.turn/write?}]
-  (let [connection (:seon.db/connection handle)
-        database (db/db connection)
-        namespace-name (sci.eval/agent-namespace database agent-id)
-        declared (when namespace-name
-                   (declared-sources handle database agent-id namespace-name))]
-    (cond
-      (nil? namespace-name)
-      (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.turn/system `system-turn
-       {:seon.turn/rule ::agent-namespace-missing
-        :seon.turn/refused-system-agent agent-id
-        :seon.error/message "The system turn requires the agent's assigned namespace."
-        :seon.error/member :seon.agent/id
-        :seon.error/expected :seon.agent/id
-        :seon.error/data {:seon.error/layer :seon.turn}}) :seon.error/type :seon.turn/refused-error)
-
-      (:seon.turn/refused-system-agent declared)
-      (assoc declared :seon.turn/refused-system-agent agent-id)
-
-      :else
-      (let [latest (latest-evaluations database agent-id)
-            plan (system-plan database (:seon.turn/forms declared) latest)
-            ;; a unit whose own work has not exited is reported, never re-run
-            selected (filterv #(#{:none :changed} (:seon.turn/status %)) plan)
-            turn-id (when (and write? (seq selected))
-                      (next-id database (:seon.cluster/name handle) agent-id))
-            agent-ctx (when turn-id
-                        (:seon.sci.eval/ctx
-                         (@cluster-agent-acquire-context! handle agent-id)))
-            ;; ONE FORK FOR EVERY PREVIEWED READ: the reads are read-only, so
-            ;; they share one fork of the agent's context; a fork per read was
-            ;; 58 ms each (root, default, 2026-09-28: 9 changed reads 526 ms)
-            preview-ctx (delay (:seon.sci.eval/ctx
-                                (sci.eval/fork-for-turn
-                                 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.db/db database
-                                  :seon.db/connection connection :seon.agent/id agent-id})))
-            previews (second
-                      (reduce
-                       (fn [[ordinal previews] source]
-                         (let [preview (cond
-                          ;; a data render's shown value, printed, never evaluated
-                          (:seon.turn/rendered source)
-                          {:seon.turn.loop/evaluated-sources
-                           [{:seon.cluster.eval/ordinal ordinal
-                             :seon.turn.loop/admitted-form
-                             (assoc (dissoc source :seon.turn/rendered)
-                                    :seon.cluster.eval/ns [:seon.ns/name (:seon.ns/name source)])
-                             :seon.sci.eval/evaluation
-                             (sci.eval/rendered-evaluation
-                              (merge (:seon.turn/rendered source)
-                                     {:seon.cluster.eval/ns [:seon.ns/name (:seon.ns/name source)]
-                                      :seon.sci.eval/ctx (or agent-ctx (:seon.sci.eval/ctx handle))
-                                      :seon.sci.admit/caps (:seon.sci.admit/caps handle)
-                                      :seon.db/db database
-                                      :seon.agent/id agent-id}
-                                     (when turn-id
-                                       {:seon.repl/handle (admit/result-handle (receipt-identity turn-id ordinal))})))}]}
-                          turn-id
-                          {:seon.turn.loop/evaluated-sources
-                           (:seon.turn.loop/evaluated-sources
-                            (evaluate-sources
-                            {:seon.turn.loop/cluster handle
-                             :seon.db/db database
-                             :seon.sci.eval/ctx agent-ctx
-                             :seon.agent/id agent-id
-                             :seon.turn/id turn-id
-                             :seon.turn/write? true
-                             :seon.cluster.eval/ordinal ordinal
-                             :seon.ns/name (:seon.ns/name source)
-                             :seon.cluster.reply/sources [source]}))}
-                          :else
-                          {:seon.turn.loop/evaluated-sources
-                           (:seon.turn.loop/evaluated-sources
-                            (evaluate-sources
-                             {:seon.turn.loop/cluster handle
-                              :seon.db/db database
-                              :seon.sci.eval/ctx @preview-ctx
-                              :seon.agent/id agent-id
-                              :seon.cluster.eval/ordinal 0
-                              :seon.ns/name (:seon.ns/name source)
-                              :seon.cluster.reply/sources [source]}))})
-                               previous (get latest (source-key source))
-                               evaluation (get-in preview [:seon.turn.loop/evaluated-sources 0
-                                                           :seon.sci.eval/evaluation])
-                               unchanged? (and previous evaluation
-                                               (= (:seon.repl/shown-value previous)
-                                                  (repl/shown-value (:seon.eval/shown evaluation ""))))
-                               preview (cond-> preview
-                                         evaluation
-                                         (assoc-in [:seon.turn.loop/evaluated-sources 0
-                                                    :seon.cluster.eval/ordinal] ordinal)
-                                         unchanged? (assoc :seon.turn/status :unchanged))]
-                           [(if unchanged? ordinal (inc ordinal)) (conj previews preview)]))
-                       [0 []] selected))]
-        (or (some #(when (:seon.cluster.reply/no-forms %)
-                     (assoc % :seon.turn/refused-system-agent agent-id)) previews)
-            (let [;; A read whose fresh reads depend on turn-taking keeps its
-                  ;; value with the fault beside it, never refusing the turn
-                  ;; (root's loop parked, 2026-09-28); its stored evidence
-                  ;; keeps it out of later openings.
-                  previews (mapv (fn [source preview]
-                                   (update preview :seon.turn.loop/evaluated-sources
-                                           (partial mapv
-                                                    (fn [evaluated]
-                                                      (if-let [fault (generated-read-fault
-                                                                      database source
-                                                                      (select-keys (:seon.sci.eval/evaluation evaluated)
-                                                                                   [:seon.cluster.eval/read-evidence]))]
-                                                        (update-in evaluated [:seon.sci.eval/evaluation :seon.cluster.eval/diagnostics]
-                                                                   #(str/join "\n" (remove nil? [% (render.value/core-text [fault])])))
-                                                        evaluated)))))
-                                 selected previews)silent (filterv #(= :unchanged (:seon.turn/status (second %)))
-                                  (mapv vector selected previews))
-                  refresh-tx
-                  (into [] cat
-                        (map (fn [[source preview]]
-                               (let [previous (get latest (source-key source))
-                                     evaluation (get-in preview [:seon.turn.loop/evaluated-sources 0
-                                                                 :seon.sci.eval/evaluation])]
-                                 (concat
-                                  ;; The read-evidence vector below replaces the previous one whole.
-                                  [[:db/add (:db/id previous) :seon.cluster.eval/read-basis-transaction
-                                    (:seon.cluster.eval/read-basis-transaction evaluation)]]
-                                  (when-let [origin (:seon.eval/origin source)]
-                                    [[:db/add (:db/id previous) :seon.eval/origin origin]])
-                                  (receipt-read-evidence-tx previous evaluation))))
-                             silent))
-                  emitted (filterv #(not= :unchanged (:seon.turn/status (second %)))
-                                   (mapv vector selected previews))
-                  selected (mapv first emitted)
-                  previews (mapv second emitted)
-                  evaluated (mapv (fn [source preview]
-                                    (cond-> (first (:seon.turn.loop/evaluated-sources preview))
-                                      (:seon.cluster.eval/comment source)
-                                      (assoc-in [:seon.turn.loop/admitted-form
-                                                 :seon.cluster.eval/comment]
-                                                (:seon.cluster.eval/comment source))))
-                                  selected previews)
-                  evaluated
-                  (mapv (fn [source item]
-                          (if-let [previous (get latest (source-key source))]
-                            (let [evaluation (:seon.sci.eval/evaluation item)
-                                  changed (db/diff
-                                           {:seon.db.diff/before (:seon.repl/shown-value previous)
-                                            :seon.db.diff/after
-                                            (repl/shown-value (:seon.eval/shown evaluation ""))})]
-                              (update item :seon.sci.eval/evaluation
-                                      #(-> %
-                                           (dissoc :seon.eval/renderer)
-                                           (assoc :seon.eval/shown
-                                                  (pr-str {:seon.repl/changes changed})))) )
-                            item))
-                        selected evaluated)
-                  text-by-source
-                  (into {} (map (fn [source item]
-                                  [(source-key source)
-                                   (repl/text
-                                    (repl/entity-emission
-                                     (merge (:seon.turn.loop/admitted-form item)
-                                            (:seon.sci.eval/evaluation item)
-                                            {:seon.db/db database
-                                             :seon.cluster.eval/ns {:seon.ns/name (:seon.ns/name source)}}
-                                            (when (seq latest)
-                                              {:seon.repl/changed-since? true}))))])
-                                selected evaluated))
-                  result {:seon.render.walk/units (:seon.render.walk/units declared)
-                          :seon.turn/forms
-                          (mapv #(if-let [text (get text-by-source (source-key %))]
-                                   (assoc % :seon.turn/text text)
-                                   (assoc % :seon.turn/status :unchanged)) plan)}]
-              (if (and write? (or (seq evaluated) (seq refresh-tx)))
-                (let [prepared (when (seq evaluated)
-                                 (phase
-                                  #(record-evaluated-tx
-                                  {:seon.turn.loop/cluster handle :seon.db/db database :seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply (str/join "\n" (map :seon.cluster.eval/source selected)) :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources evaluated})))
-                      ;; a recording its own contract refused is this turn's
-                      ;; refusal as a value, never a throw to the caller
-                      report (if (:seon.turn.loop/phase-failed prepared)
-                              prepared
-                             (blob/with-publication!
-                              connection (vec (:seon.blob/staged-writes prepared))
-                              #(db/transact!
-                                connection
-                                [[:db.fn/call
-                                  (fn [current]
-                                    ;; Compaction or another system pass may
-                                    ;; have changed history during evaluation.
-                                    ;; The writer admits this append only while idle,
-                                    ;; against the history from which it was derived.
-                                    (if (and (nil? (open-for-agent current [:seon.agent/id agent-id]))
-                                             (= latest (latest-evaluations current agent-id)))
-                                      (into refresh-tx (:seon.db/tx-data prepared))
-                                      []))]])))]
-                  (if (or (:seon.turn.loop/phase-failed report) (:seon.db/transaction-refused report))
-                    (assoc report :seon.turn/refused-system-agent agent-id)
-                      (if (some #(and (= :seon.turn/id (:a %))
-                                      (= turn-id (:v %))) (:tx-data report))
-                        (assoc result :seon.turn/id turn-id)
-                        result)))
-                result)))))))
-
-(defn compact-call
-  "Retract one idle agent's evaluations at the database writer."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  :seon.store/transaction-data]}
-  [database agent-id]
-  (let [agent-eid (db/q '[:find ?agent . :in $ ?id
-                         :where [?agent :seon.agent/id ?id]]
-                       database agent-id)
-        open-id (when agent-eid
-                  (db/q '[:find ?id . :in $ ?agent
-                          :where [?turn :seon.turn/agent ?agent]
-                          [?turn :seon.turn/id ?id]
-                          (not [?turn :seon.turn/closed-tx _])]
-                        database agent-eid))]
-    (when (or (nil? agent-eid) open-id)
-      (let [message (if open-id
-                      "Compaction requires the agent's current turn to close."
-                      "Compaction requires an existing agent.")]
-        (throw
-         (ex-info message
-                  (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `compact!
-                   {:seon.turn/compaction-agent-id agent-id
-                    :seon.error/message message
-                    :seon.error/member :seon.agent/id
-                    :seon.error/expected :seon.agent/id
-                    :seon.error/data {:seon.error/layer :seon.turn :seon.error/source (cond-> {} open-id (assoc :seon.turn/id open-id))}})))))
-    (mapv (fn [evaluation] [:db.fn/retractEntity evaluation])
-          (db/q '[:find [?evaluation ...] :in $ ?agent
-                  :where [?turn :seon.turn/agent ?agent]
-                  [?evaluation :seon.cluster.eval/run ?turn]]
-                database agent-eid))))
-
-(defn compact!
-  "Retract an idle agent's evaluations; the next system walk is fresh.
-  Answers the agent and the transaction that compacted it (its caller, the
-  agent page, re-reads the database), or the writer's refusal."
-  {:malli/schema [:=> [:cat :seon.turn/compaction-request]
-                  [:or [:map [:seon.agent/id :seon.agent/id] [:seon.db/tx :seon.db/tx]]
-                   :seon.db/transaction-refused-error]]}
-  [{connection :seon.db/connection agent-id :seon.agent/id}]
-  (let [report (db/transact! connection [[:db.fn/call #'compact-call agent-id]])]
-    (if (:db-after report)
-      {:seon.agent/id agent-id :seon.db/tx (db/basis-t (:db-after report))}
-      report)))
-
-(defn virtual-turn!
-  "Run a fixture reply as one ordinary run of the agent proc, without a
-  provider (`seon.cluster.agent/evaluate-source!`). Returns its turn identity
-  once the run has settled and committed, so a fixture reads it on the
-  connection, or the pass's refusal (a run already open)."
-  {:malli/schema [:=> [:cat :seon.turn/virtual-request]
-                  [:or :seon.agent/source-submission-result
-                   :seon.agent/source-submission-refused-error
-                   :seon.await/timeout-error :seon.await/closed-error]]}
-  [request]
-  (let [result (@cluster-agent-evaluate-source!
-                (update request :seon.cluster.reply/text #(or % "")))]
-    result))
-
-
-
 ;;; ---------------------------------------------------------------------------
 ;;; Reading the facts
 ;;; ---------------------------------------------------------------------------
@@ -2386,7 +1670,7 @@
 
 
 (defn close-folded-call
-  "Close a replied or generated run inside the settlement that gave its last
+  "Close a replied run inside the settlement that gave its last
   form a terminal fact, decided at the writer on the value after the batch's
   receipts, so the run is one transaction. A run with a form still to
   evaluate keeps the separate close pass."
@@ -2395,7 +1679,7 @@
                   :seon.store/transaction-data]}
   [database {run-id ::id}]
   (let [run (db/pull database [::reply-size ::closed-tx :seon.turn.work/situation] [::id run-id])]
-    (if (or (not (or (::reply-size run) (= :generate (:seon.turn.work/situation run))))
+    (if (or (not (::reply-size run))
             (::closed-tx run)
             (next-ordinal database run-id))
       []
@@ -2805,18 +2089,6 @@
        :seon.turn/id run-id
        :seon.agent/id agent-id})))
 
-(defn- resume-or-generate
-  [db run agent-id]
-  (let [run-id (:seon.turn/id run)]
-    (if-let [ordinal (next-ordinal db run-id)]
-      {:seon.turn.work/situation :resume
-       :seon.turn/id run-id
-       :seon.agent/id agent-id
-       :seon.cluster.eval/ordinal ordinal}
-      {:seon.turn.work/situation :generate
-       :seon.turn/id run-id
-       :seon.agent/id agent-id})))
-
 (defn- continuing-reply?
   "The latest closed turn accepted a provider reply and did not end the session."
   [database agent-id]
@@ -2871,9 +2143,6 @@
       (cond
         (:seon.turn/reply-size run)
         (fold-or-close db run agent-id)
-
-        (= :generate (:seon.turn.work/situation run))
-        (resume-or-generate db run agent-id)
 
         (= :call (:seon.turn.work/situation run))
         {:seon.turn.work/situation :call
@@ -4106,11 +3375,12 @@
                [:seon.turn/id :seon.turn/id]
                [:seon.agent/id :seon.agent/id]
                [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+               [:seon.ai.attempt/basis-t :seon.ai.attempt/basis-t]
                [:seon.error/value {:optional true} :seon.error/value]
                [:seon.turn.loop/attempt-evidence {:optional true} :map]]]
     :map]}
   [{:keys [:seon.ai/target :seon.ai/settings
-           :seon.ai.attempt/ordinal :seon.error/value]
+           :seon.ai.attempt/ordinal :seon.ai.attempt/basis-t :seon.error/value]
     run-id :seon.turn/id
     agent-id :seon.agent/id
     evidence :seon.turn.loop/attempt-evidence}]
@@ -4118,7 +3388,8 @@
                   :seon.ai/settings settings
                   :seon.turn/id run-id
                   :seon.agent/id agent-id
-                  :seon.ai.attempt/ordinal ordinal}
+                  :seon.ai.attempt/ordinal ordinal
+                  :seon.ai.attempt/basis-t basis-t}
                  evidence)
     value (assoc :seon.error/value value)))
 
@@ -4170,6 +3441,7 @@
           [:seon.turn/id :seon.turn/id]
           [:seon.agent/id :seon.agent/id]
           [:seon.ai.attempt/ordinal :seon.ai.attempt/ordinal]
+          [:seon.ai.attempt/basis-t {:optional true} :seon.ai.attempt/basis-t]
           [:seon.error/value {:optional true} :seon.error/value]
           [:seon.ai/usage {:optional true} :seon.ai/usage]
           [:seon.ai.model/last-latency-ms {:optional true} :seon.ai.model/last-latency-ms]
@@ -4184,6 +3456,7 @@
          run-id :seon.turn/id
          agent-id :seon.agent/id
          ordinal :seon.ai.attempt/ordinal
+         basis-t :seon.ai.attempt/basis-t
          usage :seon.ai/usage
          latency-ms :seon.ai.model/last-latency-ms
          settings :seon.ai/settings
@@ -4253,6 +3526,7 @@
               truncation-recording
               (assoc :seon.ai.attempt/truncation
                      (:db/id (first (:seon.db/tx-data truncation-recording))))
+              basis-t (assoc :seon.ai.attempt/basis-t basis-t)
               settings-ref (assoc :seon.ai.attempt/settings settings-ref)
               settings
               (assoc :seon.ai.attempt/settings-edn (pr-str settings))
@@ -4391,10 +3665,7 @@
     ;; `:seon.turn/trigger` is retained as PROVENANCE ONLY — the
     ;; oldest message wake this turn opened for, which the page and the
     ;; context still name. It decides nothing.
-    (let [refreshed (system-turn {:seon.turn.loop/cluster cluster
-                                 :seon.agent/id agent-id
-                                 :seon.turn/write? true})
-          id (next-id (db/db connection) (:seon.cluster/name cluster) agent-id)
+    (let [id (next-id (db/db connection) (:seon.cluster/name cluster) agent-id)
           open-request
           (cond->
            {:seon.turn/id id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
@@ -4403,15 +3674,12 @@
              :seon.turn/trigger
              [:seon.message/id
               (:seon.message/id work)]))
-          outcome (if (:seon.turn/refused-system-agent refreshed)
-                    refreshed
-                    (db/transact!
+          outcome (db/transact!
                    connection
                    {:tx-data
-                    [[:db.fn/call #'open-call open-request]]}))]
+                    [[:db.fn/call #'open-call open-request]]})]
       (cond
-        (or (:seon.db/transaction-refused outcome)
-            (:seon.turn/refused-system-agent outcome))
+        (:seon.db/transaction-refused outcome)
         (do
           ;; The open transaction formed no run, so settlement records the
           ;; error and escalation with no run attribution or close.
@@ -4590,53 +3858,18 @@
           (when (or (:seon.turn.loop/phase-failed model-context)
                     (:seon.error/at model-context))
             model-context)
-          rendered
-          (when (and model-context (not refusal))
-            {:seon.cluster.prompt/text (str/join "\n\n" (conj (:seon.context/exchanges model-context)
-                                                               (:seon.ai/prompt model-context)))
-             :seon.context/contributions []
-             :seon.db/db observed-db})
-          ;; CAPTURE BEFORE THE PROVIDER (ruling 4, 2026-07-28): the
-          ;; exact prompt text, the rendered basis and the ordered
-          ;; contribution records commit in ONE turn-owned transaction
-          ;; BEFORE the unobservable remote call. Writer ordering then
-          ;; guarantees: no capture → the prompt was never derived;
-          ;; capture with no attempt row → the call may never have
-          ;; fired. The provider call reuses this one capture:
-          ;; the same prompt bytes go out.
-          captured
-          (when-not (:seon.config.ai/no-provider settings)
-          (db/transact!
-           connection
-           (@context-capture-tx
-            (if refusal
-              {:seon.turn/id run-id
-               ;; The immutable value the refused derivation read, never a
-               ;; fresh connection deref after the fact.
-               :seon.db/db observed-db
-               :seon.error/value refusal}
-              {:seon.turn/id run-id
-               :seon.cluster.prompt/rendered-context rendered}))))
-          ;; THE EXACT-TEXT HANDOFF: the loop extracts the rendered
-          ;; text and alone places that string in `:seon.ai/prompt` —
-          ;; the bytes the capture recorded are the bytes sent.
-          text (:seon.cluster.prompt/text rendered)]
+          ;; What is sent is derivable again: `model-context` at the
+          ;; attempt's recorded basis. Nothing of the prompt is stored.
+          text (when (and model-context (not refusal))
+                 (str/join "\n\n" (conj (:seon.context/exchanges model-context)
+                                         (:seon.ai/prompt model-context))))]
       (cond
         (:seon.config.ai/no-provider settings)
         (freeze! {:seon.ai/text ""})
 
-        (or (:seon.db.write.attempt/request-id captured)
-            (:seon.db/invalid-read captured)
-            (:seon.schema/expected-value captured))
-        ;; A refused prompt/capture closes this run and records the refusal.
-        ;; The next pass derives correction from those facts below the ONE
-        ;; episode cap; at the cap it derives no work. No provider call occurs
-        ;; without durable prompt evidence.
-        (fail! captured)
-
         refusal
-        ;; The refusal capture is now durable. Close without crossing the
-        ;; provider boundary; a diagnosis never depends on absent signal.
+        ;; A refused context closes this run and records the refusal without
+        ;; crossing the provider boundary.
         (fail! refusal)
 
         :else
@@ -4666,6 +3899,7 @@
                                        :seon.agent/id agent-id
                                        :seon.ai.attempt/ordinal
                                        (attempts (db/db connection) run-id)
+                                       :seon.ai.attempt/basis-t (db/basis-t observed-db)
                                        :seon.turn.loop/attempt-evidence
                                        (attempt-evidence
                                         {:seon.ai/completion completion})}
@@ -4693,14 +3927,6 @@
                       (:seon.schema/expected-value closed))
                 (fail! closed true)
                 (report :error 0)))))))))
-
-(defn- evaluation-entity-id
-  "Return the stored evaluation's entity id, nil when absent, or the read refusal."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.cluster.eval/id]
-                  [:or :nil :int :seon.db/error-result]]}
-  [database evaluation-id]
-  (let [entity (db/pull database [:db/id] [:seon.cluster.eval/id evaluation-id])]
-    (if (db/read-refusal? entity) entity (:db/id entity))))
 
 (defn- early-disposition?
   "Whether `form`'s value `value` is a disposition, or `form` calls
@@ -5014,7 +4240,7 @@
         bound (entry-bindings batch)
         uncontracted (turn.batch/uncontracted-measures basis agent-id (:seon.batch/entries batch))]
     {:seon.turn.loop/evaluated-sources
-     (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before reads facts-error change] :as entry}]
+     (mapv (fn [{:seon.batch/keys [ordinal evaluation shown-map ns-before facts-error change] :as entry}]
              (let [row (get rows (- ordinal first-ordinal))
                    evaluation (cond-> (merge (select-keys row [:seon.eval/origin])
                                              evaluation shown-map
@@ -5023,35 +4249,13 @@
                                              (call-profile-facts entry)
                                              {:seon.cluster.eval/at (Date.)
                                               :seon.cluster.eval/read-basis-transaction (db/basis-t basis)})
-                                ;; Read evidence has one consumer, the pre-turn refresh
-                                ;; (`system-plan`), which re-runs only read-only evaluations
-                                ;; (`read-only-evaluation?`): a form that bound a Var declared,
-                                ;; so its reads are never consumed and are not stored.
-                                (empty? (get bound ordinal))
-                                (assoc :seon.cluster.eval/read-evidence (db/read-evidence reads))
                                 (get handles ordinal) (assoc :seon.repl/handle (get handles ordinal))
                                 (seq (get bound ordinal)) (assoc :seon.sci.eval/bindings (get bound ordinal))
                                 ;; only a form that declares has something to admit: a Var bound,
                                 ;; or a schema registered by this run (a plain call whose namespace
                                 ;; map SCI touched proposes nothing to refuse)
                                 (and facts-error (or (seq (get bound ordinal)) registered?))
-                                (not-admitted facts-error))
-                   ;; A generated read whose reads now depend on the agent's own
-                   ;; turn-taking (`generated-read-fault`) keeps its value: the
-                   ;; fault rides beside it as a diagnostic, and its stored
-                   ;; evidence names the turn attributes, so `generated-sources`
-                   ;; never regenerates it. Refusing the turn instead parked the
-                   ;; agent's loop after three refusals (root, 2026-09-28).
-                   fault (when-let [entity-id (when run-id (evaluation-entity-id basis (receipt-identity run-id ordinal)))]
-                             (when (and (not= :model (:seon.cluster.eval/origin
-                                                      (db/pull basis [:seon.cluster.eval/origin] entity-id)))
-                                        (= :generate (:seon.turn.work/situation
-                                                      (db/pull basis [:seon.turn.work/situation] [:seon.turn/id run-id]))))
-                               (generated-read-fault basis (assoc row :seon.cluster.eval/ns [:seon.ns/name ns-before])
-                                                     (select-keys evaluation [:seon.cluster.eval/read-evidence]))))
-                     evaluation (cond-> evaluation
-                                  fault (update :seon.cluster.eval/diagnostics
-                                                #(str/join "\n" (remove nil? [% (render.value/core-text [fault])]))))]
+                                (not-admitted facts-error))]
                (when (and run-id (= :pending (:seon.cluster.eval/code-evidence evaluation)))
                  (kernel/own-pending! (receipt-identity run-id ordinal) (:seon.batch/owned entry)))
                (cond-> {:seon.cluster.eval/ordinal ordinal
@@ -5349,128 +4553,6 @@
           (report :error 0 outcome))
       (report :closed 0))))
 
-(defn- generate-turn
-  "Run the opening the shared system-turn source generator declares: every
-  remaining form appended, evaluated and settled in one transaction that
-  closes the run."
-  {:malli/schema
-   [:=> [:cat [:map
-               [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-               [:seon.turn.loop/work :seon.turn.work/next]
-               [:seon.turn.loop/now :inst]
-               [:seon.turn.loop/report
-                [:function
-                 [:=> [:cat :seon.turn.loop/outcome :int] :seon.turn.loop/turn-report]
-                 [:=> [:cat :seon.turn.loop/outcome :int [:or :nil :seon.error/value]]
-                  :seon.turn.loop/turn-report]]]]]
-    :seon.turn.loop/turn-report]}
-  [{cluster :seon.turn.loop/cluster work :seon.turn.loop/work now :seon.turn.loop/now report :seon.turn.loop/report :as request}]
-  (let [connection (:seon.db/connection cluster)
-        process (:seon.db.process/id cluster)
-        agent-id (:seon.agent/id work)
-        run-id (:seon.turn/id work)
-        ordinal
-        (long
-         (or (db/q '[:find (count ?form) .
-                    :in $ ?run-id
-                    :where
-                    [?run :seon.turn/id ?run-id]
-                    [?form :seon.cluster.eval/run ?run]]
-                  (db/db connection) run-id)
-             0))
-        entry
-        (phase
-         #(let [database (db/db connection)
-                namespace-name (sci.eval/agent-namespace
-                                database agent-id)
-                declared (declared-sources cluster database agent-id namespace-name)]
-            (if (or (:seon.cluster.reply/no-forms declared)
-          (:seon.render.walk/missing-lookup declared)
-          (:seon.render/refused-member declared)
-          (:seon.render/candidates declared)
-          (:seon.render/invalid-output declared)
-          (:seon.render.unknown/reason declared)
-          (:seon.render.transcript/refused-member declared)
-          (:seon.config/error-key declared)
-          (:seon.db/invalid-read declared)
-          (:seon.schema/expected-value declared))
-              declared
-              ;; every form the opening has left: they append and settle in
-              ;; the run's one transaction
-              (let [plan (vec (system-plan database (:seon.turn/forms declared) {}))]
-                (subvec plan (min ordinal (count plan)))))))]
-    (cond
-      (or (:seon.turn.loop/phase-failed entry) (or (:seon.cluster.reply/no-forms entry)
-          (:seon.render.walk/missing-lookup entry)
-          (:seon.render/refused-member entry)
-          (:seon.render/candidates entry)
-          (:seon.render/invalid-output entry)
-          (:seon.render.unknown/reason entry)
-          (:seon.render.transcript/refused-member entry)
-          (:seon.config/error-key entry)
-          (:seon.db/invalid-read entry)
-          (:seon.schema/expected-value entry)))
-      (do
-        (settle! {:seon.turn.loop/cluster cluster
-                  :seon.turn.loop/now now
-                  :seon.agent/id agent-id
-                  :seon.turn/id run-id
-                  :seon.error/value entry})
-        (report :error 0))
-
-      ;; Creation and later system turns derive their sources from the same
-      ;; record walk. resume-turn below enters evaluate-sources, which captures
-      ;; read evidence before the ordinary settlement writer persists it.
-      (empty? entry)
-      (let [terminal
-            (db/transact!
-             connection
-             (close-tx
-              {:seon.turn/id run-id :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))]
-        (if (or (:seon.db.write.attempt/request-id terminal)
-          (:seon.db/invalid-read terminal)
-          (:seon.schema/expected-value terminal))
-          (do
-            (settle! {:seon.turn.loop/cluster cluster
-                      :seon.turn.loop/now now
-                      :seon.agent/id agent-id
-                      :seon.turn/id run-id
-                      :seon.error/value terminal})
-            (report :error 0 terminal))
-          (report :closed 0)))
-
-      :else
-      ;; THE OPENING IS ONE RUN, ONE TRANSACTION: its forms append in the
-      ;; settlement that records their values and closes the run
-      ;; (`with-submission`, `close-folded-call`), the fold's one path.
-      (let [namespace-name (sci.eval/agent-namespace (db/db connection) agent-id)
-            forms (map-indexed (fn [i form] [(+ ordinal i) form]) entry)]
-        (resume-turn
-         (assoc request
-                :seon.turn.loop/cluster
-                (assoc cluster :seon.turn.loop/submission
-                       {:seon.db/tx-data
-                        (into [] (mapcat
-                                  (fn [[n form]]
-                                    (append-generated-tx
-                                     (cond-> {:seon.turn/id run-id
-                                              :seon.db.process/id process
-                                              :seon.cluster.eval/at now
-                                              :seon.cluster.eval/ordinal n
-                                              ;; the comment and the form are two fields: a
-                                              ;; generated opening reads back through the one
-                                              ;; REPL grammar, its prose above the prompt
-                                              :seon.cluster.eval/source (:seon.cluster.eval/source form)
-                                              :seon.ns/name namespace-name}
-                                       (:seon.eval/origin form) (assoc :seon.eval/origin (:seon.eval/origin form))
-                                       (:seon.cluster.eval/comment form)
-                                       (assoc :seon.cluster.eval/comment (:seon.cluster.eval/comment form))))))
-                              forms)
-                        :seon.turn/sources (mapv (fn [[_ form]] (select-keys form [:seon.cluster.eval/source :seon.eval/origin])) forms)
-                        :seon.ns/name namespace-name})
-                :seon.turn.loop/work
-                (assoc work :seon.turn.work/situation :resume :seon.cluster.eval/ordinal ordinal)))))))
-
 (defn- episode-exhausted!
   "Store and deliver the fault of a pass that spent the agent's last episode run.
 
@@ -5595,7 +4677,6 @@
                  (let [result (case (:seon.turn.work/situation work)
                                 :open (open-turn request)
                                 :call (call-turn request)
-                                :generate (generate-turn request)
                                 :resume (resume-turn request)
                                 :close (close-turn request))
                        ;; A source submission spends no episode run

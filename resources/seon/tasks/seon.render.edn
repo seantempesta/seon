@@ -31,11 +31,6 @@
              :intent "An agent's (`seon.db/transact!` [...]) answers the raw datom list of the transaction it rode in, including its own run's turn and evaluation rows and receipt (about 1,000 tokens for a two-attribute write, repl-dogfood 2026-09-27). A transaction report renders what the caller's tx-data changed (entities by identity, retracted facts), not the settlement's bookkeeping."
              :must-read #{seon.db/transact! seon.render/render-call}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
- #:seon.task{:name "a-cold-prompt-renders-every-evaluation-again"
-             :kind :function
-             :intent "Each turn's first prompt renders every stored evaluation of the agent again through `seon.render/render-call`: 149 evaluations of root took 0.33-0.59 s armed after the plan decode and call-reach fixes (turn-overhead lane, default, 2026-09-27), and the cost grows with history although each evaluation's shown text is stored and unchanged. A render is cached by the value's content digest (AGENTS.md Presentation); reuse across commits, so a turn renders only the evaluations it has not shown."
-             :must-read #{seon.render.walk/history seon.render/render-call}
-             :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/turn-overhead--proof.clj"}}
  #:seon.task{:name "a-render-against-another-database-reads-the-context-custody"
              :kind :function
              :intent "render-call with an explicit `:seon.db/db` of another branch runs its renderer's (`seon.db/q` ...) against the forked context's custody, not the request's database: with the same query renderer written on both branches, retained-test equal-committed-database-skips-read-replay renders \"one\" (the first branch's shown text) for the other database, retained calls or not (probed on default 2026-09-27). A renderer's omitted database must be supplied from the world of the database it renders."

@@ -9,7 +9,6 @@
             [clojure.string :as str]
             [seon.db :as db]
             [seon.blob :as blob]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster.message :as message]
             [seon.context :as context]
             [seon.turn :as turn]
@@ -76,12 +75,6 @@
    :seon.ai.attempt/reasoning-size
    {:seon.turn/_attempts [:db/id :seon.turn/id]}])
 
-(def ^:private active-runs-rules
-  '[[(active-run ?run ?agent ?bootstrap-run-id ?pinned?)
-     [?run :seon.turn/agent ?agent]
-     [?run :seon.turn/id ?run-id]
-     [(= ?run-id ?bootstrap-run-id) ?pinned?]]])
-
 (defn- recent-message-entities
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :int] [:or [:sequential [:tuple :int :inst :string :int]] :seon.db/error-result]]}
   [db agent-id limit]
@@ -105,38 +98,16 @@
   [db agent-id limit]
   (db/q {:query
         '[:find ?receipt ?at ?id
-          :in $ % ?agent-id ?bootstrap-run-id
+          :in $ ?agent-id
           :where
           [?agent :seon.agent/id ?agent-id]
-          (active-run ?run ?agent ?bootstrap-run-id false)
+          [?run :seon.turn/agent ?agent]
           [?receipt :seon.cluster.eval/run ?run]
           [?receipt :seon.cluster.eval/at ?at]
           [?receipt :seon.cluster.eval/id ?id]]
-        :args [db active-runs-rules agent-id (bootstrap/run-id agent-id)]
+        :args [db agent-id]
         :order-by '[?at :desc ?id :desc]
         :limit limit}))
-
-(defn- pinned-receipt-ids
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or [:sequential :int] :seon.db/error-result]]}
-  [db agent-id]
-  (db/q '[:find [?receipt ...]
-         :in $ % ?agent-id ?bootstrap-run-id
-         :where
-         [?agent :seon.agent/id ?agent-id]
-         (active-run ?run ?agent ?bootstrap-run-id true)
-         [?receipt :seon.cluster.eval/run ?run]]
-       db active-runs-rules agent-id (bootstrap/run-id agent-id)))
-
-(defn- bootstrap-task-message-eid
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:or :nil :int :seon.db/error-result]]}
-  [db agent-id]
-  (db/q '[:find ?message .
-          :in $ ?turn-id
-          :where
-          [?turn :seon.turn/id ?turn-id]
-          [?turn :seon.turn/trigger ?message]
-          [?message :seon.message/id]]
-        db (bootstrap/run-id agent-id)))
 
 (defn- candidate-entity-ids
   [db agent-id limit]
@@ -156,21 +127,8 @@
              (group-by first)
              (reduce-kv (fn [ids kind entities]
                           (assoc ids kind (mapv second entities)))
-                        {}))
-        task-message-eid (bootstrap-task-message-eid db agent-id)]
-    (-> recent
-        (update :message
-                (fn [message-eids]
-                  (into []
-                        (distinct
-                         (concat (when task-message-eid [task-message-eid])
-                                 message-eids)))))
-        (update :eval
-                (fn [receipt-ids]
-                  (into []
-                        (distinct
-                         (concat (pinned-receipt-ids db agent-id)
-                                 receipt-ids))))))))
+                        {}))]
+    recent))
 
 (defn- selected-run-entity-ids
   "Select a bounded prefix of one run's evaluations.
@@ -237,9 +195,6 @@
                             :seon.agent/id])
       ::about subject
       ::reason (:my.message/reason message)}
-     (when (= (bootstrap/task-message-id database agent-id)
-              (:seon.message/id message))
-       {::bootstrap-trigger? true})
      {::custody
       (context/message-custody database run-id agent-id (:db/id message))}
      (get orders (:db/id message)))))
@@ -278,12 +233,6 @@
   [entry]
   (let [at (.getTime ^java.util.Date (::at entry))]
     (cond
-      (::bootstrap-trigger? entry)
-      [0 2 nil nil (::id entry)]
-
-      (and (::pinned? entry) (= :eval (::kind entry)))
-      [0 (inc (* 2 (::ordinal entry))) nil nil (::id entry)]
-
       :else
       (case (::kind entry)
         :message [1 at 0
@@ -384,13 +333,7 @@
                       messages)
                  (map receipt-entry receipts))
          (map (fn [entry]
-                (assoc entry
-                       ::root (entry-root identity-attrs entry)
-                       ::pinned?
-                       (or (::bootstrap-trigger? entry)
-                           (and (= :eval (::kind entry))
-                                (= (bootstrap/run-id agent-id)
-                                   (::run-id entry)))))))
+                (assoc entry ::root (entry-root identity-attrs entry))))
          (sort-by entry-order)
          vec))))
 
@@ -515,8 +458,8 @@
   ;; elision mechanism whose only driver (`best-summary`) had no caller, and
   ;; whose reported count came from the history query's limit rather than
   ;; from any budget.
-  [pinned entries]
-  (str/join "\n\n" (map ::text (concat pinned entries))))
+  [entries]
+  (str/join "\n\n" (map ::text entries)))
 
 (defn- html-entries
   [entries]
@@ -541,11 +484,11 @@
   ;; HTML is not bounded at all (owner ruling, 2026-09-07): the page serves
   ;; the entries the transcript holds. A turn renders as a node of a page, so
   ;; it carries no page element ids: two turns on one page never collide.
-  [pinned entries]
+  [entries]
   (into
    [:section {:class "seon-transcript"}]
    (map html-entries)
-   (filter seq [pinned entries])))
+   (filter seq [entries])))
 
 (defn- with-errors
   "`entry` with `errors` printed once, by the value printer, as its
@@ -638,21 +581,14 @@
         entries (if (or (some? (:seon.turn.loop/evaluated-sources unit))
                         (and db agent-id))
                   (candidate-history unit)
-                  [])
-        pinned (into []
-                     (comp (filter ::pinned?)
-                           (map #(projected-entry unit % :full)))
-                     entries)
-        candidates (into [] (remove ::pinned?) entries)]
-    {::pinned pinned
-     ::entries (mapv #(projected-entry unit % :full) candidates)}))
+                  [])]
+    {::entries (mapv #(projected-entry unit % :full) entries)}))
 
 (defn render-ai
   "Render one agent's bounded messages and faithful REPL session."
   {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
-  (let [{::keys [pinned entries]} (projection unit)]
-    (ai-output pinned entries)))
+  (ai-output (::entries (projection unit))))
 
 (defn- selected-run-identities
   {:malli/schema [:=> [:cat :seon.render/unit] :map]}
@@ -763,12 +699,10 @@
   "Render the same bounded transcript with stable block and entry ids."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
-  (let [{::keys [pinned entries]} (projection unit)]
-    ;; Reasoning is joined only after the shared projection, so it changes
-    ;; neither the AI bytes nor which transcript entries the agent receives.
-    (html-output pinned
-                 (sort-by entry-order
-                          (into entries (reasoning-attempts unit))))))
+  ;; Reasoning is joined only after the shared projection, so it changes
+  ;; neither the AI bytes nor which transcript entries the agent receives.
+  (html-output (sort-by entry-order
+                        (into (::entries (projection unit)) (reasoning-attempts unit)))))
 
 (defn- turn-header
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id] :seon.render/hiccup]}

@@ -304,77 +304,6 @@
        (sort-by (juxt ::attempt-run-id ::attempt-ordinal))
        vec))
 
-(deftest refused-generated-opening-captures-evidence-before-close
-  (test-support/with-database
-   (fn [connection]
-     (let [cluster-name "refused-generated-opening"
-           agent-id "generated-agent"
-           run-id "bootstrap:generated-agent"
-           message-id "generated-trigger"
-           ;; A declared :seon.cluster.prompt/error: the prompt owner's `refused`
-           ;; arm names the agent and its derivation observation. A bare
-           ;; diagnostic is not a prompt return, so the turn must not see one.
-           message "The generated opening could not be derived."
-           ;; The producer declares its error's schema on the value's
-           ;; metadata, as `seon.cluster.prompt/prompt` does; the recorder
-           ;; requires it.
-           refusal (with-meta
-                     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/invocation :seon.error/operation 'seon.cluster.prompt/prompt
-                      :seon.error/message message
-                      :seon.cluster.prompt/error-agent-id agent-id
-                      :seon.cluster.prompt/derivation-observation
-                      {:seon.error.evidence/attribute :seon.error/message
-                       :seon.error.evidence/value message}}
-                     {:seon.error/declared-schema :seon.cluster.prompt/error})
-           ;; The cluster's world exists before its handle reads its config.
-           _ (test-support/seed-cluster! connection cluster-name)
-           cluster (test-support/cluster-handle
-                   {:seon.env/environment (test-support/environment cluster-name connection)
-                    :seon.db/connection connection
-                    :seon.cluster/name cluster-name
-                    :seon.db.process/id process
-                    :seon.sci.eval/ctx
-                    (test-support/fork-cluster-ctx connection)
-                    :seon.config.eval/time-limit-ms 2000
-                    :seon.sci.admit/caps
-                    (config/result-caps config/defaults)
-                    :seon.config.error/recurrence-limit 3
-                    :seon.config.message/max-chain 8})]
-       (test-support/transacted!
-                    connection
-                    (cluster.agent/creation-tx
-                     {:seon.agent/id agent-id
-                      :seon.ns/name 'my.agents.generated-agent
-                      :seon.cluster/name cluster-name}))
-       (test-support/transacted!
-                    connection
-                    [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "start"}])
-       (test-support/transacted!
-                    connection
-                    (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
-
-       (with-redefs [seon.context/model-context (fn [_database _request _agent-id] refusal)]
-         (let [report
-               (turn/turn
-                {:seon.turn.loop/cluster cluster
-                 :seon.turn.work/next (call-work agent-id run-id)}
-                now)
-               capture
-               (db/q '[:find (pull ?capture [*]) .
-                       :in $ ?run-id
-                       :where
-                       [?run :seon.turn/id ?run-id]
-                       [?capture :seon.context.capture/run ?run]]
-                     @connection run-id)]
-           (is (= :error (:seon.turn.loop/outcome report)))
-           (is (inst? (test-support/turn-closed-at @connection run-id)))
-           (is (empty? (settings-attempts @connection))
-               "no model attempt entity: the provider boundary was never crossed")
-           (is (= (:seon.error/message refusal)
-                  (:seon.error/message capture)))
-           (is (int? (:seon.context.capture/basis-t capture)))
-           (is (not (find capture :seon.context.capture/prompt)))))))))
-
 (defn- with-render-context-proc
   [cluster body]
   (let [context-channel (async/chan)
@@ -460,10 +389,6 @@
                      {:seon.agent/id agent-id
                       :seon.ns/name 'my.agents.live-settings
                       :seon.cluster/name cluster-name}))
-       (let [opening (turn/system-turn {:seon.turn.loop/cluster cluster
-                                        :seon.agent/id agent-id
-                                        :seon.turn/write? true})]
-         (is (vector? (:seon.turn/forms opening))))
        (prepare-call! cluster agent-id "settings-run-1" "settings-message-1")
        ;; `prepare-call!` re-runs the agent's creation transaction, which mints
        ;; a fresh settings component; the override is asserted after it.

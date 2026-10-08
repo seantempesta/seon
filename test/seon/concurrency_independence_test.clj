@@ -14,7 +14,6 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.ai :as ai]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
@@ -62,18 +61,6 @@
       (finally
         (d/unlisten connection listener-key)))))
 
-(defn- await-bootstrap
-  [connection]
-  (await-fact
-   connection
-   (fn [database]
-     (db/q '[:find ?closed-at .
-             :in $ ?run-id
-             :where
-             [?run :seon.turn/id ?run-id]
-             [?run :seon.turn/closed-tx ?closed-at]]
-           database (bootstrap/run-id "root")))))
-
 (defn- with-cluster
   [body]
   (let [root "tmp/concurrency-independence-test"
@@ -83,7 +70,6 @@
     (let [instance (boot/start! {:seon.boot/cluster-name cluster-name
                                     :seon.boot/root root})]
       (try
-        (await-bootstrap (:seon.boot/cluster-connection instance))
         (let [root-entry (agent/armed (:seon.agent/routing instance) "root")
               graph (:seon.flow/graph root-entry)]
           (flow/pause-proc graph :seon.agent/mailbox)

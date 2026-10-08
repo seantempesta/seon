@@ -12,7 +12,6 @@
             [clojure.pprint :as pprint]
             [clojure.string :as str]
             [malli.core :as m]
-            [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.db :as db]
             [seon.print :as print]
@@ -20,15 +19,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.admit :as admit]))
 
-;;; LOAD-CYCLE BOUNDARIES. `seon.turn` and `seon.cluster.agent` both require
-;;; `seon.repl` transitively, so this namespace cannot require them back. One
-;;; resolution per var, realized at first use, instead of a
-;;; `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private turn-episode-runs
-  (delay (requiring-resolve 'seon.turn/episode-runs)))
-
-(defonce ^:private config-agent-cluster-dial
-  (delay (requiring-resolve 'seon.config/agent-cluster-dial)))
+;;; LOAD-CYCLE BOUNDARY. `seon.cluster.agent` requires `seon.repl`
+;;; transitively, so this namespace cannot require it back.
 (defonce ^:private cluster-agent-armed
   (delay (requiring-resolve 'seon.cluster.agent/armed)))
 
@@ -52,31 +44,6 @@
   [:table
    (for [{:keys [sym arglists summary]} (render-directory-ai directory)]
      [:tr [:td [:code (str sym)]] [:td [:code (str arglists)]] [:td summary]])])
-
-(defn frame
-  "Derive the current turn budget outside the saved evaluation history.
-
-  READS THE OVERLAY ONCE (2.1). A caller already holding the agent's
-  resolved settings — `seon.cluster.prompt/prompt` derives them once for
-  the whole prompt — hands them through the three-argument arity instead
-  of this function re-deriving `ai/agent-overlay` a second time; the
-  two-argument arity derives it itself for a caller with no settings on
-  hand. Either way `seon.turn/max-episode-runs` is never called twice for
-  the same number: `episode-runs` alone (no overlay) gives the count that
-  turn budget subtracts from the max already read."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.db/db :seon.agent/id] :string]
-    [:=> [:cat :seon.db/db :seon.agent/id :seon.config/agent-overlay] :string]]}
-  ([database agent-id]
-   (frame database agent-id (ai/agent-overlay database agent-id)))
-  ([database agent-id overrides]
-   (let [maximum (or (:seon.config.run/max-episode-runs overrides)
-                      (@config-agent-cluster-dial database agent-id :seon.config.run/max-episode-runs))]
-     (if (:seon.config/error-key maximum)
-       (str "turns left: unknown: " (:seon.error/message maximum))
-       (str "turns left: " (long (max 0 (- (or maximum 0) (@turn-episode-runs database agent-id))))
-            " of " maximum)))))
 
 (defn- read-shown
   "The one complete EDN value `shown` holds, else `shown` itself (prose, or

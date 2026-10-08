@@ -562,7 +562,7 @@
   ## Examples
 
   (producer (ex-data refusal) refusal)
-  ;; => {:seon.error/producer seon.turn/system-turn :seon.error/caller seon.turn/system-turn}"
+  ;; => {:seon.error/producer seon.turn/open-call :seon.error/caller seon.turn/open-call}"
   {:malli/schema [:=> [:cat :map [:maybe :seon.error/throwable]]
                   [:map [:seon.error/producer {:optional true} :seon.error/producer]
                    [:seon.error/producer-digest {:optional true} :seon.error/producer-digest]

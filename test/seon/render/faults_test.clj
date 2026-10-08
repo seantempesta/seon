@@ -1,16 +1,11 @@
 (ns seon.render.faults-test
-  (:require [clojure.core.async :as async]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [seon.cluster :as cluster]
-            [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.eval :as evaluation]
             [seon.render :as render]
-            [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.test-support :as support]))
 
 (deftest pulled-fault-concern-uses-the-entity-pair
   (support/with-database
@@ -51,36 +46,3 @@
        (doseq [expected ["No credential configured." "seon.ai/complete" "1970"
                          "fault-render-turn" "Inspect evidence" "Occurrences: 1"]]
          (is (str/includes? (pr-str html) expected)))))))
-
-(deftest the-opening-derives-repair-reads-through-function-refs
-  (support/with-database
-   (fn [connection]
-     (let [cluster-name "fault-opening"
-           _ (support/seed-cluster! connection cluster-name)
-           agents ["root" "repair" "happened"]
-           setup (db/transact! connection
-                              (into []
-                                    (mapcat #(agent/creation-tx
-                                              {:seon.agent/id % :seon.ns/name (symbol (str "my.agents." %))
-                                               :seon.cluster/name cluster-name}) agents)))
-           _ (is (:db-after setup))
-           ctx (support/fork-cluster-ctx connection cluster-name)
-           handle (support/cluster-handle
-                   {:seon.db/connection connection :seon.cluster/name cluster-name
-                    :seon.db.process/id cluster/boot-process-identity :seon.sci.eval/ctx ctx})]
-       (try
-         (doseq [id agents]
-           (let [result (turn/system-turn {:seon.turn.loop/cluster handle
-                                          :seon.agent/id id :seon.turn/write? true})]
-             (is (vector? (:seon.turn/forms result)))
-             (is (vector? (:seon.render.walk/units result)))
-             (let [entry (first (filter #(str/includes? (or (:seon.cluster.eval/source %) "") ":seon.error/fn")
-                                        (evaluation/of-agent (db/db connection) id)))]
-               (is (some? entry))
-               (is (= "[]" (:seon.eval/shown entry)))
-               (is (seq (:seon.cluster.eval/read-evidence entry))))))
-         (finally
-           (doseq [channel [(:seon.cluster.wake/channel handle)
-                           (:seon.render/context-channel handle)
-                           (:seon.turn.loop/completion handle)]]
-             (async/close! channel))))))))

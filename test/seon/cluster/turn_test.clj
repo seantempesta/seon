@@ -2383,65 +2383,6 @@
                   (contains? (get declared enum-key) member))
                 used))))
 
-(deftest generated-membership-failure-never-advances-the-run-to-call
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            run-id "generated-membership-failure"]
-        (test-support/transacted!
-                     connection
-                     (turn/generated-run-tx
-                      @connection
-                      {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
-        (test-support/transacted!
-                     connection
-                     (turn/append-generated-tx
-                      {:seon.turn/id run-id
-                       :seon.db.process/id process
-                       :seon.cluster.eval/at now
-                       :seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/source "(help)"
-                       :seon.ns/name 'my.agents.agent-a}))
-        (test-support/transacted!
-                     connection
-                     (turn/receipt-settle-tx
-                      {:seon.turn/id run-id
-                       :seon.cluster.eval/ordinal 0
-                       :seon.eval/shown "{:introduced 'my.turn}"}))
-        (let [request {:seon.agent/id "agent-a"
-                       :seon.db.process/id process}
-              generated (turn/next-agent-work @connection request)
-              ;; the identity `seon.render.walk/graph` declares for a
-              ;; lookup with no entity, which the run's recording reads
-              failure
-              (vary-meta
-               {:seon.render.walk/missing-lookup [:seon.agent/id "agent-a"]
-                :seon.error/at now
-                :seon.error/layer :seon.render.walk/neighborhood
-                :seon.error/operation 'seon.render.walk/neighborhood
-                :seon.error/message
-                "The generated opening root pull returned no membership data."
-                :seon.error/data
-                {:seon.render.walk/lookup [:seon.agent/id "agent-a"]}}
-               assoc :seon.error/declared-schema :seon.render.walk/no-such-entity-error)
-              report
-              (with-redefs-fn {#'turn/declared-sources (constantly failure)}
-                          #(turn/turn
-                            {:seon.turn.loop/cluster cluster
-                             :seon.turn.work/next generated}
-                            now))
-              run-state
-              (db/pull @connection
-                       [:seon.turn.work/situation
-                        :seon.turn/closed-tx
-                        {:seon.error.occurrence/_turn [:seon.error.occurrence/message]}]
-                       [:seon.turn/id run-id])]
-          (is (= :error (:seon.turn.loop/outcome report)))
-          (is (not= :call (:seon.turn.work/situation run-state)))
-          (is (some? (:seon.turn/closed-tx run-state)))
-          (is (= (:seon.error/message failure)
-                 (-> run-state :seon.error.occurrence/_turn first :seon.error.occurrence/message))))))))
-
 (deftest generated-phase-failures-converge-through-one-terminal-exit
   (with-cluster
     (fn [cluster]
@@ -2862,70 +2803,6 @@
                   "the pass ran the situation the work derived"))
             (is (zero? @derivations)
                 "the turn must receive the cluster's projection state instead of re-deriving it per commit")))))))
-
-(deftest generated-opening-preserves-one-provider-turn-budget
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            calls (atom 0)
-            seeded (db/transact!
-                    connection
-                    (into [{:db/id [:seon.config/cluster "turn-test"]
-                            :seon.config.run/max-episode-runs 1}]
-                          (turn/generated-run-tx
-                           (db/db connection)
-                           {:seon.agent/id "agent-a"
-                            :seon.turn/id "budget-opening"
-                            :seon.turn/opened-tx "datomic.tx"
-                            :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]
-                            :seon.turn/trigger [:seon.message/id "m-1"]})))]
-        (is (some? (:db-after seeded)))
-        (when (:seon.db.write.attempt/request-id seeded) (throw (ex-info "Budget fixture refused" seeded)))
-        (is (= 0 (turn/episode-runs (db/db connection) "agent-a")))
-        (is (= 1 (turn/turns-left (db/db connection) "agent-a")))
-        (with-redefs [ai/complete (fn [_projection _] (swap! calls inc) {:seon.ai/text "(+ 20 22)"})]
-          (drive! cluster 80))
-        (let [database (db/db connection)
-              opening (db/pull database '[*] [:seon.turn/id "budget-opening"])
-              provider-turns (db/q '[:find (count ?turn) .
-                                     :where [?agent :seon.agent/id "agent-a"]
-                                     [?turn :seon.turn/agent ?agent]
-                                     [?turn :seon.turn/attempts _]] database)]
-          (is (some? (:seon.turn/closed-tx opening)))
-          (is (nil? (:seon.turn/attempts opening)))
-          (is (= 1 @calls) "budget one permits exactly one provider reply after the opening")
-          (is (= 1 provider-turns))
-          (is (= 1 (turn/episode-runs database "agent-a")))
-          (is (= 0 (turn/turns-left database "agent-a")))
-          (is (nil? (turn/next-agent-work database (request connection)))))))))
-
-(deftest two-drivers-of-one-opening-both-answer-and-it-settles-once
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            run-id "two-driver-opening"]
-        (test-support/transacted!
-         connection
-         (turn/generated-run-tx
-          @connection
-          {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process
-           :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
-        ;; Two procs holding the same work value: whichever settles second
-        ;; finds the run closed and answers that refusal as its report.
-        (let [work (turn/next-agent-work @connection (request connection))
-              drive #(turn/turn {:seon.turn.loop/cluster cluster :seon.turn.work/next work} now)
-              reports (vec (pcalls drive drive))
-              database (db/db connection)
-              ordinals (db/q '[:find [?ordinal ...] :in $ ?run-id
-                               :where [?run :seon.turn/id ?run-id]
-                               [?form :seon.cluster.eval/run ?run]
-                               [?form :seon.cluster.eval/ordinal ?ordinal]]
-                             database run-id)]
-          (is (= :generate (:seon.turn.work/situation work)))
-          (is (= [:closed :error] (sort (map :seon.turn.loop/outcome reports))))
-          (is (some? (:seon.turn/closed-tx (db/pull database [:seon.turn/closed-tx] [:seon.turn/id run-id]))))
-          (is (seq ordinals))
-          (is (= (count ordinals) (count (distinct ordinals)))))))))
 
 (defn- agent-eval
   "Evaluate `code` as `agent-id` through `seon.mcp/call`, the reply read back as data."

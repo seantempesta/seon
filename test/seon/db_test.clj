@@ -1,6 +1,5 @@
 (ns seon.db-test
-  (:require [clojure.core.async :as async]
-            [seon.cache]
+  (:require [seon.cache]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
@@ -2666,42 +2665,6 @@
                             :seon.db.diff/after after})]
       (is (= after (db/apply-diff before changes)))
       (is (= (= before after) (empty? changes))))))
-
-(deftest ^{:seon.test/long "Armed fixture creation, stored system opening and changed-read preview measured 7849 ms on 2026-09-22."
-           :seon.test/long-ms 10000}
-  system-turn-renders-a-changed-read-with-value-diff
-(test-support/with-database
- (fn [connection]
-   (test-support/seed-cluster! connection "a2-diff")
-   (test-support/transacted!
-    connection
-    (agent/creation-tx {:seon.agent/id "a2-reader"
-                        :seon.ns/name 'my.agents.a2-reader
-                        :seon.cluster/name "a2-diff"}))
-   (test-support/transacted! connection
-    [{:seon.message/id "a2-read" :seon.message/to [:seon.agent/id "a2-reader"]
-      :seon.message/content "before"}])
-   (let [handle (test-support/cluster-handle
-                 {:seon.env/environment (test-support/environment "a2-diff" connection)
-                  :seon.db/connection connection :seon.cluster/name "a2-diff"
-                  :seon.db.process/id cluster/boot-process-identity
-                  :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
-         request {:seon.turn.loop/cluster handle :seon.agent/id "a2-reader"
-                  :seon.turn/write? true}]
-     (try
-       (let [opening (turn/system-turn request)]
-         (is (string? (:seon.turn/id opening)))
-         (test-support/transacted! connection
-          [[:db/add [:seon.message/id "a2-read"] :seon.message/content "after"]])
-         (let [preview (turn/system-turn (assoc request :seon.turn/write? false))
-               changed (filterv #(= :changed (:seon.turn/status %))
-                                 (:seon.turn/forms preview))]
-           (is (= 1 (count changed)))
-           (is (str/includes? (:seon.turn/text (first changed) "") "after"))
-           (select-keys (first changed) [:seon.cluster.eval/source :seon.turn/text])))
-       (finally
-         (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
-           (async/close! (get handle channel-key)))))))))
 
 (deftest pull-budget-refusal-is-an-explicit-named-error
   (test-support/with-database

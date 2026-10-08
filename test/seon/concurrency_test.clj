@@ -11,8 +11,7 @@
             [seon.config :as config]
             [seon.flow :as flow]
             [seon.schema :as schema]
-            [seon.test-support :as support]
-            [seon.turn :as turn])
+            [seon.test-support :as support])
   (:import [java.util.concurrent CountDownLatch]))
 
 (defn- with-message-route [connection body]
@@ -108,7 +107,7 @@
              (let [handle (:seon.turn.loop/cluster instance)
                    connection (:seon.db/connection handle)
                    source (source-fn instance agent-id)
-                   result (turn/virtual-turn!
+                   result (agent/evaluate-source!
                            {:seon.turn.loop/cluster handle
                             :seon.agent/routing
                             (:seon.agent/routing instance)

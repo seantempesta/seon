@@ -1,7 +1,4 @@
 #:seon.turn{:write? [:and {:seon.wake/context-inert true} :boolean],
-            :rendered [:map {:description "A data render's opening unit, never evaluated: its AI face (printed by the value printer) and the render's read evidence (seon.turn/declared-sources, seon.sci.eval/rendered-evaluation)."}
-                       [:seon.sci.admit/value :seon.render/ai-data]
-                       [:seon.cluster.eval/read-evidence {:optional true} [:vector :seon.db/read-evidence]]],
             :turn
             [:map
              {:seon.db/attributes true,
@@ -31,16 +28,6 @@
              [:seon.turn.work/situation
               {:optional true}
               :seon.turn.work/situation]],
-            :missing-opening-datom-error
-            [:map
-             {
-              :seon.render/ai seon.error/render-ai,
-              :seon.render/html seon.error/render-html,
-              :error/message
-              "must carry the :seon.turn/missing-opening-datom distinguishing member"}
-             [:seon.turn/missing-opening-datom
-              :seon.turn/missing-opening-datom]
-             [:seon.error/message :seon.error/message]],
             :disposition
             [:and {:description "The completed/wait control returned by the last evaluated form, recorded with settlement before presentation. These are the two closed session dispositions, not an entity kind or a stored session-open flag." :seon.wake/context-inert true}
              :my.turn/disposition],
@@ -50,16 +37,6 @@
             :rule [:keyword {:description "The violated transition rule in a refusal. Diagnostic data, not turn progress."}],
             :handled [:set {:description "Messages handled by this turn at settlement. Optional peer refs sweep if a message is deleted; they do not decide wake answering."} :seon.db/ref],
             :trigger [:and #:seon.db{:index true :seon.wake/context-inert true} :seon.db/ref],
-            :refused-system-agent [:string {:min 1}]
-            :system-refused-error
-            [:and :seon.error/base
-             [:map {:seon.db/attributes true}
-              [:seon.turn/refused-system-agent :seon.turn/refused-system-agent]]]
-            :system-result
-            [:map
-             [:seon.turn/forms :seon.turn/forms]
-             [:seon.render.walk/units :seon.render.walk/units]
-             [:seon.turn/id {:optional true} :seon.turn/id]],
             :agent
             [:and
              {:description
@@ -68,21 +45,6 @@
               :seon.render/html
               seon.render.transcript/render-history-html :seon.wake/context-inert true}
              :seon.db/ref],
-            :form
-            [:map
-             [:seon.cluster.eval/source :seon.cluster.eval/source]
-             [:seon.ns/name :seon.ns/name]
-             [:seon.turn/status :seon.turn/status]
-             [:seon.render.walk/lookup
-              {:optional true}
-              :seon.render.walk/lookup]
-             [:seon.cluster.eval/comment
-              {:optional true}
-              :seon.cluster.eval/comment]
-             [:seon.cluster.eval/read-basis-transaction
-              {:optional true}
-              :seon.cluster.eval/read-basis-transaction]
-             [:seon.turn/text {:optional true} :seon.turn/text]],
             :record-evaluated-request
             [:map
              [:seon.turn.loop/cluster :seon.turn.loop/cluster]
@@ -102,20 +64,8 @@
                   [:map
                    [:seon.cluster.eval/at
                     :seon.cluster.eval/at]]]]]]]],
-            :compaction-request
-            [:map
-             [:seon.db/connection :seon.db/connection]
-             [:seon.agent/id :seon.agent/id]],
             :basis-t [:and {:seon.wake/context-inert true} :seon.db/basis-t],
             :starting-ns [:and {:seon.wake/context-inert true} :seon.db/ref],
-            :virtual-request
-            [:map
-             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-             [:seon.agent/routing :seon.agent/routing]
-             [:seon.agent/id :seon.agent/id]
-             [:seon.cluster.reply/text
-              {:optional true}
-              :seon.cluster.reply/text]],
             :evaluation-facts-request
             [:map
              [:seon.turn/id :seon.turn/id]
@@ -124,23 +74,15 @@
              [:seon.turn.loop/settlement-evaluation
               :seon.turn.loop/evaluation]
              [:my.turn/value {:optional true} :my.turn/value]],
-            :system-request
-            [:map
-             [:seon.turn.loop/cluster :seon.turn.loop/cluster]
-             [:seon.agent/id :seon.agent/id]
-             [:seon.turn/write? {:optional true} :seon.turn/write?]],
-            :text [:and {:seon.wake/context-inert true} :string],
             :turns-remaining [:int {:min 0 :seon.wake/context-inert true}],
             :reply [:string #:seon.db{:no-history? true :seon.wake/context-inert true}],
             :missing-results [:int {:min 0 :seon.wake/context-inert true}],
-            :missing-opening-datom [:= {:seon.wake/context-inert true} true],
             :attempts
             [:set
              {:seon.db/component true :seon.db/component-schema :seon.ai/attempt,
               :description "The provider attempts owned by this turn." :seon.wake/context-inert true}
              :seon.db/ref],
             :refused [:and {:seon.wake/context-inert true} :seon.turn/rule],
-            :forms [:vector {:seon.wake/context-inert true} :seon.turn/form],
             :system-run-request
             [:map
              [:seon.agent/id :seon.agent/id]
@@ -158,13 +100,6 @@
               {:optional true}
               :seon.turn/reply-size]
              [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
-            :generated-run-request
-            [:map
-             [:seon.agent/id :seon.agent/id]
-             [:seon.turn/id :seon.turn/id]
-             [:seon.turn/opened-tx :seon.turn/opened-tx]
-             [:seon.turn/starting-ns :seon.turn/starting-ns]
-             [:seon.turn/trigger {:optional true} :seon.turn/trigger]],
             :closed-tx [:and {:seon.wake/context-inert true} :seon.db/ref],
             :opened-tx [:and {:seon.wake/context-inert true} :seon.db/ref],
             :transition [:and {:seon.wake/context-inert true} :keyword],
@@ -177,25 +112,6 @@
              :seon.error/base
              [:map {:seon.db/attributes true}
               [:seon.turn/rule :seon.turn/rule]]],
-            :status
-            [:enum
-             {:description
-              "Why one read form participates in this system walk: no prior evaluation, unchanged dependencies (read and code evidence current), changed dependencies, or pending (work its last evaluation owns has not exited, so it is not run again)." :seon.wake/context-inert true}
-             :none
-             :unchanged
-             :changed
-             :pending],
-            :generated-form-request
-            [:map
-             [:seon.turn/id :seon.turn/id]
-             [:seon.cluster.eval/at :seon.cluster.eval/at]
-             [:seon.cluster.eval/ordinal :seon.cluster.eval/ordinal]
-             [:seon.cluster.eval/source :seon.cluster.eval/source]
-             [:seon.eval/origin {:optional true} :seon.eval/origin]
-             [:seon.cluster.eval/comment
-              {:optional true}
-              :seon.cluster.eval/comment]
-             [:seon.ns/name :seon.ns/name]],
             :reply-size [:int {:min 0 :seon.wake/context-inert true}],
             :record-evaluated-call-request
             [:map
@@ -222,10 +138,6 @@
 
  :seon.turn/invalid-disposition-source :string
  :seon.turn/compaction-agent-id :seon.agent/id
- :seon.turn/generated-read-attributes [:set :qualified-keyword]
- :seon.turn/generated-read-depends-on-turns-error
- [:and :seon.error/base
-  [:map [:seon.turn/generated-read-attributes :seon.turn/generated-read-attributes]]]
  :seon.turn/error
  [:and
  {:seon.db/attributes true}

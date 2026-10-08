@@ -13,8 +13,7 @@
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.render.value :as render.value]
-            [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.test-support :as support]))
 
 (def zoo
   "Each zoo value as one form: a database, a connection, a transaction report,
@@ -66,7 +65,7 @@
         (try
           (doseq [[entrant result] [[:mcp (agent/evaluate-source! (assoc request :seon.agent/segmenter 'seon.turn/code-sources
                                                                          :seon.cluster.reply/text text))]
-                                    [:agent (turn/virtual-turn! (assoc request :seon.cluster.reply/text text))]]]
+                                    [:agent (agent/evaluate-source! (assoc request :seon.cluster.reply/text text))]]]
             (testing (name entrant)
               (is (:seon.turn/id result) "the run is answered, never refused or thrown")
               (when (:seon.turn/id result)

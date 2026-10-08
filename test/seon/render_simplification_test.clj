@@ -556,7 +556,7 @@
               (render-ai (request (support/fork-cluster-ctx connection)))))))))
 
 (deftest an-agent-neighborhood-renders-its-database-reading-units
-  ;; The system turn opens from this neighborhood (`seon.turn/declared-sources`);
+  ;; An agent's neighborhood is walked from its entity;
   ;; a unit renderer reading `(:seon.db/db unit)` (runtime owner, saved shown
   ;; text) refused a nil database and every turn open ended `:error`.
   (support/with-database

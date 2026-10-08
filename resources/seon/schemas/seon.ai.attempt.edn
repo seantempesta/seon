@@ -1,4 +1,5 @@
-#:seon.ai.attempt{:finish-reason [:and {:seon.wake/context-inert true} :seon.ai/finish-reason],
+#:seon.ai.attempt{:basis-t [:int {:min 0 :description "The database basis the model request was assembled at: `seon.context/model-context` at this basis is what was sent." :seon.wake/context-inert true}],
+                  :finish-reason [:and {:seon.wake/context-inert true} :seon.ai/finish-reason],
                   :reasoning-size [:int {:min 1 :seon.wake/context-inert true}],
                   :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.ai/attempt :seon.wake/context-inert true}],
                   :ordinal [:int {:min 0 :seon.wake/context-inert true}],

@@ -18,19 +18,6 @@
 
  :characters [:int {:min 0}]
  :estimate [:int {:min 0}]
- :estimated [:int {:min 0}]
- :upper-bound [:int {:min 0}]
-
- :verdict [:enum :seon.ai.tokens/within
-           :seon.ai.tokens/near-limit
-           :seon.ai.tokens/over]
-
- :observation
- [:map
-  [:seon.ai.tokens/characters :seon.ai.tokens/characters]
-  [:seon.ai.usage/prompt-tokens :seon.ai.usage/prompt-tokens]]
-
- :observations [:sequential :seon.ai.tokens/observation]
 
  :calibration
  [:map
@@ -39,20 +26,4 @@
   [:seon.ai.tokens/sample-count :seon.ai.tokens/sample-count]
   [:seon.ai.tokens/relative-error
    {:optional true}
-   :seon.ai.tokens/relative-error]]
-
- :budget-report
- [:map
-  [:seon.ai.tokens/estimated :seon.ai.tokens/estimated]
-  [:seon.ai.tokens/verdict :seon.ai.tokens/verdict]
-  [:seon.ai.tokens/basis :seon.ai.tokens/basis]
-  [:seon.ai.tokens/chars-per-token :seon.ai.tokens/chars-per-token]
-  [:seon.ai.tokens/sample-count :seon.ai.tokens/sample-count]
-  [:seon.config.ai/prompt-token-budget
-   :seon.config.ai/prompt-token-budget]
-  [:seon.ai.tokens/relative-error
-   {:optional true}
-   :seon.ai.tokens/relative-error]
-  [:seon.ai.tokens/upper-bound
-   {:optional true}
-   :seon.ai.tokens/upper-bound]]}
+   :seon.ai.tokens/relative-error]]}

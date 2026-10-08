@@ -1050,11 +1050,8 @@
   "Retain dependency revisions without retaining database values.
 
   Process-local caches may explicitly retain the read request and its stable
-  result for semantic replay. The default, the evidence an evaluation stores
-  as facts, holds neither: a request is code (a `#\"…\"` literal is a host
-  Pattern, not EDN), and the evaluation that owns this evidence already
-  references its source, whose preview `seon.turn/system-turn` compares by
-  shown value. Equal evidence appears once."
+  result for semantic replay. The default holds neither: a request is code (a
+  `#\"…\"` literal is a host Pattern, not EDN). Equal evidence appears once."
   {:malli/schema
    [:function
     [:=> [:cat [:vector :seon.db/captured-read]]

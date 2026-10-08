@@ -4,7 +4,6 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as db]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.message :as message]
@@ -26,27 +25,6 @@
   {:seon.agent/id agent-id
    :seon.cluster/name cluster-name
    :seon.ns/name (default-agent-namespace agent-id)})
-
-(defn- bootstrap-complete?
-  "The closed bootstrap turn of `agent-id` whose every evaluation carries a
-  terminal fact, its read refusal, or nil while it is still running. The close
-  itself does not check its evaluations (`seon.turn/close-call`), so the
-  terminal facts are read, not assumed."
-  [db agent-id]
-  (let [run-id (bootstrap/run-id agent-id)
-        closed-at (db/q '[:find ?closed .
-                          :in $ ?run-id
-                          :where
-                          [?run :seon.turn/id ?run-id]
-                          [?run :seon.turn/closed-tx ?closed]
-                          (not-join [?run]
-                            [?receipt :seon.cluster.eval/run ?run]
-                            (not [?receipt :seon.eval/shown])
-                            (not [?receipt :seon.cluster.eval/error])
-                            (not [?receipt :seon.cluster.eval/interrupted-at]))]
-                        db run-id)]
-    (cond (db/read-refusal? closed-at) closed-at
-          closed-at {:seon.turn/id run-id :seon.turn/closed-tx closed-at})))
 
 (defn await-fact!
   "The first truthy value `probe` answers for `connection`'s database, from its
@@ -328,11 +306,6 @@
     (doseq [id agent-ids]
       (cluster/ensure-entity! connection process
                               (creation-request cluster-name id)))
-    (doseq [id agent-ids]
-      (let [bootstrap (await-fact! connection timeout-ms (str "bootstrap " id)
-                                   #(bootstrap-complete? % id))]
-        (when (db/read-refusal? bootstrap)
-          (throw (ex-info (:seon.error/message bootstrap) bootstrap)))))
     (let [message-id (inbound! connection cluster-name process agent-id objective)
           terminal
           (await-fact! connection timeout-ms (str "objective " episode-id)

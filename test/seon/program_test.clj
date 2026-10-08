@@ -867,13 +867,6 @@
         (test-support/transacted! connection (entity-tx (db/db connection) {} original))
         (testing "a request with no run opened on nothing and claims nothing"
           (is (seq (entity-tx (db/db connection) {} changed))))
-        (testing "a request naming a run with no opening basis says so"
-          (let [data (refusal-data
-                      #(entity-tx (db/db connection) {:seon.turn/id "absent"}
-                               changed))]
-            (is (qualified-symbol? (:seon.error/operation data)))
-            (is (true? (:seon.turn/missing-opening-datom data))
-                "the refusal names the unreadable basis, not a concurrent definition")))
         (is (= (:seon.fn/source original)
                (:seon.fn/source
                 (db/pull @connection [:seon.fn/source]
@@ -1456,7 +1449,7 @@
                                              (:sample.s1/value fixture-forms)))
                  ;; the agent's own graph runs the submission (a submitted run is
                  ;; a value on its request port until its one settlement)
-                 submitted (turn/virtual-turn!
+                 submitted (agent/evaluate-source!
                             (assoc request :seon.cluster.reply/text
                                    (str/join "\n" (into [(first sources) registration] (rest sources)))))
                  turn-id (:seon.turn/id submitted)]

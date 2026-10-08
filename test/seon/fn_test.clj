@@ -1616,12 +1616,8 @@
           (is (contains? rows (quote seon.turn/evaluate-sources))))
         (testing "no second function evaluates agent source"
           (is (= #{(quote seon.turn/resume-turn)
-                   (quote seon.turn/system-turn)
                    (quote seon.turn/preview-sources)}
                  sources)))
-        ;; Since 17fd9768e the system turn's previews call `evaluate-sources`
-        ;; directly on one shared fork, so only the page goes through
-        ;; `preview-sources`.
         (testing "the page reuses the same evaluation path"
           (is (= #{(quote seon.render.web/render-source-call)} previews)))))))
 

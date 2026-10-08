@@ -42,16 +42,6 @@
 
 (schema.edn/load! {})
 
-;;; LOAD-CYCLE BOUNDARIES. `seon.render.web`, `seon.turn` and
-;;; `seon.render.walk` all require `seon.render`, so this namespace cannot
-;;; require them back. One resolution per var, realized at first use, instead
-;;; of a `requiring-resolve` on every call (AGENTS §2.1).
-(defonce ^:private render-web-derive-context!
-  (delay (requiring-resolve 'seon.render.web/derive-context!)))
-(defonce ^:private turn-opening-db
-  (delay (requiring-resolve 'seon.turn/opening-db)))
-
-
 ;;; ---------------------------------------------------------------------------
 ;;; Contract-derived renderer selection and guarded invocation
 ;;; ---------------------------------------------------------------------------
@@ -1721,29 +1711,6 @@
        (swap! state #(if (own? (:seon.render/cache %))
                        %
                        (assoc % :seon.render/cache (atom scope))))))))
-
-(defn acquire-context!
-  "Fold saved shown text into the agent's context.
-
-  With :seon.turn/id, return context as of that turn's opening: what its
-  attempt saw. Without it, return current context from every stored
-  evaluation, including the latest turn's results. Later replies cannot
-  enter an earlier prompt merely because the caller supplies today's db."
-  {:malli/schema [:=> [:cat :seon.render/context-request]
-                  [:or :seon.render/acquired-context
-                   :seon.render/context-change-result :seon.render.web/context-error]]}
-  [request]
-  (if (:seon.render/context-action request)
-    (@render-web-derive-context! request)
-    (let [database (:seon.db/db request)
-          turn-id (:seon.turn/id request)
-          basis (if turn-id
-                  (@turn-opening-db database turn-id)
-                  database)]
-      (if (or (:seon.db/invalid-read basis) (:seon.turn/missing-opening-datom basis))
-        (assoc basis :seon.render.web/refused-member :seon.turn/opened-tx)
-        (@render-web-derive-context! (assoc request :seon.db/db basis))))))
-
 
 (defn- namespace-owner
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.render/namespace]

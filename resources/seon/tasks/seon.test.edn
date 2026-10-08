@@ -75,7 +75,7 @@
  #:seon.task{:name "the-transitions-test-runs-six-to-seven-seconds-against-a-five-second-bound"
              :kind :namespace
              :intent "The transitions test takes 6.4-7.3 s (bound 5 s): per-transaction projection/encode cost. Done when the responsible armed functions are named from a profile and the test fits its bound without raising it."
-             :must-read #{seon.turn/compact!}}
+             :must-read #{seon.turn/recover-tx}}
  #:seon.task{:name "red-tests-on-head-are-unclassified"
              :kind :namespace
              :intent "The errors-s1 lane found reds on HEAD a5a21fd58 without its diff (baseline runs 940885360cdd and 4f4d5824dfe8): seon.cluster.host-test x5 (including a-refused-deletion-is-associated-only-with-the-one-evaluation-proposing-it, 7 assertions), seon.render.entity-pairs-test x2, seon.render.value-test x2 and seon.rereads-test x2. They block naming whole namespaces in bin/lane commit --test, so slices name single tests instead. CLAUDE.md: classify each red from stored runs by the commit that changed its behavior, then delete a test of deleted machinery, update a retired assumption or fix the surviving owner. Done when each red names its classifying commit and is deleted, converted or fixed (or restated as its own task), and the four namespaces run green on HEAD. Proof: the four namespaces' own tests, run by name on HEAD with zero reds (each kept test named by its classification)."

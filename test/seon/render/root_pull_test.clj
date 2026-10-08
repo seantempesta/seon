@@ -78,14 +78,6 @@
   [acquisition]
   (set (keys (:seon.render.walk/members acquisition))))
 
-(defn- within-event-backstop
-  [f]
-  (let [task (future (f))]
-    (try
-      (deref task (* 1000 support/event-backstop-seconds) ::backstop)
-      (finally
-        (future-cancel task)))))
-
 (deftest temporal-root-selector-uses-the-origin-schema
   (support/with-database
    (fn [connection]
@@ -111,56 +103,13 @@
              :seon.sci.admit/caps caps})
            messages (get-in acquisition
                             [:seon.render.walk/root
-                             :seon.message/_to])
-           history
-           (walk/history
-            {:seon.db/db temporal
-             :seon.agent/id "temporal-root-agent"
-             :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-             :seon.render.walk/lookup
-             [:seon.agent/id "temporal-root-agent"]
-             :seon.render/distance 1
-             :seon.sci.admit/caps caps
-             :seon.sci.eval/time-limit-ms 5000
-             :seon.render/captured-calls (atom {})
-             :seon.render.walk/root-acquisition acquisition})]
+                             :seon.message/_to])]
        (is (= current-selector temporal-selector)
            "current and as-of values derive one complete selector")
        (is (not= [:db/id] temporal-selector))
        (is (= ["The opening message."]
               (mapv :seon.message/content messages))
-           "the as-of root retains the reverse message graph")
-       (is (empty? history)
-           "an unexecuted message does not invent a saved evaluation")))))
-
-(deftest history-database-neighborhood-terminates-with-origin-schema
-  (support/with-database
-   (fn [connection]
-     (support/transacted!
-             connection
-             (into (support/agent-tx @connection "historical-walk-agent")
-               [{:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate."}]))
-     (let [current @connection
-           render-request {:seon.db/db current
-                    :seon.agent/id "historical-walk-agent"
-                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-                    :seon.render.walk/lookup
-                    [:seon.agent/id "historical-walk-agent"]
-                    :seon.render/distance 1
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 5000}
-           acquisition (walk/root-acquisition render-request)
-           result
-           (within-event-backstop
-            #(walk/history
-              (assoc render-request
-                     :seon.db/db (db/history current)
-                     :seon.render/captured-calls (atom {})
-                     :seon.render.walk/root-acquisition acquisition)))]
-       (is (not= ::backstop result)
-           "history-db rendering terminates within the declared event bound")
-       (is (or (vector? result) (:seon.db/read-operation result))
-           "a temporal walk returns units or a loud typed refusal")))))
+           "the as-of root retains the reverse message graph")))))
 
 (deftest root-acquisition-contract-is-projection-neutral
   (support/with-database

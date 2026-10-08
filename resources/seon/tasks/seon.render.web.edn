@@ -27,7 +27,7 @@
  #:seon.task{:name "stale-debt-tags-remain-in-web-and-schema"
              :kind :namespace
              :intent "Stale debt tags remain: render/web.clj:3193 (task seon.render.web/a-page-renders-with-a-refused-database) and schema.clj:20 (seon.schema/agents-can-validate, closed). Done when each tag names an open task or is deleted."
-             :must-read #{seon.render.web/derive-context!}
+             :must-read #{seon.render.web/render-step}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/root-cause-census--report.md"}}
  #:seon.task{:name "pages-print-values-instead-of-the-printer-html-face"
              :kind :namespace

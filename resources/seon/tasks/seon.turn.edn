@@ -10,11 +10,6 @@
              :intent "refusal-terminal-data (and the settle-batch! refusal and provider-failure recordings: three copies) chooses an error schema with a ~15-arm key-presence cond, because producers attach no :seon.error/declared-schema: seon.db write refusals and invalid-read, seon.schema validation, reply no-forms, render walk/request/ambiguous/invalid-output/unknown, transcript, config, fn namespace-unresolvable, eleven seon.ai refusals, cluster.prompt and turn rules. A missed producer gave a nil schema and panicked root's graph at every boot (fixed for one producer in e2d1690d4). One scripted sweep adds the metadata at each producer, then the three conds go."
              :must-read #{seon.error/recording seon.turn/refusal-terminal-data}
              :evidence #{"docs/research/agent-platform/landing/fix-root-refusal-schema-2026-09-26.md"}}
- #:seon.task{:name "a-preview-reparses-retained-source"
-             :kind :function
-             :intent "The preview path (system-turn with write? false, used by the page) re-parses retained source through planned-sources and parses root's retained bare symbol 'accepted' as no forms, so the whole preview is refused. The write path does not re-parse."
-             :must-read #{seon.turn/planned-sources seon.turn/system-turn}
-             :evidence #{"docs/research/agent-platform/landing/fix-root-refusal-schema-2026-09-26.md"}}
  #:seon.task{:name "close-turn-is-a-third-commit"
              :kind :function
              :intent "A replied run commits close-turn as a separate third transaction after settlement: a trivial root run costs 122-136 ms warm, about 75 ms of it three file-store commits (24-31 ms each), and close-turn is 32-36 ms. Fold the close into the settlement at the writer (hunk in the fix-write-cost landing), keeping the separate pass for issue-bearing agents and generated system turns."
@@ -26,11 +21,6 @@
              :must-read #{seon.sci.eval/call-detecting-program-change seon.turn/evaluate-sources}
              :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
                          "docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md"}}
- #:seon.task{:name "a-blind-cross-branch-writer-is-promoted-to-a-read"
-             :kind :function
-             :intent "read-only-evaluation? (fixed for writers that read other branches in 90c542fd0) still promotes a form that writes another branch without reading it and reads only its own database, so a system turn may re-run a writer. A positive proof records every transaction the evaluation made."
-             :must-read #{seon.turn/read-only-evaluation?}
-             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}
  #:seon.task{:name "failed-run-left-unsettled"
              :kind :function
              :intent "A run failing after it records its sources was never closed with its cause (sorted-map wedge, sticky unavailable). rc-m4 f83931226 closes escaping runs; proven by root after restart."
@@ -50,18 +40,13 @@
  #:seon.task{:name "an-agent-form-is-read-again-by-each-consumer"
              :kind :function
              :intent "After the plan reads a reply, its source is read again by evaluable-source?, read-source, source-events (source-key and read-only-evaluation?, which also re-derives declarations with program/declaration-row), seon.sci.eval/one-event and install-row!'s test and deletion replays, besides the clj-kondo parse. A form is parsed once: carry the plan's events and the analyzed entities on the evaluation."
-             :must-read #{seon.turn/source-events seon.turn/read-only-evaluation? seon.turn/evaluable-source? seon.sci.eval/one-event}
+             :must-read #{seon.turn/evaluable-source? seon.sci.eval/one-event}
              :evidence #{"docs/research/agent-platform/eval-path-audit-2026-09-26.md"}}
  #:seon.task{:name "receipt-attributes-are-a-hand-list"
              :kind :function
              :intent "seon.turn/receipt-terminal-attributes is a hand-written list of the receipt attributes the writer stores; it duplicates the receipt schema, so every new receipt key is silently dropped until someone edits the list (the LARGE VALUE cost keys of 2026-09-27 never landed because of it). Derive the stored attributes from the receipt's declared schema (CLAUDE.md: declare the partition on entity schemas, not in a hand list) and delete the list."
              :must-read #{seon.turn/receipt-terminal-attributes}
              :evidence #{"docs/research/agent-platform/landing/large-value-feedback-opus-2026-09-27.md"}}
- #:seon.task{:name "opening-run-id-from-a-stale-count"
-             :kind :function
-             :intent "seon.turn/system-turn derives an opening's run id from a count of the agent's runs on its own connection read, so competing openers agree on one id and the writer admits one. Under reply-when-applied (B) an agent's answered run may not be committed yet, so an opening started inside that window can compute an id that collides with it; the writer refuses loudly (no corruption), but the opening fails. submit-source! was fixed by generating ids (5151be7ad); openings need a collision-free identity that still lets competing openers converge (e.g. derive the id from the triggering fact's identity, not a count)."
-             :must-read #{seon.turn/system-turn}
-             :evidence #{"docs/research/agent-platform/landing/one-commit-a-2026-09-26.md"}}
  #:seon.task{:name "a-gate-exception-refuses-the-whole-run"
              :kind :function
              :intent "An exception inside the install gate escapes as a phase failure (turn.clj ~3551-3567), lands on ordinal 0 and leaves every other ordinal nil: the whole run is refused instead of its one form, violating the total REPL path. The failing form gets its diagnostic beside its value; the others keep theirs (probe-i, cc91a1e62). Worse: turn/phase (turn.clj:3551) catches only ExceptionInfo, so any other throwable (an NPE, fault 8f6fdfc0) escapes the turn step to Flow and the caller gets \"The awaited channel closed before completion\" with no value at all (fix-b, 5fffb1b48)."
@@ -76,14 +61,6 @@
              :kind :function
              :intent "Probed on disposable branch p0-probe 2026-09-27: the run \"(do (in-ns 'p0.nested) 1) (+ 1 2)\" writes the second form's :seon.cluster.eval/ns as the lookup ref [:seon.ns/name p0.nested], but namespace-rows (turn.clj ~619) creates entities only for namespaces segmentation saw (top-level in-ns), so the settlement transaction is refused ('Nothing found for entity id', logged unbounded twice by Datahike) and the caller gets 'The awaited channel closed before completion' with no run id, no values, no events. Total-path violation. Every namespace an evaluation actually ran in or ended in is upserted as {:seon.ns/name sym} in the same settlement transaction (the owner's session-entity plan P2a, docs/research/agent-platform/repl-session-entity-design-2026-09-27.md problem 3)."
              :must-read #{seon.turn/evaluate-sources}
-             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
- #:seon.task{:name "history-acquisition-decodes-stored-read-plans"
-             :kind :function
-             :intent "Loading an agent's history (seon.eval/of-agent for the prompt, seon.turn/latest-evaluations for each system turn's refresh) takes 1.5-1.8 s for root's 117 evaluations versus 3 ms for a raw pull: seon.db/pull decodes stored :datahike.read/dependency-plan strings (17.6 M chars, up to 1.5 MB each, mostly generated reads such as seon.error/for-agent) that no render shows. Context cost must follow what is shown; store bounded plans and pull none for display (data-model plan slice P1)."
-             :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
- #:seon.task{:name "compaction-erases-no-history-form-text"
-             :kind :function
-             :intent "Form :seon.cluster.eval/source, comment, output, diagnostics and the turn's reply are declared :db/noHistory, so retracting a form at compaction erases its text permanently, contradicting the owner's ruling that compaction deletes nothing (history answers what was dropped). These attributes are write-once; remove the no-history flag before compaction retracts forms (data-model plan)."
              :evidence #{"docs/research/agent-platform/repl-session-entity-design-2026-09-27.md"}}
  #:seon.task{:name "a-refused-multi-form-settlement-returns-nothing"
              :kind :function
@@ -114,16 +91,6 @@
              :intent "A definition's facts are derived twice: once on the batch's working value, where the writer's validation admits them form by form (seon.turn.batch/apply-facts), then again at the writer on the head in the turn's one settlement (seon.turn.batch/program-facts-call, since S4a; before it, with-settled then receipt-settle-call's row-tx: x43 mean 315 ms and x93 mean 244 ms on pid 66629, the second on the writer thread where it serializes every write on the branch). Settle the working value's validated tx-data under an expected-basis fence (:datahike/expected-basis-t) and re-derive only when the head moved. Done when a defining form's facts are derived once (profile count per form) and a moved head still settles correctly."
              :must-read #{seon.turn.batch/program-facts-call seon.turn.batch/apply-facts seon.turn/settle-batch!}
              :evidence #{"docs/research/agent-platform/perf-audit-2026-09-27.md"}}
- #:seon.task{:name "a-trivial-agent-turn-takes-eleven-seconds"
-             :kind :function
-             :intent "A Seon agent turn whose scripted reply is two cheap forms took about 11 s from its wake message to its close on default (e999fdd1b, local stub provider, 2026-09-27): message tx 22:19:34.2 -> turn opened 22:19:39.6 (5.4 s) -> provider request 22:19:45 (5.4 s) -> closed 22:19:45.7; the same forms through MCP SCI answer in 13-112 ms. Five turns measured 1.9-9.1 s open-to-close. Name the armed functions in the wake-to-open and open-to-request windows (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md is the earlier record) and make an ordinary turn's overhead sub-second. Profiled 2026-09-27 (one-path lane, default, root's 146 evaluations): wake-to-open is seon.turn/system-turn, 3.8-5.2 s, of which seon.turn/latest-evaluations is 3,566 ms (the same query without the read-evidence plans: 12 ms) -> seon.db/with-declarations x237 -> seon.schema.datahike/decode-attribute-value-in x996 3,694 ms decoding 477 stored :datahike.read/dependency-plan values (36.5 MB, the largest 4,536,371 chars from the opening's read (seon.error/for-agent (seon.db/db) \"root\"), whose :datahike.query.dependency/sources holds one whole vector). Open-to-request is the cold seon.cluster.prompt/prompt, 7,614 ms (warm 49 ms): seon.render.walk/history 7,385 ms = seon.eval/of-agent 3,693 ms (the same plan decode) + seon.db/call-reach x143 3,097 ms from seon.render/render-program-evidence (one reach per rendered value, not per distinct renderer). One target: 300 ms overhead; the proof is tmp/one-path one_path_proof.clj :turn-overhead. Diagnosed 2026-09-27 (turn-overhead lane, tmp/turn-overhead/proof.clj): the 4.5 M-char plan is not a copied vector but 30,729 :seon.db/read-index-patterns, one per datom the read's pull-in-find reached (seon.db/pull-index-patterns since ed8fd02e3, reached by the opening since fef94ab7a); 32 of 477 stored plans exceed 16 KB, all this read, 36.1 of 36.5 M chars. Landed or routed: the capture keeps at most 128 patterns and the schema refuses more (2.59 M -> 114 chars, same freshness and generated-read answers); latest-evaluations decodes the kept evaluations' evidence only (3.7 s -> 0.48 s, same value); history pulls evidence as references (of-agent 3.8 s -> 14 ms, same text); call reach keyed for the as-of opening (x147 2.75 s -> 19 ms); the walk's pull lowering cached per projection and selector (x63 1.16 s -> 36 ms). Remaining after install: re-measure a real turn; the cold history render of every evaluation (a-cold-prompt-renders-every-evaluation-again) and the preview of changed reads (~0.3 s)."
-             :must-read #{seon.cluster.agent/turn-step seon.turn/system-turn seon.turn/latest-evaluations seon.eval/of-agent seon.render/render-program-evidence}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md" "tmp/turn-overhead/proof.clj"}}
- #:seon.task{:name "an-mcp-run-of-root-waits-behind-roots-faulting-system-turn"
-             :kind :function
-             :intent "On default (pid 85484, 52e163bee, 2026-09-28) a root SCI run submitted through seon.cluster.agent/evaluate-source! answers in 88-114 ms when root is idle, but a second run submitted right after answers in 6.5-7.0 s (four back-to-back runs: 152, 7046, 6551, 6586 ms; after a 10 s pause 114 ms). The settled run wakes root's system turn (seon.turn/system-turn), which runs about 6.8 s and ends in the fault 'A generated context read depends on the agent's own turn-taking.' (signature 86621df3f8c7..., occurrences 9 -> 21 during the probes), and the next submission waits for it on root's request port. Every MCP call as root pays it once root is busy. Done when a run submitted right after another answers within 200 ms of an idle one and a settled run records no generated-read fault."
-             :must-read #{seon.turn/system-turn seon.turn/generated-read-fault seon.cluster.agent/evaluate-source!}
-             :evidence #{"tmp/mcp-entrance/timings.md"}}
  #:seon.task{:name "row-tx-is-a-second-declaration-writer"
              :kind :function
              :intent "seon.turn/row-tx has no production caller since the fold writes declarations through seon.turn.batch/entity-facts and schema-tx (its concurrency check and schema attribute-change copy went in the writer-duplicates cut). Test fixtures in ten files still write declarations through it (datahike_fork, db, schema, schema_usage_guard, cluster/acquisition, program, sci/branch_execution, sci/eval, schema/datahike, schema/projection_writer). Done when those fixtures write through the fold's writer and row-tx with its declared-* helpers is deleted."
@@ -136,7 +103,7 @@
  #:seon.task{:name "turn-continue-read-results-arrive-before-done-takes-six-seconds"
              :kind :namespace
              :intent "turn-continue read-results-arrive-before-done (:147) takes 5.8-7.3 s: undiagnosed. Done when a profile names the responsible armed functions and the test fits its bound."
-             :must-read #{seon.turn/compact!}}
+             :must-read #{seon.turn/step}}
  #:seon.task{:name "a-deep-value-loses-the-run"
              :kind :function
              :intent "An MCP sci run of (reduce (fn [v _] [v]) [] (range 10000)) on a branch agent (default pid 30874, 2026-10-07, waste-rank lane) evaluates in 34-47 ms, then its settlement is refused 'run transition refused: no-terminal-fact' (seon.turn/receipt-settle-call, validator :seon.turn/refused-error) and the reply carries only that 1,138-character diagnostic: the agent never receives its value (218-314 ms, 357-452 MB, 81-122 k armed calls, transact! x4). The one path is not total for deep values. Hypothesis to verify first: a recursive walk in recording or settlement (admission's project, the shown map or the receipt validation) overflows the stack and the throw becomes the refusal. Done when the case returns its value with a bounded shown text and settles as an ordinary evaluation; regression: that form through the one path, asserting the reply's value handle and the settled receipt."
@@ -147,11 +114,6 @@
              :intent "Heap after System/gc grows linearly with ordinary evaluations: 100 MCP runs of (+ 1 2) on one branch agent grew default's live heap 2,562 -> 2,582 MB (~200 KB per run), and a further 100 runs added 22.9 MB in the live class histogram: Object[] +10.2 MB, datahike.datom.Datom +60,174 (about 600 per run for a 28-datom commit), persistent-sorted-set Leaf +6,296 and Branch +2,531 (default pid 30874, 2026-10-07, tmp/waste-rank/hist-diff-100-evals.txt). Retiring the branch did not release its heap within 3 s. Hypothesis: something keeps each commit's database value reachable (read evidence, a reply's basis, a world or cache key holding a db), pinning old index leaves. Find the holder with a heap dump's path to GC roots for the new Datoms and drop the reference at its producer (hold a commit id, never a db value). Done when 100 x (+ 1 2) leaves the live heap within noise (< 1 MB) and a retired branch's context and results are collectable; regression: the 100-run heap probe as a test with a declared memory bound."
              :must-read #{seon.turn/settle-batch! seon.batch/freeze-step seon.cluster.agent/release-context!}
              :evidence #{"tmp/waste-rank/hist-diff-100-evals.txt" "tmp/waste-rank/class-histogram-live.txt"}}
- #:seon.task{:name "read-evidence-rows-are-two-fifths-of-the-stored-bytes"
-             :kind :function
-             :intent "Each evaluation's database reads are stored as one vector cell plus one evidence entity per read (receipt-read-evidence-tx), with :datahike.read/dependency-plan and :datahike.read/revision as printed strings (~660 bytes per read; 712 distinct revision strings repeated over 23,662 rows). On default (pid 30874, basis 536872613, 2026-10-07, db-watch lane) that is 23,663 reads owned by 115 of 1,189 evaluations: ~142k datoms (19% of 762k current datoms) and 15.7 MB of the 39 MB of stored value bytes (41%); four prepare-merge! evaluations hold 2,259 reads each (~1.5 MB per evaluation) and a probe defn ~547. The only reader is the old loop's refresh before a system turn (seon.turn/latest-evaluations, refresh status at the read-evidence-current? check), which the agent-loop spec deletes with system turns, while its settlement section keeps writing the rows. Evaluation results are runtime only (owner 2026-10-07), so evidence for re-evaluating them has no consumer after the cut. Done when settlement writes no read-evidence rows (or a bounded digest per evaluation, if a named consumer survives the cut), the attribute counts in docs/research/agent-platform/2026-10-07/db-watch/watch.clj stop growing with reads, and a regression asserts a 2,000-read evaluation settles under 10 datoms of evidence."
-             :must-read #{seon.turn/receipt-read-evidence-tx seon.turn/latest-evaluations seon.db/read-evidence-current?}
-             :evidence #{"docs/research/agent-platform/2026-10-07/db-watch/findings.md"}}
  #:seon.task{:name "a-deferred-wake-is-answered-by-silence",
             :kind :function,
             :intent
@@ -182,21 +144,6 @@
             :must-read #{seon.turn/read-row seon.turn/planned-sources},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
- #:seon.task{:name
-            "generated-opening-reads-fail-when-evaluated-as-written",
-            :kind :function,
-            :intent
-            "The system turn's generated opening reads (seon.turn/declared-sources) include forms that fail when an agent evaluates the same text: (dir (quote user)) refuses 'seon.sci.eval/directory-value refused argument 1 namespace-name: expected a symbol, got a sequence', and (seon.db/pull (quote [*]) [:seon.runtime/agent {:seon.agent/id \"r-context-probe\", :db/id 125969}]) answers 'Expected number or lookup ref for entity id' (the lookup value is a pulled map, not an identity). In lp-add-2's captured prompt the second showed as a value holding only :seon.render/operations, so the failure was hidden from the model. Measured as agent r-context-probe on default (722f110df, 2026-10-07). Done when every generated opening form evaluates to the value it is shown with, or the system turn is deleted (live-agents plan D1).",
-            :must-read
-            #{seon.turn/declared-sources seon.turn/unit-read},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-context-notes.md"}}
- #:seon.task{:name "generated-render-sources-are-read-as-model-replies",
-            :kind :function,
-            :intent
-            "seon.turn's system plan segments each render block's generated :seon.render/source with seon.turn/planned-sources, the model-reply reader with prose forgiveness, instead of seon.turn/code-sources: system-generated code is read as if a model wrote it (turn.clj near the unit-read reduce in HEAD 439401ac3). Correct: generated code is code (code-sources).",
-            :must-read
-            #{seon.turn/code-sources seon.turn/planned-sources}}
  #:seon.task{:name "each-form-of-a-pass-costs-megabytes"
              :kind :function
              :intent "An MCP SCI pass costs megabytes per form whatever the form does. Measured on default with seon.pass-probe/mcp!: 100 forms (+ n 1) 469 ms / 1.15 GB; 400 unresolved words 1,481 ms / 2.37 GB. After pass-cost (once-per-pass namespace lookup, config defaults, terminal ordinal, identity pull, JVM render policy): 100 forms SCI 191 ms / 350 MB, JVM 115 ms / 195 MB, still about 2.3 MB per SCI form. Remaining: retired context refresh and read evidence (S4), repeated recording and observation (S5), receipt machinery (S6), armed hot internals, Datahike query-cache inheritance walk. Correct: per-form work proportional to what the form did, well under 1 MB for a form that defines nothing. Proof: a pass-probe row where 100 non-defining forms allocate under 10x one form."
@@ -269,8 +216,12 @@
  #:seon.task{:name "the-user-prompt-stop-sequence-cuts-the-models-first-form"
              :kind :function
              :intent "The transcript shows every exchange as `user=> form` and the model row stops on \"user=>\" (`:seon.config.ai/stop`), so a model that writes its next form the way the transcript shows it is cut before the form: the first deepseek-flash pass of the live-agent run (agent live-flash, default 6cc5dbbb4, 2026-10-08) ended after prose and an opening ```clojure fence, 78 completion tokens, finish reason stop, and answered 'Your reply had no form'. Done when the prompt marker the transcript teaches and the stop sequence never collide: a model reply that writes `user=> (f)` evaluates (f)."
-             :must-read #{seon.ai/complete seon.cluster.prompt/prompt}}
+             :must-read #{seon.ai/complete seon.context/model-context}}
  #:seon.task{:name "a-model-pass-never-sees-its-test-step"
              :kind :function
              :intent "After a model pass that evaluated a form, `seon.turn/step` runs the proofs and reaching tests but offers the summary only on an MCP reply channel; the model's next prompt carries neither the summary nor the current-state block, so the model never learns its proof is still red (live-agent run, agent live-flash, default 6cc5dbbb4, 2026-10-08: nine passes, the agent learned the proof's status only by evaluating (seon.context/current-state) itself). Covered by the block-last assembly (ledger CS-03a) once it lands; done when a model pass's next prompt shows the proofs' status that pass's step recorded."
-             :must-read #{seon.turn/step seon.cluster.prompt/prompt}}]
+             :must-read #{seon.turn/step seon.context/model-context}}
+ #:seon.task{:name "a-stop-during-model-context-assembly-records-errors"
+             :kind :function
+             :intent "An orderly disarm while a model pass is assembling its context (seon.context/model-context inside the call turn's phase) interrupts the pass but records two error occurrences; a stop's wrapped interrupt is no error. Before CX-1 the test's stand-in redefined seon.cluster.prompt/prompt, which the pass no longer called, so the test hung instead (lane rip-context, 2026-10-08). Done when the interrupted pass closes as interrupted with no error recorded."
+             :must-read #{seon.turn/call-turn seon.context/model-context seon.cluster.agent/disarm!}}]

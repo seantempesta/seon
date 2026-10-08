@@ -38,7 +38,6 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.cluster.wake :as wake]
-            [seon.eval :as evaluation]
             [seon.error :as error]
             [seon.render :as render]
             [seon.render.data :as data]
@@ -836,61 +835,6 @@
            (assoc (dissoc request :seon.render.walk/continuation-node)
                   :seon.render/value (:seon.render.data/value found)
                   :seon.render.value/root node)))))))
-
-(defn history
-  "Render saved evaluations in chronological order through their schema pair.
-
-  A named reply turn excludes its own evaluations, including source rows
-  admitted with its opening transaction. Generated system evaluations remain
-  visible. Without a turn id, every stored evaluation participates."
-  {:malli/schema [:=> [:cat :seon.render.walk/history-request]
-                  [:or [:vector :map] :seon.render/request-error]]}
-  [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
-  (let [agent (db/pull database [:seon.agent/id] lookup)
-        agent-id (:seon.agent/id agent)
-        evaluations (cond
-                      (:seon.db/invalid-read agent) agent
-                      (nil? agent-id)
-                      (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/history 'seon.render.walk/history
-                       {:seon.error/message "The history lookup does not name an agent."
-                       :seon.render/refused-member :seon.render.walk/lookup}) :seon.error/type :seon.render/request-error)
-                      :else
-                      (evaluation/of-agent database agent-id
-                                           (or (:seon.db/pull-selector request)
-                                               evaluation/history-selector)))
-        selected (when-let [id (:seon.turn/id request)]
-                   (db/pull database [:db/id :seon.turn.work/situation]
-                            [:seon.turn/id id]))]
-    (if-let [refusal (or (when (:seon.db/invalid-read selected) selected)
-                        (when (or (:seon.db/invalid-read evaluations)
-                                  (:seon.agent/no-such-agent evaluations)
-                                  (:seon.render/refused-member evaluations))
-                          evaluations))]
-      (assoc (assoc refusal :seon.render/refused-member :seon.render.history/entries) :seon.error/type :seon.render/request-error)
-      (reduce
-       (fn [entries saved]
-         (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
-               ;; `:t` is the read's basis (kept below), not an attribute of
-               ;; the receipt entity; without it the entity's owner and pair
-               ;; apply, for this AI render and for every later face of the
-               ;; entry (the outline's HTML fell to the floor with it).
-               receipt (dissoc saved :t)
-               rendered (render/render-call
-                         (assoc request :seon.render/value receipt
-                                        :seon.render/output :seon.render/ai
-                                        :seon.render.call/id [lookup]))]
-           (if (:seon.render/refused-member rendered)
-             (reduced (assoc (assoc rendered :seon.render/refused-member :seon.render.history/entries) :seon.error/type :seon.render/request-error))
-             (conj entries
-                   {:seon.render.history/call-id [lookup]
-                    :seon.render/value receipt
-                    :seon.render.history/subject lookup
-                    :seon.render.history/basis-transaction (:t saved)
-                    :seon.render.history/bytes (or rendered "")}))))
-       [] (if (and selected (not= :generate (:seon.turn.work/situation selected)))
-            (remove #(= (:db/id selected)
-                        (get-in % [:seon.cluster.eval/run :db/id])) evaluations)
-            evaluations)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The linked graph: levels of set-at-a-time joins, definitions first

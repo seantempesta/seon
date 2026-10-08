@@ -1,26 +1,18 @@
 (ns seon.render.web-debug-test
   "Schema-authored block metadata and honest unavailable dependencies."
-  (:require [clojure.core.async :as async]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [clojure.walk]
             [seon.render.web :as web]
             [seon.render.web-test :as web-test]
             [seon.db :as db]
             [seon.config :as config]
-            [seon.cluster :as cluster]
-            [seon.cluster.agent :as agent]
-            [seon.context-blocks-fixture :as fixture]
-            [seon.flow :as flow]
             [seon.error :as error]
             [seon.render :as render]
             [seon.render.hiccup :as hiccup]
-            [seon.render.transcript :as transcript]
-            [seon.render.walk :as walk]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.test-support :as support]))
 
 (defn- element-text [node]
   (cond
@@ -28,128 +20,6 @@
     (vector? node) (apply str (map element-text (drop (if (map? (second node)) 2 1) node)))
     (sequential? node) (apply str (map element-text node))
     :else ""))
-
-(deftest turn-details-use-the-loop-opening-and-exact-segments
-  (support/with-database
-   (fn [connection]
-     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "debug-turns"
-                    :seon.config/manifest {:seon.config.ai/no-provider true}})
-     (cluster/ensure-cluster-entity! connection "debug-turns" cluster/boot-process-identity)
-     (support/transacted! connection
-                          (into []
-                                cat
-                                [(support/agent-tx @connection "root" 'my.agents.root)
-                                 (support/agent-tx @connection "juniper" 'my.agents.juniper)]))
-     (let [ctx (support/fork-cluster-ctx connection)
-           environment (support/environment "debug-turns" connection)
-           routing (support/attempt-routing connection)]
-       (with-open [launcher (support/closeable
-                              (flow/start-work-launcher!
-                               {:seon.env/environment environment
-                                :seon.flow/configuration (select-keys (support/effective-config) flow/flow-workload-attributes)})
-                              flow/stop-work-launcher!)
-                   faults (support/closeable (async/chan (async/sliding-buffer 16)) async/close!)]
-         (let [handle (support/cluster-handle
-                       {:seon.env/environment environment :seon.db/connection connection
-                        :seon.cluster/name "debug-turns" :seon.sci.eval/ctx ctx
-                        :seon.flow/work-launcher @launcher
-                        :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                        :seon.db.process/id cluster/boot-process-identity})
-               request {:seon.turn.loop/cluster handle :seon.agent/routing routing
-                        :seon.agent/id "juniper" :seon.turn/write? true}]
-           (swap! routing assoc :seon.agent/fault-channel @faults)
-           (try
-             (fixture/install! handle routing)
-             (is (string? (:seon.turn/id (turn/system-turn request))))
-             (agent/arm! request)
-             (let [provider-id (fixture/submit! handle routing ";; Check the total\n(+ 40 2)")
-                   _ (agent/disarm! request)
-                   opening (turn/opening-db @connection provider-id)
-                   acquire-request (merge handle {:seon.db/db opening :seon.agent/id "juniper"
-                                                   :seon.turn/id provider-id
-                                                   :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms handle)})
-                   expected (:seon.cluster.prompt/text (render/acquire-context! acquire-request))
-                   _ (is (string? expected))
-                   _ (agent/arm! request)
-                   _ (fixture/submit! handle routing "(str \"later must not enter earlier prompt\")")
-                   _ (agent/disarm! request)
-                   unit (merge acquire-request {:seon.db/db @connection})]
-               (is (= expected (:seon.cluster.prompt/text (render/acquire-context! unit)))
-                   "The acquisition owner honors the turn id even with today's database.")
-               (is (not (str/includes? expected "later must not enter earlier prompt")))
-               (doseq [entity (#'transcript/turn-entities @connection "juniper")
-                       :when (not= :generate (:seon.turn.work/situation entity))]
-                 (let [historical (turn/opening-db @connection (:seon.turn/id entity))
-                       historical-request (assoc unit :seon.turn/id (:seon.turn/id entity))
-                       rebuilt (render/acquire-context! historical-request)
-                       folded (web/derive-context! (assoc historical-request :seon.db/db historical))]
-                   (is (= (:seon.cluster.prompt/text folded) (:seon.cluster.prompt/text rebuilt))
-                       "Every reply turn excludes its own and later reply evaluations."))))
-             (finally
-               (agent/disarm! request)
-               (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
-                 (async/close! (get handle channel-key)))))))))))
-
-(deftest saved-history-preserves-shown-text-with-numeric-lookups
-  (support/with-database
-   (fn [connection]
-     (let [_ (support/transacted!
-              connection
-              (into [(support/namespace-entity @connection 'my.agents.history-probe)]
-                    (support/agent-tx @connection "history-probe" 'my.agents.history-probe)))
-           ;; The runtime and settings are the agent's own components; their
-           ;; identities name the owner.
-           written
-           (db/transact!
-            connection
-            [{:seon.runtime/agent [:seon.agent/id "history-probe"]}
-             {:db/id "history-turn" :seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
-             {:seon.cluster.eval/id "history-probe-evaluation"
-              :seon.cluster.eval/at (java.util.Date.)
-              :seon.cluster.eval/run [:seon.turn/id "history-probe-turn"]
-              :seon.cluster.eval/ordinal 0
-              :seon.cluster.eval/ns [:seon.ns/name 'my.agents.history-probe]
-              :seon.cluster.eval/source "(my.task/steps {})"
-              :seon.eval/shown "The component's shown text."}])
-           _ (is (:db-after written))
-           database @connection
-           agent-entity (db/pull database '[:db/id {:seon.agent/settings [:db/id]}]
-                          [:seon.agent/id "history-probe"])
-           agent-eid (:db/id agent-entity)
-           component-eid (get-in agent-entity [:seon.agent/settings :db/id])
-           request {:seon.db/db database
-                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
-                    :seon.render.walk/lookup agent-eid
-                    :seon.sci.admit/caps (config/result-caps config/defaults)
-                    :seon.sci.eval/time-limit-ms 5000}
-           history (walk/history request)]
-       (is (instance? Long agent-eid))
-       (is (instance? Long component-eid))
-       (is (= 1 (count history)))
-       (is (= "my.agents.history-probe=> (my.task/steps {})\n#:seon.repl{:result result/ehistory-probe-evaluation, :value The component's shown text.}"
-              (:seon.render.history/bytes (first history))))
-       (is (= history
-              (walk/history (assoc request :seon.render.walk/lookup
-                                   [:seon.agent/id "history-probe"]))))
-       (let [request (assoc request :seon.agent/id "history-probe" :seon.db/connection connection)
-             acquired (web/derive-context! request)
-             captured (db/transact! connection
-                        [{:seon.context.capture/id "history-verification"
-                          :seon.context.capture/run [:seon.turn/id "history-probe-turn"]
-                          :seon.context.capture/basis-t (db/basis-t database)
-                          :seon.context.capture/prompt (:seon.cluster.prompt/text acquired)}])
-             request (assoc request :seon.db/db @connection :seon.turn/id "history-probe-turn")]
-         (is (:db-after captured))
-         (is (string? (:seon.cluster.prompt/text (render/acquire-context! request)))
-             "Acquisition publishes units; it does not judge a capture it cannot
-              recompose. The capture is compose(select(units)) plus the frame,
-              so only seon.cluster.prompt holds the bytes to compare — see
-              seon.cluster.prompt-test/a-replay-under-a-selecting-budget-reconstructs-its-own-capture."))
-       (let [changed (db/transact! connection
-                                  [[:db/add component-eid :seon.config.eval/time-limit-ms 4321]])]
-         (is (:db-after changed))
-         (is (= history (walk/history (assoc request :seon.db/db @connection)))
-             "History reuses the observation without executing or reprinting the component."))))))
 
 (deftest the-agent-page-shows-a-comment-as-thinking-and-a-result-through-its-pair
   ;; S11 acceptance (c). The comment is a separately stored fact

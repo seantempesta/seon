@@ -16,8 +16,7 @@
             [seon.fn :as fn]
             [seon.id :as id]
             [seon.program :as program]
-            [seon.test-support :as support]
-            [seon.turn :as turn]))
+            [seon.test-support :as support]))
 
 (defn- fixture-source
   "One small namespace: a callee and its caller. The test reaching both is the
@@ -42,7 +41,7 @@
         ;; The agent's work is its own branch's: under the member's custody the
         ;; writer refuses a write naming the candidate branch.
         submitted (db/call-with-custody {:seon.db/connection connection}
-                                        #(turn/virtual-turn! (assoc request :seon.cluster.reply/text text)))
+                                        #(agent/evaluate-source! (assoc request :seon.cluster.reply/text text)))
         run-id (:seon.turn/id submitted)]
     (is run-id "the agent accepted the submission")
     (when run-id

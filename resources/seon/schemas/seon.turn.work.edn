@@ -58,12 +58,6 @@
                        [:seon.turn/id :seon.turn/id]
                        [:seon.agent/id
                         :seon.agent/id]]]
-                     [:generate
-                      [:map
-                       [:seon.turn.work/situation [:= :generate]]
-                       [:seon.turn/id :seon.turn/id]
-                       [:seon.agent/id
-                        :seon.agent/id]]]
                      [:open
                       [:map
                        [:seon.turn.work/situation [:= :open]]
@@ -86,4 +80,4 @@
                      [:seon.turn.work/settled?
                       :seon.turn.work/settled?]],
                     :settled? :boolean,
-                    :situation [:enum :resume :call :generate :open :close]}
+                    :situation [:enum :resume :call :open :close]}

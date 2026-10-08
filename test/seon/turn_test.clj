@@ -1,19 +1,13 @@
 (ns seon.turn-test
   (:require [clojure.core.async :as async]
-            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
-            [sci.core :as sci]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.eval :as evaluation]
-            [seon.flow :as flow]
             [seon.id :as id]
             [seon.render.hiccup :as hiccup]
-            [seon.render.web :as web]
             [seon.repl :as repl]
             [seon.render :as render]
             [seon.batch]
@@ -90,12 +84,6 @@
     (when (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result)) (throw (ex-info (pr-str result) result)))
     result))
 
-(defn- evaluations [database agent-id]
-  (db/q '[:find [?evaluation ...] :in $ ?id
-          :where [?agent :seon.agent/id ?id]
-          [?turn :seon.turn/agent ?agent]
-          [?evaluation :seon.cluster.eval/run ?turn]] database agent-id))
-
 (deftest agent-budget-counts-a-call-that-closes-before-the-provider
   (support/with-database
    (fn [connection]
@@ -127,77 +115,6 @@
      (support/transacted! connection (turn/close-tx {:seon.turn/id "second-closed-call"}))
      (is (zero? (turn/turns-left (db/db connection) "budget-close-worker")))
      (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id "budget-close-worker"}))))))
-
-(deftest generated-read-evidence-rejects-turn-activity
-  (support/with-database
-   (fn [connection]
-     (config/apply! {:seon.db/connection connection
-                    :seon.boot/cluster-name "generated-read-proof"})
-     (support/seed-cluster! connection "generated-read-proof")
-     (checked-transact! connection
-                        (agent/creation-tx {:seon.agent/id "reader"
-                                            :seon.ns/name 'my.agents.reader
-                                            :seon.cluster/name "generated-read-proof"}))
-     (let [source "(seon.db/q '[:find ?id :where [_ :seon.turn/id ?id]])"
-           run-id "generated-read"
-           evaluation-id (id/evaluation run-id 0)
-           _ (checked-transact!
-              connection
-              [{:seon.turn/id run-id
-                :seon.turn/agent [:seon.agent/id "reader"]
-                :seon.turn.work/situation :generate
-                :seon.turn/opened-tx "datomic.tx"}
-               {:seon.cluster.eval/id evaluation-id
-                :seon.cluster.eval/at (java.util.Date.)
-                :seon.cluster.eval/run [:seon.turn/id run-id]
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/source source}])
-           ctx (support/fork-cluster-ctx connection)
-           handle (support/cluster-handle
-                   {:seon.env/environment (support/environment "generated-read-proof" connection)
-                    :seon.db/connection connection
-                    :seon.cluster/name "generated-read-proof"
-                    :seon.db.process/id cluster/boot-process-identity
-                    :seon.sci.eval/ctx ctx})
-           request {:seon.turn.loop/cluster handle
-                    :seon.sci.eval/ctx ctx
-                    :seon.agent/id "reader"
-                    :seon.turn/id run-id
-                    :seon.cluster.eval/ordinal 0
-                    :seon.ns/name 'my.agents.reader
-                    :seon.cluster.reply/sources [{:seon.cluster.eval/source source}]}
-           ;; the fault rides beside the value as a diagnostic (585b043e8), so
-           ;; its data is asked of its producer over the evaluation's evidence
-           evaluation (get-in (turn/evaluate-sources request)
-                              [:seon.turn.loop/evaluated-sources 0 :seon.sci.eval/evaluation])
-           fault (#'turn/generated-read-fault (db/db connection)
-                                              {:seon.cluster.eval/source source
-                                               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]}
-                                              (select-keys evaluation [:seon.cluster.eval/read-evidence]))]
-       (is (str/includes? (str (:seon.cluster.eval/diagnostics evaluation))
-                          "A generated context read depends on the agent's own turn-taking.")
-           "the fault is delivered beside the value")
-       (is (seq (:seon.turn/generated-read-attributes fault)) "the fault names the turn attributes read")
-       (is (= source (get-in fault [:seon.error/offending])) "the fault names the generated form")
-       (is (= #{:seon.turn/id}
-              (get-in fault [:seon.error/data :datahike.read/attributes]))
-           "the fault names the read's attributes")
-       (is (nil? (:seon.cluster.eval/read-evidence
-                  (db/pull @connection [:seon.cluster.eval/read-evidence]
-                           [:seon.cluster.eval/id evaluation-id]))))
-       (checked-transact! connection
-                          [[:db/add [:seon.cluster.eval/id evaluation-id]
-                            :seon.cluster.eval/origin :model]])
-       (is (seq (get-in (first (:seon.turn.loop/evaluated-sources (turn/evaluate-sources request)))
-                        [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
-           "an agent may explicitly inspect its own history")
-       (checked-transact! connection
-                          [[:db/add [:seon.cluster.eval/id evaluation-id]
-                            :seon.cluster.eval/origin :outside]
-                           [:db/add [:seon.turn/id run-id] :seon.turn.work/situation :call]])
-       (is (seq (get-in (first (:seon.turn.loop/evaluated-sources (turn/evaluate-sources request)))
-                        [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
-           "a virtual reply is authored input, not generated context")))))
 
 (deftest a-forms-read-evidence-is-only-what-the-form-read
   ;; The sink covered install, identity checks and profile derivation, so
@@ -272,64 +189,6 @@
        (is (= [:seon.ns/name 'my.agents.reader] (:seon.cluster.eval/ns evaluation)))
        (is (= {:seon.repl/value 1} (:seon.sci.admit/value evaluation)))))))
 
-(deftest a-turn-dependent-generated-form-keeps-its-value-beside-the-fault
-  (testing "a generated form whose reads depend on turn-taking settles its value with the fault as a diagnostic, and the turn closes"
-   (support/with-database
-    (fn [connection]
-      (config/apply! {:seon.db/connection connection
-                     :seon.boot/cluster-name "refused-generated-form"})
-      (support/seed-cluster! connection "refused-generated-form")
-      (checked-transact! connection
-                         (agent/creation-tx {:seon.agent/id "reader"
-                                             :seon.ns/name 'my.agents.reader
-                                             :seon.cluster/name "refused-generated-form"}))
-      (let [source "(seon.db/q '[:find ?id :where [_ :seon.turn/id ?id]])"
-            run-id "refused-generated"
-            evaluation-id (id/evaluation run-id 0)
-            _ (checked-transact!
-               connection
-               [{:seon.turn/id run-id
-                 :seon.turn/agent [:seon.agent/id "reader"]
-                 :seon.turn.work/situation :generate
-                 :seon.turn/starting-ns [:seon.ns/name 'my.agents.reader]
-                 :seon.turn/opened-tx "datomic.tx"}
-                {:seon.cluster.eval/id evaluation-id
-                 :seon.cluster.eval/at (java.util.Date.)
-                 :seon.cluster.eval/run [:seon.turn/id run-id]
-                 :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/ns [:seon.ns/name 'my.agents.reader]
-                 :seon.cluster.eval/source source}])
-            ctx (support/fork-cluster-ctx connection)
-            handle (support/cluster-handle
-                    {:seon.env/environment (support/environment "refused-generated-form" connection)
-                     :seon.db/connection connection
-                     :seon.cluster/name "refused-generated-form"
-                     :seon.db.process/id cluster/boot-process-identity
-                     :seon.sci.eval/ctx ctx})
-            report (turn/turn {:seon.turn.loop/cluster handle
-                               :seon.turn.work/next {:seon.turn.work/situation :resume
-                                                     :seon.turn/id run-id
-                                                     :seon.agent/id "reader"
-                                                     :seon.cluster.eval/ordinal 0}}
-                              (java.util.Date.))
-            ;; the value the turn's settlement left
-            settled (db/pull (:seon.turn.loop/basis report)
-                             [:seon.eval/shown :seon.cluster.eval/error
-                              :seon.cluster.eval/diagnostics :seon.cluster.eval/source]
-                             [:seon.cluster.eval/id evaluation-id])]
-        ;; The class this pins (root's loop parked, 2026-09-28): the fault
-        ;; never refuses the turn. The value settles, the fault is delivered
-        ;; beside it, and the stored evidence keeps it out of later openings.
-        (is (string? (:seon.eval/shown settled)))
-        (is (nil? (:seon.cluster.eval/error settled)))
-        (is (str/includes? (str (:seon.cluster.eval/diagnostics settled))
-                           "A generated context read depends on the agent's own turn-taking.")
-            "the fault is the declared error, delivered beside the value")
-        ;; cc77df980: a generated run's settlement closes the run (one run,
-        ;; one transaction), so the turn reports :closed, not :released.
-        (is (= :closed (:seon.turn.loop/outcome report))
-            "the generated run closes in its settlement instead of parking"))))))
-
 (deftest an-untrusted-frame-failure-is-an-error-value-carrying-its-instant
   (testing "a failure after SCI returned a form's value is the kept value's error, built by the one constructor: it carries :seon.error/at, so the settlement's diagnostic contract admits it"
     (let [failure-refusal #'sci.eval/failure-refusal]
@@ -339,25 +198,6 @@
         (let [error (failure-refusal thrown)]
           (is (inst? (:seon.error/at error)))
           (is (string? (:seon.error/message error))))))))
-
-(deftest compaction-refuses-an-open-turn-at-the-writer
-  (support/with-database
-   (fn [connection]
-     (checked-transact!
-      connection
-      (into (support/agent-tx @connection "busy")
-            [{:seon.turn/id "open" :seon.turn/agent [:seon.agent/id "busy"] :seon.turn/opened-tx "datomic.tx"}
-             {:seon.cluster.eval/id "unfinished"
-        :seon.cluster.eval/at (java.util.Date.)
-        :seon.cluster.eval/run [:seon.turn/id "open"]
-        :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/source "(+ 1 1)"}]))
-     (let [before (db/basis-t @connection)
-           result (turn/compact! {:seon.db/connection connection
-                                  :seon.agent/id "busy"})]
-       (is (some? (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))))
-       (is (= before (db/basis-t @connection)))
-       (is (= 1 (count (evaluations @connection "busy"))))))))
 
 (deftest open-run-tx-call-emits-only-while-its-run-is-open
   (testing "the writer, not a caller's pre-read, decides the run-dependent half"
@@ -505,271 +345,6 @@
                         [?turn :seon.turn/id ?id]
                         (not [?turn :seon.turn/closed-tx _])] database))
              "the open turn is untouched and the fence still holds"))))))
-
-(defn- virtual-turn-fixture
-  {:malli/schema [:=> [:cat] [:tuple :string [:vector :seon.schema/value]]]}
-  []
-  (support/with-database
-   (fn [connection]
-     (config/apply! {:seon.db/connection connection
-                     :seon.boot/cluster-name "virtual-turns"})
-     (support/seed-cluster! connection "virtual-turns")
-     (doseq [[id namespace] [["a" 'my.agents.a] ["b" 'my.agents.b]]]
-       (checked-transact! connection
-                          (agent/creation-tx {:seon.agent/id id
-                                              :seon.ns/name namespace :seon.cluster/name "virtual-turns"})))
-     (let [ctx (support/fork-cluster-ctx connection)
-           environment (support/environment "virtual-turns" connection)
-           launcher (flow/start-work-launcher!
-                     {:seon.env/environment environment
-                      :seon.flow/configuration
-                      (select-keys (support/effective-config)
-                                   flow/flow-workload-attributes)})
-           routing (support/attempt-routing connection)
-           faults (async/chan (async/sliding-buffer 16))
-           events (async/chan (async/sliding-buffer 1))
-           stable-identities (atom nil)
-           handle (support/cluster-handle
-                   {:seon.env/environment environment
-                    :seon.db/connection connection
-                    :seon.cluster/name "virtual-turns"
-                    :seon.flow/work-launcher launcher
-                    :seon.flow/executor
-                    (cluster/projection-executor
-                     (:seon.sci.eval/projection-state ctx))
-                    :seon.sci.eval/ctx ctx
-                    :seon.db.process/id cluster/boot-process-identity
-                    :seon.turn.loop/stream-channel
-                    (async/chan (async/sliding-buffer 1))})
-           submit (fn [id & [source]]
-                    (let [source (or source "(+ 1 1)")
-                          result (#'web/change-context
-                                  {:seon.render/context-action :virtual-turn
-                                   :seon.turn.loop/cluster handle
-                                   :seon.agent/routing routing
-                                   :seon.agent/id id
-                                   :seon.cluster.reply/text source})
-                          turn-id (when-not (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
-                                    (:seon.turn/id
-                                     (db/pull @connection [:seon.turn/id]
-                                              (get-in (last (evaluation/of-agent @connection id))
-                                                      [:seon.cluster.eval/run :db/id]))))
-                          closed? #(some? (:seon.turn/closed-tx
-                                           (db/pull @connection
-                                                    [:seon.turn/closed-tx]
-                                                    [:seon.turn/id turn-id])))]
-                      (is (string? turn-id))
-                      (when-not (closed?)
-                        (support/await-event! events ::closed (fn [_] (closed?))))
-                      (is (closed?))
-                      (is (empty?
-                           (db/q '[:find [?attempt ...] :in $ ?id
-                                   :where [?turn :seon.turn/id ?id]
-                                   [?turn :seon.turn/attempts ?attempt]]
-                                 @connection turn-id)))
-                      (is (= source
-                             (:seon.turn/reply
-                              (db/pull @connection [:seon.turn/reply]
-                                       [:seon.turn/id turn-id]))))
-                      turn-id))]
-       (swap! routing assoc :seon.agent/fault-channel faults)
-       (d/listen connection ::turns
-                 (fn [report] (async/offer! events report)))
-       (try
-         (let [previous-id "previous-jvm"
-               seeded (checked-transact!
-                       connection
-                       [{:seon.turn/id previous-id :seon.turn/agent [:seon.agent/id "a"] :seon.turn/opened-tx "datomic.tx"}])]
-           (is (some? (:db-after seeded)))
-           (is (nil? (:seon.turn/closed-tx
-                      (db/pull @connection '[*]
-                               [:seon.turn/id previous-id]))))
-           (is (= 1 (:seon.boot/recovered-runs
-                     (#'cluster/recover-runs! connection))))
-           (is (some? (:seon.turn/closed-tx
-                        (db/pull @connection '[*]
-                                 [:seon.turn/id previous-id]))))
-           (is (empty? (evaluations @connection "a"))
-               "boot invents no evaluation when the prior JVM stored no reply"))
-         (doseq [id ["a" "b"]]
-           (agent/arm! {:seon.turn.loop/cluster handle
-                        :seon.agent/routing routing
-                        :seon.agent/id id}))
-         ;; A run settles in one commit (its open, evaluations and close share
-         ;; it): proven once, by seon.cluster.evaluate-source-test.
-         (submit "a")
-         (submit "b")
-         (let [database @connection
-               basis (db/basis-t database)
-               saved (evaluation/of-agent database "a")]
-           (is (= 1 (count saved)))
-           (is (= "(+ 1 1)" (:seon.cluster.eval/source (first saved))))
-           (is (= 'my.agents.a
-                  (get-in (first saved) [:seon.cluster.eval/ns :seon.ns/name])))
-           (is (= saved (evaluation/of-agent database "a")))
-           (is (= basis (db/basis-t @connection)))
-           (is (string? (:seon.agent/no-such-agent (evaluation/of-agent database "absent")))))
-         (let [a (evaluations @connection "a")
-               b (evaluations @connection "b")]
-           (is (= 1 (count a)))
-           (is (= 1 (count b)))
-           (is (= 2 (edn/read-string
-                      (:seon.eval/shown
-                       (db/pull @connection [:seon.eval/shown]
-                                (first a))))))
-           (is (= "a" (:seon.agent/id (turn/compact! {:seon.db/connection connection
-                                                      :seon.agent/id "a"}))))
-           (is (empty? (evaluations @connection "a")))
-           (is (= b (evaluations @connection "b")))
-           (submit "a")
-           (is (= 1 (count (evaluations @connection "a")))))
-         (let [turn-id (submit "a" "(+ 1 1)\n(+ 2 2)\n(+ 3 3)")]
-           (is (= 1 (count (turn/receipt-settle-batch-tx
-                            (mapv (fn [ordinal]
-                                    {::turn/id turn-id
-                                     :seon.cluster.eval/ordinal ordinal
-                                     :seon.eval/shown "nil"})
-                                  (range 3))))))
-           (is (= ["2" "4" "6"]
-                  (mapv :seon.eval/shown
-                        (filter #(= (:db/id (db/pull @connection [:db/id]
-                                                   [:seon.turn/id turn-id]))
-                                    (get-in % [:seon.cluster.eval/run :db/id]))
-                                (evaluation/of-agent @connection "a")))))
-           (reset! stable-identities
-                   [turn-id (mapv :seon.cluster.eval/id
-                                  (take-last 3 (evaluation/of-agent @connection "a")))]))
-         (submit "a" "(def private-state (atom 2))")
-         (let [agent-context #(get-in (agent/armed routing %)
-                                     [:seon.turn.loop/cluster
-                                      :seon.sci.eval/agent-ctx])
-               a-context (agent-context "a")
-               private-object @(sci/resolve a-context 'my.agents.a/private-state)]
-           (submit "b" "(+ 2 2)")
-           (is (nil? (sci/resolve (agent-context "b") 'my.agents.a/private-state)))
-           (is (nil? (sci/resolve ctx 'my.agents.a/private-state)))
-           (submit "a" "(swap! private-state inc)")
-           (is (identical? a-context (agent-context "a")))
-           (is (identical? private-object
-                           @(sci/resolve a-context 'my.agents.a/private-state)))
-           (is (= 3 @private-object))
-           (submit "a" "(identity private-state)")
-           (let [saved (last (evaluation/of-agent @connection "a"))
-                 result-name (:seon.repl/handle (repl/entity-emission saved))]
-             (is (qualified-symbol? result-name))
-             (is (identical? private-object @(sci/resolve a-context result-name)))
-             (is (nil? (sci/resolve (agent-context "b") result-name)))
-             (is (nil? (sci/resolve ctx result-name))))
-           (checked-transact! connection
-                         (support/agent-tx @connection "c" 'my.agents.c))
-           (agent/arm! {:seon.turn.loop/cluster handle
-                        :seon.agent/routing routing
-                        :seon.agent/id "c"})
-           (submit "c" "(+ 3 3)")
-           (is (nil? (sci/resolve (agent-context "c") 'my.agents.a/private-state)))
-           (is (nil? (sci/resolve (support/fork-cluster-ctx connection)
-                                 'my.agents.a/private-state))
-               "fresh acquisition cannot restore a private object from the database")
-           (submit "a" "(defn shared {:malli/schema [:=> [:cat] :int]} [] 42)")
-           (let [b-context (agent-context "b")]
-             (submit "b" "(my.agents.a/shared)")
-             (is (identical? b-context (agent-context "b")))
-             (is (= 42 (edn/read-string
-                         (:seon.eval/shown
-                          (last (evaluation/of-agent @connection "b")))))))
-           (is (empty? (filter #(= "seon.def" (namespace %))
-                               (db/q '[:find [?key ...]
-                                       :where [_ :seon.schema/key ?key]]
-                                     @connection)))))
-         (let [request {:seon.turn.loop/cluster handle
-                        :seon.agent/id "a"
-                        :seon.turn/write? true}
-               opening (turn/system-turn request)
-               opening-sources (mapv :seon.cluster.eval/source
-                                     (filter #(= :none (:seon.turn/status %))
-                                             (:seon.turn/forms opening)))]
-           (is (vector? (:seon.turn/forms opening)))
-           (is (seq opening-sources))
-           (is (string? (:seon.turn/id opening)))
-           (is (some #(= :none (:seon.turn/status %)) (:seon.turn/forms opening)))
-           (let [basis (db/basis-t @connection)
-                 unchanged (turn/system-turn (assoc request :seon.turn/write? false))]
-             (is (seq (:seon.turn/forms unchanged)))
-             (is (= #{}
-                    (set (map (comp first edn/read-string :seon.cluster.eval/source)
-                              (filter #(= :changed (:seon.turn/status %))
-                                      (:seon.turn/forms unchanged)))))
-                 "the saved opening does not read its own turn history")
-             (is (nil? (:seon.turn/id unchanged)))
-             (is (= basis (db/basis-t @connection))))
-           (turn/compact! {:seon.db/connection connection
-                           :seon.agent/id "a"})
-           (let [fresh (turn/system-turn request)]
-             (is (= opening-sources
-                    (mapv :seon.cluster.eval/source (:seon.turn/forms fresh))))
-             (is (every? #(= :none (:seon.turn/status %))
-                         (:seon.turn/forms fresh))))
-            (submit "a" "(my.message/inbox {})")
-           ;; Message facts are changed with both procs stopped. Only the
-           ;; explicit system walk runs: this proof cannot call a provider.
-           (doseq [id ["a" "b" "c"]]
-             (agent/disarm! {:seon.agent/routing routing
-                             :seon.agent/id id}))
-           (checked-transact! connection
-                         [{:seon.message/id "to-b" :seon.message/to [:seon.agent/id "b"] :seon.message/content "For B"}])
-           (let [other (turn/system-turn (assoc request :seon.turn/write? false))]
-             (is (seq (:seon.turn/forms other)))
-             (is (= #{}
-                    (set (map (comp first edn/read-string :seon.cluster.eval/source)
-                              (filter #(= :changed (:seon.turn/status %))
-                                      (:seon.turn/forms other))))))
-             (is (= #{:unchanged}
-                    (set (map :seon.turn/status
-                              (filter #(= 'my.message/inbox
-                                          (first (edn/read-string (:seon.cluster.eval/source %))))
-                                      (:seon.turn/forms other)))))
-                 "a peer message does not refresh this agent's inbox")
-             (is (nil? (:seon.turn/id other))))
-           (checked-transact! connection
-                         [{:seon.message/id "to-a" :seon.message/to [:seon.agent/id "a"] :seon.message/content "For A"}])
-           (let [basis (db/basis-t @connection)
-                 preview (turn/system-turn (assoc request :seon.turn/write? false))
-                 changed (filterv #(= :changed (:seon.turn/status %))
-                                  (:seon.turn/forms preview))]
-             (is (= basis (db/basis-t @connection)))
-             ;; the opening's message concern is its reverse-ref read under `get`
-             (is (= #{'get 'my.message/inbox}
-                    (set (map (comp first edn/read-string :seon.cluster.eval/source) changed))))
-             (is (string? (:seon.turn/text (first changed))))
-             (let [stored (turn/system-turn request)]
-               (is (string? (:seon.turn/id stored)))
-               (is (= 2 (count (db/q '[:find [?e ...] :in $ ?id
-                                      :where [?turn :seon.turn/id ?id]
-                                      [?e :seon.cluster.eval/run ?turn]]
-                                    @connection (:seon.turn/id stored))))))))
-         (finally
-           (doseq [id ["a" "b" "c"]]
-             (agent/disarm! {:seon.agent/routing routing
-                             :seon.agent/id id}))
-           (d/unlisten connection ::turns)
-           (flow/stop-work-launcher! launcher)
-           (doseq [channel [events faults
-                            (:seon.cluster.wake/channel handle)
-                            (:seon.render/context-channel handle)
-                            (:seon.turn.loop/completion handle)
-                            (:seon.turn.loop/stream-channel handle)]]
-             (async/close! channel))))
-       @stable-identities))))
-
-(deftest virtual-turns-use-the-proc-and-compaction-is-agent-scoped
-  ;; Since 5151be7ad a submission's run id is minted (`seon.id/id`), not
-  ;; counted from the caller's connection value, so two forks no longer share
-  ;; run ids; what stays is that each evaluation's identity is its run's
-  ;; (`seon.id/evaluation` of run and ordinal).
-  (let [[run-id evaluation-ids] (virtual-turn-fixture)]
-    (is (string? run-id))
-    (is (= (mapv #(id/evaluation run-id %) (range 3)) evaluation-ids)
-        "each evaluation's identity is derived from its run and ordinal")))
 
 (deftest evaluation-ai-is-only-the-repl-session
   (let [rendered
@@ -985,85 +560,7 @@
       (is (= 1 (:seon.cluster.eval/ordinal warning)))
       (is (= 2 (:seon.turn/missing-results warning))))))
 
-(deftest generated-system-runs-grow-only-after-their-settled-prefix
-  (with-model-database
-    (fn [connection]
-      (support/transacted!
-              connection
-              (into [(namespace-entity 'my.agents.generated)]
-                    cat
-                    [(support/agent-tx @connection "generated-agent" 'my.agents.generated)]))
-      (is (= ::committed
-             (transact-or-refusal
-              connection
-              (turn/generated-run-tx
-               @connection
-               {:seon.agent/id "generated-agent" ::turn/id "generated-run" :seon.db.process/id "generated-process" :seon.turn/opened-tx "datomic.tx" ::turn/starting-ns [:seon.ns/name 'my.agents.generated]}))))
-      (is (= {:seon.turn.work/situation :generate
-              ::turn/starting-ns {:seon.ns/name 'my.agents.generated}}
-             (db/pull @connection
-                      '[:seon.turn.work/situation
-                        {:seon.turn/starting-ns [:seon.ns/name]}]
-                      [::turn/id "generated-run"])))
-      (is (empty?
-           (db/q '[:find ?form
-                   :where
-                   [?run :seon.turn/id "generated-run"]
-                   [?form :seon.cluster.eval/run ?run]]
-                 @connection)))
-      (is (= ::committed
-             (transact-or-refusal
-              connection
-              (turn/append-generated-tx
-               {::turn/id "generated-run"
-                :seon.db.process/id "generated-process"
-                :seon.cluster.eval/at t0
-                :seon.cluster.eval/ordinal 0
-                :seon.cluster.eval/source "(help)"
-                :seon.ns/name 'my.agents.generated}))))
-      (is (= {:seon.cluster.eval/ordinal 0
-              :seon.cluster.eval/at t0
-              :seon.cluster.eval/source "(help)"
-              :seon.cluster.eval/ns {:seon.ns/name 'my.agents.generated}}
-             (db/pull @connection
-                      '[:seon.cluster.eval/ordinal :seon.cluster.eval/at
-                        :seon.cluster.eval/source
-                        {:seon.cluster.eval/ns [:seon.ns/name]}]
-                      [:seon.cluster.eval/id
-                       (turn/receipt-identity "generated-run" 0)]))
-          "the durable generated form and running evaluation are atomic")
-      (support/transacted!
-              connection
-              (turn/receipt-settle-tx
-               {::turn/id "generated-run"
-                :seon.cluster.eval/ordinal 0
-                :seon.eval/shown "{:introduced 'my.turn}"}))
-      (is (= ::committed
-             (transact-or-refusal
-              connection
-              (turn/append-generated-tx
-               {::turn/id "generated-run"
-                :seon.db.process/id "generated-process"
-                :seon.cluster.eval/at t1
-                :seon.cluster.eval/ordinal 1
-                :seon.cluster.eval/source "(dir 'my.turn)"
-                :seon.ns/name 'my.agents.generated}))))
-      (is (= [[0 "(help)"]
-              [1 "(dir 'my.turn)"]]
-             (db/q {:query
-                    '[:find ?ordinal ?source
-                      :where
-                      [?run :seon.turn/id "generated-run"]
-                      [?form :seon.cluster.eval/run ?run]
-                      [?form :seon.cluster.eval/ordinal ?ordinal]
-                      (not [?form :seon.cluster.eval/origin _])
-                      [?form :seon.cluster.eval/source ?source]]
-                    :args [@connection]
-                    :order-by '[?ordinal :asc]})))
-      (is (nil? (::turn/reply-size
-                 (run-entity connection "generated-run")))))))
-
-(deftest run-derives-its-opening-database-and-starting-namespace
+(deftest a-run-records-its-starting-namespace
   (with-model-database
     (fn [connection]
       (support/transacted!
@@ -1085,19 +582,6 @@
                                 {::turn/id "replay-run"
                                  ::turn/agent [:seon.agent/id "replay-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
-          (let [opening (turn/opening-db @connection "replay-run")]
-            (is (= "replay-run"
-                   (::turn/id (db/pull opening [::turn/id]
-                                     [::turn/id "replay-run"]))))
-            (is (inst? (get-in (db/pull opening '[{:seon.turn/opened-tx [:db/txInstant]}]
-                                         [::turn/id "replay-run"])
-                               [:seon.turn/opened-tx :db/txInstant])))
-            (is (= 'replay.start
-                   (:seon.ns/name (db/pull opening [:seon.ns/name]
-                                          [:seon.ns/name 'replay.start]))))
-            (is (nil? (db/pull opening [:seon.ns/name]
-                              [:seon.ns/name 'replay.later]))))
-          (is (:seon.turn/missing-opening-datom (turn/opening-db @connection "absent-run")))
           (is (= 'replay.start
                  (get-in run [::turn/starting-ns :seon.ns/name]))))
       (is (= :outside
@@ -1659,7 +1143,6 @@
         (tc/quick-check
          30
          (prop/for-all [states (gen/vector receipt-state-gen 1 5)
-                        generated? gen/boolean
                         round gen/nat]
            (with-model-database
              (fn [connection]
@@ -1690,15 +1173,6 @@
                                    (assoc :seon.cluster.eval/error
                                           (str "boom-" ordinal))))
                                states)))
-                 (when generated?
-                   ;; One attribute on a turn that already exists is a datom,
-                   ;; not a partial entity map: an identity-keyed map is read
-                   ;; against the whole turn schema and refused for the keys
-                   ;; the open transaction already wrote.
-                   (support/transacted!
-                    connection
-                    [[:db/add [::turn/id run-id]
-                      :seon.turn.work/situation :generate]]))
                  (let [terminals-before (pull-terminals connection run-id)
                        recovery
                        (turn/recover-tx

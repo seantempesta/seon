@@ -1,21 +1,4 @@
 #:seon.render{:cache :seon.call-preparation/state,
-              :acquired-context
-              [:map
-               [:seon.cluster.prompt/text :seon.cluster.prompt/text]
-               [:seon.render.history/segments
-                [:vector {:min 1} :seon.cluster.prompt/text]]
-               [:seon.db/db :seon.db/database-value]],
-              :context-action [:enum :system-turn :virtual-turn :compact],
-              :context-change-request
-              [:map
-               [:seon.render/context-action :seon.render/context-action]
-               [:seon.db/connection :seon.db/connection]
-               [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-               [:seon.agent/id :seon.agent/id]
-               [:seon.sci.eval/time-limit-ms :seon.sci.eval/time-limit-ms]],
-              :context-request [:or :seon.cluster.prompt/request
-                                :seon.render/context-change-request],
-              :context-change-result [:map [:seon.db/db :seon.db/database-value]],
               :ai [:and {:seon.fn/reference-to :seon.fn/sym
                          :seon.db/index true
                          :description "A schema's AI renderer: a ref to the function entity its declaration names, own or inherited along Malli's reference chain (seon.schema.datahike/declared-reference). Authored as a symbol property; the schema bridge stores the ref. Optional peer ref: removing the function sweeps it and the writer refuses by name while the schema still declares it."}

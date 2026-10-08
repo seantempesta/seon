@@ -9,7 +9,6 @@
             [seon.env :as env]
             [seon.blob :as blob]
             [seon.fault :as fault]
-            [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
             [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
@@ -55,21 +54,6 @@
   "Create the fixture's agents through the owner's creation transaction."
   [connection & agent-ids]
   (into [] (mapcat #(support/agent-tx @connection %)) agent-ids))
-
-(deftest absent-bootstrap-trigger-does-not-pin-another-agents-message
-  (support/with-database
-   (fn [connection]
-     (support/transacted!
-      connection
-      (into (agents-tx connection agent-id peer-id)
-       [{:seon.message/id "unrelated-bootstrap-message"
-        :seon.message/to [:seon.agent/id peer-id]
-        :seon.message/content "Only the peer should see this."}]))
-     (is (= "Only the peer should see this."
-            (:seon.message/content
-             (db/pull @connection [:seon.message/content]
-                      [:seon.message/id "unrelated-bootstrap-message"]))))
-     (is (= "" (transcript/render-ai (unit connection)))))))
 
 ;;; `admitted-top-level-string-is-terminal-text` lived here while the
 ;;; transcript re-rendered a stored PRINT NODE into agent-visible text
@@ -485,93 +469,6 @@
             (is (not (str/includes? cut ";; …N")) "no legend line")))
         (assert-no-session-narration ai)))))
 
-(defn- seed-pinned-bootstrap-history!
-  [connection]
-  (let [bootstrap-run-id (bootstrap/run-id agent-id)
-        bootstrap-count 12
-        ;; ONE ENTITY PER (run, ordinal), AND ONE MAP FOR IT. The split pair
-        ;; below was the frozen-form-plus-settlement shape; each map is
-        ;; validated on its own, so the source-only half is refused for the
-        ;; `:seon.cluster.eval/at` the receipt schema requires
-        ;; (`resources/seon/schemas/seon.cluster.eval.edn`) and the whole
-        ;; seed is lost with it.
-        bootstrap-receipts
-        (map
-         (fn [ordinal]
-           {:seon.cluster.eval/id (pr-str [bootstrap-run-id ordinal])
-            :seon.cluster.eval/run [:seon.turn/id bootstrap-run-id]
-            :seon.cluster.eval/ordinal ordinal
-            :seon.cluster.eval/at (at 0)
-            :seon.cluster.eval/source (str "(identity " ordinal ")")
-            :seon.eval/shown (str ordinal)})
-         (range bootstrap-count))
-        messages
-        (concat
-         (map (fn [index]
-                {:seon.message/id (str "middle-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "middle history " index " " (apply str (repeat 80 "x")))})
-              (range 40))
-         (map (fn [index]
-                {:seon.message/id (str "newest-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "newest history " index)})
-              (range 6)))]
-    (support/transacted!
-     connection
-     (into (into (agents-tx connection agent-id)
-       [{:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
-            {:db/id "bootstrap-message" :seon.message/id "task0001" :seon.message/to [:seon.agent/id agent-id] :seon.message/content (bootstrap/task-message)}])
-           cat
-           [bootstrap-receipts messages]))))
-
-(deftest same-instant-bootstrap-prefix-and-newest-tail-preserve-plan-order
-  (support/with-database
-    (fn [connection]
-      (seed-pinned-bootstrap-history! connection)
-      (let [request (unit connection)
-            ai (transcript/render-ai request)
-            html-value (transcript/render-html request)
-            html (hiccup/->string html-value)
-            html-rows (html-entries html-value)
-            bootstrap-run-id (bootstrap/run-id agent-id)
-            bootstrap-count 12
-            pinned-ids
-            (mapv #(pr-str [bootstrap-run-id %]) (range bootstrap-count))
-            bootstrap-task-id (bootstrap/task-message-id @connection agent-id)
-            newest-ids (mapv #(str "newest-" %) (range 6))
-            visible-ids (mapv :id html-rows)
-            ;; Each pinned entry is located by its own prompt line AND the
-            ;; response that answers it, so the ordering property is proven
-            ;; over the one grammar rather than over a bare printed value.
-            prompted (fn [ordinal]
-                       (str agent-prompt "(identity " ordinal
-                            ")\n#:seon.repl{"))
-            ai-positions
-            (mapv #(.indexOf ai (prompted %)) (range bootstrap-count))
-            ;; the task message is SOURCE like every other message: its own
-            ;; identity is what the transcript names
-            task-position
-            (.indexOf ai (pr-str bootstrap-task-id))
-            pinned-end
-            (.indexOf ai (prompted (dec bootstrap-count)))
-            ;; the newest message, located by its identity for the same
-            ;; reason: the transcript renders the form that reads it
-            newest-start (.indexOf ai (pr-str (first newest-ids)))]
-        (is (zero? (html-elided html-value))
-            "the transcript renders its whole query-bounded history")
-        (is (= (into [(first pinned-ids) bootstrap-task-id]
-                     (rest pinned-ids))
-               (subvec visible-ids 0 (inc bootstrap-count))))
-        (is (every? #(<= 0 %) ai-positions))
-        (is (apply < ai-positions))
-        (is (< (first ai-positions) task-position (second ai-positions)))
-        (is (every? #(= :full (:detail %))
-                    (take (inc bootstrap-count) html-rows)))
-        (is (= newest-ids (subvec visible-ids (- (count visible-ids) 6))))
-        (is (< pinned-end newest-start)
-            "the pinned opening precedes the newest tail in the AI text")
-        (is (< (.indexOf html (last pinned-ids))
-               (.indexOf html (first newest-ids)))
-            "and in the same order on the page")
-        (assert-no-session-narration ai)))))
-
 (deftest supersession-chains-vanish-from-the-history
   ;; THE HISTORY NO LONGER HIDES AN OLDER TURN, and that is the ruling, not a
   ;; regression: "All turns are shown by default; previous prompt bytes remain
@@ -585,7 +482,7 @@
   ;; to be pulled.
   (support/with-database
     (fn [connection]
-      (let [bootstrap-run-id (bootstrap/run-id agent-id)]
+      (let [bootstrap-run-id "bootstrap-run"]
         (support/transacted!
          connection
          (into (agents-tx connection agent-id)
@@ -1094,16 +991,10 @@
 ;;; ONE GENERATOR, END TO END
 ;;; ---------------------------------------------------------------------------
 
-(deftest ^{:seon.test/golden "Byte identity of one reply across the page, the history unit and the provider prompt is the behavior."}
-  one-reply-reads-identically-on-the-page-in-history-and-in-the-prompt
-  ;; THE PROOF PRD §8 ASKS FOR AND THE AUDIT (B3) SAID COULD NOT BE WRITTEN.
-  ;; One reply, evaluated ONCE through the ordinary path, then read three
-  ;; ways: the page's in-memory records, the stored history unit, and the
-  ;; provider prompt. Before this the prompt came from
-  ;; `walk/generic-history-entries`, which paired a `pr-str` of the re-read
-  ;; form with a rendered value — a second grammar the page never showed and
-  ;; the history unit never produced, so the model read something no other
-  ;; surface in the system could reproduce.
+(deftest ^{:seon.test/golden "Byte identity of one reply across the page and the history unit is the behavior."}
+  one-reply-reads-identically-on-the-page-and-in-history
+  ;; One reply, evaluated once through the ordinary path, read two ways: the
+  ;; page's in-memory records and the stored history unit.
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "one-grammar")
@@ -1212,26 +1103,11 @@
                                       stored-handles))
                page-bytes (mapv :seon.render.history/bytes
                                 (transcript/history-entries page-unit))
-               ;; c. THE PROVIDER PROMPT: what the model actually reads.
-               prompt-entries
-               (walk/history
-                {:seon.db/db stored-db
-                 :seon.agent/id "one-grammar-agent"
-                 :seon.sci.eval/ctx base
-                 :seon.render.walk/lookup
-                 [:seon.agent/id "one-grammar-agent"]
-                 :seon.render/distance 2
-                 :seon.sci.admit/caps (config/result-caps defaults)
-                 :seon.sci.eval/time-limit-ms 5000
-                 :seon.render/captured-calls (atom {})})
-               prompt-text (str/join "\n\n"
-                                     (map :seon.render.history/bytes
-                                          prompt-entries))
                responses (keep :seon.render.history/printed-value stored-entries)]
            (is (:db-after committed))
            (is (= 6 (count outcomes)) "six forms, six evaluations")
 
-           (testing "the same bytes on the page, in history, and in the prompt"
+           (testing "the same bytes on the page and in history"
              (is (seq stored-bytes))
              (is (= (count page-bytes) (count stored-bytes)))
              ;; PER ENTRY, so a difference names itself instead of dumping
@@ -1239,10 +1115,7 @@
              (doseq [[_ordinal page stored] (map vector (range)
                                                 page-bytes stored-bytes)]
                (is (= page stored)
-                   "the form renders the same in memory and from the store page"))
-             (doseq [entry-bytes stored-bytes]
-               (is (str/includes? prompt-text entry-bytes)
-                   "the prompt must carry these bytes verbatim")))
+                   "the form renders the same in memory and from the store page")))
 
            (testing "a handle names a value the fork really holds"
              ;; RULING 59c's exclusion was about ADMITTED PRINT NODES: a Var

@@ -59,6 +59,7 @@
             [seon.turn :as turn]
 
             [seon.config :as config]
+            [seon.context :as context]
             [seon.db :as db]
             [seon.env :as env]
             [seon.health :as health]
@@ -663,29 +664,6 @@
                                                   :seon.error/offending offending
                                                   :seon.render.web/refusal-reason cause})))
 
-(defn- turn-function-result
-  "Call the ruled turn API, retaining an unavailable function as data."
-  {:malli/schema [:=> [:cat :qualified-symbol [:sequential :seon.schema/value]] [:or :seon.schema/value :seon.render.web/function-unavailable-error :seon.turn/error :seon.db/error-result]]}
-
-  [function arguments]
-  ;; Unavailable means the function's own namespace has no source on the
-  ;; classpath; a namespace that exists but fails to load propagates.
-  (let [owner (namespace function)
-        root (str/replace (str/replace owner "-" "_") "." "/")
-        resolved (when (or (find-ns (symbol owner))
-                           (some #(io/resource (str root %))
-                                 [".clj" ".cljc" "__init.class"]))
-                   (requiring-resolve function))]
-    (if resolved
-      (apply resolved arguments)
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/turn-function-result
-                                     {:seon.error/message (str "Not yet available: " function)
-                                      :seon.error/fix "Supply the expected member and repeat the requested operation."
-                                      :seon.render.web/function-unavailable function
-                                      :seon.error/member :seon.fn/sym
-                                      :seon.error/expected "a resolvable turn function"
-                                      :seon.error/data {:seon.render.web/arguments arguments}}))))
-
 (defn- debug-turn-request
   [database connection agent-id caps render-context]
   (merge render-context
@@ -699,22 +677,9 @@
           :seon.render.value/root [:seon.agent/id agent-id]
           :seon.sci.admit/caps caps}))
 
-(defn- system-action-form
-  [agent-id action label]
-  [:form {(keyword "data-on:submit")
-          (str "@post('" (route/path ::route/agent-context {:id agent-id})
-               "', {contentType:'form'})")}
-   [:input {:type "hidden" :name "action" :value action}]
-   [:button {:type "submit" :class "seon-bar-send"} label]])
-
 (defn- session-controls [request]
   (let [agent-id (:seon.agent/id request)]
     (assoc request
-           ::transcript/toolbar
-           [:div {:class "seon-session-actions"}
-            (system-action-form agent-id "system-turn" "System turn")
-            (system-action-form agent-id "virtual-turn" "Virtual turn")
-            (system-action-form agent-id "compact" "Compact")]
            ::transcript/message-form
            (message-bar-html (with-database {:seon.agent/id agent-id ::message-autofocus? false} request)))))
 
@@ -1878,8 +1843,7 @@
 (defn- retained-interest
   [state]
   (let [cache @(render/shared-cache (get-in state [:seon.turn.loop/cluster :seon.sci.eval/ctx]))
-        calls (concat (vals (::calls cache))
-                      (vals (::ai-calls cache)))
+        calls (vals (::calls cache))
         interest (reduce (fn [interest retained]
                            (merge-interest interest
                                            (calls-interest retained)))
@@ -2329,7 +2293,7 @@
    (fn []
   (let [handle (:seon.turn.loop/cluster state)
         cache (render/shared-cache (:seon.sci.eval/ctx handle))
-        state (merge state (select-keys @cache [::calls ::ai-calls ::invocations ::packages]))
+        state (merge state (select-keys @cache [::calls ::invocations ::packages]))
         registration (:seon.render.web/registration state)
         watched (watched-registration-keys registration)
         profile (or (::profile state)
@@ -2407,125 +2371,13 @@
                          ::streams streams
                          ::profile profile))]
     [(assoc (dissoc state ::packages ::fragments ::calls ::invocations
-                           ::ai-calls ::ai-entries ::page-results ::page-databases
+                           ::ai-entries ::page-results ::page-databases
                            ::context-bases ::context-programs ::programs)
             ;; DERIVED, NOT ACCUMULATED: only the pages that failed THIS pass
             ;; carry a signature, so a page that starts rendering again drops
             ;; out and its next failure is offered afresh.
             ::fault-signatures pass-signatures)
      (when changed? packages)])))))
-
-(defn- history-segments
-  [entries]
-  (mapv (fn [position entry]
-          (str (when (pos? position) "\n\n")
-               (:seon.render.history/bytes entry)))
-        (range)
-        entries))
-
-(defn- change-context
-  "Run the requested ordinary turn operation on the calling thread."
-  {:malli/schema [:=> [:cat :map] [:or [:map [:seon.db/db :seon.db/database-value]] :seon.render.web/context-error]]}
-
-  [request]
-  (let [cluster (:seon.turn.loop/cluster request request)
-        connection (:seon.db/connection cluster)
-        action (:seon.render/context-action request)
-        function (case action
-                   :system-turn 'seon.turn/system-turn
-                   :virtual-turn 'seon.turn/virtual-turn!
-                   :compact 'seon.turn/compact!)
-        prepared (merge cluster request
-                        {:seon.db/db (db/db connection)
-                         :seon.db/connection connection
-                         :seon.turn.loop/cluster cluster
-                         :seon.agent/routing
-                         (or (:seon.agent/routing request)
-                             (:seon.agent/routing cluster))})
-        result (turn-function-result
-                function [(cond-> prepared
-                            (= action :system-turn) (assoc :seon.turn/write? true))])]
-    (if (or (:seon.render.web/function-unavailable result)
-            (case action
-              :system-turn (:seon.turn/refused-system-agent result)
-              :virtual-turn (:seon.agent/refused-source-agent result)
-              :compact (:seon.db/transaction-refused result)))
-      (assoc result :seon.render.web/refused-member :seon.render/context-action)
-      (let [database (db/db connection)]
-        (if (:seon.db/invalid-read database)
-          (assoc database :seon.render.web/refused-member :seon.db/db)
-          {:seon.db/db database})))))
-
-(defn derive-context!
-  "Render the requesting agent's saved evaluations from its database value."
-  {:malli/schema [:=> [:cat :seon.render/context-request]
-                  [:or :seon.render/acquired-context
-                   :seon.render/context-change-result :seon.render.web/context-error]]}
-  [request]
-  (schema/call-with-projection
-   (sci.kernel/context-projection (:seon.sci.eval/ctx request))
-   (fn []
-     (if (:seon.render/context-action request)
-       (change-context request)
-       (let [profile (render/request-profile request)]
-         (if (:seon.render/refused-member profile)
-           (assoc profile :seon.render.web/refused-member :seon.render/profile)
-           (let [request (assoc request :seon.render/profile profile)
-                 cache (render/shared-cache (:seon.sci.eval/ctx request))
-                 lookup [:seon.agent/id (:seon.agent/id request)]
-                 key [lookup (:seon.turn/id request) (:seon.db/pull-selector request)]
-                 retained (get-in @cache [::ai-calls key] {})
-                 previous (get retained root-call)
-                 evidence (render/call-cache-evidence
-                           (assoc request :seon.render.call/id root-call
-                                  :seon.render/retained-calls retained
-                                  :seon.render/value
-                                  (dissoc request :seon.db/db :seon.db/connection :seon.sci.eval/ctx))
-                           'seon.render.walk/history)
-                 reusable? (and previous
-                                (render/same-invocation-evidence? previous evidence)
-                                (every? #(render/retained-program-current? (:seon.sci.eval/ctx request) %)
-                                        (vals retained))
-                                (or (render/same-committed-database? (:seon.db/db request) (:seon.db/db previous))
-                                    (every? #(db/read-evidence-current? (:seon.db/db request)
-                                              (:seon.render.call/read-evidence %))
-                                            (vals retained))))
-                 calls (atom {})
-                 reads (atom [])
-                 entries (when-not reusable?
-                           (binding [db/*read-evidence-sink* reads]
-                             (render.walk/history
-                              (assoc request
-                                     :seon.render.walk/lookup lookup
-                                     :seon.render/retained-calls (dissoc retained root-call)
-                                     :seon.render/candidate-call-ids
-                                     (candidate-call-ids (dissoc retained root-call)
-                                                         (:seon.db/db request) false)
-                                     :seon.render/captured-calls calls))))]
-             (cond
-               reusable?
-               (let [database (:seon.db/db request)
-                     result (assoc (:seon.render.call/output previous) :seon.db/db database)]
-                 (swap! cache assoc-in [::ai-calls key root-call]
-                        (assoc (merge previous evidence) :seon.render.call/output result))
-                 result)
-               (:seon.render/refused-member entries)
-               (assoc entries :seon.render.web/refused-member :seon.render.history/entries)
-               :else
-               (let [segments (history-segments entries)
-                     result {:seon.cluster.prompt/text (apply str segments)
-                             :seon.render.history/entries entries
-                             :seon.render.history/segments segments
-                             :seon.db/db (:seon.db/db request)}]
-                 (swap! cache assoc-in [::ai-calls key]
-                        (assoc @calls root-call
-                               (merge evidence
-                                      {:seon.render.call/static-evidence
-                                       {:seon.render.call/producer 'seon.render.walk/history}
-                                       :seon.render.call/read-evidence
-                                       (db/read-evidence @reads)
-                                       :seon.render.call/output result})))
-                 result)))))))))
 
 (defn render-step
   "The render proc's transform, in Flow's four arities (F2 §1.1).
@@ -3185,10 +3037,10 @@
   (let [head (db/db connection)
         basis (or (some-> (get query "basis") parse-long) (db/basis-t head))
         database (db/as-of head basis)
-        composed (dissoc ((requiring-resolve 'seon.cluster.prompt/prompt) database
-                          (debug-turn-request database connection agent-id (:seon.sci.admit/caps service)
-                                              (dissoc service :seon.turn/id)))
-                         :seon.db/db)
+        composed (context/model-context database
+                                        (debug-turn-request database connection agent-id (:seon.sci.admit/caps service)
+                                                            (dissoc service :seon.turn/id))
+                                        agent-id)
         cursor (data/parse-cursor (get query "path") (get query "offset"))]
     {::database database ::basis basis ::cursor cursor ::found (data/at composed cursor)}))
 
@@ -3387,29 +3239,6 @@
            :body nil}
           (text-response 422 (value/text {:seon.render/value owner :seon.db/db (db/db connection) :seon.render.value/root [::create-owner namespace-name]})))))))
 
-(defn- context-action-response
-  "One ordinary turn operation requested from the page's context controls."
-  {:malli/schema [:=> [:cat :seon.render.web/service :map [:map-of :string :string]] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
-  [service request params]
-  (let [action (#{:system-turn :virtual-turn :compact} (some-> (get params "action") keyword))
-        result (if action
-                 (render/acquire-context!
-                  (merge service (:seon.turn.loop/cluster service)
-                  {:seon.db/connection (:seon.store/connection-object service)
-                   :seon.render/context-action action
-                   :seon.agent/id (get-in request [:path-params :id])
-                   :seon.sci.eval/time-limit-ms
-                   (:seon.config.eval/time-limit-ms service)}))
-                 (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/context-response
-                                                {:seon.error/message "Choose Run system turn, Virtual turn, or Compact."
-                                                 :seon.error/fix "Supply the expected member and repeat the requested operation."
-                                                 :seon.render.web/refused-member :seon.render/context-action
-                                                 :seon.error/expected "system-turn, virtual-turn, or compact"
-                                                 :seon.error/offending params}))]
-    (if (:seon.render.web/refused-member result)
-      (text-response 422 (value/text {:seon.render/value result :seon.db/db (db/db (:seon.store/connection-object service)) :seon.render.value/root [::context-action]}))
-      (no-content))))
-
 (defn- received-response
   "Acknowledge one message for the page's agent: the inbox's offered
   `(my.message/received! id)`, posted by its button. The writer decides;
@@ -3429,8 +3258,8 @@
       (text-response 422 (value/text {:seon.render/value result :seon.db/db (db/db (:seon.store/connection-object service)) :seon.render.value/root [::received]})))))
 
 (defn- context-response
-  "The agent context route: the explicit create-owner action, a message
-  acknowledgement, or a turn operation.
+  "The agent context route: the explicit create-owner action or a message
+  acknowledgement; any other action is not found.
 
   The form body is a stream, so it is decoded once here."
   {:malli/schema [:=> [:cat :seon.render.web/service :map] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
@@ -3439,7 +3268,7 @@
     (case (get params "action")
       "create-owner" (create-owner-response service request)
       "received" (received-response service request params)
-      (context-action-response service request params))))
+      (not-found request))))
 
 (defn- feed-response
   [service request]
