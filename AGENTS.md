@@ -330,7 +330,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   whose first segment names its base (the checkout, or `reference-code/<project>` at its pinned revision) with
   `#heading` anchors. Never write a file or line for code: they are derived from the Var or the analysis. Evidence
   never points into gitignored `tmp/`. Ingestion reports an unresolved reference as a problem on the task. Retire a
-  task in the commit that deletes its subject or makes it moot.
+  task in the commit that deletes its subject or makes it moot. Write the intent typed: the fully qualified symbols
+  and keywords the work creates, changes and calls, the same ones in `:seon.task/must-read`; prose naming only the
+  behavior costs the agent its calls searching for the owner (bench E1, `cards/README-bench.md` Results).
 - **Use the agreed words** ("Words and where they come from" above). Keep JVM REPL and SCI evaluation, live result
   and printed value distinct; cite legacy identifiers without reviving retired terms. Correct language in scope or
   file its issue. Source comments use `;` for prose, `;;` above forms, `;;;` for runtime structure.
