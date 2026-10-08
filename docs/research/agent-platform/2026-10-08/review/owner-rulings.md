@@ -1,74 +1,259 @@
-# Owner rulings 2026-10-07/08 (verbatim-derived; root's record)
+---
+title: Owner rulings, current
+type: reference
+status: active
+revised: 2026-10-08
+---
 
-Source: root's ruling log. These are the authority the plans must satisfy.
+# Owner rulings, current
 
-- **Round 9 (night), live agents:**
-- **Debug view (round 10):** keep ONE simple debug view: the agent's context exactly as sent, produced by the same assembly function and printed by the value printer's HTML face; nothing more elaborate (S2a revised to keep it).
-- **Round 11 (2026-10-08):** owner APPROVED S2b-1, S1 and S3 designs (code order printer → S2b-1 → S1 → S3). Boot re-lint after analyzer changes (~22 s): DEFERRED. Same-line rule: owner asked "which is simpler and faster" → root chose RUN EVERY FORM on the line (one rule fewer, same speed, REPL-like); spec §4.3 amended in the S2b-1 code commit.
-- **Split (2026-10-08):** the one ledger is now docs/seon/schedule/agent-loop-ledger.md (424bc8aad), superseding reconciled-plan.md. Root ACCEPTED every ROOT answer (Q1, Q3, Q5, Q6, Q8-Q18). OWNER-pending: Q2b (opening shows must-reads via doc only vs doc+source), Q7 (approve the assembled S5-03 admission design before S5-04). Single-slice lanes launch from /scratchpad/slice-template.txt.
-- **One transaction = the RECORDING only (owner 2026-10-08):** "at most one transaction per turn" means the machinery records the agent's forms and results in one transaction. It NEVER restricts what the agent does: ANY and ALL valid Clojure SCI can execute must work exactly like a real REPL, serially, each form seeing every earlier form's effects (defs, redefs, aliases, schema registration, the agent's own transact! writes). Any design that refuses or degrades valid REPL behavior to fit the recording is wrong.
-- **Lightweight forgiveness (owner 2026-10-08):** "Forgiving stuff is great as long as it's lightweight. Auto balancing parenthesis and turning prose into comments so the agent doesn't have to do another turn is good. But not at the cost of multiple seconds and hundreds of MB." → bring back delimiter auto-balancing as a cheap linear scan (S2b-1 deleted Parinfer); budget ~ms and a few MB per reply; SCI/edamame do the actual reading.
-- **REPL plan APPROVED (owner 2026-10-08):** docs/research/agent-platform/2026-10-08/repl-audit/repl-plan.md (2103b622c) supersedes S5-04 admission slices; slices P0-P14 in order, each proven via seon.repl-differential-test through seon.mcp/call. Rulings: a bare literal/symbol line (42, result/e…, ##NaN) is CODE; in MODEL replies words after a form on its line become that form's comment (reverses the run-every-form ruling; MCP code runs everything); #? picks :clj; namespace kept after an exception; valid contracts refuse bad returns, malformed contracts never break the fn; empty MCP input answers nil.
-- **Agent branches do anything (owner 2026-10-08):** "They get their own sci env and their own DB so why can't they do everything? We need agents to be able to do a lot of changes and then root can do a diff and merge." → on an agent's own branch the writer never refuses a REPL-valid change; dangling references become findings; integrity is enforced at root's diff/merge (repl-plan P8).
-- **Competency suite = whole-system test (owner 2026-10-08):** docs/research/agent-platform/2026-10-08/competency/competency-spec.md. Every run ends in the real merge flow that root reviews; auto-accept (root-owned policy) when proofs pass on the combined program, else held for root; include an impossible task (T9) testing early bail via my.task/complete! with a reason; (help) and the opening must say plainly how to end a session.
-- **Conflicting-change tasks (owner 2026-10-08):** competency suite includes realistic refactors that conflict with the cluster branch (rename + new caller on target, contract change vs body change, schema evolution vs target data, two agents refactoring one ns) to exercise root's diff/merge and conflict handling.
-- **Model pass budget (owner 2026-10-08):** "20-40mb is fine" as the end-state per model pass (excluding provider call); the must-fix is never rebuilding a base SCI context per pass (428 MB miss).
-- **Shared cluster base (owner 2026-10-08):** "the base in a cluster is a shared base that should be incrementally built up and forked as agents need different envs." One base SCI context per cluster, advanced incrementally on program change; agents fork it; never rebuilt per pass.
-- **Memory budget nuance (owner 2026-10-08):** "higher is fine for temp memory especially if it's garbage collected. I mostly just don't want GB of memory." → transient per-pass allocation may exceed 20-40 MB; hard lines: never GB per operation, and small RETAINED memory (live heap per agent/cluster base).
-- **16 GB machine, many agents (owner 2026-10-08):** "lots of agents running simultaneously and we don't want to require users to have more than 16GB of ram." Proposed TARGETs: heap ≤ 4 GB, RSS ≤ 6 GB, ≤ 20 MB retained per idle agent, one shared incremental base per cluster; measurement lane agent-memory (docs/research/agent-platform/2026-10-08/memory/).
-- **Answers as agent data (owner 2026-10-08, root design):** a question/research task is answered with (my.agent/answer! value) → :seon.agent/answer (any EDN) + optional :seon.agent/sources on the agent's own entity; the task's proof reads it; done when the proof passes (no propose). Competency T15 research + T15x unanswerable (must bail).
-- **Status tail (owner 2026-10-08):** latest test results (and current state: messages, turns left, task status) go in ONE small block at the end of the context right before the prompt, derived fresh per call from stored facts, never stored/appended to history (no repetition; prefix caching holds). Proofs auto-run after code-changing passes (ledger AR-/F rows). Spec lane spec-tail revises agent-loop + reconciled plan S7.
-- **Dynamic context, not infinite append (owner 2026-10-08):** "the context [is] dynamic for shit they need to know the current state of. This is not a system where we just infinitely append everything. So the task is always current..." → context = static prefix ((help)) + append-only history of ONLY the agent's forms/results + a current-state block rendered fresh each call (current task version, its proof tests' current source, proof status, unread messages, turns left), never stored, each item once. Opening-once and input passes likely disappear.
+The owner's rulings as they stand, one entry each, by topic. A ruling is revised here in place when the owner changes
+it; superseded wording is deleted (git keeps it). This page states WHAT was ruled and WHERE it is implemented or
+stated; the mechanism lives in the document each "Lives in" names, which must agree with it. Authority: these
+rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledger
+(`docs/seon/schedule/agent-loop-ledger.md`); questions still open: its §6.
 
-**2026-10-08:** owner: "There is no world where it's acceptable for a 945MB per model pass cost." I had parked it as "S4 deletes it" — wrong. A known budget breaker on the main path is never parked behind a future slice: launch the stop-and-fix lane in the same turn, pulling the deleting slice forward if that is the fix.
-**No clipping outside the value printer (owner 2026-10-08):** "No clipping outside of the one value printer. I know agents are always doing this to cheat on budgets. DO NOT LET THEM DO THIS. We need to improve the one value printer so it works everywhere ... good general rules." Every lane prompt touching output must say: bound only through the value printer's general path; a printer gap is fixed in the printer, never special-cased; review refuses subs/take/truncate/pr-str display outside seon.print/seon.render.value. Census + general rules + enforcement lint: docs/research/agent-platform/2026-10-08/printer-rules/.
-**Clojure terms + core lazy fns (owner 2026-10-08):** "always use clojure terms and built in tools that agents are already trained on and that are optimized for handling large collections like lazy versions." → "dig form" renamed "elision form"; elision forms are plain clojure.core on the live result symbol (drop/take/nth/get-in/subs/keys/count), lazy first, no Seon helpers, no DB re-pull unless the live value is gone.
-**Terse Clojure messages (owner 2026-10-08):** "make sure all messages we are providing to the agent are optimal clojure and aren't long winded." Every agent-facing message: data first, one short fixed message per error variant, Clojure's own wording style, fixes as runnable clojure.core forms, no boilerplate, no internal names the agent can't act on; audited in docs/research/agent-platform/2026-10-08/agent-messages/.
-**Errors through the value printer (owner 2026-10-08):** "The errors should be printed by the one data value printer too." Errors are flat data maps (fixed literal message + data keys) printed by the value printer under its budget; Throwables become cause-chain error maps first; no pr-str/str-built messages, no printStackTrace, never mutate the agent's exception.
-**2026-10-08 (owner):** "if the agents are taking this long the amount of work spec'ed is too large AND/OR it's too complicated and not well spec'ed." Lanes running 35-60 min = a spec defect. Before launching code lanes, a spec-and-split pass (Astra + Sol 6.1 `gpt-6.1-sol` independently, root reconciles) cuts each slice to ~15 min with exact files, contracts, named proof tests and budget rows; no design decisions left to the implementer.
+## 1. REPL and reading
 
-## Additional 2026-10-08 rulings (root's summary of owner statements)
-- **Serial REPL semantics:** "Execute the forms serially and they should all work just like in a normal repl"; define A, call A, redefine A, call A → all correct; same-pass register! then write works (register! commits like transact!); alias retarget → no refusal; stored program = final namespace state.
-- **The agent can run ANY valid Clojure SCI can execute;** one transaction per pass only records forms and results; it never restricts the agent.
-- **Reader rules (approved REPL plan):** a bare literal or qualified-symbol line is code (`42`, `result/e…`, `##NaN`); bare words like `Done.` stay prose; in MODEL replies words after a form on its line become that form's comment (MCP code runs everything); `#?` picks `:clj`; namespace kept after a throw; a valid contract refuses a bad return, a malformed contract never breaks the fn; empty MCP input answers nil; prose → comments and paren auto-balancing are wanted if lightweight (≤ ms, few MB).
-- **Experiments:** entrances as read stages (model text, MCP code, EDN data `{:ns … :forms […]}` returning envelope maps); wire formats per model (A one transcript message, B chat turns, C prefix continuation) chosen by config; measure provider token counts; don't assume chat turns cost too much — measure.
-- **Agents see the actual proof tests** they must pass (current source), and their current status.
-- **Context = static prefix + append-only history of the agent's own forms/results + a current-state block rendered fresh every call** (current task version, proofs + status, unread messages, turns left); never infinitely append; no repetition.
-- **Tests during work (superseded below by "Tests run automatically, all relevant ones"):** after a code-changing pass the task's proofs AND the tests reaching the change run on the agent's branch; `merge!` runs them again on the combined program.
-- **Root review + auto-accept:** every competency run ends in the real merge flow; auto-accept when criteria hold; bail test with an impossible task; clear instructions on ending a session; realistic conflicting changes exercise merge; root is just an agent with a merge task and must find it easy; a Seon agent should be able to do root's job.
-- **Optimal order:** fix in the optimal planned order; the end state must be fast and lightweight (no GB; 20-40 MB transient per pass fine; small retained memory; 16 GB machine).
-- **Render functions strip garbage first** and return DATA; the value printer prints render output and only handles general budget/shape.
-- **Errors are printed by the one value printer** as data maps.
-- **Use Clojure terms:** "dig form" → "elision form"; elision forms are plain clojure.core on the live result symbol.
-- **Lean values, render = cliffs notes, full value one step away (owner 2026-10-08):** "None of our core functions should ever be returning [100s of MB] even without render functions... Render functions are the cliffs notes version... if the agent wants to dig into the full version (again no garbage in the first place) that should also be available." → core functions return only what their contract says (no garbage); renders return pruned data for the top-level value only; `result/e…` is the full value and sub-values dug out of it print plainly; raw output size is profiled per function with findings over a configured bound; intentional bulk-data functions declare it.
-- **Output limits and the escape hatch (owner 2026-10-08):** 2000 tokens is the defect bound for a core function's raw return in ordinary use (declared bulk-data functions, e.g. reading a PDF, are exempt). The display budget has an override, decided by root: a dynamic var `seon.print/*budget*` (set! for the session or binding for one form, like *print-length*; works for strings) plus `:seon.print/budget` metadata on a collection; a render function may put the same key on its returned data. Hard ceiling tied to the model's context window; a large override adds a short finding with its token count.
-- **Reviews cover landed work, measure, and judge costs by reasonableness (owner 2026-10-08):** "don't do arbitrary limits if it's reasonable, stop the unreasonable stuff."
-- **Approved (owner 2026-10-08 afternoon):** proofs run as a serial step inside the pass, recorded with the agent's forms; auto-accept when every test on the merge branch is green.
-- **No "kinds" (owner):** "We aren't doing kinds... it breaks the malli conventions of having specific specs that identify what something is. We need positive data recorded in the database not a type system. Focus on the data and use unions and other malli conventions to have base data specs and then custom specs like we do for errors." → identify and remove every kind/type discriminator; what a thing is follows from its data, validated by specific Malli schemas.
-- **Git vocabulary (owner):** base merge/branch concepts, verbs, functions and data on git so every agent understands them immediately; no invented acronyms (S, MA-, RP-) in anything agent- or owner-facing; use real Clojure library names.
-- **Tests run automatically, all relevant ones (owner 2026-10-08 afternoon):** "I'd prefer if we just auto ran all relevant tests so the agent understands they need to fix the other tests if it's an intentional refactoring." → after a pass that changes code, the task's proofs AND the tests reaching the change run automatically on the agent's branch (last version wins); breaking other tests is a blocker the agent sees and fixes; agents shouldn't need to call my.test/check by hand. Supersedes "reaching tests only at merge". Root needs better merge tools.
-- **Planning (owner):** the task system replaces the plan/steps feature; later borrow its best, simplest parts into tasks. Now: focus on tasks running, with the current-state context built automatically from the refs and symbols the task names.
-- **Nested defn (owner):** we must KNOW a function was defined the way SCI knows (its write hook), never by parsing text.
-- **Live results (owner):** held results go through `seon.cache` as an LRU under its configured byte budget; no arbitrary count limit.
-- **Owner answers 2026-10-08 afternoon:** Seon's own diagnostics are like any REPL form result — the full value is cached, the value-printer version is stored (possibly as a blob with only its ref in the DB; an agent investigates cache/blob/db roles); a newer green commit updates the same open merge request (like pushing to an open PR); change our Datahike fork for cross-branch "has this changed?" revisions; a definition's pointer to the evaluation that made it is dropped at merge (the source file becomes the record).
-- **Git vocabulary approved (owner 2026-10-08):** "merge request" (request-merge!, merge-requests, close-merge-request!); one `merge!` like git merge (commits itself when clean and all tests green, otherwise stops with the merge branch kept; checkout!/defn to resolve; merge! again or abort-merge!); a merge always lands on the request's target branch (default: the main it branched from); data conversions on merge are Datahike **norms** (contracted pure fn db → tx-data, named on the merge request, run once inside the merge, recorded). Map: docs/research/agent-platform/2026-10-08/git-vocab/git-vocab.md.
-- **The Clojure way (owner 2026-10-08):** "make sure we are doing things the clojure way and using proper vocab and names for other libraries and references like git. do not pretend you are writing ruby/python/whatever and reuse those concepts." → research agenda + vocabulary audit (docs/research/agent-platform/2026-10-08/clojure-way/); prefer Clojure/library names and seams (clojure.main, nREPL/prepl, clojure.test, Datomic/Datahike, Malli, core.async.flow, core.cache, clj-reload, clj-kondo, SCI, git).
-- **Atoms (owner 2026-10-08):** "a handful of atoms at most and ideally just one per cluster ... Atoms are about managing access atomically and we should be storing fully map specced data that is validated on every write or rejected." → census of atoms/volatiles/mutable state; default: state lives in facts, Flow proc state, the SCI context, seon.cache or a validated Malli-specced state map (checked on every write). NOT a hard one-per-cluster rule: a separate atom may stay only with a seriously good justification, reported to the owner in plain words.
-- **Owner 2026-10-08:** a test already broken on main before the branch existed stops the automatic merge and asks root; norms (data conversions on merge) run in a fixed order, listed as a vector on the merge request.
-- **Renames approved (owner 2026-10-08):** all the Clojure/Malli/Datahike renames from the two Clojure-way audits (`clojure-way/`), one scripted sweep per slice that converts every caller, scheduled after the tasks-running work. One submission of forms is an **eval request** (nREPL's word); `seon.batch` folds into `seon.repl`; its stages use clojure.main's `:read :eval :print :caught`; "pass" retires.
-- **`*1 *2 *3 *e` (owner):** bind them in agents' SCI contexts only if easy and cheap; lowest priority.
-- **Atoms approved (owner):** one validated state map per process and one per cluster (`set-validator!` with a Malli validator); agent state in its Flow proc and SCI context; kept mutable counters: per-function profile counters, the SCI interrupt flag, the running Thread, clojure.test's report counter; Seon's own cache counters are deleted in favour of Caffeine's `recordStats`/`CacheStats`; a lint refuses new atoms.
-- **Stop reinventing (owner 2026-10-08):** "Please stop reinventing shit that already exists. It just makes our codebase harder to manage and our versions are usually worse. The exception is if the library doesn't do what we need to do, but bring those decisions to me and we can decide on a case by case basis." → where a dependency already does the job, use it and delete ours; keeping our own version needs an owner decision per case, with the gap stated.
-- **Vectors (research 2026-10-08, `vectors/vectors.md`):** ordered data is stored as the installed vector cells (`[:vector T]`); remaining ordinal attributes that are really vectors convert; transaction order is never authored order; no new fork value type now.
-- **Owner answers 2026-10-08 (evening):** a `defn` nested inside another form is saved from its own source span (SCI's write hook plus the analyzer's span) like any definition, unless it closes over a local, which stays live-only with a short note to define it at top level; a code task whose proofs are green with no change against main is done after checking main still holds the tested program, with no merge; Datahike subtree counts are kept on every write in our fork's sorted-set (each insert and delete updates the counts along its path).
-- **No arbitrary targets (owner 2026-10-08):** "I don't remember setting a 60MB target (remember don't set arbitrary targets), but jesus why does a defn cost 100MB? Use common sense and ask whether we are likely doing something wrong rather than arbitrary limits for both time, cpu and memory." → every cost is judged against what the work must do (an expectation from first principles: what it is proportional to); 10× over the expectation means we are probably doing something wrong and must find what; invented MB/ms targets are deleted. The owner's own numbers stay (20-40 MB per model pass fine, never GB, 16 GB machine, 2,000-token raw return, CLAUDE.md's 1 s / 10 s).
-- **No hardcoded limits; size for 16 GB (owner 2026-10-08):** "Don't have hardcoded limits. We should have anything like that be config numbers and sized for a 16GB machine (yes I have 128GB but that's fucking rare do not depend on that!)" → every size, count, byte budget, heap cap, timeout and threshold is a configuration dial (database configuration, `seon.config` defaults) whose shipped default fits a 16 GB machine running many agents beside the user's work; nothing derives its default from the host's RAM percentage; a hardcoded number in code is a defect.
-- **Defaults approved; Aero for config files (owner 2026-10-08):** root's 16 GB sizing approved (heap cap 4 GB; `seon.cache` 512 MB with live results inside it; Datahike node cache kept then made byte-based; soft-referenced node retention capped; inline/blob 4,096 bytes; blob compression floor ~1 KB; storage I/O on virtual threads; timeouts made dials at current values); every hardcoded policy number found by the audits gets a default and moves into config. The config FILE layer adopts Aero (`#profile`, `#env`, `#include`; one file read by both the JVM and the Babashka operator); Malli validation and the database reconcile of `seon.config` stay.
-- **Redesigns approved (owner 2026-10-08 late):** the recording redesign (`redo/pass-and-recording.md`: one eval request read and evaluated form by form, recorded in ONE transaction, a recording failure never hides values) is APPROVED, on condition that the transaction census's metadata findings (agent, eval request, task carried on the transaction) are folded in before the first recording row starts; the entrants redesign (`redo/entrants.md`: tests and other entrances on the one path, test evidence on its result, a test request commits twice) is APPROVED.
-- **Confirmed (owner):** a same-pass test check sees the new definition; automatic merging runs on root's ordinary agent path entered from a schedule; norms get the general limits (over 1 s a finding, over 10 s stops the merge for root); delimiter auto-balancing also applies to MCP code, with the repair noted beside the value.
-- **Storage approved (owner):** replace Datahike's soft-referenced node retention with a byte-bounded cache (a config dial); delete a finished agent's branch once its task is done or given back and its merge request is closed, so history and blobs can be collected; replace CLAUDE.md's "20% or 50 ms" regression rule with: report every regression with its numbers, and 10× over what the work should cost is a defect.
-- **Card answers (owner 2026-10-08 late):** the automatic test step runs after any eval request that evaluated a form (unchanged proofs answered from their record); its time limit is a dial defaulting to 10 s; unread messages extend `my.message/inbox` (no new `my.agent/inputs`); a reply is `my.message/send` then `my.turn/wait`, and `my.turn/complete`, `my.agent/done`, `seon.run/complete` are deleted (`my.task/complete!` only gives a task back with a reason); assignment refuses every proofless or all-green task (tests get proofs in their setup; shelved steps stop working); a call row stores its assignment key as a value read once per pass; after a reload the shared base advances in place, measured first, rebuild only as fallback; blob compression floor 1 KB.
-- **REPL-first proving (owner 2026-10-08):** "We are supposed to have one main java process with the ability to run shared tests which are only incremental and we don't re-run what hasn't changed ... so agents aren't waiting." → lanes change ordinary functions by `defn` on their own branch in the main JVM, the reaching tests run incrementally there (unchanged results reused), then write-back to files; a throwaway JVM is used ONLY for host-bound platform code (evaluator, writer, test runner, boot, schema publication, dependency bumps). The commit gate accepts recorded green branch evidence for exactly the committed definitions.
-- **Guava for byte counting (owner agreed 2026-10-08):** declare Guava as a direct dependency (pinned to the classpath version) and count UTF-8 bytes with `com.google.common.base.Utf8/encodedLength`, no byte array built to measure.
-- **Audit questions answered (owner 2026-10-08):** every recommendation in `docs/seon/schedule/cards/README-audits.md` AU-Q1..Q14, Q16, Q18..Q24 is ACCEPTED (keep the positional filler but delete the row machinery and use Malli's default transformer for map keys; options variant of Malli's `-strument!` in our checkout; Fipp once per level after measurement; keep `seon.id` and stop printed compare/sort; Malli's edit distance; Caffeine `recordStats` (per-kind hit rates dropped); hiccup 2; core.async fork with an error channel and I/O jobs as procs; EDN reader with a named catch exception; read evidence measured first; clj-kondo fork exposes bindings; checked writer validates once via Datahike's report hook; schema policy as callbacks over Malli walk/merge; one clj-kondo run, cache off; Datahike fork collector fold replaces our blob walk; rewrite-clj tokenizer; injectable `future-call` in SCI; Datahike fork seam for ordered norm tx-data inside the merge transaction; function source stays in datoms (oversized fns are the defect); delete single-query cache kinds; "cached at t" answers unknown; disk floor 10 GiB plus ratio). AU-Q15 and Q17 are asked after their deleting rows land.
-- **Answers are specced data (owner):** a question task declares its answer's Malli schema; `answer!` validates and stores it as ordinary Datahike data; scratch values stay live in the agent's vars; no blob path until a task needs one.
+- **The REPL law.** "Execute the forms serially and they should all work just like in a normal repl." Any valid Clojure
+  SCI can run works: each form sees every earlier form's effects (define, call, redefine, call again; `register!` then
+  a write in the same eval request; alias retargets; the agent's own `transact!`). The stored program is each
+  namespace's final state. Anything that refuses or degrades valid REPL behavior to fit the recording is wrong.
+  Lives in: agent-loop.md §1.1, §3.3; AGENTS.md "There is one REPL path"; ledger §3.2 (RP rows).
+- **Agent branches do anything.** "They get their own sci env and their own DB so why can't they do everything?" On an
+  agent's own branch the writer never refuses a REPL-valid change; dangling references become findings beside the
+  value; integrity is enforced at root's diff and merge. Lives in: agent-loop.md §1.1; merge.md intro and §2; ledger
+  RP-1w.
+- **An alias retarget follows Clojure's rule.** After an agent retargets an alias, reloading an earlier definition
+  reloads its stored source as a Clojure file would, so that definition breaks under the new alias. A finding warns
+  the agent when the retarget happens; merge refuses the broken definition. Lives in: agent-loop.md §3.3; card RP-8.
+- **Reader rules.** A bare literal or qualified-symbol line is code (`42`, `result/e…`, `##NaN`); bare words (`Done.`)
+  stay prose; in MODEL replies, words after a form on its line are that form's comment; MCP code runs every line;
+  `#?` picks `:clj`; the namespace is kept after a throw; a valid contract refuses a bad input or return, a malformed
+  contract never breaks its function; input with no forms answers `nil`. Lives in: agent-loop.md §3.3; ledger P2-P6,
+  LR-READa/b (landed), RP-11a/b, RP-13.
+- **Lightweight forgiveness.** "Forgiving stuff is great as long as it's lightweight." Prose becomes comments and
+  delimiters are auto-balanced by one linear scan (milliseconds, a few MB per reply), never at the cost of seconds or
+  hundreds of MB. Balancing also applies to MCP code, with the repair noted beside the value. Lives in: agent-loop.md
+  §1.3, §3.3; ledger P6, P7a (landed).
+- **Know what things are.** "We must KNOW a function was defined the way SCI knows." Evaluated code is classified from
+  SCI's observation (the Var written and its metadata), file text from clj-kondo's analysis, schemas from the Malli
+  registry; never from a form's head or a regex. Lives in: agent-loop.md §3.3; ledger UL-1a..d.
+- **Nested definitions are saved.** A `defn` inside another form is saved from its own source span (SCI's write hook
+  plus the analyzer's span) like any definition; one that closes over a local stays live-only with a short note to
+  define it at top level. Lives in: agent-loop.md §3.3; ledger RP-9.
+- **Entrances are read stages.** Model text, MCP code and EDN data (`{:ns … :forms […]}` answered by reply maps) are
+  read stages on the one path. Lives in: agent-loop.md §1.2, §3.2; ledger RP-10, RP-16.
+- **Lookups return data; library code is readable.** `doc`, `dir`, `source`, `apropos`, `find-doc` return data on
+  SCI's `clojure.repl`; a library name resolves to the host Var and its pinned `reference-code/` source. Lives in:
+  agent-loop.md §3.7; ledger S1 rows, H-01.
+- **`*1 *2 *3 *e`** are bound at an agent's REPL only if easy and cheap; lowest priority. Lives in: agent-loop.md §3.3;
+  ledger CN-23.
+
+## 2. The eval request and its recording
+
+- **One transaction is the recording only.** "At most one transaction" means the machinery records an eval request's
+  forms and results in one transaction; it never restricts what the agent does. Lives in: agent-loop.md §1.1, §3.1;
+  AGENTS.md "Recover facts, not execution".
+- **The recording and entrants redesigns are approved.** `redo/pass-and-recording.md` (one eval request read and
+  evaluated form by form, recorded in ONE transaction, a recording failure never hides values), with the transaction
+  census folded in (`b48082ca9`: agent, eval request and task carried on the transaction); `redo/entrants.md` (tests
+  and other entrances on the one path, a test's evidence on its result, a test request commits twice). Lives in:
+  agent-loop.md §3.1, §3.2; ledger §1, RP, TX and EN rows.
+- **A recording failure never hides values.** The value always returns; a later stage's failure is an error beside
+  it. Lives in: AGENTS.md "The path is total"; agent-loop.md §3.1 FINISH, §3.6; ledger EN-9.
+- **Seon's own diagnostics are stored like any REPL result**: the full value cached, the printed value stored (inline
+  or as a blob, §6 below). Lives in: agent-loop.md §3.4 storage roles; ledger SR-D, SR-I.
+- **A definition's pointer to the evaluation that made it is dropped at merge**; the source file becomes the record.
+  Lives in: merge.md §4.5; ledger NK-8a, MA-11.
+- **One shared base per cluster.** "The base in a cluster is a shared base that should be incrementally built up and
+  forked as agents need different envs." Never rebuilt per eval request; after a reload it advances in place,
+  measured first, rebuilt only as a fallback. Lives in: agent-loop.md §2; ledger PB-01 (landed), PB-03.
+
+## 3. Context
+
+- **Context is dynamic, not an infinite append.** "This is not a system where we just infinitely append everything.
+  So the task is always current." Context = static prefix (`(help)`) + append-only history of only the agent's own
+  forms and results + one current-state block rendered fresh at every model call from stored facts, never stored,
+  each item once. No opening pass, no input pass. Lives in: agent-loop.md §1.4, §3.4; ledger §3.7 (S4, CS rows).
+- **Agents see the actual proof tests** (current source) and their status, plus broken tests, in the block. Lives in:
+  agent-loop.md §3.4; ledger CS-01b (landed), CS-01d.
+- **The block is built from what the task names**: Seon symbols, library symbols and namespaces, and
+  `reference-code/` paths, resolved with the pinned revision. Lives in: agent-loop.md §3.4; ledger CS-01c1..c3.
+- **Unread messages extend `my.message/inbox`** (no new `my.agent/inputs`). Lives in: agent-loop.md §3.4; ledger
+  S4-05a, CS-01c4.
+- **One debug view**: the context exactly as sent, from the same assembly function, printed by the value printer's
+  HTML face. Lives in: agent-loop.md §3.4; ledger DBG-01.
+- **Wire formats are experiments**: transcript, chat turns and prefix continuation are adapters over stored exchanges
+  chosen by configuration; measure provider token counts, never assume. Lives in: agent-loop.md §3.4; ledger CS-03a-c.
+
+## 4. Tasks and tests
+
+- **Tasks replace plan/steps.** Steps are shelved; their best, simplest parts may move into tasks later. Now: tasks
+  running, with the block built automatically from what the task names. Lives in: agent-loop.md §3.4; ledger F8 (shelved).
+- **Assignment refuses a task with no proofs or whose proofs are all green.** Tests get proofs in their setup.
+  Lives in: agent-loop.md §1.7; AGENTS.md "Derive work and completion"; ledger S6-06a.
+- **Tests run automatically, all relevant ones.** "I'd prefer if we just auto ran all relevant tests so the agent
+  understands they need to fix the other tests if it's an intentional refactoring." After any eval request that
+  evaluated a form, the task's proofs, then the tests reaching the change, run on the agent's branch as a serial step
+  inside the eval request, recorded with it; unchanged results are answered from their record; the last version wins;
+  a broken test is a blocker the agent sees and fixes; nobody calls `my.test/check` by hand. The step's time limit is
+  a dial defaulting to 10 s; what it leaves continues at the next eval request. A same-request check sees the new
+  definition. Lives in: agent-loop.md §1.7, §3.5; ledger F4a-d, MS-11b.
+- **Replies and ending.** A reply is `my.message/send` then `my.turn/wait`; `my.turn/complete`, `my.agent/done` and
+  `seon.run/complete` are deleted; `my.task/complete!` only gives a task back, with a required reason (an impossible
+  task bails early). `(help)` and the static prefix say plainly how to end a session. Lives in: agent-loop.md §3.5,
+  §3.7; ledger F7, H-01.
+- **Answers are specced data.** A question task declares its answer's Malli schema; `my.agent/answer!` validates the
+  answer and stores it as ordinary Datahike data; the proof reads it; done when the proof passes, nothing merges.
+  Scratch values stay live in the agent's Vars; no blob path until a task needs one. Lives in: agent-loop.md §1.7,
+  §3.5; competency-spec.md §4.5; ledger F6, A1.
+- **A code task with no change** (proofs green, no change against main) is done after checking main still holds the
+  tested program; nothing merges. Lives in: agent-loop.md §3.5; ledger F5.
+- **A call row stores its assignment key as a value**, read once per eval request. Lives in: ledger S4-02a.
+- **The competency suite is the whole-system test.** Every run ends in the real merge flow that root reviews; it
+  includes an impossible task (early bail with a reason), a research question and an unanswerable one, and realistic
+  refactors that conflict with the moving target (rename plus new caller, contract vs body change, schema evolution
+  vs target data, two agents in one namespace). Lives in: competency-spec.md §1-§8; agent-loop.md §3.10; ledger §3.11.
+
+## 5. Merge
+
+- **Git's words.** Base merge and branch concepts, verbs, functions and data on git, so every agent understands them
+  at once: main, branch, checked-out branch, merge request (`request-merge!`, `merge-requests`,
+  `close-merge-request!`), source and target branch, merge base, merge branch, ours and theirs, unmerged, behind,
+  norm. No invented acronyms (S, MA-, RP-) in anything agent- or owner-facing. Lives in: merge.md "Words";
+  vocabulary.md git rows (GV-1 landed `22910a03a`); ledger §3.16 (GV-2..6).
+- **One `merge!`, like `git merge`.** It commits itself when clean and every test on the merge branch is green;
+  otherwise it stops with the merge branch kept; resolve with `checkout!` or `defn`, then `merge!` again or
+  `abort-merge!`. A merge always lands on the request's target branch (default: the main it branched from). Lives in:
+  merge.md §1, §3, §4; ledger MA-3, MA-5a/b, MA-11, MA-14a.
+- **A test already red on main before the source branch existed stops the automatic merge and asks root.** Lives in:
+  merge.md §4; agent-loop.md §3.4 broken tests.
+- **A newer green commit updates the same open merge request**, as a push updates an open pull request. Lives in:
+  merge.md §1; ledger F5.
+- **Norms** (Datahike's word) carry data conversions: a contracted pure function `db → tx-data`, named on the merge
+  request in a fixed order as a vector, run once inside the merge, recorded; bounded like any operation (over 1 s a
+  finding, over 10 s the merge stops for root). Lives in: merge.md §4 Norms; ledger MA-8a-c.
+- **Automatic merging** runs on root's ordinary agent path, entered from a schedule; root is just an agent with a merge
+  task, and a Seon agent must find root's job easy. Lives in: merge.md §5; agent-loop.md §3.10; ledger MA-12, MA-17.
+
+## 6. Storage, cache and blob
+
+- **Storage roles.** The cache holds the full live value; a database fact holds small facts plus the printed value up
+  to 4,096 bytes; a blob holds anything larger, the fact keeping its digest and size; no second printed copy is ever
+  stored. Lives in: agent-loop.md §3.4; ledger §3.17 (SR rows).
+- **Live results live in `seon.cache`** as an LRU under its configured byte budget, with no count limit. Lives in:
+  agent-loop.md §3.4; ledger SR-H.
+- **Datahike's node cache is byte-bounded.** Its soft-referenced node retention is replaced by a byte-bounded cache
+  whose size is a configuration dial. Lives in: architecture.md §2; ledger DH-4a, DH-4b.
+- **A finished agent's branch is deleted** once its task is done or given back and its merge request is closed, so
+  history and blobs can be collected. Lives in: merge.md §4.5; clusters-branches-contexts.md item 9; ledger
+  SR-BRANCH, MA-15, LR-RETIRE.
+- **Cross-branch revisions** for content-keyed caches come from our Datahike fork. Lives in: ledger LR-CACHEb.
+- **Datahike subtree counts are kept on every write** in our fork's sorted set (after verifying that writes drop them).
+  Lives in: ledger DH-1, DH-2.
+- **Ordered data is stored as vector cells**, never by transaction order; no new fork value type now. Lives in:
+  merge.md §4 Norms; ledger §3.20 (VEC).
+- **Function source stays in datoms**; an oversized function is the defect. Lives in: ledger §3.22 (AU answers).
+- **Count UTF-8 bytes with Guava** (`com.google.common.base.Utf8/encodedLength`, Guava a direct dependency pinned to
+  the classpath version); no byte array built to measure. Lives in: ledger DEPS-1.
+
+## 7. Memory, cost and dials
+
+- **No arbitrary targets.** "Use common sense and ask whether we are likely doing something wrong rather than
+  arbitrary limits for both time, cpu and memory." Every cost is judged against what the work must do (what it is
+  proportional to); 10× over that expectation means something is wrong and must be found; invented MB or ms targets
+  are deleted. Every regression is reported with its numbers (this replaces the old "20% or 50 ms" rule). The owner's
+  own numbers stay: 20-40 MB transient per model eval request is fine, never GB; a 16 GB machine; a 2,000-token raw
+  return; AGENTS.md's 1 s and 10 s. Lives in: AGENTS.md "Make ordinary work sub-second", "Make cost follow changed
+  inputs"; agent-loop.md §1.8, §2; merge.md §8; errors.md §6.
+- **Never park a budget breaker.** "There is no world where it's acceptable for a 945MB per model pass cost." A known
+  breaker on the main path is stop-and-fix in the same turn, pulling a deleting slice forward if that is the fix.
+  Lives in: agent-loop.md §1.8.
+- **Memory.** "I mostly just don't want GB of memory." Transient allocation may exceed 20-40 MB when it is garbage
+  collected; never GB per operation; small retained memory per agent and per cluster base. Lives in: agent-loop.md §2.
+- **Size for a 16 GB machine; no hardcoded limits.** "We should have anything like that be config numbers and sized
+  for a 16GB machine." Every size, count, byte budget, heap cap, timeout and threshold is a configuration dial whose
+  shipped default fits 16 GB with many agents beside the user's work; nothing derives a default from host RAM; a
+  hardcoded policy number is a defect. Approved defaults: heap cap 4 GB; `seon.cache` 512 MB with live results
+  inside it; Datahike node cache byte-bounded; inline/blob threshold 4,096 bytes; blob compression floor 1 KB;
+  storage I/O on virtual threads; timeouts dials at their current values. Lives in: AGENTS.md "Boot and
+  configuration"; architecture.md §2; ledger §3.24 (DIAL-0 in flight, MEM-01 `c62a1d6b1`), MEM-02.
+- **Aero for config files.** The config FILE layer adopts Aero (`#profile`, `#env`, `#include`; one file read by the
+  JVM and the Babashka operator); Malli validation and the database reconcile of `seon.config` stay. Lives in:
+  AGENTS.md "Boot and configuration"; architecture.md §2; ledger DIAL-1.
+- **Output bounds.** 2,000 estimated tokens is the defect bound for a core function's raw return in ordinary use;
+  declared bulk-data functions are exempt. The display budget's one override: the dynamic var `seon.print/*budget*`
+  (`set!` or `binding`, like `*print-length*`) and `:seon.print/budget` metadata, which a render may also put on its
+  data; a hard ceiling follows the model's window; a large override adds a short finding with its token count.
+  Lives in: agent-loop.md §2 Output; ledger PR-11, §3.13 (RO rows).
+- **Reviews judge reasonableness**: "don't do arbitrary limits if it's reasonable, stop the unreasonable stuff."
+  Reviews cover landed work and measure. Lives in: ledger §3.14 (LR rows).
+
+## 8. Printing and messages
+
+- **One value printer; no clipping anywhere else.** "No clipping outside of the one value printer. I know agents are
+  always doing this to cheat on budgets." A printer gap is fixed in the printer with general rules, never
+  special-cased; review refuses `subs`/`take`/truncate/`pr-str` display outside the printer. Lives in: AGENTS.md
+  "Presentation"; agent-loop.md §1.9; ledger §3.3 (PR rows, PR-E1..E4 enforcement).
+- **Errors are printed by the value printer** as flat data maps (fixed message plus data keys); a Throwable becomes a
+  cause-chain error map first; no `pr-str`-built messages, no `printStackTrace`, the agent's exception never mutated.
+  Lives in: errors.md §1; AGENTS.md "Errors are ordinary values of one shape"; ledger PR-04, E-SRENDERS.
+- **Elision forms are plain clojure.core** (`drop`, `take`, `nth`, `get-in`, `subs`, `keys`, `count`) on the live
+  result symbol, lazy first, no Seon helpers, no database re-pull unless the live value is gone ("dig form" retired).
+  Lives in: AGENTS.md "Presentation"; agent-loop.md §1.9; vocabulary.md; ledger PR-02, PR-10.
+- **Lean values; renders are the cliffs notes.** Core functions return only what their contract says; renders strip
+  garbage and return pruned data for the top-level value; the full value is one step away through `result/e…`, and
+  sub-values dug from it print plainly; intentional bulk-data functions declare it. Lives in: AGENTS.md
+  "Presentation"; agent-loop.md §1.9; ledger PR-12, PR-13, RO-8, RO-12.
+- **Terse Clojure messages.** Every agent-facing message: data first, one short fixed message per error variant,
+  Clojure's wording style, fixes as runnable clojure.core forms, no boilerplate, no internal names the agent cannot
+  act on. Lives in: agent-loop.md §1.9; ledger §3.4 (MS rows), PR-20a-d.
+
+## 9. Vocabulary and libraries
+
+- **The Clojure way.** "Do not pretend you are writing ruby/python/whatever and reuse those concepts." Use Clojure's
+  and each library's names and seams (clojure.main, nREPL/prepl, clojure.test, Datomic/Datahike, Malli,
+  core.async.flow, core.cache, clj-reload, clj-kondo, SCI, git). Lives in: AGENTS.md "Use grounded vocabulary" and its
+  words table; vocabulary.md.
+- **Renames approved.** One submission of forms is an **eval request** (nREPL's word); `seon.batch` folds into
+  `seon.repl` with clojure.main's stages `:read :eval :print :caught`; "pass" retires; the other renames of the two
+  Clojure-way audits (recording transaction, reply, printed value, error, test var, checked-out branch, reload,
+  registry …) follow, one scripted sweep per slice converting every caller, after the tasks-running work. The living
+  documents use the new words now; code keeps its spelling until its rename row lands. Lives in: vocabulary.md;
+  agent-loop.md §1.2; ledger §3.18 (CN-1..24).
+- **No kinds.** "We aren't doing kinds... We need positive data recorded in the database not a type system." What a
+  thing is follows from its positive data, validated by a base Malli schema plus specific schemas composed over it,
+  as errors are. Lives in: AGENTS.md "Declare facts at their producer"; agent-loop.md §3.4 History; merge.md §1;
+  ledger §3.15 (NK rows).
+- **Stop reinventing.** "Please stop reinventing shit that already exists." Where a dependency does the job, use it
+  and delete ours; keeping ours is an owner decision per case, with the gap stated. Lives in: AGENTS.md "Read the
+  dependency first"; ledger §3.22 (UL rows).
+- **The library audit answers** (`cards/README-audits.md` AU-Q1..Q14, Q16, Q18..Q24) are accepted as recommended;
+  AU-Q15 and AU-Q17 are asked after their deleting rows land. Lives in: `docs/seon/schedule/cards/README-audits.md`;
+  ledger §3.22, FK-* and DEPS-1 rows, §6 item 2.
+
+## 10. Atoms
+
+- **A handful of atoms at most.** "Atoms are about managing access atomically and we should be storing fully map
+  specced data that is validated on every write or rejected." One validated state map per process and one per cluster
+  (`set-validator!` with a Malli validator); agent state in its Flow proc and SCI context. Kept mutable counters: the
+  per-function profile counters, the SCI interrupt flag, the running Thread, clojure.test's report counter. Seon's
+  own cache counters are replaced by Caffeine's `recordStats`/`CacheStats`. A lint refuses new atoms. Any other atom
+  needs a seriously good justification reported to the owner in plain words. Lives in: AGENTS.md "Prefer values to
+  places"; ledger §3.19 (AT-1..8).
+
+## 11. Process and lanes
+
+- **REPL-first proving.** "We are supposed to have one main java process with the ability to run shared tests which
+  are only incremental and we don't re-run what hasn't changed." Lanes change ordinary functions by `defn` on their
+  own branch in the main JVM, the reaching tests run incrementally there, then write-back; a throwaway JVM only for
+  host-bound platform code (evaluator, writer, test runner, boot, schema publication, dependency bumps); the commit
+  gate accepts recorded green branch evidence for exactly the committed definitions. Lives in: ledger RF-1..RF-6
+  (cards `RF-*.md`); AGENTS.md "Prove each slice before it lands" waits on RF-2 (the `bin/lane commit
+  --branch-evidence` gate), when root applies `repl-first/claude-md-prove-slice.patch`.
+- **Small, fully specified slices.** "If the agents are taking this long the amount of work spec'ed is too large
+  AND/OR it's too complicated and not well spec'ed." A spec-and-split pass cuts each slice to about 15 minutes with
+  exact files, contracts, named proof tests and budget rows; no design decision is left to the implementer. Lives in:
+  AGENTS.md "Pick the model by risk"; ledger "How to read a row" (`ready`) and cards.
+- **Fix in the optimal planned order**; the end state is fast and lightweight. Lives in: ledger §5.
