@@ -47,9 +47,9 @@ ledger, root answers Q1-Q18), [competency suite](../../research/agent-platform/2
 5. **Exchanges are data; wire formats are adapters** (§4.4). A per-model dial selects the format; the default stays
    one transcript message until the competency suite measures otherwise.
 6. **Standard lookups** return data, on SCI's `clojure.repl`.
-7. **Success is proofs green, then propose** (§4.5). After a pass that changes definitions, their reaching tests
-   (the task's proofs among them) run automatically off the pass; the agent reads their status in the current-state
-   block. `my.task/complete!` only bails, with a required reason. A task needs proofs before launch.
+7. **Success is proofs green, then propose** (§4.5). After a pass that changes definitions, the task's PROOF tests
+   that the change reaches run automatically off the pass; the agent reads their status in the current-state block.
+   Every other test reaching the change (regressions) runs once at merge, on the combined program (owner 2026-10-08). `my.task/complete!` only bails, with a required reason. A task needs proofs before launch.
 8. **Budgets** (§3). A model pass costs no more than an ordinary pass (provider call excluded). Over 1 s or 10 MB of
    Seon work is stop-and-fix in the turn it is seen. A number that gets worse blocks the slice.
 9. Delete before adding. Reuse libraries. Understand before designing. Dual reviews. The owner approves core
@@ -383,7 +383,8 @@ with its branch.
 **Proofs run automatically** (TARGET AR-01; CLAUDE.md: "a defn's batch schedules its reaching test agents; the Var
 render only reads their status").
 - **What runs.** After a pass whose settlement changed definitions (program facts added, changed or removed), the
-  tests reaching that changed set, the task's proofs among them, run as ONE request through the one test entrance,
+  task's PROOF tests reaching that changed set (a handful) run as ONE request. Other reaching tests are regression
+  checks and run once at merge on the combined program (`merge.md`, criterion `:no-new-red`), never per pass. The request goes through the one test entrance,
   `seon.test/run` (`src/seon/test.clj:2225`) with `:seon.test/policy :named` and `:seon.test/changed` the pass's changed
   set: the same request `my.test/check` makes (`src/my/test.clj:6-29`). A member whose recorded green still holds is
   answered from the record without execution, so the work is proportional to the reaching tests whose reach changed.
