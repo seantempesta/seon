@@ -174,12 +174,18 @@
                  [:map
                   [:seon.test/passed? {:optional true} :boolean]
                   [:seon.turn.loop/red {:optional true} [:vector :seon.test/sym]]
+                  [:seon.turn.loop/pending {:optional true} [:vector :seon.test/sym]]
                   [:seon.turn.loop/test-error {:optional true} :seon.error/value]],
                  :test-summary
                  [:map [:seon.turn/id :seon.turn/id]
+                  [:seon.source/commit-id {:optional true} :seon.source/commit-id]
                   [:seon.turn.loop/proofs {:optional true} :seon.turn.loop/request-summary]
                   [:seon.turn.loop/reaching {:optional true} :seon.turn.loop/request-summary]],
                  :tests :seon.turn.loop/test-summary,
+                 :queue
+                 [:map {:description "The tests a bounded test step left for the next pass; the Flow proc's state, dropped when a pass runs its own step."}
+                  [:seon.turn.loop/queued [:vector :seon.test/sym]]
+                  [:seon.source/commit-id :seon.source/commit-id]],
                  :turn-report
                  [:map
                   [:seon.turn/id {:optional true} :seon.turn/id]

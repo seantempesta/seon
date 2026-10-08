@@ -1,5 +1,12 @@
 #:seon.config.test{:auto-check-cases
                    [:int {:min 0, :seon.config/dial true}]
+                   :step-time-limit-ms
+                   [:int
+                    {:min 1, :seon.config/optional true,
+                     :description
+                     "Milliseconds the automatic test step may spend on one pass: the proofs, then the tests reaching the change. A started member runs to its exit and records; the members not yet started continue at the next pass.",
+                     :seon.config/default 10000,
+                     :seon.config/dial true}]
                    :step?
                    [:boolean
                     {:seon.config/display-label "Test step" :seon.config/optional true,

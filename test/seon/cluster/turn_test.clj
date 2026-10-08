@@ -39,6 +39,7 @@
             [clojure.data.json]
             [seon.mcp]
             [seon.task]
+            [seon.operator.runtime]
             [seon.test.runner]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -2933,6 +2934,14 @@
                    "content"))
         "text")))
 
+(defn- eval-result
+  "Evaluate `code` as `agent-id` through `seon.mcp/call`, the parsed MCP result (read with `test-support/mcp-reply` and `mcp-tests`)."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :map]}
+  [running agent-id code]
+  (clojure.data.json/read-str
+   (seon.mcp/call (clojure.data.json/write-str
+                   {"name" "eval_clj" "arguments" {"code" code "agent" agent-id "cluster" running}}))))
+
 (deftest a-defn-reaching-a-proof-records-its-result-without-a-check-call
   (test-support/with-running-agent
    (fn [running agent-id connection]
@@ -2971,3 +2980,95 @@
   (let [summary (#'seon.turn/test-step {} "agent-x" "r1")]
     (is (= "r1" (:seon.turn/id summary)))
     (is (:seon.error/message (get-in summary [:seon.turn.loop/proofs :seon.turn.loop/test-error])))))
+
+(defn- step-dial!
+  "Set the cluster's test step bound to `ms`."
+  {:malli/schema [:=> [:cat :seon.db/connection pos-int?] :nil]}
+  [connection ms]
+  (test-support/apply-config! connection (:seon.cluster/name (test-support/execution-handle nil))
+                              {:seon.config.test/step-time-limit-ms ms})
+  nil)
+
+(defn- wake!
+  "Wake the running agent's proc once, as a message would."
+  {:malli/schema [:=> [:cat :string :seon.agent/id] :nil]}
+  [running agent-id]
+  (async/offer! (:seon.cluster.wake/channel
+                 (get-in @(:seon.agent/routing (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances running)))
+                         [:seon.agent/armed agent-id]))
+                :seon.agent/wake)
+  nil)
+
+(defn- await-results
+  "The latest results of `syms` once `done?` holds for them, read every 100 ms for 30 s; the last read otherwise."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector :seon.test/sym] [:=> [:cat :seon.schema/value] :boolean]]
+                  :seon.schema/value]}
+  [connection syms done?]
+  (loop [tries 300]
+    (let [results (seon.test.runner/latest-results (db/db connection) syms)]
+      (if (or (done? results) (zero? tries))
+        results
+        (do (Thread/sleep 100) (recur (dec tries)))))))
+
+(defn- two-tests-reaching-area
+  "Define `tq.f4c/area` wrongly, two tests reaching it and the proof `tq.f4c/area-test`, all red, and give the agent the task that holds the proof."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :seon.db/connection] :nil]}
+  [running agent-id connection]
+  (agent-eval running agent-id "(ns tq.f4c) (defn area [r] r)")
+  (agent-eval running agent-id "(in-ns 'tq.f4c-test) (clojure.test/deftest one (clojure.test/is (= 4 (tq.f4c/area 2)))) (clojure.test/deftest two (clojure.test/is (= 16 (tq.f4c/area 4))))")
+  (agent-eval running agent-id "(in-ns 'tq.f4c) (clojure.test/deftest ^{:seon/tasks #{'tq.f4c/area}} area-test (clojure.test/is (= 25 (tq.f4c/area 5))))")
+  (let [id (:seon.task/id (seon.task/create! {:seon.db/connection connection :seon.agent/id agent-id
+                                              :seon.task/ns 'tq.f4c :seon.task/name "area" :seon.task/kind :function
+                                              :seon.task/intent "Square."}))]
+    (let [assigned (seon.task/assign! {:seon.db/connection connection :seon.task/assigned id
+                                       :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch :main})]
+      (is (nil? (:seon.error/message assigned)) "the fixture's task is assigned")))
+  nil)
+
+(deftest ^{:seon.test/long "Five evaluations, each followed by the step's test worlds, then a continuation."
+           :seon.test/long-ms 60000}
+  tests-past-the-step-bound-continue-on-the-next-pass
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (two-tests-reaching-area running agent-id connection)
+     (step-dial! connection 1)
+     (let [tests (test-support/mcp-tests (eval-result running agent-id "(in-ns 'tq.f4c) (defn area [r] (* r r))"))
+           pending (set (concat (get-in tests [:seon.turn.loop/proofs :seon.turn.loop/pending])
+                                (get-in tests [:seon.turn.loop/reaching :seon.turn.loop/pending])))]
+       (is (= #{'tq.f4c-test/one 'tq.f4c-test/two 'tq.f4c/area-test} pending)
+           "the bounded step shows the tests it did not start as pending"))
+     (step-dial! connection 10000)
+     (wake! running agent-id)
+     (let [results (await-results connection ['tq.f4c-test/one 'tq.f4c-test/two 'tq.f4c/area-test]
+                                  (fn [results] (every? #(pos? (long (:seon.test/pass-count % 0))) results)))]
+       (is (= 3 (count results)))
+       (is (every? #(pos? (long (:seon.test/pass-count % 0))) results) "the next pass ran the queued tests and recorded them")))))
+
+(deftest ^{:seon.test/long "Five evaluations, each followed by the step's test worlds."
+           :seon.test/long-ms 60000}
+  a-newer-change-supersedes-queued-tests
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (two-tests-reaching-area running agent-id connection)
+     (step-dial! connection 1)
+     (agent-eval running agent-id "(in-ns 'tq.f4c) (defn area [r] (* r r))")
+     (step-dial! connection 10000)
+     (agent-eval running agent-id "(in-ns 'tq.f4c) (defn area [r] (* 3 r))")
+     (let [results (await-results connection ['tq.f4c-test/one 'tq.f4c-test/two]
+                                  (fn [results] (and (= 2 (count results)) (every? #(pos? (long (:seon.test/fail-count % 0))) results))))]
+       (is (every? #(= 1 (:seon.test/fail-count % 0)) results)
+           "the queued tests last ran against the newer program, where they fail")))))
+
+(deftest a-proof-left-for-the-next-pass-shows-pending-in-the-block
+  (test-support/with-running-agent
+   (fn [running agent-id connection]
+     (two-tests-reaching-area running agent-id connection)
+     (step-dial! connection 1)
+     (agent-eval running agent-id "(in-ns 'tq.f4c) (defn area [r] (* r r))")
+     (let [block (:seon.repl/value (test-support/mcp-reply (eval-result running agent-id "(seon.context/current-state)")))]
+       (is (= [:pending] (mapv :seon.context/proof-status (:seon.context/proof-list (:seon.context/proofs block)))))))))
+
+(deftest an-eval-request-reaching-no-test-has-no-test-summary
+  (test-support/with-running-agent
+   (fn [running agent-id _connection]
+     (is (nil? (test-support/mcp-tests (eval-result running agent-id "(+ 1 2)")))))))

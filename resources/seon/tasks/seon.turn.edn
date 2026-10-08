@@ -245,4 +245,12 @@
  #:seon.task{:name "two-branches-share-reach-declarations-is-red-beside-the-turn-tests"
              :kind :function
              :intent "seon.test-reaching-test/two-branches-of-one-program-share-reach-declarations is red when run in one JVM with seon.cluster.turn-test (check run d5281e6ec4d3, with F4b's automatic test step): seon.test.runner/retained-declarations answers nil for the parent (the 'derived once' and 'unrelated write keeps the key' assertions fail), and the test is green alone (check run 32238f76c1b8, 99 passes). Root hypothesis: cache eviction. The process cache is full (510 of 512 MB, 21 evictions of reach-related entries per the Opus landed review) and the step's test worlds add pressure, so the test asserts a retention that eviction legitimately drops. Proper fix: the base weighed correctly and held in the cluster's own registry (review finding #3), and the test not depending on cache retention. Filed here because seon.test.runner.edn is held by lane task-census; move it there. Done when the test is green whatever runs beside it, by the cause found."
-             :must-read #{seon.test.runner/reach-declarations seon.test.runner/reach-revision-key}}]
+             :must-read #{seon.test.runner/reach-declarations seon.test.runner/reach-revision-key}}
+ #:seon.task{:name "the-reply-shows-unreached-only-for-names-this-request-defined"
+             :kind :function
+             :intent "Root's step-noise finding, part 2 (part 1, dropping a run that executed nothing, landed with F4c as seon.turn/ran-something): `seon.turn/step` should show `:seon.test/unreached` only for the names the eval request itself defined that no test reaches, from the world member `:seon.batch/defined`, so a later pass never repeats it. Not done in F4c: the test summary carries no unreached key yet."
+             :must-read #{seon.turn/step seon.turn/ran-something}}
+ #:seon.task{:name "a-bounded-step-that-leaves-queued-tests-wakes-nothing-when-no-member-ran"
+             :kind :function
+             :intent "F4c: `seon.turn/continue-queue` rewakes the agent only when the continuation ran at least one queued test; with the dial below the selection cost no member ever starts and the queue waits for the next wake. Unreached by a default 10 s dial; named so a smaller dial is understood."
+             :must-read #{seon.turn/step seon.turn/continue-queue}}]
