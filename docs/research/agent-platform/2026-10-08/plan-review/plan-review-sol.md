@@ -85,7 +85,7 @@ The model must learn what happened to its own call, not only what successfully e
 
 **Change:** derive exchanges from the authoritative call/agent relationship, preserving zero-evaluation calls and their diagnostics, and attach the recorded proof-step summary to the relevant exchange. Keep help/profile failures explicit. Never restore system turns, captured prompts or an opening run to recover this information.
 
-R-7 correctly identifies repeated work: the current `seon.context/exchanges` re-reads evaluations and calls `seon.repl/entity-emission` / `seon.repl/text` on each model call. Agent-loop.md's proc-held append claim does not describe that implementation. Store/reuse exact shown units or content-keyed render results through the existing cache; do not add another transcript store. CX-13's assignment boundary is important for root, whose successive questions must not accumulate unlimited unrelated history.
+R-7 correctly identifies repeated work: the current `seon.context/exchanges` re-reads evaluations and calls `seon.repl/entity-emission` / `seon.repl/text` on each model call. The earlier proc-held append claim did not describe that implementation; `71f94ef6e` corrects the spec to identify today's work and leave the reuse choice to R-7. Store/reuse exact shown units or content-keyed render results through the existing cache; do not add another transcript store. CX-13's assignment boundary is important for root, whose successive questions must not accumulate unlimited unrelated history.
 
 **Research:** failed provider call, read-only reader failure, prose-only reply, recorded proof failure, reassignment and restart. Compare the complete model input data with the MCP observation, including diagnostic/result handles. Measure increasing exchange counts; cached text reuse must leave historical units stable.
 
@@ -170,4 +170,25 @@ Read-only JVM probes used MCP agent `plan-review-sol`, cluster `default`. `resul
 
 `clj-kondo --lint src script test --cache false` completed in 7,991 ms: **0 errors, 1,450 warnings**. This is zero errors, not zero findings. Foreign working changes were present in `src/seon/context.clj`, `src/seon/turn.clj` and turn tests during inspection; several subsequently landed. Symbol evidence was checked against committed source where an in-flight change affected it. No foreign path was staged or edited. Publication, adoption, reload and proposed card correctness are not established by this documentation review.
 
-No test reaches this Markdown as a program input. The requested candidate check names `seon.instrument-test/host-boundaries-enforce-per-arity-declared-schemas-in-both-modes` as an installed contract/arity baseline; it is not a regression proof for CO-8/11 or the unimplemented task/merge proposals. Candidate-check result and final landing evidence are recorded here after the gate returns.
+No test reaches this Markdown as a program input. The requested candidate check named `seon.instrument-test/host-boundaries-enforce-per-arity-declared-schemas-in-both-modes` as an installed contract/arity baseline; it is not a regression proof for CO-8/11 or the unimplemented task/merge proposals. `bin/lane commit` booted the candidate and passed run `c74489bfe422`: executed 1, reused 0, pass 25, fail 0, error 0, **2,679 ms**. Full check **51,193 ms**; publication **5,009 ms**, adoption **466 ms**, readiness **32,027 ms**. Operator phase fields overlap and must not be summed. Candidate SHA `3dc61f4f08fe1cebd0118484b5fcedb0db7cbe0d`; 371 identities adopted. Initial report commit `08fb93ca6`. The test and publication exceed the ordinary one-second goal; these are recorded harness/operator costs, not evidence that the reviewed designs are fast. The requested check authorizes this throwaway operation; default was not restarted.
+
+Pre-existing reds reported by `87326e203`, not rerun or waived here: `seon.sci.eval-test/showing-a-value-realizes-and-stores-only-what-is-shown`, `seon.sci.eval-test/root-acquisition-and-the-web-share-one-pull-plan`, `seon.sci.eval-test/the-evaluator-remains-live-after-its-namespace-reloads`, and `seon.db-test/query-and-pull-append-evidence-only-when-captured` (reported 5.4 s against a 5 s bound). They are foreign boundaries for broad namespace gates; the named baseline above was green. This lane owns no persistent test root or long-running shell. The ordinary MCP agent bookkeeping is left to the system/root lifecycle owner; retiring it would require a write outside this read-only review.
+
+Exact bounded data probes, in addition to the installed-symbol lookup:
+
+```clojure
+{:cat-any-validation (mapv (malli.core/validator [:cat :any]) [[] [1] [1 2]])
+ :incomparable-value-order (datahike.datom/cmp-nil [1 2] [1 "x"])
+ :thread-allocation-field
+ (contains? (seon.profile/measure (fn [] :read-only)) :seon.profile/alloc-bytes)}
+;; result/e6f7092afa331, 11 ms:
+;; {:cat-any-validation [false true false], :incomparable-value-order 0,
+;;  :thread-allocation-field true}
+
+(let [good {:seon.schema.projection/registry {} :seon.schema.projection/forms {}}
+      bad {:a {} :b {}}]
+  {:same-class (= (class good) (class bad))
+   :projection-validation (mapv seon.schema/projection-value? [good bad])})
+;; result/e5912af7330df, 1 ms:
+;; {:same-class true, :projection-validation [true false]}
+```
