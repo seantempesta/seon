@@ -34,7 +34,7 @@ Source: root's ruling log. These are the authority the plans must satisfy.
 - **Experiments:** entrances as read stages (model text, MCP code, EDN data `{:ns … :forms […]}` returning envelope maps); wire formats per model (A one transcript message, B chat turns, C prefix continuation) chosen by config; measure provider token counts; don't assume chat turns cost too much — measure.
 - **Agents see the actual proof tests** they must pass (current source), and their current status.
 - **Context = static prefix + append-only history of the agent's own forms/results + a current-state block rendered fresh every call** (current task version, proofs + status, unread messages, turns left); never infinitely append; no repetition.
-- **Only the task's proof tests run during work** (a handful); reaching/regression tests run once at merge on the combined program.
+- **Tests during work (superseded below by "Tests run automatically, all relevant ones"):** after a code-changing pass the task's proofs AND the tests reaching the change run on the agent's branch; `merge!` runs them again on the combined program.
 - **Root review + auto-accept:** every competency run ends in the real merge flow; auto-accept when criteria hold; bail test with an impossible task; clear instructions on ending a session; realistic conflicting changes exercise merge; root is just an agent with a merge task and must find it easy; a Seon agent should be able to do root's job.
 - **Optimal order:** fix in the optimal planned order; the end state must be fast and lightweight (no GB; 20-40 MB transient per pass fine; small retained memory; 16 GB machine).
 - **Render functions strip garbage first** and return DATA; the value printer prints render output and only handles general budget/shape.
