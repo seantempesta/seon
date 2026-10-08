@@ -47,7 +47,7 @@ supply the facts each operation reads.
 4. **An agent's mode is one attribute: its branch.** Live: the attribute points at
    the cluster's branch; every evaluation reads the current head and every `defn` it
    transacts is there for all agents at their next evaluation. Isolated: a branch off
-   the cluster head; nothing moves under it until it merges. Custody hands the agent
+   main; nothing moves under it until it merges. Custody hands the agent
    that branch's connection; the agent never names a branch. The task sets the mode at
    start; the agent can also branch and request a merge itself through `my.*`.
 5. **Stability comes from the branch, not from a captured value.** No reload runs
@@ -55,20 +55,20 @@ supply the facts each operation reads.
    between evaluations; a context is reacquired from its branch head at turn start and
    cached by commit id.
 6. **A test is an isolated agent that lives for one body**: branch off a captured
-   commit, fork the context onto it, run under custody, unlink the branch. The same
+   commit, fork the context onto it, run under custody, delete the branch. The same
    three functions as an isolated agent; the runner is never a second mechanism.
-7. **Merge is program entities only, git-like.** Non-conflicting entities land on an
-   intermediate branch; conflicts stay for the agent to fix there, so the problem
+7. **Merge is program entities only, git-like.** Non-conflicting entities land on the
+   merge branch; conflicts stay for the agent to fix there, so the problem
    shrinks; the combined program is tested in a context forked from that branch. The
    gate is green reaching tests plus contracts; a named accept (root or the owner)
    then advances the pointer. Write-back to files is the same gate; its diff is a
    separate spec (branch + current codebase in, minimal recomputation, spans or whole
    files out).
-8. **Filesystem lanes (Codex, Claude) are live agents on one candidate branch of
+8. **Filesystem lanes (Codex, Claude) are live agents on one branch of
    default.** The hook indexes every session's edits into that branch; the reaching
    tests run there; when green, default advances, the files are already the truth, and
    the changed namespaces plus dependents reload sub-second (`require :reload`) at the next boundary.
    Isolation between filesystem lanes remains file ownership. Seon agents doing all
    updates is the goal; the filesystem path is bootstrap.
-9. **Retirement is unlink, then GC.** A finished branch leaves the roster; its data is
+9. **Delete the branch, then GC.** A deleted branch leaves the roster; its data is
    reclaimed by the retention sweep, never by a per-branch cleanup.

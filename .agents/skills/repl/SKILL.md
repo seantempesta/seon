@@ -129,15 +129,15 @@ Use actual agent turns for persistence, isolation, publication, or
 outcome-storage claims. HTTP reachability and a successful host eval
 prove neither those behaviors nor browser repaint.
 
-## A lane works on its own branch
+## An agent works on its own branch
 
 Forms and timings are in [the landing note](../../../docs/prds/agent-platform/landing/lane-branch-repl-2026-09-23.md).
 
 1. **Name your agent; it gets a branch.** Call `eval_clj` with an `agent` id
-   that is new: it gets its own branch off the cluster head on first use,
+   that is new: it gets its own branch off main on first use,
    recorded as its `:seon.agent/branch`. `my.agent/create-branch!`,
    `my.agent/branches` and `my.agent/retire-branch!` (`src/my/agent.clj`)
-   manage lane branches by name; the cluster's own branch and an existing name
+   manage branches by name; main and an existing name
    refuse as `:seon.error` values.
 2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and that
    `agent`. The forms run as an ordinary run of that agent on its branch.
@@ -149,10 +149,10 @@ Forms and timings are in [the landing note](../../../docs/prds/agent-platform/la
 4. **Test there.** `seon.test/run` takes the branch
    handle as `:seon.test/execution` and records on its connection. It runs the
    branch's program entities.
-5. **Propose, then root accepts.** Root assigns the task (`seon.task/assign!`);
+5. **Request a merge, then root merges.** Root assigns the task (`seon.task/assign!`);
    the agent writes a deftest naming it by symbol (`^{:seon/tasks #{'ns/task-name}}`) and calls
    `(my.program/propose-merge! {})`, which runs those proofs on its branch.
-   Root reads `(my.program/proposals)` and passes one open proposal to
+   Root reads `(my.program/proposals)` and passes one open merge request to
    `my.program/prepare-merge!`, then the answer to `accept-merge!` (which
    closes the merge task) and that answer to `write-back!`
    (`src/my/program.clj`, over `seon.cluster.source`). Only the proofs gate
@@ -163,11 +163,11 @@ Forms and timings are in [the landing note](../../../docs/prds/agent-platform/la
    into their one file; it refuses `:not-analyzable` when a declaration names a
    namespace its file does not require (fully qualify only required namespaces).
    Host-bound declarations always go through the files.
-6. **Retire.** Call `my.agent/retire-branch!` (`src/my/agent.clj`). It
+6. **Delete the branch.** Call `my.agent/retire-branch!` (`src/my/agent.clj`). It
    releases the retained contexts (`seon.cluster.agent/release-context!`), then
-   unlinks the branch (`seon.cluster.registry/retire-branch!`). If an agent
-   still holds the branch, retire refuses; your own branch records its
-   retirement now and unlinks once your run exits.
+   deletes the branch (`seon.cluster.registry/retire-branch!`). If an agent
+   still holds the branch, it refuses; your own branch records its
+   retirement now and is deleted once your run exits.
 
 A branch evaluation that persists entities needs an armed agent whose custody is
 the branch. The work then goes through `seon.cluster.agent/submit-source!`, the path a model reply uses. Root assigns

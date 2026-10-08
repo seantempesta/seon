@@ -279,20 +279,20 @@ window threshold or top-N task policy follows from inclusive totals.
 [C1](../../prds/agent-platform/plan/lane-c1-wrapper-profiling.md), sharing A1's wrapper,
 B4's member observation and B3's task writer.
 
-## 10. Explicit candidate acceptance and source write-back
+## 10. Explicit merge and source write-back
 
-A candidate records its immutable fork basis and runs only its assigned task.
+A source branch records its immutable fork basis and runs only its assigned task.
 Inherited agents, open turns and schedules must not execute accidentally. Its
 branch/context/custody and cluster-qualified message address remain explicit.
 Branch creation alone is not this lifecycle proof.
 
-An explicit merge captures basis B, candidate C and shared H. Canonical net changes
+An explicit merge captures merge base B, source branch C and main H. Canonical net changes
 compare B1 definition digests. Equal final content is unchanged; competing changes
 to one identity become a structural conflict task assigned to root. Complete entities
 normalize through the program owner; branch-local numeric ids cannot cross as if
 they were identities.
 
-Scratch starts from H and admits the proposal through Seon's final writer validator.
+Scratch starts from H and admits the merge request through Seon's final writer validator.
 Malformed schemas, invalid refs, unresolved surviving callers and missing coverage
 refuse. B4 runs the combined program's current reaching tests union the task's explicit
 tests. Every required member needs valid executed/reused green evidence. The final

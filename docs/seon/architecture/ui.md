@@ -81,9 +81,9 @@ graphs are visible states, not disappearing sections interpreted as success.
 Error presentation composes the base and domain schema blocks, preserving declared
 evidence under B3's durability decision.
 
-Candidate addresses remain cluster-qualified. The shared task names its candidate;
-messages and replies use that candidate's existing owner. D1 retains history and
-run evidence before retiring a branch. The UI must not infer that a candidate-local
+Source-branch addresses remain cluster-qualified. The shared task names its source branch;
+messages and replies use that branch's existing owner. D1 retains history and
+run evidence before retiring a branch. The UI must not infer that a branch-local
 green resolved the shared task or merged source.
 
 ## 4. Controls and proof

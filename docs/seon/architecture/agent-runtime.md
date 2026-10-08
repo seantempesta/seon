@@ -13,7 +13,7 @@ result objects stay in memory. The ordered evaluation facts are its durable
 history. [B2](../../prds/agent-platform/plan/lane-b2-walk-flow-fork.md) specifies the
 execution and rendering cut; [B3](../../prds/agent-platform/plan/lane-b3-errors-tasks-dials.md)
 owns task transitions and [D1](../../prds/agent-platform/plan/lane-d1-isolation-merge-writeback.md)
-owns candidate acceptance. The flows below are targets where they replace current
+owns merge acceptance. The flows below are targets where they replace current
 acquisition, duplicated turn paths or delivery machinery.
 
 ## 1. Program, context and private objects
@@ -40,11 +40,11 @@ two successive program updates must prove the intended behavior while preserving
 private atom identity.
 
 A JVM Var binding sees its root replaced by reload. Capturing a root does not freeze
-its indirect JVM calls or contract. A1/B2 prove old/new/candidate contexts against
+its indirect JVM calls or contract. A1/B2 prove old/new/merge-branch contexts against
 direct and indirect calls, aliases/refers/imports, macros, dynamic Vars and noncallable
 defs before retiring existing resolution/isolation. Digest equality at install is
 necessary evidence, not that proof. Unsupported SCI interop is a typed boundary;
-falling back to another loaded body cannot certify a candidate's changed definition.
+falling back to another loaded body cannot certify a source branch's changed definition.
 
 Every current program function remains callable regardless of whether it appears in
 the prompt. Supplied defaults come from the scoped environment by the declared
@@ -141,7 +141,7 @@ record facts through the same system-turn path. It is not manual history editing
 Debug execution uses the ordinary evaluation/settlement owner and explicit custody;
 previewing stored history never silently reexecutes effects.
 
-## 5. Tasks, candidates and recovery
+## 5. Tasks, source branches and recovery
 
 B3 trigger creates/resolves task identity without launching an agent. Start validates
 its done condition and assignment, then composes the first work with this lifecycle.
@@ -150,10 +150,10 @@ triggering-message/reply relation. Repeated actionable occurrences must reach pa
 or exhausted agents through the existing wake owner without duplicating tasks or
 notifications. Namespace responsibility does not route work independently of tasks.
 
-D1 candidates carry their fork commit, connection, program context and assigned task.
+D1 source branches carry their fork commit, connection, program context and assigned task.
 A fork inherits agent/turn/schedule facts; startup must explicitly avoid recovering
 or running unrelated inherited work. Cluster-qualified messages arriving after the
-fork reach the candidate's own message owner. Shared-only forwarding needs a separate
+fork reach the source branch's own message owner. Shared-only forwarding needs a separate
 custody/read-evidence proof; copying message facts is not that interface.
 
 A definition evaluates once, in the agent's retained context, and the REPL always
@@ -166,7 +166,7 @@ After process failure, interrupted execution never resumes. Recovery closes open
 turns and marks unfinished evaluations interrupted; the agent adapts from recorded
 shown text. Private objects and result handles are unavailable after restart. Durable
 facts remain subject to the selected branch and retention policy. A destructive reset
-also loses those facts. Recovery for candidate branches must obey their task-only
+also loses those facts. Recovery for source branches must obey their task-only
 lifecycle instead of applying ordinary whole-cluster recovery indiscriminately.
 
 The [web UI](ui.md) observes these same facts. REPL reachability, a successful write,
