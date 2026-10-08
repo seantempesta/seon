@@ -47,7 +47,7 @@ Storage: SR-H → SR-I; SR-E after SR-D; SR-C any time in group C order; SR-F af
 
 **Open (context cut, 2026-10-08).**
 
-**Q-CX1 (CX-4). The `user=>` prompt in the history.** The transcript prints `<ns>=> ` before each form; the model
+**Q-CX1 (CX-4). The `user=>` prompt in the history.** ANSWERED (owner 2026-10-08): drop the prompt from the history. The transcript prints `<ns>=> ` before each form; the model
 copies it, and a copied prompt is read as the symbol `user=>` (one error beside each form, probed 2026-10-08).
 1. **(recommended)** Drop the prompt from `seon.repl/text`: the spec's REPL presentation is "the form as sent, then
    its envelope", the envelope's `:ns` shows a namespace change. Three lines deleted, no reader change.
@@ -55,14 +55,14 @@ copies it, and a copied prompt is read as the symbol `user=>` (one error beside 
    `<current-ns>=> `, as clojure.main's own prompt is not code. Adds a text rule to the reader.
 3. Both.
 
-**Q-CX2 (CX-12). Which wire format do live runs use by default?** The spec keeps `:transcript` until the competency
+**Q-CX2 (CX-12). Which wire format do live runs use by default?** ANSWERED (owner 2026-10-08): "experiment and see what works best": CX-12 builds both, and live runs compare `:transcript` and `:chat` on the same task before a default is chosen. The spec keeps `:transcript` until the competency
 table is read; the live run shows format A's cost (the model read its own forms inside a user message and advised
 itself).
 1. **(recommended)** Land both and make `:chat` the default for live runs now; the competency matrix still scores both.
 2. Keep `:transcript` the default until the matrix, `:chat` by agent overlay only.
 3. Only `:chat`; delete `:transcript`.
 
-**Q-CX3 (CX-2). Root's model turns.** With "a model turn only with an assignment", root (no assignment) no longer
+**Q-CX3 (CX-2). Root's model turns.** ANSWERED (owner 2026-10-08): root gets model turns only for an assigned root task (e.g. a merge request); a wake alone never starts one. With "a model turn only with an assignment", root (no assignment) no longer
 gets model turns from error notifications or messages. Today merge requests are root tasks worked through the
 ordinary REPL by our orchestrator, so nothing is lost.
 1. **(recommended)** Accept: a root model turn needs an assigned root task (a merge request is one).
