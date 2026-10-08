@@ -20,7 +20,8 @@
                  'seon.bootstrap/session-end-is-taught-three-ways
                  'seon.bootstrap/help-teaches-a-placeholder-namespace-for-defn
                  'seon.bootstrap/help-teaches-a-placeholder-checkout-path
-                 'seon.bootstrap/help-teaches-no-schema-registration}
+                 'seon.bootstrap/help-teaches-no-schema-registration
+                 'seon.bootstrap/help-does-not-teach-how-a-test-names-a-task}
    :malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.help/help]}
   [database _agent-id]
@@ -36,6 +37,7 @@
    ["You are an agent at a REPL on your own branch: an SCI fork of the cluster's program. Only what root merges reaches the cluster."
     "Your task and its proofs are in your block: (seon.context/current-state). Send forms, and write every sentence as a ;; comment."
     "Change a function in the namespace that owns it, the one your task's references name: (in-ns 'the.task.ns) then (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). Every function carries a contract."
+    "A test proves a task by naming it in the deftest's :seon/tasks metadata, an ns/name symbol: (deftest ^{:seon/tasks #{'comp.text/slug-is-lowercase}} slug-lowercases (is (= \"a-b\" (comp.text/slug \"A B\"))))."
     "Register a schema with (seon.schema/register! :comp.order/qty [:int {:min 1}])."
     "After each eval request that evaluated a form, your task's proofs and then the tests reaching your change run by themselves and show in the reply. Green proofs finish the task."
     "Find more: (doc my.message/send), (my.program/source 'my.message/send), (dir my.program) and the references your task names."
