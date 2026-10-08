@@ -168,6 +168,28 @@
 
 (declare findings)
 
+(defonce ^:private render-agent-render-profile
+  (delay (requiring-resolve 'seon.render/agent-render-profile)))
+(defonce ^:private config-defaults
+  (delay (requiring-resolve 'seon.config/defaults)))
+
+(defn- shown-output
+  "The evaluation's printed output as the value printer shows it: under the
+  agent profile's one budget, a cut carrying the form that reads the rest from
+  the stored evaluation (`subs` over its `:seon.cluster.eval/output`)."
+  {:malli/schema [:=> [:cat :string [:maybe :string]] :string]}
+  [output evaluation-id]
+  (let [profile (@render-agent-render-profile @@config-defaults)]
+    (value/text
+     (cond-> {:seon.render/value output
+              :seon.render.value/root [:seon.cluster.eval/output evaluation-id]
+              :seon.render/profile profile}
+       evaluation-id
+       (assoc-in [:seon.render/profile :seon.print/requery-id]
+                 (list :seon.cluster.eval/output
+                       (list 'seon.db/pull ''[:seon.cluster.eval/output]
+                             [:seon.cluster.eval/id evaluation-id])))))))
+
 (defn- response-entries
   "The response's present keys, in declared order, each already text.
 
@@ -214,7 +236,7 @@
                 ;; simply its absence, so nothing here re-decides what the
                 ;; binding already settled.
                 :seon.repl/result (some-> handle str)
-                :seon.repl/out (when (seq output) (print/string-literal output))
+                :seon.repl/out (when (seq output) (shown-output output (:seon.cluster.eval/id emission)))
                 ;; ALREADY TEXT: the value renderer bounded it once.
                 :seon.repl/errors (:seon.repl/errors emission)
                 :seon.repl/note (when-not failed?
