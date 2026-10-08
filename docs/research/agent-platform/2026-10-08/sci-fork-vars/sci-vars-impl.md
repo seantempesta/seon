@@ -1,18 +1,23 @@
 ---
 type: research
-status: stopped-at-timing-gate
+status: implemented-in-fork
 created: 2026-10-08
 tags: [sci, forks, performance]
 ---
 
-# Context-owned SCI Var bindings: timing gate (lane sci-vars)
+# Context-owned SCI Var bindings (lane sci-vars)
 
 Lane `sci-vars`, 2026-10-08, implementing [sci-sol.md](sci-sol.md) option 2 (stable Var
 handles, binding selected by the executing context) for task
 `seon.sci.eval/an-inherited-test-never-sees-the-branch-redefinition-of-its-callee`.
 The owner's gate: measure first; if the design costs more than about 10% on Var reads,
-stop and report options. **It does, for every Var a fork redefines, so the lane stopped
-before cards 1-4 landed.** Nothing in Seon's `src/` changed.
+stop and report options. It does, for every Var a fork redefines; the lane stopped and
+reported. **Owner ruling (2026-10-08): "if evals are sub second I don't care and we can
+optimize later so I want correct now and fast later": option A.** It is implemented in
+the fork at `seon-env-hook` `cff2cefb` (cards 1-4 of sci-sol.md in one commit, with
+`sci.fork-bindings-test`); Seon's integration and deletions are cards
+docs/seon/schedule/cards/SCI-1.md to SCI-3.md, and option C is SCI-4.md. Nothing in
+Seon's `src/` changed and the gitlink is not bumped.
 
 ## Evidence (fork `reference-code/sci`, remote `fork` = seantempesta/sci)
 
@@ -80,7 +85,26 @@ whose read cost stays near the 10% bar for the Vars agents redefine. A is the sm
 and correct but buys correctness with a 40-100% slowdown on exactly those Vars; it is
 acceptable only if the owner rules that cost proportional to the redefined set is fine.
 
-## Card 5 (Seon integration, after root bumps the gitlink), for any of A-C
+## Implemented (fork `cff2cefb`)
+
+The prototype completed: `sci.impl.vars/Binding` (root, meta, watches) per context under
+`:sci/var-bindings`; `sci.impl.vars/owns?`; reads (deref, getRawRoot, hasRoot, meta,
+isMacro, dynamic?) and writes (bindRoot, unbind, alterMeta/resetMeta, add/removeWatch)
+of `sci.lang/Var` select the executing context; `sci.core/fork` renews both generations;
+`sci.impl.utils/owned-var` and the copies in eval-def and metadata writes are deleted.
+`sci.fork-bindings-test`: 10 deftests (Seon's case through a direct call and
+`clojure.test/test-var`, a `bind-root!` re-arm, self reference, value/handle/closure,
+parent/sibling/grandchild snapshot, unmap/reintern, declare, dynamic binding, metadata,
+concurrent siblings, host invocation), red at 97de2004 (19 failures, 1 error), green at
+`cff2cefb`. `lein test`: 414 tests, 1611 assertions, only the 5 baseline failures.
+Timing at `cff2cefb` matched the prototype rows above; fork over 5,700 Vars 86-92 ns /
+856 B (the parent's generation swap); def in a fork 4.0-4.4 us. The +32 B per read of a
+written Var is the MapEntry of the `*ctx*` thread-binding lookup.
+
+A live Seon eval request (`:ping`, a `defn`) through it was not measured: that needs
+SCI-1's integration in `src/`, outside this lane; SCI-1's proof carries it.
+
+## Card 5 (Seon integration; superseded by SCI-1 and SCI-2, which name the exact changes)
 
 - `seon.sci.eval/fork-cluster-ctx`: arm contracted functions once in the base, not by
   `sci.core/bind-root!` per fork (under A/B that loop would flag every contracted Var).
@@ -101,7 +125,7 @@ acceptable only if the owner rules that cost proportional to the redefined set i
   revert the interim in `seon.test/clean-request-handle` (the world back over the agent's
   live base) and keep it green.
 
-## Card 6 (deletion)
+## Card 6 (deletion; superseded by SCI-3)
 
 Delete `seon.sci.eval/stale-reach`, `seon.sci.eval/reinterpret-reach!` and
 `seon.sci.eval/reinterpret-inherited-callers!` with their callers' copy-before-analysis
