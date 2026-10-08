@@ -3058,3 +3058,10 @@
                      [nil false 0 "" :k [] {}
                       [(:e datom) (:a datom) (:v datom) (:tx datom) (:added datom)]
                       {:e (:e datom) :a (:a datom) :v (:v datom) :tx (:tx datom) :added (:added datom)}]))))))
+
+(deftest ^{:seon/tasks #{'seon.db/the-missing-connection-refusal-has-no-fix-key}}
+  a-missing-connection-refusal-carries-its-fix-as-data
+  (let [refusal (#'db/missing-connection-error "a database value")]
+    (is (str/includes? (:seon.error/fix refusal) "seon.cluster.boot/connection"))
+    (is (not (str/includes? (:seon.error/message refusal) "seon.cluster.boot/connection"))
+        "the message says what was refused; the fix is its own key")))

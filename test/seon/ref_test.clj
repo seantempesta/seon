@@ -2,7 +2,10 @@
   (:require [clojure.data.json :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [my.program :as program]
+            [seon.db :as db]
             [seon.mcp :as mcp]
+            [seon.ref :as ref]
             [seon.test-support :as test-support]))
 
 (defn- shown
@@ -97,3 +100,10 @@
      (let [answer (shown running agent-id "(select-keys (my.fs/section \"docs/seon/architecture/NO-SUCH.md\") [:seon.ref/section-missing :seon.ref/nearest])")]
        (is (= :file (:seon.ref/section-missing answer)))
        (is (some #{"README.md"} (:seon.ref/nearest answer)))))))
+
+(deftest ^{:seon/tasks #{'seon.ref/a-must-read-offers-a-source-form-that-answers-nil}}
+  a-resolved-function-offers-a-source-form-that-shows-its-source
+  (let [database (db/db)
+        source-form (last (:seon.render/operations (#'ref/resolve-name database 'seon.ref/references)))]
+    (is (= '(my.program/source 'seon.ref/references) source-form))
+    (is (string? (:source (program/source database (second (second source-form))))))))

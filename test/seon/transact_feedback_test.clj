@@ -203,3 +203,9 @@
            (finally
              (d/release connection)
              (d/delete-database configuration))))))))
+
+(deftest ^{:seon/tasks #{'seon.db/uninstalled-attribute-candidates-are-alphabetical}}
+  uninstalled-attribute-candidates-are-the-nearest-names
+  (let [declarations (#'db/installed-attribute-declarations (db/db))]
+    (is (= :seon.agent/settings (first (#'db/registered-attribute-candidates declarations :seon.agent/setings))))
+    (is (= :seon.agent/branch (first (#'db/registered-attribute-candidates declarations :seon.agnet/branch))))))
