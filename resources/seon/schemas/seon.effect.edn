@@ -14,7 +14,7 @@
               :provenance
               [:map
                {:description
-                "Write-back provenance a capability handler reports to the effect writer. It never reaches the agent: `settle-value!` removes it from the handler's value exactly as it removes `:seon.blob/staged-writes`, and the writer derives `:seon.effect/program` from the file and span at the database that owns the declarations."}
+                "Write-back provenance a capability handler reports to the effect writer. It never reaches the agent: `settle-value!` removes it from the handler's value exactly as it removes `:seon.blob/staged-writes`, and the writer derives `:seon.effect/program` from the file and span at the database that owns the declarations. The file is the path relative to the agents' filesystem working root (`seon.fs.jvm/working-relative`), the program index's `:seon.fn.file/relative-path`."}
                [:seon.effect/file :my.fs/path]
                [:seon.effect/form-span :seon.effect/form-span]],
               :request-edn [:string #:seon.db{:no-history? true}],

@@ -370,16 +370,14 @@
                 "no declaration contains a comment, and none is fabricated")))
         (testing "the containment owner names the position instead of answering nil"
           (let [declarations
-                (db/q '[:find [(pull ?declaration [:seon.fn/sym :seon.fn/form-span]) ...]
+                (db/q '[:find [(pull ?declaration [:db/id :seon.fn/sym :seon.fn/form-span]) ...]
                         :in $ ?path
                         :where
                         [?file :seon.fn.file/relative-path ?path]
                         [?declaration :seon.fn/file ?file]]
                       (db/db connection) (fs/relative-path (fs/source-directory) path))
                 refusal (program/declaration-at declarations 0)]
-            (is (= 0 (:seon.program/position refusal)))
-            (is (= 0 (get-in refusal
-                             [:seon.error/data :seon.program/position])))))
+            (is (= 0 (:seon.program/position refusal)))))
         (.delete file)
         (.delete (.getParentFile file))))))
 

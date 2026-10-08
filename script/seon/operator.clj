@@ -732,6 +732,17 @@
                 (str "-J-XX:HeapDumpPath=" heap-dump-path)
                 "-M:dev:test" "-e" form])))
 
+(defn boot-request
+  "`request` with the agents' filesystem working root (`:seon.config.fs/working-root`)
+  bound to `checkout` in its configuration environment, unless its manifest or
+  environment already decides that dial."
+  {:malli/schema [:=> [:cat :seon.operator/request :string] :seon.operator/request]}
+  [request checkout]
+  (if (or (find (:seon.config/manifest request) :seon.config.fs/working-root)
+          (find (:seon.config/environment request) :seon.config.fs/working-root))
+    request
+    (assoc-in request [:seon.config/environment :seon.config.fs/working-root] checkout)))
+
 (defn- launch-child!
   "Launch one JVM whose program is the directory `source` and return its
   terminal boot value with the coordinates it advertised. A nuke passes
@@ -739,7 +750,8 @@
   heap dump lands in the managed root's `data/heap`, never in the program
   directory, which the next move prunes (`prune-archives!`)."
   [request source reuse-classes?]
-  (let [root (:seon.operator/managed-root request)
+  (let [request (boot-request request (repository-root))
+        root (:seon.operator/managed-root request)
         name (:seon.boot/cluster-name request)
         log (io/file root "data/clusters" name "logs/seon.log")
         heap (doto (io/file root "data/heap") .mkdirs)
@@ -1714,9 +1726,12 @@
             source (filled-classes! disposable (prepared-source! disposable sha previous))
             source-root (:seon.operator/source-root source)
             prepared-ms (elapsed-ms began)
+            ;; A candidate's agents work in its own archive, never the checkout.
             outcome (try (launch-child! {:seon.operator/managed-root disposable
                                          :seon.operator/command :start
-                                         :seon.boot/cluster-name "default"}
+                                         :seon.boot/cluster-name "default"
+                                         :seon.config/environment
+                                         {:seon.config.fs/working-root source-root}}
                                         source-root true)
                          (catch Exception cause
                            {:seon.operator/value

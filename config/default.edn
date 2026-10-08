@@ -199,7 +199,9 @@
 
  ; THE FILESYSTEM CAPABILITY. These are policy facts shared by every agent,
  ; never per-agent grants. Relative request paths resolve against the explicit
- ; working root; the process working directory is not an undeclared fallback.
+ ; working root. A JVM runs a committed archive, so the operator binds the
+ ; working root to the Git checkout in its boot environment
+ ; (`seon.operator/boot-request`); "." serves only a JVM started in its checkout.
  ; Provenance: the 2026-08-03 tracked-tree census found 2,793 first-party
  ; src/test/resources/docs/config files, maximum depth 9, and a largest tracked
  ; file of 2,327,591 bytes. The scan/write ceilings are ~7x that observed file;

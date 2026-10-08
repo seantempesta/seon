@@ -1,7 +1,6 @@
 (ns seon.edit.jvm
   "Protected JVM handler for digest-fenced structural source edits."
-  (:require [clojure.java.io :as io]
-            [seon.edit :as edit]
+  (:require [seon.edit :as edit]
             [seon.error.refusal :as error.refusal]
             [seon.fs.jvm :as fs.jvm]))
 
@@ -67,7 +66,7 @@
                 {})))
 
 (defn- result
-  [request before transformed write-result]
+  [request effective before transformed write-result]
   (merge
    {:my.edit/path (:my.edit/path request)
     :my.edit/changed? (:my.fs/changed? write-result)
@@ -88,7 +87,7 @@
    ;; it removes `:seon.blob/staged-writes`, and refs the indexed file and
    ;; the declaration whose span contains it.
    {:seon.effect/provenance
-    {:seon.effect/file (.getCanonicalPath (io/file (:my.edit/path request)))
+    {:seon.effect/file (fs.jvm/working-relative (:my.edit/path request) effective)
      :seon.effect/form-span (:seon.edit/form-span transformed)}}))
 
 (defn- filesystem-refusal
@@ -155,7 +154,7 @@
                         (:my.fs/blob-unavailable written) (:my.fs/already-exists written)
                         (:my.fs/stale-digest written) (:my.fs/atomic-write-unsupported written))
                   (edit-error written request actual-digest)
-                  (result request before transformed written))))))))))
+                  (result request effective before transformed written))))))))))
 
 (defn- edit
   {:malli/schema

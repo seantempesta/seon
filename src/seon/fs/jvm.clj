@@ -94,6 +94,17 @@
        candidate
        (fs/path base candidate)))))
 
+(defn working-relative
+  "`path` as the program index names a file: canonical and relative to the
+  working root when beneath it, else its absolute canonical form."
+  {:malli/schema [:=> [:cat :my.fs/path :seon.config/effective] :my.fs/path]}
+  [path effective]
+  (let [^Path working (fs/canonicalize (:seon.config.fs/working-root effective))
+        ^Path target (fs/canonicalize (absolute-normalized working path))]
+    (str (if (and (.startsWith target working) (not= target working))
+           (.relativize working target)
+           target))))
+
 (defn- path-plan
   [path effective]
   (let [working-root (fs/normalize

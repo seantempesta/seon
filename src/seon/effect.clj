@@ -22,7 +22,6 @@
             [seon.error.refusal :as error]
             [seon.flow :as flow]
             [seon.id :as id]
-            [seon.fs :as fs]
             [seon.program :as program]
             [seon.sci.admit :as admit]
             [seon.sci.kernel :as kernel]
@@ -261,8 +260,7 @@
   (let [span (:seon.effect/form-span provenance)
         path (:seon.effect/file provenance)
         file (when path
-               (db/pull database [:db/id] [:seon.fn.file/relative-path
-                                         (fs/relative-path (fs/source-directory) path)]))
+               (db/pull database [:db/id] [:seon.fn.file/relative-path path]))
         declarations
         (when (and file span)
           (db/q '[:find [(pull ?declaration [:db/id :seon.fn/form-span]) ...]
