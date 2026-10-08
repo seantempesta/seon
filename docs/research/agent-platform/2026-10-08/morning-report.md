@@ -39,7 +39,8 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: the automatic test step narrows to identities changed since its previous completed run (new optional
+Root defaults taken: a contract equal to the committed one is admitted unchanged at the REPL, write-back and merge (the
+nilable rule judges only new or changed contracts; `cf4794d43`). The automatic test step narrows to identities changed since its previous completed run (new optional
 request key; `my.test/check` and proofs keep the broad rule; namespace-derived seeds stay broad); a branch revision's reach maps are
 derived and dropped rather than cached (advancing from the recording transaction's report is the follow-up). A REPL `require` updates the stored ns form (files are the write-back of the program), and a function's
 digest depends only on the aliases it resolves through, so an unused alias changes no other digest (task `ad78cf13e`; lane ns-form). Tests reaching a change are answered by a reverse walk from the changed names (reach-cost option 1;
@@ -217,3 +218,11 @@ of two each).
   trivial test still costs ~500 ms of step (~50× its work): six durable commits at ~50 ms each (commit-cost pattern; CC cards),
   11 `declaration-content-key` calls per changed definition (PB-08), 144 queries. Running: fan-out 5 (write-back end to end), PB-08,
   CC-3/CC-4 (smaller branch heads in our Datahike fork).
+- **Fan-out 5** (`b06d986f5`): 0 of 3, nothing landed; the main finding was a core defect: after `in-ns` into a file namespace
+  its library aliases didn't resolve (the libraries weren't exposed). **Fixed** (`e40167fbe`: acquisition exposes every loaded
+  library a program namespace requires, aliases or refers; ~5 ms per base build). Also fixed: re-entering a function with its
+  committed contract unchanged was refused because its admission source flipped `:core` → `:agent` (`cf4794d43`). Write-back of
+  fan5-seq's branch now succeeds (270 ms, 414 MB); its earlier refusal didn't reproduce. **PB-08** landed (`98de689da`): a
+  definition write advances its projection from its own report (0 full projection rebuilds per write, was 2+1). **CC-3/CC-4**
+  bumped (`92af22555`, Datahike e65599de): branch head 3.8 KB → 149 B; commit time stays at the ~12 ms flush floor (CC-7 is the
+  time lever).
