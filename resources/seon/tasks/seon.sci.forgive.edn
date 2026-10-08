@@ -37,4 +37,9 @@
             :kind :function,
             :intent
             "A model reply's `#_` read its operand wherever the reader found one, across prose lines and fence lines: (seon.sci.forgive/segments \"#_ (+ 1 2)\\nDone.\\n(+ 3 4)\") ran Done. as code, and a `#_` alone before a closing fence discarded the fence line. A reader conditional selecting no :clj branch did the same. Correct: a no-value construct is skipped inside its region (the text between fence lines), and classification resumes after it. Proof: seon.sci.forgive-test/the-reader-reads-a-reply-by-its-line-rules (the no-value rows).",
-            :must-read #{seon.sci.forgive/step}}]
+            :must-read #{seon.sci.forgive/step}}
+ #:seon.task{:name "reader-at-restarts-line-and-column-numbering",
+            :kind :function,
+            :intent
+            "seon.sci.forgive/reader-at built a reader over (subs text pos bound), so a reader built after prose, a `;` comment, a fence or a second form on a line counted lines and columns from 1:1: (seon.sci.forgive/step ...) over \"Some prose.\\n(defn pa [x] x)\" gave the form :line 1 :column 1 while its entry was at line 2, and a read error at text line 4 reported line 2. The one-text fold (S6-03, S5-04) joins write origins to entries by position and found no definition. Correct: the reader starts at the text's own line and column for its position. Proof: seon.sci.forgive-test/a-form-read-mid-text-has-the-texts-own-line-and-column.",
+            :must-read #{seon.sci.forgive/reader-at}}]

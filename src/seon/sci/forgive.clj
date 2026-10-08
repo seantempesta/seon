@@ -126,16 +126,30 @@
         (and (:seon.batch/reader v) (> pos (:seon.batch/pos v))) (advance v pos)
         :else (-> v (assoc :seon.batch/pos pos) (dissoc :seon.batch/reader))))
 
+(defn- line-and-column
+  "The 1-based line and column of offset `pos` in `text`."
+  {:malli/schema [:=> [:cat :string nat-int?] [:tuple pos-int? pos-int?]]}
+  [^String text pos]
+  (loop [i 0 line 1 start 0]
+    (let [nl (.indexOf text "\n" (int i))]
+      (if (and (>= nl 0) (< nl pos))
+        (recur (inc nl) (inc line) (inc nl))
+        [line (inc (- pos start))]))))
+
 (defn- reader-at
   "The version with a reader at `pos` that ends at its region's bound: its
-  own, advanced, when it has one at or before `pos`, else one built once."
+  own, advanced, when it has one at or before `pos`, else one built once that
+  starts at the text's own line and column for `pos`."
   {:malli/schema [:=> [:cat :seon.batch/text-version nat-int?] :seon.batch/text-version]}
   [v pos]
   (if (and (:seon.batch/reader v) (<= (:seon.batch/pos v) pos))
     (advance v pos)
-    (let [^String text (:seon.batch/text v)]
+    (let [^String text (:seon.batch/text v)
+          [line column] (line-and-column text pos)]
       (assoc v :seon.batch/pos pos
-             :seon.batch/reader (sci/reader (java.io.StringReader. (subs text pos (:seon.batch/bound v (count text)))))))))
+             :seon.batch/reader (rt/->IndexingPushbackReader
+                                 (rt/push-back-reader (java.io.StringReader. (subs text pos (:seon.batch/bound v (count text)))))
+                                 line column (= 1 column) nil 0 nil false)))))
 
 (defn- string-end
   "The offset of the quote closing the string opened at `open`, or nil."

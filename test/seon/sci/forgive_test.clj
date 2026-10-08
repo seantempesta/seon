@@ -3,6 +3,7 @@
   its cost follows the text's length."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [are deftest is]]
+            [edamame.core :as edamame]
             [seon.sci.forgive :as forgive]
             [seon.turn :as turn]))
 
@@ -74,3 +75,31 @@
     (is (= [reply] (mapv :seon.cluster.eval/source (turn/planned-sources reply 'user 10))))
     (is (= [reply] (mapv :seon.cluster.eval/source (turn/code-sources reply 'user 10))))
     (is (= ["(+ 1 2)" "(+ 3 4)"] (mapv :seon.cluster.eval/source (turn/planned-sources reply 'user 100))))))
+
+(def ^:private locating-stage
+  "A read stage whose forms carry `:line` and `:column`."
+  (let [opts (edamame/normalize-opts {:all true :eof ::eof :location? (constantly true)
+                                      :row-key :line :col-key :column})]
+    {:seon.batch/read (fn [rdr eof] (let [f (edamame/parse-next rdr opts)] (if (= ::eof f) eof f)))}))
+
+(defn- positions
+  "The line and column of each form `text` reads in `mode`, or of the failure."
+  [text mode]
+  (loop [state (forgive/read-state text) out []]
+    (let [r (forgive/step locating-stage mode state)
+          failure (:seon.batch/read-error r)]
+      (if (:seon.batch/eof r)
+        out
+        (recur (assoc state :seon.batch/version (:seon.batch/version r) :seon.batch/last-code-end (:seon.batch/end r))
+               (conj out (if failure
+                           (select-keys (ex-data failure) [:line :column])
+                           (-> r :seon.batch/form meta (select-keys [:line :column])))))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.forgive/reader-at-restarts-line-and-column-numbering}}
+  a-form-read-mid-text-has-the-texts-own-line-and-column
+  (are [mode text expected] (= expected (positions text mode))
+    :reply "Some prose.\n(defn pa [x] x)"                [{:line 2 :column 1}]
+    :reply "Prose\n(def a 1)\nmore\n(def b 2)"            [{:line 2 :column 1} {:line 4 :column 1}]
+    :code  "; note\n\n  (def a 1) (def b 2)"               [{:line 3 :column 3} {:line 3 :column 13}]
+    :code  "(def a 1)\n(def b 2) (def c 3)"                [{:line 1 :column 1} {:line 2 :column 1} {:line 2 :column 11}]
+    :reply "Prose\n(def a 1)\nmore\n(def b 2) (foo ]"      [{:line 2 :column 1} {:line 4 :column 1} {:line 4 :column 16}]))
