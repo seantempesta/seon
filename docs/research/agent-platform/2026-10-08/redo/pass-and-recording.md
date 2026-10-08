@@ -167,12 +167,17 @@ transaction (`seon.turn/record-evaluated-call`) carries no agent, and an SCI eva
 | `:seon.cluster.eval/origin` | a model form is found through its call row's model attempt | NK-5 (unchanged) |
 | `:seon.cluster.eval/run` | `:seon.cluster.eval/agent-ordinal` (S4-01) for agent order; the transaction's `eval-request` → `[:seon.turn/id v]` for the call row | TX-8c |
 | `:seon.cluster.eval/read-basis-transaction` | the transaction's `basis-t` | TX-8a |
-| `:seon.ai.attempt/at`, `:seon.test.run/at`, `:seon.test.member/completed-tx`, `terminated-tx`, `:seon.test.run/selection-tx` | `:db/txInstant` and the writing transaction | RP-14 (attempt), EN-6 (test run and member) |
+| `:seon.ai.attempt/at`, `:seon.test.run/at`, `:seon.test.run/selection-tx` | `:db/txInstant` of the attempt's or run's own transaction, and the run's admission transaction (the `:seon.test.run/id` datom's tx) | RP-14b (attempt), EN-6 (run) |
 | the schedule triple: `:seon.maintenance.request/*` + `:seon.maintenance.receipt/*` + `:seon.schedule.fire/*` repeating agent, task, handler and instants | one fire entity; agent and operation on the transaction | TX-7b |
 | `:seon.db/receipt`, `db/*receipt*`, `db/*open*`, `:seon.db/pending-open` | the transaction's `eval-request` | RP-14 |
 | `:seon.error.occurrence/process`, `first-at`, `last-at`, `:seon.error/at` | `:seon.db/process`, `:db/txInstant` | TX-3 (the base drops `at` in E-CUT) |
 | `:seon.merge/merged-by` (planned, never added) | the merge transaction's `agent` | MA-11 |
 | `:seon.effect/run`, `:seon.effect/eval`, the planned `:seon.effect/pass` | the receipt's opening transaction's `eval-request`, plus `:seon.effect/form-ordinal` | EN-1 |
+
+Kept on purpose: `:seon.test.member/completed-tx` and `terminated-tx` (the census listed them) are transition refs
+written by a later transaction than the member row (admission creates members; completion and exit come later), which
+is the data guide's rule for a transition ("a transition recorded by the database in its own transaction uses a
+transaction ref"), and the runner reads their presence as state (`src/seon/test/runner.clj:1363-1367`, `:1652-1671`).
 
 **Limits, kept.**
 - **Transaction → datoms is not indexed.** Datahike filters the transaction position and never seeks by it
