@@ -1825,8 +1825,16 @@
                   manifest (edn/read-string (slurp path))]
               (when-not (map? manifest) (fail! "Manifest must be an EDN map." request))
               (assoc request :seon.boot/cluster-name (valid-name name) :seon.config/manifest manifest))
-            :check (assoc request :seon.operator/paths
-                          (mapv #(.getCanonicalPath (io/file %)) positionals))
+            :check (let [stray (first (filter #(and (seq (:seon.operator/tests request))
+                                                    (not (.exists (io/file %)))
+                                                    (not-any? (fn [extension] (str/ends-with? % extension))
+                                                              [".clj" ".cljc" ".cljs" ".edn" ".md" ".json" ".sh"]))
+                                             positionals))]
+                     (when stray
+                       (fail! (str "'" stray "' is not a path: each test needs its own --test (--test A --test B), not --test A B.")
+                              {:seon.operator/argument stray}))
+                     (assoc request :seon.operator/paths
+                            (mapv #(.getCanonicalPath (io/file %)) positionals)))
             (:status :down :nuke)
             (do (when (seq positionals) (fail! "Command takes no cluster name." request))
                 (when (and (#{:reset :nuke} command) (not (:seon.operator/force? request)))
@@ -1944,7 +1952,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH...] [--test NS | --test NS/NAME]... [--include-long]"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | check [PATH...] [--test NS | --test NS/NAME]... [--include-long] (each test needs its own --test)"}
                    (request! request))
           failed? (:seon.error/message result)
           ;; "No JVM runs" is observed, never inferred from the message.

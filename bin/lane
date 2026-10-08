@@ -5,8 +5,9 @@
 #   bin/lane add     LANE PATH...        claim more
 #   bin/lane commit  LANE -m MSG [--test NS]... [--include-long] PATH...
 #                                        lint and check the candidate, then commit exactly PATH...
-#   bin/lane release LANE                drop the lane's claims
-#   bin/lane status                      every live claim
+#   bin/lane release LANE [PATH...]      drop the named claims, or all of the lane's when none is named
+#   bin/lane status [LANE]               one line per lane with its path count; a lane's paths one per line
+#   bin/lane commit takes each test as its own `--test NS` (never `--test A B C`)
 #   LANE_ADOPT=1 bin/lane claim ...      root only: record a claim for a lane already editing those files
 #
 # The candidate is HEAD plus exactly the committed paths (a tree written through a
@@ -20,6 +21,9 @@
 # holds .git/lane-commit.lock: git commit shares .git/COMMIT_EDITMSG, the index and
 # HEAD between processes, and two concurrent commits once crossed (649829332
 # carried lane commit-validation's paths under lane heap-retained's message).
+#
+# A released path remembers its last holder (tmp/orchestrator/lanes/released.holders):
+# only that lane may re-claim it while the file is still dirty and unclaimed.
 #
 # Refusals (exit 2) name the rule they enforce:
 #   - a path claimed by another lane, or already dirty in the tree (someone else's work in progress);
@@ -51,6 +55,13 @@ valid_path() {
   esac
 }
 
+# A claimed argument is one literal path: whitespace means a whole list was passed as one string.
+no_whitespace() {
+  case "$1" in
+    *[[:space:]]*) refuse "path argument '${1//$'\n'/\\n}' contains whitespace; pass each path as its own argument" ;;
+  esac
+}
+
 # A claim entry covers a path when equal, or when the entry ends with / and prefixes it.
 covers() {
   local entry="$1" path="$2"
@@ -73,6 +84,22 @@ owner_of() {
   return 1
 }
 
+holders="$claims/released.holders"
+
+# The lane that last released PATH, or nothing.
+last_holder() { awk -F'\t' -v p="$1" '$1 == p { lane = $2 } END { if (lane != "") print lane }' "$holders" 2>/dev/null || true; }
+
+# Under a claimed directory a path may be new; otherwise it must exist.
+exists_or_new_under() {
+  local lane="$1" path="$2"; shift 2
+  [[ -e "$path" ]] && return 0
+  local entry
+  for entry in "$@" $(cat "$claims/$lane.paths" 2>/dev/null); do
+    [[ "$entry" == */ && "$path" == "$entry"* && -d "$entry" ]] && return 0
+  done
+  return 1
+}
+
 dirty() { [[ -n "$(git status --porcelain -- "$1")" ]]; }
 
 claim() {
@@ -81,12 +108,14 @@ claim() {
   [[ $# -gt 0 ]] || refuse "claim needs at least one path"
   local path owner
   for path in "$@"; do
+    no_whitespace "$path"
     path="${path#./}"
     valid_path "$path"
+    exists_or_new_under "$lane" "$path" "$@" || refuse "$path does not exist and is not a new file under a claimed directory"
     if owner="$(owner_of "$path")" && [[ "$owner" != "$lane" ]]; then
       refuse "$path is claimed by lane $owner (one file, one owner)"
     fi
-    if [[ "${LANE_ADOPT:-}" != 1 ]] && dirty "$path" && ! owner_of "$path" >/dev/null; then
+    if [[ "${LANE_ADOPT:-}" != 1 ]] && dirty "$path" && ! owner_of "$path" >/dev/null && [[ "$(last_holder "$path")" != "$lane" ]]; then
       refuse "$path already has uncommitted changes nobody claimed; root decides whose they are before anyone edits it"
     fi
   done
@@ -94,8 +123,12 @@ claim() {
   for path in "$@"; do
     path="${path#./}"
     grep -qxF -- "$path" "$claims/$lane.paths" 2>/dev/null || echo "$path" >> "$claims/$lane.paths"
+    if [[ -e "$holders" ]]; then
+      grep -vxF -- "$(printf '%s\t%s' "$path" "$lane")" "$holders" > "$holders.tmp" || true
+      mv "$holders.tmp" "$holders"
+    fi
   done
-  echo "lane $lane claims: $(tr '\n' ' ' < "$claims/$lane.paths")"
+  echo "lane $lane claims: ${*#./}"
 }
 
 
@@ -197,19 +230,27 @@ commit() {
   local lane="$1"; shift
   valid_lane "$lane"
   [[ -e "$claims/$lane.paths" ]] || refuse "lane $lane has no claims; run bin/lane claim first"
-  local message="" tests=() paths=()
+  local message="" tests=() paths=() path
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -m) message="$2"; shift 2 ;;
-      --test) tests+=("--test" "$2"); shift 2 ;;
+      --test) [[ $# -ge 2 ]] || refuse "--test needs a test name"; tests+=("--test" "$2"); shift 2 ;;
       --include-long) tests+=("--include-long"); shift ;;
       *) paths+=("${1#./}"); shift ;;
     esac
   done
+  # `--test A B C` leaves B and C as paths: a test name is no file and no tracked path.
+  if [[ ${#tests[@]} -gt 0 ]]; then
+    for path in ${paths[@]+"${paths[@]}"}; do
+      if [[ ! -e "$path" ]] && ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1 && [[ "$path" != *.* || "$path" != */* ]]; then
+        refuse "'$path' is not a path: each test needs its own --test (--test A --test B), not --test A B"
+      fi
+    done
+  fi
   [[ -n "$message" ]] || refuse "commit needs -m MESSAGE"
   message_owned "$lane" "$message"
   [[ ${#paths[@]} -gt 0 ]] || refuse "commit needs the exact paths to commit"
-  local path owner
+  local owner
   for path in "${paths[@]}"; do
     valid_path "$path"
     owner="$(owner_of "$path" || true)"
@@ -325,20 +366,38 @@ commit_locked() {
 }
 
 release() {
-  local lane="$1"
+  local lane="$1"; shift
   valid_lane "$lane"
-  rm -f "$claims/$lane.paths" "$claims/$lane.base"
-  echo "lane $lane released"
+  local file="$claims/$lane.paths" path
+  [[ -e "$file" ]] || { echo "lane $lane holds no claims"; return 0; }
+  if [[ $# -eq 0 ]]; then set -- $(cat "$file"); fi
+  for path in "$@"; do
+    path="${path#./}"
+    grep -qxF -- "$path" "$file" || refuse "lane $lane does not hold '$path'"
+  done
+  for path in "$@"; do
+    path="${path#./}"
+    printf '%s\t%s\n' "$path" "$lane" >> "$holders"
+    grep -vxF -- "$path" "$file" > "$file.tmp" || true
+    mv "$file.tmp" "$file"
+  done
+  if [[ ! -s "$file" ]]; then rm -f "$file" "$claims/$lane.base"; fi
+  echo "lane $lane released ${#} path(s)"
 }
 
 status() {
+  if [[ $# -gt 0 ]]; then
+    valid_lane "$1"
+    [[ -e "$claims/$1.paths" ]] && cat "$claims/$1.paths" || echo "lane $1 holds no claims"
+    return 0
+  fi
   local file lane
   shopt -s nullglob
   local any=0
   for file in "$claims"/*.paths; do
     any=1
     lane="$(basename "$file" .paths)"
-    echo "$lane (since $(cut -c1-9 "$claims/$lane.base" 2>/dev/null || echo '?')): $(tr '\n' ' ' < "$file")"
+    echo "$lane (since $(cut -c1-9 "$claims/$lane.base" 2>/dev/null || echo '?')): $(wc -l < "$file" | tr -d ' ') paths"
   done
   [[ $any == 1 ]] || echo "no live claims"
 }
@@ -349,6 +408,6 @@ case "$command" in
   commit) commit "$@" ;;
   _commit-locked) commit_locked "$@" ;;
   release) release "$@" ;;
-  status) status ;;
+  status) status "$@" ;;
   *) sed -n '2,29p' "$0"; exit 1 ;;
 esac
