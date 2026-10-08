@@ -298,6 +298,8 @@
   [missing path anchor nearest]
   (refusal/diagnostic (java.util.Date.) :seon.ref/section 'seon.ref/section
                       (cond-> {:seon.error/message (if (= :file missing) "No such file at this reference." "No heading with this anchor.")
+                               :seon.error/offending (cond-> {:seon.ref/path path} anchor (assoc :seon.ref/anchor anchor))
+                               :seon.error/expected nearest
                                :seon.ref/section-missing missing :seon.ref/path path :seon.ref/nearest nearest}
                         anchor (assoc :seon.ref/anchor anchor))))
 
