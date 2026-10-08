@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.config]
             [seon.sci.eval]
+            [seon.program]
             [seon.fn :as functions]
             [seon.id :as id]
             [seon.instrument]
@@ -664,4 +665,34 @@
          "a fresh branch has changed nothing")
      (define! branch '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
      (is (= [[:seon.fn/sym 'reach.fixture/b]] (sut/changes child branch)) "only its own definition")
+     (finally (agent/release-context! child)))))))
+
+(defn- namespace-with-aliases
+  "`reach.fixture`'s row as `(ns reach.fixture (:require ...))` writes it with `aliases` (local to target)."
+  [database aliases]
+  (seon.program/declaration-row
+   (db/carried-projection database)
+   {:seon.ns/name 'reach.fixture
+    :seon.ns/source (pr-str (list 'ns 'reach.fixture (list* :require (map (fn [[local target]] [target :as local]) aliases))))
+    :seon.ns/requires (set (vals aliases))
+    :seon.ns/aliases (mapv (fn [[local target]] {:seon.ns.alias/local local :seon.ns.alias/target-ns target}) aliases)}
+   :all :agent))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/a-require-in-a-hub-namespace-reaches-every-test}}
+  a-require-that-adds-an-alias-reaches-no-test-and-one-that-removes-it-reaches-its-namespace
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (support/transacted! connection [(namespace-with-aliases (db/db connection) {'s 'clojure.string})])
+   (let [child (agent/acquire-context! (support/execution-handle connection) nil {:seon.agent/isolate? true})
+         branch (:seon.db/connection child)]
+    (try
+     (support/transacted! branch [(namespace-with-aliases (db/db branch) {'s 'clojure.string 'tsp 'clojure.set})])
+     (is (= :seon.test/policy-unscoped (:seon.test/selection-refusal (sut/changes child branch)))
+         "an added alias no declaration uses is no change")
+     (let [aliases (db/q '[:find [?a ...] :where [?n :seon.ns/name reach.fixture] [?n :seon.ns/aliases ?a]
+                                                 [?a :seon.ns.alias/local s]] (db/db branch))]
+      (support/transacted! branch (conj (mapv #(vector :db/retractEntity %) aliases)
+                                        (namespace-with-aliases (db/db branch) {'tsp 'clojure.set}))))
+     (is (= [[:seon.ns/name 'reach.fixture]] (sut/changes child branch)) "a removed alias is a change of its namespace")
      (finally (agent/release-context! child)))))))

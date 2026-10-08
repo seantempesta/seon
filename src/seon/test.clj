@@ -1881,14 +1881,40 @@
     recorded
     (or (fork-commit store candidate) recorded)))
 
+(defn- bindings
+  "The names namespace `ns-name` binds on `database`: its requires and its alias, refer and import bindings; none when it is absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :seon.schema/value]]}
+  [database ns-name]
+  (let [entity (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]] database ns-name)
+        row (cond (:seon.error/at entity) entity
+                  entity (db/pull database [:seon.ns/requires
+                               {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
+                               {:seon.ns/refers [:seon.ns.refer/local :seon.ns.refer/target-ns :seon.ns.refer/target-name]}
+                               {:seon.ns/imports [:seon.ns.import/local :seon.ns.import/target-class]}]
+                                  entity)
+                  :else {})]
+    (if (:seon.error/at row)
+      (throw (ex-info (:seon.error/message row) row))
+      ;; a namespace binding nothing pulls as nil
+      (into (set (map #(vector :require %) (:seon.ns/requires row)))
+            (mapcat #(get row %)) [:seon.ns/aliases :seon.ns/refers :seon.ns/imports]))))
+
+(defn- binding-lost?
+  "Whether namespace `ns-name` binds on `candidate` less than on `world`: a removed or retargeted
+  binding may change what its declarations resolve; an added one resolves nothing they already use."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :symbol] :boolean]}
+  [world candidate ns-name]
+  (boolean (seq (remove (bindings candidate ns-name) (bindings world ns-name)))))
+
 (defn changes
   "What a check of `execution` must reach: the declarations its program holds
   at other behavior digests than its base (`change-base`: the published commit
   on the cluster's own branch, the fork commit on any other), so a branch's
   change is its own (`behavior-differences`: a docstring-only change is none).
   A namespace identity is a binding change; it stays only when the namespace
-  declares something a test can reach. Equal programs refuse by name: there
-  is no change to check."
+  declares something a test can reach and lost or retargeted a binding its base
+  held (`binding-lost?`): a require that only adds an alias reaches no test.
+  A change no test can observe refuses by name: there is no change to check."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
                   [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
   [execution recording]
@@ -1910,13 +1936,15 @@
                                 :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
                               candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))
             changed (when (sequential? declaring)
-                      (vec (sort print/compare-values (filter (fn [[a v]] (or (not= :seon.ns/name a) (some #{v} declaring)))
-                                                              identities))))]
+                      (vec (sort print/compare-values
+                                 (filter (fn [[a v]] (or (not= :seon.ns/name a)
+                                                         (and (some #{v} declaring) (binding-lost? world candidate v))))
+                                         identities))))]
         (cond (:seon.error/at differences) differences
               (not (sequential? declaring)) declaring
               (empty? changed)
               (request-refusal :seon.test/policy-unscoped
-                               "My program equals my base (the published commit, or the commit my branch was forked at): there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
+                               "Nothing I changed since my base (the published commit, or the commit my branch was forked at) is a change a test can observe: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
                                base)
               :else changed)))))
 
