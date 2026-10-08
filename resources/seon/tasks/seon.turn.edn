@@ -201,4 +201,9 @@
              :kind :function
              :intent "An MCP SCI pass costs megabytes per form whatever the form does. Measured on default with seon.pass-probe/mcp!: 100 forms (+ n 1) 469 ms / 1.15 GB; 400 unresolved words 1,481 ms / 2.37 GB. After pass-cost (once-per-pass namespace lookup, config defaults, terminal ordinal, identity pull, JVM render policy): 100 forms SCI 191 ms / 350 MB, JVM 115 ms / 195 MB, still about 2.3 MB per SCI form. Remaining: retired context refresh and read evidence (S4), repeated recording and observation (S5), receipt machinery (S6), armed hot internals, Datahike query-cache inheritance walk. Correct: per-form work proportional to what the form did, well under 1 MB for a form that defines nothing. Proof: a pass-probe row where 100 non-defining forms allocate under 10x one form."
              :must-read #{seon.turn/resume-turn seon.db/with-declarations}
-             :evidence #{"docs/research/agent-platform/2026-10-07/pass-cost/design-notes.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/pass-cost/design-notes.md"}}
+ #:seon.task{:name "an-armed-agents-run-forks-the-program-acquired-before-a-later-commit"
+             :kind :function
+             :intent "An armed agent's run (resume-turn) forked the cluster base context it captured at arming without acquiring the program its connection now holds, so a program change committed by another writer (boot's adoption of the loaded files, another agent's definition) stayed invisible to every SCI run until something else called seon.cluster.agent/acquire-context!. Observed on default after a restart onto b5ff51e4c: root's (doc h) failed 'Unable to resolve symbol: seon.sci.eval/reference-in' for two minutes while a freshly hosted agent and the JVM path saw the function. Correct: each pass acquires its base at the connection's current value before forking (a no-op when the program is unchanged)."
+             :must-read #{seon.turn/resume-turn seon.sci.eval/acquire! seon.cluster.agent/acquire-context!}
+             :evidence #{"docs/research/agent-platform/2026-10-07/doc-fix/doc-resolution-notes.md"}}]

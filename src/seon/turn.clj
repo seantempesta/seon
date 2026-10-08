@@ -5143,15 +5143,26 @@
         run-id (:seon.turn/id work)
         base-ctx (:seon.sci.eval/ctx cluster)
         forked
-        (phase #(sci.eval/fork-for-turn
-                 (cond-> {:seon.sci.eval/ctx base-ctx
-                  :seon.db/db (db/db connection)
-                  :seon.db/connection connection
-                  :seon.agent/id agent-id
-                  :seon.turn/id run-id}
-                   (:seon.sci.eval/agent-ctx cluster)
-                   (assoc :seon.sci.eval/agent-ctx
-                          (:seon.sci.eval/agent-ctx cluster)))))
+        (phase
+         (fn []
+           (let [database (db/db connection)
+                 ;; The base the graph captured at arming acquires the program
+                 ;; its connection holds now, as `seon.cluster.agent/acquire-context!`
+                 ;; does: a program another writer committed since (adoption,
+                 ;; another agent's definition) is this run's program.
+                 acquired (sci.eval/acquire! {:seon.sci.eval/ctx base-ctx :seon.db/db database})]
+             (when-let [failure (:seon.sci.eval/acquisition-recording-error acquired)]
+               (throw (ex-info "Program acquisition could not record its refusals."
+                               {:seon.sci.eval/acquisition-recording-error failure})))
+             (sci.eval/fork-for-turn
+              (cond-> {:seon.sci.eval/ctx base-ctx
+                       :seon.db/db database
+                       :seon.db/connection connection
+                       :seon.agent/id agent-id
+                       :seon.turn/id run-id}
+                (:seon.sci.eval/agent-ctx cluster)
+                (assoc :seon.sci.eval/agent-ctx
+                       (:seon.sci.eval/agent-ctx cluster)))))))
         trigger (phase #(message/trigger (db/db connection) run-id))
         ;; handles a fresh fork could not bind: a core fault delivered to this
         ;; agent's next context; the turn continues without them

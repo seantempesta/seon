@@ -13,6 +13,7 @@
             [seon.flow :as flow]
             [seon.id :as id]
             [seon.sci.admit :as admit]
+            [seon.sci.eval :as sci.eval]
             [seon.batch :as batch]
             [seon.test-support :as support]
             [seon.turn :as turn]
@@ -311,3 +312,25 @@
        (testing "a print-time redefinition supersedes the body-time one"
          (code "(do (defn lazy-r [x] 1) (map (fn [_] (defn lazy-r [x] 2) 0) [1]))")
          (is (= "(defn lazy-r [x] 2)" (source-of 'lazy-r))))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/an-armed-agents-run-forks-the-program-acquired-before-a-later-commit}}
+  an-armed-agents-run-sees-a-program-change-committed-by-another-writer
+  ;; Boot arms agents, then adoption commits the loaded files' entities: the
+  ;; next run must evaluate against that program, so `(doc x)` and a call of
+  ;; the new definition resolve in the agent's own context.
+  (with-armed-agent
+   (fn [{:keys [connection cluster-name code]}]
+     (code "(+ 1 2)")
+     (support/define! (world/agent-world {:seon.db/connection connection :seon.cluster/name cluster-name
+                                          :seon.sci.eval/base-ctx (sci.eval/base-ctx (db/db connection))}
+                                         {:seon.agent/id "later-writer"})
+                      'my.agents.later-writer
+                      "(defn later-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+     (let [result (code (str "(my.agents.later-writer/later-inc 1)\n"
+                             "(:arglists (doc my.agents.later-writer/later-inc))\n"
+                             "(:arglists (doc clojure.set/union))\n"
+                             "(contains? (doc no-such-name) :seon.sci.eval/documentation-unavailable)"))
+           receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])]
+       (is (not-any? :seon.cluster.eval/error receipts) "every form resolves in the agent's run")
+       (is (= [2 '([x]) '([] [s1] [s1 s2] [s1 s2 & sets]) true]
+              (mapv #(edn/read-string (:seon.eval/shown %)) receipts)))))))
