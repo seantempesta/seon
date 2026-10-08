@@ -1,7 +1,7 @@
 ---
 title: The pass and its recording (redo of admission/P8 and the cursor-intent cut)
 type: research
-status: design, for owner review
+status: approved by the owner 2026-10-08, with the transaction census folded in (§2.1)
 date: 2026-10-08
 lane: redo-pass
 ---
@@ -10,7 +10,10 @@ lane: redo-pass
 
 Replaces, as one acyclic sequence: P7, P8 (with admission-design §7 S5-04a-j), P9, P12, P13, P14, S6-03 and S6-04a/b.
 Authority: `review/owner-rulings.md` lines 9, 11-12, 31-33, then CLAUDE.md. Both reviews read in full. Code cited at HEAD
-`aeb692d87`; default runs source `9c88ae5b8` (it does not yet hold P7a, P11 or PB-01).
+`aeb692d87`; default runs source `9c88ae5b8` (it does not yet hold P7a, P11 or PB-01). The owner approved this design on
+condition that the transaction census (`tx-census/tx-census-opus.md`) is folded in before the first recording row
+starts: §2.1 is that fold-in (lane cards-recording, HEAD `22910a03a`), and the implementation cards are
+`docs/seon/schedule/cards/RP-*.md` and `TX-*.md`.
 
 **In one paragraph.** Each entrance hands the pass a text and a read stage. The pass reads one form at the live cursor,
 lets SCI evaluate it, prints it while observation is open, and captures every Var write as a value at the moment it
@@ -83,7 +86,9 @@ after the last form:
           removals in order → final state + findings
   RECORD  ONE [:db.fn/call] at the writer on the current head: call row (pass id, reply text or
           blob digest, start ns, provider attempt facts), evaluation rows (pass id + ordinal, minted
-          before eval; ordinals at the writer), the final program, findings and repairs as data
+          before eval; ordinals at the writer), the final program, findings and repairs as data;
+          the transaction entity carries who, when, which eval request and which basis (§2.1),
+          so no row repeats them
 ```
 
 **What the recording may and may not refuse.** It checks the shape of each value it writes against that value's
@@ -118,6 +123,94 @@ under, so its edges are what its Var does. Its digest uses the final row the rec
 aliases differ between the two rows gets `[:alias-retargeted sym alias]`, because a reload would change its meaning.
 The check compares alias maps restricted to the alias names the analysis says it used (O(aliases used)).
 
+### 2.1 Transaction metadata (the census fold-in)
+
+The census measured what a commit costs on default (`tx-census-opus.md` §1): 41 KB retained plus a 29 KB branch-head
+rewrite before any data, and ~1.5-2.5 node objects (4-10 KB each) per distinct attribute it touches; folding 7 commits
+into 1 cut retained bytes 2.6-2.9× and time 5.5× (606-629 → 206-241 KB, 106-112 → 20 ms). So the recording is one
+commit, and the provenance every row repeats today (who, when, which eval request, which basis) moves onto the one
+transaction entity, where Datahike already records `:db/txInstant`.
+
+**What every Seon transaction carries.** One owner writes it: `seon.db/stamp-transaction` (`src/seon/db.clj:3570`),
+which already appends `{:db/id :db/current-tx …}` and installs a missing stamp attribute inline on an old store
+(`:3580-3590`). Each value comes from the transaction request map first (a writer that runs outside an evaluation's
+binding, such as `seon.turn.batch/settle`, names them there), else from the eval request's world
+(`seon.batch/*world*`, `src/seon/batch.clj:39`).
+
+| Attribute | Value | Indexed | Present when | Consumer |
+|---|---|---|---|---|
+| `:db/txInstant` | Datahike's | no | always | every "when" (replaces the instants listed below) |
+| `:seon.db.transaction/operation` | the writer's symbol (exists) | AVET (exists) | always | health, census, error delivery |
+| `:seon.db.transaction/agent` | agent id string (exists) | AVET (exists) | the request or world names an agent: every agent-caused write, the JVM-mode recording included (TX-4) | who wrote this; merge review |
+| `:seon.db.transaction/eval-request` | the eval request id string: today's `:seon.turn/id` of the call row (`:seon.turn/id` in the world, `src/seon/turn.clj:4978`, `src/seon/mcp.clj:274`) | no | inside an eval request | recovery (RP-15a), effects (EN-1), a row's eval request without `:seon.cluster.eval/run` |
+| `:seon.db.transaction/basis-t` | the t of the value the eval request read first: a model eval request's presented context basis, an MCP eval request's branch head at its start (`:seon.batch/basis`, `turn.clj:4940`) | no | inside an eval request | S6-05's answered basis; replaces the per-evaluation `read-basis-transaction` |
+| `:seon.db.transaction/merge-request` | the merge request id string | no | the merge commit only (MA-11) | which merge brought a merged row; replaces `:seon.merge/merged-by` |
+| `:seon.db/process` | ref to the process row (exists) | AVET (ref) | system writers (boot) | boot, recovery |
+
+All are values, never refs to agent, task or eval request rows: tx metadata is written on agent branches, checkpoint and
+test-member worlds that hold none of those rows, and on merge branches; a ref fails where the row is absent, eids
+differ between branches, a merge re-transacts, and `:db/retractEntity` would retract it from transaction entities
+(census §4). A task symbol is not stamped: nothing reads it (add it with its first consumer).
+
+The world gains one member, `:seon.db/basis-t` (optional, `resources/seon/schemas/seon.batch.edn` `:world`), set by
+the entrant where it takes `:seon.batch/basis`. The recording passes all four values in its request map, because the
+fold's RECORD runs outside the per-form `with-world` binding: probed on default, an MCP JVM eval request's recording
+transaction (`seon.turn/record-evaluated-call`) carries no agent, and an SCI eval request's recording is named
+`seon.db/absent-call` (the first `:db.fn/call`, the run-open intent) instead of its writer.
+
+**What it deletes** (each with its row):
+
+| Deleted | Replaced by | Row |
+|---|---|---|
+| `:seon.turn/opened-tx`, `:seon.turn/closed-tx` (the call row's open and close refs; a call row exists only once recorded) | the call row's own transaction (`[?call :seon.turn/id _ ?tx]`) | RP-14 (open), TX-8b (close readers) |
+| `:seon.cluster.eval/at` | `:db/txInstant` of the evaluation's transaction | TX-8a |
+| `:seon.cluster.eval/origin` | a model form is found through its call row's model attempt | NK-5 (unchanged) |
+| `:seon.cluster.eval/run` | `:seon.cluster.eval/agent-ordinal` (S4-01) for agent order; the transaction's `eval-request` → `[:seon.turn/id v]` for the call row | TX-8c |
+| `:seon.cluster.eval/read-basis-transaction` | the transaction's `basis-t` | TX-8a |
+| `:seon.ai.attempt/at`, `:seon.test.run/at`, `:seon.test.member/completed-tx`, `terminated-tx`, `:seon.test.run/selection-tx` | `:db/txInstant` and the writing transaction | RP-14 (attempt), EN-6 (test run and member) |
+| the schedule triple: `:seon.maintenance.request/*` + `:seon.maintenance.receipt/*` + `:seon.schedule.fire/*` repeating agent, task, handler and instants | one fire entity; agent and operation on the transaction | TX-7b |
+| `:seon.db/receipt`, `db/*receipt*`, `db/*open*`, `:seon.db/pending-open` | the transaction's `eval-request` | RP-14 |
+| `:seon.error.occurrence/process`, `first-at`, `last-at`, `:seon.error/at` | `:seon.db/process`, `:db/txInstant` | TX-3 (the base drops `at` in E-CUT) |
+| `:seon.merge/merged-by` (planned, never added) | the merge transaction's `agent` | MA-11 |
+| `:seon.effect/run`, `:seon.effect/eval`, the planned `:seon.effect/pass` | the receipt's opening transaction's `eval-request`, plus `:seon.effect/form-ordinal` | EN-1 |
+
+**Limits, kept.**
+- **Transaction → datoms is not indexed.** Datahike filters the transaction position and never seeks by it
+  (`reference-code/datahike/src/datahike/db/search.cljc:152`, the `[_ a _ t *]` row), and it has no transaction log. Entity → transaction is
+  cheap (the datom carries its tx); "everything eval request X wrote" scans the AEVT range of each attribute. So the
+  agent's hot read keeps one indexed fact on the evaluation (S4-01's `:seon.cluster.eval/agent-ordinal`), and the call
+  row keeps its `:seon.turn/id` identity and its `:seon.turn/agent` ref. Metadata answers who, when, why and which basis
+  for a fact already in hand.
+- **A merge re-transacts.** `d/merge-db!` writes one new transaction on the target; source transaction entities are not
+  copied, and the source commit is reachable through the merge commit's parents (`datahike/writing.cljc:928-937`) only
+  while retention keeps it (`datahike/gc.cljc:79`). After that the target answers "root, merge request M", and the merge
+  request names the source branch: the same loss MA-11 and NK-8a already choose for the evaluation pointer.
+- **A tx attribute must be installed before use** (`datahike/db/transaction.cljc:904-923` refuses an unknown one):
+  `stamp-transaction`'s inline-install list gains the new attributes, and the schema is published and adopted on a
+  branch of the live store (TX-0).
+- **Seon's tx-data form, not Datahike's `:tx-meta`**, which applies only with `keep-history?`
+  (`transaction.cljc:1270`).
+- **Group commit** shares one commit between queued transactions (`datahike/writer.cljc:229-295`); metadata is per
+  transaction, so it stays correct.
+
+**Cost.** Each tx attribute written on a commit dirties its AEVT tail leaf (plus AVET when indexed): measured +5
+objects / +15.5 KB for the indexed `operation` on default, about half that for an unindexed one. `eval-request` and
+`basis-t` are unindexed and written only inside eval requests; against them, an ordinary eval record loses ~10 of its
+25 attributes (the turn's open and close refs, `at`, `origin`, `run`, `read-basis-transaction`, the stamp's profile
+attributes with S5-02, the measurement rows), roughly 60-100 KB less per eval request on default.
+
+**Census row corrections, applied in the ledger and the cards.**
+- RP-14: the open and the attempt's timestamp are not carried into the one commit at all; the call row is written once
+  by the recording, and the attempt's measured data (usage, latency, tokens) is EN-2's `call-facts`.
+- EN-6: a cold test request is 8 commits on three branches; EN-6's "twice" counts the recording branch only.
+  `prepare-checkpoint!`'s four commits on the checkpoint branch fold into one (TX-5), and the in-memory member overlay
+  writes nothing to the store.
+- MA-11: no `:seon.merge/merged-by`; the merge transaction carries root's agent and eval request plus the merge request
+  id, and drops the copied `seon.turn/*` and `seon.cluster.eval/*` rows from the merged program (TX-6).
+
+**The second census** (`tx-census-astra.md`, lane tx-census-astra) had not landed when this fold-in was written. Where
+it later disagrees, the disagreement is stated here with both measurements and a choice.
+
 ## 3. Entrances as read stages (the DATA reader, which Astra flagged)
 
 | Mode | Text | Rules |
@@ -148,9 +241,10 @@ The pass writes nothing durable of its own before RECORD. A crash before the com
 - for a model pass, the provider's reply (the wake stays unanswered, so the model is asked again).
 
 A crash does not lose any durable effect a form already made: the agent's `transact!`, a `register!` commit, or an
-effect receipt keyed on pass id + ordinal (S6-01). The work stays due; an effect repeats unless its owner is
-idempotent. Boot recovery shrinks to `effect/interruption-stamps` over receipts whose pass id has no recorded
-evaluation. `recover-tx`, `recover-call`, the open/close families and `:seon.boot/recovered-runs` are deleted. Nothing
+effect receipt whose opening transaction carries the eval request id (§2.1, EN-1). The work stays due; an effect
+repeats unless its owner is idempotent. Boot recovery shrinks to `effect/interruption-stamps` over the open receipts
+whose opening transaction's `:seon.db.transaction/eval-request` names no recorded call row (`[:seon.turn/id v]`
+absent): open receipts are few, and each is entity → transaction, so no transaction scan is needed. `recover-tx`, `recover-call`, the open/close families and `:seon.boot/recovered-runs` are deleted. Nothing
 is resumed, and no live value is serialized.
 
 ## 5. Deleted
@@ -164,6 +258,8 @@ is resumed, and no live value is serialized.
   `revalidate`, `rebase`, `changed-since-basis`, `analyze-form`, `captured-locals`' second kondo run, the facts-error
   stamp, `turn/not-admitted`, and `removal-facts`' refusal branch.
 - **Declaration machinery:** `seon.sci.reader` `declaration-facts` and its recovery helpers (P13).
+- **Provenance rows** (§2.1): `:seon.turn/opened-tx`/`closed-tx`, `:seon.cluster.eval/at`/`run`/
+  `read-basis-transaction`, `:seon.ai.attempt/at`, `:seon.db/receipt`.
 
 Estimate: about 1,100 source lines out, about 150 in.
 
@@ -179,6 +275,8 @@ Estimate: about 1,100 source lines out, about 150 in.
 | `defn` pass | 126-131 ms / 159 MB | < 120 ms, ≤ 60 MB |
 | five-`defn` pass | 243-256 ms / 355-370 MB | < 150 ms, ≤ 80 MB |
 | model pass (Seon's part) | 7 commits, 375-675 ms | 1 commit; the same as an MCP pass of the same forms + block |
+| one commit on default (census §1) | 41 KB retained + 29 KB head, 15-20 ms, + ~1.5-2.5 objects per distinct attribute | unchanged; fewer commits and fewer attributes per commit are the lever |
+| ordinary eval record on default (census §2) | 253 KB (SCI), 288 KB (JVM), 25 attributes | ~150-190 KB: ~10 provenance attributes move to the transaction |
 
 Where the `defn` pass's 159 MB goes is not decomposed here. RP-0 measures that before A-rows are ranked.
 
@@ -205,7 +303,8 @@ rows must not regress over 20% or 50 ms.
 | RP-11 (P7, S6-03) | submission = text + mode; live cursor (`sci.batch/read-next`) for model and MCP; repairs attach per entry from the read step; delete the reading list of §5 | `src/seon/turn.clj`, `src/seon/cluster/agent.clj`, `src/seon/sci/forgive.clj`, `test/seon/repl_differential_p7_test.clj` (marked) | `:seon.agent/run-request` holds `:seon.batch/text`, no `:seon.turn/sources` | `seon.repl-differential-p7-test/an-alias-required-by-one-form-resolves-in-the-next`, the P6/P7a rows | RP-10 |
 | RP-12 (P7a fix) | repairs, findings and diagnostics stored as data; publish and adopt the schema on a branch of the live store | `seon.cluster.eval.edn`, `src/seon/turn.clj`, `src/seon/turn/batch.clj`, test | §2 tuple and component shapes | `seon.repl-differential-p7-test/repairs-ride-beside-the-form-they-repaired` (marked; pulls the tuple set) | RP-11, RP-7 |
 | RP-13 (P12) | code input with no form answers `nil` | `src/seon/turn.clj`, test | — | `…-p8-test/a-discarded-form-answers-nil` | RP-11 |
-| RP-14 (S6-04a) | run open and attempt facts ride the one settlement; delete `open-turn`'s commit, `submission-open-tx`, `*open*`, `pending-open`, `*receipt*` | `src/seon/turn.clj`, `src/seon/db.clj`, `src/seon/sci/eval.clj`, `seon.db.edn`, `test/seon/db_test.clj` | — | `seon.db-test/a-transaction-stamp-carries-no-ref-to-an-unrecorded-evaluation`; the model row asserts 1 commit per pass | RP-10, S6-01, S6-02b (outside) |
+| TX-0 | every transaction carries `eval-request` and `basis-t`; the recording names its operation, agent, eval request and basis in its request map (§2.1) | `src/seon/db.clj`, `seon.db.transaction.edn`, `seon.batch.edn`, `src/seon/turn/batch.clj`, `src/seon/turn.clj`, `src/seon/mcp.clj`, `test/seon/db_test.clj` | `stamp-transaction` unchanged arity | `seon.db-test/an-eval-request-commit-names-its-eval-request-on-the-transaction` | — |
+| RP-14 (S6-04a) | the run open and the attempt's own commit are dropped, not carried: the call row is written once by the recording, its `opened-tx`/`attempt/at` facts are not written (the transaction is the open and the instant, §2.1), the attempt's measured data rides EN-2's `call-facts`; delete `open-turn`'s commit, `submission-open-tx`, `*open*`, `pending-open`, `*receipt*`, `:seon.db/receipt` | `src/seon/turn.clj`, `src/seon/db.clj`, `src/seon/sci/eval.clj`, `seon.db.edn`, `test/seon/db_test.clj` | — | `seon.db-test/a-transaction-stamp-carries-no-ref-to-an-unrecorded-evaluation`; the model row asserts 1 commit per pass | RP-10, TX-0, EN-1, EN-5, EN-8b |
 | RP-15a (S6-04b) | boot recovery = `effect/interruption-stamps` by pass id; delete `recover-tx`/`recover-call`/close families, `:seon.boot/recovered-runs` | `src/seon/turn.clj`, `src/seon/cluster/boot.clj`, `seon.boot.edn`, test | — | `seon.cluster.turn-test/a-crash-before-record-keeps-only-durable-effects` | RP-14 |
 | RP-15b-d | the 24 `turn/open-tx` fixture files convert to the pass entrance (three groups of 8, per I-Q10) | listed in I-Q10 | — | each group's existing tests green | RP-15a |
 | RP-16 (DATA) | `:data` read stage (§3) and the `:seon.config.ai/entrance` dial | `src/seon/sci/forgive.clj`, `src/seon/sci/batch.clj`, `seon.batch.edn`, test | mode enum gains `:data` | `…-p8-test/data-forms-read-at-the-cursor` (alias then `::a/k` element; malformed map; bad element continues) | RP-11 |
@@ -213,7 +312,9 @@ rows must not regress over 20% or 50 ms.
 
 The cycle P7 → P14 → S6 → S6-03 → P7 disappears. The model path already has the MCP submission path, which keeps no
 intent rows, so RP-10 needs nothing first. The cursor (RP-11) then changes only the submission's shape. The open and
-recovery deletions (RP-14, RP-15) come last, after the effect provenance (S6-01) they need. A rows and the RP-10/11
+recovery deletions (RP-14, RP-15) come last, after the effect provenance (EN-1) and the transaction metadata (TX-0)
+they need. TX-0 has no dependency and lands first. The ledger (`docs/seon/schedule/agent-loop-ledger.md` §3.2, §3.8,
+§3.25) holds the current order and status; this table is the design's. A rows and the RP-10/11
 rows touch disjoint files except `turn/batch.clj` (A only) and `turn.clj` (RP-7's `not-admitted`; serialize RP-7
 after RP-11).
 

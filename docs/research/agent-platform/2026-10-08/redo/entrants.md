@@ -1,6 +1,6 @@
 ---
 type: research
-status: design, for owner review
+status: approved by the owner 2026-10-08, with the transaction census folded in (§3, §5)
 date: 2026-10-08
 lane: redo-entrants
 ---
@@ -78,10 +78,14 @@ Its pass id is minted before eval (`seon.id/id`); its one evaluation has ordinal
 through the printer, replacing `render.value/core-text` in `member-result`. `test-agent-world` and its settlement
 connection are deleted: nothing records on another branch.
 
-**Effect provenance as values (S6-01; I-Q10 O1 answered).** The receipt stores `:seon.effect/pass` (the pass id
-string, a new name) and `:seon.effect/form-ordinal`; `:seon.effect/run`, the `:seon.effect/eval` ref and
-`evaluation-eid` (`effect.clj:210`) are deleted. The effect id stays `digest(pass, ordinal, effect-ordinal)`
-(`effect.clj:849`). `*request-context*` carries pass id, ordinal, connection, ctx, counter and cluster, never a row:
+**Effect provenance on the transaction (S6-01; I-Q10 O1 answered; revised by the census fold-in).** The receipt keeps
+`:seon.effect/form-ordinal`; its eval request is the `:seon.db.transaction/eval-request` of the transaction that
+opened it (`pass-and-recording.md` §2.1), passed explicitly in `open-call`'s request map from `*request-context*`, so no
+receipt attribute repeats it. `:seon.effect/run`, the `:seon.effect/eval` ref and `evaluation-eid` (`effect.clj:210`)
+are deleted, and the planned `:seon.effect/pass` is never added. A reader holding a receipt reaches its eval request
+entity → transaction (EAVT, cheap); boot recovery reads the open receipts (no result, no interruption: few) and
+interrupts those whose eval request has no call row. The effect id stays `digest(eval request, ordinal,
+effect-ordinal)` (`effect.clj:849`). `*request-context*` carries pass id, ordinal, connection, ctx, counter and cluster, never a row:
 the SCI binder (`sci/eval.clj:4180`) passes the pass id; for a test member the fold's eval stage binds the member's.
 
 **No attempt turn (S6-02b).** `attempt-writers`, `attempt-request-context`, the `:seon.test/effect-attempt?` flag
@@ -91,7 +95,13 @@ before its receipt opens, `:seon.error/type :seon.effect/background-in-test`: it
 agent the clean world does not hold, and the branch is released at exit.
 
 **The request in one transaction (EN-6, = F3).** The common path, every body exits inside the bound: after the last
-member, ONE `[:db.fn/call record-request …]` writes the run, its members, their results and exits. The writer checks
+member, ONE `[:db.fn/call record-request …]` writes the run, its members, their results and exits. Writer admission
+stays (OD-Q5), so the recording branch sees two commits per executed request. The run's `:seon.test.run/at` and
+`selection-tx` and each member's `completed-tx` and `terminated-tx` are not written: the record transaction's
+`:db/txInstant` and the transaction itself answer them (census fold-in). Counted honestly, a cold request is today 8
+commits on three branches (census §2): 3 on the recording branch, 4 on the checkpoint branch from
+`prepare-checkpoint!` (`test.clj:1790`), and the member overlay, which is in memory and writes nothing to the store.
+After EN-6 and TX-5 a cold request is 3 commits (admission, record, one checkpoint commit) and a warm one 2. The writer checks
 the reach digests against its head, as admission does today. A body that outlives the bound gets its "held" fact
 written at the bound, and its exit fact at actual exit (`record-exit!`). That is the rare path, and it keeps
 ownership until exit. Overlap of live work is guarded by the runner's process roster of live bodies, keyed by
@@ -109,7 +119,7 @@ transaction.
 | fold per member (read, eval stage, print) | 0.30 ms / 0.36 MB without print | ≤ 2 ms / ≤ 2 MB with print |
 | member body acquire + run + release | 19-28 ms | unchanged (agent work) |
 | clean world, unchanged program | 152-159 ms | ≤ 15 ms (branch! + cache hit) |
-| request recording | 3 tx, ~60-100 ms | 1 tx ≤ 40 ms |
+| request recording | 3 tx, ~60-100 ms | admission + 1 record tx on the recording branch, plus 1 checkpoint commit when the clean world is built (census: cold 8 commits, 545 KB, 1,592 ms) |
 | one executed proof, warm | 506-1,040 ms / ~1 GB | < 150 ms / < 20 MB (budget T) |
 | model pass | 7 commits, 507-886 ms, 0.7-1.1 GB | 1 commit, < 200 ms, 20-40 MB (C0) |
 | MCP SCI / JVM pass | 1 commit, 31-69 ms | unchanged; no regression over 20% or 50 ms |
@@ -119,12 +129,12 @@ transaction.
 | Id (replaces) | Change | Files | Contract | Proof | Deps |
 |---|---|---|---|---|---|
 | EN-0 | `seon.pass-probe/run-proof`: per repetition, redefine then check by identity, so every row executes a member | `test/seon/pass_probe.clj` | `[:=> [:cat :string :qualified-symbol pos-int?] [:vector :map]]` | `seon.pass-probe-test` row: every record `::member-executed? true` | — |
-| EN-1 (S6-01) | `:seon.effect/pass` + ordinal; delete `:seon.effect/run`, `:seon.effect/eval`, `evaluation-eid`; readers `effect.clj:60-115,405` and the receipt fixtures (I-Q10 §4); `turn.clj:1905` as a patch to group B | `src/seon/effect.clj`, `seon.effect.edn`, `test/seon/effect_test.clj`, fixtures | open-request `[:map [:seon.effect/pass :seon.turn/id] [:seon.effect/form-ordinal nat-int?] …]` | `seon.effect-test/a-receipt-names-its-pass-by-value`: MCP pass runs a stub capability; pull of the receipt has `:seon.effect/pass` = the call row id, no `:seon.effect/run` | — |
+| EN-1 (S6-01) | the receipt's eval request is its opening transaction's `:seon.db.transaction/eval-request` (passed by `open-call`'s caller); keep `:seon.effect/form-ordinal`; delete `:seon.effect/run`, `:seon.effect/eval`, `evaluation-eid`; readers `effect.clj:58-115,385-408` and the receipt fixtures (I-Q10 §4); `turn.clj:1897-1905` goes with S4-06's refresh deletion | `src/seon/effect.clj`, `seon.effect.edn`, `test/seon/effect_test.clj`, fixtures | open-request loses `:seon.effect/run` | `seon.effect-test/a-receipt-names-its-eval-request-on-its-transaction`: an MCP eval request runs a stub capability; the receipt has no `:seon.effect/run`, and its opening transaction's `eval-request` is the call row's `:seon.turn/id` | TX-0 |
 | EN-2 (S5-07a) | `settle` takes `:seon.turn.batch/call-facts`; `record-evaluated-call` merges them into the call row | `src/seon/turn/batch.clj`, `seon.batch.edn`, test | `settle [request batch] → :seon.batch/commit` unchanged | `seon.mcp-entrance-test/every-entrant-keeps-values-through-recording-failure` JVM row: a refusing writer as the world's `:seon.db/writer`; the value printed; diagnostic `:seon.error/type` present | RP-7 |
 | EN-3 (S5-06, ready) | JVM mode holds no SCI acquisition | as ledger | as ledger | as ledger | — |
 | EN-4 (S6-02a) | member through the fold: `test-request` `:body` stage, show by the printer, no settle; `test-agent-world` deleted | `src/seon/test.clj`, `src/seon/turn/batch.clj` (`test-request` only), `src/seon/turn/world.clj`, `seon.batch.edn`, `test/seon/test_test.clj` | `member-result` unchanged; `test-request [{:seon.batch/body fn :seon.batch/world w}] → :seon.batch/request` | `seon.test-test/a-member-body-runs-as-one-pass`: an MCP check of a red proof; the recorded report's actual is the printer's value data and the request recorded 0 rows on any member branch | EN-1 |
 | EN-5 (S6-02b) | delete attempt writers, the flag and the effect-reach walk; fold binds the member's request context; background refusal | `src/seon/test.clj`, `src/seon/effect.clj`, schemas, `test/seon/test/effect_attempt_test.clj` | `request*` error union gains `:seon.effect/background-in-test` | `seon.test-test/a-test-effect-needs-no-attempt-agent-or-turn` (body pulls its receipt: pass = its member pass, no `attempt-` agent); `…/a-background-effect-in-a-test-is-refused-by-name` | EN-4 |
-| EN-6 (F3) | request recorded in one transaction; held fact only past the bound; process roster of live bodies | `src/seon/test.clj`, `src/seon/test/runner.clj`, `seon.test.run.edn` | `record-request [db completion] → tx-data` | `seon.test-test/an-executed-proof-request-commits-once`: transactions on the recording branch carrying the run id = 1; T row | EN-4, F1 |
+| EN-6 (F3) | request recorded in one transaction after writer admission (two commits on the recording branch); held fact only past the bound; process roster of live bodies; run `at`/`selection-tx` and member `completed-tx`/`terminated-tx` not written (the transaction answers them) | `src/seon/test.clj`, `src/seon/test/runner.clj`, `seon.test.run.edn`, `seon.test.member.edn` | `record-request [db completion] → tx-data` | `seon.test-test/an-executed-proof-request-commits-twice`: transactions on the recording branch carrying the run id = 2 (admission, record); the checkpoint branch's commits counted apart (TX-5); T row | EN-4, F1, TX-0 |
 | EN-7 (F2) | overlay digest in the checkpoint key | `src/seon/test.clj` | unchanged | existing `seon.sci.documentation-test/run-test-var-answers-one-branch-test-as-data`; T row: a second proof run on an unchanged program ≤ 15 ms in `clean-request-handle` | F1 |
 | EN-8 (S5-07c, d) | `evaluate-sources` keeps `settle`; model passes `call-facts`; delete `settle-batch!`, `settle-evaluated!`, `settle-batch-refusal!`, `with-submission` | `src/seon/turn.clj`, `test/seon/cluster/turn_test.clj` | `evaluate-sources` answers the fold's batch with `:seon.batch/commit` | SCI and model rows of the EN-2 table; `seon.cluster.turn-test/a-model-reply-pass-commits-its-evaluations-once` (marked) | EN-2, RP-10, RP-11, S5-05 |
 | EN-9 (S5-07f) | the test row of the table (a refused request recording keeps every member value); a search shows no old owner left | `test/seon/mcp_entrance_test.clj` | — | the EN-2 table, all four rows | EN-6, EN-8 |
