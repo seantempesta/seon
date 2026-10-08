@@ -161,8 +161,8 @@
 
   The operation reads the cluster defaults these overrides override."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/settings-view :seon.error/value]]}
-  [{database :seon.db/db agent-id :seon.agent/id}]
-  (let [overrides (settings database agent-id)]
+  [{database :seon.db/db agent-id :seon.agent/id supplied :seon.render/value}]
+  (let [overrides (if (map? supplied) (dissoc supplied :db/id :seon.config/agent) (settings database agent-id))]
     (if (:seon.error/at overrides)
       overrides
       {:my.agent/settings overrides
