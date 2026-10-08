@@ -140,6 +140,12 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   code), so a refactor or cost task has a red proof before the fix and is assigned like any other. Lives in: lane
   eval-alloc (the measure); pilot note `dogfood/pilot.md`.
 
+- **A same-submission check runs right after recording (owner 2026-10-08).** A `my.test/check` naming definitions made
+  earlier in the same eval request answers that it runs after this request records; the automatic test step runs those
+  tests right after the one recording transaction and puts their results in the same reply. One transaction stays
+  one; nothing tests uncommitted values. Supersedes "a same-pass check reads the live world" (row MS-11b). Lives in:
+  agent-loop.md §3.5; my.test check; F4 step.
+
 ## 5. Merge
 
 - **Git's words.** Base merge and branch concepts, verbs, functions and data on git, so every agent understands them
