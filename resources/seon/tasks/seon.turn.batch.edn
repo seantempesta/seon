@@ -48,4 +48,9 @@
   :kind :function
   :intent "When join-write answers :no-definition-at-origin the definition is not admitted, and the pass records nothing and says nothing: no note and no error. Correct: an unanalyzed note (an error value delivered in the reply) names the Var and the origin that joined no analyzed definition. Proof: a definition write whose origin joins no analyzed form answers a diagnostic naming it."
   :must-read #{seon.turn.batch/join-write}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/prose-design.md"}}
+ #:seon.task{:name "a-defn-rewrites-its-namespace-row"
+  :kind :function
+  :intent "One (in-ns 'seon.task) (defn merge-dogfood-probe ...) on an agent branch (2026-10-08, spec-merge dogfood) rewrites the seon.task namespace row: :seon.ns/doc, :seon.fn/file and :seon.task/tasks are dropped, :seon.schema.admission/source turns :core -> :agent, and the alias components are re-minted, so its digest changes. Effects: every defn makes the namespace row a change, two agents adding to one namespace always conflict on that row at merge, and an accepted merge strips the target namespace's docstring, file link and task edges. Done when a pass that changes no ns form leaves the namespace row (and its digest) unchanged, regression through MCP SCI asserting the digest."
+  :must-read #{seon.turn.batch/derive-form}
+  :evidence #{"docs/seon/specs/merge.md"}}]

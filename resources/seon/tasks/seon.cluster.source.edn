@@ -8,4 +8,25 @@
             :kind :function,
             :intent
             "seon.cluster.source/index-issues! (source.clj:523) indexes notes from an archive without .git, so every :seon.issue/opened is silently missing in production adoption. Done when the opened dates come from a declared source (the checkout's git) or the gap is recorded as a typed unknown, with a regression on an archive without .git. The issue namespaces are cut-planned (owner ruling 2026-09-28: cut only after tasks hold an ordered series); if the cut lands first, delete this task with it.",
-            :must-read #{seon.cluster.source/changed-identities}}]
+            :must-read #{seon.cluster.source/changed-identities}}
+ #:seon.task{:name "a-new-function-cannot-arm-in-the-merge-gate"
+             :kind :function
+             :intent "Live on default (2026-10-08, spec-merge dogfood), every proposal adding a contracted function in a new namespace prepares red: the proof that was green on the agent's branch errors on the candidate with 'Cannot interpret scratch.merge-dogfood3/sq: this context holds no Var to arm its contract on.' (seon.sci.eval/install-function-contract!). Hypothesis, unverified: the candidate's install-row! takes the evaluated? branch (mark-installed! then arm) for a row this context never evaluated. host-test a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root passes in its fixture world, so the live path differs. Done when a new function in a new namespace, proposed through MCP SCI, prepares green on a disposable target, as a regression through the real entrance."
+             :must-read #{seon.cluster.source/prepare-merge! seon.cluster/candidate-gate! seon.sci.eval/install-row!}
+             :evidence #{"docs/seon/specs/merge.md"}}
+ #:seon.task{:name "a-test-only-namespace-throws-at-prepare"
+             :kind :function
+             :intent "prepare-merge! of a proposal whose branch adds only a deftest in a new namespace throws 'Nothing found for entity id [:seon.ns/name scratch.merge-dogfood4]' (entity-id/missing) out of my.program/prepare-merge! in 77 ms, live 2026-10-08: the reconcile transaction names the namespace by lookup ref before the namespace row exists on the destination, or the namespace row is missing from the delta. A returning tool also must not throw. Done when that proposal prepares, regression through MCP SCI."
+             :must-read #{seon.cluster.source/prepare-merge! seon.fn/reconcile-tx}
+             :evidence #{"docs/seon/specs/merge.md"}}
+ #:seon.task{:name "a-branch-schema-blocks-diff-and-merge"
+             :kind :function
+             :intent "One seon.schema/register! on an agent branch makes my.program/diff and compare-branch refuse the whole comparison with 'Only function, test and namespace declarations may change here.' (seon.program/changed-identities), though digest-map compares :seon.schema/key as a family. A schema change can neither be seen nor merged. Done when diff lists the schema key as added/changed with its stored-data check against the target, and prepare carries it, regression through MCP SCI."
+             :must-read #{seon.program/changed-identities seon.cluster.source/compare-branch my.program/diff}
+             :evidence #{"docs/seon/specs/merge.md"}}
+ #:seon.task{:name "a-red-prepare-leaks-its-candidate-branch"
+             :kind :function
+             :intent "A prepare whose proofs are red leaves its candidate branch (:merge-<id>) in the store roster; only a successful accept retires it, so each refused review leaks one branch. Done when the candidate's lifetime is the merge task's: retired when the task closes (accepted or declined) or when a new prepare replaces it."
+             :must-read #{seon.cluster.source/prepare-merge! my.program/accept-merge!}
+             :evidence #{"docs/seon/specs/merge.md"}}
+]
