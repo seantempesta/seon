@@ -23,14 +23,14 @@ come from". **Pending:** `red/red-1.md` does not exist yet (lane led-red1 holds 
 Excluded by assignment: transaction-census rows (cards-recording); S4, CS, SR-H, SR-I and BLOB-K (cards-context); CS,
 F4, S6-06a, A1, F6, F7 (cards-tasks).
 
-## Owner questions (one list)
+## Owner questions (one list; answered 2026-10-08: every recommendation accepted except AU-Q15 and AU-Q17, deferred; `review/owner-rulings.md` last bullets)
 
 Each is a place where Seon keeps its own version of something a library does, or a storage choice the rulings left
 open. The ruling "stop reinventing" says keeping ours is the owner's call, case by case, with the gap stated. Nothing
 below is implemented until the owner (or root citing an authority) answers here. **(recommended)** marks the
 recommendation.
 
-**AU-Q1. Filling missing function arguments from the agent's world (`seon.call-preparation`, 1,130 lines).** Malli's
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q1. Filling missing function arguments from the agent's world (`seon.call-preparation`, 1,130 lines).** Malli's
 `default-value-transformer` fills missing *map keys* from `:default`/`:default/fn`, but never inserts a missing
 *positional* argument, which is what CLAUDE.md's "supply defaults by declared schema name" needs. Also: of the four
 stored supplied-default rows on default, three are already answered by `seon.batch/world-members`; only
@@ -42,7 +42,7 @@ stored supplied-default rows on default, three are already answered by `seon.bat
    namespace; every agent-facing call gets longer.
 3. Keep everything as it is.
 
-**AU-Q2. Installing contracts (`seon.instrument`, 1,335 lines).** The wrapper is already Malli's `m/-instrument`.
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q2. Installing contracts (`seon.instrument`, 1,335 lines).** The wrapper is already Malli's `m/-instrument`.
 Malli's own loop `malli.instrument/-strument!` cannot replace ours because it passes no registry, stops at the first
 failing Var, re-wraps unchanged Vars and has no profile bracket. Two smaller copies sit beside it: a primitive-function
 test copied from Malli's private one (`instrument.clj:65-81`), and a ranking that picks one failed branch of an `:or`
@@ -55,7 +55,7 @@ test copied from Malli's private one (`instrument.clj:65-81`), and a ranking tha
 3. Rewrite onto `mi/instrument!` with Malli's global function registry. Conflicts with per-branch contracts; not
    recommended.
 
-**AU-Q3. Printer layout prediction (`seon.render.value`, `flat-width`/`extras`/`breaks?`/`settle`, about 100 lines).**
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q3. Printer layout prediction (`seon.render.value`, `flat-width`/`extras`/`breaks?`/`settle`, about 100 lines).**
 Fipp lays text out in one pass and cannot say "how long would this be" incrementally, so we re-derive its fits test to
 charge each breadth-first admission its length.
 1. Keep it.
@@ -63,7 +63,7 @@ charge each breadth-first admission its length.
    overflows (O(levels × n)); delete the prediction. Needs a measurement on the printer's golden values first.
 3. Add an incremental fits API to a fipp fork (fipp comes from Maven; no fork exists).
 
-**AU-Q4. Structural hash (`seon.id`, 190 lines).** hasch's `uuid` is on the classpath (Datahike uses it), but measured
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q4. Structural hash (`seon.id`, 190 lines).** hasch's `uuid` is on the classpath (Datahike uses it), but measured
 2.2× slower on small maps and it throws `StackOverflowError` on a 10,000-deep vector, which `seon.id` handles (the
 exact case `seon.turn/a-deep-value-loses-the-run` guards). Our stack-safe `id/printed` is also used to sort and
 compare, which CLAUDE.md forbids.
@@ -72,14 +72,14 @@ compare, which CLAUDE.md forbids.
 2. Adopt hasch and accept a depth limit and the cost.
 3. Keep both as they are.
 
-**AU-Q5. "Did you mean" suggestions.** A 12-line edit distance ranks a namespace's names near a
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q5. "Did you mean" suggestions.** A 12-line edit distance ranks a namespace's names near a
 missing symbol (`edit-distance`, `names-in`, `error.clj:1834-1860`). Malli's distance is private and only suggests map keys.
 1. Keep ours.
 2. **(recommended)** Make Malli's edit distance public in our Malli checkout and call it; use Malli's
    `with-spell-checking` for schema key typos.
 3. Delete the ranking; list the namespace's names unranked.
 
-**AU-Q6. Cache statistics (`seon.cache`, AT-8).** The ruling says Caffeine's `recordStats` replaces our counters. The
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q6. Cache statistics (`seon.cache`, AT-8).** The ruling says Caffeine's `recordStats` replaces our counters. The
 gap: Caffeine's stats callbacks get no key, so one shared weighted cache cannot report hits and misses per kind.
 Separate caches per kind would break the one byte budget.
 1. **(recommended)** `recordStats` for whole-cache hits, misses and evictions; per-kind entries and bytes computed on
@@ -88,7 +88,7 @@ Separate caches per kind would break the one byte budget.
 2. Keep per-kind counters beside `recordStats` as a named exception.
 3. Research a Caffeine stats extension first.
 
-**AU-Q7. HTML serializer (`seon.render.hiccup`, 525 lines).** hiccup 2 is not on the classpath; it does not sort
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q7. HTML serializer (`seon.render.hiccup`, 525 lines).** hiccup 2 is not on the classpath; it does not sort
 attribute keys (we rely on that for identical bytes) and does not normalize camelCase style keys.
 1. Keep ours.
 2. **(recommended)** Add hiccup 2, sort attributes and normalize style keys before calling it (about −400 lines, one
@@ -96,7 +96,7 @@ attribute keys (we rely on that for identical bytes) and does not normalize came
    `seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check`).
 3. Use the Datastar SDK's hiccup support if it has one (unverified).
 
-**AU-Q8. Flow internals (`seon.flow`).** Two gaps. (a) Flow's graph error channel is a sliding buffer that drops
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q8. Flow internals (`seon.flow`).** Two gaps. (a) Flow's graph error channel is a sliding buffer that drops
 faults and `flow/stop` closes it before an unwinding proc reports (`flow/impl.clj:102`, `:179`), so we reify our own
 `WritePort` and reach into `flow.impl.graph`, `flow.spi` and `core.async.impl.*`. (b) Our I/O launcher adds bounded
 concurrent submissions and one completion after actual exit, with three atoms per submission. core.async comes from
@@ -106,7 +106,7 @@ Maven; there is no fork.
    job as an ordinary proc with its counts in proc state.
 3. Accept fault loss (contradicts "deliver every error").
 
-**AU-Q9. EDN symbol test (`seon.program/edn-symbol-text?`, 44 lines).** `clojure.edn/read-string` agrees on all 14,724
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q9. EDN symbol test (`seon.program/edn-symbol-text?`, 44 lines).** `clojure.edn/read-string` agrees on all 14,724
 interned names and every edge case at a negligible cost. The gap: the reader throws on non-symbol text, so the
 replacement needs a `catch` in a predicate, which CLAUDE.md's three-catches law does not list.
 1. **(recommended)** Replace it with the EDN reader and record the predicate's catch as a named exception to the
@@ -114,7 +114,7 @@ replacement needs a `catch` in a predicate, which CLAUDE.md's three-catches law 
 2. Keep ours.
 3. Ask edamame for a non-throwing token test (no such API today).
 
-**AU-Q10. Read evidence (`seon.db`, about 430 lines of query capture and replay).** Datahike already gives dependency
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q10. Read evidence (`seon.db`, about 430 lines of query capture and replay).** Datahike already gives dependency
 plans; ours also proves that writes to other entities sharing an attribute leave a read unchanged, sometimes by running
 extra queries. Read evidence also repeats text: 49% of its plan, revision and request characters on default are
 copies (storage audit finding 9, row SR-R).
@@ -123,13 +123,13 @@ copies (storage audit finding 9, row SR-R).
 3. **(recommended)** Measure first (row SR-R0: how often precise evidence avoids a re-render on default), then choose
    1 or 2; SR-R (store each plan once) waits on this answer, since option 1 deletes what it would shrink.
 
-**AU-Q11. Function signatures (`fn/signature.cljc`, `program.cljc:768-1008`, `fn/analyzer.clj:565-667`).** We re-parse
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q11. Function signatures (`fn/signature.cljc`, `program.cljc:768-1008`, `fn/analyzer.clj:565-667`).** We re-parse
 source for binding structure clj-kondo does not expose. clj-kondo is our fork.
 1. Use only clj-kondo's arity and metadata fields and stop storing the extra binding detail.
 2. **(recommended)** Expose exact bindings from our clj-kondo fork's existing parse and delete our re-parse.
 3. Keep the re-parse.
 
-**AU-Q12. Checked writer validation (`db.clj:3700-3836`, `4097-4348`).** Datahike validates types and refs, not whole
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q12. Checked writer validation (`db.clj:3700-3836`, `4097-4348`).** Datahike validates types and refs, not whole
 Malli owning values, multiple owners, component cycles or our deletion rules. defn-why measured the checked writer at
 14 MB per `defn` (`transaction-report-datom?` called 21,000 times for 157 datoms).
 1. **(recommended)** Delete our duplicate normalization of submitted values and validate the final report once through
@@ -137,7 +137,7 @@ Malli owning values, multiple owners, component cycles or our deletion rules. de
 2. Reduce to Datahike's native rules (weaker guarantees).
 3. Keep it as an approved extension and fix only the hot predicate (PB-10 alone).
 
-**AU-Q13. Schema policy around Malli (`schema.clj:63-177`, `:589-645`, `schema/internal.cljc:47-151`, `:329-425`,
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q13. Schema policy around Malli (`schema.clj:63-177`, `:589-645`, `schema/internal.cljc:47-151`, `:329-425`,
 `schema/admission.clj:198-227`).** Malli compares forms but not meaning under different local registries, lets the later
 map entry win where we refuse conflicts, accepts shapes our admission refuses, and our admission walks schema syntax
 by hand.
@@ -146,20 +146,20 @@ by hand.
 2. Use Malli's native merge and accept every Malli-valid schema.
 3. Keep as is.
 
-**AU-Q14. clj-kondo inputs and its cache (`fn/analyzer.clj:215-472`, `:668-795`).** We keep private mirrors so a
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q14. clj-kondo inputs and its cache (`fn/analyzer.clj:215-472`, `:668-795`).** We keep private mirrors so a
 rejected branch definition never becomes a shared dependency fact.
 1. **(recommended)** Feed all captured files in one run with the cache off and reuse only dependency inputs.
 2. Expose an immutable dependency-analysis input in our clj-kondo fork.
 3. Keep the mirrors.
 
-**AU-Q15. Neighborhood reads for rendering (`render/walk.clj:189-538`, `:675-838`).** We pick neighbors by schema
+**Deferred (owner): asked after its deleting row lands.** **AU-Q15. Neighborhood reads for rendering (`render/walk.clj:189-538`, `:675-838`).** We pick neighbors by schema
 links and distance; Datahike's pull follows a selector. The S4 context rows delete the model-context caller
 (`declared-sources`, `render.walk/neighborhood`), so ask after S4-07b3.
 1. **(recommended)** Compile one selector from those choices and use Datahike's pull.
 2. Plain pull selectors as the contract (navigation changes).
 3. Keep ours for distance and continuation only.
 
-**AU-Q16. Which blobs are still referenced (`cluster/registry.clj:435-583`).** Our blob-root walk reads Datahike's
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q16. Which blobs are still referenced (`cluster/registry.clj:435-583`).** Our blob-root walk reads Datahike's
 sorted-set internals per branch and checks only each branch head and its history; Datahike's collector visits every
 retained commit. A blob referenced only from a retained older commit (a `:db/noHistory` attribute, a purged datom, a
 removed schema) is outside our walk (unproven loss risk, astra finding 1).
@@ -168,26 +168,26 @@ removed schema) is outside our walk (unproven loss risk, astra finding 1).
    marks, and delete our walk.
 3. Approve our walk with a regression test; leave the retained-commit gap.
 
-**AU-Q17. Namespace reader state (`sci/reader.cljc:75-225`, `:384-448`).** edamame's `parse-ns-form` parses `ns`
+**Deferred (owner): asked after its deleting row lands.** **AU-Q17. Namespace reader state (`sci/reader.cljc:75-225`, `:384-448`).** edamame's `parse-ns-form` parses `ns`
 clauses; ours also tracks `in-ns`, runtime `require` and refer renames without evaluating. UL-1d deletes the reader's
 declaration functions first; ask after it.
 1. **(recommended)** Use `edamame.core/parse-ns-form` for `ns` and keep only the runtime transitions.
 2. Resolve through an evaluating SCI context.
 3. Keep ours.
 
-**AU-Q18. Display tokenizer (`repl.clj:416-467`).** A small lexer classifies reply text for display; AGENTS.md says
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q18. Display tokenizer (`repl.clj:416-467`).** A small lexer classifies reply text for display; AGENTS.md says
 never parse code with strings. The gap: reply text can hold printer elisions that are not valid Clojure.
 1. Show plain escaped text and delete the lexer.
 2. **(recommended)** Tokenize with rewrite-clj and leave regions it cannot parse plain.
 3. Keep the lexer.
 
-**AU-Q19. `future`/`pmap` in agents (`sci/kernel.clj:669-719`).** SCI's future addon conveys bindings but its `pmap`
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q19. `future`/`pmap` in agents (`sci/kernel.clj:669-719`).** SCI's future addon conveys bindings but its `pmap`
 calls the host `future-call`, bypassing our accounting, so we copied `pmap` (27 lines).
 1. **(recommended)** Add an injectable `future-call` to our SCI checkout's addon and delete the copy.
 2. Remove `pmap` from what agents get.
 3. Keep the copy.
 
-**AU-Q20. How norms run in a merge (MA-8a-c).** Datahike's norm runner calls each norm with a connection and transacts
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q20. How norms run in a merge (MA-8a-c).** Datahike's norm runner calls each norm with a connection and transacts
 separately (`norm/norm.clj:140-161` at `86c3301a`), and `ensure-norms!` reads resources; the approved design wants pure
 `db → tx-data` norms inside the one guarded merge transaction. The rulings approved norms as the feature, not this
 replacement mechanism.
@@ -196,25 +196,25 @@ replacement mechanism.
 2. Approve Seon's own runner as written in MA-8c (records `:tx/norm` itself).
 3. Run norms through `ensure-norms!` as separate transactions after the merge (not atomic).
 
-**AU-Q21. Program source over 4,096 bytes.** 286 definitions (1.9 M characters) exceed the storage-roles threshold and
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q21. Program source over 4,096 bytes.** 286 definitions (1.9 M characters) exceed the storage-roles threshold and
 stay in datoms, copied into every index leaf and node version.
 1. Store it as a blob by the one rule (`:seon.fn/source-blob` plus size); every source reader changes.
 2. **(recommended)** Keep source in datoms; attack its memory through the byte-bounded node cache (DH-4) and by
    shrinking oversized functions (a 28 KB `defn` is itself the defect).
 3. Keep source only in Git for main's program and in datoms only on branches that change it.
 
-**AU-Q22. One query cache or two (after DH-6 measures Datahike's hits).** Several `seon.cache` kinds wrap a single
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q22. One query cache or two (after DH-6 measures Datahike's hits).** Several `seon.cache` kinds wrap a single
 `d/q` keyed by commit (e.g. `:seon.sci.eval/loaded-function-rows`, 23 MB, 0 hits).
 1. **(recommended)** Keep Seon kinds only for derivations of more than one query; delete kinds that wrap one query.
 2. Raise Datahike's weight limit and delete every single-query kind.
 3. Make Datahike's result cache a `seon.cache` kind through a fork seam.
 
-**AU-Q23. "Was this value cached at time t?"** Caffeine keeps no history.
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q23. "Was this value cached at time t?"** Caffeine keeps no history.
 1. **(recommended)** Answer "unknown" (SR-AUDIT does this; no writes).
 2. Store occasional compact cache summaries.
 3. Record every admission, eviction and hit (not recommended on a 4 GB heap).
 
-**AU-Q24. The free-disk floor (dials.md D31).** `:seon.config.maintenance/min-usable-bytes` ships 50 GiB; on a
+**Answered (owner 2026-10-08): the recommendation.** **AU-Q24. The free-disk floor (dials.md D31).** `:seon.config.maintenance/min-usable-bytes` ships 50 GiB; on a
 256 GB laptop that reports "low space" with a fifth of the disk free. `:seon.config.maintenance/min-usable-ratio` also
 exists.
 1. Keep 50 GiB.
@@ -270,13 +270,15 @@ fully specified in the ledger and its card is this lane's next batch.
 |---|---|---|
 | UL-3a | [UL-3a](UL-3a.md) | ready |
 | UL-3b | — | waits on root's split of eight test conversions |
-| UL-4 | — | blocked (AU-Q9) |
+| UL-4 | [UL-4](UL-4.md) | ready |
 | UL-5 | [UL-5](UL-5.md) (UL-5a; UL-5b noted) | ready after PB-07a |
 | UL-6 | [UL-6](UL-6.md) | ready after led-cacheb releases `cluster/agent.clj` |
 | UL-7 | [UL-7](UL-7.md) | ready |
 | UL-8 | card next | waits on led-nk1, led-cacheb |
 | UL-9 | — | waits on task `seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check` |
-| UL-10 | — | blocked (AU-Q1) |
+| UL-10 | — | ready once carded (AU-Q1 answered) |
+| UL-10b, UL-12 … UL-25, DEPS-1 | — | rows from the answers; each waits on its fork row or file release (ledger) |
+| FK-MALLI, FK-KONDO, FK-DH, FK-ASYNC, FK-SCI | — | fork rows, one fork commit and one bump each; root batches the restarts |
 | UL-11 | [UL-11](UL-11.md) | ready (diagnosis) |
 | SR-P | [SR-P](SR-P.md) | ready after blob-konserve releases `blob.clj` |
 | SR-L | [SR-L](SR-L.md) | ready after led-cacheb releases `registry.clj` |
@@ -290,7 +292,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-STATUS | [SR-STATUS](SR-STATUS.md) | ready |
 | SR-STREAM | — | after BLOB-K |
 | SR-R0 | [SR-R0](SR-R0.md) | ready (diagnosis) |
-| SR-R | — | blocked (AU-Q10) |
+| SR-R | — | after SR-R0 |
 | SR-AUDIT | — | after SR-G2 |
 | SR-HITS | — | after LR-CACHEb |
 | SR-BRANCH | — | after MA-15, F5, F7, MA-14b |
@@ -298,11 +300,13 @@ fully specified in the ledger and its card is this lane's next batch.
 | PB-07b | [PB-07b](PB-07b.md) (b1, b2) | after PB-07a, led-ul2 (b1), led-cacheb (b2) |
 | PB-08 | — | waits on led-cacheb (Opus) |
 | PB-09 | — | after S4-01 |
-| PB-10 | — | blocked (AU-Q12) |
+| PB-10 | — | ready after led-cacheb (AU-Q12 answered) |
 | PB-11 | — | after PB-03 (Opus) |
 | PB-12 | [PB-12](PB-12.md) (PB-12a fork, PB-12b Seon) | ready |
 | PB-13 | — | after PB-07b |
 | PB-14 | [PB-14](PB-14.md) | ready (diagnosis, Astra) |
+| PB-16 | [PB-16](PB-16.md) | in flight (stopfix-projection) |
+| PB-17 | [PB-17](PB-17.md) | ready (diagnosis) |
 | PB-15 | [PB-15](PB-15.md) | ready after led-nk9, led-nk1 |
 | DH-4a | [DH-4a](DH-4a.md) | after dials-16gb (`store.clj`), LR-CACHEb (gitlink) |
 | DH-4b | — | after DH-4a (Opus design check) |
@@ -313,4 +317,6 @@ fully specified in the ledger and its card is this lane's next batch.
 | DIAL-3 | [DIAL-3](DIAL-3.md) | ready |
 | DIAL-5 | [DIAL-5](DIAL-5.md) | ready |
 | DIAL-8 (absorbs DIAL-13) | [DIAL-8](DIAL-8.md) | after dials-16gb, led-nk1 |
-| DIAL-2, DIAL-4, DIAL-6, DIAL-7, DIAL-9 … DIAL-12, DIAL-14 … DIAL-18 | — | each row's Deps; carded when their files free |
+| DIAL-17 | [DIAL-17](DIAL-17.md) | after dials-16gb (AU-Q24 answered: 10 GiB) |
+| AT-8 | [AT-8](AT-8.md) | after SR-H, SR-J (AU-Q6 answered) |
+| DIAL-2, DIAL-4, DIAL-6, DIAL-7, DIAL-9 … DIAL-12, DIAL-14 … DIAL-16, DIAL-18 | — | each row's Deps; carded when their files free |

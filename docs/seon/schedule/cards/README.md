@@ -12,9 +12,9 @@ plus led-cs01a's uncommitted `seon.context/current-state`), the returned shape, 
 expected cost, what is deleted, the commit line and the dependencies. A card marked **blocked** waits on a question
 below; nobody implements it until the owner (or root, citing authority) answers in this file.
 
-## Owner questions (Q-B … Q-F answered 2026-10-08 late, `review/owner-rulings.md` last bullet; Q-A open)
+## Owner questions (all answered 2026-10-08, `review/owner-rulings.md`)
 
-**Still open (root is discussing it with the owner).** **Q-A. How is an arbitrary EDN answer stored? (blocks A1, then F6)** The competency spec §4.5 names
+**Answered (owner 2026-10-08): none of the three; a question task declares its answer's Malli schema, `answer!` validates it and stores it as ordinary Datahike data, no blob path (A1, F6 rewritten).** **Q-A. How is an arbitrary EDN answer stored? (blocks A1, then F6)** The competency spec §4.5 names
 `seon.blob/store-faithful-edn` (`src/seon/blob.clj:43`); it does not exist. Blobs are UTF-8 text only
 (`seon.blob/put!` `blob.clj:325`, `seon.blob/get` `blob.clj:378`), so storing a map needs a serializer, and the
 law "no printing to store a copy" forbids `pr-str`.
@@ -91,8 +91,8 @@ assign proofless tasks too.
 | F4c | [F4c](F4c.md) | ready after F4b |
 | F4d | [F4d](F4d.md) | ready after F4c |
 | S6-06a | [S6-06a](S6-06a.md) | in flight (s606a) |
-| A1 | [A1](A1.md) | blocked (Q-A) |
-| F6 | [F6](F6.md) | blocked (Q-A through A1) |
+| A1 | [A1](A1.md) | ready after led-cacheb, s606a release `my/agent.clj`, `seon.task.edn` |
+| F6 | [F6](F6.md) | ready after A1 |
 | F7 | [F7](F7.md) | F7a ready after S6-06a; F7b after F7a; F7c after F7b |
 
 ## Common to every card
