@@ -1,8 +1,4 @@
-[#:seon.task{:name "a-branch-change-to-an-unloaded-fixture-namespace-cannot-run-its-tests"
-             :kind :function
-             :intent "The proof of the commit gate, test/seon/cluster/branch_evidence_test.clj (uncommitted, lane impl-rf2), is red in the throwaway check. With seon.test/run called directly on the branch's acquired context after seon.test-support/replacement-tx, the named fixture tests refuse: 'Host-bound declaration <ns>/callee must change through the loaded source files.' (`seon.test/arm-first-loads!`); the same run on H executes both. Driven through the agent path instead (seon.cluster.write-back-test/with-agent! and submit!, the tests authored by an agent on H, the replacement and my.test/check by a lane agent on the branch), file-equals-branch and changed pass, but `seon.test/reaching` of the changed callee answers [] on the branch, so no test is verified and the callee reads as unreached (check run 40563f4cb0c3: 12 pass, 5 fail). Hypothesis, unverified: the agent-authored deftests carry no :seon.fn/calls edge to the fixture functions that `seon.fn/call-reach` walks. Done when that test is green and the gate commits with it."
-             :must-read #{seon.test/reaching seon.cluster.branch-evidence/branch-evidence}}
- #:seon.task{:name "a-schema-registered-on-a-branch-is-invisible-to-its-test-run"
+[#:seon.task{:name "a-schema-registered-on-a-branch-is-invisible-to-its-test-run"
              :kind :function
              :intent "After `seon.schema/register!` of :seon.source/accepted-red-before on agent impl-rf2's branch (answered :seon.schema.usage/new? true), `my.test/check` on that branch threw :malli.core/invalid-schema for that key, 7.4 s and 138,645 calls in. Each register! also cost 270-380 ms and about 32,700 calls. Done when a branch-registered key compiles in the branch's test run and one registration is under 50 ms."
              :must-read #{seon.schema/register! my.test/check}}
