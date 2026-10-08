@@ -2,9 +2,19 @@
   "The competency bench's grade: one run's outcome read from the stored facts of its agent's branch.
 
   A run is its agent: the task it held, its settings overlay (the presentation variant) and the
-  call rows and evaluations its model passes recorded. Nothing here runs a test or a model."
-  (:require [seon.context :as context]
-            [seon.db :as db]))
+  call rows and evaluations its model passes recorded. `launch!` starts runs through the agents' own
+  REPL entrance and grades them; `table` folds grades into one row per cell."
+  (:require [clojure.data.json :as json]
+            [seon.agent :as agent]
+            [seon.cluster :as cluster]
+            [seon.context :as context]
+            [seon.db :as db]
+            [seon.eval.drive :as drive]
+            [seon.id :as id]
+            [seon.mcp :as mcp]
+            [seon.operator.runtime :as runtime]
+            [seon.task :as task]
+            [seon.turn :as turn]))
 
 (def setups
   "The definitions each task's agent starts from, evaluated as its first eval request on its own branch;
@@ -47,7 +57,7 @@
 
 (def ^:private call-selector
   [:db/id {:seon.turn/opened-tx [:db/id :db/txInstant]} {:seon.turn/closed-tx [:db/id :db/txInstant]}
-   {:seon.turn/attempts [:seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens
+   {:seon.turn/attempts [:db/id :seon.ai.usage/prompt-tokens :seon.ai.usage/completion-tokens
                          :seon.ai.usage/cached-tokens :seon.ai.attempt/error]}])
 
 (def ^:private evaluation-selector
@@ -65,12 +75,13 @@
        vec))
 
 (defn- model-evaluations
-  "The agent's evaluations its model passes recorded, in writer order."
+  "The forms the agent's model passes evaluated, in writer order: evaluations that ran (`:seon.eval/duration-ms`),
+  as the turn loop counts them; a reply of prose or only read errors evaluated none."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:vector [:map [:db/id :int]]]]}
   [database agent-id]
   (->> (db/q '[:find [(pull ?e selector) ...] :in $ ?agent-id selector
                :where [?agent :seon.agent/id ?agent-id] [?call :seon.turn/agent ?agent]
-               [?e :seon.cluster.eval/run ?call] [?e :seon.cluster.eval/origin :model]]
+               [?e :seon.cluster.eval/run ?call] [?e :seon.cluster.eval/origin :model] [?e :seon.eval/duration-ms _]]
              database agent-id evaluation-selector)
        (sort-by :db/id)
        vec))
@@ -96,7 +107,7 @@
   "One run's grade, read from `database` (the agent's branch).
 
   Whether `task`'s proofs are green, the model calls taken and taken to green,
-  agent and platform errors, wasted calls, tokens and wall time."
+  agent and platform errors, wasted calls, tokens, wall time and the agent's settings overrides (its variant)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.task/sym]
                   [:or [:map
                         [:seon.competency/agent :seon.agent/id]
@@ -114,7 +125,8 @@
                         [:seon.competency/prompt-tokens :int]
                         [:seon.competency/cached-tokens :int]
                         [:seon.competency/completion-tokens :int]
-                        [:seon.competency/wall-ms {:optional true} :int]]
+                        [:seon.competency/wall-ms {:optional true} :int]
+                        [:seon.competency/variant :map]]
                    :seon.error/value]]}
   [database agent-id task]
   (let [proven (context/proofs database task)]
@@ -144,7 +156,162 @@
                  :seon.competency/repeated-forms (- (count sources) (count (distinct sources)))
                  :seon.competency/prompt-tokens (usage-total calls :seon.ai.usage/prompt-tokens)
                  :seon.competency/cached-tokens (usage-total calls :seon.ai.usage/cached-tokens)
-                 :seon.competency/completion-tokens (usage-total calls :seon.ai.usage/completion-tokens)}
+                 :seon.competency/completion-tokens (usage-total calls :seon.ai.usage/completion-tokens)
+                 :seon.competency/variant (let [overrides (agent/settings database agent-id)]
+                                            (if (:seon.error/at overrides) {} overrides))}
           green-tx (assoc :seon.competency/calls-to-green
                           (count (filter #(< (get-in % [:seon.turn/opened-tx :db/id]) green-tx) calls)))
           (and opened closed) (assoc :seon.competency/wall-ms (- (inst-ms closed) (inst-ms opened))))))))
+
+;;; LAUNCH: fresh agents on their own branches, each assigned one task under one strategy's settings,
+;;; woken together by one outside message each, graded once idle, their branches retired.
+
+(defn- agent-eval!
+  "The parsed MCP result of `code` evaluated as `agent-id` in the running cluster `running`."
+  {:malli/schema [:=> [:cat :string :seon.agent/id :string] :map]}
+  [running agent-id code]
+  (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                            "arguments" {"code" code "agent" agent-id "cluster" running}}))))
+
+(defn- failed
+  "The launch error for `agent-id` at `step`, carrying the MCP result's text."
+  {:malli/schema [:=> [:cat :seon.agent/id :keyword :map] :map]}
+  [agent-id step result]
+  {:seon.competency/agent agent-id :seon.competency/launch-failed step
+   :seon.error/message (str "The run's " (name step) " was refused.")
+   :seon.competency/reply (mapv #(get % "text") (get result "content"))})
+
+(defn- start-run!
+  "Create the run's agent on its own branch through its first eval request (its task's setup, then its
+  settings), assign it its task at the task home and write its one outside message on its branch. Answers
+  the run with its branch and connection, or the step that was refused."
+  {:malli/schema [:=> [:cat :string :map] :map]}
+  [running {agent-id :seon.competency/agent task-sym :seon.competency/task settings :seon.competency/settings :as run}]
+  (let [first-request (agent-eval! running agent-id (str (get setups task-sym "(ns user)")
+                                                         "\n(my.agent/settings! " (id/printed settings) ")"))
+        handle (:seon.turn.loop/cluster (get @runtime/running-instances running))
+        connection (:seon.db/connection handle)
+        branch (db/q '[:find ?b . :in $ ?id :where [?a :seon.agent/id ?id] [?a :seon.agent/branch ?b]]
+                     (db/db connection) agent-id)]
+    (if (or (get first-request "isError") (not (keyword? branch)))
+      (merge run (failed agent-id :setup first-request))
+      (let [task-id (db/q '[:find ?id . :in $ ?sym :where [?t :seon.task/sym ?sym] [?t :seon.task/id ?id]]
+                          (db/db (task/home-connection connection)) task-sym)
+            assigned (task/assign! {:seon.db/connection connection :seon.task/assigned task-id
+                                    :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})
+            target (db/branch-connection (db/db connection) branch)]
+        (if (:seon.error/at assigned)
+          (merge run (failed agent-id :assignment {}) {:seon.competency/refusal assigned})
+          (do (db/call-with-custody {:seon.db/connection target}
+                #(drive/inbound! target (:seon.cluster/name handle) cluster/boot-process-identity agent-id
+                                 "Work your task."))
+              (assoc run :seon.store/branch branch :seon.db/connection target)))))))
+
+(defn- run-state
+  "Where the run of `agent-id` stands on its branch `database`: `:running` while a model call or a test member
+  is open; then `:waiting` once its last reply leaves the turn loop nothing to continue (`seon.turn`'s own
+  rule: no evaluated form, a disposition or a failed attempt), `:capped` once `cap` calls closed; else
+  `:running`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id pos-int?] [:enum :running :waiting :capped]]}
+  [database agent-id cap]
+  (let [calls (model-calls database agent-id)
+        testing? (db/q '[:find ?m . :where [?m :seon.test.member/began? true] (not [?m :seon.test.member/ended? true])]
+                       database)]
+    (cond (or (empty? calls) (some #(nil? (:seon.turn/closed-tx %)) calls) testing?) :running
+          ;; the loop's own continuation rule, read rather than restated
+          (not (@#'turn/continuing-reply? database agent-id)) :waiting
+          (<= cap (count calls)) :capped
+          :else :running)))
+
+(defn- await-runs
+  "Each started run with the state it settled in: polled every `poll-ms` until every run held a terminal
+  state on two polls running (a call's test step starts as the call closes, so one poll can fall between),
+  or `deadline-ms` passed (`:deadline`)."
+  {:malli/schema [:=> [:cat [:vector :map] pos-int? pos-int?] [:vector :map]]}
+  [runs poll-ms deadline-ms]
+  (let [deadline (+ (System/currentTimeMillis) deadline-ms)
+        states #(mapv (fn [{agent-id :seon.competency/agent connection :seon.db/connection settings :seon.competency/settings}]
+                        (run-state (db/db connection) agent-id (:seon.config.run/max-episode-runs settings)))
+                      runs)]
+    (loop [previous nil]
+      (let [now (states)]
+        (cond (and (= now previous) (not-any? #{:running} now))
+              (mapv #(assoc %1 :seon.competency/terminal %2) runs now)
+              (< deadline (System/currentTimeMillis))
+              (mapv #(assoc %1 :seon.competency/terminal (if (= :running %2) :deadline %2)) runs now)
+              :else (do (Thread/sleep (long poll-ms)) (recur now)))))))
+
+(defn launch!
+  "Run every cell of `:seon.competency/cells` (a task, a strategy name and its settings) `:seon.competency/runs`
+  times, all in parallel, and answer one grade per run with its strategy and terminal state.
+
+  Each run is a fresh agent `bench-<strategy>-<task name>-<launch>-<i>` on its own branch: its first eval
+  request (through MCP in the running cluster `:seon.competency/cluster`) evaluates the task's setup and sets
+  its own overrides, the cell's settings (the strategy's dials, the provider and the call cap
+  `:seon.config.run/max-episode-runs`); root assigns the task at the task home; one outside message wakes it.
+  Once every run is waiting, capped or past `:seon.competency/deadline-ms`, each is graded on its branch and
+  its branch retired by root (`:seon.competency/retired?`). A run whose start was refused answers that refusal in place of its grade."
+  {:malli/schema [:=> [:cat [:map [:seon.competency/cluster :string]
+                             [:seon.competency/cells [:vector [:map [:seon.competency/task :seon.task/sym]
+                                                               [:seon.competency/strategy :keyword]
+                                                               [:seon.competency/settings
+                                                                [:map [:seon.config.run/max-episode-runs pos-int?]]]]]]
+                             [:seon.competency/runs pos-int?] [:seon.competency/poll-ms pos-int?]
+                             [:seon.competency/deadline-ms pos-int?]]]
+                  [:vector :map]]}
+  [{running :seon.competency/cluster cells :seon.competency/cells n :seon.competency/runs :as request}]
+  (let [launch (subs (id/id) 0 6)
+        planned (vec (for [{task-sym :seon.competency/task strategy :seon.competency/strategy :as cell} cells
+                           i (range n)]
+                       (assoc cell :seon.competency/agent
+                              (str "bench-" (name strategy) "-" (name task-sym) "-" launch "-" i))))
+        started (mapv #(start-run! running %) planned)
+        settled (await-runs (filterv :seon.db/connection started)
+                            (:seon.competency/poll-ms request) (:seon.competency/deadline-ms request))
+        graded (mapv (fn [{agent-id :seon.competency/agent connection :seon.db/connection branch :seon.store/branch
+                           :as run}]
+                       (let [graded-run (grade (db/db connection) agent-id (:seon.competency/task run))
+                             retired (agent-eval! running "root"
+                                                  (str "(my.agent/retire-branch! {:seon.store/branch " branch "})"))]
+                         (merge graded-run (select-keys run [:seon.competency/strategy :seon.competency/terminal
+                                                             :seon.store/branch])
+                                {:seon.competency/retired? (false? (get retired "isError"))})))
+                     settled)]
+    (into graded (comp (remove :seon.db/connection) (map #(dissoc % :seon.competency/settings))) started)))
+
+(defn- median
+  "The middle value of `xs` (the lower of the two middles), or nil when empty."
+  {:malli/schema [:=> [:cat [:sequential :int]] [:maybe :int]]}
+  [xs]
+  (when (seq xs) (nth (vec (sort xs)) (quot (dec (count xs)) 2))))
+
+(defn- per-run
+  "The mean of `k` over `grades`, to one decimal."
+  {:malli/schema [:=> [:cat [:vector :map] :keyword] :double]}
+  [grades k]
+  (/ (Math/round (* 10.0 (/ (double (transduce (map #(get % k 0)) + 0 grades)) (count grades)))) 10.0))
+
+(defn table
+  "One row per cell (task and strategy) of `grades`: runs, green share, median and range of calls to green,
+  agent and platform errors, wasted calls and tokens per run, in first-seen cell order."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [grades]
+  (let [graded (filterv :seon.competency/task grades)
+        cells (distinct (map (juxt :seon.competency/task :seon.competency/strategy) graded))
+        by-cell (group-by (juxt :seon.competency/task :seon.competency/strategy) graded)]
+    (mapv (fn [[task-sym strategy :as cell]]
+            (let [runs (by-cell cell)
+                  to-green (keep :seon.competency/calls-to-green runs)]
+              (cond-> {:seon.competency/task task-sym :seon.competency/strategy strategy
+                       :seon.competency/runs (count runs)
+                       :seon.competency/green (count (filter :seon.competency/green? runs))
+                       :seon.competency/agent-errors (per-run runs :seon.competency/agent-errors)
+                       :seon.competency/platform-errors (per-run runs :seon.competency/platform-errors)
+                       :seon.competency/no-form-calls (per-run runs :seon.competency/no-form-calls)
+                       :seon.competency/repeated-forms (per-run runs :seon.competency/repeated-forms)
+                       :seon.competency/prompt-tokens (per-run runs :seon.competency/prompt-tokens)
+                       :seon.competency/cached-tokens (per-run runs :seon.competency/cached-tokens)
+                       :seon.competency/completion-tokens (per-run runs :seon.competency/completion-tokens)}
+                (seq to-green) (assoc :seon.competency/calls-to-green-median (median to-green)
+                                      :seon.competency/calls-to-green-range [(apply min to-green) (apply max to-green)]))))
+          cells)))

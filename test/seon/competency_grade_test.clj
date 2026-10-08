@@ -2,8 +2,10 @@
   "A competency run is graded from its agent's stored facts."
   (:require [clojure.core.async :as async]
             [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.host :as host]
             [seon.competency :as competency]
             [seon.db :as db]
             [seon.eval.drive]
@@ -89,3 +91,61 @@
                                      :seon.competency/forms :seon.competency/repeated-forms
                                      :seon.competency/agent-errors :seon.competency/no-form-calls]))
              "one model call turned the proof green; its repeated ns form counts as wasted"))))))
+
+(defn- fixture-answer
+  "A fixture model for T1: its solution, unindented as a model writes it, until a request shows it was
+  evaluated, then a reply with no form."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [document]
+  (if (some #(str/includes? (str (get % "content")) "symbol comp.geo/area") (get document "messages"))
+    ";; The proof is green; I wait."
+    "(ns comp.geo)\n(defn area {:malli/schema [:=> [:cat [:int {:min 1}] [:int {:min 1}]] [:int {:min 1}]]} [w h] (* w h))"))
+
+(defn- home-root!
+  "Name the member's branch as root's home, as a running cluster's root row names its own branch, so a task
+  home exists apart from the bench agents' branches."
+  {:malli/schema [:=> [:cat :seon.db/connection] :nil]}
+  [connection]
+  (let [database (db/db connection)
+        branch (get-in database [:config :branch])
+        root (db/pull database [:db/id] [:seon.agent/id "root"])]
+    (db/transact! connection (if (:db/id root)
+                               [[:db/add (:db/id root) :seon.agent/branch branch]]
+                               [[:db.fn/call #'host/home-call "root" branch 'user
+                                 (:seon.cluster/name (support/execution-handle nil))]]))
+    nil))
+
+(deftest ^{:seon.test/long "Four fixture-model runs on their own branches, each one model call, its proof's step and a waiting reply."
+           :seon.test/long-ms 120000}
+  a-launch-grades-each-run
+  (support/with-running-agent
+   (fn [running _agent-id connection]
+     (home-root! connection)
+     (support/with-provider
+      (atom []) fixture-answer
+      (fn [server]
+        (let [settings (assoc (support/provider-config server)
+                              :seon.config.ai/no-provider false :seon.config.run/max-episode-runs 3)
+              grades (competency/launch!
+                      {:seon.competency/cluster running
+                       :seon.competency/cells [{:seon.competency/task 'seon.competency/area-is-contracted
+                                                :seon.competency/strategy :defaults :seon.competency/settings settings}
+                                               {:seon.competency/task 'seon.competency/area-is-contracted-typed
+                                                :seon.competency/strategy :defaults :seon.competency/settings settings}]
+                       :seon.competency/runs 2 :seon.competency/poll-ms 100 :seon.competency/deadline-ms 60000})]
+          (is (= (repeat 4 {:seon.competency/green? true :seon.competency/calls-to-green 1
+                            :seon.competency/model-calls 2 :seon.competency/no-form-calls 1
+                            :seon.competency/terminal :waiting :seon.competency/retired? true
+                            :seon.competency/max-episode-runs 3})
+                 (map #(-> (select-keys % [:seon.competency/green? :seon.competency/calls-to-green
+                                           :seon.competency/model-calls :seon.competency/no-form-calls
+                                           :seon.competency/terminal :seon.competency/retired?])
+                           (assoc :seon.competency/max-episode-runs
+                                  (get-in % [:seon.competency/variant :seon.config.run/max-episode-runs])))
+                      grades))
+              "each run turned its proof green in one call, replied with no form and waited, carries its variant and was retired")
+          (is (= [['seon.competency/area-is-contracted 2 2 1] ['seon.competency/area-is-contracted-typed 2 2 1]]
+                 (mapv (juxt :seon.competency/task :seon.competency/runs :seon.competency/green
+                             :seon.competency/calls-to-green-median)
+                       (competency/table grades)))
+              "one table row per cell")))))))
