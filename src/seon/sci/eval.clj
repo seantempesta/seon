@@ -254,8 +254,10 @@
   namespace the JVM already loaded, required and not yet in the context, is
   exposed as itself, each public Var copied at its root, so an agent requires
   `malli.core` or `datahike.api` as a Clojure REPL does. Program namespaces are
-  acquired into the context before any form runs, so none reaches here; an
-  unloaded namespace answers nil and SCI reports it as not found.
+  acquired into the context before any form runs, so none reaches here, and
+  acquisition exposes the libraries they require the same way
+  (`install-required-libraries!`); an unloaded namespace answers nil and SCI
+  reports it as not found.
 
   The copies carry no SCI generation: the agent defined none of them, so the
   definition authority (`turn-interns`) never reads them as its program change.
@@ -1892,6 +1894,23 @@
       (install-host-namespace! ctx target (remove (fn [[local-name]] (contains? present local-name))
                                                   interns)))))
 
+(defn- install-required-libraries!
+  "Expose each loaded library namespace that `namespace-rows` require, alias or
+  refer and `ctx` does not yet hold, as `require` would (`load-host-namespace`):
+  a file namespace's aliases and full names resolve to the host's loaded Vars,
+  as they do for its compiled callers. Namespaces already in `ctx` (program
+  namespaces, SCI's own `clojure.*`) are left as they are; a target this JVM
+  has not loaded stays absent."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:sequential :map]] :nil]}
+  [ctx namespace-rows]
+  (doseq [target (into (sorted-set)
+                       (mapcat (fn [row]
+                                 (let [{:keys [aliases refers requires]} (row-bindings row)]
+                                   (concat requires (vals aliases) (map (comp symbol namespace) (vals refers))))))
+                       namespace-rows)
+          :when (not (contains? (:namespaces @(:env ctx)) target))]
+    (load-host-namespace {:namespace target :ctx ctx})))
+
 (defn- install-declared-classes!
   "Install every non-masked class named by acquired namespace facts."
   [ctx namespace-rows]
@@ -2374,6 +2393,9 @@
         (install-first-party-namespaces!
          ctx namespace-assertions all-namespace-rows
          (host-function-rows all-function-rows loaded db))
+        ;; Libraries the namespaces require resolve through their aliases and
+        ;; full names, as the compiled namespaces that require them do.
+        (install-required-libraries! ctx all-namespace-rows)
         ;; The bare REPL name refers to the acquired macro itself. Keeping the
         ;; boot-time copy here would preserve its old expansion after adoption.
         (sci/add-namespace! ctx 'clojure.core
@@ -2560,6 +2582,7 @@
        ;; A function the loaded program lacks runs as its compiled Var where
        ;; this JVM has one, exactly as the base binds the loaded program's.
        (install-first-party-namespaces! ctx [] namespace-rows added-rows)
+       (install-required-libraries! ctx namespace-rows)
        (install-selected!
         ctx database (:seon.flow/commit-fault! snapshot) namespace-row-by-name
         function-rows tests interpreted
