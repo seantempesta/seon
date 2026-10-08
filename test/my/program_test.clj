@@ -1,5 +1,6 @@
 (ns my.program-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string]
+            [clojure.test :refer [deftest is testing]]
             [my.program :as program]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
@@ -294,3 +295,10 @@
       (finally
         (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) [branch home])
         (support/delete-recursively! root)))))
+
+(deftest ^{:seon/tasks #{'my.program/source-repeats-the-docstring}}
+  source-shows-the-docstring-once-inside-the-source
+  (let [found (program/source (db/db) 'my.program/source)]
+    (is (clojure.string/includes? (:source found) "Read one declaration's source") "the source carries its docstring")
+    (is (not (contains? found :doc)) "the docstring is not repeated beside the source")
+    (is (= 'my.program/source (:sym found)))))
