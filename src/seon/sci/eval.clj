@@ -3094,8 +3094,8 @@
 (defn- derive-base-ctx
   "Derive the cluster base: load the loaded program's JVM namespaces, build the
   interpreter under its projection and acquire the `loaded` program."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map] :seon.sci.eval/ctx]}
-  [loaded arm-request]
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.sci.eval/ctx]}
+  [loaded]
   ;; Once per derivation: a JVM keeps what it loaded, so a cached base proves
   ;; its loaded program's namespaces loaded.
   (load-core-namespaces! loaded)
@@ -3109,9 +3109,7 @@
                         ::bind-result! #'bind-result!
                         :seon.schema/projection projection
                         ::kernel/install-function! install-function-from-database!)
-             _ (swap! (::kernel/program-snapshot ctx) merge
-                      (select-keys arm-request [:seon.flow/commit-fault!])
-                      {::loaded-database loaded})
+             _ (swap! (::kernel/program-snapshot ctx) assoc ::loaded-database loaded)
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                          :seon.db/db loaded
                                          :seon.schema/projection projection})]
@@ -3129,24 +3127,28 @@
 
 (defn- cluster-base-key
   "The inputs the cluster base is a function of: the loaded program's store and
-  commit (which also name its projection) and the fault recorder its wrappers
-  close over. Nil for an uncommitted loaded value."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map] [:or :nil [:tuple :map :uuid [:or :nil :seon.flow/commit-fault!]]]]}
-  [loaded arm-request]
+  commit, which also name its projection. The base interprets nothing, so it
+  arms no wrapper over a fault recorder. Nil for an uncommitted loaded value."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:tuple :map :uuid]]]}
+  [loaded]
   (when-let [commit (commit-id-of loaded)]
-    [(store-identity loaded) commit (:seon.flow/commit-fault! arm-request)]))
+    [(store-identity loaded) commit]))
 
 (defn- copy-base-ctx
   "A fresh context over the cluster base: SCI's generation-aware fork plus owned
-  copies of the kernel atoms, holding the caller's database and loaded program."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value] :seon.sci.eval/ctx]}
-  [cached database loaded]
+  copies of the kernel atoms, holding the caller's database, loaded program and
+  fault recorder."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/database-value
+                       [:or :nil :seon.flow/commit-fault!]]
+                  :seon.sci.eval/ctx]}
+  [cached database loaded recorder]
   (assoc (sci/fork cached)
          ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
          ::kernel/program-snapshot
-         (atom (assoc @(::kernel/program-snapshot cached)
-                      :seon.db/db database
-                      ::loaded-database loaded))))
+         (atom (cond-> (assoc @(::kernel/program-snapshot cached)
+                              :seon.db/db database
+                              ::loaded-database loaded)
+                 recorder (assoc :seon.flow/commit-fault! recorder)))))
 
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
@@ -3165,14 +3167,15 @@
   ([database] (base-ctx database {}))
   ([database arm-request]
    (let [loaded (or (::loaded-database arm-request) (loaded-program database))
-         derive-base #(derive-base-ctx loaded arm-request)
-         cluster (if-let [cache-key (cluster-base-key loaded arm-request)]
+         derive-base #(derive-base-ctx loaded)
+         cluster (if-let [cache-key (cluster-base-key loaded)]
                    (seon.cache/lookup ::base-context cache-key
                                       #(* 2048 (count (:functions @(::kernel/program-snapshot %))))
                                       derive-base)
                    (derive-base))
          projection (or (db/carried-projection database) (schema/projection-from-database database))
-         ctx (assoc (copy-base-ctx cluster database loaded) :seon.schema/projection projection)]
+         ctx (assoc (copy-base-ctx cluster database loaded (:seon.flow/commit-fault! arm-request))
+                    :seon.schema/projection projection)]
      (assoc ctx ::acquisition (overlay! ctx database)))))
 
 (defn- loaded-basis
