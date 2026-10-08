@@ -131,22 +131,30 @@
 (def ^:private acquire-context!
   (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
 
+(defn- test-var-meta
+  "The metadata of `test-var` as the member context `ctx` reads it: an SCI Var's metadata is
+  the context's own binding of it, so a file test redefined on a branch carries its
+  `:test`, bounds and seeds only inside `ctx`."
+  {:malli/schema [:=> [:cat [:maybe :seon.sci.eval/ctx] :any] [:maybe :map]]}
+  [ctx test-var]
+  (if ctx (sci.ctx-store/with-ctx ctx (meta test-var)) (meta test-var)))
+
 (defn- apply-seeds!
-  "Apply the test Var's ordered `:seon.test/seed` to the member's connection.
+  "Apply the ordered `:seon.test/seed` of `test-meta` (the test Var's metadata in the member's context) to the member's connection.
   Maps are tx-data; a function maps the previous entry's database to `:seon.test.seed/value`
   (manifest via `config/apply!`, tx-data via the checked writer). The first refusal stops
   entry; else the member reacquires its own branch head through the agent entrance, so the
   held handle, its program and the commit canonical fixtures branch from are the prepared ones.
   Seeds that change the test's own `:seon.program/definition-digest` refuse (`:changes-test`):
   the body would run the Var resolved before them."
-  {:malli/schema [:=> [:cat [:maybe :seon.agent/execution-handle] :seon.test/sym :seon.test/var]
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/execution-handle] :seon.test/sym [:maybe :map]]
                   [:or [:maybe :seon.agent/execution-handle] :seon.test.seed/preparation-error]]}
-  [member test-symbol test-var]
+  [member test-symbol test-meta]
   (let [refusal (fn [kind ordinal message offending]
                   (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/seed :seon.error/operation `apply-seeds!
                            :seon.error/message message :seon.error/expected :seon.test.seed/value :seon.error/offending offending
                            :seon.test.seed/preparation kind :seon.test/error-test-symbol test-symbol} ordinal (assoc :seon.test.seed/ordinal ordinal)))
-        connection (:seon.db/connection member) seeds (vec (:seon.test/seed (meta test-var)))]
+        connection (:seon.db/connection member) seeds (vec (:seon.test/seed test-meta))]
     (cond
       (empty? seeds) member
       (nil? member) (refusal :no-member nil (str test-symbol " declares seeds but runs without a member.") seeds)
@@ -256,7 +264,7 @@
                      #(let [test-var (resolve!)
                             ;; Seeds prepare under the body's program-change detection.
                             member (if (:seon.error/at test-var) member
-                                       (apply-seeds! member test-symbol test-var))
+                                       (apply-seeds! member test-symbol (test-var-meta (:seon.sci.eval/ctx custody) test-var)))
                             ;; Only an `effect/request*`-reaching member gets an evaluation.
                             context (when (and (:seon.test/effect-attempt? custody) (not (:seon.error/at member)))
                                       (attempt-request-context member test-symbol))]
@@ -290,7 +298,8 @@
                                       :seon.test/var test-var
                                       :seon.sci.eval/time-limit-ms
                                       (or (:seon.test/long-ms
-                                           (program/test-markers (meta test-var) (meta (:ns (meta test-var)))))
+                                           (let [test-meta (test-var-meta (:seon.sci.eval/ctx custody) test-var)]
+                                             (program/test-markers test-meta (meta (:ns test-meta)))))
                                           5000))))))))))))))
             ;; a platform thread: HotSpot counts a platform thread's
             ;; allocation and none of a virtual thread's, so a body's
@@ -1617,7 +1626,7 @@
             ;; file test the cluster base already interns, redefined in this
             ;; context, carries its `:test` only as `ctx` reads it.
             (and (runner/var-reference? test-var)
-                 (ifn? (:test (if ctx (sci.ctx-store/with-ctx ctx (meta test-var)) (meta test-var)))))
+                 (ifn? (:test (test-var-meta ctx test-var))))
             test-var
             ;; the interpretation's refusal, naming its cause
             (map? test-var) test-var
