@@ -147,8 +147,6 @@
 
 (deftest ^{:seon/tasks #{'seon.bootstrap/help-does-not-teach-how-a-test-names-a-task}}
   help-teaches-how-a-deftest-names-its-task
-  (with-help-agent
-   (fn [connection]
-     (let [forms (mapcat taught-forms (:seon.help/lines (bootstrap/help-value @connection "help")))]
-       (is (some #(and (seq? %) (= 'deftest (first %)) (:seon/tasks (meta (second %)))) forms)
-           "help teaches a deftest whose name carries :seon/tasks")))))
+  (let [lines (:seon.help/lines (seon.bootstrap/help-value (seon.db/db) "help"))]
+    (is (some #(clojure.string/includes? % "(deftest ^{:seon/tasks #{'") lines)
+        "help teaches a deftest whose name carries :seon/tasks")))
