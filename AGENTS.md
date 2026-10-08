@@ -109,6 +109,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 ## How to work
 
 1. **Understand.** Read the owning spec, Git history, dependency source and first-party caller before designing.
+   Code dives into `reference-code/` and web research are always authorized; use them instead of guessing.
    Record the pinned revision, the seam by fully qualified symbol (a `file:line` only in dated evidence), guarantee,
    inputs, recomputation event and cost. Verify a seam exists
    upstream before calling it the library's; prefer upstream, improving a maintained fork only to remove real
