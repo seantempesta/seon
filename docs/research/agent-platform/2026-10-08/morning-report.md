@@ -39,7 +39,8 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: proofs and reaching tests run as one test request (CC Q2: one admission and one completion instead
+Root defaults taken: `:chat` is the default wire format (E2: success tied 36/40 vs 35/40; chat had fewer repeated forms
+31 vs 86 and 16% fewer prompt tokens; a weak preference, a dial per agent). Proofs and reaching tests run as one test request (CC Q2: one admission and one completion instead
 of two each).
 
 ## Pending ledger edits
@@ -124,3 +125,7 @@ of two each).
 - **Commit-cost cards** (`8f5f23dab`, CC-0 … CC-8): commits per eval request today are 1 for `:ping` or a `defn` with no reaching
   test, 3 when a reaching test runs (recording, admission, completion), up to 5 with proofs; the reply's commit count is
   wrong and is fixed first (CC-1).
+- **E2 wire format** (`690045e35`, 80 runs, US$0.07): transcript vs chat tie on success (35/40 vs 36/40; no task clears
+  the rule at 10 runs); chat favoured on repeated forms and tokens, so chat is the default (lane chat-default). CX-4
+  removed prompt copying completely (`user=>` lines 44/322 → 0/244). Platform defects found: H1, a Markdown reply read as
+  121 forms (lane h1-prose); H3, a deftest over an earlier contracted defn is refused (lane h3-contract).
