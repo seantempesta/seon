@@ -21,19 +21,21 @@ commit's bytes with `Compiler/load` (clj-reload's seam), and restarts only for t
 
 Measured 2026-10-08 17:50-18:30 JST on default (loaded commit `e3b7bae3a`, HEAD `e78ab4ac8`, 7 commits ahead), MCP
 `eval_clj`: agent `mp-src` (SCI, own branch) made the change; agent `mp-root` (JVM mode) played root against a
-disposable target branch `:mp-target-…` forked from default's tip, with a scratch checkout made by
+disposable target branch `:mp-target-…` forked from default's tip (deleted afterwards, with both agents' branches), with a scratch checkout made by
 `git archive e3b7bae3a` as the write-back root. Default's program and the shared working tree were not changed.
 
 ## 0. Ranked: what blocks a smooth merge most
 
 | # | Blocker | Evidence (measured) | Fix (row) |
 |---|---|---|---|
-| 1 | **Files and database disagree after every merge.** The merged rows carry no file or span, and the target's file row keeps the old digest | §1 step 7-8: after the merge, `seon.task/step-summary` on the target holds only `:seon.program/definition-digest` (no `:seon.fn/file`, no `:seon.fn/form-span`); `src/seon/task.clj`'s `:seon.fn.file/digest` stays `20d261e3…` while the written file is `367ee7d9…`. The **second merge of the same function cannot be written back**: `prepare-merge!` with the root refuses `:one-file` in 47 ms (`proven-file`'s `file-of` answers nil for a before-row with no file, source.clj:1134) | MP-1: the merge transaction records the file facts the write-back's reindex already computed |
+| 1 | **Files and database disagree after every merge.** The merged rows carry no file or span, and the target's file row keeps the old digest | §1 step 7-8: after the merge, `seon.task/step-summary` on the target holds only `:seon.program/definition-digest` (no `:seon.fn/file`, no `:seon.fn/form-span`); `src/seon/task.clj`'s `:seon.fn.file/digest` stays `20d261e3…` while the written file is `367ee7d9…`. The **second merge of the same function cannot be written back**: `prepare-merge!` with the root refuses `:one-file` in 47 ms (`proven-file`'s `file-of` answers nil for a before-row with no file instead of falling back to the namespace's file, source.clj:1122-1124) | MP-1: the merge transaction records the file facts the write-back's reindex already computed |
 | 2 | **The write-back's base is the loaded commit, but it writes into the shared working tree** | the target's file facts describe `e3b7bae3a`; the shared tree is 7 commits ahead with 9 src/test/resources files changed and 24 more uncommitted (427 commits in 24 h; `src/seon/sci/eval.clj` 21 of them). Any merge touching one of those files refuses `:file-changed` (source.clj:1159, 1242) | MP-2: build the merge's git commit with plumbing off the loaded commit (no working tree); MP-3: integrate it into the git branch with `git merge-tree` |
 | 3 | **Nothing commits to git and nothing tells the JVM** | `write-back!` installs files and stops ("Publishing the changed path stays with the publication owner", source.clj docstring); no function creates a git commit; `merge!` (MA-11) has no write-back step | MP-2, MP-4 |
-| 4 | **Reload in place is a no-op in default today** | default now runs with program classes: `seon/task__init.class` resolves under `target/dev-program-classes/3b9f8dc7…/`, mtime `2100-01-01`; `require :reload` (`load-development-definitions!` cluster.clj:1924) loads the class and replaces nothing (PB-03a measured `root-replaced?` false). This **corrects hostbound-opus §4 step 11**, which found no program classes in default before the 08:46Z restart. The classpath is also the old archive `data/source/e3b7bae3a…` | MP-4 (RED-5 becomes this row's precondition, not a separate fix) |
+| 4 | **Reload in place is a no-op in default today** | default now runs with program classes: `seon/task__init.class` resolves under `target/dev-program-classes/3b9f8dc7…/`, mtime `2100-01-01`; `require :reload` (`load-development-definitions!` cluster.clj:1924) loads the class and replaces nothing (PB-03a measured `root-replaced?` false; reproduced here in a plain Clojure 1.12.5 JVM with `foo.core` AOT classes dated 2100: after `require :reload` `(f)` still answered the old 1, after `Compiler/load` of the new source it answered 2 in 15 ms with the same Var, §3). This **corrects hostbound-opus §4 step 11**, which found no program classes in default before the 08:46Z restart. The classpath is also the old archive `data/source/e3b7bae3a…` | MP-4 (RED-5 becomes this row's precondition, not a separate fix) |
 | 5 | Root's tools are not yet one `merge!` and need JVM mode | to play root I needed `seon.operator.runtime/running-instances`, `cluster.agent/acquire-context!` and `db/call-with-custody`; without the custody wrapper `accept-merge!` spent **2,678 ms** then refused ("This write names branch … not the writing cluster's branch") | MA-0, MA-4, MA-11, MA-14a (existing) |
-| 6 | The test-keeping decision has no data | owner ruling §5 "root keeps only new behavior": nothing in the diff says which added deftest duplicates an existing one | MP-5 |
+| 6 | The merge branch re-runs every test, reusing none | `prepare-merge!`'s run: `:seon.test/reused-count 0`, 2,570 of 3,204 ms in test bodies the source branch had just run green on the same reached definitions | MP-6: reuse a member's green result when its reach digest on the merge branch equals the source branch's |
+| 7 | "Red on main before the branch" has no evidence on main | the home holds no result row for the red `seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes` (test results live on test branches); so `merge!` cannot tell a pre-existing red from a new one | D6 |
+| 8 | The test-keeping decision has no data | owner ruling §5 "root keeps only new behavior": nothing in the diff says which added deftest duplicates an existing one | MP-5 |
 
 ## 1. What exists end to end, step by step, measured
 
@@ -47,7 +49,7 @@ One docstring change to `seon.task/step-summary` plus one new deftest `seon.task
 | 4 | merge request | `my.program/propose-merge!` | not exercised (needs an assigned task); merge.md §8: 0.46-1.05 s | proofs + one write | yes, G3/G4 open |
 | 5 | branch the target / merge branch | `registry/branch!` | 18-27 ms | constant | yes |
 | 6 | diff | `compare-branch` | **41 ms** for 2 identities (merge.md §8 had 174 ms for 4) | changed identities | yes |
-| 7 | test merge with the file proof | `source/prepare-merge!` with root | **3,204 ms**: 2,570 ms in the run (3 members: the proof, the reaching test, one unrelated red), ~630 ms branch, acquire, write and file proof | test bodies + changed files | yes; the red `seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes` (unrelated: a schema usage assertion) shows, not gated |
+| 7 | test merge with the file proof | `source/prepare-merge!` with root | **3,204 ms**, `:seon.test/reused-count 0`: 2,570 ms in the run (3 members: the proof, the reaching test, one unrelated red), ~630 ms branch, acquire, write and file proof | test bodies + changed files | yes; the red `seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes` (unrelated: a schema usage assertion) shows, not gated |
 | 8 | merge commit | `source/accept-merge!` | **1,200 ms** (2,678 ms to refuse under the wrong custody) | one guarded transaction of 2 rows | yes; 10× over (MA-16a) |
 | 9 | write-back | `source/write-back!` | **371 ms**, 2 files: `src/seon/task.clj` one span replaced, `test/seon/task_steps_test.clj` one form appended; `git diff` shows exactly 6+/1- lines | changed files (one analysis each) | yes, but leaves the target's file facts stale (blocker 1) |
 | 10 | git commit | none | `git commit` in the scratch checkout 20 ms; plumbing commit off the base 74 ms; `git merge-tree --write-tree` with another lane's edit in the same file 16 ms, clean | changed files | **missing** |
@@ -68,7 +70,7 @@ parses a diff and never runs a textual three-way merge of program files. Each st
 | diff | `compare-branch`: merge-base walk + digests of changed identities (installed) | commits since the fork + changed identities |
 | merge branch | `d/branch!` off the target's tip + one transaction of the non-conflicting rows | changed rows |
 | norms | each norm's tx-data from the merge branch's value (MA-8) | rows it converts |
-| tests | proofs ∪ reaching tests ∪ root's choice; unchanged results answered from their record | test bodies |
+| tests | proofs ∪ reaching tests ∪ root's choice; a member whose reach digest (`:seon.test.member/reach-digest`) on the merge branch equals its digest in the source branch's green run is answered from that record (MP-6); only tests whose reached definitions differ (the target's `behind` changes, norms, root's edits) run | tests whose reach differs between source and merge branch |
 | files | `proven-files` over `db/with target merged-rows`: splice spans, reindex each changed file | changed files (one clj-kondo analysis each: 371 ms measured for two files) |
 | merge commit | ONE Datahike transaction: program rows + **the reindexed file facts (spans, file digest, `:seon.fn/file` refs)** + norm tx-data + the closed request + the git commit id | changed rows + changed files |
 | git | blobs for the changed files, a tree from the loaded commit's tree, `git commit-tree -p <loaded commit>`; then `git merge-tree --write-tree` into the git branch | changed files |
@@ -81,7 +83,8 @@ kept equal by gates that refuse (`:file-changed`, `:one-file`, `:span-mismatch`)
    (the file facts). Pure: a crash here loses nothing.
 2. **Git objects.** Write the blobs, the tree and a commit `G` whose parent is the commit the target's file facts were
    indexed from (the loaded commit). Git objects are immutable and unreachable until a ref names them: harmless if
-   anything later fails, collected by `git gc`.
+   anything later fails, collected by `git gc`. The parent is the commit the target's file facts name: the loaded
+   commit at first, then each merge's `G` (the target records it), so consecutive merges chain without a restart.
 3. **The merge transaction** on the target, guarded by its tip (`registry/head-guard-tx`): program rows, file facts,
    norm data, the closed request, and `G`'s id on the request (`:seon.merge/git-commit`). This is the moment the merge
    happens. Files and rows now agree *as data*: the target says which bytes (`G`) its rows were proven against.
@@ -110,6 +113,9 @@ commit). `bin/lane claim` already knows the holders.
 ## 3. How the change reaches the running JVM
 
 Facts:
+- Reproduced in a plain Clojure 1.12.5 JVM: `foo.core` compiled to classes, class files touched to 2100, the source
+  changed from `(defn f [] 1)` to `2`: `(require 'foo.core :reload)` left `(f)` at 1; `Compiler/load` of the new
+  source text answered 2 in 15 ms and kept the same Var (`identical?` true).
 - default's classpath is the archive `data/source/e3b7bae3a…` plus `target/dev-program-classes/3b9f8dc7…` (class files
   dated 2100). `require :reload` finds the class newer than the source and loads it: nothing changes.
 - clj-reload loads a namespace from a string with `Compiler/load` (`clj_reload/util.clj:121` `ns-load-file`, at
@@ -206,6 +212,14 @@ writers: Seon agents merge rows, lanes commit files, and the two meet only at a 
 3. Reload via `require :reload` after removing the class cache. Cost: still reads the old archive's classpath;
    needs a classpath change per adoption.
 
+**D6. How does `merge!` know a test was red on main before the source branch existed?** The merge-base evidence it
+needs does not exist: results are recorded on test branches, and the home held no result for the red test above.
+1. **Run each red member once more on the target's tip when it is red on the merge branch (recommended).** Cost: one
+   test body per red test, only on red; the answer is current evidence, never a stale record.
+2. Keep baseline runs on main (the "test evidence persists" ruling): every main commit carries results. Cost: a
+   whole-suite run per main commit; stale by the next commit.
+3. Treat unknown at main as "red on main" and ask root. Cost: every unrelated red stops the automatic merge.
+
 **D5. Norms run as Datahike runs them, or as Seon needs?** Datahike's `transact-norms` calls a `tx-fn` with the
 **connection** and resolves it as a JVM Var (`norm/norm.clj:142-158`), but a norm defined on an agent branch is an
 SCI definition until merged and loaded. MA-8c/FK-DH already chose a fork seam computing norm tx-data from a database
@@ -220,9 +234,10 @@ MA-16a (profile: accept's 1.2 s, prepare's ~630 ms outside the run), MA-8a-c (no
 | Id | Title | Change | Files | Proof | Deps |
 |---|---|---|---|---|---|
 | MP-1 | A merge records the file facts its write-back proved | `merge!` computes `proven-files` on the merge branch's value before committing and carries, in the one merge transaction, each changed file's digest and each written declaration's `:seon.fn/file` and `:seon.fn/form-span` from the reindex; `write-back!`'s separate pass after the commit goes; the merge commit's file facts equal what publication would write | `src/seon/cluster/source.clj` | `seon.cluster.source-test/a-second-merge-of-one-function-writes-back` (two merges of one function in a row, both write back; today the second refuses `:one-file`) | MA-11 |
-| MP-2 | `merge!` writes its git commit off the loaded commit | blobs, tree and `git commit-tree -p <loaded commit>` with trailers (request, Datahike merge commit, run) made before the merge transaction, which records `:seon.merge/git-commit`; base bytes read with `git cat-file` from the loaded commit, never the working tree | `src/seon/cluster/source.clj`, a small git owner (`seon.git`, plumbing via `babashka.process`), `resources/seon/schemas/seon.merge.edn` | `seon.git-test/a-merge-commit-builds-off-the-loaded-commit-without-the-working-tree` (a dirty working copy of the same file is untouched; the commit's file reindexes to the merged digests) | MP-1 |
+| MP-2 | `merge!` writes its git commit off the loaded commit | blobs, tree and `git commit-tree -p <loaded commit>` with trailers (request, run) made before the merge transaction (the Datahike merge commit id cannot be in it: the transaction records `G`, not the reverse); the parent is the commit the target's file facts name (the loaded commit, then the previous merge's `G`), which records `:seon.merge/git-commit`; base bytes read with `git cat-file` from the loaded commit, never the working tree | `src/seon/cluster/source.clj`, a small git owner (`seon.git`, plumbing via `babashka.process`), `resources/seon/schemas/seon.merge.edn` | `seon.git-test/a-merge-commit-builds-off-the-loaded-commit-without-the-working-tree` (a dirty working copy of the same file is untouched; the commit's file reindexes to the merged digests) | MP-1 |
 | MP-3 | Integrate the merge's git commit into the git branch | `git merge-tree --write-tree` of the branch tip and `G`, `commit-tree` with both parents, `update-ref` with the expected old tip; clean working-tree paths refreshed, held paths named; a file conflict stops the merge with the merge branch kept; a merged request whose git commit is unreachable is integrated at the next `merge!` or boot | the git owner, `src/my/program.clj` | `…/a-lane-edit-elsewhere-in-the-file-merges-clean`, `…/a-lane-edit-on-the-same-lines-stops-the-merge`, `…/a-crash-after-the-merge-transaction-integrates-at-the-next-merge` | MP-2 |
 | MP-4 | Reload merged namespaces from the commit's bytes | the development reload loads each changed namespace with `Compiler/load` from `G`'s blob (clj-reload's `ns-load-file` shape, no `remove-ns`) in clj-reload's order, dependents only for changed macros, then arms, records, and PB-03b advances the base; kinds in §3 answer `:seon.merge/needs-restart` instead; RED-5's verification is this row's first probe | `src/seon/cluster.clj` | `seon.cluster.adoption-reload-test/a-merged-function-reloads-in-a-jvm-with-program-classes` (platform tier, isolated JVM with program classes) | RED-5, UL-9, PB-03b, MP-2 |
+| MP-6 | The merge branch reuses the source branch's green results | at `merge!`'s run, a member whose reach digest on the merge branch equals the one in the source branch's green run is answered from that record (unknown or red never reused); a red member is run once on the target's tip to classify it (D6) | `src/seon/cluster/source.clj`, `src/seon/test/runner.clj` (the reuse key); first probe: the reach digest is the same for one test on two branches holding the same reached rows | `seon.cluster.source-test/a-clean-merge-reuses-the-source-branchs-green-results` (reused-count equals members, prepare under one test body) | MA-11 |
 | MP-5 | The diff names new tests and what already covers them | `:seon.merge/new-tests` in the diff value: each source-added deftest, `:proof?`, `:covered-by` (target tests reaching the same changed functions); a folded row re-tags the task | `src/my/program.clj` | `my.program-test/a-new-test-reaching-a-covered-function-names-its-cover` | MA-4 |
 
 ## 7. Findings (record as tasks; outside this lane's files)
@@ -245,8 +260,8 @@ MA-16a (profile: accept's 1.2 s, prepare's ~630 ms outside the run), MA-8a-c (no
 
 - `propose-merge!` and the home's merge request were not exercised (the probe called `prepare-merge!` and
   `accept-merge!` directly on a disposable target); their costs are merge.md §8's.
-- In-place reload was not run in default (never load into default's JVM); its cost is PB-03a's, its no-op is
-  inferred from the class files measured here plus PB-03a's measured `root-replaced?` false in a JVM of the same shape.
-- Whether `seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes` is red at the merge base was not
-  checked; it is red on the source and merge branches with a cause unrelated to the change.
+- In-place reload was not run in default (never load into default's JVM); its cost is PB-03a's; its no-op follows from
+  the class files measured in default plus the plain-JVM reproduction (a disposable directory outside the checkout, Clojure 1.12.5).
+- Whether `seon.render.ns-test/task-and-schema-entities-render-as-graph-nodes` is red at the merge base is unknown:
+  the home records no result for it (D6); it is red on the source and merge branches with a cause unrelated to the change.
 - One sample per timing.
