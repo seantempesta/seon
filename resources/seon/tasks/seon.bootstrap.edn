@@ -6,8 +6,8 @@
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
  #:seon.task{:name "help-does-not-teach-how-a-test-names-a-task"
              :kind :function
-             :intent "(help) does not document how a test names a task (^{:seon/tasks #{\"handle\"}} on the deftest), the only way a test proves a task. Done when the help value carries that example and a bootstrap test asserts it."
-             :must-read #{seon.bootstrap/help-value}}
+             :intent "`seon.bootstrap/help-value` teaches no form showing how a test names the task it proves, the only way a test proves a task. Done when one of its `:seon.help/lines` teaches a deftest form whose name carries `:seon/tasks` metadata naming a task as an ns/name symbol, e.g. (deftest ^{:seon/tasks #{'comp.text/slug-is-lowercase}} slug-lowercases (is (= \"a-b\" (comp.text/slug \"A B\")))), as a line of its own beside the other taught forms."
+             :must-read #{seon.bootstrap/help-value seon.help-test/help-teaches-how-a-deftest-names-its-task}}
 #:seon.task{:name "help-evidence-test-red-on-head"
              :kind :function
              :intent "`seon.help-test/help-evidence-tracks-its-code-version` is red on HEAD 82224522b ('an unrelated write leaves help current' fails: an agent-tx write makes help's read evidence stale), bin/seon check candidate 4e48f5785 run a04d7e761706. Find which of help-value's reads the agent write touches and make the read attribute-bound, or correct the test's assumption."

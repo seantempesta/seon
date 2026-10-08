@@ -82,8 +82,8 @@
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "the-missing-connection-refusal-has-no-fix-key"
              :kind :function
-             :intent "`seon.db/missing-connection-error` answers a refusal whose fix (pass the database value, or (`seon.cluster.boot/connection` \"default\") at a development REPL) exists only inside `:seon.error/message` prose, so a test or agent can read it only as text. A refusal adds its fix as `:seon.error/fix` (AGENTS.md, errors are ordinary values of one shape)."
-             :must-read #{seon.db/missing-connection-error}
+             :intent "`seon.db/missing-connection-error` answers a refusal whose fix (pass the database value, or (`seon.cluster.boot/connection` \"default\") at a development REPL) exists only inside `:seon.error/message` prose, so a test or agent can read it only as text. Done when the refusal it answers carries that fix as `:seon.error/fix` (a string naming `seon.cluster.boot/connection`) and its `:seon.error/message` says only what was refused, without naming `seon.cluster.boot/connection`."
+             :must-read #{seon.db/missing-connection-error seon.db-test/a-missing-connection-refusal-carries-its-fix-as-data}
              :evidence #{"docs/research/agent-platform/2026-10-08/task-census/evidence/test-data-assertions--proofs.edn"}}
  #:seon.task{:name "capturing-read-evidence-costs-0.8-ms-per-index-seek"
              :kind :function
@@ -235,8 +235,8 @@
              :must-read #{seon.db/datoms seon.db/edn-encoded?}}
  #:seon.task{:name "uninstalled-attribute-candidates-are-alphabetical"
              :kind :function
-             :intent "The \"uninstalled attribute\" error's ::registered-candidates lists the first attributes alphabetically (datahike.budget/*), not the names nearest the requested one, so a model cannot act on it. Done when seon.db/registered-attribute-candidates returns the nearest names by edit distance (Malli's public edit distance after FK-MALLI), with a regression on a near-miss attribute."
-             :must-read #{seon.db/transact!}}
+             :intent "`seon.db/registered-attribute-candidates` answers the first installed attributes alphabetically (the requested attribute's namespace first, else every attribute), not the names nearest the requested one, so a model cannot act on the \"uninstalled attribute\" error's `:seon.db/registered-candidates`. Done when it answers at most twelve installed attributes ordered by `malli.error/levenshtein` distance from the requested attribute, nearest first: :seon.agent/setings answers :seon.agent/settings first and :seon.agnet/branch answers :seon.agent/branch first."
+             :must-read #{seon.db/registered-attribute-candidates malli.error/levenshtein seon.transact-feedback-test/uninstalled-attribute-candidates-are-the-nearest-names}}
  #:seon.task{:name "a-deftest-after-a-same-request-refer-is-refused-by-digest"
              :kind :function
              :intent "Bench run bench-defaults-slug-has-a-passing-test-prose-35d2a9-2 (2026-10-09), namespace comp.text-test on an agent branch: one eval request evaluated (require '[clojure.test :refer [deftest is]]) and then (deftest slug-lowercases (is (= \"hello-world\" (ct/slug \"Hello World\"))) (is (= \"foo-bar-baz\" (ct/slug \"  Foo   Bar Baz  \")))); the deftest was answered \"The stored definition digest of [:seon.test/sym comp.text-test/slug-lowercases] is not the one its definition produces\", so its proof never saw a declaration although the test ran 2 passes at the REPL. Unlike `seon.db/a-cross-pass-alias-retarget-leaves-dependant-digests-stale`, the refer was added, not retargeted. Done when a reproduction of this request on a branch admits the deftest, or refuses its form with the resolver cause as data."
