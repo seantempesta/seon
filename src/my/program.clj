@@ -240,9 +240,11 @@
   "Read the referrers a retraction would strand.
 
   Callers, references and test subjects block; stored test reach is advisory.
-  Nothing is written. Unknown dispatch, apply, macro and external
-  callers are reported explicitly. A supplied contract is advisory: argument
-  shapes require the existing candidate test gate.
+  Nothing is written. Gating tests come from one reverse walk seeded with the
+  subject, or with every function and test a namespace owns. Dispatch, macro
+  and runtime-computed callers are not modelled; call sites without a recorded
+  argument count are counted under :seon.program/unknown. A supplied contract
+  is advisory: argument shapes require the existing candidate test gate.
 
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
@@ -265,17 +267,17 @@
           gate-names (if (= :seon.ns/name kind) owned-functions
                          (when (qualified-symbol? subject)
                            [subject]))
-          gates (let [result (function/gate-sets database (vec gate-names))]
- (if (:seon.db/invalid-read result)
-
- (throw (ex-info (:seon.error/message result) result)) result))
+          gating (let [result (function/gating-tests database (vec (symbols gate-names)))]
+                   (if (:seon.db/invalid-read result)
+                     (throw (ex-info (:seon.error/message result) result))
+                     result))
           report
           (merge (observation database subject identity) calls
                  (present-groups
                   {:seon.program/references (symbols (names-through database :seon.fn/references subject :seon.fn/sym))
                    :seon.program/subject-of (symbols (names-through database :seon.test/subject subject :seon.test/sym))
                    :seon.program/stale-reach (symbols (names-through database :seon.test/reach subject :seon.test/sym))
-                   :seon.program/gating (vec (sort (symbols (mapcat val gates))))
+                   :seon.program/gating gating
                    :seon.program/capability-of (symbols (names-through database :seon.effect/capability subject :seon.fn/sym))
                    :seon.program/schedule-tasks (set (names-through database :seon.schedule.task/function entity :seon.schedule.task/id))
                    :seon.program/render-declared-by (render-referrers database subject)
@@ -285,21 +287,16 @@
                      (set (names-through database :seon.ns/requires subject :seon.ns/name)))})
                  (when (= :seon.schema/key kind) (key-data database subject entity)))
           unknown-arities (count (remove :seon.fn/call-arity (:seon.program/call-sites report)))]
-      (-> report
-          (update :seon.program/unknown into
-                  (cond->
-                   [{:seon.program/gap :dispatch-not-modelled
-                     :seon.program/message "Protocol and multimethod implementations have no independent program entity."}
-                    {:seon.program/gap :arity-unknown-sites
-                     :seon.program/count unknown-arities
-                     :seon.program/message "Calls without recorded argument counts, including apply, cannot be checked for arity."}
-                    {:seon.program/gap :macro-mediated
-                     :seon.program/message "Macro expansions can introduce calls absent from the indexed caller relation."}
-                    {:seon.program/gap :unresolvable-callers
-                     :seon.program/message "Runtime-computed targets cannot be attributed to this subject by static analysis."}]
-                    (:seon.program/contract request)
-                    (conj {:seon.program/gap :contract-shapes-unknown
-                           :seon.program/message "The proposed contract has not run through the candidate test gate; these referrers are suspects, not proven contract violations."})))))))
+      (cond-> report
+        (pos? unknown-arities)
+        (update :seon.program/unknown conj
+                {:seon.program/gap :arity-unknown-sites
+                 :seon.program/count unknown-arities
+                 :seon.program/message "Calls without recorded argument counts, including apply, cannot be checked for arity."})
+        (:seon.program/contract request)
+        (update :seon.program/unknown conj
+                {:seon.program/gap :contract-shapes-unknown
+                 :seon.program/message "The proposed contract has not run through the candidate test gate; these referrers are suspects, not proven contract violations."})))))
 
 (defn- entity-facts
   "`entity`'s attributes at `database` (`seon.db/stored-entity`): refs remain
@@ -691,8 +688,8 @@
   "Retract a declaration, then unmap its Var in the executing fork and base.
 
   Calls breaks first; a refusal changes neither facts nor SCI and names the
-  surviving referrers. :seon.program/unknown records dispatch, apply and
-  macro callers the analyzer cannot see.
+  surviving referrers. :seon.program/unknown counts call sites without a
+  recorded argument count; dispatch and macro callers are not modelled.
 
   Example:
   (my.program/ns-unmap! 'user/helper)"
@@ -707,8 +704,8 @@
   "Retract a namespace and its owned declarations, then remove it from SCI.
 
   Calls breaks first and writes the entire affected set in one transaction; a
-  refusal names the surviving referrers. The returned :seon.program/unknown
-  retains dispatch, apply and macro coverage limits. A namespace owning
+  refusal names the surviving referrers; dispatch and macro callers are not
+  modelled. A namespace owning
   schema declarations refuses: declaration-only deletion would leave its
   database attributes.
 
@@ -725,8 +722,8 @@
 
   Calls breaks first. Namespace referrers conservatively refuse removal:
   indexed calls do not retain which alias spelling resolved their targets.
-  Until seam B lands this refusal comes from breaks alone; the result carries
-  :seon.program/unknown for dispatch, apply and macro callers.
+  Until seam B lands this refusal comes from breaks alone; dispatch and macro
+  callers are not modelled.
   Example: (my.program/ns-unalias! 'my.scratch 'str)"
   {:malli/schema [:=> [:cat :my.program/context :symbol :symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
