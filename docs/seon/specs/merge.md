@@ -37,7 +37,9 @@ root's diff and merge. During work, the task's proofs and every test reaching th
 agent's branch ([agent-loop.md](agent-loop.md) §1.7, §3.5); at merge they run again on the merged program. `merge!`
 commits when the merge is clean and every test on the merge branch is green, and otherwise stops with the merge branch
 kept. A newer green commit updates the same open merge request, as a push does. A definition's pointer to the
-evaluation that made it is dropped at merge: the source file becomes the record.
+evaluation that made it is dropped at merge: the source file becomes the record. Our own lanes write a branch back
+to files without a merge (`my.program/write-branch!`, installed) and commit by branch evidence (`bin/lane commit
+--branch-evidence`); that is the lanes' path into git, not a merge of the cluster.
 
 ## 1. The merge request
 
@@ -75,6 +77,7 @@ evaluation that made it is dropped at merge: the source file becomes the record.
 - the run on the merge branch, `:seon.test.run/id`, with every member's result (consumers: `merge!`, the score);
 - the merge commit on the target, with parents the target's tip, the merge branch and the source commit (an octopus
   merge, valid in git; consumers: write-back, history);
+- the review's test decisions (§4 step 3: kept, folded, dropped; consumers: the score, suite growth);
 - on the request: `:seon.merge/merge-commit` present means merged, `:seon.merge/close-reason` present means closed,
   neither means open (positive data replaces today's `:seon.task/outcome` enum); a stopped merge records why it
   stopped (unmerged identities, red tests, failed integrity) as data on the request; who merged
@@ -153,6 +156,11 @@ One verb, as `git merge`: `(my.program/merge! {:seon.merge/request m})`.
 3. **Test.** Run, on the merge branch: the task's proofs, every test reaching the final change, and root's chosen
    tests (`:seon.test/identities`). The selection and every result are stored. Reaching-test counts are shown, not
    gated: the installed `uncovered` gate (source.clj:996-998) is deleted.
+   **Keep only new behavior** (owner 2026-10-08). A task's proof is preferably an existing test tagged with the task
+   or a row added to an existing table test. For each new deftest the source branch carries, root decides in the
+   review: keep it only if it guards a behavior class no existing test covers (one regression per behavior class),
+   otherwise fold it into a table row or drop it on the merge branch, as an ordinary edit there (§3). The decision is
+   recorded on the merge request as data (its keys are declared with the merge request data, ledger §3.16). Suite growth follows distinct behaviors, not task count.
 4. **Commit or stop.** Commit when all hold:
    - `:seon.merge/unmerged` is empty;
    - every test of the run is green (unknown evidence never merges). A test already red on main before the source

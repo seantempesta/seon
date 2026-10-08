@@ -305,9 +305,8 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   are only incremental and we don't re-run what hasn't changed." Lanes change ordinary functions by `defn` on their
   own branch in the main JVM, the reaching tests run incrementally there, then write-back; a throwaway JVM only for
   host-bound platform code (evaluator, writer, test runner, boot, schema publication, dependency bumps); the commit
-  gate accepts recorded green branch evidence for exactly the committed definitions. Lives in: ledger RF-1..RF-6
-  (cards `RF-*.md`); AGENTS.md "Prove each slice before it lands" waits on RF-2 (the `bin/lane commit
-  --branch-evidence` gate), when root applies `repl-first/claude-md-prove-slice.patch`.
+  gate accepts recorded green branch evidence for exactly the committed definitions. Lives in: AGENTS.md "Prove each
+  slice before it lands"; ledger RF-1, RF-2, RF-4 (landed), RF-3, RF-6 (§3.27).
 - **Small, fully specified slices.** "If the agents are taking this long the amount of work spec'ed is too large
   AND/OR it's too complicated and not well spec'ed." A spec-and-split pass cuts each slice to about 15 minutes with
   exact files, contracts, named proof tests and budget rows; no design decision is left to the implementer. Lives in:

@@ -58,7 +58,12 @@ the **printed value** (code: shown text, CN-9). Code converts as each rename row
 6. **Standard lookups return data** on SCI's `clojure.repl`; `(help)` teaches only what its commit installs (§3.7).
 7. **Work ends by proofs; every relevant test runs by itself.** A task needs proofs (deftests naming it in
    `:seon/tasks`) before it is assigned: assignment refuses a task with no proofs or whose proofs are all green
-   (tests give their tasks proofs in their setup). After every eval request that evaluated a form, the task's proofs and then every test reaching the change run automatically on the agent's branch,
+   (tests give their tasks proofs in their setup). A proof is preferably an existing test: an existing failing test
+   tagged with the task, or a new row in an existing table test; a new deftest only for a behavior no test covers. A
+   cost or refactor task, whose value does not change, is proven by measured cost: its proof asserts one test-visible
+   measure (`seon.profile/measure`: reads, armed calls, allocated bytes, ms, as data from JVM counters, so it sees
+   compiled code), red before the fix. At merge root keeps a new deftest only if it guards a behavior class no test
+   covers (merge.md §4). After every eval request that evaluated a form, the task's proofs and then every test reaching the change run automatically on the agent's branch,
    as a serial step inside the eval request, recorded with that eval request (§3.5); the agent never has to call `my.test/check`. A
    test the change broke is a blocker the agent sees and fixes, as in any intentional refactoring. The step has a time
    bound: proofs first, reaching tests after, and what the bound leaves continues at the next eval request, shown as pending.
@@ -77,7 +82,9 @@ the **printed value** (code: shown text, CN-9). Code converts as each rename row
    general rules only; nothing else clips. Render functions return pruned data for the top-level value; the full value
    is one step away through its result symbol. Elision forms are plain clojure.core on the live result symbol, lazy
    first. Agent-facing messages are data first, one short fixed message per variant, fixes as runnable forms.
-10. Delete before adding. Reuse libraries. Understand before designing. Dual reviews. The owner approves core
+10. Delete before adding. Reuse libraries; where one lacks a seam we need, change our fork rather than build around
+    it, as an upstream-quality commit with the library's own tests, kept on a short divergence list
+    (`docs/seon/architecture/reference-code.md` "Our forks") and offered upstream when general. Understand before designing. Dual reviews. The owner approves core
     designs. Reset whenever needed, with the §5 manifest.
 
 ## 2. Budgets
@@ -249,7 +256,8 @@ messages and errors are unread items shown in the block; `(help)` is the prefix,
 
 **The current-state block.** One value, `seon.context/current-state [database agent-id]`, read at the call from
 stored facts (a database value, never a connection), rendered by its declared AI render pair into pruned data in this
-order, and printed by the value printer under the block budget. Sections, each absent when empty:
+order, and printed by the value printer like any evaluation, under the ordinary per-evaluation display budget (§2
+"Context tokens"; there is no block budget). Sections, each absent when empty:
 - **Task**: the task's current declaration (intent and the names it references), read at the task home's current
   main. A task revised by root or the user is a review: the update advances the assignment's revision in the same
   transaction, so the block always shows the current declaration and never an older one. Task steps are shelved
@@ -270,8 +278,13 @@ order, and printed by the value printer under the block budget. Sections, each a
   A reference that is not code (a Markdown doc, a README) is a relative path whose first segment names its base (the
   checkout, or `reference-code/<project>` at its pinned revision) with an optional `#heading`; the block lists it with
   its size in tokens and one read operation, `(my.fs/section "path#heading")`, which the agent evaluates to pull the
-  section. Task intents, docs and docstrings are parsed for references by one resolver. A name resolving to nothing
-  shows as a problem on the task. An agent that runs the operations sees the result in its own history.
+  section. **References follow one rule everywhere.** Code is a fully qualified symbol, a schema a fully qualified
+  keyword, any other file a relative path whose first segment names its base, with `#heading` anchors; no custom EDN
+  tag or reader; file and line are always derived (the Var's metadata, clj-kondo's analysis, the stored schema), never
+  written. Docs are Markdown, and task intents, docs (code spans and relative links) and docstrings are parsed by one
+  resolver (target `seon.ref/references`, ledger REF-1; installed today: CS-01c1's resolution of task names). A
+  reference resolving to nothing is a problem on the task at ingestion, never a refusal (TASK-CHECK), and the edit
+  hook reports one in an edited file (REF-2). An agent that runs the operations sees the result in its own history.
 - **Unread**: messages and errors delivered to this agent and not yet delivered by a committed model eval request, each with
   its identity; `(my.message/inbox)` is the operation that shows them all (it is extended for unread items; there is
   no `my.agent/inputs`).
@@ -346,8 +359,11 @@ the web never reads the proc's memory.
 reaching the eval request's change, as one reaching request. Each request carries the eval request id, so its results are recorded
 with that eval request. The step is serial: the next submission or model call starts after it, so the next block or reply
 shows real results and nothing is ever `:running`. A test whose recorded result still holds for the program it now
-reaches is answered from that record, so an eval request that changed nothing costs lookups. A test check run inside the
-eval request sees the eval request's earlier definitions. It has a time bound (a cluster configuration dial, default 10 s): proofs always
+reaches is answered from that record, so an eval request that changed nothing costs lookups. A `my.test/check` naming
+definitions an earlier form of the same eval request made answers `:my.test/after-recording`: those tests run in this
+step, right after the one recording transaction, and their results are in the same reply; nothing tests uncommitted
+values and the recording stays one transaction. A change no test reaches answers `:seon.test/unreached` with no
+`:seon.test/passed?`, never a failed run. The step is the cluster dial `:seon.config.test/step?` (default on). It has a time bound (a cluster configuration dial, default 10 s): proofs always
 first, reaching tests after; when the bound fires, a started member runs to its actual exit and records, and the
 tests not yet run continue at the next eval request's step and show as pending. A newer eval request's change supersedes the queued
 tests of the older program (the last version wins). A member whose recorded green still holds for the program it now
