@@ -1,5 +1,6 @@
 (ns seon.sci.documentation-test
-  (:require [clojure.string :as str]
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [sci.core :as sci]
             [seon.config :as config]
@@ -76,10 +77,9 @@
               (:in (first (filter #(= 'my.agent/settings! (:sym %)) entities)))))
        (is (= :map (first (get-in directory-value [:schemas :my.agent/settings-request]))))
        (is (= :map (first (second (:in entity)))))
-       (doseq [target ["my.message/send" "my.agent/done" "my.task"]
+       (doseq [target ["my.message/send" "my.agent/done"]
                :let [doc (:seon.sci.admit/value (run (str "(doc " target ")")))]]
-         (is (= (cond-> #{:summary :body :example :in :out}
-                  (namespace (symbol target)) (conj :arglists :supplied))
+         (is (= (conj #{:summary :body :example :in :out} :arglists :supplied)
                 (set (keys doc))))
          (is (not (str/blank? (:summary doc))))
          (is (not (str/blank? (:body doc))))
@@ -116,7 +116,23 @@
          (is (= (set (keys library)) #{:summary :body :example :arglists}) "a library Var has no invented contract")
          (is (seq (:arglists library)))
          (is (= library aliased) "an alias resolves to the same Var"))
-       (is (empty? (:seon.cluster.eval/output (run "(doc 'x)"))))))))
+       (is (empty? (:seon.cluster.eval/output (run "(doc 'x)"))))
+       (let [schema (value "(doc :seon.task/intent)")
+             namespace-doc (value "(doc seon.task)")
+             empty-ns (value "(do (in-ns 'fixture.empty-doc) (doc fixture.empty-doc))")
+             sci-ns (value "(doc clojure.set)")]
+         (is (= :seon.task/intent (:key schema)))
+         (is (= (edn/read-string (:seon.schema/form (db/pull (db/db connection) [:seon.schema/form]
+                                                              [:seon.schema/key :seon.task/intent])))
+                (:form schema))
+             "the declared form is returned parsed")
+         (is (unavailable? (value "(doc :no.such/schema)")))
+         (is (contains? (set (:publics namespace-doc)) 'seon.task/create!))
+         (is (not (str/blank? (:summary namespace-doc))))
+         (is (not-any? #(contains? namespace-doc %) [:in :out]))
+         (is (= {:publics []} empty-ns) "a known empty namespace has no publics")
+         (is (contains? (set (:publics sci-ns)) 'clojure.set/union))
+         (is (unavailable? (value "(doc no.such.namespace)"))))))))
 
 (deftest directory-observes-a-function-installed-after-context-acquisition
   (support/with-database

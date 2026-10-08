@@ -2062,12 +2062,48 @@
     (sci/var->symbol resolved)
     authored))
 
+(defn- schema-documentation
+  "The declared form of the schema named `key`, with its description property."
+  {:malli/schema [:=> [:cat :seon.db/db :qualified-keyword :seon.sci.eval/authored-reference]
+                  [:or :seon.sci.eval/schema-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [database key authored]
+  (let [row (db/pull database [:seon.schema/key :seon.schema/form] [:seon.schema/key key])]
+    (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row) (not (:seon.schema/form row)))
+      (if (:seon.schema/form row) row (documentation-unavailable authored))
+      (let [form (edn/read-string (:seon.schema/form row))
+            description (when (and (vector? form) (map? (second form))) (:description (second form)))]
+        (cond-> {:key key :form form}
+          description (assoc :description description))))))
+
+(defn- namespace-documentation
+  "The documentation of the namespace `namespace-name`: its docstring parts and
+  public names, from the program entity and the SCI namespace."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/db :symbol :seon.sci.eval/authored-reference]
+                  [:or :seon.sci.eval/namespace-doc :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [ctx database namespace-name authored]
+  (let [row (db/pull database [:seon.ns/name :seon.ns/doc] [:seon.ns/name namespace-name])
+        functions (when-not (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
+                    (program-documentation database namespace-name))
+        sci-ns (sci/find-ns ctx namespace-name)]
+    (cond
+      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
+      (or (:seon.db/invalid-read functions) (:seon.schema/expected-value functions)) functions
+      (not (or sci-ns (:seon.ns/name row) (seq functions))) (documentation-unavailable authored)
+      :else
+      (let [doc (or (:seon.ns/doc row) (:doc (meta sci-ns)))
+            scoped (when sci-ns
+                     (map #(symbol (str namespace-name) (str %))
+                          (keys (sci/eval-form ctx (list 'ns-publics (list 'quote namespace-name))))))]
+        (merge (when doc (docstring-parts doc))
+               {:publics (vec (sort (distinct (concat (map :seon.fn/sym functions) scoped))))})))))
+
 (defn documentation-value
-  "Read documentation for a public function, SCI Var, named override, or namespace."
+  "Read documentation for a public function, SCI Var, named override, schema key or namespace."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/db :seon.sci.eval/authored-reference :seon.sci.eval/authored-reference]
                   [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
   [ctx database authored resolved]
   (cond
+    (qualified-keyword? resolved) (schema-documentation database resolved authored)
     (not (symbol? resolved)) (documentation-unavailable authored)
     (namespace resolved)
     (let [row (db/pull database
@@ -2086,12 +2122,7 @@
         (merge (when-let [doc (:doc metadata)] (docstring-parts doc))
                (when-let [arglists (:arglists metadata)] {:arglists arglists}))
         :else (documentation-unavailable authored)))
-    :else
-    (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name resolved])]
-      (cond
-        (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
-        (:seon.ns/doc row) (merge (docstring-parts (:seon.ns/doc row)) {:in [] :out []})
-        :else (documentation-unavailable authored)))))
+    :else (namespace-documentation ctx database resolved authored)))
 
 (defn- program-doc-var
   "Resolve in the calling SCI namespace; read facts when the form executes."

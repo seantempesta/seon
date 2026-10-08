@@ -249,6 +249,13 @@
                 [:or {:description "Whatever syntax an agent wrote after `doc`; lookup classifies it."}
                  :symbol :keyword :int :double :string :boolean :nil
                  [:sequential :seon.schema/value] [:map-of :seon.schema/value :seon.schema/value]],
+                :schema-doc
+                [:map {:description "The declared form of one schema key, with its description property when it has one."}
+                 [:key :qualified-keyword] [:form :seon.schema/definition] [:description {:optional true} :string]],
+                :namespace-doc
+                [:map {:description "A namespace's docstring parts when it has a docstring, and its public names."}
+                 [:summary {:optional true} :string] [:body {:optional true} :string] [:example {:optional true} :string]
+                 [:publics [:vector :qualified-symbol]]],
                 :bindings
                 [:map-of :qualified-symbol :seon.sci.eval/binding],
                 :projection-state
