@@ -462,10 +462,11 @@
  :seon.config.ai/top-p :seon.config/absent
  :seon.config.ai/frequency-penalty :seon.config/absent
  :seon.config.ai/presence-penalty :seon.config/absent
- ; The REPL owns response text: the context introduces each REPL result with
- ; this marker, which real code never contains, so a reply that starts writing
- ; a result is stopped before it fabricates one.
- :seon.config.ai/stop ["user=>"]
+ ; The REPL owns response text: every REPL result in the context opens with
+ ; this marker, which a form the transcript teaches never contains, so a reply
+ ; that starts writing a result is stopped before it fabricates one, while a
+ ; reply that writes `user=> (f)` still reaches its form.
+ :seon.config.ai/stop ["#:seon.repl{"]
  :seon.config.ai/response-format :seon.config/absent
  :seon.config.ai/extra-body-edn :seon.config/absent
 

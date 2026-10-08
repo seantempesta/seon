@@ -5,6 +5,7 @@
             [clojure.test.check :as check]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [seon.config :as config]
             [seon.repl :as repl]
             [seon.sci.admit :as admit]
             [seon.test-support :as support]))
@@ -492,3 +493,14 @@
     (is (not (contains? reply :seon.repl/value)))
     (is (= 0 (:seon.repl/ms reply)))))
 
+
+(deftest ^{:seon/tasks #{'seon.turn/the-user-prompt-stop-sequence-cuts-the-models-first-form}}
+  the-model-stop-sequences-never-cut-a-form-the-transcript-teaches
+  (let [emission {:seon.cluster.eval/source "(f)" :seon.ns/name 'user :seon.eval/shown "3"}
+        stops (:seon.config.ai/stop config/defaults)]
+    (is (seq stops))
+    (doseq [stop stops]
+      (is (not (str/includes? (first (str/split-lines (repl/text emission))) stop))
+          "a reply that writes a form the way the transcript shows it is not cut")
+      (is (str/includes? (repl/response emission) stop)
+          "a reply that starts writing a result is stopped"))))
