@@ -403,25 +403,28 @@
 (defn- inherit-var-bindings!
   "Record the Var bindings `ctx` holds now, at its fork, as the ones it
   inherited: its own definitions of inherited Vars are the bindings that
-  differ from them (`own-binding?`)."
+  differ from them (`own-bindings`)."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/ctx]}
   [ctx]
   (swap! (:env ctx) #(assoc % ::inherited-var-bindings (get % :sci/var-bindings {})))
   ctx)
 
-(defn- own-binding?
-  "Whether `ctx` wrote its own binding of `sci-var` since its fork."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/sci-var] :boolean]}
-  [ctx sci-var]
-  (let [binding (sci.vars/context-binding ctx sci-var)]
-    (boolean (and binding
-                  (not (identical? binding (get (::inherited-var-bindings @(:env ctx)) sci-var)))))))
+(defn- own-bindings
+  "The bindings `ctx` wrote since its fork, by SCI Var: one pass over its own
+  bindings, never over its namespaces' Vars."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :map]}
+  [ctx]
+  (let [env @(:env ctx)
+        inherited (get env ::inherited-var-bindings {})]
+    (into {}
+          (remove (fn [[sci-var binding]] (identical? binding (get inherited sci-var))))
+          (get env :sci/var-bindings {}))))
 
 (defn- turn-interns
   "This context's own definitions: the Vars it wrote since its fork.
 
   A redefinition of an inherited Var keeps the Var and writes this context's
-  own binding of it (`own-binding?`). A new name is a Var with an SCI
+  own binding of it (`own-bindings`). A new name is a Var with an SCI
   generation (an SCI `def` or `intern`; host Vars copied in by namespace
   installation carry none) at a path where the acquired program
   (`::program-namespaces`) has no Var or another one; only namespace maps not
@@ -435,8 +438,8 @@
         reference (when (and program
                              (not= (::generation program) (:sci/generation @(:env ctx))))
                     (::namespaces program))
-        rebound? (not (identical? (get @(:env ctx) :sci/var-bindings {})
-                                  (get @(:env ctx) ::inherited-var-bindings {})))]
+        rebound (own-bindings ctx)
+        rebound? (boolean (seq rebound))]
     (sci.ctx-store/with-ctx ctx
       (into {}
             (for [[namespace-name namespace-map] (sci/namespace-state ctx)
@@ -446,7 +449,7 @@
                   [intern-name sci-var] namespace-map
                   :when (and (symbol? intern-name)
                              (sci.utils/var? sci-var)
-                             (or (and rebound? (own-binding? ctx sci-var))
+                             (or (contains? rebound sci-var)
                                  (and new-names?
                                       (contains? (meta sci-var) :sci/generation)
                                       (not (identical? sci-var (get program-map intern-name))))))]
@@ -2932,6 +2935,7 @@
         previous @(::base-bindings ctx)
         current (base-bindings base)
         base-layer (sci/namespace-state base)
+        own-binding (own-bindings ctx)
         changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
                                              @(::kernel/program-snapshot base)
                                              [(symbol (str %1) (str %2))]))
@@ -2945,7 +2949,8 @@
                        root (if (sci.vars/hasRoot entry) @entry absent-intern)
                        held (get current path)
                        transferred? (boolean (and held (same-program-root? root (first held))))
-                       rebound? (own-binding? ctx entry)
+                       binding (get own-binding entry)
+                       rebound? (some? binding)
                        own? (or rebound? (contains? generations (:sci/generation (meta entry))))
                        changed (when-not transferred? (changed? namespace-name local-name))
                        adopted (when (and own? changed (sci.utils/var? (get-in base-layer path)))
@@ -2959,7 +2964,7 @@
                          (or transferred? (not changed) adopted)
                          (and (not (contains? previous path)) (not changed) (not transferred?)))]
              [namespace-name local-name entry (or transferred? (some? adopted)) adopted
-              (when rebound? (sci.vars/context-binding ctx entry))])))
+              binding])))
         private-names (into #{} (map (fn [[namespace-name local-name _]]
                                       (symbol (str namespace-name) (str local-name))))
                             private-bindings)
