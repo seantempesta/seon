@@ -39,7 +39,8 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: SCI functions carry their defining context so a host thread reads the current definition (option
+Root defaults taken: tests reaching a change are answered by a reverse walk from the changed names (reach-cost option 1;
+the whole-program reach graph per change was the real P1 owner: 280 ms / 671 MB cold). SCI functions carry their defining context so a host thread reads the current definition (option
 A1: an SCI fn binds its defining context on entry when none is active; +4 ns (+14%) per call through a Var, correct for
 reads, calls, host ops and writes; option A2 was free but left host ops and writes wrong). The reply's `:seon.cost/transactions` counts every durable commit the request caused, the test
 world's throwaway-branch commit included, counted by distinct commit ids (CC-1 follow-up). `:chat` is the default wire format (E2: success tied 36/40 vs 35/40; chat had fewer repeated forms
@@ -161,3 +162,7 @@ of two each).
   on a throwaway JVM with `check --at`: raw thread, executor and future all read the current definition, and SCI-1's
   inheritance proofs stay green. Help regression from `8b0efd5d7` (unresolvable example, over the token cap) is being
   fixed (lane help-cap); `081f7eab6` stops help encouraging commented-out code.
+- **Reach cost measured** (lane reach-cost; CO-0 `667cc9a95`): CO-3 never reached today and its design was unsafe; CO-4 moot after
+  W-24; CO-5's forward closure walk measured 4× worse. The real owner is `seon.test.runner/tests-reaching` rebuilding the whole
+  program reach graph per change (task `d21ac7dd1`). Root chose the reverse walk from changed names (lane reach-reverse). The
+  check's other large cost is arming every contract per test world (677 MB): a separate card.
