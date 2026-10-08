@@ -45,7 +45,7 @@ D: one size comparison per form with output; one blob stage only over 4096 bytes
 Nothing.
 
 ## Commit
-`bin/lane commit <lane> -m "SR-C: large printed output goes to a blob" --test seon.repl-differential-p1-test seon.repl-differential-p5-test resources/seon/schemas/seon.cluster.eval.edn src/seon/sci/eval.clj src/seon/repl.clj src/seon/render/transcript.clj src/seon/eval/drive.clj test/seon/repl_differential_p1_test.clj`
+`bin/lane commit <lane> -m "SR-C: large printed output goes to a blob" --test seon.repl-differential-p1-test --test seon.repl-differential-p5-test resources/seon/schemas/seon.cluster.eval.edn src/seon/sci/eval.clj src/seon/repl.clj src/seon/render/transcript.clj src/seon/eval/drive.clj test/seon/repl_differential_p1_test.clj`
 
 ## Dependencies
 None (SR-B landed). Group C order puts it after LR-STALE3/RED-2 (ledger §5). `render/transcript.clj` conflicts with

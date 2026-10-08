@@ -54,7 +54,7 @@ per few-KB value); none outside them. Storage shrinks by the content's compressi
 Nothing.
 
 ## Commit
-`bin/lane commit <lane> -m "BLOB-K: blobs written compressed and immutable" --test seon.blob-test seon.blob-threshold-test seon.blob-publication-test deps.edn reference-code/konserve src/seon/blob.clj resources/seon/schemas/seon.config.blob.edn test/seon/blob_test.clj`
+`bin/lane commit <lane> -m "BLOB-K: blobs written compressed and immutable" --test seon.blob-test --test seon.blob-threshold-test --test seon.blob-publication-test deps.edn reference-code/konserve src/seon/blob.clj resources/seon/schemas/seon.config.blob.edn test/seon/blob_test.clj`
 
 ## Dependencies
 The fork push; releases of `led-storage` (blob.clj, blob_test.clj) and `dials-16gb` (deps.edn). Schema publication

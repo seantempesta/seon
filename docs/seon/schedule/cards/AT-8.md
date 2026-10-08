@@ -46,7 +46,7 @@ misses, three hits, one eviction by weight) gives `:seon.cache/stats` equal to t
 (`cache_test.clj:133`) to the new shape (byte share per kind; hit share is whole-cache). The other cache tests stay
 green.
 
-`--test seon.cache-test seon.health-test`
+`--test seon.cache-test --test seon.health-test`
 
 ## Cost
 
@@ -54,7 +54,7 @@ Expected: no per-lookup allocation of our own (Caffeine's striped counters); `st
 
 ## Commit
 
-`bin/lane commit <lane> -m "AT-8: cache counters are Caffeine's recordStats; per-kind entries and bytes on demand" --test seon.cache-test seon.health-test src/seon/cache.clj resources/seon/schemas/seon.cache.edn test/seon/cache_test.clj`
+`bin/lane commit <lane> -m "AT-8: cache counters are Caffeine's recordStats; per-kind entries and bytes on demand" --test seon.cache-test --test seon.health-test src/seon/cache.clj resources/seon/schemas/seon.cache.edn test/seon/cache_test.clj`
 
 ## Dependencies
 

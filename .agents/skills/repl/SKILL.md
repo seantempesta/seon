@@ -5,13 +5,11 @@ description: "Distinguish the agent reply reader, persistent agent SCI context, 
 
 # REPL surfaces and durable observations
 
-Use [root instructions](../../../AGENTS.md) and
-[the active plan §6](../../../docs/prds/agent-platform/plan/README.md#6-implementation-proof-and-recovery)
-for lane verification cadence. Use [the turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-§13–§15 for the target. Later sections supersede
-fresh forks per turn, restored defs, and serialized results. The
-[agent runtime](../../../docs/seon/architecture/agent-runtime.md) diagrams
-show the additive context and since-query diff.
+Use [root instructions](../../../AGENTS.md) for lane verification and
+[agent-loop.md](../../../docs/seon/specs/agent-loop.md) for the target.
+The [ledger](../../../docs/seon/schedule/agent-loop-ledger.md) names what has
+landed. Context is a static prefix, the agent's own forms and results, and
+one fresh current-state block; older turn PRDs are historical research.
 
 ## Name the surface before making a claim
 
@@ -25,8 +23,8 @@ show the additive context and since-query diff.
   `:seon.batch/repair`; balanced text passes through byte for byte.
   `seon.sci.forgive/segments` turns the scan's spans into ordered sources with
   preceding prose as each one's comment (`seon.turn/planned-sources` for a
-  reply, `seon.turn/code-sources` for code); the repairs are not yet delivered
-  beside the values. Each form's one semantic read happens when the one REPL
+  reply, `seon.turn/code-sources` for code). Repairs are delivered beside the
+  values as `:seon.repl/repairs` (`src/seon/repl.clj:227`). Each form's one semantic read happens when the one REPL
   path evaluates it (`seon.turn/read-row`).
 - An agent turn evaluates in its own SCI context, forked from the cluster
   base with its private layer carried over (see below); a host REPL

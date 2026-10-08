@@ -72,7 +72,7 @@ New `seon.error-test/contract-problems-read-malli-explanations`:
                          (me/error-message (dissoc problem :type)))))))
 ```
 
-`--test seon.error-test seon.refusal-grammar-test seon.db-test seon.instrument-test`
+`--test seon.error-test --test seon.refusal-grammar-test --test seon.db-test --test seon.instrument-test`
 
 ## Cost
 
@@ -88,7 +88,7 @@ a valid collection type; if none, it deletes the scan and the `member?` branch.
 
 ## Commit
 
-`bin/lane commit <lane> -m "UL-5a: contract expectations are Malli's messages; schema-expectation and bound-text deleted" --test seon.error-test seon.refusal-grammar-test seon.db-test seon.instrument-test src/seon/error.clj test/seon/error_test.clj test/seon/refusal_grammar_test.clj test/seon/db_test.clj`
+`bin/lane commit <lane> -m "UL-5a: contract expectations are Malli's messages; schema-expectation and bound-text deleted" --test seon.error-test --test seon.refusal-grammar-test --test seon.db-test --test seon.instrument-test src/seon/error.clj test/seon/error_test.clj test/seon/refusal_grammar_test.clj test/seon/db_test.clj`
 
 ## Dependencies
 

@@ -38,7 +38,7 @@ assertions on it in `test_failure_facts_test.clj:171-172,208` (converted to asse
 D: ~18 KB less per thrown failure (ledger), one fewer blob write.
 
 ## Commit
-`bin/lane commit <lane> -m "SR-E: a thrown test failure stores shown text only" --test seon.test-failure-storage-test seon.test-failure-facts-test seon.test-support-test src/seon/test/runner.clj resources/seon/schemas/seon.test.failure.edn resources/seon/schemas/seon.test.report.edn test/seon/test_failure_facts_test.clj test/seon/test_support_test.clj test/seon/test_failure_storage_test.clj`
+`bin/lane commit <lane> -m "SR-E: a thrown test failure stores shown text only" --test seon.test-failure-storage-test --test seon.test-failure-facts-test --test seon.test-support-test src/seon/test/runner.clj resources/seon/schemas/seon.test.failure.edn resources/seon/schemas/seon.test.report.edn test/seon/test_failure_facts_test.clj test/seon/test_support_test.clj test/seon/test_failure_storage_test.clj`
 
 ## Dependencies
 SR-D (in flight, led-storage).

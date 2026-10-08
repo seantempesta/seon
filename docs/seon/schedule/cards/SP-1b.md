@@ -66,7 +66,7 @@ Each error recording loses up to four further admissions of its offending values
 
 ## Commit
 
-`bin/lane commit <lane> -m "SP-1b: a recorded error stores no admitted copies of its offending values" --test seon.error-test seon.problems-test seon.instrument-test seon.error-result-test seon.db-error-test src/seon/error.clj resources/seon/schemas/seon.error.edn resources/seon/schemas/seon.error.occurrence.edn resources/seon/schemas/seon.error.projection.edn test/seon/error_test.clj test/seon/problems_test.clj test/seon/schema/datahike_parity.edn`
+`bin/lane commit <lane> -m "SP-1b: a recorded error stores no admitted copies of its offending values" --test seon.error-test --test seon.problems-test --test seon.instrument-test --test seon.error-result-test --test seon.db-error-test src/seon/error.clj resources/seon/schemas/seon.error.edn resources/seon/schemas/seon.error.occurrence.edn resources/seon/schemas/seon.error.projection.edn test/seon/error_test.clj test/seon/problems_test.clj test/seon/schema/datahike_parity.edn`
 
 ## Dependencies
 

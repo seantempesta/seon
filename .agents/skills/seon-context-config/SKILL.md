@@ -6,8 +6,8 @@ description: "Change or diagnose Seon's database-backed cluster configuration: s
 # Cluster configuration
 
 Configuration is declared data, compiled and reconciled into the selected
-cluster. Use [the turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-§13–§15 when a dial touches agent context, rendering, or result lifetime.
+cluster. Use [agent-loop.md](../../../docs/seon/specs/agent-loop.md)
+when a dial touches agent context, rendering, or result lifetime.
 
 ## Declare and compile
 

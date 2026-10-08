@@ -65,7 +65,7 @@ A put is O(1); a pass interns only the handles its forms name.
 `::result-objects` atom and its two readers' deref paths (~15 lines). AT-3 folds the other per-fork atoms later.
 
 ## Commit
-`bin/lane commit <lane> -m "SR-H: live results live in the one cache" --test seon.cache-test seon.repl-differential-p2-test seon.sci.eval-test seon.mcp-entrance-test src/seon/cache.clj resources/seon/schemas/seon.cache.edn src/seon/sci/eval.clj src/seon/render/walk.clj src/seon/repl.clj test/seon/cache_test.clj test/seon/repl_differential_p2_test.clj`
+`bin/lane commit <lane> -m "SR-H: live results live in the one cache" --test seon.cache-test --test seon.repl-differential-p2-test --test seon.sci.eval-test --test seon.mcp-entrance-test src/seon/cache.clj resources/seon/schemas/seon.cache.edn src/seon/sci/eval.clj src/seon/render/walk.clj src/seon/repl.clj test/seon/cache_test.clj test/seon/repl_differential_p2_test.clj`
 
 ## Dependencies
 PB-02b (same file, group C order). `test/seon/sci/eval_test.clj` is held by `led-storage` at the time of writing.

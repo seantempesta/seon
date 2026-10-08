@@ -260,8 +260,8 @@ occurrence queue:
 
 `problem-shape` is the set of `[:in :type]` pairs over the problems; do not sort heterogeneous path
 keys with Clojure's default comparator (an index and a keyword at the same position throw). The signature requires
-structural, order-independent `id/id` hashing (the identity owner's pending change), not the installed printed-data
-hash. P4 must wait for that seam and prove equal sets have equal signatures regardless of insertion order.
+structural, order-independent `id/id` hashing, which is already implemented (`src/seon/id.clj:246-261`). P4 proves
+equal sets have equal signatures regardless of insertion order; no identity change is a prerequisite.
 `exception-class` is the root link's class for
 `:seon.error/exception`, else absent. So two contract refusals with different failure types, or two host exceptions of
 different classes at one frame, are different rows. Member names reuse installed keys where the meaning is the same

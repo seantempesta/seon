@@ -98,7 +98,7 @@ New `seon.maintenance-test/stale-staging-files-are-collected`, modelled on
       (finally (test-support/delete-recursively! repository-root)))))
 ```
 
-`--test seon.maintenance-test seon.maintenance-schema-test seon.config-defaults-test`
+`--test seon.maintenance-test --test seon.maintenance-schema-test --test seon.config-defaults-test`
 
 ## Cost
 
@@ -110,7 +110,7 @@ Nothing.
 
 ## Commit
 
-`bin/lane commit <lane> -m "SR-S: collection deletes blob staging files older than the staging-max-age dial" --test seon.maintenance-test seon.maintenance-schema-test seon.config-defaults-test resources/seon/schemas/seon.config.maintenance.edn resources/seon/schemas/seon.maintenance.request.edn resources/seon/schemas/seon.operator.collect.edn src/seon/maintenance.clj test/seon/maintenance_test.clj`
+`bin/lane commit <lane> -m "SR-S: collection deletes blob staging files older than the staging-max-age dial" --test seon.maintenance-test --test seon.maintenance-schema-test --test seon.config-defaults-test resources/seon/schemas/seon.config.maintenance.edn resources/seon/schemas/seon.maintenance.request.edn resources/seon/schemas/seon.operator.collect.edn src/seon/maintenance.clj test/seon/maintenance_test.clj`
 
 ## Dependencies
 

@@ -58,7 +58,7 @@ broken by the agent's pass); read the block through `seon.mcp/call`; assert `:se
 first (root defines it red and runs it there), then the agent's change; assert the entry has
 `:seon.context/red-at-base true`.
 
-`--test seon.context-test seon.cluster.turn-test`.
+`--test seon.context-test --test seon.cluster.turn-test`.
 
 ## Cost
 
@@ -69,4 +69,4 @@ lands, and the fix is reading the change from F4b's last reaching request instea
 
 ## Commit
 
-`bin/lane commit cs01d -m "CS-01d: the block shows tests the change broke" --test seon.context-test seon.cluster.turn-test src/seon/context.clj resources/seon/schemas/seon.context.edn test/seon/context_test.clj`
+`bin/lane commit cs01d -m "CS-01d: the block shows tests the change broke" --test seon.context-test --test seon.cluster.turn-test src/seon/context.clj resources/seon/schemas/seon.context.edn test/seon/context_test.clj`

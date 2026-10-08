@@ -53,7 +53,7 @@ New `seon.blob-threshold-test/shell-and-web-use-the-one-threshold` (data only): 
 a 4,000-byte one stores text; the same pair for a web body served by the test's local server (reuse the fixture the
 existing web tests use). The existing `seon.blob-threshold-test/text-at-threshold-is-inline-over-is-staged` stays green.
 
-`--test seon.blob-threshold-test seon.shell.jvm-test seon.web.jvm-test seon.config-defaults-test`
+`--test seon.blob-threshold-test --test seon.shell.jvm-test --test seon.web.jvm-test --test seon.config-defaults-test`
 
 ## Cost
 
@@ -61,7 +61,7 @@ D: one dial read instead of another; web bodies between 4 and 8 KB now become bl
 
 ## Commit
 
-`bin/lane commit <lane> -m "SR-T: shell output and web bodies store inline or as a blob by the one blob threshold" --test seon.blob-threshold-test seon.shell.jvm-test seon.web.jvm-test seon.config-defaults-test src/seon/shell/jvm.clj src/seon/web/jvm.clj resources/seon/schemas/seon.config.shell.edn resources/seon/schemas/seon.config.web.edn config/default.edn test/seon/blob_threshold_test.clj`
+`bin/lane commit <lane> -m "SR-T: shell output and web bodies store inline or as a blob by the one blob threshold" --test seon.blob-threshold-test --test seon.shell.jvm-test --test seon.web.jvm-test --test seon.config-defaults-test src/seon/shell/jvm.clj src/seon/web/jvm.clj resources/seon/schemas/seon.config.shell.edn resources/seon/schemas/seon.config.web.edn config/default.edn test/seon/blob_threshold_test.clj`
 
 ## Dependencies
 

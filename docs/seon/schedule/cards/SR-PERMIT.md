@@ -65,7 +65,7 @@ Also: a refused transaction (an invalid fact) releases the permit at once and le
 ordinary orphan collection reclaims. The existing
 `seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings` stays green.
 
-`--test seon.blob-publication-test seon.blob-test seon.db-test`
+`--test seon.blob-publication-test --test seon.blob-test --test seon.db-test`
 
 ## Cost
 
@@ -73,7 +73,7 @@ F: none on the normal path (one unbound dynamic Var read); on a timed-out write,
 
 ## Commit
 
-`bin/lane commit <lane> -m "SR-PERMIT: a blob's reachability permit is held until its transaction actually exits" --test seon.blob-publication-test seon.blob-test seon.db-test src/seon/db.clj src/seon/blob.clj resources/seon/schemas/seon.db.edn test/seon/blob_publication_test.clj`
+`bin/lane commit <lane> -m "SR-PERMIT: a blob's reachability permit is held until its transaction actually exits" --test seon.blob-publication-test --test seon.blob-test --test seon.db-test src/seon/db.clj src/seon/blob.clj resources/seon/schemas/seon.db.edn test/seon/blob_publication_test.clj`
 
 ## Dependencies
 

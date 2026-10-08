@@ -51,7 +51,7 @@ The hand-staged reasoning path and its threshold query.
 
 ## Commit
 
-`bin/lane commit <lane> -m "SP-4: model reasoning takes the one threshold in bytes" --test seon.cluster.turn-test seon.ai-test seon.render.transcript-test src/seon/turn.clj resources/seon/schemas/seon.ai.attempt.edn test/seon/cluster/turn_test.clj`
+`bin/lane commit <lane> -m "SP-4: model reasoning takes the one threshold in bytes" --test seon.cluster.turn-test --test seon.ai-test --test seon.render.transcript-test src/seon/turn.clj resources/seon/schemas/seon.ai.attempt.edn test/seon/cluster/turn_test.clj`
 
 ## Dependencies
 

@@ -72,7 +72,7 @@ New tests in `test/seon/cluster/registry_test.clj` (read its existing blob tests
 Existing `seon.blob-publication-test/publication-and-collection-are-exclusive-in-both-orderings` and
 `seon.maintenance-test/collection-reports-and-verifies-the-exact-store` stay green.
 
-`--test seon.cluster.registry-test seon.blob-publication-test seon.maintenance-test seon.schema-test`
+`--test seon.cluster.registry-test --test seon.blob-publication-test --test seon.maintenance-test --test seon.schema-test`
 
 Schema resources change: `bin/lane commit` publishes and adopts the candidate on disposable branches (CLAUDE.md
 "publish and adopt").
@@ -85,7 +85,7 @@ SR-ENUMa's (it rewrites the verification).
 
 ## Commit
 
-`bin/lane commit <lane> -m "SR-L: blob roots are declared: digest vectors are roots, content digests are not blobs" --test seon.cluster.registry-test seon.blob-publication-test seon.maintenance-test seon.schema-test src/seon/cluster/registry.clj resources/seon/schemas/seon.db.edn resources/seon/schemas/my.fs.edn resources/seon/schemas/my.web.body.edn resources/seon/schemas/my.shell.output.edn resources/seon/schemas/seon.dev.mcp.artifact.edn test/seon/cluster/registry_test.clj`
+`bin/lane commit <lane> -m "SR-L: blob roots are declared: digest vectors are roots, content digests are not blobs" --test seon.cluster.registry-test --test seon.blob-publication-test --test seon.maintenance-test --test seon.schema-test src/seon/cluster/registry.clj resources/seon/schemas/seon.db.edn resources/seon/schemas/my.fs.edn resources/seon/schemas/my.web.body.edn resources/seon/schemas/my.shell.output.edn resources/seon/schemas/seon.dev.mcp.artifact.edn test/seon/cluster/registry_test.clj`
 
 ## Dependencies
 

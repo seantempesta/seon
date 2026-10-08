@@ -56,11 +56,13 @@ Only the GPT-6 versions are used (owner 2026-09-23). Dials: `LANE_MODEL`
 - **Identity:** the launcher exports `SEON_CODEX_LANE=<name>` on run and
   resume (`:381`) and appends its `lane_rule` text (`:56`) to every spec and
   followup (`:428`, `:443`).
-- **Tests:** assigned lanes start no test requests (AGENTS.md "Stay inside
-  the assignment"); they name the focused tests their slice needs and root
-  runs them centrally. The appended `lane_rule` still tells a lane to iterate
-  with `bin/test-check`, so every spec must say explicitly that the lane runs
-  no tests.
+- **Tests:** every lane proves its own slice through `bin/lane commit`, naming
+  each reaching test (`bin/codex-agent:56`). Use a separate `--test NS-or-VAR`
+  for each test; select Vars when a namespace has pre-existing reds and name
+  those reds in the landing. Root runs the broad tiers centrally. Documentation
+  is not a program input: a documentation-only commit without `--test` does not
+  publish or boot (`bin/lane` usage). The REPL-first gate is a target until its
+  ledger row lands; do not assume that gate exists.
 - **Hooks:** the launcher passes `--dangerously-bypass-hook-trust` on both
   paths, because Codex silently skips a project hook whose trust snapshot
   no longer matches (`c41dd408b`). Codex snapshots `.codex/hooks.json` at
@@ -71,7 +73,7 @@ Only the GPT-6 versions are used (owner 2026-09-23). Dials: `LANE_MODEL`
 - **Default is the owner's window:** a lane never stops, resets, reforks or
   adopts `default`; RESET NEEDED goes in the landing note.
 - **Commits are the heartbeat:** claim files first (`bin/lane claim LANE PATHS`), commit
-  each coherent slice through `bin/lane commit LANE -m MSG --test NS... PATHS` (proven on a
+  each coherent slice through `bin/lane commit LANE -m MSG --test NS-or-VAR --test NS-or-VAR PATHS` (proven on a
   throwaway JVM from the candidate), `bin/lane release LANE` at the end; the orchestrator
   runs the broad tiers and pushes.
 

@@ -6,7 +6,7 @@ description: "Assess whether a requested agent-authored canvas or control needs 
 # Canvas and control boundary
 
 Read [UI architecture](../../../docs/seon/architecture/ui.md) and
-[turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
+[agent-loop.md](../../../docs/seon/specs/agent-loop.md).
 Use the datastar-web-ui skill for the existing page, block, and feed
 owners.
 
@@ -38,11 +38,10 @@ whole concerns. No pair means the attribute-map printer. Render
 functions choose useful forms from data; `dir` and `doc` return
 program data rather than separate teaching prose.
 
-System turns store generated evaluations. The turn owner refreshes
-changed reads across every distinct read form's latest evidence.
-Passive browser rendering does not append evaluations or repeat
-writes/effects. Manual context curation is superseded by compaction:
-wipe evaluations and regenerate the opening.
+The target context has a static prefix, the agent's own forms and results,
+and one fresh current-state block. Rendering the block or its debug view
+never appends evaluations or repeats effects. There is no opening or input
+eval request and no compaction path that regenerates one (agent-loop.md §3.4).
 
 The value renderer applies the profile once at evaluation time.
 Stored shown text remains immutable; HTML can inspect actual live

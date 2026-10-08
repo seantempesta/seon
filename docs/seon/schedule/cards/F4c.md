@@ -44,7 +44,7 @@ second as pending and the next pass's reply shows it run.
 queued symbol is not run against the older commit (its latest result's `:seon.source/commit-id`, read with
 `latest-results`, is the newer one).
 
-`--test seon.cluster.turn-test seon.turn-test seon.config-test`.
+`--test seon.cluster.turn-test --test seon.turn-test --test seon.config-test`.
 
 ## Cost
 
@@ -52,4 +52,4 @@ The next pass waits no longer than the dial.
 
 ## Commit
 
-`bin/lane commit f4c -m "F4c: the test step is bounded and continues on the next pass" --test seon.cluster.turn-test seon.turn-test seon.config-test src/seon/turn.clj resources/seon/schemas/seon.config.test.edn resources/seon/schemas/seon.turn.loop.edn config/default.edn test/seon/cluster/turn_test.clj`
+`bin/lane commit f4c -m "F4c: the test step is bounded and continues on the next pass" --test seon.cluster.turn-test --test seon.turn-test --test seon.config-test src/seon/turn.clj resources/seon/schemas/seon.config.test.edn resources/seon/schemas/seon.turn.loop.edn test/seon/cluster/turn_test.clj`

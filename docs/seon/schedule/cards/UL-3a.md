@@ -51,7 +51,7 @@ Nothing is added.
 
 No new test (a deletion). The converted tests stay green, and D: `(ns-resolve 'seon.instrument 'remove!)` is nil.
 
-`--test seon.instrument-test seon.dev.source-instrumentation-test seon.registry-isolation-test`
+`--test seon.instrument-test --test seon.dev.source-instrumentation-test --test seon.registry-isolation-test`
 
 ## Cost
 
@@ -59,7 +59,7 @@ D: none at runtime; −5 source lines, about −8 test lines.
 
 ## Commit
 
-`bin/lane commit <lane> -m "UL-3a: delete seon.instrument/remove!, a count with no caller" --test seon.instrument-test seon.dev.source-instrumentation-test seon.registry-isolation-test src/seon/instrument.clj test/seon/instrument_test.clj test/seon/dev/source_instrumentation_test.clj test/seon/registry_isolation_test.clj resources/seon/tasks/seon.instrument.edn`
+`bin/lane commit <lane> -m "UL-3a: delete seon.instrument/remove!, a count with no caller" --test seon.instrument-test --test seon.dev.source-instrumentation-test --test seon.registry-isolation-test src/seon/instrument.clj test/seon/instrument_test.clj test/seon/dev/source_instrumentation_test.clj test/seon/registry_isolation_test.clj resources/seon/tasks/seon.instrument.edn`
 
 ## Dependencies
 

@@ -89,7 +89,7 @@ The threshold's default line in `config/default.edn` (moved onto its declaration
 
 ## Commit
 
-`bin/lane commit <lane> -m "SP-2: the writer refuses stored text over the blob threshold" --test seon.db-write-text-bound-test seon.blob-threshold-test seon.error-result-test seon.error-storage-bytes-test seon.db-test seon.db-transact-shape-test seon.test.one-request-test <every file above>`
+`bin/lane commit <lane> -m "SP-2: the writer refuses stored text over the blob threshold" --test seon.db-write-text-bound-test --test seon.blob-threshold-test --test seon.error-result-test --test seon.error-storage-bytes-test --test seon.db-test --test seon.db-transact-shape-test --test seon.test.one-request-test <every file above>`
 
 ## Dependencies
 

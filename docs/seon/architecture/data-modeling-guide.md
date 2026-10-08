@@ -174,8 +174,10 @@ defines cumulative observation and lifetime semantics.
 
 ## 6. Collections, tuples and native values
 
-Cardinality-many is a set even when a source schema used vector/sequential notation
-(§9). Store explicit ordinal/position facts when order matters. A tuple is one fixed
+Datahike cardinality-many is a set. Seon's bridge stores declared vectors and
+sequences in ordered cells, preserving order, duplicates and presence (§9;
+`src/seon/schema/datahike.clj:112-119,415-436`). Older database values whose
+projection lacks cells retain their original representation. A tuple is one fixed
 ordered observation; its complete value is the index key. Members do not become
 independently indexed attributes or live refs. A ref-shaped tuple member gets neither
 ref resolution nor incoming-ref sweep. Scalar qualified function identity stays scalar.
@@ -188,11 +190,9 @@ the collection of tuple values deliberately.
 
 The bridge owns representation codecs. Do not add a hand-encoded EDN mirror of a
 declared value or name its transport encoding as if it were domain semantics.
-Genuinely opaque provider bytes remain opaque when declared as such. A2's target
-native heterogeneous storage replaces a codec only after ordering, equality,
-history, retraction, reconnect and supported-shape proofs. Merely admitting
-`:db.type/any` is insufficient for index safety. Arbitrary nested paths do not
-become a mixed tuple workaround.
+Genuinely opaque provider bytes remain opaque when declared as such. Ordered data
+uses the bridge cells; the owner did not approve a new native fork value type.
+Arbitrary nested paths do not become a mixed tuple workaround.
 
 **Grounding:** `reference-code/datahike/src/datahike/index/persistent_set.cljc:31-132`
 index keys; `reference-code/datahike/src/datahike/db/transaction.cljc:718-736,1020-1039`
@@ -206,13 +206,12 @@ pull results are different grammars. A pulled reference map is not a reason to w
 every stored attribute to accept `{:db/id ...}`. Derive the pulled shape from the
 entity schema and selector instead of maintaining a second schema by hand.
 
-Current Datahike pull defaults each many-valued attribute to 1,000 and silently takes
-that prefix. Recursive pull may also yield id-only maps. Neither a wildcard nor a
-successful return establishes completeness. A reader needing the whole value must
-acquire it under a declared work bound or return an explicit refusal/elision. The
-target A2 native-pull change removes hidden truncation without pretending unlimited
-work is cheap. HTML has no presentation clipping; an AI profile cannot excuse missing
-stored data. Query-work bounds and presentation bounds are separate decisions.
+The pinned Datahike fork's many-pull default is unlimited (`pull_api.cljc:16`). An
+explicit `:limit` silently takes a prefix; recursive pull may yield id-only maps.
+Neither a wildcard nor a successful return establishes completeness. A reader needing
+the whole value must acquire it under a declared work bound or return an explicit
+refusal/elision. Query-work bounds and the one value printer's presentation budget
+are separate decisions, for both AI and HTML.
 
 Temporal values retain the schema interpretation of their origin; a reader does
 not apply whichever cluster projection happens to be globally current. A1/A2 carry
@@ -277,7 +276,7 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
 | `[:maybe T]` | refused (`:137`, message `:168`) | Datahike stores no nil: absence is no datom, clearing is a retraction |
 | `:seon.db/ref` | `:db.type/ref`, cardinality one (`:90-91`); Datahike indexes refs (`utils.cljc:319`) | A statement about a living entity (§3). The fold stops at this named reference: the target's own shape is not consulted |
 | `[… {:seon.db/component true :seon.db/component-schema :child/key} :seon.db/ref]` | `:db/isComponent true` (`:185`) | The child is part of the parent's value: pull expands it and parent retraction cascades (§4). `:seon.db/component-schema` never reaches Datahike; the final writer reads it from the projection to validate the complete owned value (`src/seon/db.clj:3553-3562`, missing target refuses at `:3700`) and declaration requires it (`src/seon/schema.clj:3355-3380`). A component position also accepts the child's own entity map as transaction data (`:seon.db/component-entity`, `:116-120`) |
-| `[:set T]`, `[:vector T]`, `[:sequential T]` | `:db.cardinality/many` of `T`'s type (`:111-114`) | Datahike's cardinality-many is a **set** of datoms (`reference-code/datahike/src/datahike/index/persistent_set.cljc`). A `[:vector …]` declaration is therefore stored as an unordered set today: order and duplicate members are lost on the round trip. Where order matters the child carries an explicit ordinal (`:seon.fn.arity/order`, `:seon.fn.argument/order`, `:seon.test.seed/ordinal`). The [vector-storage design](../../research/agent-platform/vector-storage-design-2026-09-27.md) (in progress) owns the target |
+| `[:set T]`, `[:vector T]`, `[:sequential T]` | The member attribute keeps `:db.cardinality/many`; vectors and sequences also use bridge cells (`src/seon/schema/datahike.clj:112-119,415-436`) | Sets stay unordered. Cells preserve a vector's order, duplicates and presence. Values older than the cells are read under their original projection; missing order cannot be recovered by changing the declaration. Do not encode order through transaction order or add another ordinal representation for a declared vector |
 | `[:tuple A B …]` | `:db.type/tuple` with `:db/tupleTypes` (`:138-141`, `:180`); a collection of tuples is cardinality-many of tuples | One fixed ordered observation; its whole value is the index key (§6). Collection or unstorable members refuse |
 | `{:db.secondary/only true}` on a float/double tuple | `:db.secondary/only` (`:173-181`) | The fork's secondary-index seam for embeddings; no attribute declares it today |
 | `{:seon.db/no-history? true}` | `:db/noHistory true` (`:186`) | Datahike writes no history datoms for the attribute (`reference-code/datahike/src/datahike/db/transaction.cljc:448`). Declared on three groups: large evaluation and reply text (`:seon.cluster.eval/source`, `output`, `diagnostics`, `comment`, `:seon.turn/reply`), so compaction's `retractEntity` of evaluations (`src/seon/turn.clj:2393-2423`) actually releases their text instead of keeping it in history; opaque payload strings (`:seon.effect/request-edn`, `result-edn`, `:seon.ai.attempt/usage-edn`, `settings-edn`, `:seon.test.accretion/report-edn`, `:seon.dev.mcp.artifact/digest`); and overwritten gauges (`:seon.error.occurrence/count`, `last-at`, `:seon.ai.model/last-*`). History/as-of cannot answer their past, and read evidence refuses to prove them unchanged through history (`src/seon/db.clj:1157`) |
@@ -292,14 +291,10 @@ transacts the result; nothing else writes Datahike schema. Probe (JVM, default,
 
 Each is evidence for an owner decision; the bridge is unchanged.
 
-1. **Ordered declarations stored as sets.** 28 cardinality-many attributes are
-   declared `[:vector …]`. Those with an explicit ordinal child are intentional.
-   The rest lose order and duplicates, contradicting their own descriptions:
-   `:seon.sci.eval/stacktrace` ("innermost first", `seon.sci.eval.edn:423`),
-   `:seon.render/units` ("Ordered forward attributes", `seon.render.edn:171-174`),
-   `:my.shell/failed-argv` (argv order and repeated arguments),
-   `:seon.render/candidates`, `:seon.config.ai/stop`, `:seon.config.fs/roots`,
-   `:seon.ai/wire`, `:seon.test/failing-assertions`. Owner: the vector-storage design.
+1. **Ordered declarations use cells (resolved).** The bridge's vector cells preserve
+   order and duplicates (§6 and the table above). Old values without cells retain
+   the representation they were written with; any recovery of missing order needs
+   actual evidence, not a guessed ordinal.
 2. **Render pairs are refs (resolved).** The faces are declared
    `[:and {:seon.fn/reference-to :seon.fn/sym} :seon.db/ref]`; a schema row
    stores each effective face as a ref to its function (row above), and a

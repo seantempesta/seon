@@ -59,7 +59,7 @@ L: proportional to the transcript's characters (one `str/join`).
 The inline two-message vector in `request-body`.
 
 ## Commit
-`bin/lane commit <lane> -m "CS-03a: assemble the model's messages" --test seon.ai-test seon.cluster.turn-test src/seon/ai.clj resources/seon/schemas/seon.ai.edn src/seon/turn.clj test/seon/ai_test.clj`
+`bin/lane commit <lane> -m "CS-03a: assemble the model's messages" --test seon.ai-test --test seon.cluster.turn-test src/seon/ai.clj resources/seon/schemas/seon.ai.edn src/seon/turn.clj test/seon/ai_test.clj`
 
 ## Dependencies
 CS-02 (the block renders), S4-04 (exchange texts held).

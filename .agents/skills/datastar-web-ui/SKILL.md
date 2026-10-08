@@ -5,7 +5,8 @@ description: "Change Seon's Datastar namespace pages, debug previews, entity blo
 
 # Datastar web UI
 
-The target is [turn PRD §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md).
+The target is [agent-loop.md](../../../docs/seon/specs/agent-loop.md), especially
+§3.4's current-state block and single debug view.
 Use [UI architecture](../../../docs/seon/architecture/ui.md) for the
 render contract and the seon-flow-architecture skill for proc changes.
 

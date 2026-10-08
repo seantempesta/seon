@@ -59,7 +59,7 @@ None at runtime; eight namespaces stop carrying one key.
 
 ## Commit
 
-`bin/lane commit <lane> -m "SP-1c: delete the error evidence dial" --test seon.config-test seon.error-test seon.error-evidence-test seon.instrument-test seon.turn-test seon.cluster-test seon.problems-test <every file above>`
+`bin/lane commit <lane> -m "SP-1c: delete the error evidence dial" --test seon.config-test --test seon.error-test --test seon.error-evidence-test --test seon.instrument-test --test seon.turn-test --test seon.cluster-test --test seon.problems-test <every file above>`
 
 ## Dependencies
 

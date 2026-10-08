@@ -32,7 +32,7 @@ test stays pending; stop and start the agent's graph the way the existing restar
 (`test/seon/cluster/program_restart_test.clj`: reuse its helper, do not copy it); send one non-changing pass
 (`eval_clj` `(+ 1 2)`); assert the pending test now has a result on the branch.
 
-`--test seon.cluster.turn-test seon.cluster.program-restart-test`.
+`--test seon.cluster.turn-test --test seon.cluster.program-restart-test`.
 
 ## Cost
 
@@ -40,4 +40,4 @@ One derivation per proc start: proportional to the task's proofs and the reachin
 
 ## Commit
 
-`bin/lane commit f4d -m "F4d: a restarted agent proc runs the tests left unfinished" --test seon.cluster.turn-test seon.cluster.program-restart-test src/seon/turn.clj test/seon/cluster/turn_test.clj`
+`bin/lane commit f4d -m "F4d: a restarted agent proc runs the tests left unfinished" --test seon.cluster.turn-test --test seon.cluster.program-restart-test src/seon/turn.clj test/seon/cluster/turn_test.clj`

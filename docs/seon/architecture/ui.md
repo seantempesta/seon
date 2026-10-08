@@ -26,12 +26,13 @@ the object is unavailable. The current history walk requests AI at
 `src/seon/render/walk.clj:1005`; B2 makes that choice explicit and removes the
 parallel history composition only after equivalence is proven.
 
-Only AI render functions and the value renderer apply presentation limits under
-the supplied render profile. Historical shown text is never clipped again. HTML
-has no presentation clipping. A query-work bound can still stop an expensive
-read, but it yields an explicit elision/refusal naming that bound. Datahike's current
-many-pull default of 1,000 is not complete HTML data: A2's complete-read contract
-must replace silent truncation or report the cut honestly.
+Render functions return data or hiccup; the one value printer applies presentation
+limits for both AI and HTML. Historical shown text is never clipped again. A
+query-work bound remains separate and yields an explicit elision/refusal naming
+that bound. The pinned Datahike fork's many-pull default is unlimited
+(`reference-code/datahike/src/datahike/pull_api.cljc:16,315-323`); an explicit
+`:limit` can still truncate, and recursive pulls can return id-only maps. Neither
+a successful pull nor an unlimited default proves a complete owning value.
 
 Namespace AI rendering is bounded content or an elision naming the omitted
 definitions and `(dir ns)` requery. Namespace HTML renders the complete requested

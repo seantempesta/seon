@@ -46,7 +46,7 @@ New `seon.cluster.process-test/cleanup-bounds-come-from-config`: `(#'process/dec
 is 10000, and a `run-process!` of `sleep 5` with a 100 ms deadline and `:seon.config.shell/termination-grace-ms 50`
 returns its timeout data within one second (data: the result's phase is `:process-exit`).
 
-`--test seon.cluster.process-test seon.shell.jvm-test seon.config-defaults-test`
+`--test seon.cluster.process-test --test seon.shell.jvm-test --test seon.config-defaults-test`
 
 ## Cost
 
@@ -54,7 +54,7 @@ D: one cached lookup.
 
 ## Commit
 
-`bin/lane commit <lane> -m "DIAL-5: subprocess cleanup and grace bounds are dials" --test seon.cluster.process-test seon.shell.jvm-test seon.config-defaults-test resources/seon/schemas/seon.config.shell.edn src/seon/cluster/process.clj test/seon/cluster/process_test.clj`
+`bin/lane commit <lane> -m "DIAL-5: subprocess cleanup and grace bounds are dials" --test seon.cluster.process-test --test seon.shell.jvm-test --test seon.config-defaults-test resources/seon/schemas/seon.config.shell.edn src/seon/cluster/process.clj test/seon/cluster/process_test.clj`
 
 ## Dependencies
 

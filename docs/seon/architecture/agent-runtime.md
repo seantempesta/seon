@@ -113,33 +113,26 @@ bounds. Cancellation, a delivered error and an empty ping cannot substitute for 
 
 ## 4. Read currency and history
 
-Before an ordinary turn, the system considers the latest evaluation of each distinct
-read form, including namespace and read basis. A2's `read-evidence-current?` is the
-one currency authority. It uses captured dependency plans and source identity plus
-revisions; unsupported or broad plans remain conservatively unknown. Writes and
-effects are never replayed. Changed reads append ordinary system evaluations.
-The target removes duplicate currency logic only when the native revision mechanism
-covers the eligible reads, including transaction-time changes.
+The target is [agent-loop.md §3.4](../specs/agent-loop.md#34-context): a static prefix,
+append-only history of the agent's own forms and results, and one current-state block
+read fresh from stored facts at each model call. Changed reads do not append system
+evaluations; there is no opening or input eval request. Read evidence governs reuse
+of a derivation, not replay of effects or a second history.
 
-The agent's history is `seon.eval/of-agent`, ordered by turns and ordinal, rendered
-through the evaluation schema's AI/HTML pair. AI uses the exact saved shown text,
-without rerendering old results or evaluating historical source. HTML uses the live
-object when retained and saved text when unavailable. The walk must honor its
-requested output; today's history path requests AI unconditionally
-(`src/seon/render/walk.clj:979-1016`).
+History uses exact saved shown text without reprinting or clipping it again. The
+full live value resides in `seon.cache`; database facts hold small facts and printed
+text up to the configured threshold, with larger text in a blob. An evicted live
+result answers that it is gone rather than reconstructing a private object.
 
-Prompt composition selects whole units under its budget. Stored evaluation bytes
-remain stable, but selection can change which units appear in a later prompt;
-whole-prompt byte immutability is not promised. Presentation limits apply once in
-the AI render functions/value renderer. Query-work cuts and evaluation deadlines
-remain separate controls, each naming its own bound. An elision describes omitted
-work and requery identity; it does not invent an omitted count it never observed.
-HTML has no presentation clipping.
+Render functions return data; every shown value passes through the one value printer,
+with the same selection and budget for AI text and HTML. Query-work bounds and
+evaluation deadlines remain separate controls. An elision names its bound, path and
+plain clojure.core retrieval form on the live result symbol; it never invents a count.
 
-Compaction clears the agent's evaluations and regenerates its opening from current
-record facts through the same system-turn path. It is not manual history editing.
-Debug execution uses the ordinary evaluation/settlement owner and explicit custody;
-previewing stored history never silently reexecutes effects.
+There is one debug view of the context as sent, built by the same assembly function
+and shown through the printer's HTML face. Viewing context never reexecutes effects
+or regenerates an opening. The ledger's context rows retire the older refresh and
+compaction machinery; this target is not a claim that those deletions are installed.
 
 ## 5. Tasks, source branches and recovery
 

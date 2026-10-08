@@ -63,7 +63,7 @@ if it does not, any declaration write the file's other tests use is enough, as l
 earlier `occurred-since` filled. The existing `an-error-is-seen-on-its-own-branch-once-per-window` stays green (it
 covers the non-empty window).
 
-`--test seon.error.branch-test seon.fault-test`
+`--test seon.error.branch-test --test seon.fault-test`
 
 ## Cost
 
@@ -76,7 +76,7 @@ Nothing.
 
 ## Commit
 
-`bin/lane commit <lane> -m "PB-07a: an empty error window derives no selector" --test seon.error.branch-test seon.fault-test src/seon/error.clj test/seon/error/branch_test.clj`
+`bin/lane commit <lane> -m "PB-07a: an empty error window derives no selector" --test seon.error.branch-test --test seon.fault-test src/seon/error.clj test/seon/error/branch_test.clj`
 
 ## Dependencies
 

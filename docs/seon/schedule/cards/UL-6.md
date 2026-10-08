@@ -41,7 +41,7 @@ Unchanged: the channel still holds at most the newest wake. A Flow `ping` of the
 Existing tests reaching the wake channel stay green: `seon.turn-test` (`turn_test.clj:1836-1873` polls the cluster's
 wake channel: one wake readable, then empty). D: `rg CountedSlidingBuffer src test` is empty.
 
-`--test seon.turn-test seon.cluster.host-test`
+`--test seon.turn-test --test seon.cluster.host-test`
 
 ## Cost
 
@@ -49,7 +49,7 @@ Expected: one fewer `swap!` per overwritten wake; −25 lines.
 
 ## Commit
 
-`bin/lane commit <lane> -m "UL-6: the wake channel is core.async's sliding buffer; CountedSlidingBuffer deleted" --test seon.turn-test seon.cluster.host-test src/seon/cluster/agent.clj`
+`bin/lane commit <lane> -m "UL-6: the wake channel is core.async's sliding buffer; CountedSlidingBuffer deleted" --test seon.turn-test --test seon.cluster.host-test src/seon/cluster/agent.clj`
 
 ## Dependencies
 

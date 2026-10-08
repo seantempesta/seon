@@ -6,8 +6,8 @@ description: "Design Seon attributes, identities, refs, components, and function
 # Model declared attributes and whole concerns
 
 Use [AGENTS.md](../../../AGENTS.md) for the design laws and
-[the turn PRD](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
-§13–§15 for the current record, rendering, and result target.
+[agent-loop.md](../../../docs/seon/specs/agent-loop.md)
+for the current record, rendering, and result target.
 Start by querying the merged registry before declaring another shape.
 [The data-modeling decision guide](../../../docs/seon/architecture/data-modeling-guide.md)
 consolidates every ruled answer — retract versus close by a positive fact, ref
@@ -88,8 +88,11 @@ Grounding:
 [the deletion study](../../../docs/prds/steward-platform/research/datahike-deletion-and-the-program-graph-2026-09-16.md)
 §8 and program-facts PRD §1f G2/G4.
 
-Cardinality-many does not acquire order because a Malli declaration used
-a vector. Store an ordinal on ordered members.
+Datahike cardinality-many is a set. Seon's bridge stores declared vectors and
+sequences in ordered cells, preserving order, duplicates and presence
+(`src/seon/schema/datahike.clj:112-119,415-436`). Use that representation for
+ordered data. Older database values without the cells retain their original
+set representation; changing a declaration does not repair lost order.
 
 Choose a tuple for one fixed ordered observation, such as callee and argument
 count; its complete value is the index key, not each member

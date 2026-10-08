@@ -45,7 +45,7 @@ D: one cache put and one size comparison per evaluation with diagnostics; none o
 Nothing.
 
 ## Commit
-`bin/lane commit <lane> -m "SR-I: diagnostics get a result handle" --test seon.repl-differential-p5-test seon.sci.eval-test src/seon/sci/eval.clj resources/seon/schemas/seon.cluster.eval.edn test/seon/repl_differential_p5_test.clj`
+`bin/lane commit <lane> -m "SR-I: diagnostics get a result handle" --test seon.repl-differential-p5-test --test seon.sci.eval-test src/seon/sci/eval.clj resources/seon/schemas/seon.cluster.eval.edn test/seon/repl_differential_p5_test.clj`
 
 ## Dependencies
 SR-H.

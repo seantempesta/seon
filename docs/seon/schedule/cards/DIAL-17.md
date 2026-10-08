@@ -29,11 +29,11 @@ unchanged. Check `rg -n "min-usable-bytes" test src config docs/seon` for an ass
 New `seon.maintenance-test/the-shipped-disk-floor-is-ten-gibibytes`: `(get-in (config/compile-manifest {:seon.boot/cluster-name "floor-probe"}) [:seon.config/effective :seon.config.maintenance/min-usable-bytes])`
 is 10737418240 (the same compile the file's `declare-cluster-config!` uses, `maintenance_test.clj:411-420`).
 
-`--test seon.maintenance-test seon.config-defaults-test`
+`--test seon.maintenance-test --test seon.config-defaults-test`
 
 ## Commit
 
-`bin/lane commit <lane> -m "DIAL-17: the shipped free-disk floor is 10 GiB" --test seon.maintenance-test seon.config-defaults-test config/default.edn test/seon/maintenance_test.clj`
+`bin/lane commit <lane> -m "DIAL-17: the shipped free-disk floor is 10 GiB" --test seon.maintenance-test --test seon.config-defaults-test config/default.edn test/seon/maintenance_test.clj`
 
 ## Dependencies
 

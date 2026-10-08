@@ -1,11 +1,17 @@
 ---
 type: decision
-status: active
+status: superseded by agent-loop.md and AGENTS.md Presentation
 date: 2026-08-04
 tags: [decision, architecture, rendering, observability]
 ---
 
 # ADR-015: Entity render pairs and one value-rendering bound
+
+This is historical design. The current mechanism is [agent-loop.md §3.4](../../specs/agent-loop.md)
+and AGENTS.md "Presentation": renders return data, the form face returns a form without
+executing it, live results belong in `seon.cache`, and larger printed text belongs in
+blobs. The value printer applies the one presentation budget for both AI and HTML.
+The former system-turn, compaction and unlimited-HTML design below is superseded.
 
 ## Decision
 

@@ -56,7 +56,7 @@ New `seon.cluster.source-test/merge-comparison-bounds-come-from-config`: on a te
 `:maps`), and with the defaults answers the comparison. Existing `seon.cluster.source-test` and `my.program-test`
 diff tests stay green.
 
-`--test seon.cluster.source-test my.program-test seon.config-defaults-test`
+`--test seon.cluster.source-test --test my.program-test --test seon.config-defaults-test`
 
 ## Cost
 
@@ -64,7 +64,7 @@ D: three map lookups per comparison.
 
 ## Commit
 
-`bin/lane commit <lane> -m "DIAL-8: merge comparison bounds and index page bounds are dials" --test seon.cluster.source-test my.program-test seon.config-defaults-test resources/seon/schemas/seon.config.db.edn resources/seon/schemas/seon.program.edn src/seon/cluster/source.clj src/seon/program.cljc src/my/program.clj test/seon/cluster/source_test.clj`
+`bin/lane commit <lane> -m "DIAL-8: merge comparison bounds and index page bounds are dials" --test seon.cluster.source-test --test my.program-test --test seon.config-defaults-test resources/seon/schemas/seon.config.db.edn resources/seon/schemas/seon.program.edn src/seon/cluster/source.clj src/seon/program.cljc src/my/program.clj test/seon/cluster/source_test.clj`
 
 ## Dependencies
 

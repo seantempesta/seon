@@ -61,7 +61,7 @@ form for the same size across shell, web, error text, replies and test failures.
 
 ## Commit
 
-`bin/lane commit <lane> -m "SP-3: shell output and web bodies take the one threshold" --test seon.shell.jvm-test seon.web.jvm-test seon.config-test src/seon/shell/jvm.clj src/seon/web/jvm.clj resources/seon/schemas/seon.config.shell.edn resources/seon/schemas/seon.config.web.edn config/default.edn test/seon/shell/jvm_test.clj test/seon/web/jvm_test.clj`
+`bin/lane commit <lane> -m "SP-3: shell output and web bodies take the one threshold" --test seon.shell.jvm-test --test seon.web.jvm-test --test seon.config-test src/seon/shell/jvm.clj src/seon/web/jvm.clj resources/seon/schemas/seon.config.shell.edn resources/seon/schemas/seon.config.web.edn config/default.edn test/seon/shell/jvm_test.clj test/seon/web/jvm_test.clj`
 
 ## Dependencies
 

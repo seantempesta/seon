@@ -55,7 +55,7 @@ three trivial members; assert the run reports two batches (the members' admissio
 `:seon.config.test/time-limit-ms` to 200 and run a member whose body sleeps 400 ms with no `:seon.test/long-ms`:
 assert it fails on its bound (the duration failure data), not that it passed.
 
-`--test seon.test-test seon.test-runner-test seon.config-defaults-test`
+`--test seon.test-test --test seon.test-runner-test --test seon.config-defaults-test`
 
 ## Cost
 
@@ -63,7 +63,7 @@ D: one map lookup instead of a constant.
 
 ## Commit
 
-`bin/lane commit <lane> -m "DIAL-3: the default test bound and batch size are dials" --test seon.test-test seon.test-runner-test seon.config-defaults-test resources/seon/schemas/seon.config.test.edn src/seon/test.clj test/seon/test_test.clj`
+`bin/lane commit <lane> -m "DIAL-3: the default test bound and batch size are dials" --test seon.test-test --test seon.test-runner-test --test seon.config-defaults-test resources/seon/schemas/seon.config.test.edn src/seon/test.clj test/seon/test_test.clj`
 
 ## Dependencies
 

@@ -6,7 +6,7 @@ description: "Design or change Seon procs, graph lifecycle, workloads, channels,
 # Flow owns running machinery
 
 Use [AGENTS.md](../../../AGENTS.md) for repository laws and
-[turn PRD §10, §13–§15](../../../docs/prds/context-generation/plan/agent-record-and-turn-loop-prd-2026-09-07.md)
+[agent-loop.md](../../../docs/seon/specs/agent-loop.md)
 for the current lane and runtime contract. Read the dependency at the
 boundary before adding a mechanism.
 

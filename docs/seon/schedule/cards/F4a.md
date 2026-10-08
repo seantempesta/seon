@@ -93,7 +93,7 @@ and `(deftest ^{:seon/tasks #{'tq.f4/area}} area-test (is (= 4 (tq.f4/area 2))))
 `(seon.test.runner/latest-results (db/db branch-conn) ['tq.f4/area-test])` has one result with fail-count 1, and the
 latest result's run was created after the pass's settlement (its `:seon.test/run-basis-t` ≥ the pass's basis).
 
-`--test seon.cluster.turn-test seon.turn-test seon.mcp-entrance-test`.
+`--test seon.cluster.turn-test --test seon.turn-test --test seon.mcp-entrance-test`.
 
 ## Cost
 
@@ -107,6 +107,6 @@ Nothing.
 
 ## Commit
 
-`bin/lane commit f4a -m "F4a: the proofs run after a pass that changed code" --test seon.cluster.turn-test seon.turn-test seon.mcp-entrance-test src/seon/turn.clj resources/seon/schemas/seon.turn.loop.edn test/seon/cluster/turn_test.clj`
+`bin/lane commit f4a -m "F4a: the proofs run after a pass that changed code" --test seon.cluster.turn-test --test seon.turn-test --test seon.mcp-entrance-test src/seon/turn.clj resources/seon/schemas/seon.turn.loop.edn test/seon/cluster/turn_test.clj`
 
 Dependencies: LR-CACHEb, Q-B.

@@ -96,7 +96,7 @@ then `(my.test/check {})`. Read the block (`block` helper). Assert: `(get-in b [
 (define `f` as `(* 2 x)`, check, assert `:green`), then redefine `f` as `(* 3 x)` through `eval_clj` without a check;
 assert the status is `:pending` and the counts are `{:pending 1}`.
 
-`--test seon.context-test seon.task-ingestion-test`.
+`--test seon.context-test --test seon.task-ingestion-test`.
 
 ## Cost
 
@@ -110,4 +110,4 @@ Nothing.
 
 ## Commit
 
-`bin/lane commit cs01b -m "CS-01b: the block shows proofs and their status" --test seon.context-test seon.task-ingestion-test src/seon/context.clj resources/seon/schemas/seon.context.edn test/seon/context_test.clj`
+`bin/lane commit cs01b -m "CS-01b: the block shows proofs and their status" --test seon.context-test --test seon.task-ingestion-test src/seon/context.clj resources/seon/schemas/seon.context.edn test/seon/context_test.clj`

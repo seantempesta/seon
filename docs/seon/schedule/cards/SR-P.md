@@ -63,7 +63,7 @@ New `seon.blob-test/blobs-publish-only-with-a-commit`:
 
 The converted tests stay green.
 
-`--test seon.blob-test seon.blob-publication-test seon.ai-stream-fold-test seon.cluster.registry-test seon.render.runtime-test seon.render.transcript-test seon.render.value-test seon.render.web-test`
+`--test seon.blob-test --test seon.blob-publication-test --test seon.ai-stream-fold-test --test seon.cluster.registry-test --test seon.render.runtime-test --test seon.render.transcript-test --test seon.render.value-test --test seon.render.web-test`
 
 ## Cost
 
@@ -71,7 +71,7 @@ D: none at runtime; −20 source lines; tests grow by one `let` per site.
 
 ## Commit
 
-`bin/lane commit <lane> -m "SR-P: delete seon.blob/put! and put-binary!; a blob is written only with its fact" --test seon.blob-test seon.blob-publication-test seon.ai-stream-fold-test seon.cluster.registry-test seon.render.runtime-test seon.render.transcript-test seon.render.value-test seon.render.web-test src/seon/blob.clj test/seon/blob_test.clj test/seon/blob_publication_test.clj test/seon/ai_stream_fold_test.clj test/seon/cluster/registry_test.clj test/seon/render/runtime_test.clj test/seon/render/transcript_test.clj test/seon/render/value_test.clj test/seon/render/web_test.clj`
+`bin/lane commit <lane> -m "SR-P: delete seon.blob/put! and put-binary!; a blob is written only with its fact" --test seon.blob-test --test seon.blob-publication-test --test seon.ai-stream-fold-test --test seon.cluster.registry-test --test seon.render.runtime-test --test seon.render.transcript-test --test seon.render.value-test --test seon.render.web-test src/seon/blob.clj test/seon/blob_test.clj test/seon/blob_publication_test.clj test/seon/ai_stream_fold_test.clj test/seon/cluster/registry_test.clj test/seon/render/runtime_test.clj test/seon/render/transcript_test.clj test/seon/render/value_test.clj test/seon/render/web_test.clj`
 
 ## Dependencies
 

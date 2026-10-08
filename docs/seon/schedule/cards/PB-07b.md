@@ -39,8 +39,8 @@ Files: `src/seon/schema.clj`, `src/seon/program.cljc`, `src/seon/error.clj`, `te
 - Proof `seon.schema-test/equal-schema-forms-share-schema-only-derivations`: two projections that differ only by one
   function contract (`schema/projection-with-function-contract`, as `seon.program-test/equal-schema-forms-share-one-program-attribute-derivation`
   does) answer `identical?` values from `declared-schema-keys` and `observation-selector`.
-- `--test seon.schema-test seon.program-test seon.error-test`
-- Commit: `bin/lane commit <lane> -m "PB-07b1: schema-only derivations are held by schema forms" --test seon.schema-test seon.program-test seon.error-test src/seon/schema.clj src/seon/program.cljc src/seon/error.clj test/seon/schema_test.clj`
+- `--test seon.schema-test --test seon.program-test --test seon.error-test`
+- Commit: `bin/lane commit <lane> -m "PB-07b1: schema-only derivations are held by schema forms" --test seon.schema-test --test seon.program-test --test seon.error-test src/seon/schema.clj src/seon/program.cljc src/seon/error.clj test/seon/schema_test.clj`
 
 ## PB-07b2: the program shapes
 

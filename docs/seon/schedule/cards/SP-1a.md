@@ -81,7 +81,7 @@ re-admission) to the one printer pass of `prepare-result`; stored bytes per erro
 
 ## Commit
 
-`bin/lane commit <lane> -m "SP-1a: a recorded error stores its shown text and no data-edn" --test seon.error-evidence-test seon.error-test seon.error-result-test seon.error-storage-bytes-test seon.fault-test seon.cluster.fault-storage-test seon.cluster.listener-failure-test seon.test.one-request-test seon.problems-test <every file above>`
+`bin/lane commit <lane> -m "SP-1a: a recorded error stores its shown text and no data-edn" --test seon.error-evidence-test --test seon.error-test --test seon.error-result-test --test seon.error-storage-bytes-test --test seon.fault-test --test seon.cluster.fault-storage-test --test seon.cluster.listener-failure-test --test seon.test.one-request-test --test seon.problems-test <every file above>`
 
 ## Dependencies
 

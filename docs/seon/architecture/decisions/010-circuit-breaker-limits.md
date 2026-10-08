@@ -24,8 +24,8 @@ Every protective limit is a resolved database configuration fact with:
   explicit unit;
 - a docstring naming the protected resource and firing meaning;
 - calibration provenance;
-- a default at least one hundred times legitimate measured P99.9 work; and
-- one loud failure path that records a fault and returns a flat steering error
+- a measured, reasonable default sized for the owner's 16 GB machine; and
+- one loud failure path that records an error and returns a flat error map
   naming the governing config key.
 
 Limits abort runaway or unsafe work. They are never normal throughput governors,
@@ -45,7 +45,7 @@ or the operation as a structured configuration error.
 
 ## Related
 
-- `AGENTS.md` §2.3 — the binding event-driven and bounded-execution law.
-- [[data-model]] — configuration facts.
+- `AGENTS.md` "Bound admission and await actual exit" and "Make bounds honest".
+- [Data modeling](../data-modeling-guide.md) — configuration facts.
 - [[agent-runtime]] — SCI `time-limit` and cluster JVM bounds.
-- [[architecture]] — the capability boundary and flat steering errors.
+- [[architecture]] — explicit inputs and flat error maps.
