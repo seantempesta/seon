@@ -5,6 +5,7 @@
             [seon.print :as print]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.test]
             [sci.core :as sci]
             [sci.lang]
             [clojure.core.async.flow :as-alias flow]
@@ -261,7 +262,9 @@
                           (:seon.error/at member) member
                           (:seon.error/at context) context
                           :else
-                          (with-bindings {(:context @attempt-writers) context}
+                          ;; Stored results are the record: a member's report lines are not the evaluation's `:out`.
+                          (with-bindings {(:context @attempt-writers) context
+                                          #'clojure.test/*test-out* (java.io.Writer/nullWriter)}
                           (with-test-loader
                            (fn [] (if (var? test-var)
                               ;; A host body runs unarmed (it may evaluate its own SCI

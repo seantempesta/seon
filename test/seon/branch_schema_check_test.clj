@@ -41,3 +41,17 @@
                              :seon.db/writer (fn [_connection _transaction] (throw (ex-info "injected" {})))})]
        (is (some? (:seon.test/unknown result)) "an unknown error, not a throw")
        (is (= "injected" (-> result :seon.error/chain first :seon.error/message)) "the cause is kept")))))
+
+(deftest ^{:seon/tasks #{'seon.test/check-fails-on-agent-registered-schemas}}
+  a-failing-check-reply-carries-no-runner-report-in-out
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [ns-name (str "my.agents." agent-id)]
+       (answered (str "(in-ns '" ns-name ") (clojure.core/refer-clojure) (require '[clojure.test :refer [deftest is]]) (defn g [] 1)") agent-id running)
+       (answered "(deftest g-test (is (= 2 (g))))" agent-id running)
+       (let [reply (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                             "arguments" {"code" (str "(my.test/check {:seon.test/changed '[" ns-name "/g " ns-name "/g-test]})")
+                                                                          "agent" agent-id "cluster" running}})))
+             check (support/reply (get (first (get reply "content")) "text"))]
+         (is (false? (:seon.test/passed? (:seon.repl/value check))) "the test failed")
+         (is (nil? (:seon.repl/out check)) "stored failure reports are the record, not the echo"))))))
