@@ -864,10 +864,19 @@ every row repeats onto the transaction entity. Index and owner question: `cards/
 For the owner, in plain words. Each step is one or more rows above (titles as in the rows); steps on one line run in
 parallel when their files are disjoint. Landed work is in §2 and no longer listed. The same path by row id follows.
 
-In flight now: one reach cache shared by all branches, Seon part (led-cacheb); errors store shown text and their blob
-commits with the fact (led-storage); what a one-line `defn` should cost (defn-why); the heap cap and cache defaults
-as dials (dials-16gb). Landed since: a definition's
-installation check reads only program rows (`754e20ff6`, its proof still owed by led-pb02b).
+**The main goal (owner 2026-10-08): our own lanes work as Seon agents.** Root files each slice as a task (EDN, typed
+references) with a red tagged proof and assigns it; the lane reads its current-state block at the REPL, works by
+`defn` on its branch while its tests run by themselves, writes back with `my.program/write-branch!`, commits with
+branch evidence, and files every gap in its context as a task. Refining that loop early is the priority: the rows
+that make it work come first (the block's sections CS-01c1..c4 and CS-01d, the automatic reaching tests F4b..F4d, the
+branch-evidence gate RF-2 and RF-3, the REPL edit hook RF-4 (landed), branch write-back RF-1 (landed), the ingestion
+check TASK-CHECK below), then the friction tasks the dogfood lanes file. Pilot: lane dogfood-pilot.
+
+**TASK-CHECK (new row): ingestion reports what makes a task unworkable.** Per task, as problems on the task (never a
+refusal): no tagged proof, a backticked reference resolving to nothing, every subject deleted. Absorbs
+`seon.task/task-text-references-are-never-resolved` and `seon.task/open-tasks-with-all-proofs-green-are-not-flagged`.
+Design and evidence: `docs/research/agent-platform/2026-10-08/task-census/task-census.md` §7. Files: `src/seon/task.clj`,
+its schema, `test/seon/task_ingestion_test.clj`. Status: waits on its card.
 
 1. **Tasks show their current state (first).** A task revised by its file shows on the next call, with the end-to-end
    proof → the block shows the current task → the block shows proofs and their status → the block shows the Seon
