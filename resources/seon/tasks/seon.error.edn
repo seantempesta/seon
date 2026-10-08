@@ -114,4 +114,8 @@
              :kind :function
              :intent "`seon.error/prepare` returned the observation carrying the whole admitted data-edn as `:seon.error/source`, and `seon.error/commit-tx` stores the source's declared members over the fact's, so a map-sourced fault stored 300 KB inline while its fitted fact held 52 bytes (lane fault-data-edn, b233d838f). Fixed: the source keeps the data-edn the fact kept. Done when seon.error-evidence-test/a-capped-turn-fault-says-it-is-capped asserts the stored data-edn fits `:seon.config.error/max-evidence-bytes` (b233d838f). SP-1a (cards/SP-1a.md) deletes `:seon.error/data-edn` and this fix with it: the task is then done by deletion of its producer."
              :must-read #{seon.error/prepare seon.error/commit-tx}
-             :evidence #{"b233d838f"}}]
+             :evidence #{"b233d838f"}}
+ #:seon.task{:name "error-notifications-to-root-are-printed-maps"
+             :kind :function
+             :intent "Error notifications to root are outside messages whose text is a pr-str of the error map (a second printer), delivered through :seon.config.error/escalate-to. Done when the notification carries the error's identity (signature, task, handle) as data and no printed copy."
+             :must-read #{seon.error/commit-call}}]

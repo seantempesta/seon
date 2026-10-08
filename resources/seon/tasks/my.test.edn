@@ -23,4 +23,7 @@
              :intent "A `my.test/check` reply carries clojure.test's \"Testing ns\" (and FAIL) lines in `:out`, printed outside the value printer; and the automatic test step reports `:seon.turn.loop/reaching {:seon.test/passed? false :seon.turn.loop/red []}` after an eval request on a fresh agent branch with no change (both observed on default 2026-10-08, agent integrate-2-probe). A one-test check there allocated 2.5 GB in 1.67 s. Done when the report reaches the agent only as data and a reaching run with nothing to run says so instead of `passed? false`. (The pilot's other half, a test named as changed being refused, no longer reproduces.)"
              :must-read #{my.test/check seon.test/run seon.turn/run-reaching}
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
-]
+ #:seon.task{:name "check-ignores-the-tests-key"
+             :kind :function
+             :intent "(my.test/check {:seon.test/tests [sym]}) ignores the key and runs the tests reaching the named function instead (13 s) (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08). Done when a named test list runs exactly those tests, with a regression, or the request schema refuses the key."
+             :must-read #{my.test/check}}]

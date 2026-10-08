@@ -253,4 +253,16 @@
  #:seon.task{:name "a-bounded-step-that-leaves-queued-tests-wakes-nothing-when-no-member-ran"
              :kind :function
              :intent "F4c: `seon.turn/continue-queue` rewakes the agent only when the continuation ran at least one queued test; with the dial below the selection cost no member ever starts and the queue waits for the next wake. Unreached by a default 10 s dial; named so a smaller dial is understood."
-             :must-read #{seon.turn/step seon.turn/continue-queue}}]
+             :must-read #{seon.turn/step seon.turn/continue-queue}}
+ #:seon.task{:name "a-red-proof-carries-no-reason"
+             :kind :function
+             :intent "A red test's reason is invisible (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08): the test step's :red names only the test; :seon.render.test/failures carries only the symbol; \"exceeded 5000 ms\" and \"Worker-global state changed\" each needed manual digs (three in all); result entries lack :seon.test/passed?, so (remove :seon.test/passed?) matched every entry. Done when each red in the step summary and in the my.test/check failure render carries its failure data (test, expected/actual, or the bound or drift reason) and every result entry has :seon.test/passed?, with a regression on a red by bound and a red by drift."
+             :must-read #{seon.turn/step seon.render.test/render-ai seon.test/recorded-result}}
+ #:seon.task{:name "no-model-turn-without-an-assignment"
+             :kind :function
+             :intent "seon.turn/next-agent-work opens another model call after every successful reply (continuing-reply?) unless the last evaluation answered done or wait; only :seon.config.run/max-episode-runs (100) bounds it, and an agent without an assignment still gets model turns (error notifications to root open root turns too). Contradicts \"a model agent launches only on an assigned task with proofs\". Done when no model turn runs for an agent without an assigned task, with a test that an unassigned agent with a wake gets none."
+             :must-read #{seon.turn/next-agent-work}}
+ #:seon.task{:name "ai-attempt-stores-printed-copies-of-settings-and-usage"
+             :kind :function
+             :intent "Evidence for ledger row SR-G: :seon.ai.attempt/settings-edn is written as (pr-str settings) in seon.turn (and usage-edn likewise), a stored printed copy and a second printer. Store the settings and usage as data, or only their digest and ids."
+             :must-read #{seon.turn/step}}]

@@ -53,4 +53,8 @@
              :kind :function
              :intent "The seon.cache kind :seon.test.runner/reach-declarations held 187 MB (37% of the 512 MB budget) with 0 hits and 11 misses on default 2026-10-08 (`seon.cache/status`), 1.9 s of load. reach-revision-key keys the whole-program declaration read by Datahike's connection-id, which is [store-id branch-name], plus the connection's generation, so every agent branch, check world, merge branch and member reads all declarations again although branches share immutable indexes and the program is identical. A first one-test check on a new agent allocated 3.8 GB in 1.18 s (`seon.pass-probe/run-check`). Correct: key the derivation by content the branches share (the reach attributes' index roots or the program digest), so an unchanged program on any branch is a hit. Proof: two checks on two fresh agent branches of one program count one miss and one hit for this kind."
              :must-read #{seon.test.runner/reach-declarations seon.test.runner/reach-revision-key}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/redo-review-opus-redo-review.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/redo-review-opus-redo-review.md"}}
+ #:seon.task{:name "verified-recomputes-reach-digests-for-the-whole-program"
+             :kind :function
+             :intent "seon.test/verified? on a proof with a recorded result calls seon.test.runner/reach-digests: 5.9 s, 4.2 GB, 3.3M calls cold (whole-program work) on every seon.task/assign! of a proof with evidence (lane assign-reply). Done when the digests are derived only for the proof's reach and cached by content, with timing on the same probe under one second."
+             :must-read #{seon.test.runner/reach-digests seon.test/verified?}}]

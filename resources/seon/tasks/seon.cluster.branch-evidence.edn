@@ -12,7 +12,7 @@
              :must-read #{my.test/check seon.test/run}}
  #:seon.task{:name "a-printer-failure-answers-unprintable-without-its-cause"
              :kind :function
-             :intent "A JVM eval_clj whose value was [rows kw (keys @conn)] answered `#unprintable[clojure.lang.PersistentVector java.lang.ClassCastException]` with no diagnostic naming the failing member or cause (2026-10-08, agent impl-rf2). Done when the printer shows the printable members and names the failing path, with its error delivered beside the value."
+             :intent "A JVM eval_clj whose value was [rows kw (keys @conn)] answered `#unprintable[clojure.lang.PersistentVector java.lang.ClassCastException]` with no diagnostic naming the failing member or cause (2026-10-08, agent impl-rf2). Done when the printer shows the printable members and names the failing path, with its error delivered beside the value. More evidence (PB-15 dogfood run, lane dogfood-pb15, default, 2026-10-08): in the SCI path (keys [1 2]) printed a diagnostic with a 76-frame stack (~3,500 tokens, ClassCastException in KeySeq) while JVM mode shows only #unprintable[...] with no diagnostic. Done also when the diagnostic is compact data (type, message, top frames; ledger PR-04) in both modes. Owners: seon.sci.eval/shown-result and the diagnostic builder."
              :must-read #{seon.mcp/call}}
  #:seon.task{:name "agent-identity-prints-its-id-into-the-message"
              :kind :function
