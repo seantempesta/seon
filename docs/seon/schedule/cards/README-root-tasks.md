@@ -37,7 +37,9 @@ Wakes are datoms on attributes declared `:seon.wake/listen true` whose value is 
 3. **A task names proofs in its data** (`:seon.task/proofs`, the installed key, stored on the task) beside the deftests
    tagging it, and **a proof reads the task it proves** (the proof request carries the task; the member records the
    digest of the task data it read, as F6 records an answer's), so one deftest proves every generated question.
-4. **An agent may hold several assignments; holding is the assertion.** Root holds many at once; the block lists them
+4. **An agent may hold several assignments; holding is the assertion.** The assignments are components of the agent
+   entity, which lives at the task home with everything about the agent ([README-agent-entity](README-agent-entity.md),
+   AE-4). Root holds many at once; the block lists them
    oldest first. Completing a task (all proofs green) or giving it back retracts the assignment in the transaction that
    records it, so root's open work is one indexed read of its current assignments, never a walk of its history.
 5. **Root is on rails through its tasks' references, not its own help** (owner: "no kinds"). Every agent reads the
@@ -78,7 +80,7 @@ are retracted when done), then `verified?` per held proof: follows root's open w
 
 ## Order (each card about 15 minutes)
 
-1. **RT-1** an assignment is a wake (schema only).
+1. **RT-1** an assignment is a wake (schema only; superseded by AE-4 under Q-AE1's recommended option).
 2. **RT-2** `seon.task/assign-tx`: assignment checks inside any producer's transaction.
 3. **RT-3** an agent holds several assignments; completing or giving back retracts one (after F5's completion).
 4. **RT-4** a task names proofs in its data.

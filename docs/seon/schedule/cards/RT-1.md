@@ -9,6 +9,10 @@ created: 2026-10-08
 
 Ledger §3.28 RT-1 (group E). Index: [README-root-tasks](README-root-tasks.md). Lane: Sonnet.
 
+**Superseded by [AE-4](AE-4.md)** if Q-AE1 is answered as recommended: the assignment becomes a component of the
+agent (`:seon.agent/assignments`), and that edge, declared `:seon.wake/listen :entity`, is the wake. Launch this card
+only if the owner keeps the assignment pointing at the agent (Q-AE1 option 2).
+
 ## What becomes true
 Writing an assignment wakes the assigned agent: `:seon.task/agent` is declared `:seon.wake/listen true`, so
 `seon.wake/wake-attributes` and `turn-opening-attributes` include it and `seon.turn/unanswered-wakes` lists a new

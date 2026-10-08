@@ -19,6 +19,10 @@ Ledger §3.28 RT-3 (groups E, then D for the block line). Q-RT1 (recommended opt
 - The current-state block shows the held task as today and, when more are held, `:seon.task/also-held` with their
   handles and count (data, no prose).
 
+With AE-4 (the agent entity), the held assignments are the agent's `:seon.agent/assignments` components: `held` is
+the record's (`seon.agent/record`, AE-1) assignments ordered by their transaction, and `agent-task` is deleted by
+AE-3 rather than changed here; the retraction is `[:db/retractEntity assignment]`, which drops the agent's edge.
+
 ## Functions
 - NEW `seon.task/held` `[database agent-id]` → `[:vector :seon.task/handle]`: one query on current
   `:seon.task/agent` datoms ordered by their transaction.

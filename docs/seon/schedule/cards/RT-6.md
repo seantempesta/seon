@@ -14,6 +14,9 @@ A1's answer is a component of the assignment (`:seon.task/answer`), not of the a
 questions (root) keeps one answer per task. `my.agent/answer!` and `my.agent/answer` keep their contracts and find the
 held task as A1 says; with RT-3 they take an optional `:seon.task/id` to name which held task when several are held.
 
+With AE-4 the assignment is a component of the agent, so the answer is a member of that component: still on the
+assignment, and in the agent's one-hop record.
+
 ## Functions
 A1's card, with `seon.agent.edn`'s `:answer`, `:sources`, `:source-names` moved to `seon.task.edn` as assignment
 members, and the transaction writing the assignment entity instead of the agent. If A1 has landed, this card moves the

@@ -377,8 +377,9 @@ There is no proof proc and no running or dirty state.
 
 - A committed model reply advances answered to the basis its context presented and records the delivery of the unread
   items its block showed. Outside and test eval requests never answer.
-- The cap counts call rows at the writer against the outside wake whose anchor they consumed. Root's messages are
-  outside wakes. A self-wake or MCP retry never refills the cap.
+- The cap counts model call rows carrying the held assignment's grant (§3.11): calls left are the agent's cap setting
+  minus that count. Only a new assignment (a new grant) refills it; a message, a task revision, a self-wake or an MCP
+  retry never does.
 - With no provider configured, no model eval request is admitted. A schedule-only firing arms but opens no call.
 
 ### 3.6 Failure
@@ -409,7 +410,7 @@ only the forms its commit installs, each once, and says plainly how to end a ses
 |---|---|---|
 | provider timeout `:seon.config.ai/timeout-ms` | `seon.ai/complete` | a counted failed call |
 | SCI evaluation time limit per form | `seon.sci.eval` | that form's error value |
-| model calls per outside wake | the writer's count | disposition `:capped` |
+| model calls per assignment grant (§3.11) | the writer's count | disposition `:capped` |
 
 The MCP await uses the caller's deadline; on timeout the caller gets a terminal "still running" reply. A host call
 that ignores interruption keeps ownership until its actual exit, and no second eval request overlaps it; the actual-exit owner
@@ -436,6 +437,26 @@ completion's cross-branch crash window with idempotent recovery. Capture-before-
 - **Scoring** reads stored facts only: proof member counts, eval requests, tokens, read-error types, imitation notes,
   latency, merge outcome, bail reason. Tests and scoring cost no provider call. The suite runs the competency spec's
   task × wrapping × entrance × model matrix, DeepSeek flash first, every run ending in the real merge flow.
+
+### 3.11 The agent entity
+
+Everything about an agent lives on its entity, `[:seon.agent/id …]` (owner 2026-10-08: "an agent has their own entity
+and the task should be ref'ed there"). One rule says where each fact is written: **addressed to the agent → the task
+home; done by the agent → its branch.** The record (identity, branch, namespace, settings, held assignments) and what
+is sent to it (assignments, messages) are written at the home, so root changes an agent without touching its branch;
+its evaluations, call rows and answered basis are written on its branch in its eval request's one transaction. Each
+agent attribute declares its side (`:seon.agent/written-at`), and the writer refuses the wrong one.
+
+- **Held tasks.** The agent's assignments are components of it (`:seon.agent/assignments`); each refs its task and
+  carries the revision it reviewed, its branch, its grant and its answer. Holding is the component's presence.
+- **One read.** `seon.agent/record [database agent-id]` answers the record from the home seen from `database`, plus the
+  branch-side facts (answered basis, calls left on the grant). An eval request reads it once, when its world is built,
+  and passes the value to the block, the proofs, the cap and the provider settings; nothing else looks up the home.
+- **Cap.** Each assignment carries a grant minted when it is written; call rows record it; calls left is the cap
+  setting minus the call rows on the grant (§3.5).
+- **Answered basis.** `:seon.agent/answered-t` is the home basis the last committed model eval request presented.
+
+Cards: [README-agent-entity](../schedule/cards/README-agent-entity.md) (AE-1 … AE-7).
 
 ## 4. Order of work
 
