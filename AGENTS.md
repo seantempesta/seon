@@ -422,7 +422,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   confusing next to data and agents repeat them. A render function takes the value and returns data, never forms to
   execute:
   - The AI face returns the pruned, processed data the agent cares about; the value printer prints it. Offered
-    operations and dig or requery forms are part of that data, shown so the agent may run them, and never run by the
+    operations and elision or requery forms are part of that data, shown so the agent may run them, and never run by the
     render step.
   - The HTML face returns hiccup: a thing with a look and its operations.
   - The form face (`:seon.render/form`) returns the form that shows how this data can be found again, e.g. its

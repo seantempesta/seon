@@ -129,7 +129,7 @@ The owner wants agents to tune the budget. Smallest loop, from what exists:
    `eN`'s cut paths), a re-read of the whole handle, or a use of `seon.print/*budget*` (PR-11 records
    `:seon.eval/budget-override`). Class is derived from the form's data, no text matching beyond the read symbols.
 3. **Report per value class, as data.** `seon.health/budget-report` (a pure function over eval facts, a health unit
-   beside `:profile`), grouped by `:seon.eval/renderer` or value class: `{:n :elided-count :dig-in-rate :override-rate
+   beside `:profile`), grouped by `:seon.eval/renderer` or value class: `{:n :elided-count :followed-cut-rate :override-rate
    :shown-p50 :shown-p90 :recommended-budget}`. `recommended-budget` is the 90th percentile of `:value-tokens` among
    replies whose cut the agent followed, clamped to the model ceiling, and unchanged when the followed-cut rate is under a threshold.
    It is advice; the dial stays a configuration fact an owner applies.
@@ -138,7 +138,7 @@ Files: `src/seon/turn/batch.clj` (D1 recording), `src/seon/sci/eval.clj` (cut pa
 and `seon.cluster.eval.edn`, `src/seon/health.clj` (report), `test/seon/cluster/turn_test.clj`. Proof:
 `seon.cluster.turn-test/a-form-naming-a-handle-records-its-result-read` (D1), then a new
 `seon.cluster.turn-test/an-elision-form-on-a-cut-result-counts-as-a-followed-cut` (evaluate `(vec (range 100))`, then
-`(drop 32 result/eN)`; assert the second evaluation's result-reads name the first and the report counts one dig-in
+`(drop 32 result/eN)`; assert the second evaluation's result-reads name the first and the report counts one followed cut-in
 for that class) and `seon.health-test/the-budget-report-recommends-from-the-followed-cut-rate` on fixture rows. Task:
 `seon.turn.batch/the-display-budget-has-no-feedback` (new).
 
@@ -150,5 +150,5 @@ library var (got nothing), `runtime_status` (needed one top fault, got five); wh
 never read again, which the report can show per class (`shown-p50` against followed-cut rate zero) but cannot tell from a reply read
 and used in full. That limit is real and the report should say it.
 
-Dependency on other rows: PR-02 and PR-29 make the elision forms runnable and readable, which is what lets a dig-in be
+Dependency on other rows: PR-02 and PR-29 make the elision forms runnable and readable, which is what lets a followed cut be
 recognised; PR-11 supplies the override signal; D1 supplies the reads.

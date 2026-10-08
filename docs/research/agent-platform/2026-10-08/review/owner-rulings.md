@@ -246,7 +246,7 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   Lives in: AGENTS.md "Presentation"; agent-loop.md §1.9; vocabulary.md; ledger PR-02, PR-10.
 - **Lean values; renders are the cliffs notes.** Core functions return only what their contract says; renders strip
   garbage and return pruned data for the top-level value; the full value is one step away through `result/e…`, and
-  sub-values dug from it print plainly; intentional bulk-data functions declare it. Lives in: AGENTS.md
+  sub-values reached from it print plainly; intentional bulk-data functions declare it. Lives in: AGENTS.md
   "Presentation"; agent-loop.md §1.9; ledger PR-12, PR-13, RO-8, RO-12.
 - **Terse Clojure messages.** Every agent-facing message: data first, one short fixed message per error variant,
   Clojure's wording style, fixes as runnable clojure.core forms, no boilerplate, no internal names the agent cannot
