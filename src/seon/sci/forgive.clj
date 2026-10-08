@@ -1,47 +1,54 @@
 (ns seon.sci.forgive
-  "The reader stage in front of evaluation: one stepper, `step`, for a model
-  reply (`:reply`) and code (`:code`), with the read itself supplied as a
-  value (`:seon.batch/read-stage`).
+  "Light forgiveness in front of evaluation, and the stepper that reads each
+  form once with the read itself supplied as a value
+  (`:seon.batch/read-stage`).
 
-  A reply is read region by region (the text between fence lines). A code
-  fence's lines are code; a non-code fence's lines are prose. Outside fences
-  a line whose first character starts a form is code to the end of every form
-  on it; every other line is prose, which becomes the next form's comment. A
-  failed read is its own step, and reading continues after it: past the
-  closer of the collection open at the failure, else where the reader
-  stopped, never past its region's end. `#_` and a reader conditional that
-  selects nothing are skipped inside their region. Nothing is repaired."
+  `forgive` is one linear scan. In a model reply (`:reply`), outside a code
+  fence and outside an open form, a line is code when it starts a form at
+  column zero or is one literal or qualified symbol; every other line becomes
+  a `;` comment, fence lines go, and words after a form on its line become a
+  comment. In both modes an unbalanced text is repaired: a stray closer is
+  dropped and missing closers are inserted before the next column-zero line,
+  each change a repair note. Balanced text keeps its delimiters byte for
+  byte. The scan also finds each top-level form's span, which `step` reads."
   (:require [clojure.string :as str]
             [clojure.tools.reader.reader-types :as rt]
             [edamame.core :as edamame]
-            [sci.core :as sci]
             [seon.sci.reader :as reader]))
 
-;;; Lines and regions
+;;; Characters and lines
 
 (defn- line-end
   "The offset of the newline ending the line at `pos`, else the text's end."
   {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
-  [^String text pos]
-  (let [i (.indexOf text "\n" (int pos))] (if (neg? i) (count text) i)))
-
-(defn- line-start
-  "The offset where the line holding `pos` starts."
-  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
-  [^String text pos]
-  (inc (.lastIndexOf text "\n" (int (max 0 (dec pos))))))
+  ^long [^String text ^long pos]
+  (let [i (.indexOf text "\n" (int pos))] (if (neg? i) (.length text) i)))
 
 (defn- non-blank
   "The first offset from `pos` below `limit` that is not whitespace, else `limit`."
   {:malli/schema [:=> [:cat :string nat-int? nat-int?] nat-int?]}
-  [^String text pos limit]
-  (loop [i (long pos)]
+  ^long [^String text ^long pos ^long limit]
+  (loop [i pos]
     (if (and (< i limit) (Character/isWhitespace (.charAt text (int i)))) (recur (inc i)) i)))
 
+(defn- token-end
+  "The end, at most `limit`, of the bare token continuing at `pos`: the next
+  whitespace or character the reader's token rule ends a token at."
+  {:malli/schema [:=> [:cat :string nat-int? nat-int?] nat-int?]}
+  ^long [^String text ^long pos ^long limit]
+  (loop [i pos]
+    (if (and (< i limit)
+             (let [c (.charAt text (int i))]
+               (not (or (Character/isWhitespace c)
+                        (case c (\( \) \[ \] \{ \} \" \; \@ \^ \` \~ \\ \,) true false)))))
+      (recur (inc i))
+      i)))
+
 (defn- fence-line
-  "The backtick count and lowercased first word of the fence line `[ls le)`, or nil."
+  "The backtick count and lowercased first word of the line `[ls le)` when it
+  is a fence line (three or more backticks first), else nil."
   {:malli/schema [:=> [:cat :string nat-int? nat-int?] [:maybe [:tuple pos-int? :string]]]}
-  [^String text ls le]
+  [^String text ^long ls ^long le]
   (let [s (non-blank text ls le)
         e (loop [i s] (if (and (< i le) (= \` (.charAt text (int i)))) (recur (inc i)) i))
         tag-start (non-blank text e le)
@@ -49,43 +56,277 @@
     (when (>= (- e s) 3)
       [(- e s) (str/lower-case (subs text tag-start tag-end))])))
 
-(defn- region-end
-  "The start of the first line from the line start `pos` that ends the region:
-  any fence line when `ticks` is nil, else an untagged line of at least
-  `ticks` backticks; the text's end when none does."
-  {:malli/schema [:=> [:cat :string nat-int? [:maybe pos-int?]] nat-int?]}
-  [^String text pos ticks]
-  (let [n (count text)]
-    (loop [ls (long pos)]
-      (if (>= ls n)
-        n
-        (let [le (line-end text ls)
-              [t tag] (when (.startsWith text "```" (int (non-blank text ls le))) (fence-line text ls le))]
-          (if (and t (or (nil? ticks) (and (= "" tag) (>= t ticks)))) ls (recur (inc le))))))))
+(defn- code-fence-line?
+  "Whether the line `[ls le)` of code is a fence line: three backticks or tildes first."
+  {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
+  [^String text ^long ls ^long le]
+  (let [s (int (non-blank text ls le))]
+    (or (.startsWith text "```" s) (.startsWith text "~~~" s))))
 
 (def ^:private code-tags
   "The fence tags whose body is code; an untagged fence is code too."
   #{"" "clojure" "clj" "cljc" "edn"})
 
 (defn- form-start?
-  "Whether the line character at `s` starts a form outside a fence: a
-  collection, quote, deref or meta character, or `#` before a non-blank
-  character other than `#`."
-  {:malli/schema [:=> [:cat :string nat-int?] :boolean]}
-  [^String text s]
+  "Whether the character at `s` starts a form by its first character: a
+  collection, quote, deref or meta character, `#` before a non-blank
+  character other than `#`, or a backtick before a collection."
+  {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
+  [^String text ^long s ^long le]
   (let [c (.charAt text (int s))
-        d (when (< (inc s) (count text)) (.charAt text (int (inc s))))]
-    (boolean (or (#{\( \[ \{ \' \@ \^} c)
-                 (and (= \# c) d (not= \# d) (not (Character/isWhitespace ^char d)))))))
+        d (when (< (inc s) le) (.charAt text (int (inc s))))]
+    (boolean (case c
+               (\( \[ \{ \' \@ \^) true
+               \# (and d (not= \# d) (not (Character/isWhitespace ^char d)))
+               \` (#{\( \[ \{} d)
+               false))))
 
-(defn- skip-blank
-  "The first offset from `pos` that is neither whitespace nor a comma."
-  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
-  [^String text pos]
-  (loop [p (long pos)]
-    (if (and (< p (count text)) (let [c (.charAt text (int p))] (or (Character/isWhitespace c) (= \, c))))
-      (recur (inc p))
-      p)))
+(defn- string-closes-at?
+  "Whether the string opened at `s` closes exactly at `end`."
+  {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
+  [^String text ^long s ^long end]
+  (loop [j (inc (long s))]
+    (cond (> j end) false
+          (= \\ (.charAt text (int j))) (recur (+ j 2))
+          (= \" (.charAt text (int j))) (= j end)
+          :else (recur (inc j)))))
+
+(defn- literal-line?
+  "Whether the trimmed line `[s le)` is exactly one literal (number, string,
+  keyword, character, `##` value) or one namespace-qualified symbol."
+  {:malli/schema [:=> [:cat :string nat-int? nat-int?] :boolean]}
+  [^String text ^long s ^long le]
+  (let [e (loop [e le] (if (and (> e s) (Character/isWhitespace (.charAt text (int (dec e))))) (recur (dec e)) e))
+        c (.charAt text (int s))
+        one-token? (fn [from] (= e (token-end text from e)))]
+    (boolean
+     (cond
+       (= \" c) (string-closes-at? text s (dec e))
+       (= \\ c) (and (>= (- e s) 2) (one-token? (+ s 2)))
+       (= \# c) (and (> (- e s) 2) (= \# (.charAt text (int (inc s)))) (one-token? (+ s 2)))
+       (not (one-token? s)) false
+       (Character/isDigit c) true
+       (#{\+ \-} c) (and (> (- e s) 1) (Character/isDigit (.charAt text (int (inc s)))))
+       (= \: c) (> (- e s) 1)
+       :else (let [slash (.indexOf text "/" (int s))]
+               (and (or (Character/isLetter c) (#{\* \! \_ \? \< \> \= \-} c))
+                    (< s slash (dec e))
+                    (neg? (.indexOf (subs text s e) ":"))))))))
+
+(def ^:private closer-of
+  "The closer of each opener."
+  {\( \) \[ \] \{ \}})
+
+;;; The scan
+
+(defn- scan
+  "One pass over `text`: the forgiven text, each top-level form's span
+  `[start end line column]` in it, the repairs, and whether `text`'s own
+  delimiters balance. Prose rules apply when `reply?`; delimiters are
+  repaired when `repair?`, else kept as written."
+  {:malli/schema [:=> [:cat :string :boolean :boolean] [:map [:seon.batch/text :string] [:seon.batch/spans :seon.batch/spans]
+                                                        [:seon.batch/repairs :seon.batch/repairs] [::balanced? :boolean]]]}
+  [^String text reply? repair?]
+  (let [n (.length text)
+        out (StringBuilder. (+ n 16))
+        ;; the openers of the open collections, outermost first
+        open (StringBuilder.)
+        spans (volatile! (transient []))
+        repairs (volatile! (transient []))
+        balanced (volatile! true)
+        in-string (volatile! false)
+        ;; the open top-level form: [out-start line column]
+        form (volatile! nil)
+        ;; the items the open top-level form still needs; just past the last
+        ;; code item in `out`, and its line (kept only when repairing)
+        marks (long-array [0 0 1])
+        fence (volatile! nil)
+        closers (fn [from] (let [sb (StringBuilder.)]
+                             (loop [k (dec (.length open))]
+                               (when (>= k from) (.append sb (char (closer-of (.charAt open k)))) (recur (dec k))))
+                             (str sb)))
+        matching (fn [c] (loop [k (dec (.length open))]
+                           (cond (neg? k) -1 (= c (closer-of (.charAt open k))) k :else (recur (dec k)))))
+        at-code! (fn [o line] (when repair? (aset marks 1 (long o)) (aset marks 2 (long line))))
+        repair! (fn [line k v] (vswap! repairs conj! {:seon.batch/line line k v}))
+        start! (fn [o line ols] (vreset! form [o line (inc (- (long o) (long ols)))]) (aset marks 0 1))
+        ;; an item ended at `o`: true when it completes the top-level form
+        item! (fn [o line]
+                (at-code! o line)
+                (when (and @form (zero? (.length open)) (zero? (aset marks 0 (dec (aget marks 0)))))
+                  (let [[s l c] @form] (vswap! spans conj! [s o l c]) (vreset! form nil) true)))
+        prefix! (fn [arity] (when (zero? (.length open)) (aset marks 0 (+ (aget marks 0) (dec (long arity))))))
+        close-all! (fn []
+                     (let [o (aget marks 1)
+                           line (aget marks 2)
+                           cls (closers 0)]
+                       (.insert out (int o) ^String cls)
+                       (repair! line :seon.batch/inserted cls)
+                       (.setLength open 0)
+                       (aset marks 0 1)
+                       (item! (+ o (count cls)) line)))
+        code-line!
+        (fn [^long ls ^long le ^long line trailing?]
+          (let [ols (.length out)]
+            (loop [i (long ls) copied (long ls) after false]
+              (let [o (+ (.length out) (- i copied))]
+                (cond
+                  (>= i le) (.append out text (int copied) (int le))
+                  @in-string
+                  (case (.charAt text (int i))
+                    \\ (recur (Math/min le (+ i 2)) copied after)
+                    \" (do (vreset! in-string false) (recur (inc i) copied (or (item! (inc o) line) after)))
+                    (recur (inc i) copied after))
+                  :else
+                  (let [c (.charAt text (int i))
+                        d (when (< (inc i) le) (.charAt text (int (inc i))))
+                        top? (and (nil? @form) (zero? (.length open)))]
+                    (cond
+                      (or (Character/isWhitespace c) (= \, c)) (recur (inc i) copied after)
+                      (or (= \; c) (and (= \# c) (= \! d))) (.append out text (int copied) (int le))
+                      ;; words after a form on its line become its comment
+                      (and top? after trailing? (not (form-start? text i le)))
+                      (do (.append out text (int copied) (int i)) (.append out "; ") (.append out text (int i) (int le)))
+                      :else
+                      (do
+                        (when top? (start! o line ols))
+                        (case c
+                          \" (do (vreset! in-string true) (recur (inc i) copied after))
+                          (\( \[ \{) (do (.append open c) (at-code! (inc o) line) (recur (inc i) copied after))
+                          (\) \] \})
+                          (let [m (long (matching c))
+                                top (dec (.length open))]
+                            (cond
+                              (and (>= m 0) (= m top))
+                              (do (.setLength open m)
+                                  (at-code! (inc o) line)
+                                  (recur (inc i) copied (or (item! (inc o) line) after)))
+                              (not repair?)
+                              ;; kept as written: the reader answers it
+                              (do (vreset! balanced false)
+                                  (if (neg? top) (aset marks 0 (inc (aget marks 0))) (.setLength open top))
+                                  (recur (inc i) copied (or (item! (inc o) line) after)))
+                              (>= m 0)
+                              (let [cls (closers (inc m))]
+                                (.append out text (int copied) (int i))
+                                (.append out ^String cls)
+                                (repair! line :seon.batch/inserted cls)
+                                (.setLength open m)
+                                (recur (inc i) i (or (item! (+ (.length out) 1) line) after)))
+                              :else
+                              (do (.append out text (int copied) (int i))
+                                  (repair! line :seon.batch/dropped (str c))
+                                  (when top? (vreset! form nil) (aset marks 0 0))
+                                  (recur (inc i) (inc i) after))))
+                          \\ (let [j (token-end text (Math/min (+ i 2) le) le)] (recur j copied (or (item! (+ o (- j i)) line) after)))
+                          (\' \@ \`) (do (prefix! 1) (recur (inc i) copied after))
+                          \~ (do (prefix! 1) (recur (if (= \@ d) (+ i 2) (inc i)) copied after))
+                          \^ (do (prefix! 2) (recur (inc i) copied after))
+                          \# (case d
+                               (\( \{) (do (.append open (char d)) (at-code! (+ o 2) line) (recur (+ i 2) copied after))
+                               \" (do (vreset! in-string true) (recur (+ i 2) copied after))
+                               (\_ \' \=) (do (prefix! 1) (recur (+ i 2) copied after))
+                               \^ (do (prefix! 2) (recur (+ i 2) copied after))
+                               \? (do (prefix! 1) (recur (if (and (< (+ i 2) le) (= \@ (.charAt text (int (+ i 2))))) (+ i 3) (+ i 2)) copied after))
+                               \# (let [j (token-end text (+ i 2) le)] (recur j copied (or (item! (+ o (- j i)) line) after)))
+                               (let [j (token-end text (inc i) le)]
+                                 (if (or (= \: d) (and d (> j (inc i)) (not (Character/isDigit ^char d))))
+                                   ;; a tag or namespaced-map prefix before its form
+                                   (do (prefix! 1) (recur j copied after))
+                                   (recur j copied (or (item! (+ o (- j i)) line) after)))))
+                          (let [j (token-end text (inc i) le)] (recur j copied (or (item! (+ o (- j i)) line) after))))))))))))
+        prose! (fn [ls le] (.append out "; ") (.append out text (int ls) (int le)))
+        line!
+        (fn line! [^long ls ^long le ^long line]
+          (let [s (non-blank text ls le)
+                [kind ticks] @fence]
+            (cond
+              @in-string (code-line! ls le line false)
+              (or @form (pos? (.length open)))
+              (if (and repair? (pos? (.length open)) (< s le)
+                       (or (code-fence-line? text ls le)
+                           (and (= s ls) (not (#{\) \] \} \;} (.charAt text (int s)))))))
+                (do (close-all!) (line! ls le line))
+                (code-line! ls le line (and reply? (nil? kind))))
+              (>= s le) (.append out text (int ls) (int le))
+              (not reply?) (when-not (code-fence-line? text ls le) (code-line! ls le line false))
+              :else
+              (if-let [[t tag] (fence-line text ls le)]
+                (cond (nil? kind) (vreset! fence [(if (code-tags tag) :code :prose) t])
+                      (and (= "" tag) (>= t ticks)) (vreset! fence nil)
+                      (= :code kind) (code-line! ls le line false)
+                      :else (prose! ls le))
+                (cond (= :code kind) (code-line! ls le line false)
+                      (= :prose kind) (prose! ls le)
+                      (= \; (.charAt text (int s))) (.append out text (int ls) (int le))
+                      (or (and (= s ls) (form-start? text s le)) (literal-line? text s le)) (code-line! ls le line true)
+                      :else (prose! ls le))))))]
+    (let [last-line (loop [ls 0 line 1]
+                      (if (< ls n)
+                        (let [le (line-end text ls)]
+                          (line! ls le line)
+                          (when (< le n) (.append out \newline))
+                          (recur (inc le) (inc line)))
+                        (dec line)))]
+      (when @in-string
+        (vreset! balanced false)
+        (when repair?
+          (.append out \")
+          (repair! last-line :seon.batch/inserted "\"")
+          (vreset! in-string false)
+          (item! (.length out) last-line))))
+    (when (pos? (.length open))
+      (vreset! balanced false)
+      (when repair? (close-all!)))
+    (when-let [[s l c] @form]
+      (vswap! spans conj! [s (.length out) l c]))
+    {:seon.batch/text (str out) :seon.batch/spans (persistent! @spans)
+     :seon.batch/repairs (persistent! @repairs) ::balanced? @balanced}))
+
+(defn forgive
+  "`text` forgiven in `mode`: its text, its top-level forms' spans, its repairs.
+
+  Repairs are present only when its delimiters did not balance; a balanced
+  text keeps every delimiter as written."
+  {:malli/schema [:=> [:cat :string :seon.batch/mode] :seon.batch/forgiven]}
+  [text mode]
+  (let [reply? (= :reply mode)
+        strict (scan text reply? false)
+        {r :seon.batch/repairs :as result} (if (::balanced? strict) strict (scan text reply? true))]
+    (cond-> (dissoc result ::balanced? :seon.batch/repairs)
+      (seq r) (assoc :seon.batch/repairs r))))
+
+;;; The stepper
+
+(defn- span-reader
+  "A reader over the span `[s e line column]` of `text` that numbers lines and columns as `text` does."
+  {:malli/schema [:=> [:cat :string :seon.batch/span] :seon.batch/reader]}
+  [^String text [s e line column]]
+  (rt/->IndexingPushbackReader (rt/push-back-reader (java.io.StringReader. (subs text s e))) line column (= 1 column) nil 0 nil false))
+
+(defn step
+  "The next read step at the cursor in `mode`.
+
+  The first step forgives the text; each step then reads the next form's span
+  once. A failed read's step carries the reader's own failure."
+  {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/mode :seon.batch/read-state] :seon.batch/read-step]}
+  [stage mode {v :seon.batch/version}]
+  (let [eof (Object.)]
+    (loop [v (if (find v :seon.batch/spans) v (merge v (forgive (:seon.batch/text v) mode)))]
+      (if-let [[s e :as span] (first (:seon.batch/spans v))]
+        (let [v' (-> v (assoc :seon.batch/pos e) (update :seon.batch/spans subvec 1))
+              [form failure] (try [((:seon.batch/read stage) (span-reader (:seon.batch/text v) span) eof)]
+                                  (catch Throwable t [nil t]))]
+          (cond failure {:seon.batch/read-error failure :seon.batch/start s :seon.batch/end e :seon.batch/version v'}
+                (identical? eof form) (recur v')
+                :else {:seon.batch/form form :seon.batch/start s :seon.batch/end e :seon.batch/version v'}))
+        {:seon.batch/eof true :seon.batch/version v}))))
+
+(defn read-state
+  "The initial read state of `text`."
+  {:malli/schema [:=> [:cat :string] :seon.batch/read-state]}
+  [text]
+  {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
 
 (defn skip-to
   "The offset of the next form start from `pos`.
@@ -108,236 +349,6 @@
             (recur (line-end text p) false)
             :else p))))))
 
-;;; The cursor
-
-(defn- advance
-  "The version with its reader moved forward to `pos`."
-  {:malli/schema [:=> [:cat :seon.batch/text-version nat-int?] :seon.batch/text-version]}
-  [v pos]
-  (dotimes [_ (- pos (:seon.batch/pos v))] (rt/read-char (:seon.batch/reader v)))
-  (assoc v :seon.batch/pos pos))
-
-(defn- at
-  "The version moved to `pos`: its reader advanced there, or dropped when it
-  cannot move forward to it."
-  {:malli/schema [:=> [:cat :seon.batch/text-version nat-int?] :seon.batch/text-version]}
-  [v pos]
-  (cond (= pos (:seon.batch/pos v)) v
-        (and (:seon.batch/reader v) (> pos (:seon.batch/pos v))) (advance v pos)
-        :else (-> v (assoc :seon.batch/pos pos) (dissoc :seon.batch/reader))))
-
-(defn- line-and-column
-  "The 1-based line and column of offset `pos` in `text`."
-  {:malli/schema [:=> [:cat :string nat-int?] [:tuple pos-int? pos-int?]]}
-  [^String text pos]
-  (loop [i 0 line 1 start 0]
-    (let [nl (.indexOf text "\n" (int i))]
-      (if (and (>= nl 0) (< nl pos))
-        (recur (inc nl) (inc line) (inc nl))
-        [line (inc (- pos start))]))))
-
-(defn- reader-at
-  "The version with a reader at `pos` that ends at its region's bound: its
-  own, advanced, when it has one at or before `pos`, else one built once that
-  starts at the text's own line and column for `pos`."
-  {:malli/schema [:=> [:cat :seon.batch/text-version nat-int?] :seon.batch/text-version]}
-  [v pos]
-  (if (and (:seon.batch/reader v) (<= (:seon.batch/pos v) pos))
-    (advance v pos)
-    (let [^String text (:seon.batch/text v)
-          [line column] (line-and-column text pos)]
-      (assoc v :seon.batch/pos pos
-             :seon.batch/reader (rt/->IndexingPushbackReader
-                                 (rt/push-back-reader (java.io.StringReader. (subs text pos (:seon.batch/bound v (count text)))))
-                                 line column (= 1 column) nil 0 nil false)))))
-
-(defn- string-end
-  "The offset of the quote closing the string opened at `open`, or nil."
-  {:malli/schema [:=> [:cat :string nat-int?] [:maybe nat-int?]]}
-  [^String text open]
-  (loop [j (inc (long open))]
-    (cond (>= j (count text)) nil
-          (= \\ (.charAt text (int j))) (recur (+ j 2))
-          (= \" (.charAt text (int j))) j
-          :else (recur (inc j)))))
-
-(defn- closer-end
-  "Just past the closer matching the collection opener at `open` (strings,
-  characters and comments skipped), or nil when it never closes."
-  {:malli/schema [:=> [:cat :string nat-int?] [:maybe nat-int?]]}
-  [^String text open]
-  (loop [i (long open) depth 0]
-    (when (< i (count text))
-      (case (.charAt text (int i))
-        \" (when-let [c (string-end text i)] (recur (inc (long c)) depth))
-        \\ (recur (+ i 2) depth)
-        \; (let [nl (.indexOf text "\n" (int i))] (when-not (neg? nl) (recur (inc nl) depth)))
-        (\( \[ \{) (recur (inc i) (inc depth))
-        (\) \] \}) (if (= 1 depth) (inc i) (recur (inc i) (dec depth)))
-        (recur (inc i) depth)))))
-
-(defn- outermost-opener
-  "The line and column of the outermost collection open when a read failed
-  (edamame's containers, outermost last), or nil."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe [:tuple pos-int? pos-int?]]]}
-  [failure]
-  (when-let [c (peek (:edamame/containers (ex-data failure)))]
-    [(:edamame/row c) (:edamame/column c)]))
-
-(defn- read-one
-  "One read with the stage at the version's cursor, as a read step.
-
-  A failure spans past the closer of the outermost collection open at it (the
-  text's end when that never closes), and at least to where the reader stopped."
-  {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/text-version] :seon.batch/read-step]}
-  [stage v]
-  (let [eof (Object.)
-        {^String text :seon.batch/text rdr :seon.batch/reader pos :seon.batch/pos} v
-        n (count text)
-        l0 (sci/get-line-number rdr) c0 (sci/get-column-number rdr)
-        ;; the reader's lines and columns count from where it started
-        offset (fn [l c]
-                 (min n (if (= l l0)
-                          (+ pos (- c c0))
-                          (loop [i pos k (- l l0)]
-                            (let [nl (.indexOf text "\n" (int i))]
-                              (cond (neg? nl) n
-                                    (= 1 k) (+ (inc nl) (dec c))
-                                    :else (recur (inc nl) (dec k))))))))
-        stopped #(offset (sci/get-line-number rdr) (sci/get-column-number rdr))]
-    (try
-      (let [form ((:seon.batch/read stage) rdr eof)
-            end (stopped)]
-        (if (identical? eof form)
-          {:seon.batch/eof true :seon.batch/version v}
-          {:seon.batch/form form :seon.batch/start pos :seon.batch/end end
-           :seon.batch/version (assoc v :seon.batch/pos end)}))
-      (catch Throwable t
-        (let [stop (stopped)
-              opener (some->> (outermost-opener t) (apply offset))]
-          {:seon.batch/read-error t :seon.batch/start pos
-           ;; never short of where the reader stopped, so its reader moves on, never back
-           :seon.batch/end (max (if opener (or (closer-end text opener) n) stop) stop (inc pos))
-           :seon.batch/version (assoc v :seon.batch/pos stop)})))))
-
-(defn- no-value?
-  "Whether a read form yields no value: a reader conditional selecting no `:clj` branch."
-  {:malli/schema [:=> [:cat :seon.batch/form] :boolean]}
-  [form]
-  (and (reader-conditional? form) (not-any? #{:clj :default} (take-nth 2 (:form form)))))
-
-(def ^:private token-end-chars
-  "Characters that end a bare token, as the reader's token rule has them."
-  #{\( \) \[ \] \{ \} \" \; \@ \^ \` \~ \\ \,})
-
-(defn- token-end
-  "The end of the bare token at `s`: the next whitespace or terminating character."
-  {:malli/schema [:=> [:cat :string nat-int?] nat-int?]}
-  [^String text s]
-  (loop [i (inc (long s))]
-    (if (and (< i (count text)) (let [c (.charAt text (int i))] (not (or (Character/isWhitespace c) (token-end-chars c)))))
-      (recur (inc i))
-      i)))
-
-(defn- span-step
-  "A spans-only step over `[s e)` that takes no read."
-  {:malli/schema [:=> [:cat :seon.batch/text-version nat-int? nat-int?] :seon.batch/read-step]}
-  [v s e]
-  {:seon.batch/form ::token :seon.batch/start s :seon.batch/end e :seon.batch/version (at v e)})
-
-(defn- read-at
-  "The step reading the construct at `s`: a form, a failed read clamped to the
-  region, or a no-value construct's end as `::skip` (nil at the region's end)."
-  {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/text-version nat-int?]
-                  [:or :seon.batch/read-step [:map [::skip [:maybe nat-int?]] [:seon.batch/version :seon.batch/text-version]]]]}
-  [stage v s]
-  (let [^String text (:seon.batch/text v)
-        bound (:seon.batch/bound v (count text))
-        c (.charAt text (int s))
-        discard? (and (= \# c) (< (inc s) (count text)) (= \_ (.charAt text (int (inc s)))))
-        spans? (:seon.batch/spans-only? stage)
-        r (cond
-            ;; a stray closer is one character; the live read answers its error
-            (and spans? (#{\) \] \}} c)) (span-step v s (inc s))
-            (and spans? (not (#{\( \[ \{ \" \\ \# \' \` \~ \@ \^} c))) (span-step v s (min (token-end text s) bound))
-            :else (read-one stage (reader-at v (if discard? (+ s 2) s))))]
-    (cond
-      (:seon.batch/eof r) {::skip nil :seon.batch/version v}
-      (:seon.batch/read-error r)
-      (let [end (min (:seon.batch/end r) bound)]
-        (assoc r :seon.batch/start s :seon.batch/end end :seon.batch/version (at (:seon.batch/version r) end)))
-      (or discard? (no-value? (:seon.batch/form r))) {::skip (:seon.batch/end r) :seon.batch/version (:seon.batch/version r)}
-      :else (assoc r :seon.batch/start s))))
-
-;;; The stepper
-
-(defn- enter
-  "The version of the region from the line start `pos`: a fence body to its
-  closing line when `fence` (`ticks` backticks), else to the next fence line."
-  {:malli/schema [:=> [:cat :string nat-int? [:maybe :seon.batch/fence] [:maybe :seon.batch/ticks]] :seon.batch/text-version]}
-  [text pos fence ticks]
-  (cond-> {:seon.batch/text text :seon.batch/pos pos :seon.batch/bound (region-end text pos ticks)}
-    fence (assoc :seon.batch/fence fence :seon.batch/ticks ticks)))
-
-(defn- reply-step
-  "The next step of a model reply under the line rules, region by region;
-  `code-end` is where the last construct ended."
-  {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/text-version [:maybe nat-int?]] :seon.batch/read-step]}
-  [stage v code-end]
-  (let [^String text (:seon.batch/text v)
-        n (count text)]
-    (loop [v (if (:seon.batch/bound v) v (enter text (:seon.batch/pos v) nil nil))
-           p (:seon.batch/pos v)
-           code-end code-end]
-      (let [{fence :seon.batch/fence bound :seon.batch/bound} v
-            s (min (skip-blank text p) bound)]
-        (cond
-          (>= s n) {:seon.batch/eof true :seon.batch/version v}
-          ;; a region ends at a fence line: close the open fence, or open one by its tag
-          (>= s bound)
-          (let [le (line-end text bound)
-                [t tag] (fence-line text bound le)
-                start (min n (inc le))]
-            (recur (if fence (enter text start nil nil) (enter text start (if (contains? code-tags tag) :code :prose) t))
-                   start code-end))
-          (= :prose fence) (recur v bound code-end)
-          ;; a code fence's lines, and the rest of a line a form started, are code
-          (or (= :code fence) (and code-end (<= (line-start text s) code-end))
-              (and (= s (line-start text s)) (form-start? text s)))
-          (if (= \; (.charAt text (int s)))
-            (recur v (inc (line-end text s)) code-end)
-            (let [r (read-at stage v s)]
-              (if (find r ::skip)
-                (let [e (or (::skip r) bound)] (recur (:seon.batch/version r) e e))
-                r)))
-          :else (recur v (inc (line-end text s)) code-end))))))
-
-(defn- code-step
-  "The next step of code read as written: every construct is code."
-  {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/text-version] :seon.batch/read-step]}
-  [stage v]
-  (let [text (:seon.batch/text v)]
-    (loop [v v]
-      (let [s (skip-to text (:seon.batch/pos v))]
-        (if (>= s (count text))
-          {:seon.batch/eof true :seon.batch/version v}
-          (let [r (read-at stage v s)]
-            (if (find r ::skip) (recur (at (:seon.batch/version r) (or (::skip r) (count text)))) r)))))))
-
-(defn step
-  "The next read step at the cursor in `mode`.
-
-  A failed read's step carries the reader's own failure."
-  {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/mode :seon.batch/read-state] :seon.batch/read-step]}
-  [stage mode {v :seon.batch/version code-end :seon.batch/last-code-end}]
-  (if (= :reply mode) (reply-step stage v code-end) (code-step stage v)))
-
-(defn read-state
-  "The initial read state of `text`."
-  {:malli/schema [:=> [:cat :string] :seon.batch/read-state]}
-  [text]
-  {:seon.batch/version {:seon.batch/text text :seon.batch/pos 0}})
-
 (defn- carried
   "The read-error carrier of the error `value`."
   {:malli/schema [:=> [:cat :seon.sci.reader/failure] :seon.error/throwable]}
@@ -350,70 +361,71 @@
   A failed read is that span's read error, carried as its error value."
   {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/mode :seon.batch/read-state] :seon.batch/read-step]}
   [stage mode state]
-  (let [{:seon.batch/keys [read-error start end version] :as r} (step stage mode state)
-        source #(subs (:seon.batch/text version) start end)]
+  (let [{:seon.batch/keys [read-error start end version] :as r} (step stage mode state)]
     (if read-error
-      (assoc r :seon.batch/read-error (carried (reader/reader-error (source) read-error)))
+      (assoc r :seon.batch/read-error (carried (reader/reader-error (subs (:seon.batch/text version) start end) read-error)))
       r)))
-
-;;; The structural pass
-
-(def ^:private structural-options
-  "edamame with every semantic hook neutral, normalized once: spans only."
-  (edamame/normalize-opts {:all true :read-cond :preserve :features #{:clj}
-                           :auto-resolve (constantly 'seon.sci.forgive.trial)
-                           :suppress-read true :eof ::eof
-                           :location? (constantly false) :end-location false}))
-
-(def ^:private structural-stage
-  "The structural read stage: edamame under `structural-options`, and token
-  spans by the reader's token rule with no read. Resolves no alias and
-  invokes no tag reader."
-  {:seon.batch/read (fn [rdr eof] (let [f (edamame/parse-next rdr structural-options)] (if (= ::eof f) eof f)))
-   :seon.batch/spans-only? true})
 
 (defn failure-step
   "The read-error step of a host read that failed at `start`.
 
-  Its span is the structural construct there; its error value is the reader's
-  error of that span."
+  Its span is the construct there as the scan finds it, delimiters as
+  written; its error value is the reader's error of that span."
   {:malli/schema [:=> [:cat :string nat-int? :seon.error/throwable] :seon.batch/read-step]}
   [text start failure]
-  (let [end (:seon.batch/end (code-step structural-stage {:seon.batch/text text :seon.batch/pos start}) (count text))]
+  (let [[_ e] (first (:seon.batch/spans (scan (subs text start) false false)))
+        end (+ start (or e (- (count text) start)))]
     {:seon.batch/read-error (carried (reader/reader-error (subs text start end) failure))
      :seon.batch/start start :seon.batch/end end
      :seon.batch/version {:seon.batch/text text :seon.batch/pos end}}))
 
+;;; Segments
+
+(def ^:private conditional-options
+  "edamame with every semantic hook neutral, reader conditionals preserved."
+  (edamame/normalize-opts {:all true :read-cond :preserve :features #{:clj}
+                           :auto-resolve (constantly 'seon.sci.forgive.trial)
+                           :suppress-read true :location? (constantly false) :end-location false}))
+
+(defn- no-value?
+  "Whether the source reads no value: a discard, or a reader conditional selecting no `:clj` branch."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [source]
+  (boolean
+   (or (str/starts-with? source "#_")
+       (and (str/starts-with? source "#?")
+            (let [form (try (edamame/parse-string source conditional-options) (catch Exception _ nil))]
+              (and (reader-conditional? form) (not-any? #{:clj :default} (take-nth 2 (:form form)))))))))
+
 (defn- comment-of
-  "The text between two forms as comment lines: prose as `; line`, the
-  agent's `;` lines kept, blank, `;`-only and fence lines dropped."
+  "The text between two forms as comment lines: the `;` lines kept, blank,
+  `;`-only and comma-only lines dropped."
   {:malli/schema [:=> [:cat :string] :string]}
   [^String between]
   (->> (str/split-lines between)
        (keep (fn [line]
                (let [l (str/trim line)]
-                 (cond (or (= "" l) (str/starts-with? l "```") (str/starts-with? l "~~~") (every? #{\;} l)) nil
+                 (cond (or (= "" l) (every? #{\; \,} l)) nil
                        (str/starts-with? l ";") l
                        :else (str "; " l)))))
        (str/join "\n")))
 
 (defn segments
-  "Each construct's source with the text above it as its comment.
+  "Each form's source in the forgiven text, the text above it as its comment.
 
-  Read structurally in `mode` (`:reply` by default); a failed read's span is
-  one more source, whose live read answers its error."
+  The text's repairs ride beside the segments. `mode` is `:reply` by default; a failed read's span is one more source,
+  whose live read answers its error."
   {:malli/schema [:function
                   [:=> [:cat :string] :seon.batch/segmented]
                   [:=> [:cat :string :seon.batch/mode] :seon.batch/segmented]]}
   ([text] (segments text :reply))
   ([text mode]
-   (loop [state (read-state text) prev 0 out []]
-     (let [r (step structural-stage mode state)]
-       (if (:seon.batch/eof r)
-         {:seon.batch/segments out}
-         (let [{:seon.batch/keys [start end]} r
-               c (when (< (skip-blank text prev) start) (comment-of (subs text prev start)))]
-           (recur (assoc state :seon.batch/version (:seon.batch/version r) :seon.batch/last-code-end end)
-                  end
-                  (conj out (cond-> {:seon.batch/source (str/trimr (subs text start end))}
-                              (seq c) (assoc :seon.batch/comment c))))))))))
+   (let [{t :seon.batch/text spans :seon.batch/spans repairs :seon.batch/repairs} (forgive text mode)]
+     (loop [[[s e] & more] spans prev 0 out []]
+       (if-not s
+         (cond-> {:seon.batch/segments out} repairs (assoc :seon.batch/repairs repairs))
+         (let [source (str/trimr (subs t s e))
+               c (when (< (non-blank t prev s) (long s)) (comment-of (subs t prev s)))]
+           (recur more e (if (no-value? source)
+                           out
+                           (conj out (cond-> {:seon.batch/source source} (seq c) (assoc :seon.batch/comment c)))))))))))

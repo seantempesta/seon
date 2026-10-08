@@ -26,24 +26,30 @@
  :text [:string {:description "Exact text of a batch: what is read, evaluated, stored and rendered."}]
  :start-ns :symbol
  :mode [:enum :reply :code]
- :segmented [:map {:description "A text's forms read structurally (seon.sci.forgive/segments): each construct's source, a failed read's span included, and the text above it as its comment."}
+ :segmented [:map {:description "A text's forms as the forgiving scan finds them (seon.sci.forgive/segments): each construct's source, a failed read's span included, the text above it as its comment, and the text's repairs."}
              [:seon.batch/segments [:vector [:map [:seon.batch/source :string]
-                                             [:seon.batch/comment {:optional true} :string]]]]]
+                                             [:seon.batch/comment {:optional true} :string]]]]
+             [:seon.batch/repairs {:optional true} :seon.batch/repairs]]
+ :span [:tuple {:description "A top-level form's span in the forgiven text: start, end, and its start's line and column."} nat-int? nat-int? pos-int? pos-int?]
+ :spans [:vector :seon.batch/span]
+ :repair [:map {:description "One change the forgiving scan made to an unbalanced text: closers (or a string's quote) inserted on a line, or a stray closer dropped from it."}
+          [:seon.batch/line pos-int?]
+          [:seon.batch/inserted {:optional true} :string]
+          [:seon.batch/dropped {:optional true} :string]]
+ :repairs [:vector :seon.batch/repair]
+ :forgiven [:map {:description "A text forgiven by seon.sci.forgive/forgive: the text, each top-level form's span in it, and the repairs when its delimiters did not balance."}
+            [:seon.batch/text :seon.batch/text]
+            [:seon.batch/spans :seon.batch/spans]
+            [:seon.batch/repairs {:optional true} :seon.batch/repairs]]
  :pos nat-int?
- :reader [:any {:description "The reader at the cursor (sci.core/reader over the region); a host object, never stored."}]
- :bound [:int {:min 0 :description "The end of the region a reply's cursor is in: no read crosses it."}]
- :fence [:enum {:description "The kind of fence the region is the body of: code is read, prose is skipped."} :code :prose]
- :ticks [:int {:min 1 :description "The backtick count of the open fence's line; only an untagged line of at least as many closes it."}]
+ :reader [:any {:description "The reader over one form's span (seon.sci.forgive/step); a host object, never stored."}]
  :text-version [:map
                 [:seon.batch/text :seon.batch/text]
                 [:seon.batch/pos :seon.batch/pos]
-                [:seon.batch/reader {:optional true} :seon.batch/reader]
-                [:seon.batch/bound {:optional true} :seon.batch/bound]
-                [:seon.batch/fence {:optional true} :seon.batch/fence]
-                [:seon.batch/ticks {:optional true} :seon.batch/ticks]]
- :read-stage [:map {:description "The read itself, supplied as a value: read one form from the reader, or answer the given eof sentinel; spans-only stages take a bare token's and a stray closer's span with no read."}
-              [:seon.batch/read [:=> [:cat :seon.batch/reader :any] :any]]
-              [:seon.batch/spans-only? {:optional true} :boolean]]
+                [:seon.batch/spans {:optional true :description "The spans still to read; present once the text is forgiven."} :seon.batch/spans]
+                [:seon.batch/repairs {:optional true} :seon.batch/repairs]]
+ :read-stage [:map {:description "The read itself, supplied as a value: read one form from the reader, or answer the given eof sentinel."}
+              [:seon.batch/read [:=> [:cat :seon.batch/reader :any] :any]]]
  :last-code-end nat-int?
  :line-cursor [:map {:description "Where the last read form began: its text, offset, line and column. The next form's position is scanned on from here (seon.batch/line-cursor), so a batch's positions cost its text once."}
                [:seon.batch/text :seon.batch/text] [:seon.batch/pos :seon.batch/pos]

@@ -15,13 +15,19 @@ show the additive context and since-query diff.
 
 ## Name the surface before making a claim
 
-- The forgiving stage segments model text into ordered sources structurally
-  (tags unread, no alias resolved): preceding prose becomes each form's
-  comment, prompt markers go, delimiters are repaired where unambiguous, and
-  trailing prose stays only in the raw reply (`seon.sci.forgive/segments`,
-  `src/seon/sci/forgive.clj`; `seon.turn/planned-sources` for a reply,
-  `seon.turn/code-sources` for code). Each form's one semantic read happens
-  when the one REPL path evaluates it (`seon.turn/read-row`).
+- The forgiving stage is one linear scan (`seon.sci.forgive/forgive`, no
+  read, no alias resolved). In a model reply, outside a code fence and an open
+  form, a line is code when it starts a form at column zero or is one literal
+  or qualified symbol; other lines become `;` comments, fence lines go, and
+  words after a form on its line become a comment. In both modes an
+  unbalanced text is repaired (a stray closer dropped, missing closers
+  inserted before the next column-zero line), each change a
+  `:seon.batch/repair`; balanced text passes through byte for byte.
+  `seon.sci.forgive/segments` turns the scan's spans into ordered sources with
+  preceding prose as each one's comment (`seon.turn/planned-sources` for a
+  reply, `seon.turn/code-sources` for code); the repairs are not yet delivered
+  beside the values. Each form's one semantic read happens when the one REPL
+  path evaluates it (`seon.turn/read-row`).
 - An agent turn evaluates in its own SCI context, forked from the cluster
   base with its private layer carried over (see below); a host REPL
   expression proves nothing about it. SCI itself provides reusable contexts,
