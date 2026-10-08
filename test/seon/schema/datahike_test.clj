@@ -1,7 +1,6 @@
 (ns seon.schema.datahike-test
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.set :as set]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -112,7 +111,8 @@
          (is (seq forms))
          (is (seq attributes))
          (is (= (set attributes) (into (set core) properties)) "every attribute is core or a property")
-         (is (empty? (set/intersection (set core) (set properties))))
+         ;; the render faces are entity members and schema properties at once (refs to their render function)
+         (is (= (count attributes) (count (set attributes))) "each attribute is declared once, however many ways select it")
          (is (= (set attributes) (set (schema.datahike/database-attributes-in projection))))
          (is (= attributes (mapv :db/ident native)) "one native declaration per attribute, in order")
          (is (every? #(and (:db/valueType %) (:db/cardinality %)) native))
@@ -290,9 +290,10 @@
   ;; contract map (`declaration-changes` refused argument 0 `before`) and
   ;; would have kept dependents compiled against the replaced definition.
   (let [delta (schema/begin-registration-delta (fixture-projection))]
-    (is (= ::literal
+    (is (= {:seon.schema/key ::literal :seon.schema/definition [:= true]}
            (schema/call-with-registration-delta
-            delta core-admission #(schema/register! ::literal [:= true]))))
+            delta core-admission #(schema/register! ::literal [:= true])))
+        "register! answers its registration")
     (is (= [:= true] (schema/registration-delta-form delta ::literal))))
   (let [projection (admitted [[::base-shape :string]
                               [::referrer [:vector ::base-shape]]
@@ -419,14 +420,16 @@
   ;; CLASS: an error value a transaction function answered (seon.db/vectors-tx
   ;; under its armed contract) was encoded as transaction data, and the second
   ;; refusal hid the first.
-  (let [projection (schema/build-projection (schema.edn/packaged-forms))
-        error {:seon.error/at (java.util.Date. 0) :seon.error/layer ::probe
-               :seon.error/operation 'probe/tx :seon.error/message "first cause"}
-        thrown (try (#'schema.datahike/encode-call-output-in nil projection nil (fn [_] error))
-                    nil
-                    (catch clojure.lang.ExceptionInfo e e))]
-    (is (= error (ex-data thrown)))
-    (is (= "first cause" (ex-message thrown)))))
+  (support/with-database
+   (fn [connection]
+     (let [projection (schema/build-projection (schema.edn/packaged-forms))
+           error {:seon.error/at (java.util.Date. 0) :seon.error/layer ::probe
+                  :seon.error/operation 'probe/tx :seon.error/message "first cause"}
+           thrown (try (#'schema.datahike/encode-call-output-in (db/db connection) projection nil (fn [_] error))
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+       (is (= error (ex-data thrown)))
+       (is (= "first cause" (ex-message thrown)))))))
 
 (deftest compiled-storage-navigation-reuses-retained-roots
   ;; Navigation reads the projection's retained compiled roots: every lookup
