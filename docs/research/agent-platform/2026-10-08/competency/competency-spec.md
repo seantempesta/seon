@@ -25,7 +25,7 @@ query; no harness, runner, store or printer.
 Owner ruling 2026-10-08: no world accepts 926-945 MB and 536-568 ms per model pass through the fixture provider
 (`seon.pass-probe/run-model running 1 #{}`, test/seon/pass_probe.clj:328; an MCP SCI pass of the same form costs about
 23 MB). **No model run of this suite starts until `run-model` reports a model pass inside the ordinary-pass budget
-(agent-loop §3: < 200 ms, < 5 MB, 1 machinery transaction, Seon's work only).** Lane `model-pass-cost` owns that cut.
+(agent-loop §3: < 200 ms, 20-40 MB transient and never GB, no base-context rebuild, 1 machinery transaction, Seon's work only).** The planned S4 slices plus the base-context slice (reconciled plan) own that cut.
 Slices marked "today" in section 9 need no model pass; everything else waits.
 
 ## 1. Merge target and root review

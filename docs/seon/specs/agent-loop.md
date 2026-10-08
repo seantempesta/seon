@@ -73,7 +73,7 @@ checked calls, transactions attempted and durable, store bytes, tokens.
 
 | Pass kind (Seon's work only; excluding the provider and the agent's own forms) | Time | Allocation | Machinery txs |
 |---|---|---|---|
-| ordinary (no definitions), **model passes included** | < 200 ms | < 5 MB | 1 |
+| ordinary (no definitions), **model passes included** (excluding the provider call) | < 200 ms | 20-40 MB transient, garbage collected; never GB (owner 2026-10-08) | 1 |
 | definition (one-line `defn`) | < 300 ms | < 30 MB | 1 |
 | the pass after a definition | < 150 ms | < 10 MB | 1 |
 | opening or input pass | < 200 ms | < 5 MB | 1 each |
@@ -423,7 +423,7 @@ store BEFORE its slice lands.
    comment; empty code input answers `nil`; code mode skips fence lines.
 8. **Wire formats** are per-model adapters over stored exchanges; the default stays `:transcript` until measured.
 9. **S8 is the competency suite.**
-10. **The model-pass budget** is the ordinary-pass budget; no world accepts today's 945 MB pass.
+10. **The model-pass budget** is the ordinary-pass budget: 20-40 MB transient per pass is fine when garbage collected; never GB; retained memory stays small (§3.2); no world accepts today's 945 MB pass. A task completes when its proofs pass on the combined program after root (or the auto-accept policy) accepts the merge.
 11. **Memory** (§3.2): many simultaneous agents on a 16 GB machine; transient allocation may be collected, never GB per
     operation.
 
