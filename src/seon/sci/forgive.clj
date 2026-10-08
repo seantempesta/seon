@@ -3,11 +3,13 @@
   form once with the read itself supplied as a value
   (`:seon.batch/read-stage`).
 
-  `forgive` is one linear scan. In a model reply (`:reply`), outside a code
-  fence and outside an open form, a line is code when it starts a form at
-  column zero or is one literal or qualified symbol; every other line becomes
-  a `;` comment, fence lines go, and words after a form on its line become a
-  comment. In both modes an unbalanced text is repaired: a stray closer is
+  `forgive` is one linear scan. In a model reply (`:reply`), outside a
+  Clojure-tagged code fence and outside an open form, a line is code when its
+  first non-blank character starts a form or it is one literal or qualified
+  symbol; every other line becomes a `;` comment, fence lines go, and words
+  after a form on its line become a comment. An untagged fence's body is read
+  by this line rule; another tag's body is prose; a fence line ends a form
+  still waiting for a prefix's operand. In both modes an unbalanced text is repaired: a stray closer is
   dropped and missing closers are inserted before the next column-zero line,
   each change a repair note. Balanced text keeps its delimiters byte for
   byte. The scan also finds each top-level form's span, which `step` reads."
@@ -64,8 +66,9 @@
     (or (.startsWith text "```" s) (.startsWith text "~~~" s))))
 
 (def ^:private code-tags
-  "The fence tags whose body is code; an untagged fence is code too."
-  #{"" "clojure" "clj" "cljc" "edn"})
+  "The fence tags whose body is code. An untagged fence's body is read by
+  the line rule, as outside fences: models fence prose and quotes too."
+  #{"clojure" "clj" "cljc" "edn"})
 
 (defn- form-start?
   "Whether the character at `s` starts a form by its first character: a
@@ -255,24 +258,28 @@
                 [kind ticks] @fence]
             (cond
               @in-string (code-line! ls le line false)
+              ;; a fence line is never a prefix's operand: the form ends
+              ;; before it, its read answering what is missing
+              (and @form (zero? (.length open)) (code-fence-line? text ls le))
+              (let [[s l c] @form] (vswap! spans conj! [s (.length out) l c]) (vreset! form nil) (line! ls le line))
               (or @form (pos? (.length open)))
               (if (and repair? (pos? (.length open)) (< s le)
                        (or (code-fence-line? text ls le)
                            (and (= s ls) (not (#{\) \] \} \;} (.charAt text (int s)))))))
                 (do (close-all!) (line! ls le line))
-                (code-line! ls le line (and reply? (nil? kind))))
+                (code-line! ls le line (and reply? (not= :code kind))))
               (>= s le) (.append out text (int ls) (int le))
               (not reply?) (when-not (code-fence-line? text ls le) (code-line! ls le line false))
               :else
               (if-let [[t tag] (fence-line text ls le)]
-                (cond (nil? kind) (vreset! fence [(if (code-tags tag) :code :prose) t])
+                (cond (nil? kind) (vreset! fence [(cond (code-tags tag) :code (= "" tag) :lines :else :prose) t])
                       (and (= "" tag) (>= t ticks)) (vreset! fence nil)
                       (= :code kind) (code-line! ls le line false)
                       :else (prose! ls le))
                 (cond (= :code kind) (code-line! ls le line false)
                       (= :prose kind) (prose! ls le)
                       (= \; (.charAt text (int s))) (.append out text (int ls) (int le))
-                      (or (and (= s ls) (form-start? text s le)) (literal-line? text s le)) (code-line! ls le line true)
+                      (or (form-start? text s le) (literal-line? text s le)) (code-line! ls le line true)
                       :else (prose! ls le))))))]
     (let [last-line (loop [ls 0 line 1]
                       (if (< ls n)

@@ -13,6 +13,19 @@
   (doseq [{reply :text expected :segments} (edn/read-string (slurp "test/seon/sci/forgive_replies.edn"))]
     (is (= expected (forgive/segments reply)))))
 
+(deftest ^{:seon/tasks #{'seon.turn/a-markdown-heading-in-a-reply-is-read-as-code
+                         'seon.sci.forgive/an-indented-definition-outside-a-fence-is-read-as-prose}}
+  a-markdown-reply-reads-only-its-forms
+  ;; A recorded 7,446-character reply of Markdown prose, backticked spans and
+  ;; fences (bench E2 H1): only its Clojure-fenced forms are read; every prose
+  ;; word becomes comment text, never a symbol to evaluate.
+  (let [sources (mapv :seon.batch/source (:seon.batch/segments (forgive/segments (slurp "test/seon/sci/markdown_reply.txt"))))]
+    (is (= 13 (count sources)))
+    (is (= #{"(in-ns 'seon.schema)" "(in-ns 'comp.order)" "(seon.schema/register! :comp.order/qty [:int {:min 1}])"
+             "(defn double-qty {:malli/schema [:=> [:cat :comp.order/qty] :int]} [x] (* 2 x))"
+             "(defn double-qty\n  {:malli/schema [:=> [:cat :comp.order/qty] :int]}\n  [x]\n  (* 2 x))"}
+           (set sources)))))
+
 (deftest valid-clojure-is-unchanged
   ;; Balanced code keeps every byte; only an unbalanced text is repaired.
   (doseq [text (cons (slurp "src/seon/sci/forgive.clj")
@@ -36,10 +49,16 @@
     ;; a non-code fence is prose, its tagged lines included; a fence closes only on its match
     :reply "```text\n(+ 1 2)\n```clj\n(+ 9 9)\n```\n```clj\n(+ 3 4)\n```" ["(+ 3 4)"]
     :reply "````clojure\n```\n(+ 1 2)\n````\nDone."                ["```\n(+ 1 2)"]
-    ;; outside fences a line's first character decides, or the whole line is one literal
+    ;; outside fences a line's first non-blank character decides, or the whole line is one literal
     :reply "#inst \"2026-01-01\"\n#'x\n#:a{:b 1}\n@a\n^:m []\n'x"    ["#inst \"2026-01-01\"" "#'x" "#:a{:b 1}" "@a" "^:m []" "'x"]
     :reply "##NaN\n`(+ 1 2)\n\\newline\n42\nresult/e1a2b3c4d5e6"     ["##NaN" "`(+ 1 2)" "\\newline" "42" "result/e1a2b3c4d5e6"]
-    :reply "# Heading\n## h2\n`reply-map` joins\n1. First step\nDone.\nx\n  (+ 3 4)\n(+ 1 2)" ["(+ 1 2)"]
+    :reply "# Heading\n## h2\n`reply-map` joins\n1. First step\nDone.\nx\n  (+ 3 4)\n(+ 1 2)" ["(+ 3 4)" "(+ 1 2)"]
+    :reply "1. Define it:\n   (defn pa [x] (inc x))\n2. Call it:\n   (pa 1)" ["(defn pa [x] (inc x))" "(pa 1)"]
+    ;; an untagged fence's body is read by the same line rule
+    :reply "```\nRead it as `x`.\n(+ 1 2)\n  (defn f [x]\n    x)\n```\nDone." ["(+ 1 2)" "(defn f [x]\n    x)"]
+    :reply "```\ndefine `a/b` contracted `[:=> [:cat :int] :int]`\n```\nNo." []
+    ;; a fence line is never a prefix's operand
+    :reply "```clojure\n(+ 1 2) '\n```\nDone.\n(+ 3 4)"     ["(+ 1 2)" "'" "(+ 3 4)"]
     :reply "Done."                                                  []
     ;; after a form, the rest of its line is code only when it starts a form
     :reply "(+ 1 2) (+ 3 4) ; sum\nDone."                          ["(+ 1 2)" "(+ 3 4)"]
@@ -152,4 +171,4 @@
     :code  "; note\n\n  (def a 1) (def b 2)"               [{:line 3 :column 3} {:line 3 :column 13}]
     :code  "(def a 1)\n(def b 2) (def c 3)"                [{:line 1 :column 1} {:line 2 :column 1} {:line 2 :column 11}]
     :reply "Prose\n(def a 1)\nmore\n(def b 2) (foo ]"      [{:line 2 :column 1} {:line 4 :column 1} {:line 4 :column 11}]
-    :reply "(+ 1 2) ; x\n  (def c 3) (str \"a\" #\"b\")"   [{:line 1 :column 1}]))
+    :reply "(+ 1 2) ; x\n  (def c 3) (str \"a\" #\"b\")"   [{:line 1 :column 1} {:line 2 :column 3} {:line 2 :column 13}]))
