@@ -122,4 +122,9 @@
  #:seon.task{:name "error-notifications-to-root-are-printed-maps"
              :kind :function
              :intent "Error notifications to root are outside messages whose text is a pr-str of the error map (a second printer), delivered through :seon.config.error/escalate-to. Done when the notification carries the error's identity (signature, task, handle) as data and no printed copy."
-             :must-read #{seon.error/commit-call}}]
+             :must-read #{seon.error/commit-call}}
+ #:seon.task{:name "the-faults-render-pulls-with-a-sci-var-as-its-entity-id"
+             :kind :function
+             :intent "Every refused definition's reply at the SCI REPL (default 6d6861a25-era JVM, agents nilable-rule-probe and nilable-rule-wb, seon.error and seon.render.ns, 2026-10-09) carries a :seon.render/unknown diagnostic: `seon.error/render-faults-ai` calls `seon.error/faults-form`, which calls `seon.db/pull` with a sci.lang.Var as argument 2 `entity-id` ([:seon.agent/id] selector), and the armed contract refuses it. The reply loses the faults render and adds about 1,000 tokens of renderer refusal beside the real refusal. Done when a refused defn's reply carries no render diagnostic and the faults render reads the agent by its id."
+             :must-read #{seon.error/faults-form seon.error/render-faults-ai seon.db/pull}}
+]
