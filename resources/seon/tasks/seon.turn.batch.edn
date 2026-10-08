@@ -33,4 +33,9 @@
   :kind :function
   :intent "derive-form analyzes a defining form with the namespace row left after the form, not the row the definition ran under. Reproduce (MCP eval_clj sci, namespace probe.alias5, x -> clojure.string): (do (defn h [] (x/upper-case \"a\")) (alias 'x 'clojure.set)) answers nil and h is ADMITTED with calls [defn clojure.set/upper-case], an edge to a Var that does not exist; SCI resolved x/upper-case to clojure.string/upper-case when it evaluated the defn. Correct: each form is analyzed under the namespace row in force when it was evaluated. Proof: that form stores calls [defn clojure.string/upper-case] or is refused, never the false edge."
   :must-read #{seon.turn.batch/derive-form seon.fn/runtime-analysis-batch}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/alias-design.md"}}
+ #:seon.task{:name "a-function-using-a-schema-registered-in-the-same-form-is-not-admitted"
+  :kind :function
+  :intent "(do (seon.schema/register! :k [:int {:min 0 :max 100}]) (defn ^{:malli/schema [:=> [:cat :k] :int]} f [x] (quot x 2))) in ONE form arms f (its gate works) but does not admit it: the reply carries 'Not admitted to the program ... derive: :malli.core/invalid-schema {:schema :k}' from seon.schema/contract-product and f has no entity. Cause: seon.sci.arm/arm! arms under seon.sci.arm/arming-projection (the batch's registration delta included), while seon.turn.batch/write-entity built the row's contract facts from the working value's carried projection, which lacks a registration the batch has not applied yet. Correct: the row reads the projection the write was armed under. Proof: seon.cluster.turn-test/a-function-using-a-schema-registered-in-the-same-form-is-admitted."
+  :must-read #{seon.turn.batch/write-entity seon.sci.arm/arming-projection}
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}]

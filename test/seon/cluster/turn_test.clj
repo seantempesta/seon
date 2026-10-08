@@ -927,6 +927,26 @@
             (is (not (contains? call :seon.cluster.eval/error)) "the new arity is armed")
             (is (= 103 (edn/read-string (:seon.eval/shown call))))))))))
 
+(deftest ^{:seon/tasks #{'seon.turn.batch/a-function-using-a-schema-registered-in-the-same-form-is-not-admitted}}
+  a-function-using-a-schema-registered-in-the-same-form-is-admitted
+  (with-cluster
+    (fn [cluster]
+      (with-provider! cluster
+        (str "(do (seon.schema/register! :my.agents.agent-a/pct [:int {:min 0 :max 100}])\n"
+             "    (defn ^{:malli/schema [:=> [:cat :my.agents.agent-a/pct] :int]} half [x] (quot x 2)))\n"
+             "(seon.run/complete \"registered\")")
+        (fn [_ledger]
+          (drive-agent! cluster "agent-a" 2)
+          (is (= [:my.agents.agent-a/pct]
+                 (db/q '[:find [?key ...]
+                         :in $ ?sym
+                         :where
+                         [?function :seon.fn/sym ?sym]
+                         [?function :seon.fn/arities ?arity]
+                         [?arity :seon.fn.arity/input-refs ?key]]
+                       @(:seon.db/connection cluster) 'my.agents.agent-a/half))
+              "the function is admitted with its input ref to the schema registered beside it"))))))
+
 (deftest a-refused-contract-commits-a-receipt-and-no-entity
   (with-cluster
     (fn [cluster]

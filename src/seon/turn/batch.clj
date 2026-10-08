@@ -239,9 +239,10 @@
     {:analysis analysis :entities (analyzed-entities db [req] analysis)}))
 
 (defn- write-entity
-  "The program row of one joined definition write, or the reason it has none."
-  {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
-  [ctx db entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
+  "The program row of one joined definition write, or the reason it has none.
+  Its contract facts read `projection`, the one the write was armed under."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value :seon.schema/projection :map :map :seon.batch/write [:vector :qualified-symbol]] :map]}
+  [ctx db projection entry {:keys [analysis entities]} {sym :seon.batch/sym v :seon.batch/var :as write} declared]
   (let [coords (entry-coords analysis entry)
         first-row (:first-row coords)
         source (:seon.batch/source entry)
@@ -269,7 +270,7 @@
       ;; (:seon.fn/arities, their input/output refs), as the index's rows do:
       ;; the schema usage guard and arity checks read them
       row {:seon.batch/row (if (and contract (fn? @v))
-                             (sfn/contract-facts-row (db/carried-projection db)
+                             (sfn/contract-facts-row projection
                                                      (namespace-entity ctx (symbol (namespace sym)))
                                                      (assoc row :seon.fn/spec (pr-str contract)))
                              row)}
@@ -324,9 +325,12 @@
         analyzed (when (and (seq finals) (:seon.batch/source entry))
                    (analyze-form ctx working (:seon.batch/ns-before entry) (:seon.batch/source entry) declared
                                  (form-relative-expansions entry writes)))
+        ;; the projection each write was armed under (`seon.sci.arm/arm!`):
+        ;; it holds a schema this form registered before the batch applies it
+        projection (when analyzed (arm/arming-projection request working))
         by-var (into {} (map (fn [w] [(:seon.batch/var w)
                                       (if analyzed
-                                        (write-entity ctx working entry analyzed w declared)
+                                        (write-entity ctx working projection entry analyzed w declared)
                                         {:seon.batch/private {:seon.batch/sym (:seon.batch/sym w)
                                                               :seon.batch/join :unanalyzed
                                                               :seon.batch/reason :no-source}})]))
