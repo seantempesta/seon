@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [sci.core :as sci]
+            [sci.ctx-store]
             [seon.cache]
             [seon.config :as config]
             [seon.db :as db]
@@ -541,8 +542,11 @@
                                  (:seon.sci.eval/load-results (:value acquired))))]
          (is (every? (:interpreted view) (concat callers host-bound-callers [changed]))
              "the changed helper's closure reaches each caller")
-         (is (= (zipmap callers (repeat :interpreted)) (load-states callers))
-             "each caller is an SCI definition, analyzed against its private def, referred defonce and dependency alias")
+         ;; A caller interprets on its first call (`seon.sci.eval/interpret-affected!`).
+         (is (every? #(nil? (refusal-of ctx %)) callers)
+             "each caller is analyzed against its private def, referred defonce and dependency alias")
+         (is (not-any? #(identical? @(find-var %) (sci.ctx-store/with-ctx ctx @(sci/resolve ctx %))) callers)
+             "and runs as an SCI definition")
          (is (= (zipmap host-bound-callers (repeat :jvm)) (load-states host-bound-callers)))
          (is (nil? (refusal-of ctx 'seon.render.web/handler)) "a compiled root refuses nothing by name")
          ;; A caller expanding a JVM macro that reads &env (async/go-loop in a

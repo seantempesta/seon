@@ -1482,7 +1482,7 @@
                 ;; the replacement too; retain only the destination's ns.
                 (reset-meta! installed (merge metadata (select-keys (meta installed) [:ns])))))))))))
 
-(declare base-bindings acquired-database? stale-reach reinterpret-reach! interpret-affected!
+(declare base-bindings acquired-database? stale-reach reinterpret-reach! interpret-affected! carry-promotions!
          namespace-row install-caller-host-bindings! install-required-libraries! acquisition-refusal)
 
 (defn acquired-program
@@ -1684,10 +1684,15 @@
                 :when (and before (not (identical? before (sci/resolve ctx sym))))]
           (reinterpret-reach! ctx db (stale-reach ctx db sym (complement batch))))
         ;; A caller `ctx` still runs compiled never sees a redefinition: the
-        ;; reverse closure of these definitions is interpreted once, so the
-        ;; next eval request calls the branch's program, as one Clojure Var would.
+        ;; reverse closure of these definitions is bound lazily once, so the
+        ;; next eval request calls the branch's program, as one Clojure Var
+        ;; would. The turn fork walked it at each write (`seon.sci.arm/arm!`):
+        ;; its closure carries over, walked again only for a definition the
+        ;; fork never promoted.
         (when (seq functions)
-          (interpret-affected! ctx db functions))
+          (if-let [promoted (some-> agent-ctx ::kernel/program-snapshot deref)]
+            (carry-promotions! ctx db promoted functions)
+            (interpret-affected! ctx db functions)))
         installed))))
 
 (defn- classpath-locatable?
@@ -2200,14 +2205,15 @@
 
 (defn- install-selected!
   "Interpret `function-rows` and `test-rows` on `ctx`, each namespace after the
-  ones it binds, advancing the acquisition `state`; the recorded acquisition."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:or :nil :seon.flow/commit-fault!]
+  ones it binds, advancing the acquisition `state`; the acquisition, its
+  refusals not yet recorded."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
                        [:map-of :symbol :map]
                        [:sequential [:tuple :qualified-symbol :string :symbol :keyword :boolean]]
                        [:sequential [:tuple :qualified-symbol :string :symbol :keyword]]
                        [:set :qualified-symbol] :map]
                   :map]}
-  [ctx db commit-fault! namespace-row-by-name function-rows test-rows interpreted state]
+  [ctx db namespace-row-by-name function-rows test-rows interpreted state]
   (sci.ctx-store/with-ctx ctx
     (let [function-rows-by-ns (group-by #(nth % 2) function-rows)
           test-rows-by-ns (group-by #(nth % 2) test-rows)
@@ -2301,22 +2307,19 @@
              order)]
         ;; Tests resolve only after every namespace's functions and exact
         ;; bindings are present. This makes renamed `deftest` deterministic.
-        (record-acquisition-refusals!
-         ctx db
-         (reduce
-          (fn [state namespace-name]
-            (reduce
-             install-row
-             state
-             (map (fn [[sym source _ admission]]
-                    {:seon.test/sym sym
-                     :seon.schema.admission/source admission
-                     :seon.test/source source
-                     :seon.test/ns [:seon.ns/name namespace-name]})
-                  (sort-by first (get test-rows-by-ns namespace-name)))))
-          functions-installed
-          order)
-         commit-fault!)))))
+        (reduce
+         (fn [state namespace-name]
+           (reduce
+            install-row
+            state
+            (map (fn [[sym source _ admission]]
+                   {:seon.test/sym sym
+                    :seon.schema.admission/source admission
+                    :seon.test/source source
+                    :seon.test/ns [:seon.ns/name namespace-name]})
+                 (sort-by first (get test-rows-by-ns namespace-name)))))
+         functions-installed
+         order)))))
 
 (defn- namespace-row
   "A pulled namespace row carrying its source, admission and authorship."
@@ -2443,8 +2446,10 @@
         ;; boot-time copy here would preserve its old expansion after adoption.
         (sci/add-namespace! ctx 'clojure.core
                             {'help (sci/resolve ctx 'seon.bootstrap/help)})
-        (install-selected!
-         ctx db commit-fault!
+        (record-acquisition-refusals!
+         ctx db
+         (install-selected!
+         ctx db
          (select-keys all-namespace-row-by-name selected-namespace-names)
          function-rows test-rows interpreted
          {:seon.schema/projection projection
@@ -2459,7 +2464,8 @@
                            :seon.sci.eval/load-state :unavailable
                            :seon.error/message
                            (str "The loaded JVM has no core definition " sym ".")})))
-                all-function-rows)}))))))
+                all-function-rows)})
+         commit-fault!))))))
 
 (declare same-program-root?)
 
@@ -2575,37 +2581,156 @@
                         rows)
      ::tests (into [] (comp (filter :seon.test/sym) (map test-row) (remove held-tests)) rows)}))
 
+(defn- function-rows-in
+  "`[sym source namespace admission private?]` of each admitted function among
+  `symbols` stored in `database`, sorted by symbol."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:seqable :qualified-symbol]]
+                  [:vector [:tuple :qualified-symbol :string :symbol :keyword :boolean]]]}
+  [database symbols]
+  (into []
+        (keep (fn [{sym :seon.fn/sym source :seon.fn/source
+                    admission :seon.schema.admission/source private? :seon.fn/private?}]
+                (when admission
+                  [sym (or source "") (symbol (namespace sym)) admission (boolean private?)])))
+        (db/pull-many database [:seon.fn/sym :seon.fn/source :seon.schema.admission/source :seon.fn/private?]
+                      (mapv #(vector :seon.fn/sym %) (sort symbols)))))
+
+(defn- interpretable-functions
+  "The functions among `symbols` whose row in `database` states they are not
+  host-bound (`host-bound-row?`): SCI may interpret them."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]] [:set :qualified-symbol]]}
+  [database symbols]
+  (if (empty? symbols)
+    #{}
+    (let [rows (db/q '[:find [?sym ...] :in $ [?sym ...]
+                       :where [?row :seon.fn/sym ?sym] [?row :seon.fn/host-bound? false]]
+                     database (vec symbols))]
+      (when (db/read-refusal? rows)
+        (throw (ex-info (:seon.error/message rows) rows)))
+      (set rows))))
+
+(defn- executing-ctx
+  "The context the calling thread runs SCI under, else `ctx`. A context a
+  library stored as the root of `sci.ctx-store/*ctx*` is no thread's own, as
+  SCI's own fn entry reads it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/ctx]}
+  [ctx]
+  (let [active sci.ctx-store/*ctx*]
+    (if (or (nil? active) (identical? active (.getRawRoot #'sci.ctx-store/*ctx*))) ctx active)))
+
+(defn- promote-member!
+  "Interpret the closure member `sym` in `ctx` from `database`'s stored source.
+  `sci-var`, the Var `ctx`'s analyzed callers hold, ends bound to that
+  definition, to the compiled root a host-bound member keeps, or to a root
+  refusing by name; never still to `pending`, the root that called this."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol
+                       :seon.sci.eval/sci-var [:fn clojure.core/ifn?]]
+                  :nil]}
+  [ctx database sym sci-var pending]
+  ;; Interpreting a stored row is not an evaluated form's own definition.
+  (binding [sci.lang/*write-observer* nil
+            sci.lang/*expansion-observer* nil]
+    (sci.ctx-store/with-ctx ctx
+      (let [snapshot (::kernel/program-snapshot ctx)
+            projection (or (db/carried-projection database) (context-projection ctx))
+            database (vary-meta database assoc :seon.schema/projection projection)
+            namespace-name (symbol (namespace sym))
+            rows (function-rows-in database [sym])
+            ns-row (or (get-in @snapshot [:namespaces namespace-name])
+                       (namespace-row (db/pull database namespace-pattern [:seon.ns/name namespace-name])))]
+        (when (seq rows)
+          (schema/call-with-projection
+           projection
+           (fn []
+             (swap! snapshot #(-> %
+                                  (update :functions into (map (fn [row] [(first row) (function-entry row)])) rows)
+                                  (update :namespaces assoc namespace-name ns-row)))
+             (install-declared-classes! ctx [ns-row])
+             (sci/install-namespace-bindings! ctx namespace-name (assoc (row-bindings ns-row) :refers {}))
+             (install-required-libraries! ctx [ns-row])
+             ;; A refused row binds a root refusing by name, delivered when called.
+             (install-selected! ctx database {namespace-name ns-row} rows [] #{sym}
+                                {:seon.schema/projection projection :seon.sci.eval/installed 0}))))
+        ;; A kept compiled member binds a fresh Var at its name; the Var the
+        ;; callers hold follows it.
+        (let [current (sci/resolve ctx sym)]
+          (when (and current (not (identical? current sci-var)))
+            (sci/bind-root! ctx sci-var @current)))
+        (when (identical? pending @sci-var)
+          (sci/bind-root! ctx sci-var
+                          (refusing (interpretation-error
+                                     sym (str sym " has no stored definition this context can interpret.")))))
+        nil))))
+
+(defn- lazy-root
+  "The root of closure member `sym` at `sci-var` until its first call: that
+  call interprets the member, in the context executing it, from `database`'s
+  stored source (`promote-member!`), so cost follows the members called; then
+  it and every later call run what that context binds."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol :seon.sci.eval/sci-var]
+                  [:fn clojure.core/ifn?]]}
+  [ctx database sym sci-var]
+  (fn lazy-member [& args]
+    (let [executing (executing-ctx ctx)
+          held #(sci.ctx-store/with-ctx executing @sci-var)]
+      (when (identical? lazy-member (held))
+        (promote-member! executing database sym sci-var lazy-member))
+      (apply (held) args))))
+
+(defn- bind-lazy-members!
+  "Bind each of `members` in `ctx` to its `lazy-root`, creating the Var of one
+  `ctx` does not hold; the macros among them, left unbound for eager
+  interpretation: a macro runs when its callers are analyzed, not called."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value [:seqable :qualified-symbol]]
+                  [:vector :qualified-symbol]]}
+  [ctx database members]
+  (sci.ctx-store/with-ctx ctx
+    (reduce
+     (fn [macros sym]
+       (let [held (sci/resolve ctx sym)]
+         (if (and held (:macro (meta held)))
+           (conj macros sym)
+           (let [namespace-name (symbol (namespace sym))
+                 sci-var (or held
+                             (let [created (sci/new-var (symbol (name sym)) nil
+                                                        {:ns (sci/create-ns namespace-name)})]
+                               (sci/add-namespace! ctx namespace-name {(symbol (name sym)) created})
+                               created))]
+             (sci/bind-root! ctx sci-var (lazy-root ctx database sym sci-var))
+             macros))))
+     []
+     members)))
+
 (defn- interpret-overlay!
-  "Interpret the overlay `plan` on `ctx`: its overrides with their reverse
-  closure (functions and the tests reaching them), its namespaces and its
-  tests, and bind the compiled Vars of the functions it adds; the acquisition
+  "Interpret the overlay `plan` on `ctx`: its overrides, its namespaces and its
+  tests now, and bind the compiled Vars of the functions it adds; its reverse
+  closure (functions, and the tests reaching them as interpreted tests) is
+  bound lazily (`bind-lazy-members!`), from `::closure` and `::closure-tests`
+  when the plan carries them, else walked from the overrides. The acquisition
   advanced from the base's. What `ctx` already interprets, and the plan's
   `::evaluated` definitions it holds as evaluated, are not installed again."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :map]}
-  [ctx database {::keys [overridden added namespaces tests evaluated]}]
+  [ctx database {::keys [overridden added namespaces tests evaluated] :as plan}]
   (let [snapshot @(::kernel/program-snapshot ctx)
         already (into (set (::interpreted snapshot)) evaluated)
         already-tests (set (::interpreted-tests snapshot))
         projection (or (db/carried-projection database) (:seon.schema/projection ctx))
         database (vary-meta database assoc :seon.schema/projection projection)
-        closure (if (seq overridden)
-                  (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds overridden})
-                  {:seon.fn/affected #{}})
+        closure (cond (contains? plan ::closure) {:seon.fn/affected (::closure plan)
+                                                  :seon.fn/tests (::closure-tests plan)}
+                      (seq overridden) (seon.fn/reverse-closure {:seon.db/db database :seon.fn/seeds overridden})
+                      :else {:seon.fn/affected #{}})
         _ (when (:seon.db/invalid-read closure)
             (throw (ex-info "Cannot acquire the affected function closure." closure)))
         interpreted (into overridden (:seon.fn/affected closure))
         tests (into [] (remove (comp already-tests first)) tests)
-        rows-of (fn [symbols]
-                  (into []
-                        (keep (fn [{sym :seon.fn/sym source :seon.fn/source
-                                    admission :seon.schema.admission/source private? :seon.fn/private?}]
-                                (when admission
-                                  [sym (or source "") (symbol (namespace sym)) admission (boolean private?)])))
-                        (db/pull-many database [:seon.fn/sym :seon.fn/source :seon.schema.admission/source
-                                                :seon.fn/private?]
-                                      (mapv #(vector :seon.fn/sym %) (sort symbols)))))
-        function-rows (rows-of (remove already interpreted))
-        added-rows (rows-of (remove interpreted added))
+        callers (into [] (remove #(or (already %) (contains? overridden %))) (sort (:seon.fn/affected closure)))
+        interpretable (interpretable-functions database callers)
+        ;; a host-bound caller keeps its compiled Var, decided now (`install-row!`)
+        eager (into (bind-lazy-members! ctx database (filter interpretable callers))
+                    (remove interpretable) callers)
+        function-rows (function-rows-in database (into (vec (remove already overridden)) eager))
+        added-rows (function-rows-in database (remove interpreted added))
         selected (into (into #{} (map :seon.ns/name) namespaces) (map #(nth % 2)) function-rows)
         new-namespaces (into #{} (comp (map #(nth % 2)) (remove (:namespaces snapshot)) (remove selected))
                              added-rows)
@@ -2637,21 +2762,25 @@
        ;; this JVM has one, exactly as the base binds the loaded program's.
        (install-first-party-namespaces! ctx [] namespace-rows added-rows)
        (install-required-libraries! ctx namespace-rows)
-       (install-selected!
-        ctx database (:seon.flow/commit-fault! snapshot) namespace-row-by-name
-        function-rows tests (into #{} (map first) function-rows)
-        (-> (::acquisition snapshot)
-            (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
-            (assoc :seon.schema/projection projection
-                   :seon.sci.eval/interpreted-count
-                   (count (::interpreted @(::kernel/program-snapshot ctx))))))))))
+       (record-acquisition-refusals!
+        ctx database
+        (install-selected!
+         ctx database namespace-row-by-name
+         function-rows tests (into #{} (map first) function-rows)
+         (-> (::acquisition snapshot)
+             (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
+             (assoc :seon.schema/projection projection
+                    :seon.sci.eval/interpreted-count
+                    (count (::interpreted @(::kernel/program-snapshot ctx))))))
+        (:seon.flow/commit-fault! snapshot))))))
 
 (defn interpret-affected!
   "Interpret in `ctx` the callers and tests reaching `changed` it runs compiled.
-  `changed` are functions `ctx` holds as evaluated; each caller and test of
-  their reverse closure that `ctx` still runs compiled is interpreted from its
-  stored source in `database`, so it calls `ctx`'s definitions. A host-bound
-  caller keeps its compiled Var. Once interpreted, a
+  `changed` are functions `ctx` holds as evaluated; each caller of their
+  reverse closure that `ctx` still runs compiled is bound to interpret itself
+  from its stored source in `database` on its first call (`bind-lazy-members!`),
+  so it calls `ctx`'s definitions, and each test reaching them runs
+  interpreted. A host-bound caller keeps its compiled Var. Once interpreted, a
   caller sees every later redefinition through its context's binding, so a
   repeated change pays only the closure read. The acquisition after it."
   {:seon/tasks #{'seon.sci.eval/a-branch-redefinition-never-reaches-its-inherited-callers}
@@ -2666,6 +2795,31 @@
                                                        ::added #{} ::namespaces [] ::tests []})]
         (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
         acquired))))
+
+(defn- carry-promotions!
+  "Bind lazily in `ctx` the closure the turn fork's program snapshot
+  `promoted` interprets beyond `ctx`'s, as `interpret-affected!` would for
+  `changed`; a changed definition the fork does not interpret has its closure
+  walked here. The acquisition after it."
+  {:seon/tasks #{'seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice}
+   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:sequential :qualified-symbol]] :map]}
+  [ctx database promoted changed]
+  (let [held @(::kernel/program-snapshot ctx)
+        carried (set (::interpreted promoted))
+        unwalked (remove carried changed)]
+    (when (seq unwalked)
+      (interpret-affected! ctx database unwalked))
+    (binding [sci.lang/*write-observer* nil
+              sci.lang/*expansion-observer* nil]
+      (sci.ctx-store/with-ctx ctx
+        (let [acquired (interpret-overlay!
+                        ctx database
+                        {::overridden (set changed) ::evaluated (set changed) ::added #{} ::namespaces [] ::tests []
+                         ::closure (into #{} (remove (set (::interpreted held))) carried)
+                         ::closure-tests (into #{} (remove (set (::interpreted-tests held)))
+                                               (::interpreted-tests promoted))})]
+          (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
+          acquired)))))
 
 (defn- overlay!
   "Interpret on `ctx`, a fork of the cluster base, what `database` changes of

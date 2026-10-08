@@ -45,7 +45,7 @@
   did. It reads the Var as `ctx` binds it. The base's callers of a function the
   write defines apart from the base's Var are re-interpreted onto it
   (`seon.sci.eval/reinterpret-inherited-callers!`), and the callers and tests
-  `ctx` still runs compiled are interpreted (`seon.sci.eval/interpret-affected!`),
+  `ctx` still runs compiled are bound to run interpreted (`seon.sci.eval/interpret-affected!`),
   so the forms after the write call the definition through them; a failure
   there is the write's `:seon.batch/arm-error` too."
   {:malli/schema [:=> [:cat :map :seon.db/database-value :map] :map]}

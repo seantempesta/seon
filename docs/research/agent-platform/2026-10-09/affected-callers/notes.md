@@ -68,7 +68,36 @@ First redefinition of `f` in a context: closure query (12-373 ms) plus one inter
 ~312 × 0.3 ms ≈ 160 ms, twice (turn fork and live base). Hub `seon.id/digest`: 373 ms + 2,393 promotions, measured
 4.7-5.3 s at acquisition (hostbound-opus §1.2): over one second, a finding with an existing task
 (`seon.sci.eval/a-branch-overriding-a-widely-called-function-acquires-in-seconds`; the fix is the lazy closure, D3,
-binding each member to a stub that interprets on first call). Later redefinitions: the closure query only.
+binding each member to a stub that interprets on first call; landed, see Lazy promotion). Later redefinitions: the closure query only.
+
+## Lazy promotion (lane lazy-callers, 2026-10-09)
+
+Interpreting the whole closure eagerly made a first redefinition cost per caller (3.5 MB, ~1 ms each) whether
+or not anything called it, twice. Now `seon.sci.eval/interpret-overlay!` interprets only the overrides (and the
+closure's host-bound members, which keep their compiled Var, and its macros, which run at their callers'
+analysis) and binds every other closure member's Var, in that context only (SCI-1's per-context binding), to
+`seon.sci.eval/lazy-root`: its first call interprets the member from stored source in the context executing it
+(`seon.sci.eval/promote-member!`, through `install-selected!`) and then calls what that context binds; a member
+that cannot interpret ends bound to a root refusing by name. A member whose namespace the context lacks gets a new
+Var holding the lazy root, so a test helper interprets once its test namespace is loaded. Cost: the closure walk,
+one query for the members' `:seon.fn/host-bound?` facts, one `bind-root!` per member; interpretation follows the
+callers actually called. Settlement no longer walks again: `seon.sci.eval/carry-promotions!` binds in the live base
+the closure the turn fork holds beyond it (walking only for a definition the fork never promoted). Interpreted
+callers then deref the Var directly; a lazy root stays on the path only where its value was captured.
+
+Measured in check JVMs (HEAD bb934b396 vs this change, `seon.profile/measure` per thread, fresh `base-ctx` each):
+
+| seed | callers | walk | first promotion before | after | first call through a caller |
+|---|---|---|---|---|---|
+| `seon.render.ns/first-doc-line` | 65 | 52 ms / 122 MB | 252 ms / 304 MB | 15 ms / 23 MB | `render-ai` 15 ms / 8 MB, then 0.2 ms |
+| `seon.error/collection-member-problem` | 322 | 197 ms / 589 MB | 574 ms / 1.14 GB | 63 ms / 119 MB | - |
+| `seon.id/digest` | 2,401 | 284 ms / 661 MB | 3,027 ms / 6.46 GB | 234 ms / 482 MB | 3.9 ms / 3.9 MB |
+
+A redefining eval request through MCP: `first-doc-line` 2,290 ms / 260 MB (settle 541, evaluate 183) before,
+1,627 ms / 28 MB (settle 324, evaluate 75) after; `collection-member-problem` 2,816 ms / 977 MB (settle 554,
+evaluate 405) before, 1,109 ms / 111 MB (settle 111, evaluate 70) after. What remains is the test step
+(0.8-1.0 s, running the reaching tests) and the closure walk itself (`seon.fn/reverse-closure`, about 0.1-0.4 ms and
+0.3 MB per caller, mostly `seon.db/pull-many` of identity names per BFS level), the next slice.
 
 ## As landed (769c4a843) and what SCI-3 then deletes
 

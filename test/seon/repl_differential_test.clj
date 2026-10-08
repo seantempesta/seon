@@ -6,7 +6,10 @@
             [clojure.test :refer [deftest is testing]]
             [sci.core :as sci]
             [seon.db :as db]
+            [seon.fn :as fn]
             [seon.mcp :as mcp]
+            [seon.profile :as profile]
+            [seon.sci.eval :as eval]
             [seon.test-support :as support]))
 
 (def rows
@@ -254,6 +257,26 @@
          (is (= "branch" (answered (str branch-doc-line " " shown-doc-line) brancher running))))
        (testing "and so does the next eval request"
          (is (= "branch" (answered shown-doc-line brancher running))))))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice}}
+  promoting-a-closure-costs-its-walk-and-the-callers-called
+  ;; A first redefinition binds the compiled callers of its reverse closure in
+  ;; the context; a caller is interpreted only when it is called.
+  (support/with-running-agent
+   (fn [_ _ connection]
+     (let [db @connection
+           promoted (fn [seed]
+                      (let [ctx (eval/base-ctx db)
+                            measured (profile/measure #(eval/interpret-affected! ctx db [seed]))
+                            closure (fn/reverse-closure {:seon.db/db db :seon.fn/seeds #{seed}})]
+                        (assoc measured :callers (count (:seon.fn/affected closure)))))
+           widely (promoted 'seon.error/collection-member-problem)
+           hub (promoted 'seon.id/digest)]
+       (is (< 200 (:callers widely)) "the seed is widely called")
+       (is (< (:seon.profile/alloc-bytes widely) (* (:callers widely) 1024 1024))
+           "promoting allocates far less than interpreting each caller")
+       (is (< 2000 (:callers hub)) "the hub is called from most of the program")
+       (is (< (:seon.profile/ms hub) 1000) "promoting a hub's closure is sub-second")))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-repl-require-of-a-dependent-namespace-wedges-the-agent}}
   a-require-closing-a-namespace-cycle-is-refused-and-the-agent-still-answers
