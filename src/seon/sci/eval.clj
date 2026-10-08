@@ -2852,8 +2852,9 @@
   The private layer is what the agent's own evaluation added: Vars its SCI
   generation defined, and Vars at a path the base it forked from never had (a
   namespace it required from the JVM, `load-host-namespace`). Owned private
-  Vars keep their roots, including captured values. Inherited program bindings
-  are replaced. A JVM restart has no entering context and
+  Vars keep their roots, including captured values, and an own definition keeps
+  its Var until another writer changes its row. Inherited program bindings are
+  replaced. A JVM restart has no entering context and
   consequently preserves no private objects. No database read restores them.
   An unavailable execution's private layer is the unrestored one, so it
   carries nothing: the context is the base acquired at the branch head."
@@ -2870,18 +2871,27 @@
               [local-name entry] entries
               :when (sci.utils/var? entry)
               :let [path [namespace-name local-name]
-                    root (if (sci.vars/hasRoot entry) @entry absent-intern)]
-              :when (and (or (= generation (:sci/generation (meta entry)))
-                             (not (contains? previous path)))
-                         (not (changed? namespace-name local-name))
-                         (not (or (when-let [prior (get previous path)]
-                                    (same-program-root? root (first prior)))
-                                  (when-let [next (get current path)]
-                                    (same-program-root? root (first next))))))]
-          [namespace-name local-name entry])
+                    root (if (sci.vars/hasRoot entry) @entry absent-intern)
+                    held (get current path)
+                    transferred? (boolean (and held (same-program-root? root (first held))))]
+              ;; An own Var stays the Var its callers' closures hold, as one
+              ;; Clojure Var does: settlement transfers its root into the base
+              ;; under another Var, which never replaces it. Only another
+              ;; writer's change of its row does.
+              :when (if (= generation (:sci/generation (meta entry)))
+                      (or transferred? (not (changed? namespace-name local-name)))
+                      (and (not (contains? previous path))
+                           (not (changed? namespace-name local-name))
+                           (not transferred?)))]
+          [namespace-name local-name entry transferred?])
         private-names (into #{} (map (fn [[namespace-name local-name _]]
                                       (symbol (str namespace-name) (str local-name))))
                             private-bindings)
+        ;; the base's row of a transferred definition is the current one
+        snapshot-names (into #{} (keep (fn [[namespace-name local-name _ transferred?]]
+                                         (when-not transferred?
+                                           (symbol (str namespace-name) (str local-name)))))
+                             private-bindings)
         regenerated
         (assoc (merge ctx (sci/fork base))
                ::base-bindings (atom current)
@@ -2892,7 +2902,7 @@
                ::kernel/program-snapshot
                (atom (update @(::kernel/program-snapshot base) :functions merge
                              (select-keys (:functions @(::kernel/program-snapshot ctx))
-                                          private-names)))
+                                          snapshot-names)))
                :seon.sci.eval/private-state :preserved-in-memory)]
     ;; Keep the continuing agent's generation and owned Vars. Re-interning
     ;; only their roots would detach private closures from their private Vars.
