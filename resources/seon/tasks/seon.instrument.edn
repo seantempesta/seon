@@ -36,4 +36,8 @@
  #:seon.task{:name "a-contract-with-an-fn-ifn-cannot-arm-on-a-sci-branch"
              :kind :function
              :intent "A contract containing [:fn clojure.core/ifn?] cannot arm on a SCI branch (\"No reader function for tag object\"): how the spec is stored and read back (my-program-reads lane, 67b4d420b). Done when a stored spec with a registered named predicate arms on a branch and the failing form is a regression."
-             :must-read #{seon.schema/register!}}]
+             :must-read #{seon.schema/register!}}
+ #:seon.task{:name "a-call-missing-an-argument-is-refused-as-the-wrong-argument"
+             :kind :function
+             :intent "Calling `seon.test.runner/tests-reaching` (declared [database test-symbols target]) with two arguments, (seon.test.runner/tests-reaching db '[my.program/nearest]) in JVM mode, is refused as \"argument 1 `test-symbols`: expected a vector, got a map\" with the database value as :seon.error/offending: the arity mismatch is reported as a type error on a different argument (cost-regression-card lane, 2026-10-09). Done when a call with too few arguments is refused naming the declared arity and the count received, with a regression row on the form."
+             :must-read #{seon.instrument/attributed-problem seon.instrument/boundary-refusal}}]
