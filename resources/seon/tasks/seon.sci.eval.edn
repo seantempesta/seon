@@ -244,4 +244,9 @@
              :kind :function
              :intent "(defn f [a] a) (f 1 2) through MCP answers :seon.error/message \"Wrong number of args (2) passed to: sci.impl.fns/fun/arity-1--73805\" (default 2026-10-08); Clojure says user/f, and the reply's own :seon.sci.eval/stacktrace begins [user/f 1 1]. Done when the message names the agent's function and an MCP regression asserts it."
              :must-read #{seon.error/reply-value seon.sci.eval/shown-failure}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "a-caller-keeps-the-definition-of-an-earlier-pass"
+             :kind :function
+             :intent "On an MCP agent branch (default, HEAD 48191071f, agent redo-finish-probe): pass 1 (ns scratch.fin2) (defn g2 [] 1) (defn h2 [] (g2)) (defn g2 [] 2) answers [(h2) (g2)] = [2 2]; pass 2 (defn g2 [] 3) answers [(h2) (g2)] = [2 3], where Clojure answers [3 3]. With contracts the same. A deftest defined in an earlier pass sees the old callee too, so (deftest t (is (= 4 (f/other 2)))) records GREEN while (f/other 2) is 6 in the same context and on the test member's branch: proofs and propose-merge! accept stale programs. Same-pass redefinition is correct; the break is at the pass boundary (context advance or overlay interpretation binding a caller to another Var object than the next defn writes). Done when a seon.repl-differential-test row through seon.mcp/call redefines a callee in a later pass and asserts the caller's value equals plain SCI's, and a member run of a test written before the redefinition records red."
+             :must-read #{seon.sci.eval/acquire! seon.sci.eval/fork-cluster-ctx}
+             :evidence #{"docs/research/agent-platform/2026-10-08/redo/task-finish.md"}}]
