@@ -28,6 +28,11 @@
              [:seon.blob/digest :seon.blob/digest]
              [:seon.blob/size :seon.blob/size]
              [:seon.blob/inline-prefix :seon.blob/inline-prefix]],
+            :compression
+            [:map
+             [:seon.config.blob/compress? {:optional true} :seon.config.blob/compress?]
+             [:seon.config.blob/compress-min-bytes {:optional true} :seon.config.blob/compress-min-bytes]
+             [:seon.config.blob/compress-max-bytes {:optional true} :seon.config.blob/compress-max-bytes]],
             :threshold-attribute :qualified-keyword
             :store-root-absent :string
             :stored-content-mismatch :seon.blob/digest

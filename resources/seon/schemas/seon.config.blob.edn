@@ -1,0 +1,20 @@
+#:seon.config.blob{:compress?
+                   [:boolean
+                    {:seon.config/dial true,
+                     :seon.config/optional true,
+                     :seon.config/default true,
+                     :description "Blob publication passes a blob's bytes through the store's LZ4 compressor when its size lies within the compression bounds; absent, as on a store without configuration, means off; Konserve keeps them as they are when compression does not make them smaller."}],
+                   :compress-min-bytes
+                   [:int
+                    {:min 0,
+                     :seon.config/dial true,
+                     :seon.config/optional true,
+                     :seon.config/default 1024,
+                     :description "Blobs smaller than this are stored uncompressed: below it the LZ4 frame and the metadata marker cost about what compression saves."}],
+                   :compress-max-bytes
+                   [:int
+                    {:min 1,
+                     :seon.config/dial true,
+                     :seon.config/optional true,
+                     :seon.config/default 16777216,
+                     :description "Blobs larger than this are stored uncompressed: Konserve compresses a blob whole in memory, and a range read of a compressed blob decompresses from its start."}]}

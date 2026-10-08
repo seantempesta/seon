@@ -161,8 +161,38 @@
     (io/file path)
     (:seon.blob/staged-octets staged)))
 
+(def ^:private compression-dials
+  [:seon.config.blob/compress?
+   :seon.config.blob/compress-min-bytes
+   :seon.config.blob/compress-max-bytes])
+
+(defn- compression
+  "The connection's blob compression dials, read once per publication."
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.blob/compression]}
+  [connection]
+  (into {}
+        (db/q (db/db connection)
+              '[:find ?dial ?value
+                :in $ [?dial ...]
+                :where [_ ?dial ?value]]
+              compression-dials)))
+
+(defn- compressed-size?
+  "True when the dials compress a blob of `size` bytes; absent dials, as on a
+  store without configuration, compress nothing."
+  {:malli/schema [:=> [:cat :seon.blob/compression :seon.blob/size] :boolean]}
+  [{:seon.config.blob/keys [compress? compress-min-bytes compress-max-bytes]} size]
+  (boolean (and compress? compress-min-bytes compress-max-bytes
+                (<= compress-min-bytes size compress-max-bytes))))
+
 (defn- publish-staged!
-  [connection staged]
+  "Write one staged blob as an immutable Konserve value: new content-addressed
+  keys take Konserve's deferred sync, made durable by the barrier of the
+  commit that names them (`with-publication!`)."
+  {:malli/schema
+   [:=> [:cat :seon.db/connection :seon.blob/compression :seon.blob/staged-write]
+    :seon.blob/write-result]}
+  [connection dials staged]
   (let [store (konserve-store connection)
         content-digest (:seon.blob/digest staged)
         expected-size (:seon.blob/size staged)
@@ -171,7 +201,10 @@
     ;; This existence check must remain inside the publication permit. An
     ;; issued sweep batch may already contain an orphan with the same digest.
     (when-not (k/exists? store content-digest {:sync? true})
-      (k/bassoc store content-digest (staged-source staged) {:sync? true}))
+      (k/bassoc store content-digest (staged-source staged)
+                {:immutable? true}
+                {:sync? true
+                 :compress? (compressed-size? dials expected-size)}))
     (verify-stored! store content-digest expected-size verification-buffer-size)
     (when-let [path (:seon.blob/staged-path staged)]
       (Files/deleteIfExists (.toPath (io/file path))))
@@ -316,7 +349,8 @@
     (let [permit (gc-guard/acquire-reachability-permit!
                   (store-id connection) :blob)]
       (try
-        (run! #(publish-staged! connection %) staged-writes)
+        (let [dials (compression connection)]
+          (run! #(publish-staged! connection dials %) staged-writes))
         (commit-roots!)
         (finally
           (gc-guard/release-reachability-permit! permit))))

@@ -7,6 +7,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [konserve.core :as k]
+            [konserve.impl.defaults :as defaults]
             [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -43,6 +44,15 @@
                   :db/unique :db.unique/identity}
                  {:db/ident :seon.config.eval.result/blob-threshold
                   :db/valueType :db.type/long
+                  :db/cardinality :db.cardinality/one}
+                 {:db/ident :seon.config.blob/compress?
+                  :db/valueType :db.type/boolean
+                  :db/cardinality :db.cardinality/one}
+                 {:db/ident :seon.config.blob/compress-min-bytes
+                  :db/valueType :db.type/long
+                  :db/cardinality :db.cardinality/one}
+                 {:db/ident :seon.config.blob/compress-max-bytes
+                  :db/valueType :db.type/long
                   :db/cardinality :db.cardinality/one}])
         (registry/branch! {:seon.store/store opened
                            :seon.cluster.registry/from :db
@@ -52,7 +62,10 @@
             (support/transacted!
                     connection
                     [{:blob-test/id "dial"
-                      :seon.config.eval.result/blob-threshold binary-threshold}])
+                      :seon.config.eval.result/blob-threshold binary-threshold
+                      :seon.config.blob/compress? true
+                      :seon.config.blob/compress-min-bytes 1024
+                      :seon.config.blob/compress-max-bytes (* 16 1024 1024)}])
             (f connection root)
             (finally
               (d/release connection))))
@@ -199,6 +212,40 @@
           (is (= 4096 (alength ^bytes range-bytes)))
           (is (< read-allocation (* 1024 1024))
               "4 KiB chunk read allocated bytes"))))))
+
+;; A published blob is an immutable Konserve value, so a new key takes the
+;; deferred sync plan, and its bytes pass through the store's LZ4 compressor
+;; within the configured bounds.
+(deftest published-blob-is-compressed-and-deferred
+  (with-file-blob-store
+    (str "tmp/blob-compress-test/" (random-uuid))
+    (fn [connection root]
+      (let [store (:store @connection)
+            file-store (or (:backend-store store) store)
+            file-bytes (fn [digest]
+                         (.length (io/file root "store" (defaults/key->store-key digest))))
+            text (apply str (repeat 880 "#:seon.print{:face :seon.print/keyword, :value :seon.agent/id}\n"))
+            size (blob/utf8-size text)
+            digest (blob/put! connection text)
+            stored-meta (k/get-meta store digest nil {:sync? true})
+            small "a blob under the compression minimum"
+            small-digest (blob/put! connection small)]
+        (testing "a compressible blob is stored compressed and reads back unchanged"
+          (is (= {:immutable? true :compressed? true :size size}
+                 (select-keys stored-meta [:immutable? :compressed? :size])))
+          (is (< (file-bytes digest) 10240))
+          (is (= text (blob/get connection digest)))
+          (is (= (subs text 100 200)
+                 (String. ^bytes (blob/read-chunk connection digest 100 100) "UTF-8"))))
+        (testing "where the store barriers a mutable write, the blob's write defers"
+          (let [plan (fn [immutable?]
+                       (defaults/sync-plan (:backing file-store) (:config file-store)
+                                           immutable? false))]
+            (is (= (if (= :barriered (plan false)) :deferred (plan false))
+                   (plan (:immutable? stored-meta))))))
+        (testing "a blob under the minimum is stored as it is"
+          (is (nil? (:compressed? (k/get-meta store small-digest nil {:sync? true}))))
+          (is (= small (blob/get connection small-digest))))))))
 
 (deftest utf8-content-round-trips-by-its-digest
   (let [root (str "tmp/blob-test/" (random-uuid))
