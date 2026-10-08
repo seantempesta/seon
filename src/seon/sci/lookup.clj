@@ -153,11 +153,20 @@
   {:malli/schema [:=> [:cat :string] [:map [:summary :string] [:body {:optional true} [:string {:min 1}]]
                                       [:example {:optional true} [:string {:min 1}]]]]}
   [docstring]
-  (let [lines (mapv str/trim (str/split-lines (or docstring "")))
+  (let [abbreviations #{"e.g." "i.e." "etc." "vs."}
+        sentence-end (fn [flat]
+                       (loop [from 0]
+                         (let [stop (str/index-of flat ". " from)]
+                           (cond
+                             (nil? stop) nil
+                             (some #(str/ends-with? (subs flat 0 (inc stop)) %) abbreviations)
+                             (recur (inc stop))
+                             :else stop))))
+        lines (mapv str/trim (str/split-lines (or docstring "")))
         lines (vec (drop-while str/blank? lines))
         [paragraph after] (split-with (complement str/blank?) lines)
         flat (str/join " " paragraph)
-        stop (str/index-of flat ". ")
+        stop (sentence-end flat)
         summary (if stop (subs flat 0 (inc stop)) flat)
         leftover (when stop (str/trim (subs flat (+ stop 2))))
         lines (vec (concat (when (seq leftover) [leftover]) after))
