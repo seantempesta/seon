@@ -347,17 +347,14 @@
 (defn next-form
   "The next read step with the live `stage`.
 
-  A failed read, or a reserved response map (`seon.sci.reader/response-map?`),
-  is that span's read error, carried as its error value."
+  A failed read is that span's read error, carried as its error value."
   {:malli/schema [:=> [:cat :seon.batch/read-stage :seon.batch/mode :seon.batch/read-state] :seon.batch/read-step]}
   [stage mode state]
-  (let [{:seon.batch/keys [form read-error start end version] :as r} (step stage mode state)
+  (let [{:seon.batch/keys [read-error start end version] :as r} (step stage mode state)
         source #(subs (:seon.batch/text version) start end)]
-    (cond
-      read-error (assoc r :seon.batch/read-error (carried (reader/reader-error (source) read-error)))
-      (reader/response-map? form)
-      (-> r (dissoc :seon.batch/form) (assoc :seon.batch/read-error (carried (reader/response-error (source) form))))
-      :else r)))
+    (if read-error
+      (assoc r :seon.batch/read-error (carried (reader/reader-error (source) read-error)))
+      r)))
 
 ;;; The structural pass
 

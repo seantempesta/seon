@@ -7,25 +7,20 @@
   This namespace requires no evaluator owner, so `seon.sci.eval` builds its
   acquisition entrant from it."
   (:require [sci.core :as sci]
-            [seon.sci.forgive :as forgive]
-            [seon.sci.reader :as reader]))
+            [sci.impl.parser :as parser]
+            [seon.sci.forgive :as forgive]))
 
-(defn parse-options
-  "The live reader's options for `ctx`: Seon's reader policy with end
-  locations (every form carries its complete span, which SCI's producer
-  origin and the expansion observer report), no eof."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :map]}
-  [ctx]
-  (-> (#'reader/parse-options {::reader/ctx ctx ::reader/features #{:clj} ::reader/tags {}})
-      (dissoc :eof)
-      (assoc :end-location true)))
+(def parse-options
+  "The live reader's options: SCI's own reader policy (tags, records,
+  `*data-readers*`, `#=`) with the `:clj` features and end locations, so every
+  form carries its complete span, no eof."
+  {:features #{:clj} :end-location true})
 
 (defn read-stage
-  "The live read stage for `ctx`: SCI's `parse-next` under Seon's reader policy."
+  "The live read stage for `ctx`: SCI's `parse-next` under its own reader policy."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.batch/read-stage]}
   [ctx]
-  (let [opts (parse-options ctx)]
-    {:seon.batch/read (fn [rdr eof] (sci/parse-next ctx rdr (assoc opts :eof eof)))}))
+  {:seon.batch/read (fn [rdr eof] (sci/parse-next ctx rdr (assoc parse-options :eof eof)))})
 
 (defn read-next
   "One read step at the live cursor, through the reader stage's stepper."
@@ -40,8 +35,9 @@
   (sci/ns-name @sci/ns))
 
 (defn around
-  "The batch runs in its start namespace."
+  "The batch runs in its start namespace, with the data readers bound for the pass as `sci/eval-string*` binds them."
   {:malli/schema [:=> [:cat :seon.batch/request [:=> [:cat] :seon.batch/batch]] :seon.batch/batch]}
   [{start-ns :seon.batch/start-ns} body]
-  (sci/with-bindings {sci/ns (sci/create-ns start-ns)}
+  (sci/with-bindings {sci/ns (sci/create-ns start-ns)
+                      parser/data-readers @parser/data-readers}
     (body)))

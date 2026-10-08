@@ -12,7 +12,6 @@
             [seon.eval.drive :as drive]
             [seon.flow :as flow]
             [seon.id :as id]
-            [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.batch :as batch]
             [seon.test-support :as support]
@@ -265,20 +264,15 @@
 (deftest ^{:seon/tasks #{'seon.batch/an-error-recorded-while-showing-a-form-rides-the-next-form
                          'seon.turn.batch/a-jvm-read-error-drops-the-form-and-every-later-form}}
   a-failed-read-is-its-forms-error-and-reading-continues-in-sci-and-jvm
-  ;; A failed read and a reserved response map are each their form's read
-  ;; error; the forms around them run, and no error rides another form.
+  ;; A failed read is its form's read error; the forms around it run, and no
+  ;; error rides another form.
   (with-armed-agent
    (fn [{:keys [connection cluster-name agent-id code]}]
-     (let [result (code "(+ 1 2)\n#:seon.repl{:value 3}\n(* 2 3)\n[1 bad: (+ 2 3)]\n(+ 4 4)")
+     (let [result (code "(+ 1 2)\n(* 2 3)\n[1 bad: (+ 2 3)]\n(+ 4 4)")
            receipts (drive/run-receipts (:seon.db/db result) [(:seon.turn/id result)])
            error (fn [r] (when (:seon.cluster.eval/error r) (edn/read-string (:seon.eval/shown r))))]
-       (is (= ["3" nil "6" nil "8"] (mapv #(when-not (:seon.cluster.eval/error %) (:seon.eval/shown %)) receipts)))
-       (is (= :seon.sci.reader/fabricated-response-error
-              (edn/read-string (first (shown connection (code (str "(:seon.error/type "
-                                                                   (admit/result-handle (turn/receipt-identity (:seon.turn/id result) 1))
-                                                                   ")"))))))
-           "the agent digs the reserved map's error value by its result handle")
-       (is (= [nil nil nil :seon.sci.reader/form nil] (mapv (comp :seon.error/member error) receipts)))
+       (is (= ["3" "6" nil "8"] (mapv #(when-not (:seon.cluster.eval/error %) (:seon.eval/shown %)) receipts)))
+       (is (= [nil nil :seon.sci.reader/form nil] (mapv (comp :seon.error/member error) receipts)))
        (is (empty? (db/q '[:find ?receipt :in $ ?id
                            :where [?run :seon.turn/id ?id] [?receipt :seon.cluster.eval/run ?run]
                            [?receipt :seon.cluster.eval/diagnostics _]]

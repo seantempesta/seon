@@ -57,20 +57,13 @@
     (is (= '(identity "before\n```clojure\n(+ 1 2)\n```\nafter")
            (:seon.sci.reader/form (first (events source)))))))
 
-(deftest fabricated-responses-are-reader-errors-with-exact-source
-  (let [source "#:seon.repl{:value (throw (ex-info \"must not run\" {}))}"
+(deftest a-response-shaped-map-reads-as-data
+  (let [source "#:seon.repl{:value 3}"
         parsed (events (str "(inc 1)\n" source))]
     (is (= 2 (count parsed)))
-    (is (nil? (:seon.sci.reader/error (first parsed))))
-    (is (= source (:seon.sci.reader/source (second parsed))))
-    (is (= #{:seon.repl/value}
-           (get-in parsed [1 :seon.sci.reader/error :seon.sci.reader/response-keys])))
-    (is (= :seon.sci.reader/fabricated-response-error
-           (get-in parsed [1 :seon.sci.reader/error :seon.error/type])))
-    (doseq [text ["(identity #:seon.repl{:value 2})"
-                  "'#:seon.repl{:value 2}"
-                  "\"my.agents.juniper=>\\n#:seon.repl{:value 2}\""]]
-      (is (not-any? :seon.sci.reader/error (events text))))))
+    (is (not-any? :seon.sci.reader/error parsed))
+    (is (= {:seon.repl/value 3} (:seon.sci.reader/form (second parsed))))
+    (is (= source (:seon.sci.reader/source (second parsed))))))
 
 (defn- read-kinds
   [read-events]

@@ -241,10 +241,8 @@
                     (evidence reading)))
            "a form's one query is its one read")))))
 
-(deftest a-refused-response-map-settles-as-an-unrun-evaluation
-  ;; THE CLASS: a fabricated response map once carried no error value, so its
-  ;; unrun evaluation was built from nil and the run's settlement was refused.
-  ;; It is now that form's read error, carried like any other.
+(deftest a-response-shaped-map-settles-as-an-evaluated-value
+  ;; A map naming `:seon.repl` keys is data like any other: it evaluates to itself.
   (support/with-database
    (fn [connection]
      (config/apply! {:seon.db/connection connection
@@ -272,8 +270,7 @@
               :seon.cluster.reply/sources [{:seon.cluster.eval/source "{:seon.repl/value 1}"}]}))
            evaluation (:seon.sci.eval/evaluation refused)]
        (is (= [:seon.ns/name 'my.agents.reader] (:seon.cluster.eval/ns evaluation)))
-       (is (= :seon.sci.reader/fabricated-response-error
-              (:seon.error/type (:seon.sci.admit/value evaluation))))))))
+       (is (= {:seon.repl/value 1} (:seon.sci.admit/value evaluation)))))))
 
 (deftest a-turn-dependent-generated-form-keeps-its-value-beside-the-fault
   (testing "a generated form whose reads depend on turn-taking settles its value with the fault as a diagnostic, and the turn closes"

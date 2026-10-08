@@ -11,10 +11,6 @@
            [:edamame/column :int]
            [:edamame/elements [:vector :seon.schema/value]]]]
 
- :seon.sci.reader/fabricated-response-error [:and {:seon.db/attributes true}
- :seon.error/base
- [:map [:seon.sci.reader/response-keys :seon.sci.reader/response-keys]]]
-
  :seon.sci.reader/unreadable-error [:and {:seon.db/attributes true}
  :seon.error/base
  [:map [:seon.sci.reader/unreadable-member :seon.sci.reader/unreadable-member]]]
@@ -56,6 +52,5 @@
 :seon.sci.reader/refused-token [:or :symbol :string]
 :seon.sci.reader/length [:int {:min 0}]
 :seon.sci.reader/source-bound [:int {:min 0 :description "The character bound actually supplied to this pure reader, including a zero bound."}]
-:seon.sci.reader/response-keys [:set {:min 1} :qualified-keyword]
-:seon.sci.reader/failure [:or :seon.sci.reader/unreadable-error :seon.sci.reader/refused-tag-error :seon.sci.reader/oversize-error :seon.sci.reader/fabricated-response-error]
+:seon.sci.reader/failure [:or :seon.sci.reader/unreadable-error :seon.sci.reader/refused-tag-error :seon.sci.reader/oversize-error]
 }

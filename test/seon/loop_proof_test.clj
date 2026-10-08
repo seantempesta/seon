@@ -786,7 +786,7 @@
              (testing "the scenario crosses the real query, write, message, and session boundaries"
                (agent/arm! {:seon.turn.loop/cluster handle
                            :seon.agent/routing routing :seon.agent/id "juniper"})
-               (testing "the saved trial's prompt-marked query is prose and its reserved response map a read error"
+               (testing "the saved trial's prompt-marked query is prose and its response-shaped map is one evaluated source"
                  (let [trial (edn/read-string
                               (slurp "docs/prds/context-generation/research/help_trial_2026_09_09.edn"))
                        reply-text (get-in trial [:seon.trial/completion :seon.ai/text])
@@ -798,11 +798,7 @@
                        saved (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
                                       (evaluation/of-agent @connection "juniper"))]
                    (is (= 1 (count saved)))
-                   (is (str/starts-with? (:seon.cluster.eval/source (first saved)) "#:seon.repl"))
-                   (submit (str "(:seon.error/type result/e" (:seon.cluster.eval/id (first saved)) ")"))
-                   (is (= :seon.sci.reader/fabricated-response-error
-                          (edn/read-string (:seon.eval/shown (last (evaluation/of-agent @connection "juniper")))))
-                       "the agent digs the reserved map's error value by its result handle")))
+                   (is (str/starts-with? (:seon.cluster.eval/source (first saved)) "#:seon.repl"))))
                (submit "(seon.db/q '[:find ?customer (sum ?amount) :where [?order :example/customer ?customer] [?order :example/amount ?amount]])")
                (is (str/includes? (:seon.eval/shown (last (evaluation/of-agent @connection "juniper"))) "115"))
                (submit "(seon.db/transact! [{:example/order \"a3\" :example/customer \"Ada\" :example/amount 40}])")
