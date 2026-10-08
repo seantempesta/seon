@@ -15,7 +15,13 @@
 (defn- first-doc-line
   {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]}
   [doc]
-  (some-> doc str/split-lines first str/trim not-empty))
+  (let [paragraph (->> (str/split-lines (or doc ""))
+                       (map str/trim)
+                       (drop-while str/blank?)
+                       (take-while (complement str/blank?))
+                       (str/join " "))
+        end (str/index-of paragraph ". ")]
+    (not-empty (if end (subs paragraph 0 (inc end)) paragraph))))
 
 (defn render-alias-ai
   "One alias binding as data: the local symbol and the namespace it names,
