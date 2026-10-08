@@ -123,7 +123,7 @@ The owner wants agents to tune the budget. Smallest loop, from what exists:
    `:seon.eval/value-tokens`, `:seon.eval/elisions`, `:seon.eval/value-class`, `:seon.eval/renderer`
    (`src/seon/sci/eval.clj` where `shown-tokens` is set). Add `:seon.eval/cut-paths`: the paths of the cut nodes the
    printer already produces (bounded by `:elisions`), declared on the eval schema.
-2. **Record dig-in on the later form.** Ledger row D1 is the seam: `:seon.cluster.eval/result-reads` lists which
+2. **Record a followed cut on the later form.** Ledger row D1 is the seam: `:seon.cluster.eval/result-reads` lists which
    result handles a form names (recorded at settlement, `src/seon/turn/batch.clj`). A later evaluation of the same
    agent reading handle `eN` is one of: an elision form (head in `drop`, `nth`, `get-in`, `subs`, `take`, path inside
    `eN`'s cut paths), a re-read of the whole handle, or a use of `seon.print/*budget*` (PR-11 records
@@ -131,23 +131,23 @@ The owner wants agents to tune the budget. Smallest loop, from what exists:
 3. **Report per value class, as data.** `seon.health/budget-report` (a pure function over eval facts, a health unit
    beside `:profile`), grouped by `:seon.eval/renderer` or value class: `{:n :elided-count :dig-in-rate :override-rate
    :shown-p50 :shown-p90 :recommended-budget}`. `recommended-budget` is the 90th percentile of `:value-tokens` among
-   replies the agent dug into, clamped to the model ceiling, and unchanged when the dig-in rate is under a threshold.
+   replies whose cut the agent followed, clamped to the model ceiling, and unchanged when the followed-cut rate is under a threshold.
    It is advice; the dial stays a configuration fact an owner applies.
 
 Files: `src/seon/turn/batch.clj` (D1 recording), `src/seon/sci/eval.clj` (cut paths), `resources/seon/schemas/seon.eval.edn`
 and `seon.cluster.eval.edn`, `src/seon/health.clj` (report), `test/seon/cluster/turn_test.clj`. Proof:
 `seon.cluster.turn-test/a-form-naming-a-handle-records-its-result-read` (D1), then a new
-`seon.cluster.turn-test/an-elision-form-on-a-cut-result-counts-as-a-dig-in` (evaluate `(vec (range 100))`, then
+`seon.cluster.turn-test/an-elision-form-on-a-cut-result-counts-as-a-followed-cut` (evaluate `(vec (range 100))`, then
 `(drop 32 result/eN)`; assert the second evaluation's result-reads name the first and the report counts one dig-in
-for that class) and `seon.health-test/the-budget-report-recommends-from-dig-in-rate` on fixture rows. Task:
+for that class) and `seon.health-test/the-budget-report-recommends-from-the-followed-cut-rate` on fixture rows. Task:
 `seon.turn.batch/the-display-budget-has-no-feedback` (new).
 
-**This census as first data.** Of 11 replies with elisions I dug into none, because the probes were synthetic; of the
+**This census as first data.** Of 11 replies with elisions I followed none, because the probes were synthetic; of the
 rest, where I needed more: `callers` (I wanted every caller, got 14 of 25 and a list of call sites), `source` of a
 library var (got nothing), `runtime_status` (needed one top fault, got five); where I needed less:
 `current-state` (about 80% world arguments), `doc`, the tests tail, the five `:unknown` gap messages after
-`ns-unmap!`. The loop sees only "needed more" (a dig-in); "needed less" shows as tokens shown on replies that were
-never read again, which the report can show per class (`shown-p50` against dig-in rate zero) but cannot tell from a reply read
+`ns-unmap!`. The loop sees only "needed more" (an elision form run on the cut); "needed less" shows as tokens shown on replies that were
+never read again, which the report can show per class (`shown-p50` against followed-cut rate zero) but cannot tell from a reply read
 and used in full. That limit is real and the report should say it.
 
 Dependency on other rows: PR-02 and PR-29 make the elision forms runnable and readable, which is what lets a dig-in be

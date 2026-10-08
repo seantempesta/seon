@@ -230,7 +230,7 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 - **The display budget is tuned by feedback, not guessed (owner 2026-10-08).** "We guessed at the budget. I want agents
   to tune it via feedback." The budget stays a dial with the per-form override; the system records, per reply, what
-  was shown and cut and whether the agent then dug in (ran an elision form, re-read the value, raised the budget) or
+  was shown and cut and whether the agent then followed the cut (ran an elision form, re-read the value, raised the budget) or
   ignored it, and reports per value schema where the budget is too small or too large; agents report budget friction
   as tasks; the dial's default and any per-schema adjustment follow that evidence. Lives in: reply census; row PR-30.
 

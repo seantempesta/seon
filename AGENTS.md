@@ -358,7 +358,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Deliver every error to whoever can act on it.** Seon's own failures are errors (the errors cut retires the
   separate fault concept). Every occurrence returns as data in the reply of the agent whose evaluation or call it
   happened in (the MCP reply for outside agents, the next context for Seon agents, both reading the same saved
-  observation), with a result handle to dig into; an agent's own mistake is only delivered. Target (the errors cut;
+  observation), with a result handle to follow; an agent's own mistake is only delivered. Target (the errors cut;
   today `seon.fault` records faults): the entrant records Seon's own errors once per signature at the task home, with
   a count, a task and one notification; repeats only count. A recorded error resolves when its producer is deleted, or
   when the producer changed and its task's proofs (at least one) ran green since. Recording without delivery, a log
