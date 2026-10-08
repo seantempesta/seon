@@ -1,13 +1,16 @@
 (ns my.program-test
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is testing]]
             [my.program :as program]
             [seon.config :as config]
             [seon.cluster.agent :as agent]
+            [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.program :as seon-program]
+            [clojure.java.io :as io]
             [seon.fn :as function]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -215,3 +218,49 @@
         (finally
           (agent/release-context! held)
           (registry/retire-branch! {:seon.store/store store :seon.store/branch branch}))))))
+
+(deftest write-branch!-writes-my-defn-into-its-file
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str "wbranch" suffix ".core"))
+        path (str "src/wbranch" suffix "/core.clj")
+        root (str "tmp/write-branch-test-" suffix)
+        file (io/file root path)
+        callee [:seon.fn/sym (symbol (str fixture-ns) "callee")]
+        replacement "(defn callee\n  \"Add one, by increment.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (inc x))"
+        cluster-name (str "wbranch" suffix)
+        home (cluster.branch/cluster-branch cluster-name)
+        branch (keyword (str "write-branch-" suffix))]
+    (io/make-parents file)
+    (spit file (str "(ns " fixture-ns "\n  \"Fixture.\"\n  (:require [clojure.test]))\n\n"
+                    "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+    (try
+      (let [entities (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})]
+        (support/transacted! h-conn (function/reconcile-tx (db/db h-conn) entities (mapv seon-program/row-identity entities)))
+        ;; A cluster of its own, whose head holds the indexed file: the branch compares against it.
+        (registry/branch! {:seon.store/store store :seon.store/branch home
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+        (registry/branch! {:seon.store/store store :seon.store/branch branch
+                           :seon.cluster.registry/from (registry/branch-commit-id {:seon.store/store store :seon.store/branch home})})
+        (let [held (agent/acquire-context! target nil {:seon.agent/branch branch})
+              connection (:seon.db/connection held)]
+          (try
+            (support/transacted! connection (support/replacement-tx (db/db connection) callee replacement {}))
+            (let [context {:seon.db/connection connection :seon.store/store store
+                           :seon.cluster/name cluster-name
+                           :seon.sci.eval/ctx (:seon.sci.eval/ctx held) :my.program/base-ctx (:seon.sci.eval/base-ctx held)}
+                  written (program/write-branch! {:my.program/context context :seon.fn/root root})
+                  branch-digest (:seon.program/definition-digest (db/pull (db/db connection) [:seon.program/definition-digest] callee))]
+              (testing "the branch's defn replaces the declaration in its file"
+                (is (= [(str "src/wbranch" suffix "/core.clj")] (:seon.source/changed-paths written)))
+                (is (= [callee] (get-in written [:seon.source/files 0 :seon.source/replaced]))))
+              (testing "the file reindexed from disk declares the branch's digest"
+                (is (= branch-digest
+                       (->> (function/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+                            (some #(when (= callee (seon-program/row-identity %)) (:seon.program/definition-digest %))))))))
+            (finally (agent/release-context! held)))))
+      (finally
+        (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) [branch home])
+        (support/delete-recursively! root)))))

@@ -959,7 +959,7 @@
         head (when-not (:seon.error/at head-id) (source/commit-database store head-id))
         compared (if head (source/compare-branch store held head) {:c-id head-id})
         refusal (some #(when (:seon.error/at %) %) [(:c-id compared) (:changed compared) (first (:maps compared))])]
-    (cond-> {:head head :compared compared}
+    (cond-> {:head head :head-id head-id :compared compared}
       refusal (assoc :answer refusal)
       (and (not refusal) (= held home)) (assoc :answer {:added [] :changed [] :removed []})
       (and (not refusal) (not= held home) (nil? (:three compared)))
@@ -987,6 +987,37 @@
   [context]
   (let [comparison (head-comparison context)]
     (try (or (:answer comparison) (diff-value (:compared comparison)))
+         (finally (release-comparison! comparison)))))
+
+(defn write-branch!
+  "Write your branch's declarations into their source files under `root`
+  without a merge (`seon.cluster.source/write-back!`): the changed, added and
+  removed declarations of `my.program/diff`, or the `:seon.program/identities`
+  you pass. Proven equivalent before an atomic install; answers the written
+  paths and digests.
+
+  Example:
+  (my.program/write-branch! {:seon.fn/root \"/path/to/checkout\"})
+  Edge cases: holding the cluster's own branch answers the empty difference; nothing is written.
+  Costs: one merge-base walk (as `my.program/diff`) and one analysis per written file."
+  {:malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.fn/root :seon.fn/root]
+                             [:seon.program/identities {:optional true} :seon.program/identity-set]]]
+                  [:or :seon.source/written :seon.source/write-back-error :seon.error/value]]}
+  [{context :my.program/context root :seon.fn/root given :seon.program/identities}]
+  (let [comparison (head-comparison context)
+        {:keys [head-id compared]} comparison
+        {:seon.program/keys [added changed-on-branch retracted]} (:three compared)
+        identities (or given (into #{} cat [added changed-on-branch retracted]))]
+    (try (cond (:seon.error/at (:answer comparison)) (:answer comparison)
+               (:answer comparison)
+               (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/write-branch!
+                 {:seon.error/message "Your branch is the cluster's own: there is nothing to write."})
+               :else
+               (source/write-back!
+                 {:seon.db/connection (:seon.db/connection context) :seon.fn/root root
+                  :seon.source/accepted {:seon.program/identities identities
+                                         :seon.source/base-commit-id head-id
+                                         :seon.source/commit-id (:c-id compared)}}))
          (finally (release-comparison! comparison)))))
 
 (defn declaration-diff
