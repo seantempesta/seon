@@ -111,4 +111,8 @@
  #:seon.task{:name "breaks-of-a-widely-used-function-shows-its-callers-twice"
              :kind :function
              :intent "(my.program/breaks {:seon.program/subject 'seon.db/pull}) is an 83,933-token value shown as 2,053 tokens: the 600-name :seon.program/callers set beside :seon.program/call-sites that already name every caller, and 2,274 :seon.program/gating tests, each cut by the value printer (context corpus, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Both groups are consumed by the retraction refusal and deletion report, so the producer keeps them. Done when :seon.program/breakage has a declared AI render showing each blocking relation's count with a few names and its requery, and the reply for seon.db/pull is under 600 tokens with no name shown twice."
-             :must-read #{my.program/breaks my.program/callers}}]
+             :must-read #{my.program/breaks my.program/callers}}
+ #:seon.task{:name "breaks-of-a-widely-used-function-allocates-a-gigabyte"
+             :kind :function
+             :intent "(my.program/breaks {:seon.program/subject 'seon.db/pull}) at an SCI agent's REPL allocated 1,200 MB in 622 ms (:large-allocation finding; context corpus row 15, default 56f176efc, 2026-10-09); at the JVM REPL the same read plus seon.fn/gating-tests and its render took 410 ms over 343,906 armed calls and 29,184 reads, for 610 call sites and 2,297 gating tests. Its AI render (my.program/render-breakage-ai) is 1 ms. Done when the read's allocation and reads follow its callers and gating set, measured with seon.profile/measure."
+             :must-read #{my.program/breaks seon.fn/gating-tests}}]
