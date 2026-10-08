@@ -726,15 +726,16 @@
   Baselines and outstanding work derive from admitted run/member facts, ordered
   by selection transaction. Calls, references and declared subjects use one
   union gate walk. Named requests retain their declared eligibility scope.
-  Green evidence from an earlier program is reusable when its reachable content
-  and external inputs still match; its tested provenance remains unchanged.
+  Completed evidence from an earlier program, green or red, is reused when its
+  reachable content and external inputs still match; its tested provenance
+  remains unchanged.
   Unknown coverage refuses. No filesystem reads occur."
   {:malli/schema [:=> [:cat :seon.test.selection/request]
                   [:or :seon.test.selection/result :seon.test/selection-error :seon.test/unknown-error :seon.test.run/unavailable-error
                    :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
   [{database :seon.db/db cluster :seon.test.run/cluster
     requested-namespaces :seon.test/namespaces requested-identities :seon.test/identities
-    supplied-basis :seon.test.run/change-basis-t :as request}]
+    supplied-basis :seon.test.run/change-basis-t rerun? :seon.test/rerun? :as request}]
   (try
     (if-not cluster
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
@@ -1032,24 +1033,27 @@
             loaded-drift? (when-let [loaded (:seon.test/loaded-source request)]
                             (not= loaded recorded))
             reuse-candidates (cond
-                               loaded-drift? {}
+                               (or loaded-drift? rerun?) {}
                                (and (= :incremental policy) (not work?)) eligible
                                :else reasons)
-            ;; Reuse is content-keyed: a green member's stored reach digest
+            ;; Reuse is content-keyed: a completed member's stored reach digest
             ;; against the current one, one batched read (B4 §2a). A member
-            ;; recorded without it is unknown and executes.
-            current-reach (let [greens (into [] (keep (fn [[test-symbol _]]
-                                                        (when-let [[_ member] (get latest test-symbol)]
-                                                          (when (and (green? member) (one member :seon.test.member/reach-digest)
-                                                                     (not (observed-reached test-symbol)))
-                                                            test-symbol))))
-                                             reuse-candidates)]
-                            (if (seq greens) (selection-read! (runner/reach-digests database greens)) {}))
+            ;; recorded without it, or not yet exited, is unknown and executes.
+            ;; A red is reused as a green is: the same tested program and inputs
+            ;; answer the same result, so it is answered from its record, never
+            ;; executed again (a member cut by its bound included, once exited).
+            current-reach (let [recorded (into [] (keep (fn [[test-symbol _]]
+                                                          (when-let [[_ member] (get latest test-symbol)]
+                                                            (when (and (complete? member) (one member :seon.test.member/reach-digest)
+                                                                       (not (observed-reached test-symbol)))
+                                                              test-symbol))))
+                                               reuse-candidates)]
+                            (if (seq recorded) (selection-read! (runner/reach-digests database recorded)) {}))
             reused (into (sorted-map)
                          (keep (fn [[test-symbol _]]
                                  (when-let [[run-eid member] (get latest test-symbol)]
                                    ;; Evidence naming no loaded program is unknown.
-                                   (when (and (green? member)
+                                   (when (and (complete? member)
                                               (one run-eid :seon.test.run/loaded-commit-id)
                                               (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
                                               (not (observed-reached test-symbol))
@@ -1066,8 +1070,24 @@
                                        :seon.test/run [:seon.test.run/id (one run-eid :seon.test.run/id)]
                                        :seon.test/recorded-basis-t (one member :seon.test.member/completed-tx)
                                        :seon.test/pass-count (one member :seon.test.member/pass-count)
-                                       :seon.test/fail-count 0 :seon.test/error-count 0}]))))
+                                       :seon.test/fail-count (one member :seon.test.member/fail-count)
+                                       :seon.test/error-count (one member :seon.test.member/error-count)}]))))
                          reuse-candidates)
+            ;; A reused red carries its recorded failure data, one batched read.
+            red-records (let [reds (into [] (keep (fn [[test-symbol result]] (when (pos? (+ (:seon.test/fail-count result) (:seon.test/error-count result))) test-symbol))) reused)]
+                          (if (seq reds)
+                            (into {} (keep #(when (:seon.test/sym %) [(:seon.test/sym %) %]))
+                                  (selection-read! (runner/latest-results database reds)))
+                            {}))
+            reused (into (sorted-map)
+                         (map (fn [[test-symbol result]]
+                                (let [record (get red-records test-symbol)]
+                                  [test-symbol
+                                   (cond-> result
+                                     (= (:seon.test/run result) (:seon.test/run record))
+                                     (merge (select-keys record [:seon.test.failure/reports :seon.test/failures :seon.test/failure-message
+                                                                 :seon.test/failing-assertions])))])))
+                         reused)
             reasons (apply dissoc reasons (keys reused))]
         (cond-> {:seon.test.run/basis-t basis-t
                  :seon.test.run/policy policy
@@ -2404,6 +2424,7 @@
                                 :seon.test.run/cluster [:seon.cluster/name cluster]
                                 :seon.test.run/policy policy
                                 :seon.test/include-long? (true? (:seon.test/include-long? request))}
+                         (:seon.test/rerun? request) (assoc :seon.test/rerun? true)
                          (seq identities) (assoc :seon.test/identities (set identities))
                          (seq namespaces) (assoc :seon.test/namespaces (set namespaces))
                          (seq (:seon.test/changed request))
@@ -2718,8 +2739,9 @@
   the declared rows; `:all` every eligible row). Selection and admission read
   and write the explicit `:seon.test/recording-connection`, which must hold the
   execution branch; `:seon.db/writer` (default `seon.db/transact!`)
-  writes admission and stop there. A member whose recorded green still holds is answered from
-  the record with `:seon.test/unchanged` and no execution.
+  writes admission and stop there. A member whose recorded result (green or red)
+  still holds is answered from the record with `:seon.test/unchanged` and no
+  execution, unless the request asks `:seon.test/rerun?`.
 
   Each executed member is an isolated agent for one body: a fresh branch off
   the request's world through `seon.cluster.agent/acquire-context!`. A cluster's
@@ -2732,7 +2754,8 @@
   `:seon.test/check-time-limit-ms` (request member or the cluster's dial); a
   body still live at the bound fails and keeps its branch; the rest of its
   request stops, and a later request holds (reports pending) only that test
-  until it exits.
+  until it exits; once exited, its recorded failure answers later requests at
+  the same reach digest.
   Members reaching a destructive owner or declaring a file-backed fixture
   are excluded in a JVM operating the development checkout, with the platform
   command. `:seon.test/passed?` is true only when every obligation has green

@@ -696,3 +696,26 @@
                                         (namespace-with-aliases (db/db branch) {'tsp 'clojure.set}))))
      (is (= [[:seon.ns/name 'reach.fixture]] (sut/changes child branch)) "a removed alias is a change of its namespace")
      (finally (agent/release-context! child)))))))
+
+(deftest ^{:seon/tasks #{'seon.test.runner/a-timed-out-unrelated-test-restarts-in-every-eval-request}}
+  an-unchanged-red-is-answered-from-its-record
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (define! connection '[:seon.test/sym reach.fixture/red-test] "(deftest red-test (is (= 2 (b 1))))")
+   (let [request #(sut/run {:seon.test/execution (support/execution-handle connection)
+                            :seon.test/recording-connection connection
+                            :seon.test/policy :named
+                            :seon.test/identities #{'reach.fixture/red-test}})
+         first-run (request)
+         again (request)]
+    (is (= [1 0] [(:seon.test/executed-count first-run) (:seon.test/reused-count first-run)]))
+    (is (= [0 1] [(:seon.test/executed-count again) (:seon.test/reused-count again)])
+        "the same program and inputs execute nothing")
+    (is (false? (:seon.test/passed? again)))
+    (is (= 1 (:seon.test/fail-count (first (:seon.test/results again)))))
+    (is (seq (:seon.test.failure/reports (first (:seon.test/results again)))) "the red keeps its failure data")
+    (define! connection '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+    (let [changed (request)]
+     (is (= 1 (:seon.test/executed-count changed)) "a changed reach executes again")
+     (is (true? (:seon.test/passed? changed))))))))

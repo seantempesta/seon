@@ -311,6 +311,7 @@
   [:seon.test/namespaces {:optional true} [:set :symbol]]
   [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.test/include-long? {:optional true} :boolean]
+  [:seon.test/rerun? {:optional true :description "Execute every selected test, reusing no recorded result: for a test whose outcome depends on inputs its reach does not capture."} :boolean]
   [:seon.test/check-time-limit-ms {:optional true} :seon.test/check-time-limit-ms]
   [:seon.test/batch-limit {:optional true} :seon.test/batch-limit]]
  :seon.test/loaded-source [:and {:description "The source commit this JVM loaded (its store's published head), supplied to selection."} :seon.source/commit-id]
