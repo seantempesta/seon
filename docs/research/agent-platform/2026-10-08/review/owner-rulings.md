@@ -148,6 +148,12 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 ## 5. Merge
 
+- **Root keeps only new behavior (owner 2026-10-08).** A task's proof first tags an existing failing test or adds a row
+  to an existing table test; a new deftest only when no test covers the behavior. At merge, root keeps a new deftest
+  only if it guards a behavior class no existing test covers (one regression per behavior class); otherwise it is
+  folded into a table row or dropped, decided in the merge review and recorded on the merge request. Suite growth
+  follows distinct behaviors, not task count. Lives in: AGENTS.md "Write tasks as data"; merge.md §4.
+
 - **Git's words.** Base merge and branch concepts, verbs, functions and data on git, so every agent understands them
   at once: main, branch, checked-out branch, merge request (`request-merge!`, `merge-requests`,
   `close-merge-request!`), source and target branch, merge base, merge branch, ours and theirs, unmerged, behind,

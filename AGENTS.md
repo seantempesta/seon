@@ -322,7 +322,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
   name; the task is `ns/name`), `:seon.task/intent` (what must become true, short), `:seon.task/must-read` (fully
   qualified symbols) and optional `:seon.task/evidence` (paths); `:seon.task/kind` is still required until its retirement row lands. Its proofs are the deftests carrying `ns/name` in
-  `:seon/tasks`, never prose: write or tag the proving test when you file the task; a task already green proves nothing.
+  `:seon/tasks`, never prose: prefer tagging an existing failing test or adding a row to an existing table test; write
+  a new deftest only for a behavior no test covers; a task already green proves nothing; at merge root keeps a new
+  test only if it guards a new behavior class.
   References are typed by plain EDN and must resolve: code is a backticked fully qualified symbol (Seon or library,
   e.g. `` `malli.core/validator` ``), a schema a backticked fully qualified keyword, any other file a relative path
   whose first segment names its base (the checkout, or `reference-code/<project>` at its pinned revision) with
