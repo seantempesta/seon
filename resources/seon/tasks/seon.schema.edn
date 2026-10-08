@@ -75,4 +75,8 @@
  #:seon.task{:name "a-committed-nilable-return-cannot-be-redefined"
              :kind :function
              :intent "Main holds seon.render.ns/first-doc-line with the contract [:=> [:cat [:maybe :string]] [:maybe :string]], but re-evaluating it, even unchanged, is refused at admission (\"has a bare nilable return\", `seon.schema.internal/assert-complete-schema!`), and [:or :nil :string] is refused the same way (fanout run, default e1a71b7c8, 2026-10-08: agent fan-doc spent 4 refused defns in one pass, then changed the return to :string, which breaks its five (when-let [line (first-doc-line doc)] ...) callers). An agent cannot fix a function whose committed contract the admission rule no longer accepts without rewriting its callers. Done when the rule and the committed program agree: every committed contract passes the rule that admits its redefinition, or the rule names the replacement shape an agent can use in place."
-             :must-read #{seon.schema.internal/assert-complete-schema! seon.render.ns/render-ai}}]
+             :must-read #{seon.schema.internal/assert-complete-schema! seon.render.ns/render-ai}}
+ #:seon.task{:name "the-durable-projection-cache-evicts-a-commits-entry-across-tests-sharing-a-jvm"
+             :kind :function
+             :intent "`seon.schema.projection-writer-test/a-new-branch-at-an-equal-commit-reads-the-held-projection` passes alone and with its own namespace but fails (one `seon.db/declaration-content-key` call) when run in one JVM with `seon.db-test` and `seon.schema-test` tests, at HEAD and with PB-08 (2026-10-09): the likely cause is the 24-entry durable projection cache (`seon.db/carried-projection`, `content-projection`) evicting the commit's entry. Either the bound is a dial sized from what projections weigh, or the test owns its cache state."
+             :must-read #{seon.db/carried-projection}}]
