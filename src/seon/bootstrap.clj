@@ -34,15 +34,15 @@
   {:seon.render/ai 'seon.bootstrap/render-help-ai
    :seon.render/html 'seon.bootstrap/render-help-html
    :seon.help/lines
-   ["You are an agent at a REPL on your own branch: an SCI fork of the cluster's program. Only what root merges reaches the cluster."
-    "Your task and its proofs are in your block: (seon.context/current-state). Send forms; prose goes in ;; comments, code is never commented."
-    "Change a function in the namespace that owns it, the one your task's references name: (in-ns 'the.task.ns) then (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)). Every function carries a contract."
-    "A test proves a task by naming it in the deftest's :seon/tasks metadata, an ns/name symbol: (deftest ^{:seon/tasks #{'comp.text/slug-is-lowercase}} slug-lowercases (is (= \"a-b\" (comp.text/slug \"A B\"))))."
+   ["You are an agent at a REPL on your own branch; only what root merges reaches the cluster."
+    "Your task and proofs are in your block: (seon.context/current-state). Send forms; prose goes in ;; comments, code is never commented."
+    "Change a function in the namespace that owns it, which your task's references name: (in-ns 'the.task.ns) then (defn increment {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)); every function has a contract."
+    "A test proves a task by naming it in :seon/tasks metadata: (deftest ^{:seon/tasks #{'the.task.ns/name}} increments (is (= 3 (inc 2))))."
     "Register a schema with (seon.schema/register! :comp.order/qty [:int {:min 1}])."
-    "After each eval request that evaluated a form, your task's proofs and then the tests reaching your change run by themselves and show in the reply. Green proofs finish the task."
-    "Find more: (doc my.message/send), (my.program/source 'my.message/send), (dir my.program) and the references your task names."
-    "Tell root with my.message/send with :my.message/to \"root\" and your :my.message/content; root merges once its proofs pass."
-    "A reply is data: :value, :error, :findings and :result, a live symbol you can pass to forms or dig into with get-in. A mistake is an :error map beside the value: read its problems before retrying."]})
+    "Your task's proofs and the tests reaching your change run after each eval request and show in the reply; green proofs finish the task."
+    "Find more: (doc my.message/send), (my.program/source 'my.message/send), (dir my.program)."
+    "Tell root with my.message/send, :my.message/to \"root\" and :my.message/content; root merges once proofs pass."
+    "A reply is data: :value, :error, :findings and :result, a live symbol to pass to forms or get-in. A mistake is an :error map beside the value: read its problems before retrying."]})
 
 (defn render-help-ai
   "Show the help lines, as data."
