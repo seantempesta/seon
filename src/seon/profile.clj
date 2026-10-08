@@ -4,7 +4,7 @@
 
   Each armed callable owns one cell of JDK accumulators, created when it is
   installed: a log2 latency histogram (one LongAdder per bucket, so calls are
-  its sum), total nanoseconds, lifetime maximum nanoseconds, entries (in flight
+  its sum), total nanoseconds, self nanoseconds, lifetime maximum nanoseconds, entries (in flight
   is entries minus calls) and throws by class. `seon.instrument` brackets every
   call with two `System/nanoTime` reads and updates the cell directly (`timed`);
   the call path constructs no map, reads no database and calls no armed
@@ -25,7 +25,9 @@
   zero (owner ruling): what survives a restart is what was stored.
 
   Times are inclusive wall time unless named self: a caller's total contains
-  its callees' and its waits.
+  its callees' and its waits; its self time is its total less its counted
+  armed callees' (what ran or waited in the callable's own body, and in any
+  unarmed code it called), so a wrapper ranks below the work it wraps.
 
   A call is one outermost entry per thread: a call that re-enters the same
   cell on its thread (one arity of a multi-arity function calling another
@@ -142,6 +144,7 @@
                                                        :seon.profile/scope :seon.profile/context])
                        {:seon.profile/histogram (into-array LongAdder (repeatedly buckets #(LongAdder.)))
                         :seon.profile/total-counter (LongAdder.)
+                        :seon.profile/self-counter (LongAdder.)
                         :seon.profile/max-counter (LongAccumulator. longest 0)
                         :seon.profile/entry-counter (LongAdder.)
                         :seon.profile/throw-counts (ConcurrentHashMap.)
@@ -182,6 +185,8 @@
          (:seon.profile/histogram cell#)
          ~(with-meta '__profile-total {:tag 'java.util.concurrent.atomic.LongAdder})
          (:seon.profile/total-counter cell#)
+         ~(with-meta '__profile-self {:tag 'java.util.concurrent.atomic.LongAdder})
+         (:seon.profile/self-counter cell#)
          ~(with-meta '__profile-max {:tag 'java.util.concurrent.atomic.LongAccumulator})
          (:seon.profile/max-counter cell#)
          ~(with-meta '__profile-entries {:tag 'java.util.concurrent.atomic.LongAdder})
@@ -261,6 +266,7 @@
          (let [~b (aget ~'__profile-histogram (seon.profile/bucket-of ~elapsed))]
            (. ~b ~'increment))
          (. ~'__profile-total ~'add ~elapsed)
+         (. ~'__profile-self ~'add self#)
          (. ~'__profile-max ~'accumulate ~elapsed)))))
 
 (defmacro timed
@@ -408,6 +414,7 @@
                                       :seon.profile/scope :seon.profile/context])
                    {:seon.profile/calls calls
                     :seon.profile/total-ms (quot total 1000000)
+                    :seon.profile/self-ms (quot (.sum ^LongAdder (:seon.profile/self-counter held)) 1000000)
                     :seon.profile/mean-us (if (pos? calls) (quot total (* 1000 calls)) 0)
                     :seon.profile/max-ms (quot (.get ^LongAccumulator (:seon.profile/max-counter held)) 1000000)
                     :seon.profile/throws (aget ^longs counted buckets)
@@ -415,23 +422,6 @@
       (pos? calls) (assoc :seon.profile/p50-us (upper-us (bucket-at (quantile-position counted calls 0.5)))
                           :seon.profile/p99-us (upper-us (bucket-at (quantile-position counted calls 0.99))))
       (seq by-class) (assoc :seon.profile/throws-by-class by-class))))
-
-(defn top
-  "Rank `population` by inclusive total and maximum; list maxima over one second.
-
-  The top `limit` definitions by each measure, and every definition whose
-  maximum exceeds one second."
-  {:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}
-   :malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/report]}
-  [population limit]
-  (let [observed (into [] (comp (map observation) (filter (comp pos? :seon.profile/calls))) population)
-        ranked (fn [k] (into [] (take limit) (sort-by k > observed)))]
-    {:seon.profile/cells (count population)
-     :seon.profile/observed (count observed)
-     :seon.profile/by-total (ranked :seon.profile/total-ms)
-     :seon.profile/by-max (ranked :seon.profile/max-ms)
-     :seon.profile/over-second
-     (into [] (filter #(< slow-ms (:seon.profile/max-ms %))) (sort-by :seon.profile/max-ms > observed))}))
 
 (def explained-calls
   "Armed calls since a world's previous transaction from which its work is
@@ -612,32 +602,29 @@
                            " proportional to (the whole program? the store? the call count?).")]
                      (rest %))))))
 
-(defn- observation-line
-  {:malli/schema [:=> [:cat :seon.profile/observation] :string]}
-  [{sym :seon.profile/sym calls :seon.profile/calls total :seon.profile/total-ms
-    maximum :seon.profile/max-ms throws :seon.profile/throws scope :seon.profile/scope}]
-  (str sym " inclusive total " total " ms, max " maximum " ms, x" calls
-       (when (pos? throws) (str ", " throws " threw"))
-       (when (= :seon.profile/context scope) " [SCI]")))
-
 (defn summary
-  "`top` as one line per definition, for status surfaces an agent reads.
+  "The definitions that did the work, once, as data: `limit` rows ranked by
+  self time (then inclusive total), and how many definitions had a call over
+  one second.
 
-  Every time is inclusive: a caller's line contains its callees', so nested
-  definitions repeat down a call chain; no self time is derived.
-
-  Over-second lines are bounded by `limit` too; the count says how many
-  definitions exceeded one second in all."
-  {:malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/summary]}
+  A row is the definition's calls, self, inclusive and maximum milliseconds,
+  with its throws when it threw and `:seon.profile/scope` when it is an SCI
+  wrapper. Self time is the row's own body and unarmed callees; a wrapper whose
+  callback does the work ranks by its own time, and its callee's row carries
+  the work. The maximum is one call, inclusive."
+  {:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}
+   :malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/summary]}
   [population limit]
-  (let [{by-total :seon.profile/by-total by-max :seon.profile/by-max
-         over :seon.profile/over-second observed :seon.profile/observed}
-        (top population limit)]
-    {:seon.profile/observed observed
-     :seon.profile/over-second-count (count over)
-     :seon.profile/by-total-lines (mapv observation-line by-total)
-     :seon.profile/by-max-lines (mapv observation-line by-max)
-     :seon.profile/over-second-lines (into [] (comp (take limit) (map observation-line)) over)}))
+  (let [observed (into [] (comp (map observation) (filter (comp pos? :seon.profile/calls))) population)
+        row (fn [{:seon.profile/keys [sym calls self-ms total-ms max-ms throws scope]}]
+              (cond-> {:seon.profile/sym sym :seon.profile/calls calls :seon.profile/self-ms self-ms
+                       :seon.profile/total-ms total-ms :seon.profile/max-ms max-ms}
+                (pos? throws) (assoc :seon.profile/throws throws)
+                (= :seon.profile/context scope) (assoc :seon.profile/scope scope)))]
+    {:seon.profile/observed (count observed)
+     :seon.profile/over-second-count (count (filter #(< slow-ms (:seon.profile/max-ms %)) observed))
+     :seon.profile/by-self (into [] (comp (take limit) (map row))
+                                 (sort-by (juxt :seon.profile/self-ms :seon.profile/total-ms) #(compare %2 %1) observed))}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A measured call — JVM counters around one function, as data
@@ -651,9 +638,10 @@
 (defn measure
   "Call `f` once and return its value beside what the call cost, read from
   JVM counters, so compiled work inside it counts: wall ms, allocated bytes,
-  GC collections and their accumulated time, armed calls by symbol (host
-  and SCI wrappers' outermost entries) and the reads among them
-  (`read-entrances`). A thrown exception propagates.
+  GC collections and their accumulated time, the armed definitions ranked by
+  self time and by calls (host and SCI wrappers' outermost entries, at most
+  `hot-limit` each) and the count of reads among them (`read-entrances`). A
+  thrown exception propagates.
 
   Every counter but a platform thread's allocation is JVM-wide over the
   call's window, so concurrent unrelated work counts too: allocation on a
@@ -671,11 +659,16 @@
         collected (fn [] (reduce (fn [[n ms] ^java.lang.management.GarbageCollectorMXBean gc-bean]
                                    [(+ n (max 0 (.getCollectionCount gc-bean))) (+ ms (max 0 (.getCollectionTime gc-bean)))])
                                  [0 0] (java.lang.management.ManagementFactory/getGarbageCollectorMXBeans)))
+        ;; symbol -> [entries self-nanos], summed over the symbol's cells
         entries (fn [] (persistent!
                         (reduce (fn [m ^java.util.Set members]
                                   (reduce (fn [m held]
-                                            (let [n (.sum ^LongAdder (:seon.profile/entry-counter held))]
-                                              (if (pos? n) (assoc! m (:seon.profile/sym held) (+ n (get m (:seon.profile/sym held) 0))) m)))
+                                            (let [n (.sum ^LongAdder (:seon.profile/entry-counter held))
+                                                  sym (:seon.profile/sym held)
+                                                  [n0 self0] (get m sym [0 0])]
+                                              (if (pos? n)
+                                                (assoc! m sym [(+ n n0) (+ self0 (.sum ^LongAdder (:seon.profile/self-counter held)))])
+                                                m)))
                                           m (.toArray members)))
                                 (transient {}) (.values ^ConcurrentHashMap roster))))
         entries-before (entries)
@@ -686,15 +679,22 @@
         ms (/ (Math/round (/ (- (System/nanoTime) started) 1e4)) 100.0)
         [_ allocated-after] (allocated)
         [gc-after gc-ms-after] (collected)
-        called (into (sorted-map)
-                     (keep (fn [[sym n]] (let [d (- n (get entries-before sym 0))] (when (pos? d) [sym d]))))
-                     (entries))]
+        called (into []
+                     (keep (fn [[sym [n self]]]
+                             (let [[n0 self0] (get entries-before sym [0 0])
+                                   d (- n n0)]
+                               (when (pos? d)
+                                 {:seon.profile/sym sym :seon.profile/calls d
+                                  :seon.profile/self-ms (quot (- self self0) 1000000)}))))
+                     (entries))
+        ranked (fn [k] (into [] (take hot-limit) (sort-by k #(compare %2 %1) called)))]
     {:seon.profile/value value
      :seon.profile/ms ms
      :seon.profile/alloc-bytes (max 0 (- allocated-after allocated-before))
      :seon.profile/alloc-scope scope
      :seon.profile/gc-count (- gc-after gc-before)
      :seon.profile/gc-ms (- gc-ms-after gc-ms-before)
-     :seon.profile/calls (reduce + 0 (vals called))
-     :seon.profile/reads (reduce + 0 (vals (select-keys called read-entrances)))
-     :seon.profile/called called}))
+     :seon.profile/calls (transduce (map :seon.profile/calls) + 0 called)
+     :seon.profile/reads (transduce (comp (filter (comp read-entrances :seon.profile/sym)) (map :seon.profile/calls)) + 0 called)
+     :seon.profile/ranked-by-self (ranked (juxt :seon.profile/self-ms :seon.profile/calls))
+     :seon.profile/ranked-by-calls (ranked :seon.profile/calls)}))

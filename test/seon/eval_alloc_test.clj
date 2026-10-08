@@ -39,10 +39,11 @@
            reads (:seon.repl/value
                   (call "(select-keys (seon.profile/measure
                                         (fn [] (dotimes [_ 3] (seon.db/pull '[:db/ident] [:db/ident :db/ident]))))
-                           [:seon.profile/reads :seon.profile/called])"))]
+                           [:seon.profile/reads :seon.profile/ranked-by-calls])"))]
        (is (= 6250000 (:seon.profile/value allocation)))
        (is (<= 50000000 (:seon.profile/alloc-bytes allocation) 80000000))
        (is (= :jvm (:seon.profile/alloc-scope allocation)) "SCI evaluates on a virtual thread")
-       (is (= 3 (get-in reads [:seon.profile/called 'seon.db/pull]))
+       (is (= 3 (some #(when (= 'seon.db/pull (:seon.profile/sym %)) (:seon.profile/calls %))
+                       (:seon.profile/ranked-by-calls reads)))
            "compiled seon.db reads made from SCI are counted")
        (is (<= 3 (:seon.profile/reads reads)))))))

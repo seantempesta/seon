@@ -22,6 +22,7 @@
                                  :description "The log2 latency histogram: bucket b counts outermost calls of [2^(b-1), 2^b) ns; calls are its sum."}
                            seon.profile/histogram?]
  :seon.profile/total-counter :seon.profile/adder
+ :seon.profile/self-counter :seon.profile/adder
  :seon.profile/max-counter :seon.profile/accumulator
  :seon.profile/entry-counter [:and {:description "Outermost entries; in flight is entries minus calls."} :seon.profile/adder]
  :seon.profile/throw-counts [:fn {:error/message "must be a java.util.concurrent.ConcurrentHashMap of Class to LongAdder"
@@ -41,6 +42,7 @@
   [:seon.profile/context {:optional true} :seon.profile/context]
   [:seon.profile/histogram :seon.profile/histogram]
   [:seon.profile/total-counter :seon.profile/total-counter]
+  [:seon.profile/self-counter :seon.profile/self-counter]
   [:seon.profile/max-counter :seon.profile/max-counter]
   [:seon.profile/entry-counter :seon.profile/entry-counter]
   [:seon.profile/throw-counts :seon.profile/throw-counts]
@@ -54,6 +56,7 @@
   [:seon.profile/context {:optional true} :seon.profile/context]]
  :seon.profile/calls [:int {:min 0 :description "Completed outermost calls per thread (a re-entry through the same wrapper is inside its caller's): returns and throws both count."}]
  :seon.profile/total-ms [:int {:min 0 :description "Inclusive wall milliseconds."}]
+ :seon.profile/self-ms [:int {:min 0 :description "Wall milliseconds in the definition's own body and unarmed callees: total less its counted armed callees'."}]
  :seon.profile/mean-us [:int {:min 0}]
  :seon.profile/max-ms [:int {:min 0 :description "Lifetime maximum of one call, inclusive."}]
  :seon.profile/throws [:int {:min 0}]
@@ -69,6 +72,7 @@
   [:seon.profile/context {:optional true} :seon.profile/context]
   [:seon.profile/calls :seon.profile/calls]
   [:seon.profile/total-ms :seon.profile/total-ms]
+  [:seon.profile/self-ms :seon.profile/self-ms]
   [:seon.profile/mean-us :seon.profile/mean-us]
   [:seon.profile/max-ms :seon.profile/max-ms]
   [:seon.profile/throws :seon.profile/throws]
@@ -120,18 +124,6 @@
  :seon.profile/world-counter [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray of five slots"
                                    :description "One executed definition's counter in a world's call sink: [calls nanos self-nanos calls-at-last-transaction self-at-last-transaction] (seon.profile/new-adder)."}
                               seon.profile/world-counter?]
- :seon.profile/cells [:int {:min 0}]
- :seon.profile/observed [:int {:min 0}]
- :seon.profile/by-total [:vector :seon.profile/observation]
- :seon.profile/by-max [:vector :seon.profile/observation]
- :seon.profile/over-second [:vector :seon.profile/observation]
- :seon.profile/report
- [:map
-  [:seon.profile/cells :seon.profile/cells]
-  [:seon.profile/observed :seon.profile/observed]
-  [:seon.profile/by-total :seon.profile/by-total]
-  [:seon.profile/by-max :seon.profile/by-max]
-  [:seon.profile/over-second :seon.profile/over-second]]
  :seon.profile/started-ns :int
  :seon.profile/snapshot [:fn {:error/message "must be the counter snapshot seon.profile/begin takes"
                               :description "Each live cell's entry and total counts, keyed by its entry counter."}
@@ -159,17 +151,23 @@
   [:seon.profile/by-calls :seon.profile/by-calls]
   [:seon.profile/calls :seon.profile/calls]
   [:seon.profile/lines :seon.profile/lines]]
- :seon.profile/over-second-count [:int {:min 0}]
- :seon.profile/by-total-lines [:vector :string]
- :seon.profile/by-max-lines [:vector :string]
- :seon.profile/over-second-lines [:vector :string]
+ :seon.profile/observed [:int {:min 0}]
+ :seon.profile/over-second-count [:int {:min 0 :description "Definitions with a call over one second (inclusive)."}]
+ :seon.profile/call-row
+ [:map {:description "One definition's calls, self and inclusive milliseconds and its longest call."}
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/self-ms :seon.profile/self-ms]
+  [:seon.profile/total-ms :seon.profile/total-ms]
+  [:seon.profile/max-ms :seon.profile/max-ms]
+  [:seon.profile/throws {:optional true} [:int {:min 1}]]
+  [:seon.profile/scope {:optional true} [:= :seon.profile/context]]]
+ :seon.profile/by-self [:vector {:description "The definitions ranked by self time, then inclusive total."} :seon.profile/call-row]
  :seon.profile/summary
  [:map
   [:seon.profile/observed :seon.profile/observed]
   [:seon.profile/over-second-count :seon.profile/over-second-count]
-  [:seon.profile/by-total-lines :seon.profile/by-total-lines]
-  [:seon.profile/by-max-lines :seon.profile/by-max-lines]
-  [:seon.profile/over-second-lines :seon.profile/over-second-lines]]
+  [:seon.profile/by-self :seon.profile/by-self]]
  :seon.profile/thunk [:=> {:description "A function of no arguments whose one call is measured."} [:cat]
                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                              :seon.schema.admission/reason "seon.profile/measure returns whatever the measured function returns."
@@ -183,8 +181,14 @@
  :seon.profile/alloc-scope [:enum {:description ":thread: the calling platform thread's own count, which misses work handed to other threads. :jvm: every thread's (a virtual thread has no count of its own), which holds that work and any unrelated concurrent work."} :thread :jvm]
  :seon.profile/gc-count [:int {:min 0 :description "Collections every collector (GarbageCollectorMXBean) completed over the measured call, JVM-wide."}]
  :seon.profile/gc-ms [:int {:min 0 :description "Collection time every collector accumulated over the measured call, JVM-wide: pause time for G1's young and old collectors, cycle time for its concurrent one."}]
- :seon.profile/called [:map-of {:description "Outermost entries of armed functions (host and SCI wrappers) over the measured call, by symbol, JVM-wide."} :qualified-symbol [:int {:min 1}]]
- :seon.profile/reads [:int {:min 0 :description "The entries among :seon.profile/called of seon.profile/read-entrances: database reads through seon.db."}]
+ :seon.profile/ranked-by-calls [:vector {:description "The armed definitions entered over the measured call, most entries first (at most seon.profile/hot-limit): its repeated work."} :seon.profile/entered-row]
+ :seon.profile/entered-row
+ [:map {:description "One armed definition's outermost entries over a measured call and the self time they used (JVM-wide)."}
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/self-ms :seon.profile/self-ms]]
+ :seon.profile/ranked-by-self [:vector {:description "The armed definitions entered over the measured call, most self time first (at most seon.profile/hot-limit): where the time went, wrappers below the work they wrap."} :seon.profile/entered-row]
+ :seon.profile/reads [:int {:min 0 :description "The entries of seon.profile/read-entrances among the measured call's armed entries: database reads through seon.db."}]
  :seon.profile/measured-call
  [:map {:description "One measured call (seon.profile/measure): its value and what it cost, from JVM counters."}
   [:seon.profile/value :seon.profile/value]
@@ -195,4 +199,5 @@
   [:seon.profile/gc-ms :seon.profile/gc-ms]
   [:seon.profile/calls :seon.profile/calls]
   [:seon.profile/reads :seon.profile/reads]
-  [:seon.profile/called :seon.profile/called]]}
+  [:seon.profile/ranked-by-self :seon.profile/ranked-by-self]
+  [:seon.profile/ranked-by-calls :seon.profile/ranked-by-calls]]}

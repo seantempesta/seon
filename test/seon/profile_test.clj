@@ -16,7 +16,7 @@
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent.atomic LongAccumulator LongAdder]))
+  (:import [java.util.concurrent.atomic LongAdder]))
 
 (defn- preserving-roots
   [body]
@@ -156,29 +156,6 @@
     (is (= {:seon.profile/calls 3 :seon.profile/throws 1} (calls))
         "a throw leaves the thread outside the cell, so the next entry counts")))
 
-(deftest reads-rank-by-total-and-maximum-and-list-maxima-over-one-second
-  (let [fast (profile/cell {:seon.profile/sym 'probe/fast :seon.profile/scope :seon.profile/host})
-        slow (profile/cell {:seon.profile/sym 'probe/slow :seon.profile/scope :seon.profile/host})
-        idle (profile/cell {:seon.profile/sym 'probe/idle :seon.profile/scope :seon.profile/host})
-        record! (fn [held nanos]
-                  (.increment ^LongAdder (aget ^objects (:seon.profile/histogram held) (profile/bucket nanos)))
-                  (.add ^LongAdder (:seon.profile/total-counter held) nanos)
-                  (.accumulate ^LongAccumulator (:seon.profile/max-counter held) nanos))]
-    (dotimes [_ 5000] (record! fast 1000000))
-    (record! slow 1500000000)
-    (let [report (profile/top [fast slow idle] 1)]
-      (is (= 3 (:seon.profile/cells report)))
-      (is (= 2 (:seon.profile/observed report)) "a cell with no calls is not observed")
-      (is (= ['probe/fast] (mapv :seon.profile/sym (:seon.profile/by-total report))))
-      (is (= ['probe/slow] (mapv :seon.profile/sym (:seon.profile/by-max report))))
-      (is (= [{:seon.profile/sym 'probe/slow :seon.profile/calls 1 :seon.profile/max-ms 1500}]
-             (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/max-ms])
-                   (:seon.profile/over-second report))))
-      (is (= {:seon.profile/over-second-count 1
-              :seon.profile/over-second-lines ["probe/slow inclusive total 1500 ms, max 1500 ms, x1"]}
-             (select-keys (profile/summary [fast slow idle] 1)
-                          [:seon.profile/over-second-count :seon.profile/over-second-lines]))))))
-
 (deftest an-explanation-names-the-definitions-whose-counters-grew
   (let [var-name (symbol (str "explained-" (random-uuid)))]
     (try
@@ -217,6 +194,26 @@
   (profile/cell {:seon.profile/sym (symbol "seon.profile-test" (str label "-" (random-uuid)))
                  :seon.profile/digest (digest-of label)
                  :seon.profile/scope :seon.profile/host}))
+
+(deftest profile-summary-returns-call-data-once
+  (let [inner-cell (probe-cell "inner")
+        outer-cell (probe-cell "outer")
+        idle (profile/cell {:seon.profile/sym 'probe/idle :seon.profile/scope :seon.profile/host})
+        inner (profile/with-cell inner-cell (fn [] (profile/timed (Thread/sleep 30))))
+        outer (profile/with-cell outer-cell (fn [] (profile/timed (inner))))
+        _ (outer)
+        summary (profile/summary [outer-cell inner-cell idle] 5)
+        [first-row second-row :as rows] (:seon.profile/by-self summary)]
+    (is (= 2 (:seon.profile/observed summary)) "a cell with no calls is not observed")
+    (is (= [(:seon.profile/sym inner-cell) (:seon.profile/sym outer-cell)] (mapv :seon.profile/sym rows))
+        "the callee that did the work ranks above the wrapper that only called it")
+    (is (<= 25 (:seon.profile/self-ms first-row)))
+    (is (<= (:seon.profile/self-ms second-row) 5) "a wrapper's self time excludes its callee's")
+    (is (<= 25 (:seon.profile/total-ms second-row)) "its inclusive total still contains the callee's")
+    (is (= #{:seon.profile/observed :seon.profile/over-second-count :seon.profile/by-self}
+           (set (keys summary))) "one list of call data, no string rows or repeated rankings")
+    (is (every? map? rows))
+    (is (= 1 (count (:seon.profile/by-self (profile/summary [outer-cell inner-cell] 1)))))))
 
 (deftest a-cell-counts-each-call-into-its-histogram-gauge-and-throws-by-class
   (let [held (probe-cell "histogram")
