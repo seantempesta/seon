@@ -87,10 +87,12 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 - **Wire formats are experiments**: transcript, chat turns and prefix continuation are adapters over stored exchanges
   chosen by configuration; measure provider token counts, never assume. Lives in: agent-loop.md §3.4; ledger CS-03a-c.
 
-- **The 2,000-token default is per eval reply, not the context (owner 2026-10-08).** "each eval can output 2000 tokens
-  btw not the entire context ... a hairy task should pull in a lot of helpful references and context we shouldn't be
-  limiting it to 2000 tokens." The current-state block has its own budget dial, a fraction of the model's context
-  window (default 0.1). Lives in: agent-loop.md §2 "Context tokens"; card CS-02.
+- **Every REPL evaluation is its own context unit; no block budget (owner 2026-10-08).** "each eval can output 2000
+  tokens btw not the entire context ... a hairy task should pull in a lot of helpful references" and "No block budget.
+  Stick with REPL evals all being individual context." The 2,000-token default is one evaluation's display budget. The
+  current-state block is an ordinary evaluation under that budget (with the usual override); a task needing more
+  context gets it through more evaluations (`doc`, `source`, its references), and the context is their sum. Lives in:
+  agent-loop.md §2 "Context tokens"; card CS-02.
 
 ## 4. Tasks and tests
 

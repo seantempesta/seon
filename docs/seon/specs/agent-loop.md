@@ -118,11 +118,11 @@ function may put the same key on its returned data. A hard ceiling follows the m
 override above the default adds one short finding with its token count.
 
 **Context tokens.** The current-state block follows the growing history, so it is never prefix-cached; its size is a
-per-call cost. It is NOT bound by the 2,000-token default, which is one eval reply's display budget: a hairy task
-pulls in as many references, proofs and definitions as it names. The block has its own budget, a dial expressed as a
-fraction of the model's context window (`:seon.config.context/block-window-fraction`, default 0.1), so it scales with
-the model and is never a fixed literal; past it the value printer elides with ordinary elision forms. A quiet block is
-a few hundred tokens; each red proof adds its data. The
+per-call cost. There is no separate block budget: the block is one REPL evaluation like any other, shown by the
+value printer under the ordinary per-evaluation display budget (2,000 tokens by default, with the usual
+`seon.print/*budget*` override). The context is the sum of individual evaluations: a hairy task pulls in more by
+evaluating more (`doc`, `source`, its references one at a time), never by enlarging one block. A quiet block is a few
+hundred tokens. The
 static prefix and the history are cache hits on every call after their first (`:seon.ai.usage/cached-tokens`).
 
 **Model eval request owners and their end state.** Base-context construction: zero in any eval request (one shared incremental base,
