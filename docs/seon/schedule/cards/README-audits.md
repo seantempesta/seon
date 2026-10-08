@@ -269,14 +269,14 @@ fully specified in the ledger and its card is this lane's next batch.
 | Row | Card | State |
 |---|---|---|
 | UL-3a | [UL-3a](UL-3a.md) | ready |
-| UL-3b | — | waits on root's split of eight test conversions |
+| UL-3b | [UL-3b](UL-3b.md) (3b1..3b4; 17 sites, not eight) | ready after UL-3a |
 | UL-4 | [UL-4](UL-4.md) | ready |
 | UL-5 | [UL-5](UL-5.md) (UL-5a; UL-5b noted) | ready after PB-07a |
 | UL-6 | [UL-6](UL-6.md) | ready after led-cacheb releases `cluster/agent.clj` |
 | UL-7 | [UL-7](UL-7.md) | ready |
-| UL-8 | card next | waits on led-nk1, led-cacheb |
+| UL-8 | [UL-8](UL-8.md) (8a, 8b) | ready |
 | UL-9 | — | waits on task `seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check` |
-| UL-10 | — | ready once carded (AU-Q1 answered) |
+| UL-10 | [UL-10](UL-10.md) (Opus; probe decides part 2) | ready after its file holders |
 | UL-10b, UL-12 … UL-25, DEPS-1 | — | rows from the answers; each waits on its fork row or file release (ledger) |
 | FK-MALLI, FK-KONDO, FK-DH, FK-ASYNC, FK-SCI | — | fork rows, one fork commit and one bump each; root batches the restarts |
 | UL-11 | [UL-11](UL-11.md) | ready (diagnosis) |
@@ -285,7 +285,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-G2 | — | after SR-L |
 | SR-T | [SR-T](SR-T.md) | retired: superseded by SP-1a, SP-3, SP-4 (cards-storage-point) |
 | SR-S | [SR-S](SR-S.md) | ready |
-| SR-ENUMa | card next | after SR-L, SR-S |
+| SR-ENUMa | [SR-ENUMa](SR-ENUMa.md) | after SR-L, SR-S |
 | SR-ENUMb | — | after SR-ENUMa |
 | SR-PERMIT | [SR-PERMIT](SR-PERMIT.md) (Opus) | after SR-P, led-cacheb, blob-konserve |
 | SR-EFFECT | — | after EN-1 |
@@ -300,7 +300,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | PB-07b | [PB-07b](PB-07b.md) (b1, b2) | after PB-07a, led-ul2 (b1), led-cacheb (b2) |
 | PB-08 | — | waits on led-cacheb (Opus) |
 | PB-09 | — | after S4-01 |
-| PB-10 | — | ready after led-cacheb (AU-Q12 answered) |
+| PB-10 | [PB-10](PB-10.md) (Opus) | ready |
 | PB-11 | — | after PB-03 (Opus) |
 | PB-12 | [PB-12](PB-12.md) (PB-12a fork, PB-12b Seon) | ready |
 | PB-13 | — | after PB-07b |
