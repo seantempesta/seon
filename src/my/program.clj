@@ -103,7 +103,7 @@
      "This supplied database value answers; callers outside its program graph are unknown."}]})
 
 (defn- caller-data
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject :int] [:map [:seon.program/callers {:optional true} :seon.program/callers] [:seon.program/call-sites {:optional true} :seon.program/call-sites]]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject :int] [:map [:seon.program/callers {:optional true} :seon.program/callers] [:seon.program/call-sites {:optional true} :seon.program/call-sites] [:seon.fn/declared-arities {:optional true} :seon.fn/declared-arities]]]}
   [database subject entity]
   (let [read! (fn [result]
                 (if (:seon.db/invalid-read result) (throw (ex-info (:seon.error/message result) result)) result))
@@ -124,16 +124,16 @@
                                      (:seon.fn/call-arities entity-map))
                         site (cond-> {:seon.fn/sym caller}
                                (:seon.fn/form-span entity-map)
-                               (assoc :seon.fn/form-span (:seon.fn/form-span entity-map))
-                               (seq declared) (assoc :seon.fn/declared-arities declared))]
+                               (assoc :seon.fn/form-span (:seon.fn/form-span entity-map)))]
                     (if (seq counts)
                       (map #(assoc site :seon.fn/call-arity %) (sort counts))
                       [site])))]
     (present-groups {:seon.program/callers callers
-                     :seon.program/call-sites (vec (mapcat site-of sorted pulled))})))
+                     :seon.program/call-sites (vec (mapcat site-of sorted pulled))
+                     :seon.fn/declared-arities declared})))
 
 (defn callers
-  "Read direct callers and their declaration spans and recorded call arities.
+  "Read each direct caller once, as a call site with its declaration span and recorded call arity, and the subject's declared arities once.
 
   Empty groups are absent; unknown coverage remains explicit.
   Example:
@@ -145,7 +145,7 @@
                #(let [{identity :seon.program/identity entities :seon.program/entities}
                       (locate database subject)]
                   (merge (observation database subject identity)
-                         (caller-data database subject (first entities))))))
+                         (dissoc (caller-data database subject (first entities)) :seon.program/callers)))))
 
 (defn tests-reaching
   "Read the current gate set, derived by seon.fn/gate-set.

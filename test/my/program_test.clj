@@ -15,7 +15,8 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(deftest program-reads-name-the-referrers-and-propose-without-writing
+(deftest ^{:seon/tasks #{'my.program/callers-lists-each-call-site-with-the-callees-arities}}
+  program-reads-name-the-referrers-and-propose-without-writing
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -31,7 +32,8 @@
            valid? (schema/projection-validator (schema/handed-projection) :seon.program/breakage)]
        (is (not (:seon.error/at report)))
        (is (= expected (:seon.program/callers report)))
-       (is (= expected (:seon.program/callers caller-report)))
+       (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites caller-report)))))
+       (is (not (contains? caller-report :seon.program/callers)) "callers lists each caller once, as a call site")
        (is (= expected (set (map :seon.fn/sym (:seon.program/call-sites report)))))
        (is (every? :seon.fn/form-span (:seon.program/call-sites report)))
        (let [arities (db/q '[:find [?arity ...] :in $ ?target
@@ -41,8 +43,9 @@
                                               [:seon.fn.arity/min :seon.fn.arity/max])
                                 arities))
              sites (:seon.program/call-sites caller-report)]
-         (is (every? #(= declared (set (:seon.fn/declared-arities %))) sites)
-             "every call site carries the subject's declared arities")
+         (is (= declared (set (:seon.fn/declared-arities caller-report)))
+             "the subject's declared arities are stated once")
+         (is (not-any? :seon.fn/declared-arities sites) "no call site repeats them")
          (is (some :seon.fn/call-arity sites) "a caller with a recorded call arity carries it"))
        (is (seq (:seon.program/gating report)))
        (is (= (function/gate-set database 'seon.turn/open?) (:seon.program/gating tests))

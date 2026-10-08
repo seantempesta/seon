@@ -199,8 +199,7 @@
   [:map
    [:seon.fn/sym :qualified-symbol]
    [:seon.fn/form-span {:optional true} :seon.fn/form-span]
-   [:seon.fn/call-arity {:optional true} :seon.fn/call-arity]
-   [:seon.fn/declared-arities {:optional true} :seon.fn/declared-arities]]]
+   [:seon.fn/call-arity {:optional true} :seon.fn/call-arity]]]
  :seon.program/render-declared-by
  [:set [:map [:seon.schema/key :seon.schema/key]
         [:seon.schema/property [:enum :seon.render/ai :seon.render/html]]]]
@@ -241,6 +240,7 @@
   [:seon.program/callers {:optional true} :seon.program/callers]
   [:seon.program/references {:optional true} :seon.program/references]
   [:seon.program/call-sites {:optional true} :seon.program/call-sites]
+  [:seon.fn/declared-arities {:optional true} :seon.fn/declared-arities]
   [:seon.program/subject-of {:optional true} :seon.program/subject-of]
   [:seon.program/stale-reach {:optional true} :seon.program/stale-reach]
   [:seon.program/gating {:optional true} :seon.program/gating]

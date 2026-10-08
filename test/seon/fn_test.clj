@@ -2298,7 +2298,7 @@
               (get-in entity [:seon.fn/file
                            :seon.fn.file/relative-path])))
        (is (some #(= "seon.cluster.process" (namespace %))
-                 (:seon.program/callers callers)))))))
+                 (map :seon.fn/sym (:seon.program/call-sites callers))))))))
 
 (deftest the-walked-root-travels-with-its-file-relative-to-the-publication
   (let [root (fixture-root)]
