@@ -21,4 +21,8 @@
  #:seon.task{:name "the-codec-reprints-values-to-compare-them"
              :kind :function
              :intent "Storing an EDN slot printed every keyword and symbol through `seon.id/printed` to check it reads back, sorted every map and set with `seon.print/compare-values`, and decoding printed the read value again to judge it canonical. An eval request whose call read 440,605 times recorded 440,605 read-evidence rows (8,266 distinct) and spent about 66 s in `seon.turn/receipt-settle-batch-call` encoding them (default 2026-10-08). Done when equal reads are one evidence row, an identifier's readability is decided once, maps and sets of one natural-order class sort by `compare`, and a read never prints. Left: `seon.schema.datahike/storage-compare` still falls back to printed text for two distinct same-class values `compare` cannot order; replacing it changes the stored order of such values and is the owner's storage decision."
-             :must-read #{seon.schema.datahike/storage-compare seon.db/read-evidence seon.turn/receipt-settle-batch-call}}]
+             :must-read #{seon.schema.datahike/storage-compare seon.db/read-evidence seon.turn/receipt-settle-batch-call}}
+ #:seon.task{:name "a-slot-refusal-copies-the-whole-stored-value"
+             :kind :function
+             :intent "`seon.schema.datahike/refuse-slot!` puts the whole offending value under `:seon.schema.datahike/value`, so a refused EDN slot carries a copy of the stored text: one refused 300-keyword dependency plan answered an MCP reply of about 3,000 tokens, the whole set printed (default 2026-10-08). Errors hold references, never copies: the refusal names the attribute, the rule and the value's size or digest. Done when a refused slot's error holds no copy of the value and its reply stays small."
+             :must-read #{seon.schema.datahike/refuse-slot!}}]
