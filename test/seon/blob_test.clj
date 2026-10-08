@@ -237,3 +237,7 @@
             digest (blob/put! connection content)]
         (is (= content (blob/get connection digest)))
         (is (= digest (blob/put! connection content)))))))
+
+(deftest no-second-printer-in-blob
+  (is (nil? (ns-resolve 'seon.blob 'store-faithful-edn)))
+  (is (nil? (ns-resolve 'seon.blob 'store-faithful?))))
