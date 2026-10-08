@@ -452,21 +452,42 @@
     :seon.program/definition-digest
     :seon.schema.admission/source})
 
+(defn- source-names
+  "The names `source` spells: `:qualifiers`, the alias part of each qualified
+  symbol, auto-resolved keyword and auto-resolved map qualifier, and
+  `:symbols`, each unqualified symbol."
+  {:malli/schema [:=> [:cat :string] [:map [:qualifiers [:set :symbol]] [:symbols [:set :symbol]]]]}
+  [source]
+  (reduce (fn [names n]
+            (let [{:keys [value k auto-resolved? prefix]} n]
+              (cond
+                (symbol? value) (if-let [q (namespace value)]
+                                  (update names :qualifiers conj (symbol q))
+                                  (update names :symbols conj value))
+                (and auto-resolved? (keyword? k) (namespace k)) (update names :qualifiers conj (symbol (namespace k)))
+                (and auto-resolved? prefix) (update names :qualifiers conj (symbol prefix))
+                :else names)))
+          {:qualifiers #{} :symbols #{}}
+          (remove node/inner? (tree-seq node/inner? node/children (parser/parse-string-all source)))))
+
 (defn- used-resolver-context
   "The part of a namespace's resolver context `row`'s own usages resolve
-  through: requires and aliases of the namespaces its calls, references and
-  keywords name, and refers of the symbols it uses. Imports stay whole: the
-  analysis records no class usage. A require edit the definition does not
-  use therefore leaves its digest unchanged, while retargeting a used alias
-  changes the resolved usages and so the kept entry."
+  through: requires of the namespaces its calls, references and keywords
+  name, the aliases its source spells as qualifiers and the refers it spells
+  as bare symbols (by target namespace and used symbol when it carries no
+  source). Imports stay whole: the analysis records no class usage. An alias
+  or refer the definition does not spell therefore leaves its digest
+  unchanged, while retargeting one it spells changes the kept entry."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [entity {:keys [requires aliases refers imports]}]
   (let [used (into (set (:seon.fn/calls entity)) (:seon.fn/references entity))
         used-namespaces (into #{} (keep #(some-> % namespace symbol))
-                              (concat used (:seon.fn/keywords entity)))]
+                              (concat used (:seon.fn/keywords entity)))
+        source (some->> (row-identity entity) first shape :seon.program/source-attribute (get entity))
+        {:keys [qualifiers symbols]} (when (string? source) (source-names source))]
     {:requires (into #{} (filter used-namespaces) requires)
-     :aliases (into {} (filter (comp used-namespaces val)) aliases)
-     :refers (into {} (filter (comp used val)) refers)
+     :aliases (into {} (filter (if qualifiers (comp qualifiers key) (comp used-namespaces val))) aliases)
+     :refers (into {} (filter (if symbols (comp symbols key) (comp used val))) refers)
      :imports (or imports {})}))
 
 (defn definition-digest

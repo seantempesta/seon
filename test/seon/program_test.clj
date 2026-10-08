@@ -197,7 +197,8 @@
     (is (not (contains? (program/shapes-in other) :memo.example/id))
         "Another projection value derives its own shapes")))
 
-(deftest a-require-a-definition-does-not-use-leaves-its-digest-unchanged
+(deftest ^{:seon/tasks #{'seon.turn.batch/a-repl-require-changes-the-namespace-context-but-not-its-source}}
+  a-require-a-definition-does-not-use-leaves-its-digest-unchanged
   ;; Task 434fed5a3a67: swapping one require changed every digest in its namespace.
   (let [entity {:seon.fn/sym 'sample/f
              :seon.fn/source "(defn f [x] (c/lookup x ::s/key))"
@@ -218,6 +219,14 @@
                            (update :aliases dissoc 'str)
                            (assoc :refers {}))))
         "Removing ones it does not use")
+    (is (= digest (program/definition-digest
+                   entity (-> context (assoc-in [:aliases 'cache] 'clojure.core.cache)
+                           (assoc-in [:aliases 'schema] 'seon.schema)
+                           (assoc-in [:refers 'lookup] 'clojure.core.cache/lookup))))
+        "Adding an alias or refer to a namespace it uses but does not spell")
+    (is (not= digest (program/definition-digest
+                      entity (assoc-in context [:refers 'x] 'clojure.core.cache/x)))
+        "Adding a refer its source spells bare")
     (is (not= digest (program/definition-digest
                       (assoc entity :seon.fn/calls #{'clojure.core/defn 'seon.cache/lookup})
                       (-> context (update :requires conj 'seon.cache)
