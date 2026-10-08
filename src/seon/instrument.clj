@@ -823,10 +823,12 @@
 (defn- compiled-wrapper
   {:seon/tasks #{'seon.instrument/contract-refusal-carries-wrapper-bookkeeping}
    :malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
-  [projection function-symbol authored original _caps & [policy]]
-  (let [contract (get (:seon.schema.projection/function-contracts projection)
-                      function-symbol authored)
-        retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
+  [projection function-symbol contract original _caps & [policy]]
+  (let [;; the registry's compile of the symbol is reused unless the projection
+        ;; holds another contract for it: a write's authored contract replaces that
+        retained (when (#{contract ::absent} (get (:seon.schema.projection/function-contracts projection)
+                                                  function-symbol ::absent))
+                   (mr/schema (:seon.schema.projection/registry projection) function-symbol))
         ;; The one armed compile (contracts-out §1): normalize, bind, compile in
         ;; the registry composed with Malli's var registry.
         options {:registry (mr/composite-registry
@@ -1142,7 +1144,9 @@
                        (let [function-symbol (var-symbol candidate)
                              built (try
                                      (binding [*compiling-contract* true]
-                                       (compiled-wrapper projection function-symbol authored
+                                       (compiled-wrapper projection function-symbol
+                                                         (get (:seon.schema.projection/function-contracts projection)
+                                                              function-symbol authored)
                                                          (mi/-f->original @candidate) caps policy))
                                      (catch Throwable failure failure))]
                          (if (instance? Throwable built)
@@ -1276,7 +1280,9 @@
                   (mapv (fn [[candidate authored policy]]
                           [candidate authored policy
                            (binding [*compiling-contract* true]
-                             (compiled-wrapper projection (var-symbol candidate) authored
+                             (compiled-wrapper projection (var-symbol candidate)
+                                               (get (:seon.schema.projection/function-contracts projection)
+                                                    (var-symbol candidate) authored)
                                                (mi/-f->original @candidate)
                                                (:seon.sci.admit/caps policy) policy))])
                         pending)]

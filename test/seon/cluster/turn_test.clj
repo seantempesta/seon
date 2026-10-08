@@ -911,6 +911,22 @@
             (is (not (contains? entity :seon.fn/doc)))
             (is (not (contains? entity :seon.fn/workload)))))))))
 
+(deftest ^{:seon/tasks #{'seon.sci.arm/a-redefinition-in-one-pass-is-armed-with-the-earlier-contract}}
+  a-changed-arity-redefinition-is-callable-in-the-same-pass
+  (with-cluster
+    (fn [cluster]
+      (with-provider! cluster
+        (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} h [x] (inc x))\n"
+             "(defn ^{:malli/schema [:=> [:cat :int :int] :int]} h [x y] (+ x y 100))\n"
+             "(h 1 2)\n"
+             "(seon.run/complete \"redefined\")")
+        (fn [_ledger]
+          (drive-agent! cluster "agent-a" 2)
+          (let [call (some #(when (= "(h 1 2)" (str/trim (:seon.cluster.eval/source %))) %)
+                           (agent-evaluations @(:seon.db/connection cluster)))]
+            (is (not (contains? call :seon.cluster.eval/error)) "the new arity is armed")
+            (is (= 103 (edn/read-string (:seon.eval/shown call))))))))))
+
 (deftest a-refused-contract-commits-a-receipt-and-no-entity
   (with-cluster
     (fn [cluster]
