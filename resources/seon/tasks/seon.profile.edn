@@ -48,4 +48,10 @@
             "`seon.profile/begin` says it calls no other armed function, but each call grows the entry counters of `seon.profile/adder?` by 5,320 and measured-mark?, accumulator?, thread-local?, histogram? by 2,660 each (2,660 live cells, default 2026-10-07): about 18,600 armed calls and 3.5 MB per mark, from its contracts validating every cell. A window measured with begin therefore counts the probe itself. Make the mark's own cost independent of armed validation of each cell. Proof: a deftest asserting two consecutive marks show zero armed entry growth.",
             :must-read #{seon.profile/begin},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/plan-research/r-turn-notes.md"}}
+
+ #:seon.task{:name "health-and-explain-rank-wrapper-chains-by-inclusive-time"
+             :kind :function
+             :intent "`seon.profile/summary` now ranks by self time (`:seon.profile/self-ms` on every observation), but `seon.profile/explain` (`:growths`, `:lines`) and `seon.health/report` (definitions with a second of inclusive time) still rank inclusive totals, so `seon.flow/in-world`, `seon.turn/phase` and `seon.schema/call-with-projection-state` lead runtime_status on 70 s of callback time (2026-10-08). Done when explain's growths carry self time ranked first and the health candidates name definitions by self time with their inclusive total beside it."
+             :must-read #{seon.profile/explain seon.profile/observation seon.health/report}}
+]
