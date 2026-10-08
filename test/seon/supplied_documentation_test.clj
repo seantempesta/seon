@@ -1,6 +1,8 @@
 (ns seon.supplied-documentation-test
-  (:require [clojure.string :as str]
+  (:require [clojure.data.json :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.mcp :as mcp]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -51,7 +53,6 @@
            (is (= (:in doc) (:in entity)))
            (is (seq entries))
            (is (not-any? #{:seon.db/connection :seon.agent/id} (map first entries)))
-           (is (str/includes? (:seon.eval/shown directory) ":supplied"))
            (let [example (evaluate ctx connection (:example doc) false)]
              (is (nil? (:seon.cluster.eval/error example)))
              (is (nil? (:seon.cluster.eval/error example))))))))))
@@ -112,3 +113,18 @@
            "the refusal names the send and the agent its world lacks")
        (is (empty? (db/q '[:find ?m :where [?m :seon.message/id]] @connection))
            "no message is written")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/doc-in-names-schemas-by-their-registered-keys}}
+  doc-in-names-schemas-by-their-registered-keys
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [doc (:seon.repl/value
+                (support/mcp-reply
+                 (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                           "arguments" {"code" "(doc seon.task/assign!)" "agent" agent-id "cluster" running}})))))
+           entries (rest (second (:in doc)))]
+       (is (= [:seon.task/assigned :seon.task/agent :seon.task/branch] (map first entries))
+           "each entry keeps its key; the supplied connection is omitted")
+       (is (every? keyword? (map last entries)) "the schema is named by its registered key")
+       (is (not-any? #{:gen/gen :seon.schema/identity-projection}
+                     (tree-seq coll? seq doc)))))))

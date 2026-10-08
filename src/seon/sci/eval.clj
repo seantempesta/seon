@@ -103,7 +103,6 @@
             [clojure.java.io :as io]
             [clojure.repl :as repl]
             [clojure.string :as str]
-            [clojure.walk :as walk]
             [clojure.test]
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
@@ -1989,10 +1988,10 @@
   [database row]
   (let [entries (call-preparation/supplied-map-entries database (:seon.fn/sym row))
         contract (documentation-contract database row)
-        expanded (walk/postwalk-replace (into {} (documentation-schemas database row)) contract)
+        schemas (documentation-schemas database row)
         spec (:seon.fn/spec row)
         arities (if (and spec (= :function (first (edn/read-string spec))))
-                  (:in expanded) [(:in expanded)])]
+                  (:in contract) [(:in contract)])]
     (if (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries))
       entries
       (let [inputs
@@ -2000,7 +1999,10 @@
                     (reduce (fn [form [position supplied]]
                               (let [offset (if (map? (second form)) 2 1)
                                     index (+ offset position)
-                                    argument (get form index)
+                                    named (get form index)
+                                    ;; A request map named by its registered key opens one level so
+                                    ;; the runtime-supplied entries can be left out of it.
+                                    argument (if (keyword? named) (get schemas named named) named)
                                     keys (set (map #(nth % 2) supplied))]
                                 (if (and (vector? argument) (= :map (first argument)))
                                   (assoc form index

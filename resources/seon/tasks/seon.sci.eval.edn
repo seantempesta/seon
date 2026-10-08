@@ -293,4 +293,8 @@
              :intent "Lane impl-cs01c5 (c9a496d6f, 2026-10-08) reported `clojure.java.io` unresolved in its agent's SCI context, so REPL-first work on file-reading code could not run there. Reported by the lane, not yet reproduced: a JVM-mode `eval_clj` of (clojure.java.io/file \"deps.edn\") answers a File on default, so probe the agent SCI mode on a branch first. Done when a form using `clojure.java.io/file` and `clojure.java.io/reader` evaluates in an agent's SCI context, the base context's namespace set naming it, with a regression through the MCP SCI entrance."
              :must-read #{seon.sci.eval/build-base-ctx}
              :evidence #{"docs/research/agent-platform/2026-10-08/reply-census/reply-census.md"}}
+ #:seon.task{:name "doc-in-names-schemas-by-their-registered-keys"
+             :kind :function
+             :intent "`(doc seon.task/assign!)` returns :in with every map entry replaced by its expanded schema, printed twice, and with generator and projection internals (:gen/gen, :seon.schema/identity-projection); supplied keys are never removed. Done when :in and :out name schemas by registered key, so `(doc :seon.task/assigned)` is the follow-up, and a map entry keeps its key."
+             :must-read #{seon.sci.eval/agent-documentation-contract seon.sci.eval/documentation-value}}
 ]
