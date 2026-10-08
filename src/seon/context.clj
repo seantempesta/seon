@@ -390,10 +390,12 @@
           (seq reads) (assoc :seon.context/must-reads reads)))))
 
 (defn current-state-ai
-  "The block as the agent reads it: the task by symbol and declaration, without its handle."
+  "The block's sections as the agent reads them: the task by symbol and declaration, without its handle.
+  The render argument carries the evaluation's world beside the block; only the sections are returned."
   {:malli/schema [:=> [:cat :seon.context/current-state] :seon.context/current-state-view]}
   [block]
-  (cond-> block (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
+  (cond-> (select-keys block [:seon.context/task :seon.context/proofs :seon.context/must-reads :seon.context/turns])
+    (:seon.context/task block) (update :seon.context/task dissoc :seon.task/id)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The pre-provider capture

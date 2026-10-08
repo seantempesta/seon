@@ -64,6 +64,13 @@
                                                                   (db/pull @connection '[*] [:seon.task/id id]))}))
        (is (= "Second." (:seon.task/intent (task-section))) "the revision shows without a reassignment")))))
 
+(deftest ^{:seon/tasks #{'seon.context/current-state-prints-the-world-not-the-block}}
+  current-state-shows-only-its-sections
+  (test-support/with-running-agent
+   (fn [running agent-id _connection]
+     (is (= #{:seon.context/turns} (set (keys (block running agent-id))))
+         "the block holds its sections, none of the evaluation's world"))))
+
 (defn- evaluate
   "Evaluates `code` as the agent through `seon.mcp/call`."
   {:malli/schema [:=> [:cat :string :seon.agent/id :string] :string]}
