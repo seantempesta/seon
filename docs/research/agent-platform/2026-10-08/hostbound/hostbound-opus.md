@@ -32,9 +32,10 @@ Measured on default (commit `6a244149d` loaded, HEAD `8bfd1c3aa`), 2026-10-08 17
 | D2 | Where platform changes are proven | **Root's `merge!` proves what the branch could not** (option A, §2): resources and schema files by the in-JVM rehearsal (seconds), unexecuted or host code by the throwaway JVM (minutes), results stored as an ordinary test run on the merge request; a **warm check JVM** (A2) only if the queue stays the bottleneck | the only option that runs the real compiled code without changing the shared JVM; "root does these things" is exactly the merge step |
 | D3 | How much the branch interprets | **Lazy closure**: bind each reverse-closure member to a stub that interprets on first call; same rule inside the eval request as after it | one override of a widely used function costs 4.7-12.9 s per acquisition today (§1.2); the same eval request sees a different program than the next (§1.1) |
 | D4 | Who writes files and commits | **`merge!` writes back and commits** (root's task); the agent never needs the checkout; root batches the restart that loads it | the JVM loads an immutable archive, so a merged program reaches the JVM only through a commit and a restart (§4 step 10) |
-| D5 | What a test an agent writes can call | Test namespaces' Vars in the agent's SCI on `require`, and SCI `binding` of a host dynamic Var binds the host Var (fork change) | test helpers are absent from every agent context today (§3, measured 0 publics) |
+| D5 | How a merged platform change reaches the running JVM | decide between restart per batch (today, 43.5 s downtime, agents lose private state) and **in-place adoption from the new archive** for function-body changes (§5 P5) | every platform fix an agent makes ends in this step; with restarts, root must batch, so agents wait |
+| D6 | What a test an agent writes can call | Test namespaces' Vars in the agent's SCI on `require`, and SCI `binding` of a host dynamic Var binds the host Var (fork change) | test helpers are absent from every agent context today (§3, measured 0 publics) |
 
-Square pegs the owner should rule on are in §5 (P1 two program stores; P2 "a branch never changes the platform"
+Square pegs the owner should rule on are in §5 (P1 two program stores; P5 adoption is a restart; P2 "a branch never changes the platform"
 versus "agents fix the system"; P3 static reach as evidence).
 
 ## 1. What an agent's branch can and cannot reach
@@ -62,7 +63,8 @@ means a platform-reaching change makes the agent's tools run its change.
 
 | Measure (JVM mode, default) | Value |
 |---|---|
-| `seon.fn/reverse-closure` of `seon.id/digest` | 1,490 ms; 2,349 affected symbols, 21 of them host-bound (of 85 on default) |
+| `seon.fn/reverse-closure` of `seon.id/digest` | 1,490 ms before the restart, 337 ms after it; 2,349 affected symbols, 21 of them host-bound (of 85 on default) |
+| `seon.fn/reverse-closure` of `seon.db/connection-object?` | 190-210 ms; 949 affected and 804 tests, through 4 direct callers. The functions that run it most are the armed contracts validating `:seon.db/connection`, through the compiled Malli registry that holds the JVM Var: no call edge, and a branch change to it never runs there (§1.3, 3) |
 | `seon.sci.eval/base-ctx` of my branch (one override, 2,350 interpreted) | 12,868 ms first, 4,668 ms again (not cached) |
 | `base-ctx` of main | 30 ms |
 | raw `sci/eval-string*` of 400 core function sources in a fork | 133 ms total, about 0.33 ms each (342 evaluated; the 58 failures are aliases my raw probe did not install, e.g. `io/file`, `gen/one-of`) |
@@ -237,7 +239,7 @@ part is what option A runs.
 | 7 | write-back (`my.program/write-branch!`) | yes (pilot: 52-484 ms), with frictions: undigested `in-ns` namespaces block it (pilot 8), same-request call answers a merge message (pilot 10) | those tasks |
 | 8 | commit | `bin/lane commit` always boots the check (207 s in the pilot); `seon.cluster.branch-evidence/branch-evidence` landed (`871a28901`) but is not wired | RF-2 wiring, with D1 as its proof rule |
 | 9 | merge request and `merge!` | gaps G1-G11 (merge.md §7): new contracted functions cannot arm on the merge branch, schemas block diff, tools throw, merge lands on the checked-out branch | merge.md rows; add the isolated step (D2) |
-| 10 | the merged program reaches the JVM | only by commit and restart: default runs from the immutable archive `data/source/6a244149…` (its `user.dir`, `seon.fs/source-directory` and classpath), so `require :reload` can only reload the archive's bytes, and development adoption refuses bytes that differ (`verify-development-sources!`) | D4: `merge!` writes back and commits; root batches `start --head` |
+| 10 | the merged program reaches the JVM | only by commit and restart: default runs from the immutable archive `data/source/6a244149…` (its `user.dir`, `seon.fs/source-directory` and classpath), so `require :reload` can only reload the archive's bytes, and development adoption refuses bytes that differ (`verify-development-sources!`) | D4: `merge!` writes back and commits; root batches `start --head` (43.5 s measured) or adopts in place (D5) |
 | 11 | RED-5 (cached program classes shadow reload) | default has no program classes on its classpath (`seon/id__init.class` resolves to nothing); only check JVMs use them | RED-5 only matters for A2's warm JVM: it must reload from source |
 | 12 | the agent's next context | a branch survived a restart in the repl-first run but mine did not (§6, other findings); private SCI defs never survive (repl-first friction 10); the agent sees the merge result only by polling the request | the merge request's state in the agent's current-state block |
 
@@ -265,6 +267,28 @@ at platform code. Options:
 option 1 makes evidence positive. Options: execution evidence (recommended); static classification of platform
 callers (over-classifies: nearly everything is reached from a compiled caller); a declared platform flag (a roster,
 forbidden).
+
+**P5. Adoption is a restart.** Default's JVM is pinned at boot to the archive of its commit (`user.dir`, the
+classpath and `seon.fs/source-directory` all `data/source/6a244149…`), so a merged change to platform code reaches it
+only by `start --head`. Measured for the 08:30Z restart (`operator-start-20261008T173059.461.edn`): total 43.5 s
+(down 3.0 s, launch 28.5 s, adopt 6.7 s, archive 2.8 s), every agent's private SCI state lost, the cluster
+`:faulted` and busy with test members for minutes after. The in-place path exists (development adoption,
+`seon.cluster/load-development-definitions!`, `require :reload` in requires order) but reads the classpath, which is
+the old archive, and `verify-development-sources!` refuses differing bytes. clj-reload shows the seam that frees it
+from the classpath: it loads each namespace from a file's content with `Compiler/load` (`clj-reload.util/ns-load-file`,
+`reference-code/clj-reload` at `61c6fa7`), so a JVM can load the new archive's files without a new classpath.
+clj-reload also `remove-ns`es before loading, which Seon must not copy: Flow graphs, the SCI base and other holders
+keep the old Var objects, while Seon's `require :reload` keeps each Var and replaces its root. Options:
+1. Restart per landing batch (today). 43.5 s of downtime per batch and lost private state; nothing new to build.
+2. **(recommended for function-body changes)** In-place adoption from the new archive: the loaded source directory
+   becomes part of the loaded identity and advances with adoption; changed namespaces load with `Compiler/load` from
+   the new archive in requires order, keeping Vars; PB-03 then advances the base. Changes to types, protocols, boot,
+   schema resources the boot path reads and the classpath still restart. Cost: reload 30-1,600 ms per namespace
+   (PB-03a) instead of 43.5 s, and agents keep their state. Sacrifice: a reload hazard class (instances of a
+   redefined record, a `defonce` holding an old function) that a restart never has; RED-5 must hold (no cached
+   class shadows a changed source).
+3. A second default JVM started on the new commit while the old one serves, then switched: no downtime but two heaps
+   and a store-lock handover the operator does not have.
 
 **P4. Whole-closure interpretation.** Interpreting 2,350 functions to change one is whole-program work for any widely
 called function. The lazy stub (D3) makes cost follow what executes: each closure member's SCI Var holds a function
@@ -312,6 +336,12 @@ Cards (proposed ids; root assigns):
   on the branch and is proven by root's isolated run at merge, with the `request-merge!` form. Proof: a branch
   redefinition of a host-bound function answers `:seon.sci.eval/proven-at-merge` (or the variant the errors spec
   names) and `my.program/diff` lists it.
+- **HB-10 In-place adoption from the new archive** (Opus, boot-critical; only if the owner picks D5 option 2). The
+  loaded source directory advances with the loaded identity; `load-development-definitions!` loads each changed
+  namespace from the new archive's file with `Compiler/load` in requires order, keeping Vars (no `remove-ns`);
+  types, protocols, boot-path and classpath changes still restart. Depends on RED-5 and PB-03b. Proof:
+  `seon.cluster.adoption-reload-test/an-adopted-source-change-replaces-the-var` (RED-5's proof) run with the new
+  archive in a different directory from the boot archive, plus an agent's private def surviving the adoption.
 - **HB-8 Warm check JVM** (research then Opus; only if the queue stays the bottleneck after RF-2). Research: how
   clj-reload (`reference-code/clj-reload`) orders unload and reload, keeps `defonce`, and whether a reset to the main
   commit is cheaper than a reboot.
