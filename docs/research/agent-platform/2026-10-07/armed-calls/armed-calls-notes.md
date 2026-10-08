@@ -1,3 +1,10 @@
+---
+title: Armed calls wrapper diagnosis
+type: research
+status: landed
+date: 2026-10-08
+---
+
 # Armed calls: wrapper hypothesis falsified
 
 The installed wrapper compiles Malli validators and supply plans at arming, then checks only the call's arguments
@@ -103,5 +110,19 @@ The slice uses HEAD plus only its own paths through `bin/lane commit` and names 
 `seon.armed-calls-test/a-tiny-contract-counts-only-its-invocations`.
 
 Working-tree lint: `clj-kondo --lint src script test --cache false`, 6,846 ms, **0 errors**, 1,460 existing warnings.
-Candidate test/commit results follow in the final response. No default restart/reset is needed for this test-only
-slice, and none was performed. Source delta 0 lines; new test 24 lines. Root owns completion of the producer fix.
+Candidate commit `ce2f48b7b`: 4 files, 165 added lines; source delta 0, test delta +23. The named regression ran
+through the candidate's real MCP entrance: run `eaba87a70585`, executed 1, reused 0, passed 3 assertions,
+failed 0, errors 0, 2,549 ms. Candidate lint: 6,168 ms, 0 errors, 1,460 warnings. Publication 2,505 ms,
+adoption 436 ms, candidate boot 57,410 ms (readiness 52,857 ms), total check 71,754 ms. These broad check costs
+remain above ordinary-operation bounds; this evidence is not a claim that boot/publication performance passed.
+No default restart/reset is needed for this test-only slice, and none was performed. Root owns completion of
+the producer fix.
+
+Cleanup reproduced `my.agent/retire-branch-refuses-a-finished-agent-as-admission-closed` (already in
+`resources/seon/tasks/my.agent.edn`). Exact SCI form on each owned agent:
+`(my.agent/retire-branch! {:seon.store/branch (:my.agent/own-branch (my.agent/branches))})`.
+Both replies were `{:seon.error/message "run transition refused: admission-closed"}`, `isError true`, with no
+timing or type. A read from root confirmed both hosted worlds remained: `armed-calls` on `:agent-b1e645c4d51e`
+and `armed-calls-measure` on `:agent-5c451b3a0a3f`. Cleanup uses their installed `seon.cluster.host/retire!`
+owner from root's JVM entrance, as the installed measurement utility does, without touching other agents.
+That call completed in 46 ms; the subsequent 1 ms read confirmed `:hosted? false` for both owned agents.
