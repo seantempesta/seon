@@ -86,4 +86,9 @@
              :intent "After a branch write-back of `my.turn/wait` through `my.program/write-branch!` (RF-1, 24e8cc2df), `my.program/diff` on that branch answered every section empty. Cause unknown: either the write-back moved the branch's comparison base to its own change (expected) or diff lost a real change (a defect). Done when a REPL reproduction names which, and a regression asserts the diff a write-back should leave. Proof: a my.program-test deftest (to be written)."
              :must-read #{my.program/diff my.program/write-branch!}
              :evidence #{"docs/seon/schedule/cards/RF-1.md"}}
+ #:seon.task{:name "write-branch-in-the-defn-request-answers-a-merge-changed-nothing"
+             :kind :function
+             :intent "`my.program/write-branch!` evaluated in the same eval request as the `defn` it should write reads the branch before the recording transaction and answers `:no-replacement` \"The accepted merge changed no declaration.\", naming a merge the agent never made. Done when it answers in write-back terms (nothing on the branch differs from its head yet; evaluate it in the next eval request), as `my.test/check` answers `:my.test/after-recording`."
+             :must-read #{my.program/write-branch! seon.cluster.source/write-back!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
 ]

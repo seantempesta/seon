@@ -1,0 +1,7 @@
+[
+ #:seon.task{:name "current-state-prints-the-world-not-the-block"
+             :kind :function
+             :intent "`(seon.context/current-state)` at an agent's REPL shows the evaluation's world (connection, database, admission caps, SCI context with two different projection fingerprints, render profile) beside a value of turns-left only (confirmed on default 2026-10-08 after CS-01c1, agent integrate-2-probe). Done when the agent reads its block: task, references, proofs with status, and nothing of its world."
+             :must-read #{seon.context/current-state seon.context/current-state-ai}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+]

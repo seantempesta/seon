@@ -26,4 +26,10 @@
   :kind :function
   :intent "A task made by `seon.task/create!` exists only in the database: a deftest tagged :seon/tasks with its ns/name is refused at publication as a dangling id, and a reset loses it. Lanes hand-copied 8+ tasks into resources/seon/tasks on 2026-10-08. CLAUDE.md: \"Files are the write-back of accepted entities.\" Correct: the task's home write-back stages the accepted task into resources/seon/tasks/<ns>.edn like any accepted entity, and ingesting that file entry over the runtime row yields one task (see a-file-task-is-refused-while-a-runtime-task-holds-its-symbol). Proof: create! then write-back produces the EDN entry, and a deftest tagged with the new task publishes without a dangling-id refusal."
   :must-read #{seon.task/create! seon.task/index-tasks!}
-  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/split/reconciled-plan.md"}}
+ #:seon.task{:name "assign-cannot-see-a-red-proof-the-gate-will-not-land"
+             :kind :function
+             :intent "`seon.task/assign!` reads proofs from the home database only, and a proof reaches the home only by commit and a restart of default, while a throwaway check refuses a commit whose named test is red (`bin/lane commit --branch-evidence` now has `--accept-red-before`). So root cannot assign a task whose red proof exists only on a branch. Its refusal \"seon.task is refused: no-proofs.\" names neither the task nor the fix. Done when root can assign a task whose red proof exists on the agent's branch or in an accepted-red commit, and the refusal names the task and the `:seon/tasks` tag to add."
+             :must-read #{seon.task/assign! seon.task/task-edges}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+]

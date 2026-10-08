@@ -278,4 +278,9 @@
              :intent "A file-derived function row in a namespace the JVM never loaded resolves to nothing in SCI: the agent gets \"Unable to resolve symbol\", though `seon.sci.eval` (the comment above `install-caller-host-bindings!`) promises a refusal naming the row when it is called. Done when such a call answers the named refusal. Reported by lane repl-test-edges."
              :must-read #{seon.sci.eval/install-caller-host-bindings! seon.sci.eval/install-function-from-database!}
              :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+ #:seon.task{:name "binding-a-host-dynamic-var-does-not-reach-host-code"
+             :kind :function
+             :intent "In the agent's SCI context `(binding [seon.db/*read-evidence-sink* sink] (seon.db/q …))` makes the Var look bound to SCI code, but `seon.db` (host code) appends nothing, so a test body (run in SCI) cannot observe reads or any other host dynamic Var. `seon.profile/measure` covers cost proofs; this covers every other dynamic-Var-observed behavior. Done when a binding of an exposed host dynamic Var in SCI is the host thread binding for the host calls inside it."
+             :must-read #{seon.sci.eval/build-base-ctx seon.db/*read-evidence-sink*}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
 ]

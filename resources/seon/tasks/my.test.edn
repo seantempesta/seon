@@ -17,4 +17,10 @@
              :kind :function
              :intent "(`my.test/check` {`:seon.test/changed` [sym]}) for a symbol that no test reaches answers :passed? false with empty :results (lane impl-hook, RF-4 at 3c15a3434), which reads as a failure. Correct: the answer says as data that no test reaches the symbol, distinct from a red run. Proof: a my.test-test deftest (to be written) checking an unreached symbol asserts that datum and no :passed? false."
              :must-read #{my.test/check}
-             :evidence #{"docs/seon/schedule/cards/RF-4.md"}}]
+             :evidence #{"docs/seon/schedule/cards/RF-4.md"}}
+ #:seon.task{:name "test-output-and-an-empty-reaching-run-reach-the-reply"
+             :kind :function
+             :intent "A `my.test/check` reply carries clojure.test's \"Testing ns\" (and FAIL) lines in `:out`, printed outside the value printer; and the automatic test step reports `:seon.turn.loop/reaching {:seon.test/passed? false :seon.turn.loop/red []}` after an eval request on a fresh agent branch with no change (both observed on default 2026-10-08, agent integrate-2-probe). A one-test check there allocated 2.5 GB in 1.67 s. Done when the report reaches the agent only as data and a reaching run with nothing to run says so instead of `passed? false`. (The pilot's other half, a test named as changed being refused, no longer reproduces.)"
+             :must-read #{my.test/check seon.test/run seon.turn/run-reaching}
+             :evidence #{"docs/research/agent-platform/2026-10-08/dogfood/pilot.md"}}
+]
