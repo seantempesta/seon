@@ -12,7 +12,8 @@
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.turn.world :as world]))
 
 (deftest a-batch-records-every-outcome-and-observed-exit-in-one-commit
   (test-support/with-database
@@ -94,6 +95,29 @@
                "digest and membership reads never rebuild the same graph's components")
            (is (zero? (get calls 'seon.test.runner/reached-graph))
                "nor walk the same program's reached graph again")))))))
+
+(deftest a-program-change-reads-only-the-reach-attributes-it-wrote
+  (test-support/with-database
+   (fn [connection]
+     (let [handle (test-support/execution-handle connection)
+           symbols (vec (take 10 (sort (db/q '[:find [?s ...] :where [_ :seon.test/sym ?s]] (db/db connection)))))
+           _ (runner/reach-digests (db/db connection) symbols)
+           report (test-support/define!
+                   (world/agent-world {:seon.db/connection connection :seon.cluster/name (:seon.cluster/name handle)
+                                       :seon.sci.eval/base-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))}
+                                      {:seon.agent/id "reach-attribute-change"})
+                   'seon.id "(defn reach-attribute-probe {:malli/schema [:=> [:cat] :int]} [] 1)")
+           changed (:db-after report)
+           reach-attributes #{:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key
+                              :seon.schema/form :seon.fn/calls :seon.fn/references :seon.fn/keywords
+                              :seon.fn/spec :seon.test/subject}
+           written (into #{} (comp (map :a) (filter reach-attributes))
+                         (:tx-data report))
+           [digests calls] (test-support/armed-calls '#{seon.db/datoms} #(runner/reach-digests changed symbols))]
+       (is (= 10 (count digests)))
+       (is (< 0 (count written) (count reach-attributes)))
+       (is (= (count written) (get calls 'seon.db/datoms))
+           "a change re-reads the reach attributes it wrote, never all ten")))))
 
 (deftest assertion-report-uses-bounded-value-renderer
   (let [ctx (sci/init {:namespaces

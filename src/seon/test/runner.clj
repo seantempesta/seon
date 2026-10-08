@@ -796,39 +796,52 @@
   (db/content-revisions database (into [:seon.fn/sym :seon.test/sym :seon.program/definition-digest :seon.schema/key :seon.schema/form]
                                        (map first) reach-fact-attributes)))
 
-(defn- reach-facts
-  "Each reach attribute's values by entity: calls, references and keywords as
-  sets, contract source and test subject as values. Read whole, never
-  inferred from the definition digest: a declaration-population retarget
-  changes an invoker's calls under an unchanged digest."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:map-of :qualified-keyword [:map-of :int :seon.schema/value]]]}
-  [database]
-  (into {}
-        (map (fn [[attribute many?]]
-               [attribute
-                (persistent!
-                 (reduce (fn [by-entity {:keys [e v]}]
-                           (assoc! by-entity e (if many? (conj (get by-entity e #{}) v) v)))
-                         (transient {}) (reach-read! (db/datoms database :aevt attribute))))]))
-        reach-fact-attributes))
+(defn- reach-attribute
+  "One attribute's datoms on `database` in `shape`: `:by-value` maps value to
+  entity, `:by-entity` entity to value and `:many` entity to its value set.
+  Cached under the attribute's content revision (`revisions`), which names
+  its datoms exactly on every branch, so a change re-reads only the
+  attributes it wrote, never the whole program."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil [:map-of :qualified-keyword :uuid]]
+                       :qualified-keyword [:enum :by-value :by-entity :many]]
+                  [:map-of :seon.schema/value :seon.schema/value]]}
+  [database revisions attribute shape]
+  (let [derive #(let [datoms (reach-read! (db/datoms database :aevt attribute))]
+                  (case shape
+                    :by-value (into {} (map (juxt :v :e)) datoms)
+                    :by-entity (into {} (map (juxt :e :v)) datoms)
+                    :many (persistent! (reduce (fn [by-entity {:keys [e v]}]
+                                                 (assoc! by-entity e (conj (get by-entity e #{}) v)))
+                                               (transient {}) datoms))))]
+    (if-let [revision (get revisions attribute)]
+      (cache/lookup ::reach-attribute [attribute shape revision]
+                    (fn [by] (* 96 (+ (count by) (if (= :many shape) (transduce (map count) + 0 (vals by)) 0))))
+                    derive)
+      (derive))))
 
 (defn- reach-declarations
   "Every function, test and schema declaration on `database`: symbol to row,
-  row to definition digest and to its reach facts ([[reach-facts]]), schema
-  key to form. Ten attribute reads, whatever the request; a committed
-  value's answer is cached under their revisions (`reach-revision-key`)."
+  row to definition digest and to its reach facts (calls, references and
+  keywords as sets, contract source and test subject as values), schema key
+  to form. Ten attribute reads ([[reach-attribute]]), each cached under its
+  own revision; a committed value's whole answer is cached under all ten
+  (`reach-revision-key`). Facts are read whole, never inferred from the
+  definition digest: a declaration-population retarget changes an invoker's
+  calls under an unchanged digest."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:map-of :keyword :map]]}
   [database]
-  (let [pairs (fn [attribute k v] (into {} (map (juxt k v)) (reach-read! (db/datoms database :aevt attribute))))
+  (let [revisions (reach-revision-key database)
+        read (partial reach-attribute database revisions)
         derive-declarations
-        #(let [schema-keys (pairs :seon.schema/key :e :v)]
-           {::rows (merge (pairs :seon.fn/sym :v :e) (pairs :seon.test/sym :v :e))
-            ::digests (pairs :seon.program/definition-digest :e :v)
-            ::facts (reach-facts database)
+        #(let [schema-keys (read :seon.schema/key :by-entity)]
+           {::rows (merge (read :seon.fn/sym :by-value) (read :seon.test/sym :by-value))
+            ::digests (read :seon.program/definition-digest :by-entity)
+            ::facts (into {} (map (fn [[attribute many?]]
+                                    [attribute (read attribute (if many? :many :by-entity))]))
+                          reach-fact-attributes)
             ::forms (into {} (keep (fn [[e form]] (when-let [k (schema-keys e)] [k form])))
-                          (pairs :seon.schema/form :e :v))})]
-    (if-let [revisions (reach-revision-key database)]
+                          (read :seon.schema/form :by-entity))})]
+    (if revisions
       (cache/lookup ::reach-declarations revisions
                     (fn [{::keys [rows digests forms facts]}]
                       (* 96 (+ (count rows) (count digests) (count forms)
