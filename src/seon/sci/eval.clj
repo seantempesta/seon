@@ -287,6 +287,16 @@
      (vals (sci.namespaces/sci-ns-interns*
             ctx (sci.namespaces/sci-the-ns* ctx namespace-designator))))))
 
+(defn- agent-do-report
+  "Report one clojure.test event; an erroring test's Throwable chain loses its
+  host stack frames first, so the report holds each link's class and message."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [event]
+  (when (and (= :error (:type event)) (instance? Throwable (:actual event)))
+    (run! #(.setStackTrace ^Throwable % (make-array StackTraceElement 0))
+          (take-while some? (iterate #(.getCause ^Throwable %) (:actual event)))))
+  (clojure.test/do-report event))
+
 (defn- agent-test-ns
   "Run one SCI namespace's tests; answer its report counters."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "clojure.test names a namespace by symbol or by namespace object.", :gen/elements [nil]}]] [:map-of :keyword :int]]}
@@ -324,6 +334,7 @@
         {'test-all-vars agent-test-all-vars
          'test-ns agent-test-ns
          'run-tests agent-run-tests
+         'do-report agent-do-report
          'use-fixtures agent-use-fixtures}))
 
 (defn- native-mutation

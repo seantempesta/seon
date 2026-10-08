@@ -344,6 +344,25 @@
            (is (str/includes? (str (:seon.cluster.eval/output result))
                               "Ran 2 tests containing 3 assertions."))))))))
 
+(deftest a-test-error-report-prints-the-exception-without-host-frames
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx @connection "test-error" 'fixture.test-error))
+     (let [ctx (support/fork-cluster-ctx connection)
+           run (fn [source]
+                 (support/evaluate
+                  {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                   :seon.db/connection connection :seon.agent/id "test-error"
+                   :seon.cluster.eval/ns [:seon.ns/name 'fixture.test-error]
+                   :seon.cluster.eval/source source
+                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                   :seon.sci.eval/time-limit-ms 10000}))]
+       (sci/binding [sci/ns (sci/create-ns 'fixture.test-error)]
+         (sci/eval-string* ctx "(deftest boom (is (= 1 (throw (ex-info \"boom\" {:a 1})))))"))
+       (let [output (str (:seon.cluster.eval/output (run "(clojure.test/run-tests 'fixture.test-error)")))]
+         (is (and (str/includes? output "clojure.lang.ExceptionInfo") (str/includes? output "boom")))
+         (is (< (quot (count output) 4) 300) "the report is a few lines, not the host stack"))))))
+
 (deftest source-at-the-agent-repl-prints-the-stored-declaration
   (support/with-database
    (fn [connection]

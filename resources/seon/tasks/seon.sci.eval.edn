@@ -223,4 +223,9 @@
             "After (set! *print-length* 2) in one SCI run, the next form (range 5) shows (0 1 2 3 4) and (vec (range 3000)) shows 32 elements, although each evaluation stores :seon.print/length 2 (seon.db/q on the run's receipts). Neither the shown text nor the response applies the form's own print length (entity-emission's comment says the response must print under it). Reproduce on default as agent review-s5a-opus: eval_clj sci '(set! *print-length* 2)\\n(range 5)'. Correct: the value prints under the length the form set, as in a Clojure REPL. Proof: a deftest asserting the shown node count of (range 5) is 2 after the set!; seon.mcp-entrance-test/an-sci-reply-is-what-the-run-saved's set! row asserts only that :seon.repl/value exists.",
             :must-read #{seon.sci.eval/shown-result seon.repl/response},
             :evidence
-            #{"docs/research/agent-platform/2026-10-07/s5a-reply/review-diff-opus-notes.md"}}]
+            #{"docs/research/agent-platform/2026-10-07/s5a-reply/review-diff-opus-notes.md"}}
+ #:seon.task{:name "a-test-error-report-prints-the-whole-host-stack",
+            :kind :function,
+            :intent
+            "In an MCP SCI pass, (deftest boom (is (= 1 (throw (ex-info \"boom\" {:a 1}))))) then (run-tests 'my.tsx) returned :out of about 10500 estimated tokens: clojure.test's report :error calls print-cause-trace with the live Throwable and no depth (reference-code/clojure/src/clj/clojure/test.clj:384-395). Correct: the erroring test's report holds the exception class and message and no host frames, under 300 estimated tokens. Proof: seon.sci.documentation-test/a-test-error-report-prints-the-exception-without-host-frames.",
+            :must-read #{seon.sci.eval/agent-test-namespace}}]
