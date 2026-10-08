@@ -17,4 +17,8 @@
  #:seon.task{:name "retiring-a-branch-allocates-a-hundred-megabytes"
              :kind :function
              :intent "Root retiring twelve idle probe-agent branches in one sci evaluation, (my.agent/retire-branch! {:seon.store/branch b}) for each, allocated 1,333.8 MB in 11,737 armed calls and 655 ms (default pid 79558, e3b7bae3a, 2026-10-08, lane heap-leak): about 110 MB and 980 calls per retire, for agents that had each run a few trivial passes. Retirement stops one graph, releases one connection and unlinks one branch; that work should be proportional to the agent's live handles, not to the program or the store. Find the allocating owner with (seon.profile/measure (fn [] (my.agent/retire-branch! {:seon.store/branch b}))) and remove what it does that is proportional to more. Done when one retire of an idle agent's branch allocates under 5 MB, measured by that probe."
-             :must-read #{my.agent/retire-branch! seon.cluster.agent/release-context! seon.cluster.registry/retire-branch!}}]
+             :must-read #{my.agent/retire-branch! seon.cluster.agent/release-context! seon.cluster.registry/retire-branch!}}
+ #:seon.task{:name "settings-bang-answers-the-overrides-before-the-write"
+             :kind :function
+             :intent "(my.agent/settings! {:seon.config.run/max-episode-runs 10}) on an agent with no overrides answered {:my.agent/settings {}}, and the next call (my.agent/settings! {:seon.config.ai/no-provider false :seon.config.run/max-episode-runs 5}) answered {:seon.config.run/max-episode-runs 10}: the reply shows the overrides before its own write (live-agent run, default 6cc5dbbb4, 2026-10-08), though its docstring promises my resulting overrides. The value is rendered by `seon.agent/render-settings-ai`, which re-reads the overrides from the evaluation's database value. Done when the reply shows the overrides the write produced."
+             :must-read #{my.agent/settings! seon.agent/render-settings-ai}}]

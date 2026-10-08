@@ -265,4 +265,12 @@
  #:seon.task{:name "ai-attempt-stores-printed-copies-of-settings-and-usage"
              :kind :function
              :intent "Evidence for ledger row SR-G: :seon.ai.attempt/settings-edn is written as (pr-str settings) in seon.turn (and usage-edn likewise), a stored printed copy and a second printer. Store the settings and usage as data, or only their digest and ids."
-             :must-read #{seon.turn/step}}]
+             :must-read #{seon.turn/step}}
+ #:seon.task{:name "the-user-prompt-stop-sequence-cuts-the-models-first-form"
+             :kind :function
+             :intent "The transcript shows every exchange as `user=> form` and the model row stops on \"user=>\" (`:seon.config.ai/stop`), so a model that writes its next form the way the transcript shows it is cut before the form: the first deepseek-flash pass of the live-agent run (agent live-flash, default 6cc5dbbb4, 2026-10-08) ended after prose and an opening ```clojure fence, 78 completion tokens, finish reason stop, and answered 'Your reply had no form'. Done when the prompt marker the transcript teaches and the stop sequence never collide: a model reply that writes `user=> (f)` evaluates (f)."
+             :must-read #{seon.ai/complete seon.cluster.prompt/prompt}}
+ #:seon.task{:name "a-model-pass-never-sees-its-test-step"
+             :kind :function
+             :intent "After a model pass that evaluated a form, `seon.turn/step` runs the proofs and reaching tests but offers the summary only on an MCP reply channel; the model's next prompt carries neither the summary nor the current-state block, so the model never learns its proof is still red (live-agent run, agent live-flash, default 6cc5dbbb4, 2026-10-08: nine passes, the agent learned the proof's status only by evaluating (seon.context/current-state) itself). Covered by the block-last assembly (ledger CS-03a) once it lands; done when a model pass's next prompt shows the proofs' status that pass's step recorded."
+             :must-read #{seon.turn/step seon.cluster.prompt/prompt}}]

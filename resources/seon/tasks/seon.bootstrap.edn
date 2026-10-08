@@ -22,4 +22,8 @@
              :kind :function
              :intent "(help) answers 1,105 tokens, over the 1,000-token :large-value bound, so its own reply carries the finding telling the agent its query returns more than it should (default 2026-10-08); every model agent's opening evaluates it. Done when help is at most 300 tokens and platform values raise no misuse finding, asserted through MCP."
              :must-read #{seon.bootstrap/help-value seon.repl/findings}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "help-teaches-a-placeholder-namespace-for-defn"
+             :kind :function
+             :intent "(help) teaches `(in-ns 'my.agents.name)` before defn; a deepseek-flash agent whose task named `live.text/slug` read it and evaluated (in-ns 'my.program), then defined slug in user (live-agent run, default 6cc5dbbb4, 2026-10-08). Done when help says to change a function in the namespace that owns it, e.g. (in-ns 'the.task.ns) then (defn f ...), with no placeholder that names a real namespace prefix."
+             :must-read #{seon.bootstrap/help-value}}]
