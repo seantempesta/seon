@@ -101,7 +101,10 @@ stays (OD-Q5), so the recording branch sees two commits per executed request. Th
 `:db/txInstant` and the transaction itself answer them (census fold-in). Counted honestly, a cold request is today 8
 commits on three branches (census §2): 3 on the recording branch, 4 on the checkpoint branch from
 `prepare-checkpoint!` (`test.clj:1790`), and the member overlay, which is in memory and writes nothing to the store.
-After EN-6 and TX-5 a cold request is 3 commits (admission, record, one checkpoint commit) and a warm one 2. The writer checks
+The second census measured a direct one-member request already at 2 durable commits (`tx-census-astra.md`, 300-382
+ms), so EN-6's gain is one record transaction for any number of members and no stored instants, not a lower count for
+one member. After EN-6 and TX-5 a cold request is 3 commits (admission, record, one checkpoint commit) and a warm one 2,
+plus the enclosing eval request's own recording when it runs inside one (`my.test/check`). The writer checks
 the reach digests against its head, as admission does today. A body that outlives the bound gets its "held" fact
 written at the bound, and its exit fact at actual exit (`record-exit!`). That is the rare path, and it keeps
 ownership until exit. Overlap of live work is guarded by the runner's process roster of live bodies, keyed by

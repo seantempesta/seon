@@ -12,4 +12,9 @@
              :kind :schema
              :intent ":seon.config.ai/no-provider is [:= true] and per-agent: an agent overlay can set it but never lift it, so with the cluster's no-provider on (default's standing setting) a branch agent cannot be pointed at a local stub provider without retracting the cluster config row on its branch (what repl-dogfood 2026-09-27 had to do). Make the dial a boolean whose overlay value wins, or document the branch-row route as the entrance."
              :must-read #{seon.config/effective seon.ai/agent-overlay}
-             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}]
+             :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "an-agent-branch-forked-before-a-new-required-dial-refuses-every-eval-request"
+             :kind :function
+             :intent "Root applied two new required dials to default's cluster config at 2026-10-08T07:02 (:seon.config.db/store-cache-size, :seon.config.operator/heap-max-bytes). Every agent branch forked before then holds the old config row, so effective-in (src/seon/config.clj:942-975) answers :seon.config/error and every MCP eval request of that agent, SCI and JVM, fails with only the fixed message: agent cards-recording, occurrences 6352f423d616, fb31f3805860, 2455649eb488 (signature dca1c074e22a). Root's own eval requests work. Two defects: a dial added on main never reaches existing branches (CLAUDE.md: a new dial exists at its first read), and the MCP reply drops the error's :seon.error/data, which names the missing dials, so the agent cannot act on it."
+             :must-read #{seon.config/effective seon.config/required-dial-attributes seon.mcp/call}
+             :evidence #{"docs/seon/schedule/cards/README-recording.md"}}]

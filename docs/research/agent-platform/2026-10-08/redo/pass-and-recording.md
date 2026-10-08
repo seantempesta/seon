@@ -208,8 +208,24 @@ attributes with S5-02, the measurement rows), roughly 60-100 KB less per eval re
 - MA-11: no `:seon.merge/merged-by`; the merge transaction carries root's agent and eval request plus the merge request
   id, and drops the copied `seon.turn/*` and `seon.cluster.eval/*` rows from the merged program (TX-6).
 
-**The second census** (`tx-census-astra.md`, lane tx-census-astra) had not landed when this fold-in was written. Where
-it later disagrees, the disagreement is stated here with both measurements and a choice.
+**The two censuses** (`tx-census-opus.md`, `tx-census-astra.md`; independent, both on a throwaway root at
+`4707b9546` plus read probes on default). They agree on every count that can be compared: a model eval request is 7
+commits including the incoming message (Opus: wake, system turn, open, capture, attempt, plan, record; Astra: 6 after
+ingress, 548-779 ms, 496-593 KB), so the target is 1 after the message, 2 with it; an ordinary SCI eval request already
+commits once; the JVM recording carries no agent; a repeated error signature writes again on both branches; branch
+creation writes no transaction; ten separate small writes against one cost 7.8-7.9× (Astra: 744,161 → 94,893 bytes,
+179.9 → 22.9 ms; Opus: 606-629 → 206-241 KB, 106-112 → 20 ms for 7 → 1). Where they differ, the choice and why:
+
+| Question | Opus | Astra | Chosen |
+|---|---|---|---|
+| index the eval request id on the transaction | no | yes, for "request → all its transactions" | **no**: no reader seeks transactions by eval request (recovery reads open receipts entity → transaction, §4); an indexed tx attribute measured +5 objects / +15.5 KB per commit on default (Opus §1). Add the index with its first seeking reader |
+| task symbol on the transaction | no (no reader) | yes, "when the agent has a task" | **no**: CLAUDE.md "every stored fact names its consumer"; none does today |
+| loaded source commit on the transaction | — | yes, for reproducibility | **no**, same reason; the loaded program identity is already process state and boot facts |
+| an entrant symbol on the transaction | — | only if no request row names it | **no**: the operation symbol plus the call row answer it (no origin tag, NK-5) |
+| a basis on the transaction | yes (`basis-t`) | the input value is the writer's `db-before` and read evidence | **yes**: a model eval request's answered basis is the basis its context presented, read before the provider call, which is not the recording's `db-before`; S6-05 consumes it |
+| the test request's count | cold 8 commits on three branches | direct request already 2 durable; the third attempt is the in-memory overlay; the first MCP check 7 + head | **both**: EN-6's "twice" is already met by a one-member request on the recording branch; EN-6's gain is one transaction for any number of members and no stored instants; the checkpoint's 4 → 1 is TX-5 |
+| error recording | occurrence rides the eval request's commit; home copy only for a new signature | two branches cannot share one transaction; decide which owns the occurrence | **Opus's shape with Astra's limit**: a new signature is the eval request's commit plus one home commit; a repeat is folded into the eval request's own commit (count on the agent branch, home untouched) (TX-3) |
+| merge | accept 5 → 2 + root's record | proposal: request and root's message in one home transaction, 5 → 4 | **both**, as TX-6a (accept) and TX-6b (merge request plus message) |
 
 ## 3. Entrances as read stages (the DATA reader, which Astra flagged)
 
