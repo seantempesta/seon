@@ -249,3 +249,13 @@
        (is (= by-agent by-value) "the walked namespace and the agent's assignment render alike")
        (is (= '(dir my.agents.ns-owner) (sut/agent-namespace-form {:seon.db/db database :seon.agent/id "ns-owner"}))
            "the form face is the namespace's dir")))))
+
+(deftest ^{:seon/tasks #{'seon.render.ns/a-doc-line-is-the-first-physical-line-not-the-first-sentence}}
+  a-doc-line-is-the-docstrings-first-sentence
+  (let [shown (fn [doc] (:seon.ns/doc (sut/render-ai {:seon.render/value {:seon.ns/name 'seon.example :seon.ns/doc doc}
+                                                     :seon.db/db (db/db) :seon.render/distance 0})))]
+    (is (= "The one database namespace for all things Datahike."
+           (shown "The one database namespace for all things Datahike. Reads and writes use\n  the branch connection.")))
+    (is (= "Change supplied setting overrides and return my resulting overrides."
+           (shown "Change supplied setting overrides and return\n  my resulting overrides.\n\n  More detail.")))
+    (is (= "A summary with no period" (shown "A summary with no period\n\n  Then a body.")))))
