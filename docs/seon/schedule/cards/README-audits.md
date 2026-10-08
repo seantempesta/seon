@@ -309,4 +309,6 @@ fully specified in the ledger and its card is this lane's next batch.
 | DH-8 | — | after BLOB-K (konserve compressor) |
 | CN-24 | — | after PR-07, RO-4 |
 | VEC-10 | [VEC-10](VEC-10.md) | ready (diagnosis) |
-| DIAL-2 … DIAL-18 | DIAL-3, DIAL-5, DIAL-13 card next | each row's Deps |
+| DIAL-3 | [DIAL-3](DIAL-3.md) | ready |
+| DIAL-5 | [DIAL-5](DIAL-5.md) | ready |
+| DIAL-2, DIAL-4, DIAL-6 … DIAL-18 | — | each row's Deps (DIAL-13 card next) |
