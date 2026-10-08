@@ -589,6 +589,20 @@
         (is (every? :seon.health/cluster rows) "every row answers"))
       (finally (swap! runtime/running-instances dissoc cluster-name)))))
 
+(deftest status-answers-while-a-test-agent-stands-in-the-roster
+  ;; Default 2026-10-08T22:15Z: status during a test run refused whole —
+  ;; `with-running-agent` registered a map with no `:seon.boot/config`, so
+  ;; `readiness` refused its row. Every roster value is a declared instance.
+  (support/with-running-agent
+   (fn [running _ _]
+     (let [response (boot/request! (merge (process/current-identity)
+                                          {:seon.operator/command :status
+                                           :seon.operator/managed-root
+                                           (or (store/declared-operator-root) (System/getProperty "user.dir"))}))
+           row (some #(when (= running (:seon.health/cluster %)) %) (:seon.operator/clusters response))]
+       (is (nil? (:seon.error/at response)) "status answers")
+       (is (map? (get-in row [:seon.health/units :seon.health/readiness])) "the test agent's row answers its readiness")))))
+
 (deftest a-failure-with-no-cluster-database-has-no-world-and-never-panics
   ;; A boot refused before its database stood (the 706e407396 indexing
   ;; refusal, 2026-09-28T02:01Z) threw "SEON CORE FAULT (panic)" from
