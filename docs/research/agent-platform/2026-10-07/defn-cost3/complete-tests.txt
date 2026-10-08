@@ -1,3 +1,6 @@
 seon.db-overhead-test/declaration-projections-retain-owning-schema-validation
+seon.db-overhead-test/final-validation-asks-cell-storage-of-written-attributes-only
 seon.db-test/a-declared-but-uninstalled-write-key-keeps-the-missing-key-hint
 seon.db-test/turn-write-schema-does-not-include-error-observations
+seon.schema-test/an-incremental-projection-equals-its-full-build
+seon.schema.registry-retention-test/a-partial-retained-registry-keeps-the-dependency-defaults

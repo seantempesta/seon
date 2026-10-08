@@ -3623,9 +3623,13 @@
   {:malli/schema [:function [:=> [:cat :seon.schema/projection] [:map-of :keyword [:vector :keyword]]]
                   [:=> [:cat :seon.schema/projection [:maybe [:sequential :keyword]]] [:map-of :keyword [:vector :keyword]]]]}
   ([projection]
-   (write-entity-schemas projection (keys (:seon.schema.projection/shape-index projection))))
+   (let [projection (schema/replacement-base projection)]
+     (write-entity-schemas projection (keys (:seon.schema.projection/shape-index projection)))))
   ([projection attributes]
-   (let [shapes (:seon.schema.projection/shape-rows projection)
+   (let [projection (if (contains? projection :seon.schema.projection/shape-index)
+                      projection
+                      (schema/replacement-base projection))
+         shapes (:seon.schema.projection/shape-rows projection)
          index (:seon.schema.projection/shape-index projection)]
      (into {}
            (keep (fn [attribute]

@@ -77,6 +77,11 @@
         (is (= attribute (:seon.schema.datahike/attr refusal)))
         (is (= rule (:seon.schema.datahike/rule refusal)))))))
 
+(deftest declaration-projections-retain-owning-schema-validation
+  (let [projection (schema/declaration-projection)
+        schemas (#'seon.db/write-entity-schemas projection [:seon.fn/sym])]
+    (is (= #{:seon.fn/fn} (set (get schemas :seon.fn/sym))))))
+
 (deftest ^{:seon/tasks #{'seon.db/every-commit-validates-its-write-report-three-ways}} final-validation-asks-cell-storage-of-written-attributes-only
   ;; A declaration write leaves a new projection whose holder answers nothing
   ;; yet. Default, 2026-10-07: every defn commit then asked all 3,389 forms

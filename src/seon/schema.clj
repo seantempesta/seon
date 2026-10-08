@@ -2566,18 +2566,11 @@
    :seon.schema/predicate-functions (predicate-functions-in projection)
    :seon.schema/validate-render-contracts? true})
 
-(defn- replacement-base
-  "`projection` when it carries every index a replacement reads, else the
-   complete projection of its own population.
-
-   A declaration projection ([[declaration-projection]]) holds forms and
-   registry only: replacing over it read a nil contract map and no reverse
-   edges, so dependents stayed compiled against the old definition and the
-   shape catalog held only the changed keys. The complete base is read, not
-   admitted (the declaration projection never judged admission or renderer
-   coherence either), and the build is process-cached by its population, so
-   it costs one build per distinct base."
-  {:malli/schema [:=> [:cat :map] :map]}
+(defn replacement-base
+  "The complete projection of the supplied population, retaining a complete base.
+  A declaration-only base derives its missing indexes through the cached build;
+  reading the population does not readmit its declarations."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.schema/projection]}
   [projection]
   (if (incremental-base? projection)
     projection
