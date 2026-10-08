@@ -107,4 +107,8 @@
  #:seon.task{:name "a-root-repl-proof-cannot-reach-its-file"
              :kind :function
              :intent "Root gives a real backlog task its red proof by a deftest at its REPL on main (a proof must be at the home before seon.task/assign! accepts it), but nothing writes that deftest to its file: bin/lane evidence for an agent's branch called test/my/program_test.clj unanalyzable once the deftest was appended by hand (it used clojure.string/includes? without a require), and differing (namespace row and test digest) after adding the require (fanout run, default e1a71b7c8, 2026-10-08), so each proof landed through a separate 55 s throwaway check (e39453e05). Done when root writes its own main definitions back with the same write-back and the proof file commits with the agent's change by branch evidence."
-             :must-read #{my.program/write-branch! seon.cluster.branch-evidence/branch-evidence seon.task/assign!}}]
+             :must-read #{my.program/write-branch! seon.cluster.branch-evidence/branch-evidence seon.task/assign!}}
+ #:seon.task{:name "breaks-of-a-widely-used-function-shows-its-callers-twice"
+             :kind :function
+             :intent "(my.program/breaks {:seon.program/subject 'seon.db/pull}) is an 83,933-token value shown as 2,053 tokens: the 600-name :seon.program/callers set beside :seon.program/call-sites that already name every caller, and 2,274 :seon.program/gating tests, each cut by the value printer (context corpus, default 795a770c2, 2026-10-08; docs/research/agent-platform/2026-10-08/context-refine/scorecard.md). Both groups are consumed by the retraction refusal and deletion report, so the producer keeps them. Done when :seon.program/breakage has a declared AI render showing each blocking relation's count with a few names and its requery, and the reply for seon.db/pull is under 600 tokens with no name shown twice."
+             :must-read #{my.program/breaks my.program/callers}}]
