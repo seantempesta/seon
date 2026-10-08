@@ -21,7 +21,8 @@
             [seon.cluster.source :as source]
             [seon.fault :as fault]
             [seon.flow :as work]
-            [seon.test]))
+            [seon.test]
+            [malli.error]))
 
 (defn- read-result
   {:malli/schema
@@ -815,23 +816,23 @@
       {})))
 
 (defn- nearest
-  "Up to five declared symbols sharing sym's name, or in its namespace with an overlapping name."
+  "Up to five declared symbols closest to sym by edit distance of their names, the same namespace before others."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol] [:vector :qualified-symbol]]}
   [database sym]
-  (let [ns-part (namespace sym) name-part (name sym)
-        overlaps? #(or (str/includes? (name %) name-part) (str/includes? name-part (name %)))]
+  (let [ns-part (namespace sym) name-part (name sym)]
     (->> (concat (db/q database '[:find [?s ...] :where [?e :seon.fn/sym ?s]])
                  (db/q database '[:find [?s ...] :where [?e :seon.test/sym ?s]]))
-         (filter #(or (= name-part (name %)) (and (= ns-part (namespace %)) (overlaps? %))))
-         (sort-by (juxt #(not= ns-part (namespace %)) str))
-         (take 5) vec)))
+         ;; each distance once, never per comparison
+         (map (fn [s] [[(malli.error/levenshtein (name s) name-part) (not= ns-part (namespace s)) (str s)] s]))
+         (sort-by first)
+         (take 5) (mapv second))))
 
 (defn source
   "Read one declaration's source, docstring, contract and location, for a function or a test.
 
   Example:
   (my.program/source 'seon.task/create!)
-  Errors: an unknown symbol returns a not-found error naming the nearest symbols."
+  Errors: an unknown symbol returns a not-found error with the nearest symbols under :seon.error/expected."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:or :my.program/declaration-source :seon.program/not-found-error]]}
   [database sym]
@@ -844,11 +845,10 @@
           (assoc :doc (:seon.fn/doc entity))
           (:seon.fn/spec entity) (assoc :contract (read-string (:seon.fn/spec entity)))
           (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity)))))
-      (let [near (nearest database sym)]
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/source
-          {:seon.error/message (str "No program declaration names " sym ". Nearest: " (str/join ", " near))
-           :seon.program/not-found sym
-           :seon.error/expected near})))))
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/source
+        {:seon.error/message "No program declaration names that symbol."
+         :seon.program/not-found sym
+         :seon.error/expected (nearest database sym)}))))
 
 (defn render-source-ai
   "A declaration's source as its own text: the code an agent can copy into a `defn`
