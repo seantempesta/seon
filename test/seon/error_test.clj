@@ -1461,6 +1461,32 @@
             :seon.error/offending {:seon.fs/path "src/a.clj"}}
            reply))))
 
+(deftest an-errors-ai-face-shows-its-variants-declared-members
+  ;; A write-back :conflict replied only its message and offending value:
+  ;; the reason, the file and each declaration's conflict digests, all
+  ;; declared by :seon.source/write-back-error, were dropped from the reply.
+  (test-support/with-database
+   (fn [connection]
+     (let [digest (fn [c] (apply str (repeat 64 c)))
+           conflicts {[:seon.fn/sym 'seon.ref/section-error]
+                      {:seon.program/base-digest (digest "a") :seon.program/head-digest (digest "b")
+                       :seon.program/branch-digest (digest "c")}}
+           refused (error.refusal/error :seon.source/write-back-error
+                                        {:seon.error/layer :seon.source/write-back
+                                         :seon.error/operation 'seon.cluster.source/write-back!
+                                         :seon.error/message "The file changed these declarations since your branch's base, and your branch changed them too."
+                                         :seon.source/write-back-refused :conflict
+                                         :seon.source/path "src/seon/ref.clj"
+                                         :seon.program/conflict-digests conflicts})
+           face (error/render-ai {:seon.render/value refused :seon.db/db (db/db connection)})]
+       (is (= :seon.source/write-back-error (:seon.error/type refused)) "the producer names its variant")
+       (is (= {:seon.source/write-back-refused :conflict :seon.source/path "src/seon/ref.clj"
+               :seon.program/conflict-digests conflicts}
+              (select-keys face [:seon.source/write-back-refused :seon.source/path :seon.program/conflict-digests]))
+           "the variant's declared members are shown")
+       (is (= {} (select-keys face [:seon.error/at :seon.error/layer :seon.error/world]))
+           "the base's bookkeeping is not")))))
+
 (deftest ^{:seon.test/golden "The specialist *-prose functions produce prose by definition; their text is their output."}
   specialist-renderers-use-their-declared-evidence
   (test-support/with-database

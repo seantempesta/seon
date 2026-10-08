@@ -1921,6 +1921,30 @@
     (let [database (db/db)]
       (when (db/database-value? database) database))))
 
+(defn- schema-keys
+  "The map keys `schema` declares, through its `:and`/`:merge` children and
+  registered references."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:sequential :qualified-keyword]]}
+  [schema]
+  (let [schema (m/deref-all schema)]
+    (case (m/type schema)
+      :map (mapv first (m/entries schema))
+      (:and :merge) (into [] (mapcat schema-keys) (m/children schema))
+      [])))
+
+(defn- variant-members
+  "The members `error`'s variant (`:seon.error/type`) declares beyond
+  `:seon.error/base`, as `error` holds them: what that kind of failure says
+  besides the base's message, fix and problems. Empty when the type is not
+  registered in `options`' registry."
+  {:malli/schema [:=> [:cat [:map [:registry :any]] :map] :map]}
+  [options error]
+  (let [variant (:seon.error/type error)]
+    (if (and (qualified-keyword? variant) (mr/schema (mr/registry (:registry options)) variant))
+      (select-keys error (remove (set (schema-keys (m/schema :seon.error/base options)))
+                                 (schema-keys (m/schema variant options))))
+      {})))
+
 (defn reply-value
   "An error as the agent acts on it: one small map to fix the failure from.
 
@@ -1948,6 +1972,9 @@
     `ex-data` without frames, when there is more than the message to say; a
     link's message equal to the shown message is not repeated.
   - `:seon.sci.eval/stacktrace`: the agent's own frames.
+  - every member the error's variant (`:seon.error/type`) declares beyond
+    `:seon.error/base` and holds (`variant-members`), e.g. a write-back
+    refusal's reason, path and conflict digests.
 
   The one-argument arity reads the database in custody, if any.
 
@@ -1977,7 +2004,8 @@
          ;; the producer's own message, never a sentence composed here
          message (or (when-not problems (:seon.error/message cause)) (:seon.error/message error))
          ;; the projection is read only for problems: expectations and examples
-         options (when-let [projection (when problems (some-> database db/carried-projection))]
+         options (when-let [projection (when (or problems (:seon.error/type error))
+                                         (some-> database db/carried-projection))]
                    {:registry (:seon.schema.projection/registry projection)})
          missing (missing-symbol error)
          ;; a stored contract fault keeps its expected and received values
@@ -2016,7 +2044,7 @@
          arity? (contains? error :seon.instrument/declared-arities)
          ;; an empty name list is no key; a refused read is shown as it is
          in-namespace (when (and database namespace-name) (names-in database namespace-name missing))]
-     (cond-> {}
+     (cond-> (if options (variant-members options error) {})
        (:seon.error/type error) (assoc :seon.error/type (:seon.error/type error))
        message (assoc :seon.error/message message)
        (and class (not= "clojure.lang.ExceptionInfo" (str class)))

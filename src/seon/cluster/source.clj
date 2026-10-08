@@ -1040,8 +1040,10 @@
   "`write-back!`'s declared refusal: its reason, message and evidence."
   {:malli/schema [:=> [:cat :seon.source/write-back-refused :string :map] :seon.source/write-back-error]}
   [reason message members]
-  (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/write-back 'seon.cluster.source/write-back!
-   (merge {:seon.error/message message :seon.source/write-back-refused reason} members)))
+  (seon.error.refusal/error :seon.source/write-back-error
+   (merge {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.cluster.source/write-back!
+           :seon.error/message message :seon.source/write-back-refused reason}
+          members)))
 
 (defn- sha-256
   "The file digest publication records (`:seon.fn.file/digest`)."
@@ -1204,7 +1206,7 @@
       (refuse :not-analyzable "The file as it is now does not analyze cleanly." {:seon.error/offending (:seon.fn/findings ours)})
       (seq conflicting)
       (refuse :conflict "The file changed these declarations since your branch's base, and your branch changed them too."
-              {:seon.error/offending (vec (sort-by str (keys conflicting))) :seon.program/conflict-digests conflicting})
+              {:seon.program/conflict-digests conflicting})
       (let [spans (map span-of before-entities)]
         (or (some nil? spans) (not= (mapv span-text spans) (mapv source-of before-entities))))
       (refuse :span-mismatch "A before-state has no span, or its span no longer holds its declaration's source." {})
