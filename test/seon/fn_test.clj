@@ -3021,6 +3021,31 @@
                           entities))
             "a batch reads exactly the entities each identity reads alone")))))
 
+(deftest ^{:seon/tasks #{'my.program/write-branch-refuses-an-unchanged-nilable-function}}
+  a-contract-analyzes-to-the-same-row-under-any-print-binding
+  ;; An agent's evaluation runs with `*print-namespace-maps*` false and the
+  ;; publication that stored the file's rows ran with it true: a contract whose
+  ;; properties share one namespace (`seon.error/scalar-text`) reindexed to
+  ;; another digest and `my.program/write-branch!` refused the unchanged file.
+  (let [root (fixture-root)
+        _ (write-source! root "src/sample/printing.clj"
+                         (str "(ns sample.printing)\n\n"
+                              "(defn scalar\n  \"A number's printed form, or nil.\"\n"
+                              "  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption"
+                              " :seon.schema.admission/polymorphic-boundary"
+                              " :seon.schema.admission/reason \"Any value.\"}]] [:maybe :string]]}\n"
+                              "  [value]\n  (when (number? value) (str value)))\n"))
+        row (fn [bindings]
+              (with-bindings bindings
+                (some #(when (= 'sample.printing/scalar (:seon.fn/sym %))
+                         (select-keys % [:seon.fn/spec :seon.program/definition-digest]))
+                      (seon.fn/analyze-entities {:seon.fn/root (.getCanonicalPath root) :seon.fn/roots ["src"]}))))
+        rows (mapv row [{#'*print-namespace-maps* true}
+                        {#'*print-namespace-maps* false}
+                        {#'*print-length* 2 #'*print-level* 2}])]
+    (is (:seon.fn/spec (first rows)) "the fixture function's contract was analyzed")
+    (is (apply = rows) "the caller's print bindings never change a stored contract or its digest")))
+
 (deftest publication-reuses-the-prior-declarations-for-contract-derivation
   (test-support/with-database
    (fn [connection]

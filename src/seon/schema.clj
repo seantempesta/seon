@@ -753,7 +753,7 @@
 
                     :else value))]
           (canonicalize definition false))
-        encoded (pr-str canonical)
+        encoded (id/printed canonical)
         decoded (edn/read-string encoded)]
     (when-not (= canonical decoded)
       (throw
@@ -1329,7 +1329,7 @@
    resolution, and acyclicity remain separate operations at that authority."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
-  (let [encoded (pr-str value)
+  (let [encoded (id/printed value)
         ;; Only each dependency's declared "not parseable" refusal is false:
         ;; clojure.edn's RuntimeException (EdnReader.java:130, :174-177) and
         ;; Malli's `-exception` ex-info with a `malli.core` :type
@@ -1704,7 +1704,7 @@
   {:malli/schema [:=> [:cat ::registry-key ::definition] ::registration]}
   [k v]
   (internal/assert-non-nilable-value-schema! (candidate-forms) k (structural-schema v))
-  (let [encoded (pr-str v)
+  (let [encoded (id/printed v)
         decoded (try
                   (edn/read-string encoded)
                   (catch Exception e
@@ -3849,7 +3849,7 @@
                  (merge (@schema-datahike-storable-properties-in projection schema-key)
                         {:seon.schema/key schema-key
                          :seon.schema/form
-                         (binding [*print-namespace-maps* false] (pr-str (get forms schema-key)))
+                         (binding [*print-namespace-maps* false *print-length* nil *print-level* nil *print-meta* false] (pr-str (get forms schema-key)))
                          :seon.schema.admission/source :core})
                   (seq references) (assoc :seon.schema/references (set references)))]
             (assoc entity :seon.program/definition-digest
