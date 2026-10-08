@@ -24,6 +24,7 @@
             [datahike.db.utils :as dbu]
             [my.program :as my.program]
             [sci.core :as sci]
+            [sci.ctx-store]
             [seon.db :as db]
             [seon.config :as config]
             [seon.fn :as sfn]
@@ -348,13 +349,17 @@
         ;; the projection each write was armed under (`seon.sci.arm/arm!`):
         ;; it holds a schema this form registered before the batch applies it
         projection (when analyzed (arm/arming-projection request working))
-        by-var (into {} (map (fn [w] [(:seon.batch/var w)
-                                      (if analyzed
-                                        (write-entity namespace-row working projection entry analyzed w declared)
-                                        {:seon.batch/private {:seon.batch/sym (:seon.batch/sym w)
-                                                              :seon.batch/join :unanalyzed
-                                                              :seon.batch/reason :no-source}})]))
-                     finals)
+        ;; a Var this context shares with its base answers its root and
+        ;; metadata per context (`sci.lang.Var`): read them as `ctx` binds
+        ;; them, never as the base bound them before this request redefined it
+        by-var (sci.ctx-store/with-ctx ctx
+                 (into {} (map (fn [w] [(:seon.batch/var w)
+                                        (if analyzed
+                                          (write-entity namespace-row working projection entry analyzed w declared)
+                                          {:seon.batch/private {:seon.batch/sym (:seon.batch/sym w)
+                                                                :seon.batch/join :unanalyzed
+                                                                :seon.batch/reason :no-source}})]))
+                       finals))
         ;; execution order: a later write supersedes an earlier one by identity
         program (reduce (fn [m w]
                           (case (:seon.batch/op w)

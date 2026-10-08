@@ -85,3 +85,26 @@
                         agent-id running)]
        (is (false? (get reply "isError"))
            "diff answers, not a refusal, after the namespace the agent stood in was removed")))))
+
+(deftest ^{:seon/tasks #{'seon.program/a-deftest-over-a-contracted-defn-refuses-its-contract-facts}}
+  a-later-request-redefining-a-contracted-defn-is-admitted-as-written
+  ;; each row: request 1 defines, request 2 redefines the same name; the
+  ;; second definition is read as the agent's context binds it, never as
+  ;; the base it forked from bound the shared Var
+  ((requiring-resolve 'seon.test-support/with-running-agent)
+   (fn [running agent-id connection]
+     (eval! "(in-ns 'h3.redefine)" agent-id running)
+     (doseq [[first-code second-code stored expected]
+             [["(defn as-test {:malli/schema [:=> [:cat] :any]} [] 1)"
+               "(clojure.test/deftest as-test (clojure.test/is (= 1 1)))"
+               #(db/pull % [:seon.test/sym :seon.fn/arities] [:seon.test/sym 'h3.redefine/as-test])
+               {:seon.test/sym 'h3.redefine/as-test}]
+              ["(defn new-arity {:malli/schema [:=> [:cat :int] :int]} [x] x)"
+               "(defn new-arity {:malli/schema [:=> [:cat] :int]} [] 1)"
+               #(db/pull % [:seon.fn/spec] [:seon.fn/sym 'h3.redefine/new-arity])
+               {:seon.fn/spec "[:=> [:cat] :int]"}]]]
+       (eval! first-code agent-id running)
+       (let [reply (eval! second-code agent-id running)]
+         (is (false? (get reply "isError")) "the redefinition is admitted, not refused")
+         (is (= expected (stored (db/db connection)))
+             "the stored row is the second definition's, without the first one's contract"))))))
