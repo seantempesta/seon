@@ -1,0 +1,23 @@
+--- a/src/seon/schema/datahike.clj
++++ b/src/seon/schema/datahike.clj
+@@ -216,11 +216,17 @@
+       declaration)))
+ 
+ (defn- declared-storable?
+-  "Whether `attribute`'s declaration maps to a Datahike attribute: false for
+-  `attribute-declaration`'s refusal; any other failure propagates whole."
++  "True when the retained storage facts admit a native Datahike attribute."
+   {:malli/schema [:=> [:cat :map :qualified-keyword] :boolean]}
+   [projection attribute]
+-  (not (:seon.error/at (attribute-declaration projection attribute))))
++  (let [root (mr/schema (:seon.schema.projection/registry projection) attribute)]
++    (boolean
++     (when (m/schema? root)
++       (let [{::keys [value-type properties refusal]} (compiled-storage root)
++             value-type (if (= :seon.db/ref attribute) :db.type/ref value-type)]
++         (and (nil? refusal) value-type
++              (or (not (:db.secondary/only properties))
++                  (#{:db.type/float :db.type/double} value-type))))))))
+ 
+ (defn assert-storable-schema!
+   "Refuse an error declaration whose members could upsert another entity."
