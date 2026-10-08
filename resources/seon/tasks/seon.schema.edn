@@ -68,4 +68,9 @@
   :kind :function
   :intent "register! of [:maybe :int] returns a flat map with layer and member but no :seon.error/type (registration-refusal, schema.clj:1643). Every error is one flat map with :seon.error/type extending :seon.error/base, built by the installed constructor seon.error.refusal/error. Proof: schema-design.md probe 3 answers a map whose :seon.error/type is a registered variant."
   :must-read #{seon.schema/registration-refusal}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}
+ #:seon.task{:name "schema-only-derivations-are-rederived-per-projection"
+             :kind :function
+             :intent "projection-cache-value holds each derivation by the projection value, and every contracted defn builds a new projection, so every derivation that reads only schema forms is recomputed after each definition: on default the pass after a defn spends 25-37 MB re-deriving program-attributes (fixed by holding it by forms and admissions), observation-selector (12.8 MB), declared-schema-keys (1.6 MB), shapes-in (2.1 MB) and the storable-attribute plans; that pass costs 94-97 MB and 57,000 armed calls against 55 MB and 8,000 for an ordinary pass (defn-why, 2026-10-08). Give the projection a schema-population identity that a contract-only write keeps (the advanced projection knows no schema row changed) and hold schema-only derivations by it. Done when the pass after a contract-only defn costs what an ordinary pass costs."
+             :must-read #{seon.schema/projection-cache-value seon.schema/load-projection}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]

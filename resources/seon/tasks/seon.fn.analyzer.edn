@@ -13,4 +13,9 @@
              :kind :function
              :intent "runtime_status on default (2026-10-08, commit 6ac7343e loaded) ranks seon.fn.analyzer/analyze over its bound: 11 calls, mean 1.17 s, max 10.0 s, and its caller seon.fn/analyzed-files 11 calls, mean 2.17 s, max 14.7 s; neither health row carries a task. Name what each call analyzes (files, forms) and whether the work follows the changed files or the whole program; an unchanged-input analysis should be a cache hit."
              :must-read #{seon.fn.analyzer/analyze seon.fn/analyzed-files seon.fn/index!}
-             :evidence #{"docs/research/agent-platform/2026-10-08/review/plan-review-opus3.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/review/plan-review-opus3.md"}}
+ #:seon.task{:name "each-analysis-resolves-the-lint-configuration-from-disk"
+             :kind :function
+             :intent "seon.fn.analyzer/invoke-kondo runs clj-kondo, which resolves its configuration directories and reads their EDN files on every call (clj-kondo.impl.core/resolve-config, process-cfg-dir, read-edn-file: 2 MB) and syncs its cache (sync-cache, load-when-missing: 2.1 MB), about 4 MB of a one-form analysis whose own work is under 1 MB; a bare clj-kondo run of the same form with no cache is 3.7 MB and 5.5 ms (defn-why, 2026-10-08). Resolve the configuration once per configuration content and pass it as a value. Done when one form's analysis allocates under 1.5 MB."
+             :must-read #{seon.fn.analyzer/invoke-kondo seon.fn.analyzer/analyze}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]

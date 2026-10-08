@@ -218,4 +218,19 @@
   :kind :function
   :intent "The refusal of seon.db/transact! carries :seon.db/registered-candidates listing keys that are already installed ([:scratch.schema/count :scratch.schema/label]) and omits the key that was undeclared (:scratch.schema/size), so it reads as a candidate list of the wrong set. Correct: the hint lists registered keys near the refused key and includes the refused key. Proof: schema-design.md probe 2 answers a hint naming :scratch.schema/size. Producer: the seon.db refusal builder."
   :must-read #{seon.db/transact!}
-  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}]
+  :evidence #{"docs/research/agent-platform/2026-10-08/s5-admission/schema-design.md"}}
+ #:seon.task{:name "a-datahike-query-walks-every-retained-result-bucket"
+             :kind :function
+             :intent "A one-clause query with a new argument value costs 0.38 MB and 0.2 ms on default, 75 times the 5 KB direct datoms lookup it needs (defn-why, 2026-10-08, 400 queries under JFR): 57% is datahike.query/result-cache-get -> inheritable-entry -> compatible-source-keys?, which walks every retained result-cache bucket (lru/weighted-entries) and allocates subvec/mapv members per bucket before checking this query's cache key (reference-code/datahike/src/datahike/query.cljc:3030-3086, pin 86c3301a00); 25% is get-or-create-plan building a new plan because substituted constants are part of the plan key (query.cljc:3608-3634). Every Seon read through seon.db/q pays both, so cost follows retained cache size and argument values, never the query. Fix in the Datahike fork: index inheritable buckets by cache key (or check (get entries cache-key) before the member comparison), and key plans by the query with constants as bound inputs. Done when a fresh-argument one-clause query allocates under 50 KB with the query-cache inheritance regressions green."
+             :must-read #{seon.db/vector-query-call seon.db/q}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
+ #:seon.task{:name "every-index-node-access-updates-an-lru-map"
+             :kind :function
+             :intent "Datahike's CachedStorage.accessed calls clojure.core.cache LRUCache hit through a swap! on every index node access (reference-code/datahike/src/datahike/index/persistent_set.cljc:450-455; node cache built by core.cache lru-cache-factory at index/interface.cljc:14-17), path-copying the LRU's persistent maps per access. A four-clause query that does one lookupGE per tuple (seon.turn/terminal-agent-ordinal) spends 58% of its 4.4 MB there (defn-why, 2026-10-08). Cost follows node accesses times log(cache size). Fix in the fork: a Caffeine (or other concurrent, allocation-free-on-hit) node cache, as seon.cache already uses. Done when a 742-tuple fused scan allocates no cache bookkeeping per access."
+             :must-read #{seon.db/vector-query-call}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
+ #:seon.task{:name "a-definition-write-reads-every-declaration-datom-for-its-projection-key"
+             :kind :function
+             :intent "A contracted defn's transaction writes a declaration attribute, so its speculative value misses the revision key and seon.db/speculative-projection keys it by declaration-content-key: every declaration datom of the program (about 30,000) copied into vectors, 6-8 MB per defn on default, then schema/load-projection walks three whole AEVT ranges (another 6 MB) to find the one changed row (defn-why, 2026-10-08). Both are proportional to the program, not the write. The basis's revision key already names the unchanged declarations; key the speculative value by the basis key plus the written declaration datoms (the report's tx-data), and advance from that basis. Done when a one-contract definition write's projection key and derivation allocate under 1 MB."
+             :must-read #{seon.db/speculative-projection seon.db/declaration-content-key seon.schema/load-projection}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]

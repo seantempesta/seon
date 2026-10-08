@@ -104,4 +104,9 @@
              :kind :function
              :intent "(undefined-sym 1) answers :seon.error/in-namespace {user []} (default 2026-10-08): reply-value adds the key whenever a name is missing, even with no near names. Done when the key is absent for an empty list, asserted through MCP."
              :must-read #{seon.error/reply-value}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "fault-window-derives-the-error-selector-when-no-error-occurred"
+             :kind :function
+             :intent "seon.error/occurred-since computes observation-selector whenever its query answers a vector, even an empty one; the selector is held per projection, so the first pass after any declaration write rederives it over the whole registry: 12-13 MB and 13.5 ms of the 94 MB pass after a defn (defn-why, 2026-10-08). Derive the selector only when the window holds an error, and hold it by the schema forms it reads (as seon.program/program-attributes now is), not by the projection value. Done when the pass after a defn allocates nothing in observation-selector with no errors in its window."
+             :must-read #{seon.error/occurred-since seon.error/observation-selector}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]

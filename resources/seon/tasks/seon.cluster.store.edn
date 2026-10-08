@@ -30,4 +30,9 @@
              :kind :function
              :intent "Konserve patches to drop the second k/keys listing in collection (astra-referenced-blobs), which lists 346k keys per pass. Done when collection lists once, timed on the live store size."
              :must-read #{seon.cluster.store/datahike-configuration}
-             :evidence #{"tmp/store-growth/report.md"}}]
+             :evidence #{"tmp/store-growth/report.md"}}
+ #:seon.task{:name "each-commit-serializes-hundreds-of-times-the-bytes-it-writes"
+             :kind :function
+             :intent "One commit's durable write allocates 70-100 times the bytes it stores: a defn pass writes 132-161 index nodes (590-690 KB) and allocates about 70 MB on the writer threads; an ordinary pass writes 36-44 nodes (270-290 KB) for about 18 MB (defn-why, 2026-10-08, JFR on default). The owners are dependency code: fressian's WriteHandlerLookup resolving a handler per written object through Fns.soloEntry, which allocates a HashMap entry iterator each time (13 MB of a defn's 71 MB), FressianWriter.doWrite (20 MB), a new LZ4FrameOutputStream with fresh 64 KB block buffers per node (konserve compressor, 10 MB), and konserve's io state machines. A plain Datahike file store with history at 480,000 datoms, outside Seon, allocates 20 MB for a 27-datom transaction and 39 MB for 60 datoms. Node count per commit is task each-commit-writes-dozens-of-index-nodes territory; this task is bytes allocated per byte written. Fix in the forks: cache write handlers by class, reuse LZ4 buffers per writer thread. Done when allocation per commit is within 10 times the bytes written."
+             :must-read #{seon.db/transact!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]
