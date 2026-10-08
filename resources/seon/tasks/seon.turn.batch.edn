@@ -53,4 +53,9 @@
   :kind :function
   :intent "One (in-ns 'seon.task) (defn merge-dogfood-probe ...) on an agent branch (2026-10-08, spec-merge dogfood) rewrites the seon.task namespace row: :seon.ns/doc, :seon.fn/file and :seon.task/tasks are dropped, :seon.schema.admission/source turns :core -> :agent, and the alias components are re-minted, so its digest changes. Effects: every defn makes the namespace row a change, two agents adding to one namespace always conflict on that row at merge, and an accepted merge strips the target namespace's docstring, file link and task edges. Done when a pass that changes no ns form leaves the namespace row (and its digest) unchanged, regression through MCP SCI asserting the digest."
   :must-read #{seon.turn.batch/derive-form}
-  :evidence #{"docs/seon/specs/merge.md"}}]
+  :evidence #{"docs/seon/specs/merge.md"}}
+ #:seon.task{:name "a-jvm-compile-error-shows-the-wrapper-message"
+             :kind :function
+             :intent "JVM-mode (undefined-jvm-sym) through MCP answers :seon.error/message \"Syntax error compiling at (1:1).\" twice (top and first chain link) with the cause, Unable to resolve symbol, last in :chain (default 2026-10-08). clojure.main/err->msg (ex-triage + ex-str) is Clojure's own message for this. Done when the reply's message is the triaged cause and a regression asserts it."
+             :must-read #{seon.turn.batch/jvm-request}
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

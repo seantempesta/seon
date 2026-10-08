@@ -206,4 +206,9 @@
              :kind :function
              :intent "An armed agent's run (resume-turn) forked the cluster base context it captured at arming without acquiring the program its connection now holds, so a program change committed by another writer (boot's adoption of the loaded files, another agent's definition) stayed invisible to every SCI run until something else called seon.cluster.agent/acquire-context!. Observed on default after a restart onto b5ff51e4c: root's (doc h) failed 'Unable to resolve symbol: seon.sci.eval/reference-in' for two minutes while a freshly hosted agent and the JVM path saw the function. Correct: each pass acquires its base at the connection's current value before forking (a no-op when the program is unchanged)."
              :must-read #{seon.turn/resume-turn seon.sci.eval/acquire! seon.cluster.agent/acquire-context!}
-             :evidence #{"docs/research/agent-platform/2026-10-07/doc-fix/doc-resolution-notes.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-07/doc-fix/doc-resolution-notes.md"}}
+ #:seon.task{:name "a-not-admitted-diagnostic-prints-its-write-attempt"
+             :kind :function
+             :intent "(defn h {:malli/schema [:=> [:cat :int] [:maybe :int]]} [x] x) through MCP answered a :diagnostics entry of about 980 tokens (default 2026-10-08): request id, producer digest, basis, three host frames and the whole refused transaction, while the rule broken sits only in the message, which a 40-token prefix from not-admitted lengthens until the printer cuts it mid-sentence. with-diagnostic prints the error whole (render.value/core-text [error]) instead of projecting it with seon.error/reply-value as evaluation errors are (seon.sci.eval/shown-failure). Done when the diagnostic is reply-value's map (type, message, offending) and an MCP regression bounds the reply at 150 tokens."
+             :must-read #{seon.turn/with-diagnostic seon.turn/not-admitted seon.error/reply-value}
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

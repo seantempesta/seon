@@ -7,4 +7,9 @@
              :kind :function
              :intent "my.test/run-owned answers about 800 tokens for one test, with a duplicated :out. Done when the reply is focused through the render (one output, the verdict, the failing assertions' data) and its token size is asserted in a regression."
              :must-read #{my.test/run-owned}
-             :evidence #{"tmp/repl-audit/change.md"}}]
+             :evidence #{"tmp/repl-audit/change.md"}}
+ #:seon.task{:name "check-in-the-defining-pass-says-the-test-does-not-exist"
+             :kind :function
+             :intent "(deftest inc3-fails ...) (my.test/check {:seon.test/changed ['scratch.msgs/inc3-fails]}) in one pass answers \"Changed identity has no definition, history or incoming edge.\" with :expected :complete-comparable-program-evidence (default 2026-10-08); the deftest's facts settle with the pass, and the same call next pass runs it. Done when the refusal says the identity is unsettled in this pass by a typed error and a regression asserts the type."
+             :must-read #{my.test/check}
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

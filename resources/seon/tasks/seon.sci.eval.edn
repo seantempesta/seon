@@ -239,4 +239,9 @@
              :kind :function
              :intent "agent-do-report calls .setStackTrace with an empty array on every link of an erroring test's Throwable (5295011dd, the fix for a-test-error-report-prints-the-whole-host-stack), so the live exception the agent may hold loses its frames for good: the bulk was a printing problem and the fix mutated the value. Done when the report prints the Throwable as its cause chain through the value printer under 300 estimated tokens and the held exception keeps its stack trace, asserted on (count (.getStackTrace e)) after run-tests."
              :must-read #{seon.sci.eval/agent-do-report seon.error.refusal/chain}
-             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
+ #:seon.task{:name "an-arity-error-names-the-sci-closure"
+             :kind :function
+             :intent "(defn f [a] a) (f 1 2) through MCP answers :seon.error/message \"Wrong number of args (2) passed to: sci.impl.fns/fun/arity-1--73805\" (default 2026-10-08); Clojure says user/f, and the reply's own :seon.sci.eval/stacktrace begins [user/f 1 1]. Done when the message names the agent's function and an MCP regression asserts it."
+             :must-read #{seon.error/reply-value seon.sci.eval/shown-failure}
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

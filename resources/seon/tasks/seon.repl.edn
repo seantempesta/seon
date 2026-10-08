@@ -75,4 +75,9 @@
              :kind :function
              :intent "A cut :out prints (subs (:seon.cluster.eval/output (seon.db/pull '[:seon.cluster.eval/output] [:seon.cluster.eval/id \"29ea417f846d\"])) 4669) (default 2026-10-08): a database read with a Seon attribute name while the live output exists in the runtime. shown-output hands the printer a seon.db/pull requery id. Owner ruling 2026-10-08: elision forms are plain clojure.core on the live result symbol, with no database re-pull while the live value exists. Done when the form is (subs (:out result/e…) n), or (subs out/e… n) on the live output, asserted by evaluating it through the MCP entrance and comparing with (subs output n)."
              :must-read #{seon.repl/shown-output}
-             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
+ #:seon.task{:name "the-slow-fix-ranks-the-whole-process"
+             :kind :function
+             :intent "The :slow finding's fix (seon.profile/summary (seon.profile/cells) 5) ranks the process's cumulative profile (seon.cluster.boot/request! 31751 ms total) as the same five prose lines in three lists, not the slow evaluation; the reply's :repeated adds about 446 tokens of seon.schema.* rows the agent cannot act on (my.test/check, 1,166 ms, default 2026-10-08). Done when the fix reads this evaluation's own armed calls as data and a slow MCP reply is bounded at 60 tokens."
+             :must-read #{seon.repl/findings}
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]

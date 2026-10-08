@@ -22,4 +22,9 @@
  #:seon.task{:name "the-printer-law-lint-refuses-nothing"
              :kind :namespace
              :intent "The one-printer rule is a clj-kondo :discouraged-var warning (.clj-kondo/config.edn), and bin/lane commit and the edit hook refuse only errors, so 183 printer findings landed and nothing refuses the next; bin/seon-hook (21 pr-str) is never linted; with-out-str, print bindings, Throwable->map, hand-built elision text and value-printing error messages are not detected. Done when a :seon/printer-law linter at :error, with a per-file ratchet baseline, refuses a candidate that adds (pr-str x), a hand-built N more text or (binding [*print-length* 5] …) outside seon.print, seon.render.value, seon.sci.admit and seon.id."
-             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
+ #:seon.task{:name "a-member-cut-costs-more-than-it-hides"
+             :kind :function
+             :intent "(zipmap (range 2000) (map #(hash-map :id % :name (str \"item-\" %) :tags #{:a :b}) (range 2000))) showed 1,388 tokens of which about 810 are 29 per-entry cuts, each a 28-token dig form hiding one 4-token :tags member (default 2026-10-08). Nothing keeps a member whole when its printed size is under its continuation's. Done when no cut is emitted for a member smaller than its dig form and a regression bounds the zipmap reply. Same producer as seon.print/elision-forms-call-a-seon-helper."
+             :must-read #{seon.print/continuation}
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
