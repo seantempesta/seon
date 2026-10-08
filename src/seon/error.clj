@@ -2352,7 +2352,10 @@
   no readable identity already did."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :seon.render/read-form :seon.db/error-result]]}
   [unit]
-  (when-let [entity (faults-input unit)]
+  ;; only an entity id or lookup ref names an agent; any other value (an SCI Var
+  ;; walked as the attribute's owner) carries none, so it shows no read
+  (when-let [entity (let [input (faults-input unit)]
+                      (when (or (integer? input) (vector? input)) input))]
    (let [entity-map (db/pull (:seon.db/db unit) [:seon.agent/id] entity)]
     (if (observation? entity-map)
       entity-map

@@ -18,6 +18,7 @@
             [seon.render.transcript]
             [malli.core]
             [seon.id]
+            [sci.core]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.internal :as schema.internal]
@@ -1731,3 +1732,16 @@
     (is (= {:a 1} (:seon.error/offending (described {:a 1}))))
     (is (= [:sequential :map] (:seon.error/expected (described {:a 1}))))
     (is (= 2 (:seon.error/offending (described [{:a 1} 2]))) "a bad member of a sequence is still named")))
+
+(deftest ^{:seon/tasks #{'seon.error/the-faults-render-pulls-with-a-sci-var-as-its-entity-id}}
+  the-faults-read-of-a-value-that-names-no-entity-is-absent
+  (with-db
+    (fn [connection]
+      (let [database (db/db connection)
+            unit (fn [value attribute]
+                   (cond-> {:seon.db/db database :seon.render/value value}
+                     attribute (assoc :seon.render.walk/attribute attribute)))
+            sci-var (sci.core/new-var 'faults-pull-probe 1)]
+        (is (nil? (error/faults-form (unit sci-var :seon.error/of-steward))) "an SCI Var names no agent")
+        (is (nil? (error/render-faults-ai (unit sci-var :seon.error/agent))) "its AI face shows nothing")
+        (is (nil? (error/faults-form (unit nil nil))))))))
