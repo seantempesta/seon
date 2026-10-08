@@ -1490,7 +1490,21 @@
                         (when-not (or (:seon.db/invalid-read incoming) (:seon.schema/expected-value incoming))
                           (recur (vec (remove seen incoming)) (into seen incoming))))))]
       (when parents
-        (let [eids (vec (into touched parents))
+        (let [candidates (vec (into touched parents))
+              ;; Only program rows decide coverage: pull the identity
+              ;; attributes of every touched entity (turns and evaluations
+              ;; among them), then every attribute of the program rows alone.
+              marks (fn [database] (db/pull-many database (vec program/identity-attributes) candidates))
+              marked-old (marks before)
+              marked-current (marks after)
+              eids (if (some #(or (:seon.db/invalid-read %) (:seon.schema/expected-value %))
+                             [marked-old marked-current])
+                     candidates
+                     (into [] (keep (fn [[eid old-mark current-mark]]
+                                      (when (or (program/row-identity old-mark)
+                                                (program/row-identity current-mark))
+                                        eid)))
+                           (map vector candidates marked-old marked-current)))
               old (db/pull-many before '[*] eids)
               current (db/pull-many after '[*] eids)]
           (and (not (or (:seon.db/invalid-read old) (:seon.schema/expected-value old)))
