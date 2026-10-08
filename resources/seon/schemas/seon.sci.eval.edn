@@ -244,7 +244,11 @@
                  [:map {:seon.db/attributes true}
                  [:seon.sci.eval/reader-event-count
                   :seon.sci.eval/reader-event-count]]],
-                :documentation-unavailable :symbol,
+                :documentation-unavailable :seon.sci.eval/authored-reference,
+                :authored-reference
+                [:or {:description "Whatever syntax an agent wrote after `doc`; lookup classifies it."}
+                 :symbol :keyword :int :double :string :boolean :nil
+                 [:sequential :seon.schema/value] [:map-of :seon.schema/value :seon.schema/value]],
                 :bindings
                 [:map-of :qualified-symbol :seon.sci.eval/binding],
                 :projection-state

@@ -1846,7 +1846,7 @@
         database program-documentation-selector namespace-name))
 
 (defn- documentation-unavailable
-  {:malli/schema [:=> [:cat :symbol] :seon.sci.eval/documentation-unavailable-error]}
+  {:malli/schema [:=> [:cat :seon.sci.eval/authored-reference] :seon.sci.eval/documentation-unavailable-error]}
   [requested]
   (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/documentation-unavailable
    {:seon.error/message "No public documentation is available; request an installed public declaration."
@@ -1995,26 +1995,26 @@
                  :supplied (vec (distinct (map #(nth % 2) entries)))))))))
 
 (defn- function-doc-map
+  "The documentation of one program row: the SCI Var's doc and arglists, the
+  stored contract and, for an accepted override, its JVM-boundary note."
   {:malli/schema [:function
-                  [:=> [:cat :seon.db/database-value :map] [:or :map :seon.db/error-result]]
-                  [:=> [:cat :seon.db/database-value :map :boolean] [:or :map :seon.db/error-result]]]}
-  ([database row]
+                  [:=> [:cat :seon.db/database-value :map [:maybe :map]] [:or :map :seon.db/error-result]]
+                  [:=> [:cat :seon.db/database-value :map [:maybe :map] :boolean] [:or :map :seon.db/error-result]]]}
+  ([database row metadata]
    (let [overrides (when (= :agent (:seon.schema.admission/source row))
                      (program/overrides database))]
      (if (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides))
        overrides
-       (function-doc-map database row
+       (function-doc-map database row metadata
                          (boolean (some #{(:seon.fn/sym row)} overrides))))))
-  ([database row overridden?]
-   (merge (when-let [doc (:seon.fn/doc row)]
+  ([database row metadata overridden?]
+   (merge (when-let [doc (:doc metadata)]
             (docstring-parts doc))
-             {:arglists (if-let [arglists (:seon.fn/arglists row)]
-                          ((arglists-reader database (symbol (namespace (:seon.fn/sym row)))) arglists)
-                          (declaration-absent :seon.fn/arglists))}
-             (agent-documentation-contract database row)
-             (when overridden?
-               {:seon.schema.admission/note
-                "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
+          {:arglists (or (:arglists metadata) (declaration-absent :seon.fn/arglists))}
+          (agent-documentation-contract database row)
+          (when overridden?
+            {:seon.schema.admission/note
+             "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."}))))
 
 (defn directory-value
   "Return current public function summaries and declared schemas for a namespace."
@@ -2053,28 +2053,45 @@
                           functions)})
       :else (documentation-unavailable namespace-name))))
 
+(defn reference-in
+  "The qualified symbol of the Var an authored symbol resolves to in the calling
+  SCI namespace, else the authored syntax unchanged."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.sci.eval/authored-reference] :seon.sci.eval/authored-reference]}
+  [ctx authored]
+  (if-let [resolved (and (symbol? authored) (sci/resolve ctx authored))]
+    (sci/var->symbol resolved)
+    authored))
+
 (defn documentation-value
-  "Read documentation for a public function, named override, or namespace."
-  {:malli/schema [:=> [:cat :seon.db/db :symbol :symbol] [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
-  [database requested qualified]
-  (if (namespace qualified)
+  "Read documentation for a public function, SCI Var, named override, or namespace."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/db :seon.sci.eval/authored-reference :seon.sci.eval/authored-reference]
+                  [:or :map :seon.db/error-result :seon.sci.eval/documentation-unavailable-error]]}
+  [ctx database authored resolved]
+  (cond
+    (not (symbol? resolved)) (documentation-unavailable authored)
+    (namespace resolved)
     (let [row (db/pull database
                        program-documentation-selector
-                       [:seon.fn/sym qualified])
+                       [:seon.fn/sym resolved])
+          metadata (meta (sci/resolve ctx resolved))
           overrides (when (= :agent (:seon.schema.admission/source row))
                       (program/overrides database))
-          overridden? (boolean (some #{qualified} overrides))]
+          overridden? (boolean (some #{resolved} overrides))]
       (cond
         (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
         (or (:seon.db/invalid-read overrides) (:seon.schema/expected-value overrides)) overrides
         (:seon.fn/sym row)
-        (function-doc-map database row overridden?)
-        :else (documentation-unavailable requested)))
-    (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name requested])]
+        (function-doc-map database row metadata overridden?)
+        (or (:doc metadata) (:arglists metadata))
+        (merge (when-let [doc (:doc metadata)] (docstring-parts doc))
+               (when-let [arglists (:arglists metadata)] {:arglists arglists}))
+        :else (documentation-unavailable authored)))
+    :else
+    (let [row (db/pull database [:seon.ns/doc] [:seon.ns/name resolved])]
       (cond
         (or (:seon.db/invalid-read row) (:seon.schema/expected-value row)) row
         (:seon.ns/doc row) (merge (docstring-parts (:seon.ns/doc row)) {:in [] :out []})
-        :else (documentation-unavailable requested)))))
+        :else (documentation-unavailable authored)))))
 
 (defn- program-doc-var
   "Resolve in the calling SCI namespace; read facts when the form executes."
@@ -2082,14 +2099,10 @@
   []
   (sci/new-macro-var
    'doc
-   (fn [_form _env function-symbol]
-     `(let [resolved# (resolve '~function-symbol)
-            metadata# (meta resolved#)]
+   (fn [_form _env authored]
+     `(let [authored# '~authored]
         (seon.sci.eval/documentation-value
-         (seon.db/db) '~function-symbol
-         (if resolved#
-           (symbol (str (:ns metadata#)) (str (:name metadata#)))
-           '~function-symbol))))
+         (seon.db/db) authored# (seon.sci.eval/reference-in authored#))))
    {:ns (sci/create-ns 'clojure.repl)}))
 
 (defn- program-dir-var

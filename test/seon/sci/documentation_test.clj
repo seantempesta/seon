@@ -22,7 +22,8 @@
          "(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] \"private override\")"
          {:seon.schema.admission/source :agent :seon.fn/private? true}))
        (let [database (db/db connection)
-             doc (evaluation/documentation-value database function-symbol function-symbol)
+             ctx (support/fork-cluster-ctx connection)
+             doc (evaluation/documentation-value ctx database function-symbol function-symbol)
              directory (evaluation/directory-value database 'seon.eval.drive true)]
          (is (= "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."
                 (:seon.schema.admission/note doc))
@@ -33,7 +34,8 @@
 (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
   (support/with-database
     (fn [connection]
-      (let [doc (evaluation/documentation-value (db/db connection) 'seon.db/pull 'seon.db/pull)
+      (let [doc (evaluation/documentation-value (support/fork-cluster-ctx connection) (db/db connection)
+                                                'seon.db/pull 'seon.db/pull)
             contract (#'evaluation/documentation-contract
                       (db/db connection)
                       {:seon.fn/spec
@@ -92,6 +94,29 @@
               (get-in missing-ns [:seon.sci.admit/value :seon.error/operation])))
        (is (= {:schemas {} :functions []} (:seon.sci.admit/value empty-ns)))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
+
+(deftest doc-classifies-authored-references
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           run (fn [source]
+                 (support/evaluate
+                  {:seon.sci.eval/ctx ctx
+                   :seon.cluster.eval/source source
+                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                   :seon.sci.eval/time-limit-ms 2000}))
+           value (comp :seon.sci.admit/value run)
+           unavailable? #(contains? % :seon.sci.eval/documentation-unavailable)]
+       (doseq [source ["(doc nosuchvar)" "(doc 'x)" "(doc 42)" "(doc \"x\")"]]
+         (is (unavailable? (value source)) source))
+       (let [program (value "(doc seon.task/create!)")
+             library (value "(doc clojure.set/union)")
+             aliased (value "(do (require '[clojure.set :as s]) (doc s/union))")]
+         (is (every? #(contains? program %) [:summary :arglists :in :out]) "a program function keeps its contract")
+         (is (= (set (keys library)) #{:summary :body :example :arglists}) "a library Var has no invented contract")
+         (is (seq (:arglists library)))
+         (is (= library aliased) "an alias resolves to the same Var"))
+       (is (empty? (:seon.cluster.eval/output (run "(doc 'x)"))))))))
 
 (deftest directory-observes-a-function-installed-after-context-acquisition
   (support/with-database
@@ -255,7 +280,7 @@
       [(assoc (support/program-fn-entity (db/db connection) 'my.turn/undeclared "(defn undeclared [] true)")
               :seon.fn/private? false)])
      (let [database (db/db connection)
-           doc (evaluation/documentation-value database
+           doc (evaluation/documentation-value (support/fork-cluster-ctx connection) database
                                                'my.turn/undeclared
                                                'my.turn/undeclared)
            entity (some #(when (= 'my.turn/undeclared (:sym %)) %)

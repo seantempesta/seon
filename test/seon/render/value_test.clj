@@ -604,9 +604,9 @@
 (deftest documentation-body-is-whole-or-one-executable-elision
   (support/with-database
    (fn [connection]
-     (let [documentation (evaluation/documentation-value (db/db connection) 'seon.db/read-evidence 'seon.db/read-evidence)
+     (let [ctx (support/fork-cluster-ctx connection)
+           documentation (evaluation/documentation-value ctx (db/db connection) 'seon.db/read-evidence 'seon.db/read-evidence)
            body (:body documentation)
-           ctx (support/fork-cluster-ctx connection)
            handle 'result/e0123456789ab
            request (assoc (probe-unit documentation)
                           :seon.repl/handle handle
