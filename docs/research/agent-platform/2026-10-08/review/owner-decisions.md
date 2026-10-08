@@ -99,6 +99,7 @@ Recommendation first, reason after the dash. ✱ = changes CLAUDE.md text.
     root task* — 10,000 output datoms bound neither a loop nor a scan.
 15. Which row does S keep for a conflicted identity? *The head's row, marked unresolved* — neither side is accepted
     silently.
+
 **Memory**
 
 16. The live-result retention bound (MEM-03)? *The newest 64 handles; an older handle answers gone-value with its
