@@ -218,6 +218,30 @@
        (is (contains? red 'seon.error-test/a-map-for-a-sequential-is-refused-as-the-map)
            "the file test, green on the loaded program, ran the branch's definition through the compiled caller")))))
 
+(def ^:private equal-doc-line
+  "A branch definition of the file function `seon.render.ns/first-doc-line`
+  answering what the loaded one answers, in other source."
+  (str "(in-ns 'seon.render.ns)"
+       " (defn- first-doc-line {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :string]]} [doc]"
+       " (let [lines (->> (str/split-lines (or doc \"\")) (map str/trim) (drop-while str/blank?)"
+       " (take-while (complement str/blank?)) (str/join \" \"))"
+       " stop (str/index-of lines \". \")]"
+       " (not-empty (if stop (subs lines 0 (inc stop)) lines))))"))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-file-test-has-no-executable-var-on-a-live-agent-branch}
+           :seon.test/long "the running-agent fixture (2.9 s) and one redefining eval request (2.8 s: test step 1.4 s running the 5 reaching tests, settle 0.5 s; seon.sci.eval/promoting-a-closure-allocates-megabytes-per-caller-and-runs-twice) measured 5.7 s in a check JVM"
+           :seon.test/long-ms 12000}
+  a-file-proof-aliasing-its-subject-runs-green-on-the-branch
+  ;; `seon.render.ns-test` requires its subject as `sut` and tags its deftests
+  ;; with tasks; the cluster base interns those tests, so the branch's
+  ;; interpreted copy is the member context's own binding of the same Var.
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [{:keys [red passed?]} (step-red equal-doc-line (str "branch-" agent-id) running)]
+       (is (not (contains? red 'seon.render.ns-test/a-doc-line-is-the-docstrings-first-sentence))
+           "the file proof ran interpreted against the branch's definition and passed")
+       (is (true? passed?) "every test reaching the redefinition ran green")))))
+
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-branch-redefinition-never-reaches-its-inherited-callers}}
   an-inherited-file-caller-sees-the-branch-redefinition-of-its-helper
   (support/with-running-agent

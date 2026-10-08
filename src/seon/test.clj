@@ -8,6 +8,7 @@
             [clojure.test]
             [sci.core :as sci]
             [sci.lang]
+            [sci.ctx-store]
             [clojure.core.async.flow :as-alias flow]
             [seon.config :as config]
             [seon.cluster.process :as cluster.process]
@@ -1612,7 +1613,12 @@
                                                       (sci.eval/interpret-test! ctx database test-symbol)))
                            :else (with-test-loader loader (fn [] (resolve-loaded test-symbol)))))]
           (cond
-            (and (runner/var-reference? test-var) (ifn? (:test (meta test-var)))) test-var
+            ;; An SCI Var's metadata is the context's own binding of it: a
+            ;; file test the cluster base already interns, redefined in this
+            ;; context, carries its `:test` only as `ctx` reads it.
+            (and (runner/var-reference? test-var)
+                 (ifn? (:test (if ctx (sci.ctx-store/with-ctx ctx (meta test-var)) (meta test-var)))))
+            test-var
             ;; the interpretation's refusal, naming its cause
             (map? test-var) test-var
             :else
