@@ -305,3 +305,19 @@
     (is (= before after) "reading, marking and explaining call no per-cell predicate")
     (is (<= (reduce + 0 (map :seon.profile/calls own)) 3)
         "an empty mark grows only explain's entry and the two checks of the mark")))
+
+(deftest calls-of-counts-a-function-past-the-hot-limit
+  (let [projection (schema/handed-projection)
+        caps (config/result-caps (test-support/effective-config))
+        prefix (str "my.agents.counted-" (random-uuid))
+        installed (mapv (fn [i]
+                          (instrument/wrap-interpreted
+                           (symbol prefix (str "f" i)) "[:=> [:cat :int] :int]"
+                           projection caps inc {:seon.program/definition-digest digest-a}))
+                        (range (+ profile/hot-limit 5)))
+        measured (profile/measure #(do (run! (fn [f] (f 1)) installed) ((first installed) 2)))]
+    (is (= 2 (profile/calls-of measured (symbol prefix "f0"))))
+    (is (every? #(= 1 (profile/calls-of measured (symbol prefix (str "f" %))))
+                (range 1 (count installed)))
+        "every definition is counted, the ones the ranked lists cut included")
+    (is (zero? (profile/calls-of measured (symbol prefix "never"))))))

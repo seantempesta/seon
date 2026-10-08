@@ -191,6 +191,7 @@
   [:seon.profile/calls :seon.profile/calls]
   [:seon.profile/self-ms :seon.profile/self-ms]]
  :seon.profile/ranked-by-self [:vector {:description "The armed definitions entered over the measured call, most self time first (at most seon.profile/hot-limit): where the time went, wrappers below the work they wrap."} :seon.profile/entered-row]
+ :seon.profile/called [:map-of {:description "Every armed definition entered over the measured call to its outermost entries (JVM-wide), uncut: seon.profile/calls-of reads one."} :seon.profile/sym [:int {:min 1}]]
  :seon.profile/reads [:int {:min 0 :description "The entries of seon.profile/read-entrances among the measured call's armed entries: database reads through seon.db."}]
  :seon.profile/measured-call
  [:map {:description "One measured call (seon.profile/measure): its value and what it cost, from JVM counters."}
@@ -203,4 +204,5 @@
   [:seon.profile/calls :seon.profile/calls]
   [:seon.profile/reads :seon.profile/reads]
   [:seon.profile/ranked-by-self :seon.profile/ranked-by-self]
-  [:seon.profile/ranked-by-calls :seon.profile/ranked-by-calls]]}
+  [:seon.profile/ranked-by-calls :seon.profile/ranked-by-calls]
+  [:seon.profile/called :seon.profile/called]]}

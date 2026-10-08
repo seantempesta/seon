@@ -666,8 +666,9 @@
   JVM counters, so compiled work inside it counts: wall ms, allocated bytes,
   GC collections and their accumulated time, the armed definitions ranked by
   self time and by calls (host and SCI wrappers' outermost entries, at most
-  `hot-limit` each) and the count of reads among them (`read-entrances`). A
-  thrown exception propagates.
+  `hot-limit` each), every entered definition's entries (`calls-of` reads one)
+  and the count of reads among them (`read-entrances`). A thrown exception
+  propagates.
 
   Every counter but the allocation is JVM-wide over the call's window, so
   concurrent unrelated work counts too. The allocation is the calling platform
@@ -719,7 +720,15 @@
      :seon.profile/calls (transduce (map :seon.profile/calls) + 0 called)
      :seon.profile/reads (transduce (comp (filter (comp read-entrances :seon.profile/sym)) (map :seon.profile/calls)) + 0 called)
      :seon.profile/ranked-by-self (ranked (juxt :seon.profile/self-ms :seon.profile/calls))
-     :seon.profile/ranked-by-calls (ranked :seon.profile/calls)}
+     :seon.profile/ranked-by-calls (ranked :seon.profile/calls)
+     :seon.profile/called (into {} (map (juxt :seon.profile/sym :seon.profile/calls)) called)}
       (not (or (neg? allocated-before) (neg? allocated-after)))
       (assoc :seon.profile/alloc-bytes (- allocated-after allocated-before)
              :seon.profile/alloc-scope :thread))))
+
+(defn calls-of
+  "How many outermost entries the armed definition `sym` made over the
+  `measured` call: 0 when it made none."
+  {:malli/schema [:=> [:cat :seon.profile/measured-call :qualified-symbol] [:int {:min 0}]]}
+  [measured sym]
+  (get (:seon.profile/called measured) sym 0))
