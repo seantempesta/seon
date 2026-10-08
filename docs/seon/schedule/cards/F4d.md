@@ -25,6 +25,15 @@ the held task's proofs (`task-proofs`, F4a) plus the tests reaching the branch's
 them as F4c's queue and sets `:seon.turn.loop/started true` in the proc state. A program equal to its base derives
 an empty queue.
 
+## Who runs what the bound left (R-6, decided 2026-10-09)
+
+A test the step's bound cut keeps running to its actual exit on its own thread; until then a later request holds it
+(pending) and never starts it twice. Once it exits, its recorded failure ("did not exit within …") is answered from
+the record by every later request at the same reach digest (`seon.test/select` reuses red as green): it runs again only
+when what it reaches changes, or when a request asks `:seon.test/rerun?`. A test the bound never started has no record
+and stays pending: the agent's next eval request selects it again (its branch's change still reaches it), and while the
+agent waits nothing runs it; this card's proc start is the other place it runs. Pending is not a wake.
+
 ## Proof
 
 `seon.cluster.turn-test/a-restarted-proc-runs-pending-tests`: a pass changes code with the dial at 1 ms so a reaching
