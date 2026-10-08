@@ -1702,10 +1702,10 @@
 (deftest ^{:seon/tasks #{'seon.error/a-missing-key-message-reads-badly}}
   a-missing-key-and-an-equals-schema-read-as-one-expectation
   (let [missing (:seon.error/expected-description
-                 (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:map [:at inst?]] {})))
+                 (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:at inst?]] {})))
                                               :seon.error/path [:at] :seon.error/argument "value" :seon.error/parent {}}))
         equals (:seon.error/expected-description
-                (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:map [:k [:= {:description "d"} true]]] {:k false})))
+                (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:map [:k [:= {:description "d"} true]]] {:k false})))
                                              :seon.error/path [:k] :seon.error/argument "value" :seon.error/parent {:k false}}))]
     (is (clojure.string/includes? missing ":at") "the missing key is named")
     (is (clojure.string/includes? equals "true") "the := schema's value is named")
@@ -1717,7 +1717,7 @@
   an-equals-or-enum-expectation-carries-no-properties
   (let [expected (fn [schema value]
                    (:seon.error/expected
-                    (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain schema value)))
+                    (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) schema value)))
                                                  :seon.error/path [] :seon.error/argument "value" :seon.error/parent value})))]
     (is (= [:= true] (expected [:= {:seon.config/display-label "No provider" :description "Use virtual turns"} true] false)))
     (is (= [:enum :a :b] (expected [:enum {:description "x"} :a :b] :c)))
@@ -1726,7 +1726,7 @@
 (deftest ^{:seon/tasks #{'seon.error/a-map-for-a-sequential-is-refused-as-its-first-entry}}
   a-map-for-a-sequential-is-refused-as-the-map
   (let [described (fn [value]
-                    (seon.error/explain-problem {:seon.error/problem (first (:errors (malli.core/explain [:sequential :map] value)))
+                    (seon.error/explain-problem {:seon.error/problem (first (:errors ((requiring-resolve 'malli.core/explain) [:sequential :map] value)))
                                                  :seon.error/path [] :seon.error/argument "xs" :seon.error/parent value}))]
     (is (= {:a 1} (:seon.error/offending (described {:a 1}))))
     (is (= [:sequential :map] (:seon.error/expected (described {:a 1}))))
