@@ -257,6 +257,13 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 ## 11. Process and lanes
 
+- **Lanes work as Seon agents (owner 2026-10-08).** "instruct agents working on a task to generate the context in the
+  repl and then work in the repl on solving it just as a seon agent will be." Root files each slice as a task with a
+  red proving deftest and assigns it; the lane's first form reads its current-state block at the REPL, it works by
+  `defn` on its branch with tests running by themselves, writes back with `my.program/write-branch!`, commits, and files
+  every friction as a task. Lives in: lane template `repl-slice.md` (pilot lane dogfood-pilot rewrites it).
+
+
 - **REPL-first proving.** "We are supposed to have one main java process with the ability to run shared tests which
   are only incremental and we don't re-run what hasn't changed." Lanes change ordinary functions by `defn` on their
   own branch in the main JVM, the reaching tests run incrementally there, then write-back; a throwaway JVM only for
