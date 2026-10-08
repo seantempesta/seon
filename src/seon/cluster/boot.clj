@@ -678,16 +678,19 @@
         :status (cond-> (merge identity
                               {:seon.operator/clusters
                                (mapv (fn [[n instance]]
-                                       (let [report (health/report {:seon.boot/cluster-name n})
-                                             connection (:seon.boot/cluster-connection instance)]
-                                         (if (:seon.operator/verbose? request)
-                                           report
-                                           ;; The operator's request has no evaluation
-                                           ;; world: the cluster hands its own database.
-                                           (health/render-ai
-                                            (cond-> {:seon.render/value report}
-                                              (store/connection? connection)
-                                              (assoc :seon.db/db (db/db connection)))))))
+                                       (let [connection (:seon.boot/cluster-connection instance)]
+                                         (if-not (store/connection? connection)
+                                           ;; An instance mid-start or mid-stop has no
+                                           ;; database: its row is its readiness.
+                                           {:seon.health/cluster n :seon.health/state :unknown
+                                            :seon.health/units #:seon.health{:readiness (readiness instance)}}
+                                           (let [report (health/report {:seon.boot/cluster-name n})]
+                                             (if (:seon.operator/verbose? request)
+                                               report
+                                               ;; The operator's request has no evaluation
+                                               ;; world: the cluster hands its own database.
+                                               (health/render-ai {:seon.render/value report
+                                                                  :seon.db/db (db/db connection)}))))))
                                      @running-instances)}
                               (store-observation root))
                   (:seon.operator/verbose? request)

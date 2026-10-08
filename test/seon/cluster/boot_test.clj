@@ -569,6 +569,28 @@
            (println "STATUS-FAULTED" elapsed-ms "ms"))
          (finally (swap! runtime/running-instances dissoc cluster-name)))))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.boot/one-cluster-without-a-database-fails-the-whole-status}}
+  one-cluster-without-a-database-fails-the-whole-status
+  ;; A started or stopping instance holds no connection; status answers its
+  ;; row as readiness data and every other row as usual.
+  (let [live (some #(when (map? %) %) (vals @runtime/running-instances))
+        cluster-name (str "status-no-db-" (random-uuid))]
+    (is (some? live) "status is requested of this JVM's live instance")
+    (swap! runtime/running-instances assoc cluster-name
+           (-> (select-keys live [:seon.boot/config :seon.boot/advertisement :seon.boot/prepl-server])
+               (assoc-in [:seon.boot/config :seon.boot/cluster-name] cluster-name)))
+    (try
+      (let [response (boot/request! (merge (process/current-identity)
+                                           {:seon.operator/command :status
+                                            :seon.operator/managed-root
+                                            (or (store/declared-operator-root) (System/getProperty "user.dir"))}))
+            rows (:seon.operator/clusters response)
+            row (some #(when (= cluster-name (:seon.health/cluster %)) %) rows)]
+        (is (nil? (:seon.error/at response)))
+        (is (map? (get-in row [:seon.health/units :seon.health/readiness])) "the incomplete instance answers its readiness")
+        (is (every? :seon.health/cluster rows) "every row answers"))
+      (finally (swap! runtime/running-instances dissoc cluster-name)))))
+
 (deftest a-failure-with-no-cluster-database-has-no-world-and-never-panics
   ;; A boot refused before its database stood (the 706e407396 indexing
   ;; refusal, 2026-09-28T02:01Z) threw "SEON CORE FAULT (panic)" from
