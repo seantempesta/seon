@@ -141,3 +141,7 @@ Recommendation first, reason after the dash. ✱ = changes CLAUDE.md text.
 | Boot: 11.6 s between store and source, unexplained | row added: LR-BOOT (measure first) |
 | `:seon.sci.eval/loaded-digests` cache: 50% hits, 60 MB | not diagnosed; LR-CACHE's design checks whether it has the same per-branch key |
 | Heap max 11 GB | covered by MEM-01 |
+
+## Added after the reviews (root, 2026-10-08)
+
+17. **Reach/digest cache key across branches (LR-CACHEb).** Datahike's attribute revisions only compare within one connection, so a branch can't reuse the cluster's derivations (cache holds 187-205 MB at 0 hits; a new branch's first check pays ~90 ms / 126 MB for reach alone). *Recommend option 2: a two-line change in our Datahike fork so a connection opens with its opening commit as the conservative revision (cross-connection revisions), plus one `seon.cache` kind mapping commit id → revision map.* Touches the boot-critical connect path; alternatives: content digest by scan (simple, exact, still pays per branch) or index-structure identity (largest). Evidence: `docs/research/agent-platform/2026-10-07/led-cache/reach-key-notes.md`.
