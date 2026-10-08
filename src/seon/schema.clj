@@ -2914,6 +2914,123 @@
                                    :seon.error/offending value})))])))
         (tree-seq coll? seq [(vals forms) (vals function-contracts)])))))
 
+(defn- schema-identity
+  "The schema key a committed schema row names; refuses any other identity."
+  {:malli/schema [:=> [:cat [:or :keyword :string :symbol]] :keyword]}
+  [identity]
+  (if (keyword? identity)
+    identity
+    (throw (ex-info "Committed schema identity is not a keyword."
+                    {:seon.schema/error :seon.schema/malformed-projection-identity
+                     :seon.schema/identity identity
+                     :seon.schema/malformed-projection-identity true}))))
+
+(defn- contract-identity
+  "The qualified symbol a committed function row names; refuses any other identity."
+  {:malli/schema [:=> [:cat [:or :keyword :string :symbol]] :qualified-symbol]}
+  [identity]
+  (cond
+    (qualified-symbol? identity) identity
+    (and (string? identity) (qualified-symbol? (symbol identity))) (symbol identity)
+    (string? identity)
+    (throw (ex-info "Committed function identity is not qualified."
+                    {:seon.schema/error :seon.schema/malformed-projection-identity
+                     :seon.schema/identity identity
+                     :seon.schema/malformed-projection-identity true}))
+    :else
+    (throw (ex-info "Committed function identity is malformed."
+                    {:seon.schema/error :seon.schema/malformed-projection-identity
+                     :seon.schema/identity identity
+                     :seon.schema/malformed-projection-identity true}))))
+
+(defn- parsed-rows
+  "`{identity {form string admission}}` of committed `rows`; a form whose text
+  `base` recorded is `base`'s own object. Refuses malformed and duplicate rows."
+  {:malli/schema [:=> [:cat :seon.schema/projection-rows [:fn clojure.core/ifn?] :string :qualified-keyword :map :map [:fn clojure.core/ifn?]] :map]}
+  [rows identity-fn identity-label identity-attribute prior-definitions prior-strings admission-for]
+  (reduce
+   (fn [parsed row]
+     (when-not (and (sequential? row) (= 3 (count row)))
+       (throw (ex-info (str "Malformed committed " identity-label " tuple.")
+                       {:seon.schema/error :seon.schema/malformed-projection-row
+                        :seon.schema/row row
+                        :seon.schema/malformed-projection-row true})))
+     (let [[raw-identity form-string _asserting-tx-eid] row
+           identity (identity-fn raw-identity)]
+       (when-not (string? form-string)
+         (throw (ex-info (str "Malformed committed " identity-label " form.")
+                         {:seon.schema/error :seon.schema/malformed-projection-form
+                          :seon.schema/row row
+                          :seon.schema/malformed-projection-form true})))
+       (when (contains? parsed identity)
+         (throw (ex-info (str "Duplicate committed " identity-label " " identity ".")
+                         {:seon.schema/error :seon.schema/duplicate-projection-row
+                          :seon.schema/duplicate-projection-row identity
+                          :seon.schema/identity identity})))
+       (assoc parsed identity
+              {:seon.schema.parsed/form (if (= form-string (get prior-strings identity))
+                                          (get prior-definitions identity)
+                                          (edn/read-string form-string))
+               :seon.schema.parsed/string form-string
+               :seon.schema.parsed/admission (admission-for identity-attribute raw-identity)})))
+   {}
+   rows))
+
+(defn- parsed-member
+  "`{identity member}` of `parsed` rows, onto `retained`."
+  {:malli/schema [:=> [:cat :map :map :qualified-keyword] :map]}
+  [retained parsed member]
+  (persistent! (reduce-kv (fn [population identity row] (assoc! population identity (get row member)))
+                          (transient retained) parsed)))
+
+(defn- projection-of-population
+  "The projection of a parsed declaration population, derived from `reusable`
+  by replacement; records the entity text each form was read from."
+  {:malli/schema [:=> [:cat :map ::projection] ::projection]}
+  [{:seon.schema/keys [forms function-contracts schema-admissions function-admissions
+                       definition-strings artifact-exports pure-predicate-symbols]}
+   reusable]
+  (let [;; A complete reusable projection answers by replacement (it is
+        ;; returned itself when nothing differs), so the population-wide
+        ;; fingerprint is computed only for a partial one.
+        fingerprint (when (and (:seon.schema.projection/fingerprint reusable)
+                               (not (incremental-base? reusable)))
+                      (projection-fingerprint forms function-contracts schema-admissions
+                                              function-admissions artifact-exports
+                                              pure-predicate-symbols))
+        projection
+        (if (and fingerprint (= fingerprint (:seon.schema.projection/fingerprint reusable)))
+          reusable
+          (build-projection
+           forms function-contracts
+           {:seon.schema/schema-admissions schema-admissions
+            :seon.schema/projection reusable
+            :seon.schema/function-admissions function-admissions
+            :seon.schema/artifact-exports artifact-exports
+            :seon.schema/pure-predicate-symbols pure-predicate-symbols
+            :seon.schema/predicate-functions
+            (deleted-predicate-functions forms function-contracts reusable)
+            ;; Reading committed entities re-admits nothing: completeness and
+            ;; renderer coherence were judged when the entities were written
+            ;; (`projection-with-schema` and the other replacements,
+            ;; publication's build). A historical commit opens as its own
+            ;; entities, under the rules that admitted it, not today's.
+            :seon.schema/validate-render-contracts? false
+            :seon.schema/admission? false}))]
+    ;; The entity text each form was read from, so the next derivation from
+    ;; this projection reads only entities whose text differs. A runtime
+    ;; member: every other constructor drops it, so it never outlives its forms.
+    (if (= definition-strings (:seon.schema.projection/definition-strings projection))
+      projection
+      (assoc projection :seon.schema.projection/definition-strings definition-strings))))
+
+(defn- unrecorded-admission
+  "The admission of an identity the database records no provenance for."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  {:seon.schema.admission/source :agent
+   :seon.schema.admission/note "The supplied database has no admission provenance for this identity."})
+
 (defn projection-from-entities
   "Build one complete projection from committed schema and contract rows.
 
@@ -2930,183 +3047,144 @@
   ([projection-input]
    (projection-from-entities projection-input {}))
   ([{:seon.schema/keys [database-value schema-rows function-contract-rows
-                        artifact-exports
-                        pure-predicate-symbols]
+                        artifact-exports pure-predicate-symbols]
      :or {artifact-exports #{}
           pure-predicate-symbols #{}}}
     reusable-projection]
-   (let [recorded-admissions
-         (if (contains? (dbi/-schema database-value) :seon.schema.admission/source)
-           (projection-admissions database-value)
-           {})
-         prior-strings
-         (get reusable-projection :seon.schema.projection/definition-strings {})
-         admission-for-identity
-         (fn [attribute identity]
-           (get recorded-admissions [attribute identity]
-                {:seon.schema.admission/source :agent
-                 :seon.schema.admission/note
-                 "The supplied database has no admission provenance for this identity."}))]
-     (letfn [(parse-tuples [tuples identity-fn identity-label identity-attribute
-                          prior-definitions]
-            (reduce
-              (fn [parsed tuple]
-                (when-not (and (sequential? tuple)
-                               (= 3 (count tuple)))
-                  (throw (ex-info (str "Malformed committed " identity-label
-                                       " tuple.")
-                                  {:seon.schema/error
-                                   :seon.schema/malformed-projection-row
-                                   :seon.schema/row tuple
-                                   :seon.schema/malformed-projection-row true})))
-                (let [[raw-identity form-string _asserting-tx-eid] tuple
-                      identity (identity-fn raw-identity)]
-                  (when-not (string? form-string)
-                    (throw (ex-info (str "Malformed committed " identity-label
-                                         " form.")
-                                    {:seon.schema/error
-                                     :seon.schema/malformed-projection-form
-                                     :seon.schema/row tuple
-                                     :seon.schema/malformed-projection-form true})))
-                  (when (contains? parsed identity)
-                    (throw (ex-info (str "Duplicate committed " identity-label
-                                         " " identity ".")
-                                    {:seon.schema/error
-                                     :seon.schema/duplicate-projection-row
-                                     :seon.schema/duplicate-projection-row identity
-                                     :seon.schema/identity identity
-                                     })))
-                  (assoc parsed identity
-                         {:seon.schema.parsed/form
-                          ;; The reusable projection's form for text it
-                          ;; parsed; only this function records that text.
-                          (if (= form-string (get prior-strings identity))
-                            (get prior-definitions identity)
-                            (edn/read-string form-string))
-                          :seon.schema.parsed/string form-string
-                          :seon.schema.parsed/admission
-                          (admission-for-identity identity-attribute raw-identity)})))
-              {}
-              tuples))]
-    (let [schemas
-          (parse-tuples schema-rows
-                  (fn [identity]
-                    (if (keyword? identity)
-                      identity
-                      (throw (ex-info "Committed schema identity is not a keyword."
-                                      {:seon.schema/error
-                                       :seon.schema/malformed-projection-identity
-                                       :seon.schema/identity identity
-                                       :seon.schema/malformed-projection-identity true}))))
-                  "schema" :seon.schema/key
-                  (:seon.schema.projection/forms reusable-projection {}))
-          contracts
-          (parse-tuples function-contract-rows
-                  (fn [identity]
-                    (cond
-                      (qualified-symbol? identity) identity
-                      (string? identity)
-                      (let [parsed (symbol identity)]
-                        (if (qualified-symbol? parsed)
-                          parsed
-                          (throw (ex-info "Committed function identity is not qualified."
-                                          {:seon.schema/error
-                                           :seon.schema/malformed-projection-identity
-                                           :seon.schema/identity identity
-                                           :seon.schema/malformed-projection-identity true}))))
-                      :else
-                      (throw (ex-info "Committed function identity is malformed."
-                                      {:seon.schema/error
-                                       :seon.schema/malformed-projection-identity
-                                       :seon.schema/identity identity
-                                       :seon.schema/malformed-projection-identity true}))))
-                   "function contract" :seon.fn/sym
-                   (:seon.schema.projection/function-contracts reusable-projection {}))
-          artifact-exports
-          (into #{}
-                (map (fn [export]
-                       (cond
-                         (qualified-symbol? export) export
-                         (string? export)
-                         (let [parsed (symbol export)]
-                           (if (qualified-symbol? parsed)
-                             parsed
-                             (throw
-                              (ex-info "Artifact export is not qualified."
-                                       {:seon.schema/error
-                                        :seon.schema/malformed-artifact-export
-                                        :seon.schema/export export
-                                        :seon.schema/malformed-artifact-export true}))))
-                         :else
-                         (throw
-                          (ex-info "Artifact export is malformed."
-                                   {:seon.schema/error
-                                    :seon.schema/malformed-artifact-export
-                                    :seon.schema/export export
-                                    :seon.schema/malformed-artifact-export true})))))
-                artifact-exports)
-          forms
-          (into {} (map (fn [[k entity]]
-                          [k (:seon.schema.parsed/form entity)]))
-                schemas)
-          function-contracts
-          (into {} (map (fn [[k entity]]
-                          [k (:seon.schema.parsed/form entity)]))
-                contracts)
-          schema-admissions
-          (into {} (map (fn [[k entity]]
-                          [k (:seon.schema.parsed/admission entity)]))
-                schemas)
-          function-admissions
-          (into {} (map (fn [[k entity]]
-                          [k (:seon.schema.parsed/admission entity)]))
-                contracts)
-          ;; A complete reusable projection answers by replacement (it is
-          ;; returned itself when nothing differs), so the population-wide
-          ;; fingerprint is computed only for a partial one.
-          fingerprint
-          (when (and (:seon.schema.projection/fingerprint reusable-projection)
-                     (not (incremental-base? reusable-projection)))
-            (projection-fingerprint
-             forms function-contracts schema-admissions function-admissions
-             artifact-exports pure-predicate-symbols))
-          projection
-          (if (and fingerprint
-                   (= fingerprint
-                      (:seon.schema.projection/fingerprint reusable-projection)))
-            reusable-projection
-            (build-projection
-             forms
-             function-contracts
-             {:seon.schema/schema-admissions schema-admissions
-              :seon.schema/projection reusable-projection
-              :seon.schema/function-admissions function-admissions
-              :seon.schema/artifact-exports artifact-exports
-              :seon.schema/pure-predicate-symbols pure-predicate-symbols
-              :seon.schema/predicate-functions
-              (deleted-predicate-functions forms function-contracts reusable-projection)
-              ;; Reading committed entities re-admits nothing: completeness and
-              ;; renderer coherence were judged when the entities were written
-              ;; (`projection-with-schema` and the other replacements,
-              ;; publication's build). A historical commit opens as its own
-              ;; entities, under the rules that admitted it, not today's.
-              :seon.schema/validate-render-contracts? false
-              :seon.schema/admission? false}))
-          ;; The entity text each form was read from, so the next derivation
-          ;; from this projection reads only entities whose text differs. A
-          ;; runtime member: every other constructor drops it, so it never
-          ;; outlives its forms.
-          definition-strings
-          (persistent!
-           (reduce-kv (fn [strings identity entity]
-                        (assoc! strings identity (:seon.schema.parsed/string entity)))
-                      (transient {})
-                      (merge schemas contracts)))]
-      (if (= definition-strings
-             (:seon.schema.projection/definition-strings projection))
-        projection
-        (assoc projection :seon.schema.projection/definition-strings
-               definition-strings)))))))
+   (let [recorded (if (contains? (dbi/-schema database-value) :seon.schema.admission/source)
+                    (projection-admissions database-value)
+                    {})
+         admission-for (fn [attribute identity]
+                         (get recorded [attribute identity] (unrecorded-admission)))
+         strings (get reusable-projection :seon.schema.projection/definition-strings {})
+         schemas (parsed-rows schema-rows schema-identity "schema" :seon.schema/key
+                              (:seon.schema.projection/forms reusable-projection {})
+                              strings admission-for)
+         contracts (parsed-rows function-contract-rows contract-identity "function contract"
+                                :seon.fn/sym
+                                (:seon.schema.projection/function-contracts reusable-projection {})
+                                strings admission-for)
+         artifact-exports
+         (into #{}
+               (map (fn [export]
+                      (cond
+                        (qualified-symbol? export) export
+                        (and (string? export) (qualified-symbol? (symbol export))) (symbol export)
+                        (string? export)
+                        (throw (ex-info "Artifact export is not qualified."
+                                        {:seon.schema/error :seon.schema/malformed-artifact-export
+                                         :seon.schema/export export
+                                         :seon.schema/malformed-artifact-export true}))
+                        :else
+                        (throw (ex-info "Artifact export is malformed."
+                                        {:seon.schema/error :seon.schema/malformed-artifact-export
+                                         :seon.schema/export export
+                                         :seon.schema/malformed-artifact-export true})))))
+               artifact-exports)]
+     (projection-of-population
+      {:seon.schema/forms (parsed-member {} schemas :seon.schema.parsed/form)
+       :seon.schema/function-contracts (parsed-member {} contracts :seon.schema.parsed/form)
+       :seon.schema/schema-admissions (parsed-member {} schemas :seon.schema.parsed/admission)
+       :seon.schema/function-admissions (parsed-member {} contracts :seon.schema.parsed/admission)
+       :seon.schema/definition-strings
+       (parsed-member (parsed-member {} schemas :seon.schema.parsed/string)
+                      contracts :seon.schema.parsed/string)
+       :seon.schema/artifact-exports artifact-exports
+       :seon.schema/pure-predicate-symbols pure-predicate-symbols}
+      reusable-projection))))
+
+(defn- range-differences
+  "The rows of one declaration range whose text or admission source differs
+  from `base`'s, every identity the range holds and the changed rows' recorded
+  admissions; nil when one identity names two rows."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :qualified-keyword ::projection [:set [:or :keyword :symbol]]] [:maybe :map]]}
+  [db identity-attribute value-attribute base held]
+  (let [installed (dbi/-schema db)
+        datoms (fn [attribute] (when (get installed attribute) (seq (d/datoms db :aevt attribute))))
+        ;; The rest of AEVT `datoms` from the first whose entity is not below `e`.
+        entity (fn ^long [datom] (.-e ^datahike.datom.Datom datom))
+        seek (fn [datoms ^long e]
+               (loop [datoms datoms]
+                 (if (and datoms (< (entity (first datoms)) e)) (recur (next datoms)) datoms)))
+        strings (:seon.schema.projection/definition-strings base)
+        schema-admissions (:seon.schema.projection/schema-admissions base)
+        function-admissions (:seon.schema.projection/function-admissions base)]
+    (loop [values (datoms value-attribute)
+           identities (datoms identity-attribute)
+           sources (datoms :seon.schema.admission/source)
+           held (transient held)
+           rows (transient [])
+           recorded (transient {})]
+      (if-let [value (first values)]
+        (let [e (entity value)
+              identities (seek identities e)
+              sources (seek sources e)
+              identity-datom (first identities)]
+          (if-not (and identity-datom (== e (entity identity-datom)))
+            (recur (next values) identities sources held rows recorded)
+            (let [raw (:v identity-datom)
+                  identity (if (string? raw) (symbol raw) raw)
+                  source (when-let [s (first sources)] (when (== e (entity s)) (:v s)))
+                  prior (get (if (keyword? identity) schema-admissions function-admissions) identity)]
+              (when-not (contains? held identity)
+                (if (and (= (:v value) (get strings identity))
+                         (= source (:seon.schema.admission/source prior))
+                         (= (nil? source) (contains? prior :seon.schema.admission/note)))
+                  (recur (next values) identities sources (conj! held identity) rows recorded)
+                  (recur (next values) identities sources (conj! held identity)
+                         (conj! rows [raw (:v value) (:tx value)])
+                         (cond-> recorded
+                           source (assoc! [identity-attribute raw]
+                                          {:seon.schema.admission/source source}))))))))
+        {::rows (persistent! rows) ::held (persistent! held) ::recorded (persistent! recorded)}))))
+
+(defn- retained-population
+  "`population` without the identities `held` lacks; itself when none is removed."
+  {:malli/schema [:=> [:cat :map [:set [:or :keyword :symbol]]] :map]}
+  [population held]
+  (reduce-kv (fn [kept identity _] (if (contains? held identity) kept (dissoc kept identity)))
+             population population))
+
+(defn- advanced-projection
+  "The projection of `db`'s declarations advanced from the complete `base` by
+  the rows whose text or admission differs and the identities no row holds;
+  nil when `base` cannot be advanced from or a row is duplicated."
+  {:malli/schema [:=> [:cat :seon.db/database-value ::projection] [:maybe ::projection]]}
+  [db base]
+  (when (and (instance? datahike.db.DB db)
+             (incremental-base? base)
+             (contains? base :seon.schema.projection/definition-strings))
+    (when-let [schema-range (range-differences db :seon.schema/key :seon.schema/form base #{})]
+      (when-let [contract-range (range-differences db :seon.fn/sym :seon.fn/spec base
+                                                   (::held schema-range))]
+        (let [held (::held contract-range)
+              recorded (merge (::recorded schema-range) (::recorded contract-range))
+              admission-for (fn [attribute identity]
+                              (get recorded [attribute identity] (unrecorded-admission)))
+              strings (:seon.schema.projection/definition-strings base)
+              schemas (parsed-rows (::rows schema-range) schema-identity "schema" :seon.schema/key
+                                   (:seon.schema.projection/forms base) strings admission-for)
+              contracts (parsed-rows (::rows contract-range) contract-identity "function contract"
+                                     :seon.fn/sym (:seon.schema.projection/function-contracts base)
+                                     strings admission-for)
+              advanced (fn [member parsed parsed-member-key]
+                         (parsed-member (retained-population (get base member) held)
+                                        parsed parsed-member-key))]
+          (projection-of-population
+           {:seon.schema/forms (advanced :seon.schema.projection/forms schemas :seon.schema.parsed/form)
+            :seon.schema/function-contracts
+            (advanced :seon.schema.projection/function-contracts contracts :seon.schema.parsed/form)
+            :seon.schema/schema-admissions
+            (advanced :seon.schema.projection/schema-admissions schemas :seon.schema.parsed/admission)
+            :seon.schema/function-admissions
+            (advanced :seon.schema.projection/function-admissions contracts :seon.schema.parsed/admission)
+            :seon.schema/definition-strings
+            (parsed-member (advanced :seon.schema.projection/definition-strings schemas
+                                     :seon.schema.parsed/string)
+                           contracts :seon.schema.parsed/string)
+            :seon.schema/artifact-exports #{}
+            :seon.schema/pure-predicate-symbols #{}}
+           base))))))
 
 (defn- refuse-projection-source
   "Typed refusal naming the value handed in place of a database.
@@ -3152,8 +3230,8 @@
 
   With `base`, a projection of any other value, the result is derived from it
   by replacement ([[build-projection]]): only declarations whose rows differ
-  and their reverse closure recompile. Any base gives the same result; a near
-  one gives it in time proportional to the difference."
+  and their reverse closure recompile. Any base gives the same result; from a
+  complete base, only the differing rows are parsed and joined."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value] ::projection]
@@ -3163,14 +3241,15 @@
    (when-not (db-utils/db? db)
      (let [refusal (refuse-projection-source db)]
        (throw (ex-info (:seon.error/message refusal) refusal))))
-   (projection-from-entities
-    (reduce-kv (fn [input member [identity value identity-tx?]]
-                 (assoc input member (projection-entities db identity value identity-tx?)))
-               {:seon.schema/database-value db
-                :seon.schema/artifact-exports #{}
-                :seon.schema/pure-predicate-symbols #{}}
-               projection-ranges)
-    base)))
+   (or (advanced-projection db base)
+       (projection-from-entities
+        (reduce-kv (fn [input member [identity value identity-tx?]]
+                     (assoc input member (projection-entities db identity value identity-tx?)))
+                   {:seon.schema/database-value db
+                    :seon.schema/artifact-exports #{}
+                    :seon.schema/pure-predicate-symbols #{}}
+                   projection-ranges)
+        base))))
 
 (defonce ^:private database-projection
   (delay (requiring-resolve 'seon.db/carried-projection)))

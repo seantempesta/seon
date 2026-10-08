@@ -1607,6 +1607,39 @@
            (is (contains? (:seon.schema.projection/forms derived) ::incremental-declaration))
            (println "incremental load-projection" {:derived-ms derived-ms :full-ms full-ms})))))))
 
+(deftest ^{:seon/tasks #{'seon.schema/a-declaration-write-reloads-the-whole-projection}}
+  a-declaration-write-reprojects-only-its-declarations
+  (test-support/with-database
+   (fn [connection]
+     (let [base (schema/projection-from-database (seon.db/db connection))
+           schema-key (first (sort (filter qualified-keyword?
+                                           (keys (:seon.schema.projection/forms base)))))
+           removed (first (sort (keys (:seon.schema.projection/function-contracts base))))
+           removed-entity (:e (first (d/datoms (seon.db/db connection) :avet :seon.fn/sym removed)))
+           written {:seon.fn/sym `reprojected-function
+                    :seon.fn/spec (pr-str [:=> [:cat :int] :int])}]
+       (d/transact connection [written
+                               [:db/retract removed-entity :seon.fn/spec]
+                               {:seon.schema/key ::reprojected-declaration
+                                :seon.schema/form (pr-str [:map [:seon.agent/id :seon.agent/id]])
+                                :seon.schema.admission/source :core}])
+       (let [database (seon.db/db connection)
+             rows (fn [identity value held]
+                    (mapv first (::schema/rows (#'schema/range-differences database identity value
+                                                                           base held))))
+             derived (schema/load-projection database base)]
+         (is (= [::reprojected-declaration] (rows :seon.schema/key :seon.schema/form #{}))
+             "only the written schema row is projected")
+         (is (= [`reprojected-function] (rows :seon.fn/sym :seon.fn/spec #{}))
+             "only the written contract row is projected")
+         (is (= (comparable-projection (schema/load-projection database))
+                (comparable-projection derived))
+             "the advanced projection equals the whole load")
+         (is (= [true false true]
+                [(contains? (:seon.schema.projection/function-contracts derived) `reprojected-function)
+                 (contains? (:seon.schema.projection/function-contracts derived) removed)
+                 (contains? (:seon.schema.projection/forms derived) schema-key)])))))))
+
 (deftest a-compiled-generator-names-its-generator-by-symbol
   ;; A `:gen/gen` resolved to its Var's value at compile time went stale on a
   ;; reload: a derived projection kept the old generator object while a full
