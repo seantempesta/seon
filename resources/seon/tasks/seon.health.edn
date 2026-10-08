@@ -1,0 +1,4 @@
+[#:seon.task{:name "health-counts-a-red-proof-of-an-open-task-as-a-failure"
+             :kind :function
+             :intent "After fan-out 3 (2026-10-09), `runtime_status` reported default `:faulted` because `seon.db-test/a-missing-connection-refusal-carries-its-fix-as-data` and `seon.transact-feedback-test/uninstalled-attribute-candidates-are-the-nearest-names` are red; they are the red proofs of open tasks, which is their expected state until the task is done. Health should report a red proof of an open task as the task's status, not as a failed test or a fault."
+             :must-read #{seon.health/report}}]
