@@ -9,15 +9,15 @@ created: 2026-10-08
 
 Ledger row RP-1w (group E). Ruling: "agent branches do anything" (`review/owner-rulings.md`); agent-loop.md §1.1.
 Design: `redo/pass-and-recording.md` §2 ("What the recording may and may not refuse"). Lane: Sonnet. Cited at HEAD
-`22910a03a`; `src/seon/db.clj` line numbers are HEAD's (led-cacheb holds uncommitted edits in that file).
+`e7f120672`.
 
 ## What changes, in one paragraph
 
-The checked writer's final-report validator (`validate-write-report`, `src/seon/db.clj:5355`, installed as
-`:datahike/validate-report` by `prepared-write` `:5593`) runs `write-report-error` (`:5268`). Three of its checks
-judge program integrity between entities: the render-target check (`write-render-target-error` `:4698`), the
-deletion check (`write-deletion-error` `:4856` → `removed-definition-error` `:4753`) and the arity verdict
-(`:5309-5324`). On an agent's branch those three answer **findings** instead of refusing; every other check (attribute
+The checked writer's final-report validator (`validate-write-report`, `src/seon/db.clj:5411`, installed as
+`:datahike/validate-report` by `prepared-write` `:5649`) runs `write-report-error` (`:5324`). Three of its checks
+judge program integrity between entities: the render-target check (`write-render-target-error` `:4754`), the
+deletion check (`write-deletion-error` `:4912` → `removed-definition-error` `:4809`) and the arity verdict
+(`:5365-5380`). On an agent's branch those three answer **findings** instead of refusing; every other check (attribute
 validation, `retention-report-check`, `write-agent-retraction-error`, owned values, `write-digest-error`) is unchanged.
 On the cluster branch (main) and every other branch (merge branches, checkpoints, test overlays) nothing changes: a
 merge writes main through the same writer, so `merge!` keeps every check.
@@ -57,14 +57,14 @@ merge writes main through the same writer, so `merge!` keeps every check.
 
 Later rows add variants to `:any` by accretion (RP-1 `:swept`, RP-6d `:unjoined-write`, RP-7 `:overwrote`, RP-8
 `:alias-retargeted`, RP-9 `:live-only`). `:seon.fn/arity-mismatches` is registered (`resources/seon/schemas/seon.fn.edn:107`).
-`removed-definition-error` already writes (`:4786-4799`).
+`removed-definition-error` already writes (`:4842-4855`).
 
 In `seon.db.edn`, add `[:seon.db/findings {:optional true} [:vector {:min 1} :seon.program.finding/any]]` to
 `:transaction-result` (`:225`) and `:transaction-report` (`:302`).
 
 ## Functions
 
-- ADD `seon.db/agent-branch?` (private)
+- ADD `seon.db/agent-branch?` (public: RP-1b's `my.program` deletion tools read it too)
   `{:malli/schema [:=> [:cat :seon.db/database-value] :boolean]}` `[database]`.
   True when the database's branch (`(get-in database [:config :branch])`) differs from
   `(seon.cluster.branch/cluster-branch name)` for the cluster name stored on it
@@ -81,27 +81,27 @@ In `seon.db.edn`, add `[:seon.db/findings {:optional true} [:vector {:min 1} :se
   of its `:seon.program/referrers` (`select-keys` of subject, relation, referrer); a render-target refusal → one
   `:render-target` per entry of `(get-in refusal [:seon.error/data :seon.render/declarations])`; an arity refusal →
   one `:arity` with `(get-in refusal [:seon.error/data :seon.fn/arity-mismatches])`; `nil` → `[]`.
-- CHANGE `seon.db/write-report-error` (`:5268`): arity `[projection report findings]`, contract
+- CHANGE `seon.db/write-report-error` (`:5324`): arity `[projection report findings]`, contract
   `[:=> [:cat :seon.schema/projection :seon.db/transaction-report [:maybe :seon.db/findings-sink]] [:or :nil :seon.db/error-result]]`.
   When `findings` (a `volatile!` created per write, see below) is non-nil **and** `(agent-branch? database)`, each of
   the three integrity checks runs as today, and its non-nil result is appended with
   `(vswap! findings into (integrity-findings result))` instead of being returned; the `or` chain continues. Otherwise
   the chain is unchanged. Note the arity branch's success value (`(assoc result ::transaction-refused true)` when
   `mismatches` is absent) is a refusal of another shape: keep returning it on every branch.
-- CHANGE `seon.db/validate-write-report` (`:5355`): arity `[prepared report findings]`, passes `findings` through.
-- CHANGE `seon.db/prepared-write` (`:5593`): arity `[projection database transaction findings]`; the installed
+- CHANGE `seon.db/validate-write-report` (`:5411`): arity `[prepared report findings]`, passes `findings` through.
+- CHANGE `seon.db/prepared-write` (`:5649`): arity `[projection database transaction findings]`; the installed
   validator is `#(validate-write-report projection % findings)`.
-- CHANGE `seon.db/transact-call` (`:5650`): creates `findings (volatile! [])` per call, passes it to
+- CHANGE `seon.db/transact-call` (`:5706`): creates `findings (volatile! [])` per call, passes it to
   `prepared-write`, and on a committed report returns `(cond-> report (seq @findings) (assoc :seon.db/findings @findings))`.
   This is the "local accumulator for a callback the code does not own" that the atoms ruling allows (ledger AT-6):
   Datahike's validator answers only nil or a refusal (`reference-code/datahike/src/datahike/db/transaction.cljc:1225-1234`).
-- CHANGE `seon.db/transaction-result` (`:5875`): copies `:seon.db/findings` from the report onto the elided result.
+- CHANGE `seon.db/transaction-result` (`:5931`): copies `:seon.db/findings` from the report onto the elided result.
 - Register `:seon.db/findings-sink` in `seon.db.edn` as
   `[:fn {:error/message "must be a volatile holding a vector of findings"} seon.db/volatile?]` (no registered
   predicate fits: the schemas name no volatile), with the new public predicate `seon.db/volatile?`
   `{:malli/schema [:=> [:cat :any] :boolean]}` `[x]` = `(instance? clojure.lang.Volatile x)`.
 
-- CHANGE `seon.db/with` (`:5725`, contract unchanged): passes `(volatile! [])` to `prepared-write` and discards it, so
+- CHANGE `seon.db/with` (`:5781`, contract unchanged): passes `(volatile! [])` to `prepared-write` and discards it, so
   a speculative value on an agent branch is judged exactly as its commit will be; the commit (through `transact-call`)
   is what reports the findings. `transact-call` and `with` are the only callers of `prepared-write` in `src`.
 

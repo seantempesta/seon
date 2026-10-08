@@ -13,9 +13,9 @@ RP-15a, EN-1, EN-6, TX-3, TX-4, TX-6 and TX-8 read what it writes.
 
 ## What changes, in one paragraph
 
-`seon.db/stamp-transaction` (`src/seon/db.clj:3570`), the one owner of transaction metadata, already stamps
+`seon.db/stamp-transaction` (`src/seon/db.clj:3626`), the one owner of transaction metadata, already stamps
 `:seon.db.transaction/operation` and `agent` from the request map or the eval request's world
-(`seon.batch/*world*`) and installs a missing stamp attribute inline (`:3578-3590`). It now also stamps
+(`seon.batch/*world*`) and installs a missing stamp attribute inline (`:3634-3646`). It now also stamps
 `:seon.db.transaction/eval-request` (the eval request id: the world's `:seon.turn/id`, the id of the call row the
 recording writes) and `:seon.db.transaction/basis-t` (the t of the value the eval request read first: the world's new
 `:seon.db/basis-t` member). Both are unindexed values. Probed on default: an agent's `(seon.db/transact! [])` inside
@@ -49,10 +49,10 @@ supplied to a function's omitted input.
 
 ## Functions
 
-- CHANGE `seon.db/stamp-transaction` (private, `:3570`), contract unchanged
+- CHANGE `seon.db/stamp-transaction` (private, `:3626`), contract unchanged
   (`[:=> [:cat :seon.db/database-value :seon.store/transaction [:maybe :map]] :seon.store/transaction]`):
-  - `attributes` (`:3580`) gains `:seon.db.transaction/eval-request` and `:seon.db.transaction/basis-t`, so an old
-    store installs them inline in the first transaction that writes them (`:3581-3589`).
+  - `attributes` (`:3636`) gains `:seon.db.transaction/eval-request` and `:seon.db.transaction/basis-t`, so an old
+    store installs them inline in the first transaction that writes them (`:3637-3645`).
   - `eval-request (or (:seon.db.transaction/eval-request request) (:seon.turn/id world))`,
     `basis-t (or (:seon.db.transaction/basis-t request) (:seon.db/basis-t world))`.
   - `stamp` gains `eval-request (assoc :seon.db.transaction/eval-request eval-request)` and
@@ -103,6 +103,25 @@ The handle is `result/e` + the evaluation id (probed: handle `result/e0f0128e502
 `[:seon.cluster.eval/id "0f0128e502df"]`). A second row, JVM mode (`"mode" "jvm"` in the arguments), runs
 `(seon.db/transact! (:seon.db/connection seon.batch/*world*) [])` and asserts the same three keys on the report's tx.
 
+### The receipt tests convert here (RED-1, commit `4e307ec54`)
+Task `seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt`
+(`resources/seon/tasks/seon.cluster.host.edn:6`): a hosted form's write carries no `:seon.db/receipt` datom, and
+`seon.receipt-write-carrier-test/evaluation-receipt-is-transaction-metadata` is red at HEAD
+(`test/seon/receipt_write_carrier_test.clj:61`). `:seon.db/receipt` is deleted by RP-14; nobody repairs its stamp. This
+row converts every test that asserts it to assert the transaction's `:seon.db.transaction/eval-request` instead (the
+write's eval request id, the `:seon.turn/id` its world or request names):
+- `test/seon/receipt_write_carrier_test.clj:68`, `:82` (`evaluation-receipt-is-transaction-metadata`: assert
+  `[?tx :seon.db.transaction/eval-request "receipt-write-run"]` for the evaluated write; rename the deftest
+  `an-evaluated-write-names-its-eval-request-on-the-transaction` and give it
+  `^{:seon/tasks #{'seon.cluster.host/a-hosted-forms-write-names-its-evaluation-receipt}}`);
+- `test/seon/cluster/host_test.clj:146` (the hosted run's write: the same assertion with the hosted run's id);
+- `test/seon/settlement_receipt_provenance_test.clj:38`, `:73`, `test/seon/cluster/evaluate_source_test.clj:196`:
+  the same conversion;
+- `test/seon/db_test.clj:2274` reads `::db/receipt` from the stamp: convert to read
+  `:seon.db.transaction/eval-request` with `seon.batch/*world*` bound to `{:seon.turn/id "x"}` in the test (a binding,
+  not a Var redefinition).
+Add these files to the commit line and `--test seon.receipt-write-carrier-test --test seon.settlement-receipt-provenance-test --test seon.cluster.host-test --test seon.cluster.evaluate-source-test`.
+
 ## Reaching tests (run in `--test`)
 
 `seon.db-test`, `seon.turn-test`, `seon.mcp-entrance-test`, `seon.cluster.evaluate-source-test`
@@ -123,7 +142,7 @@ Nothing (RP-14 deletes `:seon.db/receipt`; TX-8 deletes the per-row provenance t
 
 ## Commit
 
-`bin/lane commit <lane> -m "TX-0: every transaction inside an eval request names the eval request and its basis" --test seon.db-test --test seon.turn-test --test seon.mcp-entrance-test resources/seon/schemas/seon.db.transaction.edn resources/seon/schemas/seon.batch.edn src/seon/db.clj src/seon/turn.clj src/seon/turn/world.clj src/seon/mcp.clj test/seon/db_test.clj`
+`bin/lane commit <lane> -m "TX-0: every transaction inside an eval request names the eval request and its basis" --test seon.db-test --test seon.turn-test --test seon.mcp-entrance-test resources/seon/schemas/seon.db.transaction.edn resources/seon/schemas/seon.batch.edn src/seon/db.clj src/seon/turn.clj src/seon/turn/world.clj src/seon/mcp.clj test/seon/db_test.clj test/seon/receipt_write_carrier_test.clj test/seon/cluster/host_test.clj test/seon/settlement_receipt_provenance_test.clj test/seon/cluster/evaluate_source_test.clj --test seon.receipt-write-carrier-test --test seon.settlement-receipt-provenance-test --test seon.cluster.host-test --test seon.cluster.evaluate-source-test`
 
 ## Dependencies
 

@@ -23,7 +23,7 @@ The last transactions on the agent's branch, `[tx operation stamp]`:
 
 Two defects with one cause: the recording runs **after** the fold's per-form `with-world` binding
 (`src/seon/turn/world.clj:111-127`), so `stamp-transaction` sees no world; and the SCI recording's first
-`:db.fn/call` is `db/absent-call` (the run-open intent `*open*`, prepended at `src/seon/db.clj:3606`), so the operation
+`:db.fn/call` is `db/absent-call` (the run-open intent `*open*`, prepended at `src/seon/db.clj:3662`), so the operation
 is named after it, not the writer. It is not root-specific: every agent's JVM-mode recording lacks its agent.
 
 ## Files
@@ -47,7 +47,7 @@ is named after it, not the writer. It is not root-specific: every agent's JVM-mo
 
   built once with `cond->` so no key is nil (CLAUDE.md "absence is no key"). The writer contract (`:seon.db/writer`,
   `resources/seon/schemas/seon.db.edn:328`) takes `:seon.store/transaction`, which admits the map; `seon.db/transact!`
-  already reads `operation` and `agent` from a request map (`src/seon/db.clj:3591-3604`, docstring `:5913-5917`).
+  already reads `operation` and `agent` from a request map (`src/seon/db.clj:3647-3604`, docstring `:5913-5917`).
   The empty-transaction branch (`(empty? tx)` → no commit) is unchanged.
 - CHANGE `seon.turn/settle-batch!` (private, `:3542`; deleted later by EN-8b, which moves model and SCI recording onto
   `settle`): the `db/transact!` call at `:3626-3627` adds the same four keys to its request map:

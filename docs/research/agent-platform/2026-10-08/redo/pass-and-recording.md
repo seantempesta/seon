@@ -12,7 +12,7 @@ Replaces, as one acyclic sequence: P7, P8 (with admission-design §7 S5-04a-j), 
 Authority: `review/owner-rulings.md` lines 9, 11-12, 31-33, then CLAUDE.md. Both reviews read in full. Code cited at HEAD
 `aeb692d87`; default runs source `9c88ae5b8` (it does not yet hold P7a, P11 or PB-01). The owner approved this design on
 condition that the transaction census (`tx-census/tx-census-opus.md`) is folded in before the first recording row
-starts: §2.1 is that fold-in (lane cards-recording, HEAD `22910a03a`), and the implementation cards are
+starts: §2.1 is that fold-in (lane cards-recording, HEAD `e7f120672`), and the implementation cards are
 `docs/seon/schedule/cards/RP-*.md` and `TX-*.md`.
 
 **In one paragraph.** Each entrance hands the pass a text and a read stage. The pass reads one form at the live cursor,
@@ -131,9 +131,9 @@ into 1 cut retained bytes 2.6-2.9× and time 5.5× (606-629 → 206-241 KB, 106-
 commit, and the provenance every row repeats today (who, when, which eval request, which basis) moves onto the one
 transaction entity, where Datahike already records `:db/txInstant`.
 
-**What every Seon transaction carries.** One owner writes it: `seon.db/stamp-transaction` (`src/seon/db.clj:3570`),
+**What every Seon transaction carries.** One owner writes it: `seon.db/stamp-transaction` (`src/seon/db.clj:3626`),
 which already appends `{:db/id :db/current-tx …}` and installs a missing stamp attribute inline on an old store
-(`:3580-3590`). Each value comes from the transaction request map first (a writer that runs outside an evaluation's
+(`:3634-3646`). Each value comes from the transaction request map first (a writer that runs outside an evaluation's
 binding, such as `seon.turn.batch/settle`, names them there), else from the eval request's world
 (`seon.batch/*world*`, `src/seon/batch.clj:39`).
 
