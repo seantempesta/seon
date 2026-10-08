@@ -1842,7 +1842,7 @@
                                    (some->> (:seon.dev-cache/reason classes) name (str " ")))))))))
 
 (defn- write-diagnostic!
-  "Write a failed result whole to a new file in its cluster's log directory; its path."
+  "Write a result whole (a failed one, or a started root's detail) to a new file in its cluster's log directory; its path."
   {:malli/schema [:=> [:cat :map :map] :string]}
   [request result]
   (let [file (io/file (:seon.operator/managed-root request) "data/clusters"
@@ -1853,6 +1853,23 @@
     (io/make-parents file)
     (spit file (str (pr-str result) "\n"))
     (.getCanonicalPath file)))
+
+(defn- start-summary
+  "What root acts on after a successful `start`: sha, pid, timings, the stopped
+  processes, that adoption converged, counts of captured heads and pruned
+  archives, and the file holding the whole result."
+  {:malli/schema [:=> [:cat :map :string] :map]}
+  [result detail-path]
+  (let [phases (:seon.operator/phases result)]
+    {:seon.source/git-sha (get-in result [:seon.operator/source :seon.source/git-sha])
+     :seon.boot/pid (get-in result [:seon.boot/readiness :seon.boot/pid])
+     :seon.boot/ready-ms (get-in result [:seon.boot/readiness :seon.boot/ready-ms])
+     :seon.operator/total-ms (:seon.operator/total-ms phases)
+     :seon.operator/stopped-processes (:seon.operator/stopped-processes result)
+     :seon.operator/adopted? (contains? result :seon.operator/adoption)
+     :seon.operator/captured-heads-count (count (get-in result [:seon.operator/captured-heads :seon.operator/heads]))
+     :seon.operator/pruned-archives-count (count (get-in result [:seon.operator/archives :seon.operator/pruned]))
+     :seon.operator/detail detail-path}))
 
 (defn -main [& args]
   (try
@@ -1881,6 +1898,7 @@
           (when-not (.waitFor child (operator-silence-backstop-ms {}) TimeUnit/MILLISECONDS)
             (reap-child! child (operator-silence-backstop-ms {}) result) (fail! "OS opener did not exit." result))
           (when-not (zero? (.exitValue child)) (fail! "OS opener failed." result)))
+        (= :start (:seon.operator/command request)) (prn (start-summary result (write-diagnostic! request result)))
         :else (prn result))
       (shutdown-agents)
       (System/exit code))

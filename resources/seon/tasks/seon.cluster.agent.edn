@@ -29,4 +29,8 @@
             :intent
             "`:seon.turn/reply-size` is computed as (count (pr-str sources)) at seon.cluster.agent (~764, submit-source-in-projection) and seon.bootstrap (~310, the root seed run): each prints a value only to count characters, a printer use outside the value printer. Correct: the size is the length of the text the sources were read from (the reply they stand for), counted without printing; both sites convert together. Same defect as seon.cluster.agent/reply-size-is-measured-by-printing-the-sources, which names only the first site.",
             :must-read #{seon.cluster.agent/submit-source! seon.bootstrap/supervision-tx},
-            :evidence #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}]
+            :evidence #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
+ #:seon.task{:name "finished-agents-and-their-branches-accumulate"
+             :kind :function
+             :intent "Default holds 185 agents, each with a :seon.agent/branch (measured through JVM eval_clj on default: 185 :seon.agent/id entities, 185 branch values), and bin/seon start --head captured about 110 agent branch heads at a restart. Agents from finished lanes and probes are never archived and their branches never unlinked, so every restart captures and restores them. Related: my.agent/retire-branch-refuses-a-finished-agent-as-admission-closed (retire at run exit). Done when a finished agent's branch is unlinked and the agent archived at its run's exit, and the agent count on default after a probe batch returns to its prior value."
+             :must-read #{my.agent/retire-branch! seon.cluster.registry/retire-branch!}}]

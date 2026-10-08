@@ -121,5 +121,21 @@
     (is (= 1 (count (:seon.operator/paths request))))
     (is (= ["--ns" "seon.error.refusal-test"
             "--test" "seon.operator-test/check-names-the-tests-its-throwaway-jvm-runs"]
-           (#'operator/test-check-arguments (:seon.operator/tests request))))
+           (#'operator/test-check-arguments (:seon.operator/tests request) false)))
     (is (= :refused (:seon.operator/disposition refused)))))
+
+(deftest a-successful-start-reply-carries-counts-not-branch-heads
+  ;; `start --head` printed ~10 KB, mostly one entry per captured branch head.
+  (let [heads (into {} (map (fn [n] [(str "agent-" n) (str "commit-" n)])) (range 110))
+        result {:seon.operator/source {:seon.source/git-sha "abc123"}
+                :seon.operator/phases {:seon.operator/total-ms 7000}
+                :seon.boot/readiness {:seon.boot/pid 42 :seon.boot/ready-ms 5000}
+                :seon.operator/stopped-processes [{:seon.boot/pid 41}]
+                :seon.operator/adoption {:converged true}
+                :seon.operator/archives {:seon.operator/pruned ["a" "b"]}
+                :seon.operator/captured-heads {:seon.operator/heads heads}}
+        summary (#'operator/start-summary result "/logs/operator-start.edn")]
+    (is (= 110 (:seon.operator/captured-heads-count summary)))
+    (is (= 2 (:seon.operator/pruned-archives-count summary)))
+    (is (= [42 "abc123" true] ((juxt :seon.boot/pid :seon.source/git-sha :seon.operator/adopted?) summary)))
+    (is (not (contains? summary :seon.operator/captured-heads)))))
