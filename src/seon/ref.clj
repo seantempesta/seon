@@ -13,7 +13,7 @@
             [seon.fs :as fs]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.eval :as sci.eval]
+            [seon.sci.lookup :as lookup]
             [seon.test.cache :as test.cache])
   (:import [java.net URI URISyntaxException]
            [org.commonmark.ext.front.matter YamlFrontMatterExtension]
@@ -167,7 +167,7 @@
     (if (or v unloaded)
       (cond-> {:seon.ref/name reference :seon.render/operations [(list 'doc reference) (list 'clojure.repl/source reference)]}
         arglists (assoc :arglists arglists)
-        doc (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts doc)))))
+        doc (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts doc)))))
         pin (assoc :seon.ref/pin pin))
       {:seon.ref/name reference :seon.ref/problem-kind :unresolved})))
 
@@ -192,7 +192,7 @@
   (let [unresolved {:seon.ref/name reference :seon.ref/problem-kind :unresolved}
         operations [(list 'doc reference) (list 'clojure.repl/source reference)]]
     (if (qualified-keyword? reference)
-      (let [found (sci.eval/schema-documentation database reference reference)]
+      (let [found (lookup/schema-documentation database reference reference)]
         (cond
           (:seon.sci.eval/documentation-unavailable found) unresolved
           (:seon.error/at found) found
@@ -206,7 +206,7 @@
           (cond-> {:seon.ref/name reference :seon.render/operations operations}
             (:seon.fn/arglists function) (assoc :arglists (stored-arglists reference (:seon.fn/arglists function)))
             (:seon.fn/spec function) (assoc :seon.fn/spec (:seon.fn/spec function))
-            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (sci.eval/docstring-parts (:seon.fn/doc function)))))))
+            (:seon.fn/doc function) (assoc :doc (first (str/split-lines (:summary (lookup/docstring-parts (:seon.fn/doc function)))))))
           (:seon.error/at test-entity) test-entity
           (:seon.test/sym test-entity) {:seon.ref/name reference :seon.render/operations operations}
           :else (library-name reference))))))

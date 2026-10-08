@@ -38,6 +38,7 @@
             [seon.render.web :as render.web]
             [seon.schema :as schema]
             [seon.sci.eval :as eval]
+            [seon.sci.lookup :as lookup]
             [seon.sci.kernel :as kernel]
             [seon.test-support :as test-support]))
 
@@ -261,7 +262,7 @@
          (is (= :interpreted (:seon.sci.eval/load-state installed)))
          (is (str/includes?
               (:seon.schema.admission/note
-               (eval/documentation-value initial after 'seon.id/valid? 'seon.id/valid?))
+               (lookup/documentation-value initial after 'seon.id/valid? 'seon.id/valid?))
               "Accepted database override"))
          ;; Regeneration also interprets the override's affected callers
          ;; (39a337013) and binds their host names; incremental installation
@@ -311,7 +312,7 @@
                              (assoc canonical
                                     :seon.fn/source (:seon.fn/source original))})
          (is (nil? (:seon.schema.admission/note
-                    (eval/documentation-value initial restored 'seon.id/valid? 'seon.id/valid?))))
+                    (lookup/documentation-value initial restored 'seon.id/valid? 'seon.id/valid?))))
          (doseq [ctx [initial (fork initial b restored) regenerated]]
            (is (identical? @#'seon.id/valid? @(sci/resolve ctx 'seon.id/valid?)))))))))
 

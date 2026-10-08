@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.program :as program]
             [seon.sci.eval :as evaluation]
+            [seon.sci.lookup :as lookup]
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
@@ -25,8 +26,8 @@
          {:seon.schema.admission/source :agent :seon.fn/private? true}))
        (let [database (db/db connection)
              ctx (support/fork-cluster-ctx connection)
-             doc (evaluation/documentation-value ctx database function-symbol function-symbol)
-             directory (evaluation/directory-value database 'seon.eval.drive true)]
+             doc (lookup/documentation-value ctx database function-symbol function-symbol)
+             directory (lookup/directory-value database 'seon.eval.drive true)]
          (is (= "Accepted database override for SCI; JVM callers retain the compiled definition until write-back and reload."
                 (:seon.schema.admission/note doc))
              "the override's documentation names the JVM boundary")
@@ -36,9 +37,9 @@
 (deftest documentation-keeps-named-contracts-and-guarded-result-shapes
   (support/with-database
     (fn [connection]
-      (let [doc (evaluation/documentation-value (support/fork-cluster-ctx connection) (db/db connection)
+      (let [doc (lookup/documentation-value (support/fork-cluster-ctx connection) (db/db connection)
                                                 'seon.db/pull 'seon.db/pull)
-            contract (#'evaluation/documentation-contract
+            contract (#'lookup/documentation-contract
                       (db/db connection)
                       {:seon.fn/spec
                        "[:function [:=> [:cat :int] :string [:fn {:error/message \"pair relation\"} clojure.core/vector?]] [:=> [:cat [:or :string :int] :boolean] :keyword]]"})]
@@ -89,10 +90,10 @@
        (doseq [result [directory documentation missing missing-ns]]
          (is (empty? (:seon.cluster.eval/output result))))
        (is (symbol? (get-in missing [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
-       (is (= 'seon.sci.eval/documentation-unavailable
+       (is (= 'seon.sci.lookup/documentation-unavailable
               (get-in missing [:seon.sci.admit/value :seon.error/operation])))
        (is (symbol? (get-in missing-ns [:seon.sci.admit/value :seon.sci.eval/documentation-unavailable])))
-       (is (= 'seon.sci.eval/documentation-unavailable
+       (is (= 'seon.sci.lookup/documentation-unavailable
               (get-in missing-ns [:seon.sci.admit/value :seon.error/operation])))
        (is (= {:schemas {} :functions []} (select-keys (:seon.sci.admit/value empty-ns) [:schemas :functions])))
        (is (nil? (:seon.cluster.eval/error empty-ns)))))))
@@ -203,7 +204,7 @@
                     :seon.agent/id "documentation"}
            retained (:seon.sci.eval/ctx (evaluation/fork-for-turn request))
            old-dir @(sci/resolve retained 'clojure.core/dir)]
-       (#'evaluation/install-program-doc! base (db/db connection) (schema/handed-projection))
+       (#'lookup/install-program-doc! base (db/db connection) (schema/handed-projection))
        (is (not (identical? old-dir @(sci/resolve base 'clojure.core/dir))))
        (let [updated (:seon.sci.eval/ctx
                       (evaluation/fork-for-turn
@@ -275,11 +276,11 @@
       [(assoc (support/program-fn-entity (db/db connection) 'my.turn/undeclared "(defn undeclared [] true)")
               :seon.fn/private? false)])
      (let [database (db/db connection)
-           doc (evaluation/documentation-value (support/fork-cluster-ctx connection) database
+           doc (lookup/documentation-value (support/fork-cluster-ctx connection) database
                                                'my.turn/undeclared
                                                'my.turn/undeclared)
            entity (some #(when (= 'my.turn/undeclared (:sym %)) %)
-                     (:functions (evaluation/directory-value database 'my.turn false)))]
+                     (:functions (lookup/directory-value database 'my.turn false)))]
        (is (contains? doc :in))
        (is (some? entity) "the undeclared entity is still listed by dir")
        (doseq [[_label value attribute]
@@ -287,7 +288,7 @@
                 ["doc :out" (:out doc) :seon.fn/spec]
 ]]
          (is (= attribute (:seon.sci.eval/missing-declaration value)))
-         (is (= 'seon.sci.eval/declaration-absent (:seon.error/operation value))))
+         (is (= 'seon.sci.lookup/declaration-absent (:seon.error/operation value))))
        (is (not= [] (:in doc)) "an absent contract never reads as a declared empty one")
        ;; an undocumented function has no summary: absence is no key, never an empty string
        (is (not (contains? doc :summary)))
@@ -363,7 +364,7 @@
        (is (= (str stored "\n") (:seon.cluster.eval/output qualified)))
        (is (= (str stored "\n") (:seon.cluster.eval/output aliased)))
        (is (= "Source not found\n" (:seon.cluster.eval/output missing)))
-       (is (= stored (evaluation/stored-source (db/db connection) 'my.agent/settings!)))))))
+       (is (= stored (lookup/stored-source (db/db connection) 'my.agent/settings!)))))))
 
 (deftest an-example-ends-at-the-next-fixed-heading
   ;; The example ran to the docstring's end, so a heading after it (Costs,
@@ -371,12 +372,12 @@
   ;; eaf75398383c); a one-line `Example: (form)` yielded no example.
   (is (= {:summary "Read one." :example "(a 1)\n(b 2)"
           :body "Edge cases: none.\nCosts: one query.\n\n## Known issues\n\nx"}
-         (evaluation/docstring-parts
+         (lookup/docstring-parts
           "Read one.\n\n  Example:\n  (a 1)\n  (b 2)\n  Edge cases: none.\n  Costs: one query.\n\n  ## Known issues\n\n  x")))
-  (is (= "(trim \"a \")" (:example (evaluation/docstring-parts "Trim a title.\n\n  Example: (trim \"a \")"))))
+  (is (= "(trim \"a \")" (:example (lookup/docstring-parts "Trim a title.\n\n  Example: (trim \"a \")"))))
   (is (= {:summary "Open tasks." :body "## Costs\n\nOne query." :example "(my.task/open)"}
-         (evaluation/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
-  (is (= "" (:example (evaluation/docstring-parts "No example here.")))))
+         (lookup/docstring-parts "Open tasks.\n\n  ## Costs\n\n  One query.\n\n  Example:\n  (my.task/open)")))
+  (is (= "" (:example (lookup/docstring-parts "No example here.")))))
 
 (deftest a-refused-schema-read-keeps-its-refusal
   ;; A database that has not installed the schema attributes refuses the pull;
@@ -384,7 +385,7 @@
   (let [config {:store {:backend :memory :id (random-uuid)} :schema-flexibility :read}
         _ (d/create-database config)
         connection (d/connect config)
-        refused (#'evaluation/schema-documentation (d/db connection) :a/b :a/b)]
+        refused (#'lookup/schema-documentation (d/db connection) :a/b :a/b)]
     (is (db/read-refusal? refused))
     (is (not (contains? refused :seon.sci.eval/documentation-unavailable)))
     (d/release connection)
@@ -394,7 +395,7 @@
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
-           publics #(set (:publics (#'evaluation/namespace-documentation ctx (db/db connection) 'clojure.set 'clojure.set)))]
+           publics #(set (:publics (#'lookup/namespace-documentation ctx (db/db connection) 'clojure.set 'clojure.set)))]
        (sci/eval-string* ctx "(ns-unmap 'clojure.core 'ns-publics)")
        (is (contains? (publics) 'clojure.set/union)
            "the public names come from SCI's namespace table, not an evaluated ns-publics call")))))

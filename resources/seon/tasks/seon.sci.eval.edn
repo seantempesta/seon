@@ -2,7 +2,7 @@
  #:seon.task{:name "doc-and-dir-erase-request-keys"
              :kind :function
              :intent "The agent doc/dir contract view replaces every schema keyword with its form by postwalk-replace (agent-documentation-contract, eval.clj:2370), including map entry keys, so request keys disappear and supplied members are not removed; my.issue/add! cannot be called from its doc. (dir my.program) and (dir seon.schema) are about 25 KB each and list plumbing (native-call-refusal, supplied-context, *-generator functions, begin-registration-delta); `my.test/run` shows 'The program entity lacks a declaration ... `:seon.fn/spec`' as :in and :out. Walk Malli's own structure (m/walk, m/entries) and leave internal functions out of dir."
-             :must-read #{seon.sci.eval/agent-documentation-contract seon.sci.eval/documentation-schemas seon.sci.eval/documentation-value}
+             :must-read #{seon.sci.lookup/agent-documentation-contract seon.sci.lookup/documentation-schemas seon.sci.lookup/documentation-value}
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-report-2026-09-26.md"
@@ -115,7 +115,7 @@
  #:seon.task{:name "an-agent-cannot-read-the-private-code-it-must-change"
              :kind :function
              :intent "(doc `seon.render.value/tree`) answers documentation-unavailable because tree is private, though every private function is contracted and is what an agent edits; source, dir and doc are not referred in an agent's user namespace ('Unable to resolve symbol: source') although help teaches them; (clojure.repl/source f) works but prints to :out and draws the :large-output finding that tells the agent to return the value instead. Doc of a public function splits its summary mid-sentence at the first line break. Give an agent doc and source of private declarations as data (the declaration's stored source and contract), referred like help's other names (repl-dogfood 2026-09-27)."
-             :must-read #{seon.sci.eval/program-documentation seon.repl/response}
+             :must-read #{seon.sci.lookup/program-documentation seon.repl/response}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
  #:seon.task{:name "replaced-and-acquisition-ms-have-no-producer"
              :kind :function
@@ -124,8 +124,8 @@
              :evidence #{"resources/seon/schemas/seon.cluster.eval.edn"}}
  #:seon.task{:name "docstring-parts-reads-everything-after-example-as-the-example"
              :kind :function
-             :intent "`seon.sci.eval/docstring-parts` (eval.clj ~1883) takes every line after the last 'Example:' line as :example, so a docstring heading after the example (Errors:, Edge cases:, '## Costs') became forms the examples test read (RuntimeException 'Invalid token: Errors:', 'Unknown symbolic value: ##Costs'; task my.examples/the-examples-test-reads-a-docstring-example-as-an-invalid-token). Lane examples-red moved the headings before Example in my.program and my.task, the symptom fix. The single-line 'Example: (form)' (`my.program/ns-unalias!`, native-call-refusal) also yields a blank :example. Done when docstring-parts ends the example at the next docstring heading or accepts the one-line form, with a regression, and the Example-last ordering is no longer required of authors."
-             :must-read #{seon.sci.eval/docstring-parts}}
+             :intent "`seon.sci.lookup/docstring-parts` (eval.clj ~1883) takes every line after the last 'Example:' line as :example, so a docstring heading after the example (Errors:, Edge cases:, '## Costs') became forms the examples test read (RuntimeException 'Invalid token: Errors:', 'Unknown symbolic value: ##Costs'; task my.examples/the-examples-test-reads-a-docstring-example-as-an-invalid-token). Lane examples-red moved the headings before Example in my.program and my.task, the symptom fix. The single-line 'Example: (form)' (`my.program/ns-unalias!`, native-call-refusal) also yields a blank :example. Done when docstring-parts ends the example at the next docstring heading or accepts the one-line form, with a regression, and the Example-last ordering is no longer required of authors."
+             :must-read #{seon.sci.lookup/docstring-parts}}
  #:seon.task{:name "the-defn-reply-prints-before-its-own-change-applies"
              :kind :function
              :intent "The defn/deftest reply is printed before its own change is applied: `seon.batch/evaluate-step` prints (batch.clj ~371) before derive-step, and the change reaches the working program only at the next form's apply-pending (batch.clj:480), so the Var render shows the state without the form's change. Shown text is stored in the settlement, so printing cannot wait. Done when the reply prints against the working program plus the form's own change; the committed assertion a-function-without-a-contract-is-admitted-and-stored in cluster/agent_test stays red until then."
@@ -139,7 +139,7 @@
  #:seon.task{:name "doc-prints-contracts-expanded-with-keys-garbled"
              :kind :function
              :intent "An agent's (doc f) prints the function's contract fully expanded with map entries garbled into [[schema] [schema]] pairs (the key replaced by its schema): (doc `seon.sci.eval/install-evaluated-rows!`) costs 1,907 estimated tokens, twice the function's source, and hides which keys the input needs. doc must show the contract as declared (registry names, one level) through the value printer. Done when a regression asserts (doc install-evaluated-rows!) shows its declared :malli/schema form with its keys and is smaller than its source."
-             :must-read #{seon.sci.eval/program-doc-var}
+             :must-read #{seon.sci.lookup/program-doc-var}
              :evidence #{"docs/research/agent-platform/2026-10-07/context-examples/README.md"}}
  #:seon.task{:name "bare-source-and-apropos-do-not-resolve-in-an-agents-repl"
              :kind :function
@@ -181,8 +181,8 @@
             :intent
             "In an agent's SCI context, (doc clojure.string/split) returns the `:seon.sci.eval/documentation-unavailable` error value and (dir clojure.string) returns [] (lane steer, 2026-10-07, agent steer, ns scratch.steer), while (clojure.repl/apropos \"split\") finds clojure.string/split. An agent working in Clojure needs the same lookups for the dependency Vars it calls. Correct: doc returns the Var's docstring and arglists from its metadata and dir lists the namespace's public Vars, as data. Proof: a regression through the agent entrance asserting (doc clojure.string/split) has the arglists and (dir clojure.string) contains clojure.string/split; it fails today.",
             :must-read
-            #{seon.sci.eval/documentation-value
-              seon.sci.eval/directory-value},
+            #{seon.sci.lookup/documentation-value
+              seon.sci.lookup/directory-value},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/steer/steer-notes.md"}}
  #:seon.task{:name "diagnostics-dig-forms-point-into-the-value",
@@ -195,8 +195,8 @@
             "dir-shows-each-uncontracted-def-as-two-timestamped-errors",
             :kind :function,
             :intent
-            "The namespace render of seon.db (`seon.render.ns/render-ai`, which reads `seon.sci.eval/directory-value`) shows each dynamic Var row (`seon.db/*conn*`, *read-database*, *read-evidence-sink*) with :in and :out each holding a whole :seon.sci.eval/present-declaration error map with its own `:seon.error/at` timestamp: two error maps per row for a def that has no arglists or contract by nature. Done when a def without a function contract shows its kind (def, dynamic) and no :in/:out, and a defn lacking one shows the typed unknown once, asserted on the directory data.",
-            :must-read #{seon.sci.eval/directory-value},
+            "The namespace render of seon.db (`seon.render.ns/render-ai`, which reads `seon.sci.lookup/directory-value`) shows each dynamic Var row (`seon.db/*conn*`, *read-database*, *read-evidence-sink*) with :in and :out each holding a whole :seon.sci.eval/present-declaration error map with its own `:seon.error/at` timestamp: two error maps per row for a def that has no arglists or contract by nature. Done when a def without a function contract shows its kind (def, dynamic) and no :in/:out, and a defn lacking one shows the typed unknown once, asserted on the directory data.",
+            :must-read #{seon.sci.lookup/directory-value},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/context-design/reference-kinds-notes.md"}}
  #:seon.task{:name "loading-source-arms-tens-of-thousands-of-calls",
@@ -209,7 +209,7 @@
             :kind :function,
             :intent
             "In an agent's SCI context, (clojure.test/run-test-var #'rr.scratch/rr-inc-test) on a resolvable deftest throws ClassCastException 'class sci.lang.Namespace cannot be cast to class clojure.lang.Symbol' (MCP eval_clj sci, agent r-read, default 722f110df, 2026-10-07); an unqualified var in another namespace answers 'Unable to resolve var'. Agents in live run 1 and loop-pass reached for run-test-var to run their proof tests. Correct: run-test-var (or a documented equivalent the help names) runs one SCI test var and answers its report as data. Proof: a deftest defined on a branch runs through run-test-var and answers pass counts.",
-            :must-read #{seon.sci.eval/agent-test-namespace},
+            :must-read #{seon.sci.lookup/agent-test-namespace},
             :evidence
             #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
  #:seon.task{:name "a-forms-set-print-length-is-recorded-but-not-applied"
@@ -223,7 +223,7 @@
             :kind :function,
             :intent
             "In an MCP SCI pass, (deftest boom (is (= 1 (throw (ex-info \"boom\" {:a 1}))))) then (run-tests 'my.tsx) returned :out of about 10500 estimated tokens: clojure.test's report :error calls print-cause-trace with the live Throwable and no depth (reference-code/clojure/src/clj/clojure/test.clj:384-395). Correct: the erroring test's report holds the exception class and message and no host frames, under 300 estimated tokens. Proof: `seon.sci.documentation-test/a-test-error-report-prints-the-exception-without-host-frames`.",
-            :must-read #{seon.sci.eval/agent-test-namespace}}
+            :must-read #{seon.sci.lookup/agent-test-namespace}}
  #:seon.task{:name "a-set-print-length-taxes-every-later-run"
              :kind :function
              :intent "After one (set! *print-length* 50) every later run of that agent costs about +100 ms and +280 MB: (+ 1 1) on agent repl-audit-opus-p measured 47/43/44 ms and ~55 MB per call before, 148/150/150 ms and ~340 MB after (all-thread allocation, default 2026-10-08); a fresh agent stays at ~45 ms. Cause not yet located: the turn thread's seon frames sample the same before and after, so the extra work is outside seon.* frames (session-print-options queries every evaluation the agent ever ran per fork; the print options ride every evaluation). Correct: a session print option costs nothing per run. Proof: a probe row where 10 runs after the set! cost within 10% of 10 runs before."
@@ -233,7 +233,7 @@
  #:seon.task{:name "a-test-report-erases-the-agents-stack-frames"
              :kind :function
              :intent "agent-do-report calls .setStackTrace with an empty array on every link of an erroring test's Throwable (5295011dd, the fix for a-test-error-report-prints-the-whole-host-stack), so the live exception the agent may hold loses its frames for good: the bulk was a printing problem and the fix mutated the value. Done when the report prints the Throwable as its cause chain through the value printer under 300 estimated tokens and the held exception keeps its stack trace, asserted on (count (.getStackTrace e)) after run-tests."
-             :must-read #{seon.sci.eval/agent-do-report seon.error.refusal/chain}
+             :must-read #{seon.sci.lookup/agent-do-report seon.error.refusal/chain}
              :evidence #{"docs/research/agent-platform/2026-10-08/printer-rules/printer-rules-opus-printer-rules.md"}}
  #:seon.task{:name "an-arity-error-names-the-sci-closure"
              :kind :function
@@ -296,7 +296,7 @@
  #:seon.task{:name "doc-in-names-schemas-by-their-registered-keys"
              :kind :function
              :intent "`(doc seon.task/assign!)` returns :in with every map entry replaced by its expanded schema, printed twice, and with generator and projection internals (:gen/gen, :seon.schema/identity-projection); supplied keys are never removed. Done when :in and :out name schemas by registered key, so `(doc :seon.task/assigned)` is the follow-up, and a map entry keeps its key."
-             :must-read #{seon.sci.eval/agent-documentation-contract seon.sci.eval/documentation-value}}
+             :must-read #{seon.sci.lookup/agent-documentation-contract seon.sci.lookup/documentation-value}}
  #:seon.task{:name "an-inherited-test-never-sees-the-branch-redefinition-of-its-callee"
              :kind :function
              :intent "A proof defined on main never sees an agent branch's redefinition of the function it tests, in any later eval request, so a correct fix stays red and no branch task with a main proof can finish (live-agent run, default 6cc5dbbb4, 2026-10-08). Root on main: (ns live.text) (defn slug {:malli/schema [:=> [:cat :string] :string]} [title] \"\") and (ns live.text-test (:require [clojure.test :refer [deftest is are]] [live.text :as t])) with a deftest calling (t/slug \"Hello, World! 2\"). Agent live-probe, own branch: eval request 1 (in-ns 'live.text) (defn slug ... correct body) (slug \"Hello, World! 2\") answers \"hello-world-2\" and the deftest called directly fails with actual \"\"; eval request 2 in live.text-test: (t/slug \"Hello, World! 2\") answers \"hello-world-2\", the deftest still fails with \"\", and the step records it red. Clojure answers green from the first redefinition. Unlike `seon.sci.eval/an-inherited-caller-sees-a-redefinition-only-after-the-pass`, the next eval request does not repair it. Still live after 9aea31407 on default ade6e3059 (agent live-flash-2, branch :agent-16da364eeb28, 2026-10-08 11:54Z): after the model's correct (defn slug ...) in live.text, the proof's member re-ran in the step with reason :reaches-changed (reach digest 5ba2301f to 56c7bd95) and failed both assertions with actual \"\" in every later step (8 runs), while at the agent's REPL (live.text/slug \"Hello, World! 2\") answered \"hello-world-2\" and (clojure.test/test-vars [#'live.text-test/slug-joins-lower-case-words]) reported no failure; the test's :seon.schema.admission/source is :agent. So the step's test world (`seon.test/clean-request-handle` over the agent's live base) still runs main's callee, and `seon.repl-differential-test/an-inherited-test-sees-the-branch-redefinition` (green) does not cover this shape. Producer (lane proof-world, default ade6e3059, scratch pw3.slug/pw3.slug-test, agent pw-f): a new agent's base is `seon.sci.eval/fork-cluster-ctx` of root's live context, whose contract loop re-arms each contracted interpreted function with `sci.core/bind-root!`, copying the callee's Var into the fork while the inherited test keeps calling root's Var; `seon.sci.eval/acquired-database?` answers equal, so nothing repairs it, and the step's world forked that base. Interim: `seon.test/clean-request-handle` builds the world with `seon.sci.eval/base-ctx` from the branch's definitions; the agent's own base stays stale until SCI Var handles are context-owned (docs/research/agent-platform/2026-10-08/sci-fork-vars/sci-sol.md). The check fixture (`seon.test-support/with-running-agent`) does not reproduce the stale base. Done when a test the branch inherits calls the branch's current Var of its callee."

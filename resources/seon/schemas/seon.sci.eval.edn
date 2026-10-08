@@ -121,16 +121,6 @@
                  [:seon.eval/renderer {:optional true} :seon.eval/renderer]
                  [:seon.cluster.eval/diagnostics {:optional true} :seon.cluster.eval/diagnostics]
                  [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]],
-                :rendered-request
-                [:map {:description "A data render's shown value in a context: the value, its namespace, the render's read evidence, and the world it prints in."}
-                 [:seon.sci.admit/value :seon.render/ai-data]
-                 [:seon.cluster.eval/ns :seon.db/ref]
-                 [:seon.cluster.eval/read-evidence {:optional true} [:vector :seon.db/read-evidence]]
-                 [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
-                 [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
-                 [:seon.db/db {:optional true} :seon.db/database-value]
-                 [:seon.agent/id {:optional true} :seon.agent/id]
-                 [:seon.repl/handle {:optional true} :qualified-symbol]],
                 :unrun-request
                 [:map
                  [:seon.sci.admit/value :seon.error/value]

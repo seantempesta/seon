@@ -22,6 +22,7 @@
             [seon.schema :as schema]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as evaluation]
+            [seon.sci.lookup :as lookup]
             [seon.sci.reader :as reader]
             [seon.test-support :as support]))
 
@@ -61,7 +62,7 @@
                                 [(support/task-row "prepare00000" "Prepare input")
                                  (support/task-row "check0000000" "Check output")])
            database (db/db connection)
-           directory (evaluation/directory-value database 'seon.repl true)
+           directory (lookup/directory-value database 'seon.repl true)
            request (assoc (render-request connection nil)
                           :seon.render/profile
                           {:seon.render.profile/id :seon.render.profile/test
@@ -74,7 +75,7 @@
        ;; Each value names its producer (design §1 rule 2): its declared
        ;; return names the pair.
        (doseq [[raw render-pair producer] [[report db/render-transaction-ai 'seon.db/transact!]
-                                          [directory repl/render-directory-ai 'seon.sci.eval/directory-value]]]
+                                          [directory repl/render-directory-ai 'seon.sci.lookup/directory-value]]]
          (is (= (render-pair raw)
                 (render/render-ai (assoc request :seon.render/value raw
                                          :seon.render.call/function producer)))))))))
@@ -605,7 +606,7 @@
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
-           documentation (evaluation/documentation-value ctx (db/db connection) 'seon.db/read-evidence 'seon.db/read-evidence)
+           documentation (lookup/documentation-value ctx (db/db connection) 'seon.db/read-evidence 'seon.db/read-evidence)
            body (:body documentation)
            handle 'result/e0123456789ab
            request (assoc (probe-unit documentation)

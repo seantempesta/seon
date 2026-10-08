@@ -31,6 +31,7 @@
             [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.lookup :as lookup]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]
@@ -144,7 +145,7 @@
        (binding [*err* warnings]
          (without-handed-projection
           (fn []
-            (doseq [selector [@#'sci.eval/program-documentation-selector '[*]]]
+            (doseq [selector [@#'lookup/program-documentation-selector '[*]]]
               ;; Warm the actual per-projection codecs, then include supplier
               ;; acquisition in every measured call. No dynamic projection is
               ;; present at either acquisition or decoding.
@@ -182,7 +183,7 @@
           (let [warnings (java.io.StringWriter.)
                 entities (binding [*err* warnings]
                        (db/pull-many database
-                                     @#'sci.eval/program-documentation-selector ids))]
+                                     @#'lookup/program-documentation-selector ids))]
             (is (= (count ids) (count entities)))
             (is (= "" (str warnings))
                 "a value that declares its program derives its own projection"))))
