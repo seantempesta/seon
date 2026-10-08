@@ -60,7 +60,12 @@ root.
   patch elsewhere means: return to the data flow and find the owner.
 - **Prefer values to places.** Derive from held immutable values; arguments and channels remove hidden order. Atoms
   are a smell: state lives colocated in its owner's value (database facts, the Flow proc's state, the SCI context,
-  the dependency's cache); an atom needs a stated reason no owner holds it. Live host objects with no data form
+  `seon.cache`). Mutable state is at most one validated state map per process and one per cluster, each an atom
+  whose `set-validator!` is a Malli validator of its fully specced map, so every write is checked or refused; an
+  agent's state lives in its Flow proc and SCI context. The only other mutable cells are justified counters: the
+  per-function profile counters, the SCI interrupt flag, the running Thread and clojure.test's report counter; cache
+  counters are Caffeine's `recordStats`. Any other atom needs a seriously good reason the owner accepts in plain
+  words, and a lint refuses new ones (ledger §3.19). Live host objects with no data form
   (Flow graphs, channels, executors, SCI contexts, listeners) live in exactly one roster per scope (process, then
   cluster execution), keyed by stable ids, passed explicitly and observable in status; admission and retirement are
   writer-checked facts. Per-call accumulation is a fold.
@@ -132,7 +137,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 4. **Pick the model by risk; every lane proves its slice.**
    - **Sonnet** measures, diagnoses, writes specs, deletes and sweeps, and implements clearly specified slices. When
      it cannot find the cause or a clearly correct fix in about fifteen minutes, it bows out with what it measured.
-   - **Opus** changes the semantics of the one REPL path (pass, batch, evaluation, render, evidence) and other
+   - **Opus** changes the semantics of the one REPL path (eval request, evaluation, render, evidence) and other
      boot-critical platform code, designing by dogfooding: alternatives tried at the REPL on its own branch, the
      tests reaching the change, timings.
    - **Astra, an outside model trained on a different distribution, takes the hard performance work** a Sonnet lane
@@ -174,13 +179,20 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Clusters and branches.** A cluster is a Datahike branch, called main, plus its agents and shared plumbing; one
   JVM hosts many. A branch is `d/branch!`, a pointer to shared immutable indexes, never a store copy or a system to
   boot. An agent's context has one branch checked out. `d/delete-branch!` removes a branch from the roster; retention
-  GC reclaims its commits without per-branch cleanup.
+  GC reclaims its commits without per-branch cleanup. A finished agent's branch is deleted once its task is done or
+  given back and its merge request is closed, so its history and blobs can be collected.
 - **Boot and configuration.** Boot opens the REPL before store acquisition, then builds process → store → facts →
   flow, publishing readiness at each layer. One process root holds the store's lifetime lock; Datahike serializes
   transactions. Bootstrap selects paths and binds; running configuration is database facts; secrets are
   environment-variable names. `seon.config/defaults` is a compiled constant, not a cluster's configuration. Boot
   reads each dial from the configuration it applied, never the store's pre-adoption value, so a new dial exists at
-  its first read.
+  its first read. Every size, count, byte budget, heap cap, timeout and threshold is a dial whose shipped default fits
+  a 16 GB machine running many agents beside the user's work, never derived from the host's RAM: a 4 GB heap cap,
+  `seon.cache` 512 MB with live results inside it, Datahike's node cache byte-bounded (replacing its soft-referenced
+  retention), 4,096 bytes inline before a blob, a 1 KB blob compression floor, storage I/O on virtual threads. A
+  hardcoded policy number in code is a defect. Target (ledger DIAL-1): configuration files are read by Aero
+  (`#profile`, `#env`, `#include`), one file for the JVM and the Babashka operator; Malli validates the result and
+  the database reconcile stays.
 - **The program is entities**: functions, tests, schemas, namespaces, render pairs, contracts, analysis and test
   evidence keyed by exercised definition digests. Evaluations, calls, messages, errors, tasks and live results are
   data and never merge as program; declare that partition on entity schemas, not in a hand list. Default's program
@@ -191,8 +203,8 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   from source sees its definitions. Compute host-bound status per declaration, never from a namespace roster.
 - **An agent's context** is its SCI world; its task selects custody of the live cluster head or its own branch.
   Every agent, filesystem agents on their own named branches included, uses the one REPL entrance. Private defs,
-  atoms and objects survive program changes advanced in place at idle boundaries; each pass reacquires from the
-  branch head, reusing content-valid derivations.
+  atoms and objects survive program changes advanced in place at idle boundaries; each eval request reacquires from
+  the branch head, reusing content-valid derivations.
 - **Reload and adoption.** A reload is `require :reload` for changed namespaces and their dependents. Adoption goes
   entities → load → arm → record and waits for no one. Stability comes from branch custody: work that overlaps a reload
   compares the loaded program identity at start and end and pushes back, never takes a lock. Failure leaves affected
@@ -302,7 +314,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 
 ## Failure and execution
 
-- **Nothing crashes.** No evaluation, reply, pass, page, tool call, test run or boot step ever ends in an uncaught
+- **Nothing crashes.** No evaluation, reply, eval request, page, tool call, test run or boot step ever ends in an uncaught
   exception. A function whose job is to answer (`my.*` tools, validators, merge checks, gates) RETURNS its error map
   and lists exactly those variants (target: one `:multi` on `:seon.error/type`); every other function throws the same
   map inside `ex-info` and declares only its success value, except reads, which return refusals until the errors
@@ -338,9 +350,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   of that same work until exit, while unrelated work proceeds. SCI interrupts interpreted code, not arbitrary host
   calls; keep isolation where termination cannot be guaranteed.
 - **Recover facts, not execution.** Never resume interrupted execution or serialize private objects or live
-  results. A pass reads and evaluates every form, then writes its settlement as ONE synchronous transaction, durable
-  before it answers, under 100 ms; no fire-and-forget write, so the next call sees it. A crash before settlement loses
-  that pass's bookkeeping (evaluation rows, call row, answered basis), never an effect a form already made durable;
+  results. An eval request reads and evaluates every form, then writes its recording transaction as ONE synchronous transaction, durable
+  before it answers, under 100 ms; no fire-and-forget write, so the next call sees it. A crash before that transaction loses
+  that eval request's bookkeeping (evaluation rows, call row, answered basis), never an effect a form already made durable;
   the work stays due, so an effect repeats unless its owner is idempotent. Until the agent-loop cut, boot closes
   interrupted runs and marks their unfinished evaluations. Everything with consequences beyond the form (merges,
   write-back, tasks, config, schema adoption, boot and publication records, recorded errors, branch lifecycle,
@@ -349,10 +361,14 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   `:seon.message/from` marks inside wakes; never replay writes or effects. Context is rendered live from the agent's
   task and its references, never stored. A task names its success tests (deftests carrying it in `:seon/tasks`)
   before it is assigned or launched; a test already green before the work does not prove it. Target (agent-loop P5
-  and cut): `seon.task/assign!` refuses a task with no proofs or whose proofs are all green; after a pass that
-  changed code its proofs reach, they run, and all green completes the task, the only success; `my.task/complete!`,
-  with a required reason, gives a broken or impossible task back to its assigner, who is notified; a model agent
-  launches only on an assigned task with proofs, and its own `:work` task ends by `my.turn/wait` or the call cap; the
+  and cut): `seon.task/assign!` refuses a task with no proofs or whose proofs are all green; after any eval request
+  that evaluated a form, the task's proofs and then the tests reaching the change run on the agent's branch inside
+  that eval request (unchanged results answered from their record, the step's time limit a dial defaulting to 10 s),
+  and all green completes the task, the only success; a question task declares its answer's Malli schema and
+  `my.agent/answer!` stores the validated answer as ordinary Datahike data for its proofs to read;
+  `my.task/complete!`, with a required reason, only gives a broken or impossible task back to its assigner, who is
+  notified; a reply is `my.message/send` then `my.turn/wait`; a model agent launches only on an assigned task with
+  proofs, and its own `:work` task ends by `my.turn/wait` or the call cap; the
   answered basis is `:seon.agent/answered-t`, and system turns and context capture are gone. Archive agents; preserve
   task and agent identity on loud, resumable budget exhaustion.
 
@@ -369,9 +385,9 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
   trim it for presentation. A render function is schema-specific by definition, so all specific selection lives
   there and renders less. The value printer is the last stage every shown value passes through, with or without a
   render: it takes only general improvements (budget, shape, laziness, cycles, references), never a schema-specific
-  branch, and shows each value's essence with runnable dig forms (on the result symbol) for what it cuts. Functions
-  are data: an ordinary function's source prints whole, as code; only a real monster is cut, with the dig form for the
-  rest. Pulling unused data is waste, showing an agent irrelevant data costs more on every call, and re-touching
+  branch, and shows each value's essence with runnable elision forms for what it cuts: plain clojure.core (`drop`,
+  `take`, `nth`, `get-in`, `subs`, `keys`, `count`) on the live result symbol, lazy first. Functions are data: an
+  ordinary function's source prints whole, as code; only a real monster is cut, with the elision form for the rest. Pulling unused data is waste, showing an agent irrelevant data costs more on every call, and re-touching
   cached data costs more than leaving it: invest in the render function.
 - **Choose the render function per consumer (AI or HTML); the first match wins**: the value's own `:seon.render/ai` or
   `:seon.render/html` key (the master override: a renderer symbol, an inline function or rendered data); a render
