@@ -815,10 +815,13 @@
   [database sym]
   (let [entity (declaration database sym)]
     (if (::kind entity)
-      (cond-> (merge {:sym sym :kind (::kind entity) :source (::source entity)} (file-line entity))
-        (:seon.fn/doc entity) (assoc :doc (:seon.fn/doc entity))
-        (:seon.fn/spec entity) (assoc :contract (read-string (:seon.fn/spec entity)))
-        (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity))))
+      (let [src (::source entity)]
+        (cond-> (merge {:sym sym :kind (::kind entity) :source src} (file-line entity))
+          (and (:seon.fn/doc entity)
+               (not (clojure.string/includes? (str src) (str (:seon.fn/doc entity)))))
+          (assoc :doc (:seon.fn/doc entity))
+          (:seon.fn/spec entity) (assoc :contract (read-string (:seon.fn/spec entity)))
+          (:seon.fn/file entity) (assoc :file (:seon.fn.file/relative-path (:seon.fn/file entity)))))
       (let [near (nearest database sym)]
         (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/source
           {:seon.error/message (str "No program declaration names " sym ". Nearest: " (str/join ", " near))
