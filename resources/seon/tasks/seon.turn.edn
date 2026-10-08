@@ -227,4 +227,8 @@
              :kind :function
              :intent "Every settlement runs seon.turn/terminal-agent-ordinal, a four-clause query whose plan fuse-scans every evaluation on the branch: 4.4-4.8 MB and 2.6-3.6 ms per pass on a branch of 742 evaluations, where the same answer from (d/entity run) and (d/datoms :avet :seon.cluster.eval/run run) costs 31 KB and 0.04 ms (defn-why, 2026-10-08). The other settlement queries (fault-window, spent-runs, opening-deferred?, system-run-plan, close-call, latest-answering-turn-t, next-ordinal, agent-dial) cost 0.5-2 MB each through the query floor (seon.db/a-datahike-query-walks-every-retained-result-bucket); together 14-16 MB of a 55 MB ordinary pass. Read a known entity's members by its identity (pull or AVET datoms), never by a query that joins the whole branch. Done when an ordinary pass's run bookkeeping allocates under 1 MB."
              :must-read #{seon.turn/terminal-agent-ordinal seon.turn/fault-window seon.turn/spent-runs seon.turn/opening-deferred?}
-             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/defn-why/defn-why.md"}}
+ #:seon.task{:name "turns-left-allocates-836-kilobytes-per-call"
+             :kind :function
+             :intent "seon.turn/turns-left (max-episode-runs plus episode-runs over the agent's runs) allocates about 836 KB per call (lane cs01a's report, 2026-10-08), and the current-state block calls it on every model call; what it must do is read one dial and count the agent's own runs in the current session. Done when one call's allocation follows the agent's session runs (measured with seon.pass-probe/window on parent and change), with a test asserting the count as data."
+             :must-read #{seon.turn/turns-left seon.turn/episode-runs seon.turn/max-episode-runs}}]
