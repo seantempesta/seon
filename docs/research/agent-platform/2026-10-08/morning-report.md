@@ -39,7 +39,8 @@ This page is built up through the night; the final form is written before the ow
    that still satisfies the ruling.
 4. **When to open the datom write-ahead log design** (commit-cost step 4).
 
-Root defaults taken: the reply's `:seon.cost/transactions` counts every durable commit the request caused, the test
+Root defaults taken: SCI functions carry their defining context so a host thread reads the current definition (option
+A of the ctx-audit finding, `324461975`; correct now, timing-gated in our SCI fork, lane sci-fn-ctx). The reply's `:seon.cost/transactions` counts every durable commit the request caused, the test
 world's throwaway-branch commit included, counted by distinct commit ids (CC-1 follow-up). `:chat` is the default wire format (E2: success tied 36/40 vs 35/40; chat had fewer repeated forms
 31 vs 86 and 16% fewer prompt tokens; a weak preference, a dial per agent). Proofs and reaching tests run as one test request (CC Q2: one admission and one completion instead
 of two each).
@@ -141,3 +142,7 @@ of two each).
   clojure/clj/cljc/edn fence is code; elsewhere a line is code when it starts a form; a closing fence can't be swallowed by
   a half-finished form; indented definitions are code). Another data point for decision 1 (RF-3): branch test evidence
   proves nothing for compiled platform files like the reader.
+- **SCI context sweep** (`324461975`): no wrong site left in Seon (62 SCI-Var sites, all in context or context-free); found
+  the class instead: an SCI fn run on a raw thread or an executor sees each Var's first definition (red proof committed).
+  Root chose option A (fns carry their defining context); lane sci-fn-ctx is working in the SCI fork, timing first.
+- **Fan-out 3** launched on 324461975 (all of tonight's fixes live) to re-measure the end-to-end rate on real tasks.
