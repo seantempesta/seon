@@ -89,12 +89,12 @@
  ;; Warnings over process-local observations. They move to their producers'
  ;; stored subjects when the recording lane stores judgments (plan §2).
  :over-bound-warning
- [:map {:seon.health/severity 6 :seon.health/impact :seon.profile/calls :seon.health/subject :seon.profile/sym
-        :seon.health/in [:seon.health/profile] :seon.health/inclusive true
-        :seon.health/clues [[:seon.profile/calls] [:seon.profile/mean-us] [:seon.profile/max-ms] [:seon.health/tested?]]
-        :description "An armed definition (a profile observation) whose mean call exceeds one second: an ordinary operation over the bound (AGENTS.md). Inclusive: a slow callee is also its callers' time."}
+ [:map {:seon.health/severity 6 :seon.health/impact :seon.profile/self-ms :seon.health/subject :seon.profile/sym
+        :seon.health/in [:seon.health/profile]
+        :seon.health/clues [[:seon.profile/calls] [:seon.profile/self-mean-us] [:seon.profile/mean-us] [:seon.profile/self-ms] [:seon.profile/total-ms] [:seon.profile/max-ms] [:seon.health/tested?]]
+        :description "An armed definition (a profile observation) whose mean call spends over one second in its own body (self time, callees excluded): an ordinary operation over the bound (AGENTS.md). Ranked by self milliseconds, so a wrapper whose callback does the work sits below the callee; the inclusive total stays beside it."}
   [:seon.profile/sym :seon.profile/sym]
-  [:seon.profile/mean-us [:int {:min 1000000}]]]
+  [:seon.profile/self-mean-us [:int {:min 1000000}]]]
  :throwing-warning
  [:map {:seon.health/severity 2 :seon.health/impact :seon.profile/throws :seon.health/subject :seon.profile/sym
         :seon.health/in [:seon.health/profile] :seon.health/inclusive true

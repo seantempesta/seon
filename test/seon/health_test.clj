@@ -230,3 +230,22 @@
         score #(#'health/score health/ranking now properties %)]
     (is (< (score (row 14 15 5000)) (score (row 24 25 300)))
         "a hot cheap function adds less time than a rarely called expensive one")))
+(deftest ^{:seon/tasks #{'seon.profile/health-and-explain-rank-wrapper-chains-by-inclusive-time}}
+  over-bound-findings-rank-by-self-time-and-leave-out-wrappers
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           observation (fn [sym self-ms total-ms]
+                         {:seon.profile/sym sym :seon.profile/scope :seon.profile/host
+                          :seon.profile/calls 2 :seon.profile/total-ms total-ms :seon.profile/self-ms self-ms
+                          :seon.profile/mean-us (* 500 total-ms) :seon.profile/self-mean-us (* 500 self-ms)
+                          :seon.profile/max-ms total-ms :seon.profile/throws 0 :seon.profile/in-flight 0})
+           report {:seon.health/profile [(observation 'probe.health/wrapper 1 9000)
+                                         (observation 'probe.health/callee 8000 8000)
+                                         (observation 'probe.health/second 3000 3000)]}
+           found (filterv #(= :seon.health/over-bound-warning (:seon.health/schema %))
+                          (health/findings database report))]
+       (is (= '[probe.health/callee probe.health/second] (mapv :seon.health/subject found))
+           "the wrapper with one millisecond of its own time is not over the bound; the callee outranks the smaller one")
+       (is (= 8000 (get-in (first found) [:seon.health/value :seon.profile/total-ms]))
+           "the inclusive total stays beside self time")))))

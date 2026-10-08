@@ -175,7 +175,7 @@
         (testing "only the growth inside the window is counted"
           (is (= 3 (:seon.profile/calls grown))))
         (is (<= 6 (:seon.profile/total-ms grown)))
-        (is (some #(re-find #"ms in seon\.profile-test/explained-" %) (:seon.profile/lines explanation)))
+        (is (some #(re-find #"ms total in seon\.profile-test/explained-" %) (:seon.profile/lines explanation)))
         (is (re-find #"^OVER ONE SECOND"
                      (first (:seon.profile/lines
                              (profile/explain-slow (assoc mark :seon.profile/started-ns
@@ -184,6 +184,29 @@
         (is (nil? (profile/explain-slow (profile/begin)))
             "an operation within one second has nothing to explain"))
       (finally (ns-unmap 'seon.profile-test var-name)))))
+
+(deftest ^{:seon/tasks #{'seon.profile/health-and-explain-rank-wrapper-chains-by-inclusive-time}}
+  an-explanation-ranks-the-callee-that-did-the-work-above-the-wrapper-around-it
+  (let [work (symbol (str "explained-work-" (random-uuid)))
+        wrap (symbol (str "explained-wrap-" (random-uuid)))]
+    (try
+      (let [worker (arm-probe! work (fn [n] (let [t (System/nanoTime)]
+                                              (while (< (- (System/nanoTime) t) 5000000))
+                                              n))
+                               digest-a)
+            wrapper (arm-probe! wrap (fn [n] (@worker n)) digest-b)
+            mark (profile/begin)
+            _ (@wrapper 0)
+            order (mapv :seon.profile/sym (:seon.profile/growths (profile/explain mark 50)))
+            row (fn [v] (some #(when (= (symbol "seon.profile-test" (name v)) (:seon.profile/sym %)) %)
+                              (:seon.profile/growths (profile/explain mark 50))))]
+        (is (< (.indexOf order (symbol "seon.profile-test" (name work)))
+               (.indexOf order (symbol "seon.profile-test" (name wrap))))
+            "the callee that did the work ranks first though both have the same inclusive time")
+        (is (<= 4 (:seon.profile/self-ms (row work))))
+        (is (< (:seon.profile/self-ms (row wrap)) (:seon.profile/total-ms (row wrap)))
+            "a wrapper's self time is below its inclusive total, which stays a member"))
+      (finally (ns-unmap 'seon.profile-test work) (ns-unmap 'seon.profile-test wrap)))))
 
 (defn- digest-of
   [label]
