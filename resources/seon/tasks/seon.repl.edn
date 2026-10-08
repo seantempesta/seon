@@ -80,4 +80,8 @@
              :kind :function
              :intent "The :slow finding's fix (`seon.profile/summary` (`seon.profile/cells`) 5) ranks the process's cumulative profile (`seon.cluster.boot/request!` 31751 ms total) as the same five prose lines in three lists, not the slow evaluation; the reply's :repeated adds about 446 tokens of seon.schema.* rows the agent cannot act on (`my.test/check`, 1,166 ms, default 2026-10-08). Done when the fix reads this evaluation's own armed calls as data and a slow MCP reply is bounded at 60 tokens."
              :must-read #{seon.repl/findings}
-             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/agent-messages/messages-opus-messages.md"}}
+ #:seon.task{:name "reply-lacks-gc-commits-and-a-dialled-allocation-bound"
+             :kind :function
+             :intent "Each SCI reply now shows :seon.repl/alloc-mb from :seon.eval/allocated-bytes (every thread's allocation over the evaluation's window, since SCI runs on a virtual thread) and a :large-allocation finding past :seon.config.eval/bounds (400 MB). Missing: the evaluation's GC count and collection-time delta and the commits its request wrote, which need new :seon.eval attributes carried by seon.sci.eval's evaluation record and seon.turn's settlement and pull list (held files when this was filed); and the bound is declared data in the bounds schema, not a :seon.config/dial an operator can size for the machine, because seon.repl/findings judges the emission alone and receives no configuration. Done when a reply that collected garbage shows its GC delta, an eval request shows its commit count, and changing a dial changes the :large-allocation threshold without a reload."
+             :must-read #{seon.repl/findings seon.sci.kernel/arm seon.profile/measure}}]

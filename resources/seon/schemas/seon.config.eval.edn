@@ -20,8 +20,8 @@
                     [:seon.eval/allocated-bytes
                      {:optional true
                       :seon.repl/finding :large-allocation
-                      :seon.repl/fix "Something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection): realize only what you need."}
-                     [:<= 536870912]]
+                      :seon.repl/fix "Past ten times what an ordinary evaluation allocates: something realized far more than it returned (an unbounded lazy sequence, a whole-store read, a copied collection); realize only what you need. (seon.profile/measure (fn [] ...)) breaks a suspect call down into allocation, GC, armed calls and reads."}
+                     [:<= 400000000]]
                     [:seon.eval/replaced
                      {:optional true
                       :seon.repl/finding :replaced-definition

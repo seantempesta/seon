@@ -126,6 +126,7 @@
    :seon.repl/note
    :seon.repl/ns
    :seon.repl/ms
+   :seon.repl/alloc-mb
    :seon.repl/calls
    :seon.repl/repeated
    :seon.repl/errors
@@ -207,6 +208,7 @@
     ending-ns :seon.sci.eval/ending-ns
     prompt-ns :seon.ns/name
     duration :seon.eval/duration-ms
+    allocated :seon.eval/allocated-bytes
     interrupted-at :seon.cluster.eval/interrupted-at
     call-count :seon.cluster.eval/call-count
     repeated :seon.cluster.eval/repeated-calls
@@ -248,6 +250,11 @@
                 :seon.repl/ms (when (and (int? duration)
                                         (not (:seon.repl/changed-since? emission)))
                                (str duration))
+                ;; What the evaluation allocated, as data in MB to 0.1, with
+                ;; the measure's scope documented on :seon.eval/allocated-bytes.
+                :seon.repl/alloc-mb (when (and (int? allocated) (not (neg? allocated))
+                                               (not (:seon.repl/changed-since? emission)))
+                                      (value/core-text (/ (Math/round (/ (double allocated) 1e5)) 10.0)))
                 ;; THE EVALUATION'S CALL PROFILE, AS DATA: its armed calls,
                 ;; and, only when the run was over its time bound (a :slow finding),
                 ;; each function it called more than seon.batch/repeated-calls

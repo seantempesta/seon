@@ -638,3 +638,63 @@
      :seon.profile/by-total-lines (mapv observation-line by-total)
      :seon.profile/by-max-lines (mapv observation-line by-max)
      :seon.profile/over-second-lines (into [] (comp (take limit) (map observation-line)) over)}))
+
+;;; ---------------------------------------------------------------------------
+;;; A measured call — JVM counters around one function, as data
+;;; ---------------------------------------------------------------------------
+
+(def read-entrances
+  "The `seon.db` functions that read a database value: the armed calls
+  `measure` counts as reads."
+  #{'seon.db/q 'seon.db/pull 'seon.db/pull-many 'seon.db/entity 'seon.db/datoms})
+
+(defn measure
+  "Call `f` once and return its value beside what the call cost, read from
+  JVM counters, so compiled work inside it counts: wall ms, allocated bytes,
+  GC collections and their accumulated time, armed calls by symbol (host
+  and SCI wrappers' outermost entries) and the reads among them
+  (`read-entrances`). A thrown exception propagates.
+
+  Every counter but a platform thread's allocation is JVM-wide over the
+  call's window, so concurrent unrelated work counts too: allocation on a
+  virtual thread (every SCI evaluation) is every thread's
+  (`:seon.profile/alloc-scope :jvm`), and calls, reads and GC are always
+  every thread's. A platform thread's allocation is its own (`:thread`) and
+  misses work it hands to other threads."
+  {:malli/schema [:=> [:cat :seon.profile/thunk] :seon.profile/measured-call]}
+  [f]
+  (let [;; local functions, not armed ones: the second reading's own calls
+        ;; would otherwise count as the measured call's
+        mx ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+        allocated (fn [] (let [own (.getCurrentThreadAllocatedBytes mx)]
+                           (if (neg? own) [:jvm (.getTotalThreadAllocatedBytes mx)] [:thread own])))
+        collected (fn [] (reduce (fn [[n ms] ^java.lang.management.GarbageCollectorMXBean gc-bean]
+                                   [(+ n (max 0 (.getCollectionCount gc-bean))) (+ ms (max 0 (.getCollectionTime gc-bean)))])
+                                 [0 0] (java.lang.management.ManagementFactory/getGarbageCollectorMXBeans)))
+        entries (fn [] (persistent!
+                        (reduce (fn [m ^java.util.Set members]
+                                  (reduce (fn [m held]
+                                            (let [n (.sum ^LongAdder (:seon.profile/entry-counter held))]
+                                              (if (pos? n) (assoc! m (:seon.profile/sym held) (+ n (get m (:seon.profile/sym held) 0))) m)))
+                                          m (.toArray members)))
+                                (transient {}) (.values ^ConcurrentHashMap roster))))
+        entries-before (entries)
+        [gc-before gc-ms-before] (collected)
+        [scope allocated-before] (allocated)
+        started (System/nanoTime)
+        value (f)
+        ms (/ (Math/round (/ (- (System/nanoTime) started) 1e4)) 100.0)
+        [_ allocated-after] (allocated)
+        [gc-after gc-ms-after] (collected)
+        called (into (sorted-map)
+                     (keep (fn [[sym n]] (let [d (- n (get entries-before sym 0))] (when (pos? d) [sym d]))))
+                     (entries))]
+    {:seon.profile/value value
+     :seon.profile/ms ms
+     :seon.profile/alloc-bytes (max 0 (- allocated-after allocated-before))
+     :seon.profile/alloc-scope scope
+     :seon.profile/gc-count (- gc-after gc-before)
+     :seon.profile/gc-ms (- gc-ms-after gc-ms-before)
+     :seon.profile/calls (reduce + 0 (vals called))
+     :seon.profile/reads (reduce + 0 (vals (select-keys called read-entrances)))
+     :seon.profile/called called}))

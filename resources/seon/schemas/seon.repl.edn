@@ -161,6 +161,7 @@
              [:seon.repl/note {:optional true} :seon.repl/note]
              [:seon.repl/ns {:optional true} :seon.repl/ns]
              [:seon.repl/ms {:optional true} :seon.repl/ms]
+             [:seon.repl/alloc-mb {:optional true} :seon.repl/alloc-mb]
              [:seon.repl/calls {:optional true} :seon.repl/calls]
              [:seon.repl/repeated {:optional true} :seon.repl/repeated]
              [:seon.repl/repairs {:optional true} :seon.repl/repairs]
@@ -179,6 +180,10 @@
             [:string
              {:description
               "The wall-clock milliseconds one evaluation took, as seon.eval/duration-ms recorded it."}],
+            :alloc-mb
+            [:string
+             {:description
+              "The megabytes (to 0.1) one evaluation allocated, as seon.eval/allocated-bytes recorded it; that attribute names what the measure includes. An SCI evaluation runs on a virtual thread, so this is every thread's allocation over its window: it never misses the evaluation's own work and may include unrelated concurrent work."}],
             :calls
             [:string
              {:description

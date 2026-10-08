@@ -169,4 +169,30 @@
   [:seon.profile/over-second-count :seon.profile/over-second-count]
   [:seon.profile/by-total-lines :seon.profile/by-total-lines]
   [:seon.profile/by-max-lines :seon.profile/by-max-lines]
-  [:seon.profile/over-second-lines :seon.profile/over-second-lines]]}
+  [:seon.profile/over-second-lines :seon.profile/over-second-lines]]
+ :seon.profile/thunk [:=> {:description "A function of no arguments whose one call is measured."} [:cat]
+                      [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                             :seon.schema.admission/reason "seon.profile/measure returns whatever the measured function returns."
+                             :gen/elements [nil 1 [1 2] {:k 1}]}]]
+ :seon.profile/value [:any {:description "The measured function's value, unchanged."
+                            :seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                            :seon.schema.admission/reason "seon.profile/measure returns whatever the measured function returns."
+                            :gen/elements [nil 1 [1 2] {:k 1}]}]
+ :seon.profile/ms [:double {:min 0 :description "Wall milliseconds of the measured call, to 0.01."}]
+ :seon.profile/alloc-bytes [:int {:min 0 :description "Heap bytes allocated over the measured call, in the scope :seon.profile/alloc-scope names."}]
+ :seon.profile/alloc-scope [:enum {:description ":thread: the calling platform thread's own count, which misses work handed to other threads. :jvm: every thread's (a virtual thread has no count of its own), which holds that work and any unrelated concurrent work."} :thread :jvm]
+ :seon.profile/gc-count [:int {:min 0 :description "Collections every collector (GarbageCollectorMXBean) completed over the measured call, JVM-wide."}]
+ :seon.profile/gc-ms [:int {:min 0 :description "Collection time every collector accumulated over the measured call, JVM-wide: pause time for G1's young and old collectors, cycle time for its concurrent one."}]
+ :seon.profile/called [:map-of {:description "Outermost entries of armed functions (host and SCI wrappers) over the measured call, by symbol, JVM-wide."} :qualified-symbol [:int {:min 1}]]
+ :seon.profile/reads [:int {:min 0 :description "The entries among :seon.profile/called of seon.profile/read-entrances: database reads through seon.db."}]
+ :seon.profile/measured-call
+ [:map {:description "One measured call (seon.profile/measure): its value and what it cost, from JVM counters."}
+  [:seon.profile/value :seon.profile/value]
+  [:seon.profile/ms :seon.profile/ms]
+  [:seon.profile/alloc-bytes :seon.profile/alloc-bytes]
+  [:seon.profile/alloc-scope :seon.profile/alloc-scope]
+  [:seon.profile/gc-count :seon.profile/gc-count]
+  [:seon.profile/gc-ms :seon.profile/gc-ms]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/reads :seon.profile/reads]
+  [:seon.profile/called :seon.profile/called]]}
