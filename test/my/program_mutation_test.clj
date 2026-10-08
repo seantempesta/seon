@@ -41,33 +41,6 @@
          (is (nil? (sci/resolve fork (symbol "my.program" "disposable"))))
          (is (nil? (sci/resolve ctx (symbol "my.program" "disposable")))))))))
 
-(deftest native-program-mutations-refuse-at-the-installed-hook
-  (support/with-database
-   (fn [connection]
-     (support/seed-cluster! connection "program-hook-fixture")
-     (let [ctx (support/fork-cluster-ctx connection)
-           decisions (support/effective-config)
-           caps (config/result-caps decisions)]
-       (doseq [[source expected]
-               [["(remove-ns 'seon.turn)" 'my.program/remove-ns!]
-                ["(ns-unalias 'seon.turn 'db)" 'my.program/ns-unalias!]
-                ["(alter-var-root #'seon.turn/open? identity)" 'my.program/define!]
-                ["(intern 'seon.turn 'open? (fn [_] false))" 'my.program/define!]]]
-         (let [fork (sci/fork ctx)
-               before @(:env fork)
-               basis (db/basis-t (db/db connection))
-               result (support/evaluate
-                       {:seon.sci.eval/ctx fork :seon.db/db (db/db connection)
-                        :seon.db/connection connection :seon.cluster.eval/source source
-                        :seon.sci.admit/caps caps
-                        :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms decisions)})
-               value (:seon.sci.admit/value result)]
-           (is (= expected (:seon.program/advised-operation value)))
-           (is (= expected (get-in value [:seon.error/expected])))
-           (is (= basis (db/basis-t (db/db connection))))
-           (is (true? (= (get-in before [:namespaces 'seon.turn])
-                         (get-in @(:env fork) [:namespaces 'seon.turn]))))))))))
-
 (deftest namespace-and-alias-retraction-write-before-native-mutation
   (support/with-database
    (fn [connection]

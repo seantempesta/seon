@@ -788,50 +788,6 @@
            :seon.db/basis-t (db/basis-t (:db-after transaction))
            :seon.program/unknown (:seon.program/unknown report)})))))
 
-(defn native-call-refusal
-  "Return a reduced diagnostic for native program mutation, or nil.
-
-  The SCI hook calls this before supplied-default preparation. Intern and
-  alter-var-root remain available for private bindings with no program row."
-  {:seon.fn/internal? true
-   :seon/tasks #{'my.program/refusal-names-nonexistent-define 'my.program/native-calls-are-refused-instead-of-routed}
-   :malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.schema/value :seon.schema/arguments]
-                  :seon.schema/value]}
-  [ctx callee arguments]
-  (let [metadata (meta callee)
-        native (when (:ns metadata) (symbol (str (:ns metadata)) (str (:name metadata))))
-        operation (case native
-                    clojure.core/remove-ns 'my.program/remove-ns!
-                    clojure.core/ns-unalias 'my.program/ns-unalias!
-                    clojure.core/intern 'my.program/define!
-                    clojure.core/alter-var-root 'my.program/define!
-                    nil)]
-    (when operation
-      (let [environment ((requiring-resolve 'seon.env/of) ctx)
-            connection (:seon.db/connection environment)]
-        (when connection
-          (let [subject (case native
-                          clojure.core/alter-var-root
-                          (let [m (meta (first arguments))]
-                            (when (:ns m) (symbol (str (:ns m)) (str (:name m)))))
-                          clojure.core/intern
-                          (when (and (first arguments) (second arguments))
-                            (symbol (str (first arguments)) (str (second arguments))))
-                          (when (first arguments) (symbol (str (first arguments)))))
-                report (when subject
-                         (breaks {:seon.db/db (db/db connection) :seon.program/subject subject}))]
-            (when (or (#{'clojure.core/remove-ns 'clojure.core/ns-unalias} native)
-                      (:seon.program/kind report))
-              (reduced
-               {:seon.error/at (java.util.Date.)
-                 :seon.error/layer :seon.program/write
-                 :seon.error/operation 'my.program/native-call-refusal
-                 :seon.program/native-operation native
-                 :seon.program/advised-operation operation
-                 :seon.error/message (str "Use " operation " so program facts decide before SCI changes.")
-                 :seon.error/offending arguments
-                 :seon.error/data (or report {})}))))))))
-
 ;;; Reading a declaration: source, search and sizes return small data maps.
 
 (defn- declaration

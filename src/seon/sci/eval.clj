@@ -337,25 +337,6 @@
          'do-report agent-do-report
          'use-fixtures agent-use-fixtures}))
 
-(defn- native-mutation
-  "SCI's own `native` operation, refused by name when it would change a
-  program row outside `my.program`.
-
-  The decision is `my.program/native-call-refusal`'s, over the world of the
-  evaluation calling (`kernel/world-ctx`); an admitted program operation
-  (`evaluate-native!`) and unevaluated host work run the native unchanged."
-  {:malli/schema [:=> [:cat :seon.schema/value] [:fn clojure.core/ifn?]]}
-  [native]
-  (let [operation @native]
-    (fn [& arguments]
-      (let [ctx (kernel/world-ctx)
-            refusal (when (and ctx (not (::native-operation? ctx)))
-                      ((requiring-resolve 'my.program/native-call-refusal)
-                       ctx native (vec arguments)))]
-        (if refusal
-          (unreduced refusal)
-          (apply operation arguments))))))
-
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
@@ -423,16 +404,11 @@
     ;; every namespace receives. Acquisition refreshes the same bindings.
     (sci/add-namespace!
      ctx 'clojure.core
-     (into {'dir dir-var
-            'doc doc-var
-            'help help-var
-            'deftest (sci/resolve ctx 'clojure.test/deftest)
-            'is (sci/resolve ctx 'clojure.test/is)}
-           ;; Native program mutation asks the program's facts first.
-           (map (fn [native-name]
-                  [native-name (native-mutation
-                                (sci/resolve ctx (symbol "clojure.core" (name native-name))))]))
-           '[intern alter-var-root remove-ns ns-unalias]))
+     {'dir dir-var
+      'doc doc-var
+      'help help-var
+      'deftest (sci/resolve ctx 'clojure.test/deftest)
+      'is (sci/resolve ctx 'clojure.test/is)})
     (sci/add-namespace!
      ctx 'seon.bootstrap
      {'dir dir-var
@@ -1426,11 +1402,9 @@
       installed)))
 
 (defn- evaluate-native!
-  "Execute an already-admitted program operation in its supplied SCI context.
-   Only this operation's native mutation skips the program-fact refusal
-   (`native-mutation`), never an agent evaluation."
+  "Execute an already-admitted program operation in its supplied SCI context."
   [ctx form]
-  (kernel/with-world-ctx (assoc ctx ::native-operation? true)
+  (kernel/with-world-ctx ctx
     #(sci/eval-form ctx form)))
 
 (defn- transfer-evaluated-roots!
