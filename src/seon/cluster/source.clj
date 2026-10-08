@@ -1164,8 +1164,11 @@
       (let [candidate (spliced base-bytes (edits))
             ;; The analyzer refuses blocking findings by throwing (`seon.fn/assert-clean-analysis!`):
             ;; a declaration valid at the REPL may name a namespace its file does not require.
+            ;; `after` names the first-party functions the file calls: without it a call into
+            ;; another first-party namespace is unclassifiable (`seon.fn/host-bound-callers`).
             analyzed (try (fn/analyze-entities {:seon.fn/root (str root) :seon.fn/roots [relative-root]
                                             :seon.fn/changed-paths #{path}
+                                            :seon.source/previous-database after
                                             :seon.fn.analyzer/sources {(.getCanonicalPath file)
                                                                        (String. ^bytes candidate "UTF-8")}})
                           (catch clojure.lang.ExceptionInfo failure

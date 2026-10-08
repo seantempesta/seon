@@ -353,3 +353,51 @@
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
         (support/delete-recursively! root)))))
+
+(deftest ^{:seon.test/long "Two analyses of a two-file fixture onto H, one replacement on a branch C, and one write-back (one analysis of the candidate)."
+           :seon.test/long-ms 20000}
+  a-branch-change-calling-another-first-party-namespace-writes-back
+  ;; A lane's `defn` on its own branch is written back with no merge: the
+  ;; accepted value names H's commit as the base and C's head as the change.
+  ;; The callee calls a first-party function of another namespace, which the
+  ;; candidate's analysis classifies from C's program, not from clj-kondo's
+  ;; dependency cache.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        helper-ns (symbol (str "wbfp" suffix ".helper"))
+        core-ns (symbol (str "wbfp" suffix ".core"))
+        root (str "tmp/write-back-first-party-test-" suffix)
+        core-file (io/file root (str "src/wbfp" suffix "/core.clj"))
+        callee [:seon.fn/sym (symbol (str core-ns) "callee")]
+        replacement "(defn callee\n  \"Add one through the helper.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (helper/helper x))"
+        c (keyword (str "write-back-first-party-c-" suffix))]
+    (io/make-parents core-file)
+    (spit (io/file root (str "src/wbfp" suffix "/helper.clj"))
+          (str "(ns " helper-ns ")\n\n(defn helper\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (+ x 1))\n"))
+    (spit core-file
+          (str "(ns " core-ns "\n  (:require [" helper-ns " :as helper]))\n\n"
+               "(defn callee\n  \"Add one.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [x]\n  (helper/helper x))\n"))
+    (try
+      (let [entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) entities (mapv program/row-identity entities)))
+            base (db/commit-id (db/db h-conn))
+            _ (registry/branch! {:seon.store/store store :seon.store/branch c :seon.cluster.registry/from base})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (support/transacted! c-conn (support/replacement-tx (db/db c-conn) callee replacement {}))
+          (let [written (source/write-back! {:seon.db/connection c-conn :seon.fn/root root
+                                             :seon.source/accepted {:seon.program/identities #{callee}
+                                                                    :seon.source/base-commit-id base
+                                                                    :seon.source/commit-id (db/commit-id (db/db c-conn))}})]
+            (is (= [callee] (get-in written [:seon.source/files 0 :seon.source/replaced]))
+                "the branch's replacement is written into its file")
+            (is (= (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] callee))
+                   (get (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})) callee))
+                "the file reindexed from disk declares the branch's definition"))
+          (finally (agent/release-context! candidate))))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch c})
+        (support/delete-recursively! root)))))

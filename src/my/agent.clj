@@ -37,8 +37,9 @@
 (defn settings
   "Read my setting overrides of cluster defaults.
 
-  Returns a map of :seon.config setting overrides. Omitted settings inherit
-  cluster defaults; seon.agent/effective-settings reads effective values.
+  Returns a map of :seon.config setting overrides, {} when I override
+  nothing. Omitted settings inherit cluster defaults;
+  seon.agent/effective-settings reads effective values.
 
   Example:
   (my.agent/settings)"

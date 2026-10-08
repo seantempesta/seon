@@ -37,4 +37,8 @@
              :kind :function
              :intent "bin/seon check rehearses a candidate on default, and seon.fn.analyzer lints the checkout's non-program roots (script/) from the running JVM's own source directory, not the candidate's. A candidate that adds a var to seon.operator and a test/ deftest calling it is refused 'Unresolved var: operator/launch-argv' (2026-10-08, lane dials-16gb), so no script change can land with its JVM test in one slice. Done when the rehearsal analyzes the candidate's script/ files and that pair passes, as a regression."
              :must-read #{seon.fn.analyzer/ensure-dependency-analysis! seon.cluster/rehearse-source!}}
-]
+ #:seon.task{:name "three-write-back-merge-tests-red-in-prepare-merge"
+             :kind :function
+             :intent "Red on HEAD (2026-10-08, check run 1ee9072479d5 with no source change: 26 pass, 5 fail, 1 error): seon.cluster.write-back-test/a-merge-writes-each-change-into-its-own-file and a-require-added-at-the-repl-merges-and-writes-back-its-ns-form fail at (true? (:seon.test/passed? proposal)) with nil, and an-agent-replacement-merges-and-writes-back-its-exact-span errors when accept-merge! refuses a proposal missing :seon.source/candidate. All three fail inside prepare-merge!, which answers no proposal, before any write-back. Done when the three pass under bin/seon check --include-long and prepare-merge!'s non-proposal answer is shown by the test as data, never passed on to accept-merge!."
+             :must-read #{seon.cluster.source/prepare-merge! seon.cluster.source/accept-merge!}
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-first/repl-first.md"}}]
