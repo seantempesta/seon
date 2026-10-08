@@ -719,3 +719,24 @@
     (let [changed (request)]
      (is (= 1 (:seon.test/executed-count changed)) "a changed reach executes again")
      (is (true? (:seon.test/passed? changed))))))))
+
+(deftest an-unchanged-branch-derives-its-changes-once
+ ;; A write that touches no program row (an eval request's recording) keeps the
+ ;; branch's change set: the second read is the first value, not a re-derivation.
+ (support/with-database
+  (fn [connection]
+   (seed-reach-fixture! connection)
+   (let [child (agent/acquire-context! (support/execution-handle connection) nil {:seon.agent/isolate? true})
+         branch (:seon.db/connection child)]
+    (try
+     (define! branch '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+     (let [first-read (sut/changes child branch)
+           _ (support/transacted! branch [{:seon.agent/id "an-unchanged-branch-probe"
+                                                    :seon.agent/branch (get-in @branch [:config :branch])}])
+           second-read (sut/changes child branch)]
+      (is (= [[:seon.fn/sym 'reach.fixture/b]] first-read))
+      (is (identical? first-read second-read) "an unchanged program reads its change set back"))
+     (define! branch '[:seon.fn/sym reach.fixture/a] "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
+     (is (= [[:seon.fn/sym 'reach.fixture/a] [:seon.fn/sym 'reach.fixture/b]] (sut/changes child branch))
+         "a program write derives the set again")
+     (finally (agent/release-context! child)))))))

@@ -1933,6 +1933,29 @@
   [world candidate ns-name]
   (boolean (seq (remove (bindings candidate ns-name) (bindings world ns-name)))))
 
+(defn- changed-identities
+  "The identities `candidate` holds at other behavior digests than its change base
+  (`change-base` of the `recorded` published commit), namespaces kept only for a lost
+  binding (`changes`), in print order; a refused read answers its refusal."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.cluster/name :seon.db/database-value :seon.source/commit-id]
+                  [:or :seon.test/changed :seon.error/value]]}
+  [store cluster candidate recorded]
+  (let [families (vec (:seon.program/compared-families
+                       (program/declaration-families (db/carried-projection candidate))))
+        world (source/database store (change-base store cluster candidate recorded))
+        differences (digest-differences world candidate families)
+        identities (when (vector? differences) (apply into (behavior-differences world candidate differences)))
+        declaring (when identities
+                    (db/q '[:find [?name ...] :in $ [?name ...]
+                            :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
+                          candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))]
+    (cond (:seon.error/at differences) differences
+          (not (sequential? declaring)) declaring
+          :else (vec (sort print/compare-values
+                           (filter (fn [[a v]] (or (not= :seon.ns/name a)
+                                                   (and (some #{v} declaring) (binding-lost? world candidate v))))
+                                   identities))))))
+
 (defn changes
   "What a check of `execution` must reach: the declarations its program holds
   at other behavior digests than its base (`change-base`: the published commit
@@ -1941,34 +1964,30 @@
   A namespace identity is a binding change; it stays only when the namespace
   declares something a test can reach and lost or retargeted a binding its base
   held (`binding-lost?`): a require that only adds an alias reaches no test.
-  A change no test can observe refuses by name: there is no change to check."
+  A change no test can observe refuses by name: there is no change to check.
+  The set is derived once per base and branch program: keyed in `seon.cache` by
+  the program attributes' revision digest (`seon.test.runner/program-revisions-digest`),
+  so an eval request that changed no program row reads it back."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection]
                   [:or :seon.test/changed :seon.test/selection-error :seon.error/value]]}
   [execution recording]
-  (let [base (:seon.source/commit-id
-              (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name (:seon.cluster/name execution)]))]
+  (let [cluster (:seon.cluster/name execution)
+        base (:seon.source/commit-id
+              (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))]
     (if (nil? base)
       (request-refusal :seon.test/policy-unscoped
                        "The cluster records no adopted source commit to compare my program against: there is no change to check."
-                       (:seon.cluster/name execution))
+                       cluster)
       (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
             candidate (db/db (:seon.db/connection execution))
-            families (vec (:seon.program/compared-families
-                           (program/declaration-families (db/carried-projection candidate))))
-            world (source/database store (change-base store (:seon.cluster/name execution) candidate base))
-            differences (digest-differences world candidate families)
-            identities (when (vector? differences) (apply into (behavior-differences world candidate differences)))
-            declaring (when identities
-                        (db/q '[:find [?name ...] :in $ [?name ...]
-                                :where [?n :seon.ns/name ?name] (or [?e :seon.fn/ns ?n] [?e :seon.test/ns ?n])]
-                              candidate (vec (keep (fn [[a v]] (when (= :seon.ns/name a) v)) identities))))
-            changed (when (sequential? declaring)
-                      (vec (sort print/compare-values
-                                 (filter (fn [[a v]] (or (not= :seon.ns/name a)
-                                                         (and (some #{v} declaring) (binding-lost? world candidate v))))
-                                         identities))))]
-        (cond (:seon.error/at differences) differences
-              (not (sequential? declaring)) declaring
+            derive-changes #(changed-identities store cluster candidate base)
+            ;; No revision authority (a value without a complete revision context) derives every time.
+            revisions (runner/program-revisions-digest candidate)
+            changed (if revisions
+                      (seon.cache/lookup ::changes [cluster base (get-in candidate [:config :branch]) revisions]
+                                         #(+ 256 (* 128 (count %))) derive-changes vector?)
+                      (derive-changes))]
+        (cond (:seon.error/at changed) changed
               (empty? changed)
               (request-refusal :seon.test/policy-unscoped
                                "Nothing I changed since my base (the published commit, or the commit my branch was forked at) is a change a test can observe: there is no change to check. Name tests with :seon.test/identities, or run my namespace's tests with (my.test/run)."
