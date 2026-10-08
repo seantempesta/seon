@@ -78,8 +78,8 @@ assign proofless tasks too.
 
 | Row | Card | State |
 |---|---|---|
-| CS-01b | [CS-01b](CS-01b.md) | in flight (cs01b) |
-| CS-01c1 | [CS-01c1](CS-01c1.md) | ready after CS-01a |
+| CS-01b | [CS-01b](CS-01b.md) | landed `88bfd19cb` |
+| CS-01c1 | [CS-01c1](CS-01c1.md) | in flight (impl-cs01c1) |
 | CS-01c2 | [CS-01c2](CS-01c2.md) | ready after CS-01c1 |
 | CS-01c3 | [CS-01c3](CS-01c3.md) | ready after CS-01c2 |
 | CS-01c4 | [CS-01c4](CS-01c4.md) | ready after CS-01c1, S4-05a |
