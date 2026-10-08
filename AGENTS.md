@@ -311,7 +311,7 @@ turn, render function, current-state block, write-back, wake, answered t. Seams 
 - **Write tasks as data an agent can be handed.** A task lives in `resources/seon/tasks/<ns>.edn`, is ingested by
   the same code that serves Seon agents, and is assigned only with a proof. Its entry is `:seon.task/name` (a symbol
   name; the task is `ns/name`), `:seon.task/intent` (what must become true, short), `:seon.task/must-read` (fully
-  qualified symbols) and optional `:seon.task/evidence` (paths). Its proofs are the deftests carrying `ns/name` in
+  qualified symbols) and optional `:seon.task/evidence` (paths); `:seon.task/kind` is still required until its retirement row lands. Its proofs are the deftests carrying `ns/name` in
   `:seon/tasks`, never prose: write or tag the proving test when you file the task; a task already green proves nothing.
   References are typed by plain EDN and must resolve: code is a backticked fully qualified symbol (Seon or library,
   e.g. `` `malli.core/validator` ``), a schema a backticked fully qualified keyword, any other file a relative path
