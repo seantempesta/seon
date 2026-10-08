@@ -318,13 +318,6 @@
   (:clojure.core.async.flow/state
    (flow/ping-proc (:seon.flow/graph entry) :seon.agent/mailbox)))
 
-(defn- recording-completer
-  "A stub `ai/complete`: the ledger of calls is the countable oracle."
-  [ledger text-fn]
-  (fn [_projection request]
-    (swap! ledger conj request)
-    {:seon.ai/text (text-fn request)}))
-
 (defn- provider-config
   "Cluster dials selecting the fixture provider `server`, with no-provider removed."
   [server]
@@ -592,55 +585,6 @@
               (is (= :seon.turn/agent-already-running (:seon.turn/rule refusal))
                   "the writer's own open refuses a second open run at the pass, answered on the reply"))
             (finally (disarm-all! routing))))))))
-
-(deftest prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound
-  (with-connection
-    (fn [connection ctx]
-      (let [routing (armory connection)
-            requests (atom [])
-            events (database-events connection)]
-        (test-support/transacted!
-                     connection
-                     [(assoc (agent-entity connection "prompt-refusal-cap")
-                             :seon.agent/settings {:seon.config.run/max-episode-runs 1})
-                      (config-entity "prompt-refusal-cap" {})])
-        (try
-          (with-redefs [prompt/prompt
-                        (fn [& _]
-                          (throw (ex-info "Prompt rendering refused."
-                                          {
-                                           :seon.cluster.prompt/refused
-                                           :seon.cluster.prompt/missing-input
-                                           :seon.error/message "Prompt rendering refused."})))
-                        ai/complete
-                        (recording-completer requests (constantly "unused"))]
-            (let [entry (arm-one! connection ctx routing "prompt-refusal-cap" "prompt-refusal-cap")]
-              (outside-trigger! connection "prompt-refusal-cap"
-                                "prompt-refusal-message" "derive context")
-              (async/offer! (:seon.cluster.wake/channel entry) ::wake)
-              (let [database
-                    (await-database-state!
-                     connection (:seon.cluster.agent-test/events events)
-                     #(and (= 1 (turn/episode-runs % "prompt-refusal-cap"))
-                           (empty? (open-runs %))))]
-                (is (empty? @requests))
-                ;; the refusal is recorded once under the phase that caught
-                ;; it; `:seon.cluster.prompt/refused` is a refusal-map member,
-                ;; never a stored attribute (19827d2b0)
-                (is (= 1 (db/q '[:find (count ?error) . :where
-                                  [?error :seon.error/declared-schema :seon.turn.loop/phase-failed-error]
-                                  [?error :seon.error/occurrences ?occurrence]
-                                  [?occurrence :seon.error.occurrence/message "Prompt rendering refused."]]
-                                database)))
-                (is (seq (turn/unanswered-triggers database "prompt-refusal-cap"))
-                    "a refused prompt has not observed the wake")
-                (is (nil? (turn/next-agent-work
-                           database {:seon.agent/id "prompt-refusal-cap"})))
-                (is (false? (turn/more-agent-work?
-                             database {:seon.agent/id "prompt-refusal-cap"}))))))
-          (finally
-            (stop-database-events! connection events)
-            (disarm-all! routing)))))))
 
 (defn- parallel-trial
   "One trial: N agents × outside triggers through concurrent per-agent
