@@ -39,12 +39,15 @@
        (is (not (contains? report :seon.program/plan)) "a break names its referrers; it proposes no issues")
        (is (seq (:seon.program/unknown report)))
        (is (valid? report))
+       (is (= :seon.fn/sym (first (:seon.program/identity report))))
+       (is (not (contains? report :seon.program/kind)))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))
        (let [missing (program/breaks (assoc request :seon.program/subject 'absent.program/function))]
          (is (= 'absent.program/function (:seon.program/not-found missing)))
          (is (= 'absent.program/function (:seon.program/not-found missing))))))))
 
-(deftest schema-and-namespace-reads-keep-different-connections-distinct
+(deftest ^{:seon/tasks #{'my.program/breaks-on-a-namespace-subject-takes-five-seconds}}
+  schema-and-namespace-reads-keep-different-connections-distinct
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
@@ -56,7 +59,8 @@
        (is (contains? (:seon.program/contract-refs key-report) 'seon.db/transact!))
        (is (seq (:seon.program/schema-references key-report)))
        (is (seq (:seon.program/mentions key-report)))
-       (is (= :seon.ns/name (:seon.program/kind namespace-report)))
+       (is (= :seon.ns/name (first (:seon.program/identity namespace-report))))
+       (is (not (contains? namespace-report :seon.program/kind)))
        (is (contains? (:seon.program/owned-declarations namespace-report) 'seon.turn/open?))
        (is (seq (:seon.program/requiring-namespaces namespace-report)))
        (is (seq (:seon.program/render-declared-by render-report)))

@@ -56,7 +56,7 @@
     :else [:seon.ns/name]))
 
 (defn- locate
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject] [:map [:seon.program/kind :seon.program/kind] [:seon.program/identity :seon.program/identity] [:seon.program/entities [:vector :int]]]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/subject] [:map [:seon.program/identity :seon.program/identity] [:seon.program/entities [:vector :int]]]]}
   [database subject]
   (or (some (fn [attribute]
               (let [value subject
@@ -68,8 +68,7 @@
 
  (throw (ex-info (:seon.error/message result) result)) result))]
                 (when (seq entities)
-                  {:seon.program/kind attribute
-                   :seon.program/identity [attribute value]
+                  {:seon.program/identity [attribute value]
                    :seon.program/entities entities})))
             (subject-identities subject))
       (let [refusal (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/locate
@@ -94,9 +93,9 @@
 (defn- present-groups [groups]
   (into {} (filter (comp seq val)) groups))
 
-(defn- observation [database subject kind]
+(defn- observation [database subject identity]
   {:seon.program/subject subject
-   :seon.program/kind kind
+   :seon.program/identity identity
    :seon.db/basis-t (db/basis-t database)
    :seon.program/unknown
    [{:seon.program/gap :outside-graph
@@ -164,9 +163,9 @@
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result request 'my.program/callers
-               #(let [{kind :seon.program/kind entities :seon.program/entities}
+               #(let [{identity :seon.program/identity entities :seon.program/entities}
                       (locate database subject)]
-                  (merge (observation database subject kind)
+                  (merge (observation database subject identity)
                          (caller-data database subject (first entities))))))
 
 (defn tests-reaching
@@ -179,8 +178,8 @@
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result request 'my.program/tests-reaching
-               #(let [{kind :seon.program/kind} (locate database subject)]
-                  (merge (observation database subject kind)
+               #(let [{identity :seon.program/identity} (locate database subject)]
+                  (merge (observation database subject identity)
                          (present-groups
                           {:seon.program/gating
                            (mapv symbol (let [result (function/gate-set
@@ -231,8 +230,8 @@
                   [:or :seon.program/breakage :seon.program/read-refused-error :seon.program/not-found-error]]}
   [{database :seon.db/db schema-key :seon.schema/key :as request}]
   (read-result request 'my.program/reads-key
-               #(let [{entities :seon.program/entities} (locate database schema-key)]
-                  (-> (merge (observation database schema-key :seon.schema/key)
+               #(let [{identity :seon.program/identity entities :seon.program/entities} (locate database schema-key)]
+                  (-> (merge (observation database schema-key identity)
                              (key-data database schema-key (first entities)))
                       (update :seon.program/unknown conj
                               {:seon.program/gap :keyword-mentions
@@ -274,7 +273,8 @@
   [{database :seon.db/db subject :seon.program/subject :as request}]
   (read-result
    request 'my.program/breaks
-   #(let [{kind :seon.program/kind entities :seon.program/entities} (locate database subject)
+   #(let [{identity :seon.program/identity entities :seon.program/entities} (locate database subject)
+          [kind _] identity
           entity (first entities)
           calls (caller-data database subject entity)
           owned-functions (when (= :seon.ns/name kind)
@@ -291,7 +291,7 @@
 
  (throw (ex-info (:seon.error/message result) result)) result))
           report
-          (merge (observation database subject kind) calls
+          (merge (observation database subject identity) calls
                  (present-groups
                   {:seon.program/references (symbols (names-through database :seon.fn/references subject :seon.fn/sym))
                    :seon.program/subject-of (symbols (names-through database :seon.test/subject subject :seon.test/sym))
@@ -349,7 +349,8 @@
  (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
-          {kind :seon.program/kind entities :seon.program/entities} (locate past subject)
+          {identity :seon.program/identity entities :seon.program/entities} (locate past subject)
+          [kind _] identity
           identity-declaration (let [result (db/pull database [:seon.program/source-attribute]
                                                 [:seon.schema/key kind])]
  (if (:seon.db/invalid-read result)
@@ -380,7 +381,7 @@
                               (select-keys provenance [:seon.db/user :seon.db/process]))))
                    (sort-by (juxt (fn [event] (nth event 2))
                                   (fn [event] (nth event 3)) first) events))]
-      (cond-> (assoc (observation database subject kind) :seon.program/history entries)
+      (cond-> (assoc (observation database subject identity) :seon.program/history entries)
         at (assoc :seon.db/tx at)))))
 
 (defn supplied-context

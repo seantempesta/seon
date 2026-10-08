@@ -188,9 +188,6 @@
  :seon.program/subject
  [:or {:description "A function or test symbol, namespace symbol, or schema key."}
   :symbol :qualified-keyword]
- :seon.program/kind
- [:and {:description "The identity attribute that answered this read; never a stored entity discriminator."}
-  :seon.program/identity-attribute]
  :seon.program/contract :seon.fn/spec
  :seon.program/callers [:set :qualified-symbol]
  :seon.program/references [:set :qualified-symbol]
@@ -238,7 +235,7 @@
         :seon.render/ai seon.render.value/render-ai
         :seon.render/html seon.render.value/render-html}
   [:seon.program/subject :seon.program/subject]
-  [:seon.program/kind :seon.program/kind]
+  [:seon.program/identity :seon.program/identity]
   [:seon.db/basis-t :seon.db/basis-t]
   [:seon.program/unknown :seon.program/unknown]
   [:seon.program/callers {:optional true} :seon.program/callers]
@@ -272,7 +269,7 @@
  :seon.program/history-report
  [:map
   [:seon.program/subject :seon.program/subject]
-  [:seon.program/kind :seon.program/kind]
+  [:seon.program/identity :seon.program/identity]
   [:seon.db/basis-t :seon.db/basis-t]
   [:seon.db/tx {:optional true} :seon.db/tx]
   [:seon.program/unknown :seon.program/unknown]

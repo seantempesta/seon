@@ -70,4 +70,9 @@
              :intent "accept-merge!'s detached retire of the proposing branch fails while the proposer's hosted agent holds a connection ('branch :agent-099e88cb509c still has a connection in this process'), recorded as an open fault produced by my.program/accept-merge! (2026-10-08); the branch stays in the roster. Done when accepting a hosted agent's proposal releases its acquisition and retires its branch, regression through MCP SCI."
              :must-read #{my.program/accept-merge! my.agent/retire-branch!}
              :evidence #{"docs/seon/specs/merge.md"}}
+ #:seon.task{:name "breaks-on-a-namespace-subject-takes-five-seconds"
+             :kind :function
+             :intent "my.program/breaks on the namespace subject seon.turn took 5542 ms and 5876 ms on default's JVM, against 183 ms for the function subject seon.render.value/render-ai, so the test schema-and-namespace-reads-keep-different-connections-distinct exceeds its 5000 ms bound. Find what the namespace branch of breaks is proportional to (owned declarations, gate names, requiring namespaces) and make it sub-second; done when that test passes inside its bound."
+             :must-read #{my.program/breaks}
+             :evidence #{"docs/seon/specs/merge.md"}}
 ]
