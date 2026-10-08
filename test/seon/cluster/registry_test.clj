@@ -196,8 +196,7 @@
    (fn [connection]
      (let [database (db/db connection)
            attributes (set (#'registry/blob-digest-attributes database))]
-       (is (contains? attributes :seon.error.occurrence/blob-digest))
-       (is (contains? attributes :seon.error/data-blob))
+       (is (contains? attributes :seon.error/shown-blob))
        (is (not (contains? attributes :seon.agent/runtime))
            "a component ref naming an entity schema is not a digest")
        (is (not (contains? attributes :seon.test/sym))

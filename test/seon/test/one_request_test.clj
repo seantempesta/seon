@@ -3,7 +3,6 @@
   member's branch through the agent entrance and unlinks it after the body."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
@@ -430,17 +429,14 @@
        (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal)))))
        (is (= refusal result) "the request returns the whole refusal, its cause chain included")
        (is (string? (:seon.error/signature recorded)) "the refused admission is a stored core fault")
-       ;; The occurrence keeps the evidence inline (`:seon.error/data-edn`);
-       ;; only capped evidence goes whole to the blob tier (`seon.error/evidence-stage`).
+       ;; The occurrence keeps the evidence inline (`:seon.error/data-edn`).
        (let [entity (db/pull (db/db connection)
-                          [{:seon.error/occurrences [:seon.error/data-edn
-                                                     {:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}]}]
+                          [{:seon.error/occurrences [:seon.error/data-edn]}]
                           [:seon.error/signature (:seon.error/signature recorded)])
              occurrence (first (:seon.error/occurrences entity))
-             digest (get-in occurrence [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
-             evidence (if digest (str (blob/get connection digest)) (:seon.error/data-edn occurrence))]
+             evidence (:seon.error/data-edn occurrence)]
          (is (string? evidence) "the fault is stored with its evidence")
-         (is (str/includes? (str evidence) "writer-refused")
+         (is (str/includes? evidence "writer-refused")
              "the stored evidence keeps the root cause's data"))
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]
                          (db/db connection)))

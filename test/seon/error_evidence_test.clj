@@ -5,7 +5,6 @@
   on the core-fault path alike."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -14,31 +13,26 @@
             [seon.turn :as turn]))
 
 (def ^:private tail
-  "A marker only the whole evidence carries: it sits past the evidence bound."
+  "A marker past the evidence bound, which the inline text drops."
   "whole-evidence-tail-marker")
 
 (defn- over-cap-message
   []
-  (str (apply str (repeat 30000 "x")) tail))
+  (str (apply str (repeat 300000 "x")) tail))
 
 (defn- occurrence-evidence
-  "One occurrence's capped text and its blob's whole text, by `[attribute value]`."
+  "One occurrence's capped flag and inline text, by `[attribute value]`."
   [connection [attribute value]]
   (let [database (db/db connection)
-        occurrence (db/q '[:find (pull ?o [:seon.error/data-edn :seon.error/capped?
-                                           {:seon.error.occurrence/data-blob
-                                            [:seon.error.occurrence/blob-digest]}]) .
+        occurrence (db/q '[:find (pull ?o [:seon.error/data-edn :seon.error/capped?]) .
                            :in $ ?attribute ?value
                            :where [?e ?attribute ?value]
                                   [?e :seon.error/occurrences ?o]]
-                         database attribute value)
-        digest (get-in occurrence [:seon.error.occurrence/data-blob
-                                   :seon.error.occurrence/blob-digest])]
+                         database attribute value)]
     {:capped? (:seon.error/capped? occurrence)
-     :inline (:seon.error/data-edn occurrence)
-     :whole (when digest (str (blob/get connection digest)))}))
+     :inline (:seon.error/data-edn occurrence)}))
 
-(deftest a-capped-turn-fault-is-recoverable-in-full-from-its-blob
+(deftest a-capped-turn-fault-says-it-is-capped
   (support/with-database
    (fn [connection]
      ;; cluster-handle reads its dials from the named cluster's effective
@@ -61,15 +55,12 @@
                        :seon.error/message (over-cap-message)
                        :seon.turn/rule :seon.turn/agent-namespace-missing}})
        (let [elapsed-ms (/ (- (System/nanoTime) started) 1e6)
-             {:keys [capped? inline whole]} (occurrence-evidence connection [:seon.error/operation operation])]
+             {:keys [capped? inline]} (occurrence-evidence connection [:seon.error/operation operation])]
          (is (true? capped?))
          (is (not (str/includes? inline tail)) "the inline text is capped")
-         (testing "the blob holds the whole evidence the cap dropped"
-           (is (string? whole))
-           (is (str/includes? (str whole) tail)))
          (is (< elapsed-ms 1000.0) "one turn fault settlement stays within its bound"))))))
 
-(deftest a-capped-core-fault-is-recoverable-in-full-from-its-blob
+(deftest a-capped-core-fault-says-it-is-capped
   (support/with-database
    (fn [connection]
      (support/apply-config! connection "evidence-fault" {})
@@ -84,9 +75,8 @@
                                  {:seon.error/layer ::core
                                   :seon.error/operation operation
                                   :seon.db.process/id "evidence-fault-test"})
-           {:keys [capped? inline whole]} (occurrence-evidence
+           {:keys [capped? inline]} (occurrence-evidence
                                            connection [:seon.error/signature (:seon.error/signature receipt)])]
        (is (true? (:seon.fault/committed? receipt)))
        (is (true? capped?))
-       (is (not (str/includes? inline tail)) "the inline text is capped")
-       (is (str/includes? (str whole) tail) "the blob holds the whole evidence")))))
+       (is (not (str/includes? inline tail)) "the inline text is capped")))))

@@ -10,7 +10,6 @@
             [clojure.test.check.properties :as prop]
             [datahike.db]
             [seon.config :as config]
-            [seon.blob :as blob]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
@@ -27,14 +26,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
             [seon.db :as db]
-            [seon.program :as program]
-            [seon.render.value :as render.value]))
-
-(defn- blob-value
-  "The value a fault's evidence blob holds: a value artifact
-  (`seon.render.value/read-artifact`), never print-node text."
-  [content]
-  (render.value/artifact-value (render.value/read-artifact (str content))))
+            [seon.program :as program]))
 
 (declare commit-request with-db)
 
@@ -430,21 +422,17 @@
   (let [prepared (error/prepare
                   (request (transform-error (ex-info "boom" {}))))
         fact (:seon.error/fact prepared)
-        read-back (edn/read-string (:seon.error/data-edn fact))
-        full-read-back (blob-value (:seon.error/data-content prepared))]
+        read-back (edn/read-string (:seon.error/data-edn fact))]
     (testing "a value pr-str cannot survive reads back as EDN"
       (is (map? read-back)))
     (testing "disposable proc state is omitted before admission"
-      (is (not (contains? read-back ::flow/state)))
-      (is (not (contains? full-read-back ::flow/state))))
+      (is (not (contains? read-back ::flow/state))))
     (testing "and the Throwable is the one error shape's cause chain, never
-    the live Throwable nor its every frame; the inline value and the blob read
-    back as the same value"
-      (is (not (contains? full-read-back ::flow/ex)))
+    the live Throwable nor its every frame"
+      (is (not (contains? read-back ::flow/ex)))
       (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
                :seon.error/message "boom" :seon.error/data {}}]
-             (mapv #(dissoc % :seon.error/frames) (:seon.error/chain full-read-back))))
-      (is (= read-back full-read-back)))))
+             (mapv #(dissoc % :seon.error/frames) (:seon.error/chain read-back)))))))
 
 (deftest capping-is-honest
   ;; `capped?` is admission's own signal and means ELIDED OR TRUNCATED,
@@ -484,7 +472,7 @@
         prepared (error/prepare
                   (assoc-in (request (transform-error failure))
                             [:seon.sci.admit/caps :seon.config.eval.result/max-bytes] 16384))
-        content (blob-value (:seon.error/data-content prepared))]
+        content (edn/read-string (:seon.error/data-edn (:seon.error/fact prepared)))]
     (is (= :over-bound (get-in content [:seon.sci.admit/remainder :seon.sci.admit/reason])))
     (is (= [["clojure.lang.ExceptionInfo" "outer"] ["clojure.lang.ExceptionInfo" "middle"]
             ["java.lang.IllegalStateException" "root cause"]]
@@ -561,24 +549,17 @@
                                 ::flow/state {:cached-render disposable}))
                 :seon.config.error/max-evidence-bytes inline-limit))
         fact (:seon.error/fact prepared)
-        content (:seon.error/data-content prepared)
         fact-bytes (alength (.getBytes (pr-str fact) "UTF-8"))]
     (is (> (:seon.error/data-size fact) inline-limit))
     (is (<= fact-bytes inline-limit)
         "stored fault fact was UTF-8 bytes")
     (is (<= (alength (.getBytes (:seon.error/data-edn fact) "UTF-8"))
             inline-limit))
-    ;; The evidence content is the print tree of the evidence value: its
-    ;; leaves are the values it keeps.
-    (let [leaves (set (remove coll? (tree-seq coll? seq (edn/read-string content))))]
-      (is (not (contains? leaves ::flow/state)) "disposable flow state is omitted")
-      (is (contains? leaves 'seon.render.data/at))
-      (is (contains? leaves large)
-          "the original diagnostic string remains available for blob retrieval"))
+    (is (not (str/includes? (:seon.error/data-edn fact) "DISPOSABLE-PROC-STATE"))
+        "disposable flow state is omitted")
     ;; A FIELD OVER THE FAULT'S OWN DECLARED BYTE BOUND IS MARKED, never
     ;; silently kept: the same `:seon.sci.admit/reason` data every other surface
-    ;; reports an absent value with, and the whole field stays reachable in
-    ;; the evidence content beside it.
+    ;; reports an absent value with.
     (is (= [:over-bound :over-bound :over-bound]
            (mapv #(:seon.sci.admit/reason (edn/read-string (get fact %)))
                  [:seon.error/message :seon.instrument/expected :seon.instrument/args]))
@@ -601,13 +582,8 @@
          (assoc (request {:seon.error/message "short"})
                 :seon.config.error/max-evidence-bytes inline-limit))]
     (is (<= (:seon.error/data-size fact) inline-limit))
-    (is (not= (edn/read-string (:seon.error/data-edn fact))
-              (blob-value (:seon.error/data-content prepared)))
+    (is (true? (:seon.error/capped? fact))
         "whole-fact fitting can shorten evidence below the size threshold")
-    (is (true? (:seon.error/capped? fact)))
-    (is (= (edn/read-string (get-in small [:seon.error/fact :seon.error/data-edn]))
-           (blob-value (:seon.error/data-content small)))
-        "small evidence is not changed gratuitously")
     (is (false? (get-in small [:seon.error/fact :seon.error/capped?])))))
 
 (deftest normalization-never-throws
@@ -1600,27 +1576,19 @@
     (is (= (signature :seon.agent/error observation)
            (signature :seon.agent/error (assoc observation :seon.turn/error-turn-id "incidental"))))))
 
-(deftest a-fifty-thousand-entry-offending-value-stores-bounded-text-and-a-digest
-  ;; The value must outlive its subject, so it is stored ONCE by content
-  ;; digest; the fact itself keeps text bounded by the fault family's bound.
+(deftest a-fifty-thousand-entry-offending-value-stores-bounded-text
+  ;; The fact keeps text bounded by the fault family's bound and no second copy
+  ;; of the value.
   (test-support/with-database
-   (fn [connection]
+   (fn [_connection]
      (let [offending (into {} (map (fn [i] [(keyword "entry" (str "k" i)) i])) (range 50000))
            prepared (error/prepare
                      (request {:seon.error/message "wide"
                                :seon.error/offending offending}))
-           {fact :seon.error/fact staged :seon.blob/staged-writes}
-           (error/evidence-stage connection prepared)
-           digest (:seon.error/data-blob fact)]
+           {fact :seon.error/fact staged :seon.blob/staged-writes} prepared]
        (is (true? (:seon.error/capped? fact)))
        (is (<= (count (.getBytes ^String (:seon.error/data-edn fact) "UTF-8")) evidence-bytes))
-       (is (string? digest) "the complete evidence is referenced by its digest")
-       (is (= [digest] (mapv :seon.blob/digest staged)))
-       (blob/with-publication! connection staged (constantly nil))
-       (is (= 50000
-              (count (:seon.error/offending
-                      (blob-value (blob/get connection digest)))))
-           "the digest retrieves the whole value")))))
+       (is (empty? staged) "no copy of the value is staged")))))
 
 (deftest a-fault-site-survives-recompilation-and-moved-lines
   ;; One runner fault became four signatures and one turn backstop fault five

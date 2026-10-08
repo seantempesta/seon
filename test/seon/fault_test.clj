@@ -5,7 +5,6 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.writer]
             [datahike.writing]
-            [seon.blob :as blob]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.branch :as cluster.branch]
@@ -49,9 +48,7 @@
     {:row (db/pull database '[:seon.error/exception-class
                               {:seon.error/occurrences
                                [:seon.error.occurrence/count
-                                :seon.error/data-edn
-                                {:seon.error.occurrence/data-blob
-                                 [:seon.error.occurrence/blob-digest]}]}]
+                                :seon.error/data-edn]}]
                    [:seon.error/signature signature])
      :woken (set (db/q '[:find [?to ...] :in $ ?signature
                          :where [?message :seon.message/about ?signature]
@@ -72,17 +69,10 @@
        (is (string? (:seon.error.occurrence/id receipt)))
        (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class row)))
        (is (= 1 (:seon.error.occurrence/count occurrence)))
-       ;; The occurrence keeps its evidence inline when it fits (ab6b71e2b: the
-       ;; cause chain is value EDN, about 1 KB here); only capped evidence goes
-       ;; whole to the blob tier (`seon.error/evidence-stage`).
        (testing "the stored evidence keeps the hidden root cause"
-         (let [digest (get-in occurrence [:seon.error.occurrence/data-blob
-                                          :seon.error.occurrence/blob-digest])
-               evidence (if digest
-                          (str (blob/get connection digest))
-                          (:seon.error/data-edn occurrence))]
+         (let [evidence (:seon.error/data-edn occurrence)]
            (is (string? evidence))
-           (is (str/includes? (str evidence) "inner root cause"))))
+           (is (str/includes? evidence "inner root cause"))))
        (testing "the shipped config delivers an unowned fault to root
        (owner ruling 2026-09-25 20:50Z), and the receipt names that recipient"
          (is (= "root" (:seon.config.error/escalate-to

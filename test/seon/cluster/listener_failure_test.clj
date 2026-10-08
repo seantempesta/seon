@@ -37,8 +37,7 @@
   [connection]
   (let [database (db/db connection)]
     (mapv (fn [occurrence]
-            (let [digest (get-in occurrence [:seon.error.occurrence/data-blob
-                                             :seon.error.occurrence/blob-digest])]
+            (let [digest (:seon.error/shown-blob occurrence)]
               {:count (:seon.error.occurrence/count occurrence)
                :evidence (str (pr-str occurrence)
                               (when digest (blob/get connection digest)))

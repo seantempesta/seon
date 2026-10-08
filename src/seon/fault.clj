@@ -212,14 +212,13 @@
             ;; the declared references a producer names, never its world
             true (merge (select-keys (:seon.error/references observation) reference-members)))
           ;; The fault family's own bound decides how much evidence the
-          ;; durable fact keeps; a capped fact's whole evidence is staged by
-          ;; `error/evidence-stage` and published below with its commit.
+          ;; durable fact keeps; its shown text over the blob threshold is
+          ;; staged by `error/prepare` and published below with its commit.
           {prepared-fact :seon.error/fact staged :seon.blob/staged-writes}
           ;; The boundary's declared layer and operation name the observed
           ;; site of a failure that declares none of its own.
-          (error/evidence-stage connection
-                                (error/prepare (merge request (select-keys observation [:seon.error/layer
-                                                                                        :seon.error/operation]))))
+          (error/prepare (merge request (select-keys observation [:seon.error/layer
+                                                                  :seon.error/operation])))
           recording (error/recording db (assoc request :seon.error/fact prepared-fact))
           fact (:seon.error/fact recording)]
       (try

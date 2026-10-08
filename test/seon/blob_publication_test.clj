@@ -30,18 +30,18 @@
       :seon.store/branch :current-src})}))
 
 (defn- blob-root!
-  "Reference `digest` the way error evidence does: its occurrence blob entity."
+  "Reference `digest` the way error evidence does: as a fact's shown-text blob."
   [connection digest]
   (support/transacted!
           connection
-          [{:seon.error.occurrence/blob-digest digest
-            :seon.error/data-blob digest}]))
+          [{:seon.error/id digest
+            :seon.error/shown-blob digest}]))
 
 (defn- rooted-digests
   [connection]
   (set
    (db/q '[:find [?digest ...]
-           :where [_ :seon.error.occurrence/blob-digest ?digest]]
+           :where [_ :seon.error/shown-blob ?digest]]
          @connection)))
 
 (defn- leave-orphan!

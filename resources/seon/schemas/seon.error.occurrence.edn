@@ -15,17 +15,12 @@
  :slot [:int {:min 0 :description "Which of a signature's bounded occurrences per producer digest this is: part of the occurrence identity, never stored."}]
  :slots [:vector {:min 1 :description "The occurrence identities a recording may land on, in order (seon.error/recording); the writer takes the first not yet written, else bumps the last."}
          :seon.error.occurrence/id]
- :data-blob :seon.db/ref
  :message :string
  ; the world by reference (lost-error seams §0.4): the failing request's effect, the occurrence it follows
  :effect :seon.db/ref
  :related :seon.db/ref
  ; the branch where the error happened; a core fault's cluster-branch copy names its origin
  :branch :seon.store/branch
- :blob-digest [:and {:seon.db/identity true :seon.program/row-schema :seon.error.occurrence/blob} :seon.blob/digest]
- :blob [:map {:seon.db/attributes true :seon.program/partition :seon.data}
-        [:seon.error.occurrence/blob-digest :seon.error.occurrence/blob-digest]
-        [:seon.error/data-blob :seon.error/data-blob]]
  :occurrence
  [:map {:seon.db/attributes true :seon.program/partition :seon.data}
   [:seon.error.occurrence/id :seon.error.occurrence/id]
@@ -37,7 +32,6 @@
   [:seon.error.occurrence/turn {:optional true} :seon.error.occurrence/turn]
   [:seon.error.occurrence/evaluation {:optional true} :seon.error.occurrence/evaluation]
   [:seon.error.occurrence/task {:optional true} :seon.error.occurrence/task]
-  [:seon.error.occurrence/data-blob {:optional true} :seon.error.occurrence/data-blob]
   [:seon.error.occurrence/message :seon.error.occurrence/message]
   [:seon.error.occurrence/branch {:optional true} :seon.error.occurrence/branch]
   [:seon.error.occurrence/effect {:optional true} :seon.error.occurrence/effect]
@@ -48,6 +42,9 @@
   [:seon.error/op {:optional true} :seon.error/op]
   [:seon.error/cid {:optional true} :seon.error/cid]
   [:seon.error/throwable-class {:optional true} :seon.error/throwable-class]
+  [:seon.error/shown {:optional true} :seon.error/shown]
+  [:seon.error/shown-blob {:optional true} :seon.error/shown-blob]
+  [:seon.error/shown-size {:optional true} :seon.error/shown-size]
   [:seon.error/data-edn :seon.error/data-edn]
   [:seon.error/data-size {:optional true} :seon.error/data-size]
   [:seon.error/capped? :seon.error/capped?]

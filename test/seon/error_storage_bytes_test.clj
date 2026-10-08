@@ -29,17 +29,14 @@
         report (blob/with-publication!
                  connection (:seon.blob/staged-writes recording)
                  #(support/transacted! connection (:seon.db/tx-data recording)))
-        strings (keep #(let [v (.-v ^datahike.datom.Datom %)] (when (string? v) v)) (:tx-data report))
+        strings (distinct (keep #(let [v (.-v ^datahike.datom.Datom %)] (when (string? v) v)) (:tx-data report)))
         digest? #(re-matches #"[0-9a-f]{64}" %)
-        sized (map (fn [s] (if (digest? s)
-                             [:blob (some-> (blob/get connection s) blob/utf8-size)]
-                             [:datom-text (blob/utf8-size s)]))
-                   strings)
-        total (fn [kind] (reduce + 0 (keep #(when (= kind (first %)) (second %)) sized)))]
-    {:datom-text (total :datom-text) :blob (total :blob)
-     :blobs (count (filter #(= :blob (first %)) sized))}))
+        blob-sizes (keep #(when (digest? %) (some-> (blob/get connection %) blob/utf8-size)) strings)]
+    {:datom-text (reduce + 0 (map blob/utf8-size (remove digest? strings)))
+     :blob (reduce + 0 blob-sizes)
+     :blobs (count blob-sizes)}))
 
-(deftest one-recorded-error-store-bytes
+(deftest one-recorded-error-stores-its-shown-text-and-no-blob
   (support/with-database
    (fn [connection]
      (let [value (mapv (fn [n] {:error-storage-bytes/n n :error-storage-bytes/items (vec (range 20))}) (range 20))
@@ -49,5 +46,5 @@
                                      :seon.error/operation 'seon.error-storage-bytes-test/observation
                                      :seon.error/message "A recorded observation."
                                      :seon.error/offending value})]
-       (println "ERROR-STORE-BYTES" measured)
-       (is (pos? (:datom-text measured)))))))
+       (is (pos? (:datom-text measured)))
+       (is (zero? (:blobs measured)) "a shown text under the threshold stores no blob")))))

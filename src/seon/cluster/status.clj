@@ -133,8 +133,7 @@
                                        (filter :seon.turn/closed-tx turns)))
                fault-blobs (db/q '[:find [?digest ...] :in $ ?a
                                    :where [?o :seon.error.occurrence/agent ?a]
-                                   [?o :seon.error.occurrence/data-blob ?b]
-                                   [?b :seon.error.occurrence/blob-digest ?digest]] database (:db/id agent))
+                                   [?o :seon.error/shown-blob ?digest]] database (:db/id agent))
                digests (set (concat (keep :seon.turn/reply-blob turns)
                                     (keep :seon.ai.attempt/reasoning-blob (mapcat :seon.turn/attempts turns))
                                     fault-blobs))

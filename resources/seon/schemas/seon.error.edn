@@ -23,8 +23,8 @@
               [:seon.error/result-contract {:optional true} :seon.schema/value]
               [:seon.error/fix :string]],
              :run [:and #:seon.db{:index true} :seon.db/ref],
-             :data-blob :seon.blob/digest,
-             :offending-digest [:string {:min 64 :max 64 :description "The SHA-256 of a stored result's whole offending value (seon.id/id of its admitted value): which value it was, without a copy of it."}],
+             :shown-blob :seon.blob/digest,
+             :shown-size [:int {:min 0}],
              :result-id [:string {:min 1 :description "The result identity whose live object is bound as result/e<id>; a value token, not another entity identity."}],
              :shown :seon.eval/shown,
              :evidence [:tuple [:enum :seon.error/id] :seon.error/id],
@@ -118,6 +118,8 @@
               [:seon.error/id :seon.error/id]
               [:seon.error/result-id {:optional true} :seon.error/result-id]
               [:seon.error/shown {:optional true} :seon.error/shown]
+              [:seon.error/shown-blob {:optional true} :seon.error/shown-blob]
+              [:seon.error/shown-size {:optional true} :seon.error/shown-size]
               [:seon.error/at :seon.error/at]
               [:seon.error/process :seon.error/process]
               [:seon.error/message :seon.error/message]
@@ -134,9 +136,6 @@
               [:seon.error/data-size
                {:optional true}
                :seon.error/data-size]
-              [:seon.error/data-blob
-               {:optional true}
-               :seon.error/data-blob]
               [:seon.error/capped? :seon.error/capped?]
               [:seon.error/throwable-class
                {:optional true}
@@ -215,12 +214,12 @@
               [:seon.error/value :seon.error/value]
               [:seon.db/tx-data :seon.store/transaction-data]],
              :prepare-request :seon.error/normalize-request,
-             :data [:map {:description "A cause link's ex-data, whole, with worlds and places referenced (seon.error.refusal/chain). The value printer bounds what is shown; the recorded occurrence's :seon.error/data-blob keeps the whole value once by content."}],
+             :data [:map {:description "A cause link's ex-data, whole, with worlds and places referenced (seon.error.refusal/chain). The value printer bounds what is shown."}],
              :prepared
              [:map
               [:seon.error/fact :seon.error/fact]
               [:seon.error/source :seon.error/source]
-              [:seon.error/data-content :seon.error/data-content]],
+              [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]],
              :of-steward
              [:and
               {:description
@@ -230,7 +229,6 @@
                :seon.render/html seon.error/render-faults-html,
                :seon.render/form seon.error/faults-form}
               :seon.db/ref],
-             :data-content :string,
              :occurrence [:int {:min 1}],
              :notice
              [:map
@@ -306,7 +304,8 @@
  [:seon.error/type {:optional true} :seon.error/type]
  [:seon.error/result-id {:optional true} :seon.error/result-id]
  [:seon.error/shown {:optional true} :seon.error/shown]
- [:seon.error/data-blob {:optional true} :seon.error/data-blob]
+ [:seon.error/shown-blob {:optional true} :seon.error/shown-blob]
+ [:seon.error/shown-size {:optional true} :seon.error/shown-size]
  [:seon.error/message {:optional true} :seon.error/message]
  [:seon.error/member {:optional true} :seon.error/member]
  [:seon.error/expected-key {:optional true} :seon.error/expected-key]

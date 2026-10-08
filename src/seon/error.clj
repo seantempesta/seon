@@ -489,78 +489,26 @@
           fact
           (recur (max 1 (quot field-limit 2))))))))
 
-(defn- offending-evidence
-  "One offending value as a stored record keeps it: whole when its canonical EDN
-  fits `evidence-bytes`, else its admission under the evidence caps (the
-  missing marker over them). The bound is on the value's bytes, as the fact's
-  own evidence is (`fit-fact-payload`): admission bounds its print-node bytes,
-  about ten times the value's, so a 1,731-character value measured 16,410
-  admitted bytes and was stored as the marker under a 16,384-byte bound."
-  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps :seon.sci.admit/caps
-                       [:int {:min 1}] [:maybe :seon.schema/projection]]
-                  :seon.error/source]}
-  [value caps field-caps evidence-bytes projection]
-  (let [whole (bounded-admission value caps projection)]
-    (:seon.sci.admit/value
-     (if (and (not (::marker whole))
-              (<= (blob/utf8-size (value-edn whole)) evidence-bytes))
-       whole
-       (bounded-admission value field-caps projection)))))
-
-(defn- offending-record
-  "What a stored result keeps of an offending value: each problem's path with
-  the value at it, admitted under the fault's evidence bound (over it, the
-  missing marker naming its size), and the whole value's content digest when
-  the storage bound admits the whole. Never a copy of the whole: a contract
-  refusal whose offending request carried all of an analysis's source text
-  stored a 7.9 MB blob (publication-cost-opus, 2026-09-27). A source with no
-  problems is one problem at the value's own path, `[]`."
-  {:malli/schema [:=> [:cat :seon.error/source :seon.error/source :seon.sci.admit/caps
-                       [:int {:min 1}] [:maybe :seon.schema/projection]]
-                  [:map [:seon.error/problems
-                         [:vector [:map [:seon.error/path :seon.render.data/path]
-                                   [:seon.error/offending {:optional true} :seon.schema/value]]]]
-                   [:seon.error/offending-digest {:optional true} :seon.error/offending-digest]]]}
-  [source value caps evidence-bytes projection]
-  (let [problems (or (seq (:seon.error/problems (contract-violation-data source)))
-                     [{:seon.error/path [] :seon.error/offending value}])
-        field-caps (evidence-caps caps evidence-bytes)
-        whole (bounded-admission value caps projection)]
-    (cond-> {:seon.error/problems
-             (mapv (fn [problem]
-                     (cond-> (assoc (select-keys problem [:seon.error/argument])
-                                    :seon.error/path (vec (:seon.error/path problem)))
-                       (find problem :seon.error/offending)
-                       (assoc :seon.error/offending
-                              (offending-evidence (:seon.error/offending problem)
-                                                  caps field-caps evidence-bytes projection))))
-                   problems)}
-      (not (::marker whole))
-      (assoc :seon.error/offending-digest (id/id (:seon.sci.admit/value whole) 64)))))
-
 (defn prepare-result
-  "Render one result's shown text, store a bounded record of the value, and
-  retain its live binding.
+  "Render one result's shown text and retain its live binding.
 
-  The live binding is the actual object; the shown text is the floor's, under
-  the profile. The blob is the admitted artifact of `offending-record` (the
-  record `get_value` reads): the values at the problem paths under the
-  fault's evidence bound, with worlds as references, and the whole value's
-  digest, never the whole value. A supplied SCI context carries its owner's
-  binding operation and, absent explicit caps, the bound."
+  The live binding is the actual object under `:seon.error/result-id`; the
+  stored form is the shown text under the profile, inline at or under the blob
+  threshold, else its staged digest and size, with the staged writes for the
+  caller to publish with its commit."
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                     [:seon.render/profile :seon.render.profile/profile]
                     [:seon.error/source :seon.error/source]
-                    [:seon.config.error/max-evidence-bytes [:int {:min 1}]]
-                    [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
                     [:seon.sci.eval/ctx {:optional true}
                      [:and :seon.sci.eval/ctx
                       [:map [:seon.sci.eval/bind-result! :seon.instrument/callable]]]]]]
     [:map [:seon.error/result-id :seon.error/result-id]
-          [:seon.error/shown :seon.error/shown]
-          [:seon.error/data-blob :seon.error/data-blob]]]}
-  [{source :seon.error/source :as request}]
+          [:seon.error/shown {:optional true} :seon.error/shown]
+          [:seon.error/shown-blob {:optional true} :seon.error/shown-blob]
+          [:seon.error/shown-size :seon.error/shown-size]
+          [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
+  [{source :seon.error/source connection :seon.db/connection :as request}]
   (let [entry (or (offending-entry source)
                   (when (map? source) (find source :seon.error/offending))
                   (find (:seon.error/data source) :seon.error/offending))
@@ -571,29 +519,15 @@
         ;; the world is passed, never taken from ambient custody: a core
         ;; fault recorded off an agent's thread has none
         unit (assoc (select-keys request [:seon.schema/projection :seon.render/profile])
-                    :seon.db/db (db/db (:seon.db/connection request))
+                    :seon.db/db (db/db connection)
                     :seon.render/value value :seon.repl/handle handle
                     :seon.render.call/id handle)
-        caps (or (:seon.sci.admit/caps request)
-                 (some-> ctx env/of :seon.sci.admit/caps)
-                 (throw (ex-info "A stored result requires its storage bound."
-                                 (seon.error.refusal/diagnostic (java.util.Date.) :seon.error/recording 'seon.error/prepare-result
-                                  {:seon.error/message "Supply :seon.sci.admit/caps or an SCI context whose environment carries them."
-                                   :seon.error/member :seon.sci.admit/caps
-                                   :seon.error/expected :seon.sci.admit/caps}))))
-        projection (:seon.schema/projection request)
-        admitted (bounded-admission
-                  (offending-record source value caps
-                                    (:seon.config.error/max-evidence-bytes request) projection)
-                  caps projection)
         shown (render.value/render-ai-data (render.value/prepare unit))
-        digest (blob/put! (:seon.db/connection request)
-                          (render.value/artifact-edn (render.value/artifact admitted)))]
+        {fact :seon.blob/fact writes :seon.blob/staged-writes}
+        (blob/inline-or-stage connection shown :seon.error/shown :seon.error/shown-size :seon.error/shown-blob)]
     (when ctx
       ((:seon.sci.eval/bind-result! ctx) ctx handle value))
-    {:seon.error/result-id result-id
-     :seon.error/shown shown
-     :seon.error/data-blob digest}))
+    (assoc fact :seon.error/result-id result-id :seon.blob/staged-writes writes)))
 
 (defn- validate-declaration!
   "Validate one producer-supplied name and its observation without inference."
@@ -762,11 +696,14 @@
                                  (not= full-edn
                                        (:seon.error/data-edn fact)))))
         result (or (when (and (:seon.error/result-id source)
-                              (:seon.error/shown source)
-                              (:seon.error/data-blob source))
-                       (select-keys source [:seon.error/result-id :seon.error/shown :seon.error/data-blob]))
-                     (when (and (:seon.db/connection request) (:seon.render/profile request))
-                       (prepare-result (assoc request :seon.error/source error-value))))]
+                              (or (:seon.error/shown source) (:seon.error/shown-blob source)))
+                     (assoc (select-keys source [:seon.error/result-id :seon.error/shown :seon.error/shown-blob
+                                                 :seon.error/shown-size])
+                            :seon.blob/staged-writes []))
+                   (when (and (:seon.db/connection request) (:seon.render/profile request))
+                     (prepare-result (assoc request :seon.error/source error-value))))
+        staged (:seon.blob/staged-writes result [])
+        result (dissoc result :seon.blob/staged-writes)]
     {:seon.error/fact (merge fact result)
      ;; A digest the caller stated keeps: a cluster copy names the version that
      ;; ran on its origin branch (`seon.fault/record!`), which the throwable's
@@ -776,9 +713,7 @@
                                (string? (:seon.error/producer-digest (:seon.error/source request))))
                           (assoc :seon.error/producer-digest
                                  (:seon.error/producer-digest (:seon.error/source request))))
-     ;; the blob is the admission's value artifact, which
-     ;; `seon.render.value/read-artifact` and `artifact-value` read back
-     :seon.error/data-content (render.value/artifact-edn (render.value/artifact admitted))}))
+     :seon.blob/staged-writes staged}))
 
 (defn normalize
   "Normalize one observation with a supplied projection and bounded evidence.
@@ -794,8 +729,8 @@
   {:malli/schema [:=> [:cat :seon.error/fact] :seon.error/base]}
   [fact]
   (assoc (select-keys fact [:seon.error/at :seon.error/layer :seon.error/operation
-                          :seon.error/result-id :seon.error/shown :seon.error/data-blob
-                          :seon.error/message :seon.error/signature])
+                          :seon.error/result-id :seon.error/shown :seon.error/shown-blob
+                          :seon.error/shown-size :seon.error/message :seon.error/signature])
          :seon.error/id (:seon.error/id fact)))
 
 ;;; ---------------------------------------------------------------------------
@@ -1407,13 +1342,13 @@
         count (inc (or (:seon.error.occurrence/count old) 0))
         evidence (select-keys fact [:seon.error/process :seon.error/proc :seon.error/op
                                    :seon.error/result-id :seon.error/shown
+                                   :seon.error/shown-blob :seon.error/shown-size
                                    :seon.error/cid :seon.error/throwable-class
                                    :seon.error/data-edn :seon.error/data-size :seon.error/capped?
                                    :seon.instrument/fn :seon.instrument/arm
                                    :seon.instrument/expected :seon.instrument/args
                                    :seon.instrument/actual
                                    :seon.instrument/actual-size])
-        digest (:seon.error/data-blob fact)
         ;; the version that ran: the armed Var's digest the producer stated,
         ;; else (an interpreted definition) the recording branch's entity
         producer-digest (or (:seon.error/producer-digest (:seon.error/source request))
@@ -1441,8 +1376,6 @@
                      (assoc :seon.error.occurrence/evaluation (:seon.cluster.eval/id world))
                      (:seon.task/id world) (assoc :seon.error.occurrence/task (:seon.task/id world))
                      (string? producer-digest) (assoc :seon.error/producer-digest producer-digest)
-                     digest (assoc :seon.error.occurrence/data-blob
-                                   [:seon.error.occurrence/blob-digest digest])
                      ;; the world by reference: the failing request's effect and
                      ;; the occurrence this one follows
                      (:seon.effect/id request)
@@ -1474,10 +1407,6 @@
       ;; ONE OBLIGATION, ONE DISPOSITION: this occurrence already answers it
       [{:seon.db.process/id process}]
       (into (cond-> (into [{:seon.db.process/id process}] replacements)
-              digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
-              (and (nil? digest) (:seon.error.occurrence/data-blob old))
-              (conj [:db/retract occurrence-ref :seon.error.occurrence/data-blob
-                     (:db/id (:seon.error.occurrence/data-blob old))])
               ;; a new opening replaces the selection; a recurrence keeps it
               (some? opened) (into (map #(vector :db/retract [:seon.error/signature signature]
                                                   :seon.error/notified %))
@@ -1485,25 +1414,6 @@
               true (conj (cond-> error-entity
                            (seq messages) (assoc :seon.error/notified (set (map :db/id messages))))))
             messages))))))
-
-(defn evidence-stage
-  "One prepared fact with its WHOLE evidence staged when the fact kept less.
-
-  A capped fact's `data-edn` is only a presentation; the complete admitted
-  evidence (`:seon.error/data-content`) is staged here and its digest recorded
-  as `:seon.error/data-blob`, so the cause outlives the cap. The caller
-  publishes the staged write with its commit through `blob/with-publication!`.
-  Without a connection nothing can be published, so nothing is staged; an
-  uncapped fact, or one already carrying a blob, stages nothing."
-  {:malli/schema [:=> [:cat [:or :nil :seon.db/connection] :seon.error/prepared]
-                  [:map [:seon.error/fact :seon.error/fact]
-                   [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
-  [connection {fact :seon.error/fact content :seon.error/data-content}]
-  (if (and connection (:seon.error/capped? fact) (nil? (:seon.error/data-blob fact)))
-    (let [staged (blob/stage! connection content)]
-      {:seon.error/fact (assoc fact :seon.error/data-blob (:seon.blob/digest staged))
-       :seon.blob/staged-writes [staged]})
-    {:seon.error/fact fact :seon.blob/staged-writes []}))
 
 (defn- distinguishing-members
   "The members the declared schema adds to :seon.error/base, as observed.
@@ -1561,12 +1471,10 @@
                           (stored-observation (:seon.schema/projection request) source)))
          prepared (prepare request)
          request (assoc request :seon.error/source (:seon.error/source prepared))
-         connection (:seon.db/connection request)
          request (dissoc request :seon.db/connection)
-         {fact :seon.error/fact staged :seon.blob/staged-writes}
-         (evidence-stage connection
-                         (assoc prepared :seon.error/fact
-                                (or (:seon.error/fact request) (:seon.error/fact prepared))))
+         ;; a fact the caller supplied was prepared, and its blobs staged, by that caller
+         fact (or (:seon.error/fact request) (:seon.error/fact prepared))
+         staged (if (:seon.error/fact request) [] (:seon.blob/staged-writes prepared))
          signature (:seon.error/signature fact)
          agent-id (second (:seon.error/agent fact))
          origin (:seon.error.occurrence/branch request)
@@ -2159,7 +2067,7 @@
                           :seon.error.occurrence/message :seon.error.occurrence/branch :seon.error.occurrence/evaluation
                           :seon.error/producer-digest :seon.error/caller :seon.error/expected-key
                           {:seon.error.occurrence/agent [:seon.agent/id]}
-                          {:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}
+                          :seon.error/shown-blob
                           {:seon.error/location [{:seon.error.location/segments
                                                   [:seon.error.location.segment/ordinal
                                                    {:seon.error.location.segment/key [:seon.error.key/scalar]}]}]}]}]
@@ -2174,7 +2082,7 @@
                       (mapv #(get-in % [:seon.error.location.segment/key :seon.error.key/scalar])))
         definition (when (and producer (pos? distance))
                      (db/pull database [:seon.fn/source :seon.fn/spec] [:seon.fn/sym producer]))
-        blob (get-in latest [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])
+        blob (:seon.error/shown-blob latest)
         evaluation (:seon.error.occurrence/evaluation latest)]
     (cond
       (some :seon.error/at [fault resolved definition]) (some #(when (:seon.error/at %) %) [fault resolved definition])
@@ -2193,8 +2101,7 @@
                  producer (into [(list 'my.program/callers {:seon.program/subject (list 'quote producer)})
                                  (list 'my.program/tests-reaching {:seon.program/subject (list 'quote producer)})])
                  evaluation (conj (list 'seon.db/pull ''[*] [:seon.cluster.eval/id evaluation]))
-                 blob (conj (list 'seon.render.value/artifact-value
-                                  (list 'seon.render.value/read-artifact (list 'seon.blob/get blob))))
+                 blob (conj (list 'seon.blob/get blob))
                  task (conj (list 'my.task/claim! {:seon.task/assigned task})))}
         true (into (concat (select-keys fault [:seon.error/producer :seon.instrument/fn])
                            (select-keys latest [:seon.error/producer-digest :seon.error/caller

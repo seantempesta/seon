@@ -1,7 +1,6 @@
 (ns seon.cluster.fault-storage-test
-  "The fault path keeps bulky evidence in the content-addressed store."
-  (:require [clojure.edn :as edn]
-            [clojure.java.io :as io]
+  "The fault path stores bounded evidence and never a second copy of the value."
+ (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
@@ -78,11 +77,9 @@
 
   THE FAULT ENTITY IS EVIDENCE-FREE: it aggregates one failure class and
   carries signature, id, kind, frame and exception class only. `data-edn`,
-  `data-size` and `capped?` ride the OCCURRENCE, and the digest rides the blob
-  row the occurrence refers to through `:seon.error.occurrence/data-blob`
-  (`seon.error/commit-call`). The lookup is by signature, so a model change
-  becomes a named refusal here instead of an arbitrary member of an unordered
-  result silently handing `nil` to a blob read."
+  `data-size` and `capped?` ride the OCCURRENCE (`seon.error/commit-call`). The
+  lookup is by signature, so a model change becomes a named refusal here
+  instead of an arbitrary member of an unordered result."
   [connection fact]
   (db/pull @connection
            [:seon.error/id
@@ -93,18 +90,14 @@
               :seon.error/data-edn
               :seon.error/data-size
               :seon.error/capped?
-              {:seon.error.occurrence/data-blob [:seon.error/data-blob]}]}]
+              :seon.error/shown-blob]}]
            [:seon.error/signature (:seon.error/signature fact)]))
 
-(defn- occurrence-digest
-  [occurrence]
-  (get-in occurrence [:seon.error.occurrence/data-blob :seon.error/data-blob]))
-
-(defn- published-blob-digests
-  "Every blob entity this branch holds, as the store-global deduplication fact."
+(defn- blob-digests
+  "Every blob digest an error occurrence of this branch names."
   [connection]
   (db/q '[:find [?digest ...]
-          :where [?blob :seon.error.occurrence/blob-digest ?digest]]
+          :where [_ :seon.error/shown-blob ?digest]]
         @connection))
 
 (deftest ^{:seon.test/fixture-observation "The test measures physical store growth and blob deduplication during a repeated oversized-fault storm."} oversized-fault-evidence-is-bounded-and-retrievable
@@ -129,7 +122,7 @@
                                                  :seon.error/operation `oversized-fault-evidence-is-bounded-and-retrievable
                                                  :seon.db.process/id process})
             fact (invoke!)]
-        (testing "the occurrence keeps a bounded face and publishes the blob"
+        (testing "the occurrence keeps a bounded face and no copy of the value"
           (let [fault (fault-evidence connection fact)
                 occurrences (:seon.error/occurrences fault)]
             (is (true? (:seon.fault/committed? fact)))
@@ -138,21 +131,13 @@
             (is (= 1 (count occurrences))
                 "one payload is one occurrence of its failure class")
             (let [occurrence (first occurrences)
-                  digest (occurrence-digest occurrence)
                   inline (:seon.error/data-edn occurrence)]
-              (is (string? digest)
-                  "the occurrence refers to the published blob")
               (is (<= (count inline) 4096))
               (is (pos? (:seon.error/data-size occurrence)))
               (is (:seon.error/capped? occurrence)
                   "an inline face that omitted evidence says so")
-              (let [evidence (when (string? digest)
-                               (blob/get connection digest))]
-                (is (string? evidence))
-                (is (some? (edn/read-string evidence))
-                    "the published evidence reads back as data")
-                (is (str/includes? evidence diagnostic-payload)
-                    "the complete diagnostic payload remains retrievable")))))
+              (is (not (str/includes? inline diagnostic-payload))
+                  "the inline face omits the bulky payload"))))
 
         (testing "repeated identical faults aggregate on one bounded occurrence"
           (let [before baseline
@@ -167,8 +152,6 @@
                 occurrence (first occurrences)
                 occurrence-count (:seon.error.occurrence/count occurrence)
                 inline-max (count (:seon.error/data-edn occurrence))
-                blob-digests (published-blob-digests connection)
-                retained-digest (occurrence-digest occurrence)
                 one-growth (- after-one before)
                 storm-growth (- after-500 before)]
             (let [measurement {:fault-storage/bytes-before before
@@ -189,11 +172,8 @@
             (is (= 500 occurrence-count)
                 "every fault of the class is counted on that occurrence")
             (is (<= inline-max 4096))
-            (is (= 1 (count blob-digests))
-                "500 identical payloads publish exactly one blob entity")
-            (is (string? (when (string? retained-digest)
-                           (blob/get connection retained-digest)))
-                "the referenced blob survives collection")
+            (is (empty? (filter #(nil? (blob/get connection %)) (blob-digests connection)))
+                "every blob a fact names survives collection")
             ;; The measured growth is evidence for the owner to evaluate
             ;; against Datahike history/index copy-on-write; this test does not
             ;; pretend a fixed filesystem overhead is a correctness invariant.
@@ -203,7 +183,7 @@
         (store/release-store! opened)
         (support/delete-recursively! root)))))
 
-(deftest ^{:seon.test/fixture-observation "Fault evidence must publish complete store-global blob content even when the displayed evidence is lossy."} lossy-subthreshold-fault-evidence-is-retrievable
+(deftest ^{:seon.test/fixture-observation "A lossy fitted face of fault evidence says it omitted evidence."} lossy-subthreshold-fault-evidence-says-it-is-capped
   (let [root (str "tmp/fault-storage-test/" (random-uuid))
         cluster-name (str "fault-storage-lossy-" (random-uuid))
         process (str "fault-storage-process-" (random-uuid))
@@ -216,29 +196,22 @@
       (let [source (lossy-fault-source)
             fact (fault/fault! (fault-world connection cluster-name) source
                                {:seon.error/layer ::storm
-                                :seon.error/operation `lossy-subthreshold-fault-evidence-is-retrievable
+                                :seon.error/operation `lossy-subthreshold-fault-evidence-says-it-is-capped
                                 :seon.db.process/id process})
             fault (fault-evidence connection fact)
             occurrences (:seon.error/occurrences fault)
             occurrence (first occurrences)
-            digest (occurrence-digest occurrence)
-            evidence (when (string? digest) (blob/get connection digest))
-            fitted (:seon.error/data-edn occurrence)
-            full-evidence? (and (string? evidence)
-                                (< (count evidence) 262144)
-                                (str/includes? evidence
-                                                (get-in source [:seon.error/data :fault-message])))]
+            fitted (:seon.error/data-edn occurrence)]
         (is (true? (:seon.fault/committed? fact)))
         (is (= (:seon.error/signature fact) (:seon.error/signature fault))
             "the receipt names the fault the signature reached")
         (is (= 1 (count occurrences))
             "one payload is one occurrence of its failure class")
-        (is (string? digest)
-            "a lossy fitted face still publishes complete evidence")
         (is (string? fitted)
             "the occurrence carries the face the agent was shown")
-        (is (not= evidence fitted))
-        (is full-evidence?))
+        (is (true? (:seon.error/capped? occurrence))
+            "a lossy fitted face says it omitted evidence")
+        (is (not (str/includes? fitted (get-in source [:seon.error/data :fault-message])))))
       (finally
         (d/release connection)
         (store/release-store! opened)
