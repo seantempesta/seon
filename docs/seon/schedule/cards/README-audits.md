@@ -284,7 +284,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-S | [SR-S](SR-S.md) | ready |
 | SR-ENUMa | card next | after SR-L, SR-S |
 | SR-ENUMb | — | after SR-ENUMa |
-| SR-PERMIT | card next (Opus) | after SR-P |
+| SR-PERMIT | [SR-PERMIT](SR-PERMIT.md) (Opus) | after SR-P, led-cacheb, blob-konserve |
 | SR-EFFECT | — | after EN-1 |
 | SR-STATUS | [SR-STATUS](SR-STATUS.md) | ready |
 | SR-STREAM | — | after BLOB-K |
@@ -303,7 +303,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | PB-13 | — | after PB-07b |
 | PB-14 | [PB-14](PB-14.md) | ready (diagnosis, Astra) |
 | PB-15 | [PB-15](PB-15.md) | ready after led-nk9, led-nk1 |
-| DH-4a | card next | waits on dials-16gb (`store.clj`) |
+| DH-4a | [DH-4a](DH-4a.md) | after dials-16gb (`store.clj`), LR-CACHEb (gitlink) |
 | DH-4b | — | after DH-4a (Opus design check) |
 | DH-5, DH-6, DH-7 | — | after LR-CACHEb (Datahike gitlink) |
 | DH-8 | — | after BLOB-K (konserve compressor) |
@@ -311,4 +311,5 @@ fully specified in the ledger and its card is this lane's next batch.
 | VEC-10 | [VEC-10](VEC-10.md) | ready (diagnosis) |
 | DIAL-3 | [DIAL-3](DIAL-3.md) | ready |
 | DIAL-5 | [DIAL-5](DIAL-5.md) | ready |
-| DIAL-2, DIAL-4, DIAL-6 … DIAL-18 | — | each row's Deps (DIAL-13 card next) |
+| DIAL-8 (absorbs DIAL-13) | [DIAL-8](DIAL-8.md) | after dials-16gb, led-nk1 |
+| DIAL-2, DIAL-4, DIAL-6, DIAL-7, DIAL-9 … DIAL-12, DIAL-14 … DIAL-18 | — | each row's Deps; carded when their files free |
