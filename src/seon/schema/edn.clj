@@ -625,7 +625,10 @@
         ;; also change its derived composites; each changed declaration passes
         ;; the same incremental projection choke point without recompiling
         ;; unrelated registry forms.
-        (if-let [projection (schema/current-projection)]
+        ;; An agent evaluation hands its projection as projection state
+        ;; (`seon.sci.eval`), which clears the delta's own binding: either is
+        ;; the complete active projection this incremental gate needs.
+        (if-let [projection (or (schema/current-projection) (schema/handed-projection))]
           (admit-changed-identities
            projection forms changed-identities
            (or admission {:seon.schema.admission/source :agent}))
