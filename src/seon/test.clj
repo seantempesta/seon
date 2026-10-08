@@ -1753,19 +1753,22 @@
             :seon.error/operation (:seon.error/operation refusal)
             :seon.error/offending (:seon.error/offending refusal)}))
 
+(defn- carry-world-projection!
+  "Carry on `connection` the projection state its current value derives, for `cluster`."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster/name] :seon.db/connection]}
+  [connection cluster]
+  (let [database (db/db connection)]
+    (db/carry-connection-projection-state!
+     connection (sci.eval/projection-state database (schema/projection-from-database database) cluster))))
+
 (defn- open-world!
-  "Open `branch`, `cluster`'s test world, with the schema projection its value derives, from `candidate`'s."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value :seon.cluster/name]
+  "Open `branch`, `cluster`'s test world, with the schema projection its value derives."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.cluster/name]
                   :seon.db/connection]}
-  [store branch candidate cluster]
+  [store branch cluster]
   (let [connection (store/open-branch! store branch)]
     (try
-      (db/carry-connection-projection-state!
-       connection (sci.eval/projection-state
-                   (db/db connection)
-                   (schema/projection-from-database (db/db connection) (db/carried-projection candidate))
-                   cluster))
-      connection
+      (carry-world-projection! connection cluster)
       (catch Throwable failure
         (try (store/release-branch! connection) (catch Throwable cleanup (.addSuppressed failure cleanup)))
         (throw failure)))))
@@ -1778,7 +1781,7 @@
                        :seon.db/database-value]
                   :nil]}
   [store branch cluster effective process base candidate]
-  (let [connection (open-world! store branch candidate cluster)]
+  (let [connection (open-world! store branch cluster)]
     (try
       (db/call-with-custody
        {:seon.db/connection connection}
@@ -1907,11 +1910,14 @@
             (throw (release! (ex-info "The request branch already exists." {:seon.error/offending request-branch})
                              [drop!])))
         retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch request-branch})
-        connection (try (open-world! store request-branch candidate cluster)
+        connection (try (open-world! store request-branch cluster)
                         (catch Throwable failure (throw (release! failure [retire! drop!]))))
         report (when (seq overlay)
                  (try (db/call-with-custody {:seon.db/connection connection}
-                                            #(db/transact! connection overlay))
+                                            #(let [report (db/transact! connection overlay)]
+                                               ;; The overlay may carry declaration rows: the world's projection follows them.
+                                               (when (:db-after report) (carry-world-projection! connection cluster))
+                                               report))
                       (catch Throwable failure
                         (throw (release! failure [#(store/release-branch! connection) retire! drop!])))))]
     (when (and report (not (:db-after report)))
@@ -2238,35 +2244,8 @@
              (:seon.flow/commit-fault! snapshot)
              (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! snapshot))))))))))
 
-(defn run
-  "Answer one test request on the execution value it names.
-
-  `:seon.test/execution` is an agent context source or execution handle; the
-  request captures its current commit once. `:seon.test/policy` selects
-  eligibility (`:named` needs identities or namespaces; `:incremental` derives
-  changed reach and outstanding obligations from recorded evidence; `:platform`
-  the declared rows; `:all` every eligible row). Selection and admission read
-  and write the explicit `:seon.test/recording-connection`, which must hold the
-  execution branch; `:seon.db/writer` (default `seon.db/transact!`)
-  writes admission and stop there. A member whose recorded green still holds is answered from
-  the record with `:seon.test/unchanged` and no execution.
-
-  Each executed member is an isolated agent for one body: a fresh branch off
-  the request's world through `seon.cluster.agent/acquire-context!`. A cluster's
-  world is its loaded published program plus boot's cluster facts, holding none
-  of its agents, turns, messages or errors, plus the execution's differing
-  program rows, so an agent branch tests its candidate (`clean-request-handle`). The body
-  under that branch's custody (`seon.sci.eval/run-test`), its result recorded
-  on the recording connection, and the branch unlinked by
-  `release-context!` after the body's thread exits. The request is bounded by
-  `:seon.test/check-time-limit-ms` (request member or the cluster's dial); a
-  body still live at the bound fails and keeps its branch; the rest of its
-  request stops, and a later request holds (reports pending) only that test
-  until it exits.
-  Members reaching a destructive owner or declaring a file-backed fixture
-  are excluded in a JVM operating the development checkout, with the platform
-  command. `:seon.test/passed?` is true only when every obligation has green
-  evidence: exclusions, pending and unfinished members are unfulfilled."
+(defn- run-request
+  "The body of `run`: select, admit and execute the request, throwing what it cannot answer."
   {:malli/schema [:=> [:cat :seon.test/request]
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
@@ -2605,6 +2584,55 @@
               (assoc :seon.test/recording-refusal (:seon.test/recording-refusal outcome))
               (::admission-refusal outcome)
               (assoc :seon.test/recording-refusal (::admission-refusal outcome))))))))))
+
+(defn run
+  "Answer one test request on the execution value it names.
+
+  `:seon.test/execution` is an agent context source or execution handle; the
+  request captures its current commit once. `:seon.test/policy` selects
+  eligibility (`:named` needs identities or namespaces; `:incremental` derives
+  changed reach and outstanding obligations from recorded evidence; `:platform`
+  the declared rows; `:all` every eligible row). Selection and admission read
+  and write the explicit `:seon.test/recording-connection`, which must hold the
+  execution branch; `:seon.db/writer` (default `seon.db/transact!`)
+  writes admission and stop there. A member whose recorded green still holds is answered from
+  the record with `:seon.test/unchanged` and no execution.
+
+  Each executed member is an isolated agent for one body: a fresh branch off
+  the request's world through `seon.cluster.agent/acquire-context!`. A cluster's
+  world is its loaded published program plus boot's cluster facts, holding none
+  of its agents, turns, messages or errors, plus the execution's differing
+  program rows, so an agent branch tests its candidate (`clean-request-handle`). The body
+  under that branch's custody (`seon.sci.eval/run-test`), its result recorded
+  on the recording connection, and the branch unlinked by
+  `release-context!` after the body's thread exits. The request is bounded by
+  `:seon.test/check-time-limit-ms` (request member or the cluster's dial); a
+  body still live at the bound fails and keeps its branch; the rest of its
+  request stops, and a later request holds (reports pending) only that test
+  until it exits.
+  Members reaching a destructive owner or declaring a file-backed fixture
+  are excluded in a JVM operating the development checkout, with the platform
+  command. `:seon.test/passed?` is true only when every obligation has green
+  evidence: exclusions, pending and unfinished members are unfulfilled."
+  {:malli/schema [:=> [:cat :seon.test/request]
+                  [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
+                   :seon.test/admission-error :seon.test.run/unavailable-error
+                   :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
+                   :seon.db/invalid-read-error
+                   :seon.schema/missing-projection-error :seon.instrument/registration-error
+                   :seon.sci.eval/interpretation-error :seon.test/not-runnable-error
+                   :seon.sci.kernel/memory-pressure-error]]}
+  [request]
+  (try (run-request request)
+       ;; The entrant answers its declared variants: an exception no part of the
+       ;; request translated is the unknown outcome of this request, its cause kept.
+       (catch Throwable failure
+         (assoc (seon.error.refusal/diagnostic
+                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+                  :seon.error/operation 'seon.test/run :seon.error/message (ex-message failure)
+                  :seon.error/throwable failure})
+                :seon.test/unknown "The request ended in an exception."
+                :seon.test/next-tier :none))))
 
 (defn tally
   "Render one request's answer as the text a launcher prints.
