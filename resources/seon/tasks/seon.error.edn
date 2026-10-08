@@ -7,8 +7,8 @@
                          "docs/seon/issues/a-fault-whose-function-is-deleted-never-resolves.md"}}
  #:seon.task{:name "a-missing-key-message-reads-badly"
              :kind :function
-             :intent "A missing key whose schema carries `:error/message` reads 'the required key `:seon.db/db` with must be ...' (error.clj:867)."
-             :must-read #{seon.error/explain-problem}
+             :intent "`seon.error/explain-problem` describes a missing key `[:map [:at inst?]]` as 'the required key :at with a value satisfying should be an inst', and an `:=` schema `[:= {:description \"d\"} true]` refusing false as 'a value satisfying should be true': the fallback in `seon.error/schema-expectation` puts Malli's own 'should be' sentence after 'a value satisfying'. Done when neither `:seon.error/expected-description` contains 'satisfying should' or 'with should', the missing one still names :at, and the `:=` one names true."
+             :must-read #{seon.error/explain-problem seon.error/schema-expectation malli.error/error-message}
              :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}
  #:seon.task{:name "deliver-core-faults-to-responsible-agent"
              :kind :function
@@ -37,9 +37,13 @@
              :evidence #{"docs/research/agent-platform/stability-sweep-2026-09-27.md"}}
  #:seon.task{:name "an-enum-refusal-prints-the-schema-properties"
              :kind :function
-             :intent "Transacting `:seon.config.ai/no-provider` false answered 'expected a value satisfying should be true ([:= {`:seon.config/display-label` \"No provider\", ... :description \"Use virtual turns ...\"} true]), got a boolean false', printing the dial's whole property map inside the message (repl-dogfood 2026-09-27). The expected text is the schema's value (true), never its properties."
-             :must-read #{seon.error/problem-sentence}
+             :intent "`seon.error/explain-problem` answers `:seon.error/expected` as the problem schema's whole form, so refusing false for the dial schema `[:= {:seon.config/display-label \"No provider\" :description \"Use virtual turns\"} true]` printed its whole property map (transacting `:seon.config.ai/no-provider` false). Done when the `:seon.error/expected` of an `:=` or `:enum` schema is its form without properties (`[:= true]`, `[:enum :a :b]`) and any other schema keeps its properties (`[:int {:min 1}]`)."
+             :must-read #{seon.error/explain-problem malli.core/form malli.core/properties}
              :evidence #{"docs/research/agent-platform/repl-dogfood-2026-09-27.md"}}
+ #:seon.task{:name "a-map-for-a-sequential-is-refused-as-its-first-entry"
+             :kind :function
+             :intent "An armed `[:sequential :map]` argument given the map {:a 1} is refused as 'a collection member satisfying a map, got a collection member that is a vector' with offending [:a 1]: `seon.error/collection-member-problem` descends into any `coll?` value, so a map's entry is blamed instead of the map (fan-out 5 probe through an SCI defn). Done when `seon.error/explain-problem` of that problem answers `:seon.error/offending` {:a 1} and `:seon.error/expected` `[:sequential :map]`, while a sequence holding a bad member still names the member."
+             :must-read #{seon.error/explain-problem seon.error/collection-member-problem}}
  #:seon.task{:name "a-fault-notification-is-its-errors-edn-as-text"
              :kind :function
              :intent "A fault's notification message carries the error value printed as EDN text (message-tx: `:seon.message/content` (`seon.render.value/bounded-text` (value fact))). On default 2026-09-27, 33 of root's 35 unread messages were such strings, so its inbox (and the runtime trigger it wakes on) shows \"#:seon.error{:at\"…+412: the content head is timestamp and layer, never what failed. Content is for the reader: the error's message and operation as its text, with the whole record one read away through `:seon.message/about` (the signature). Done when a notified agent's inbox entry reads what failed and where within its first line, and the error value is not re-printed into the message."
