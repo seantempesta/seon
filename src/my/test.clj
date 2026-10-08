@@ -1,7 +1,12 @@
 (ns ^{:seon.ns/context-relevant? true} my.test
   "Run the tests declared in my namespace."
-  (:require [seon.db :as db]
-            [seon.test]))
+  (:require [babashka.fs :as fs]
+            [clojure.java.io :as io]
+            [my.program]
+            [seon.db :as db]
+            [seon.error.refusal]
+            [seon.test]
+            [seon.test.platform :as platform]))
 
 (defn- check-now
   "Run the tests reaching `changed` (else my program's change) as one request; nothing reached names it unreached."
@@ -51,6 +56,64 @@
     (cond (empty? after) (check-now context connection named)
           (empty? now) {:my.test/after-recording after}
           :else (assoc (check-now context connection now) :my.test/after-recording after))))
+
+(defn check-platform
+  "Prove my branch's host-bound change in a JVM loaded from it and record the
+  result on my branch as ordinary test evidence.
+
+  My branch's declarations (or the `:seon.program/identities` I name) are
+  written into a copy of the published archive, committed on top of the
+  published commit, and the tests (`:seon.test/identities`, else those
+  reaching my change) run by `bin/seon check --at` in a throwaway JVM. Their
+  results are recorded on my branch keyed by its reach digests, the run naming
+  the candidate commit, so `bin/lane commit --branch-evidence` accepts my
+  host-bound change until my branch changes again. Synchronous: it takes the
+  throwaway JVM's boot plus the tests.
+
+  Example:
+  (my.test/check-platform {:seon.program/identities #{[:seon.fn/sym 'seon.test/tally]}})"
+  {:malli/schema [:=> [:cat :my.test/check-platform-request] [:or :seon.test.platform/answer [:map [:seon.test/unreached :seon.test/unreached]] :seon.error/value]]}
+  [{context :my.program/context connection :seon.db/connection
+    tests :seon.test/identities identities :seon.program/identities}]
+  (let [began (System/nanoTime)
+        tested (db/db connection)
+        published (platform/published-source)
+        changed (when-not (:seon.error/at published)
+                  (or (some->> identities (keep #(when (= :seon.fn/sym (first %)) (second %))) vec)
+                      (seon.test/changes context connection)))
+        tests (cond (seq tests) tests
+                    (:seon.error/at changed) changed
+                    (seq changed) (seon.test/reaching {:seon.db/db tested :seon.test/changed (vec changed)}))]
+    (cond
+      (:seon.error/at published) published
+      (nil? (:seon.cluster/name context))
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/platform 'my.test/check-platform
+                                     {:seon.error/message "My context names no cluster to record the platform run in."})
+      (:seon.error/at changed) changed
+      (:seon.error/at tests) tests
+      (empty? tests) {:seon.test/unreached (vec changed)}
+      :else
+      (let [snapshot (platform/snapshot! tested published (str (io/file (:seon.test.platform/checkout published) "tmp")))]
+        (try
+          (let [written (my.program/write-branch! (cond-> {:my.program/context context :seon.fn/root snapshot}
+                                                    identities (assoc :seon.program/identities identities)))
+                paths (:seon.source/changed-paths written)
+                candidate (when (seq paths) (platform/candidate-commit! published snapshot paths))
+                checked (when candidate (platform/run-check! tested published candidate snapshot (set tests)))
+                recorded (when (and checked (not (:seon.error/at checked))) (platform/record! connection tested (:seon.cluster/name context) checked))]
+            (cond
+              (not (seq paths)) written
+              (:seon.error/at checked) checked
+              (:seon.error/at recorded) recorded
+              :else (cond-> {:seon.test.run/git-sha candidate
+                             :seon.source/changed-paths paths
+                             :seon.test/passed? (:seon.test/passed? checked)
+                             :seon.test/results recorded
+                             :seon.test.platform/check-ms (:seon.test.platform/check-ms checked)
+                             :seon.test.platform/ms (long (/ (- (System/nanoTime) began) 1e6))}
+                      (seq (:seon.test.platform/excluded checked))
+                      (assoc :seon.test.platform/excluded (:seon.test.platform/excluded checked)))))
+          (finally (fs/delete-tree snapshot)))))))
 
 (defn run-owned
   "Run one namespace's declared tests as one named request.

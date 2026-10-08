@@ -107,13 +107,34 @@
   [{run :seon.test/run}]
   (if (vector? run) (second run) (:seon.test.run/id run)))
 
+(defn- platform-run?
+  "Whether the run `id` on `branch` ran in a JVM loaded from a candidate
+  commit (`seon.test.platform`), so it exercised the branch's host-bound code."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.test.run/id]] :boolean]}
+  [branch id]
+  (boolean (and id (db/q '[:find ?sha . :in $ ?id :where [?run :seon.test.run/id ?id] [?run :seon.test.run/git-sha ?sha]]
+                         branch id))))
+
+(defn- platform-evidence?
+  "Whether `test-symbol`'s latest result on `branch` ran in a platform run
+  for its current reach there, green or red: the verdict buckets judge it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]}
+  [branch test-symbol]
+  (let [result (test/recorded-result branch test-symbol)
+        current (runner/reach-digests branch [test-symbol])]
+    (boolean (and (:seon.test/pass-count result) (map? current)
+                  (= (get current test-symbol) (:seon.test.member/reach-digest result))
+                  (platform-run? branch (run-id result))))))
+
 (defn- test-evidence
   "The reaching tests of the changed declarations, sorted into verified,
-  red-before and unproven, and the changed functions no test reaches."
+  red-before and unproven, the changed functions no test reaches, and the
+  changed host-bound functions every reaching test of which has its current
+  result from a platform run."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:vector :seon.program/declaration-identity]
-                       [:vector :seon.program/declaration-identity]]
+                       [:vector :seon.program/declaration-identity] [:vector :seon.fn/sym]]
                   [:or :map :seon.error/value]]}
-  [branch head changed removed]
+  [branch head changed removed host-bound]
   (let [present (remove (set removed) changed)
         reach (fn [database syms] (if (seq syms) (test/reaching {:seon.db/db database :seon.test/changed (vec syms)}) []))
         per-fn (into {} (for [[a s] present :when (= a :seon.fn/sym)] [s (reach branch [s])]))
@@ -134,6 +155,8 @@
                  ::red-before (vec before)
                  ::unproven (vec unproven)
                  ::unreached (vec (sort (keep (fn [[s r]] (when (empty? r) s)) per-fn)))
+                 ::platform-proven (filterv (fn [s] (and (seq (per-fn s)) (every? #(platform-evidence? branch %) (per-fn s))))
+                                            host-bound)
                  ::run-ids (vec (sort (distinct (keep #(run-id (test/recorded-result branch %)) verified))))}))))))
 
 (defn- commit-value
@@ -146,8 +169,10 @@
 (defn- verdict
   "The gate's answer from the merged file and test evidence."
   {:malli/schema [:=> [:cat :map :seon.source/accepted-red-before] :seon.source/branch-evidence]}
-  [{::keys [differing unanalyzable host-bound changed red-before unproven unreached verified run-ids branch-id head-id]}
+  [{::keys [differing unanalyzable host-bound platform-proven changed red-before unproven unreached verified run-ids
+            branch-id head-id]}
    accepted]
+  (let [host-bound (vec (remove (set platform-proven) host-bound))]
   {:seon.source/proven? (and (every? empty? [differing unanalyzable host-bound unproven unreached])
                              (every? accepted red-before))
    :seon.source/branch-commit-id branch-id
@@ -155,18 +180,23 @@
    :seon.source/changed (vec changed)
    :seon.source/differing (vec differing)
    :seon.source/unanalyzable (vec unanalyzable)
-   :seon.source/host-bound (vec host-bound)
+   :seon.source/host-bound host-bound
+   :seon.test.platform/proven (vec platform-proven)
    :seon.source/verified (vec verified)
    :seon.source/unproven (vec unproven)
    :seon.source/unreached (vec unreached)
    :seon.source/red-before (vec red-before)
-   :seon.source/run-ids (vec run-ids)})
+   :seon.source/run-ids (vec run-ids)}))
 
 (defn branch-evidence
   "Whether `branch` of `store` proves the source files at `paths` under `root`.
   Each file's working-tree bytes must declare exactly the branch head's definitions
-  (`:seon.source/differing` names each that does not), no changed declaration
-  is host-bound (its branch evidence would prove nothing), and every test
+  (`:seon.source/differing` names each that does not), every changed
+  host-bound declaration is `:seon.test.platform/proven` (each test reaching
+  it has its current result from a run in a JVM loaded from a candidate
+  commit, `seon.test.platform`; in-process evidence exercised the old compiled
+  code; green or red, the usual buckets then judge it),
+  else it is `:seon.source/host-bound`, and every test
   reaching a declaration changed from `head` (its cluster's branch) is `seon.test/verified?`
   on the branch head. A changed function no test reaches is
   `:seon.source/unreached`; a test red on the branch and recorded red on the
@@ -188,7 +218,7 @@
         :else
         (let [files (mapv #(file-evidence root branch-db head-db %) paths)
               merged (apply merge-with into {::differing [] ::unanalyzable [] ::changed [] ::removed [] ::host-bound []} files)
-              tests (test-evidence branch-db head-db (::changed merged) (::removed merged))]
+              tests (test-evidence branch-db head-db (::changed merged) (::removed merged) (::host-bound merged))]
           (if (:seon.error/at tests)
             tests
             (verdict (merge merged tests {::branch-id branch-id ::head-id head-id}) (or accepted #{})))))

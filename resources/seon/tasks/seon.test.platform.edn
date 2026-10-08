@@ -1,0 +1,6 @@
+[#:seon.task{:name "a-host-bound-change-has-no-proof-from-the-repl"
+             :kind :function
+             :intent "A branch's change to a host-bound function runs its tests on the old compiled Var, so `seon.cluster.branch-evidence/branch-evidence` refuses it and only `bin/seon check --test` proves it. `my.test/check-platform` writes the branch into a copy of the published archive (`my.program/write-branch!`), commits it on the published commit (`seon.test.platform/candidate-commit!`), runs the tests in a throwaway JVM (`seon.test.platform/run-check!`) and records their results on the branch (`seon.test.platform/record!`) as a run carrying `:seon.test.run/git-sha`; the gate then lists the change under `:seon.test.platform/proven`."
+             :must-read #{my.test/check-platform seon.test.platform/record! seon.test.platform/run-check!
+                          seon.cluster.branch-evidence/branch-evidence seon.test/verified? seon.test.runner/commit-results!}
+             :evidence #{"docs/seon/schedule/cards/PLATFORM-STEP.md" "docs/research/agent-platform/2026-10-09/platform-step.md"}}]

@@ -4,6 +4,12 @@
   [:my.program/context :my.program/context]
   [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.batch/defined {:optional true} :seon.batch/defined]]
+ :my.test/check-platform-request
+ [:map {:description "My branch's host-bound change to prove in a JVM loaded from it: call preparation supplies my context and writer; the tests default to those reaching my change, the declarations to my whole branch difference."}
+  [:seon.db/connection :seon.db/connection]
+  [:my.program/context :my.program/context]
+  [:seon.test/identities {:optional true} [:set :seon.test/sym]]
+  [:seon.program/identities {:optional true} :seon.program/identity-set]]
  :my.test/after-recording
  [:vector {:description "The named identities an earlier form of the same request defined: their tests run right after the request's one recording transaction, in the pass's test step, and their results ride the same reply."} :qualified-symbol]
  :my.test/after-recording-result

@@ -1,0 +1,28 @@
+#:seon.test.platform{:archive [:string {:min 1 :description "The published archive directory this JVM loaded, data/source/<sha>."}],
+                     :checkout [:string {:min 1 :description "The Git checkout candidate commits are written in."}],
+                     :published
+                     [:map {:description "The published commit a platform check builds its candidate on."}
+                      [:seon.test.platform/archive :seon.test.platform/archive]
+                      [:seon.test.run/git-sha :seon.test.run/git-sha]
+                      [:seon.test.platform/checkout :seon.test.platform/checkout]],
+                     :proven [:vector {:description "Changed host-bound functions every reaching test of which is verified on the branch by a platform run (a run carrying :seon.test.run/git-sha)."} :qualified-symbol],
+                     :check-ms [:int {:min 0 :description "Wall time of the platform check subprocess."}],
+                     :ms [:int {:min 0 :description "Wall time of the whole platform proof: snapshot, write-back, candidate, check and recording."}],
+                     :excluded [:vector {:description "Requested members the platform run did not finish: excluded or unfinished there, so not evidence."} :seon.test/sym],
+                     :check-result
+                     [:map {:description "The members a platform check's throwaway JVM answered, as its runner wrote them."}
+                      [:seon.test.run/id :seon.test.run/id]
+                      [:seon.test/passed? :seon.test/passed?]
+                      [:seon.test/results :seon.test.runner/captured-results]
+                      [:seon.test.platform/excluded {:optional true} :seon.test.platform/excluded]
+                      [:seon.test.run/git-sha :seon.test.run/git-sha]
+                      [:seon.test.platform/check-ms :seon.test.platform/check-ms]],
+                     :answer
+                     [:map {:description "A platform check recorded on my branch: the candidate commit, what was written, the recorded results and timings."}
+                      [:seon.test.run/git-sha :seon.test.run/git-sha]
+                      [:seon.source/changed-paths :seon.source/changed-paths]
+                      [:seon.test/passed? :seon.test/passed?]
+                      [:seon.test/results :seon.test/results]
+                      [:seon.test.platform/excluded {:optional true} :seon.test.platform/excluded]
+                      [:seon.test.platform/check-ms :seon.test.platform/check-ms]
+                      [:seon.test.platform/ms :seon.test.platform/ms]]}

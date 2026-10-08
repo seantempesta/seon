@@ -7,7 +7,8 @@
 ;; (seon.test/isolated-members): the platform host's request. Its bound is the
 ;; members' declared bounds (seon.test/declared-bound-ms) unless given.
 ;; The execution value is the cluster's own handle; results record on its
-;; connection. Exit 0 only when the request answers :seon.test/passed? true.
+;; connection. With SEON_TEST_RESULT_FILE set, the run's members are also
+;; written there as EDN (seon.test.platform/run-check! reads them). Exit 0 only when the request answers :seon.test/passed? true.
 (require '[clojure.java.io :as io]
          '[seon.operator :as operator])
 
@@ -43,7 +44,14 @@
       advertisement (#'operator/advertisement root cluster)
       transport-bound (#'operator/operator-silence-backstop-ms {})
       shipped-check-bound (get @@#'operator/shipped-default-decisions
-                               :seon.test/check-time-limit-ms)]
+                               :seon.test/check-time-limit-ms)
+      ;; Where the run's member results go as EDN, when the caller names a file
+      ;; (inherited through `bin/seon check`, which spawns this runner).
+      result-file (not-empty (System/getenv "SEON_TEST_RESULT_FILE"))
+      ;; :seon.test.runner/captured-result's keys, the member as recorded.
+      captured-keys [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count
+                     :seon.test/failure-message :seon.test/failing-assertions
+                     :seon.test.failure/reports :seon.test.member/began? :seon.test.member/ended?]]
   (try
     (let [request (parse args)
           handle-form (list :seon.turn.loop/cluster
@@ -101,10 +109,30 @@
                                                   :seon.test/recording-connection
                                                   (list :seon.db/connection 'handle)}))]
                        [(list 'seon.test/tally 'result)
-                        (list 'true? (list :seon.test/passed? 'result))])
+                        (list 'true? (list :seon.test/passed? 'result))
+                        (when result-file
+                          (list 'if (list :seon.error/at 'result)
+                                (list 'select-keys 'result [:seon.error/message :seon.error/operation])
+                                (list 'merge
+                                      (list 'select-keys 'result [:seon.test.run/id :seon.test/passed?
+                                                                  :seon.test/executed-count :seon.test/elapsed-ms
+                                                                  :seon.test/pending])
+                                      {:seon.test/results
+                                       (list 'mapv (list 'fn ['member] (list 'select-keys 'member captured-keys))
+                                             (list :seon.test/results 'result))
+                                       :seon.test.platform/excluded
+                                       (list 'mapv :seon.test/sym
+                                             (list 'concat (list :seon.test/destructive-excluded 'result)
+                                                   (list :seon.test/deferred 'result)
+                                                   (list :seon.test/long-excluded 'result)
+                                                   (list :seon.test/unfinished 'result)))})))])
             result (eval! form (+ (or (:seon.test/check-time-limit-ms request)
                                       shipped-check-bound)
                                   transport-bound))]
+        (when (and result-file (vector? result))
+          ;; The run's members as data for the caller that asked
+          ;; (seon.test.platform/run-check!), read back with clojure.edn.
+          (spit result-file (pr-str (nth result 2))))
         (println (if (vector? result) (first result) (or (:seon.error/message result) (pr-str result))))
         (when-not (and (vector? result) (true? (second result)))
           (System/exit 1))))
