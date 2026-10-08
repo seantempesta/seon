@@ -23,7 +23,17 @@
    ["later-pass-redefinition-reaches-a-caller-of-a-later-pass"
     ["(defn g3 [] 1) (defn h3 [] (g3))" "(defn k3 [] (h3))" "(defn g3 [] 2) [(k3) (h3) (g3)]"]]
    ["redefinition-after-a-pass-that-changed-no-program"
-    ["(defn g4 [] 1) (defn h4 [] (g4))" ":idle" "(defn g4 [] 2) [(h4) (g4)]"]]])
+    ["(defn g4 [] 1) (defn h4 [] (g4))" ":idle" "(defn g4 [] 2) [(h4) (g4)]"]]
+   ;; JVM Clojure refuses an alias retarget (the SCI fork does too)
+   ["alias-retarget-refuses"
+    "(alias 'fa1 'clojure.string) [(try (alias 'fa1 'clojure.set) :retargeted (catch Exception _ :refused)) (ns-name (get (ns-aliases *ns*) 'fa1))]"
+    [:refused 'clojure.string]]
+   ["require-as-retarget-refuses"
+    "(require '[clojure.string :as fa2]) [(try (require '[clojure.set :as fa2]) :retargeted (catch Exception _ :refused)) (ns-name (get (ns-aliases *ns*) 'fa2))]"
+    [:refused 'clojure.string]]
+   ["alias-same-target" "(alias 'fa3 'clojure.string) (alias 'fa3 'clojure.string)"]
+   ["unalias-then-retarget"
+    "(alias 'fa4 'clojure.string) (ns-unalias *ns* 'fa4) (alias 'fa4 'clojure.set) (ns-name (get (ns-aliases *ns*) 'fa4))"]])
 
 (defn- plain
   "The value of `code`'s last form that did not throw, in a fresh plain SCI context."
@@ -38,14 +48,21 @@
           (recur (try (sci/eval-form ctx form) (catch Throwable _ value))))))))
 
 (defn- answered
-  "The value the entrance answers for `code` as `agent-id`: the last evaluation's reply value."
+  "The value the entrance answers for `code` as `agent-id`: the last form's reply value (a same-pass test run answers in a further content item)."
   {:malli/schema [:=> [:cat :string :string :string] :seon.schema/value]}
   [code agent-id running]
   (let [result (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
-    (:seon.repl/value (support/reply (get (last (get result "content")) "text")))))
+    (->> (get result "content")
+         (map #(support/reply (get % "text")))
+         (filter #(contains? % :seon.repl/value))
+         last
+         :seon.repl/value)))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}} plain-sci-rows-answer-as-plain-sci
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}
+           :seon.test/long "one MCP eval_clj pass per row form (17 forms across 13 rows), each ending in its test step: 7.2 s measured in a check JVM"
+           :seon.test/long-ms 15000}
+  plain-sci-rows-answer-as-plain-sci
   (support/with-running-agent
    (fn [running agent-id _]
      (doseq [[label code :as row] rows]
@@ -66,9 +83,9 @@
            check (answered (str "(my.test/check {:seon.test/changed '[" namespace-name "/other-squares "
                                 namespace-name "/other-is-six]})")
                            agent-id running)
-           failures (into {} (map (juxt (comp name :seon.test/sym) :seon.test/fail-count))
-                          (:seon.test/results check))]
-       (is (= {"other-squares" 1 "other-is-six" 0} failures))))))
+           failed (into #{} (map (comp name :seon.test/sym)) (:seon.render.test/failures check))]
+       (is (= [2 1 #{"other-squares"}]
+              [(:seon.render.test/test check) (:seon.render.test/fail check) failed]))))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-caller-keeps-the-definition-of-an-earlier-pass}}
   another-writer-on-the-cluster-head-neither-hides-nor-freezes-a-callee

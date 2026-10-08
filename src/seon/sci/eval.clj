@@ -391,9 +391,9 @@
          ;; SCI's ceiling: a host call is not interrupted (interrupt.md:84-98)
          :classes {:allow :all}
          :load-fn load-host-namespace}
-         ;; SCI's own `future` addon; its `future-call` carries the arm
-         sci.future/install
-         (assoc-in [:namespaces 'clojure.core 'future-call] kernel/future-call)
+         ;; SCI's own `future` addon, given our arm-carrying `future-call`
+         ;; (sci fork's 2-arity install): `future` follows it
+         (sci.future/install {:future-call kernel/future-call})
          ;; the addon's pmap calls the host future-call: its threads escaped
          ;; the arm and the form's owned work (task sci-pmap-escapes-the-arm)
          (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)))
