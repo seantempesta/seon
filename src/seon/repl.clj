@@ -127,8 +127,6 @@
    :seon.repl/ns
    :seon.repl/ms
    :seon.repl/alloc-mb
-   :seon.repl/calls
-   :seon.repl/repeated
    :seon.repl/errors
    :seon.repl/diagnostics
    :seon.repl/repairs
@@ -137,7 +135,7 @@
 
 (def ^:private spliced
   "The entries that are the value printer's shown text, spliced as shown."
-  #{:seon.repl/repeated :seon.repl/errors :seon.repl/diagnostics :seon.repl/value :seon.repl/error})
+  #{:seon.repl/errors :seon.repl/diagnostics :seon.repl/value :seon.repl/error})
 
 (defn- def-note
   "Explain a temporary def from the evaluation's own record: its source is a
@@ -220,8 +218,6 @@
     duration :seon.eval/duration-ms
     allocated :seon.eval/allocated-bytes
     interrupted-at :seon.cluster.eval/interrupted-at
-    call-count :seon.cluster.eval/call-count
-    repeated :seon.cluster.eval/repeated-calls
     :as emission}]
   (let [value (value-text emission)
         ;; The evaluation's own failure: its shown text IS its flat error.
@@ -263,17 +259,7 @@
                 ;; the measure's scope documented on :seon.eval/allocated-bytes.
                 :seon.repl/alloc-mb (when (and (int? allocated) (not (neg? allocated))
                                                (not (:seon.repl/changed-since? emission)))
-                                      (value/core-text (/ (Math/round (/ (double allocated) 1e5)) 10.0)))
-                ;; THE EVALUATION'S CALL PROFILE, AS DATA: its armed calls,
-                ;; and, only when the run was over its time bound (a :slow finding),
-                ;; each function it called more than seon.batch/repeated-calls
-                ;; times as [sym calls ms], as the clue that explains it. A fast
-                ;; reply carries none: the tx stamps and health report hold it.
-                :seon.repl/calls (when (pos-int? call-count) (str call-count))
-                :seon.repl/repeated (when (and (seq repeated)
-                                              (some (comp #{:slow} :seon.repl/finding) found))
-                                      ;; Ties by name, so the text is a function of the calls, not of the set's iteration order.
-                                      (value/core-text (vec (sort-by (juxt (comp - second) first) repeated))))}]
+                                      (value/core-text (/ (Math/round (/ (double allocated) 1e5)) 10.0)))}]
     (entries-in-order
      (cond-> by-key
        ;; ONE BUDGET PER REPLY: the output shows in what the reply's other
@@ -337,18 +323,15 @@
 
 (defn cost-attributes
   "The stored evaluation attributes the declared bounds and their lines read
-  (every measure and named value outside `seon.repl`'s own derived ones), and
-  the evaluation's call profile and the class of its value (which the def note
-  reads). A
+  (every measure and named value outside `seon.repl`'s own derived ones) and
+  the class of its value (which the def note reads). A
   reader that pulls an evaluation for its reply pulls these, so the findings
   see what the receipt recorded; nothing names them by hand."
   {:malli/schema [:=> [:cat] [:vector :qualified-keyword]]}
   []
   (let [{measures ::measures named ::named} @bounds]
     (into [] (comp (remove #(= "seon.repl" (namespace %))) (distinct))
-          ;; the evaluation's call profile: every reply shows it
-          (concat measures named [:seon.cluster.eval/call-count :seon.cluster.eval/repeated-calls
-                                  :seon.eval/value-class]))))
+          (concat measures named [:seon.eval/value-class]))))
 
 (defn cost
   "The measures the declared bounds judge for one evaluation: each one its

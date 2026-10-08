@@ -453,18 +453,18 @@
       (is (= [] (repl/findings (assoc emission :seon.eval/value-tokens 900 :seon.eval/shown-tokens 900)))
           "within the bound the value is simply shown"))))
 
-(deftest repeated-calls-show-only-beside-a-slow-run
+(deftest ^{:seon/tasks #{'seon.repl/the-slow-fix-ranks-the-whole-process}}
+  the-reply-carries-no-call-bookkeeping
   (let [emission {:seon.cluster.eval/source "(inc 1)"
                   :seon.repl/handle (admit/result-handle "e5886")
                   :seon.eval/shown "2"
-                  :seon.eval/duration-ms 4
+                  :seon.eval/duration-ms 1450
                   :seon.cluster.eval/call-count 8769
-                  :seon.cluster.eval/repeated-calls #{['seon.db/database-value? 2887 0]}}]
-    (is (not (contains? (one-map (repl/response emission)) :seon.repl/repeated))
-        "a fast reply carries no repeated-call profile")
-    (is (= [['seon.db/database-value? 2887 0]]
-           (:seon.repl/repeated (one-map (repl/response (assoc emission :seon.eval/duration-ms 1450)))))
-        "a slow run keeps it as the clue")))
+                  :seon.cluster.eval/repeated-calls #{['seon.db/database-value? 2887 0]}}
+        reply (one-map (repl/response emission))]
+    (is (= [:slow] (mapv :seon.repl/finding (:seon.repl/findings reply))))
+    (is (empty? (select-keys reply [:seon.repl/calls :seon.repl/repeated]))
+        "a slow reply names its finding and numbers, not the armed call counts")))
 
 (deftest every-reply-path-reads-the-recorded-cost-its-findings-need
   ;; Live 2026-09-27: the receipt recorded :seon.eval/value-tokens 1604 but the

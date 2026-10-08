@@ -13,10 +13,10 @@
                      [:tuple :qualified-symbol :seon.program/definition-digest]],
                     :call-count
                     [:int {:min 1 :seon.wake/context-inert true
-                           :description "The armed calls this evaluation's own code made: shown in its reply beside its milliseconds."}],
+                           :description "The armed calls this evaluation's own code made, kept on the record; the reply does not show it."}],
                     :repeated-calls
                     [:set {:seon.wake/context-inert true
-                           :description "Each function this evaluation called more than seon.batch/repeated-calls times, as [sym calls ms]: repetition visible in the reply of the evaluation that made it."}
+                           :description "Each function this evaluation called more than seon.batch/repeated-calls times, as [sym calls ms], kept on the record; the reply does not show it."}
                      [:tuple :qualified-symbol :int :int]],
                     :code-evidence
                     [:enum {:seon.wake/context-inert true

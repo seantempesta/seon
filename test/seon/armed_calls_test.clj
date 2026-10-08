@@ -4,8 +4,8 @@
             [seon.mcp :as mcp]
             [seon.test-support :as support]))
 
-(deftest ^{:seon/tasks #{'seon.instrument/hot-internals-pay-armed-validation}}
-  a-tiny-contract-counts-only-its-invocations
+(deftest ^{:seon/tasks #{'seon.repl/the-slow-fix-ranks-the-whole-process}}
+  a-slow-reply-carries-no-armed-call-counts
   (support/with-running-agent
    (fn [running agent-id _]
      (let [call (fn [code]
@@ -15,9 +15,6 @@
                                            "arguments" {"cluster" running "agent" agent-id "code" code}})))]
                     (support/mcp-reply reply)))]
        (call "(defn pf {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
-       (doseq [[code expected calls]
-               [["(pf 41)" 42 1]
-                ["(mapv pf (range 10))" (vec (range 1 11)) 10]
-                ["(reduce + (map pf (range 100)))" 5050 100]]]
-         (is (= {:seon.repl/value expected :seon.repl/calls calls}
-                (select-keys (call code) [:seon.repl/value :seon.repl/calls]))))))))
+       (let [reply (call "(do (Thread/sleep 1100) (dorun (map pf (range 300))) 1)")]
+         (is (= :slow (-> reply :seon.repl/findings first :seon.repl/finding)))
+         (is (empty? (select-keys reply [:seon.repl/calls :seon.repl/repeated]))))))))
