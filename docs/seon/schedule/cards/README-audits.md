@@ -276,11 +276,11 @@ fully specified in the ledger and its card is this lane's next batch.
 | UL-8 | card next | waits on led-nk1, led-cacheb |
 | UL-9 | — | waits on task `seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check` |
 | UL-10 | — | blocked (AU-Q1) |
-| UL-11 | card next | ready (diagnosis) |
+| UL-11 | [UL-11](UL-11.md) | ready (diagnosis) |
 | SR-P | [SR-P](SR-P.md) | ready after blob-konserve releases `blob.clj` |
-| SR-L | card next | waits on led-cacheb (`registry.clj`) |
+| SR-L | [SR-L](SR-L.md) | ready after led-cacheb releases `registry.clj` |
 | SR-G2 | — | after SR-L |
-| SR-T | card next | after SR-P |
+| SR-T | [SR-T](SR-T.md) (shell and web only; fault evidence goes with E-SDELETE) | ready after SR-P, dials-16gb |
 | SR-S | [SR-S](SR-S.md) | ready |
 | SR-ENUMa | card next | after SR-L, SR-S |
 | SR-ENUMb | — | after SR-ENUMa |
@@ -288,7 +288,7 @@ fully specified in the ledger and its card is this lane's next batch.
 | SR-EFFECT | — | after EN-1 |
 | SR-STATUS | [SR-STATUS](SR-STATUS.md) | ready |
 | SR-STREAM | — | after BLOB-K |
-| SR-R0 | card next | ready (diagnosis) |
+| SR-R0 | [SR-R0](SR-R0.md) | ready (diagnosis) |
 | SR-R | — | blocked (AU-Q10) |
 | SR-AUDIT | — | after SR-G2 |
 | SR-HITS | — | after LR-CACHEb |
@@ -301,11 +301,12 @@ fully specified in the ledger and its card is this lane's next batch.
 | PB-11 | — | after PB-03 (Opus) |
 | PB-12 | [PB-12](PB-12.md) (PB-12a fork, PB-12b Seon) | ready |
 | PB-13 | — | after PB-07b |
-| PB-14 | card next | ready (diagnosis, Astra) |
+| PB-14 | [PB-14](PB-14.md) | ready (diagnosis, Astra) |
+| PB-15 | [PB-15](PB-15.md) | ready after led-nk9, led-nk1 |
 | DH-4a | card next | waits on dials-16gb (`store.clj`) |
 | DH-4b | — | after DH-4a (Opus design check) |
 | DH-5, DH-6, DH-7 | — | after LR-CACHEb (Datahike gitlink) |
 | DH-8 | — | after BLOB-K (konserve compressor) |
 | CN-24 | — | after PR-07, RO-4 |
-| VEC-10 | card next | ready (diagnosis) |
+| VEC-10 | [VEC-10](VEC-10.md) | ready (diagnosis) |
 | DIAL-2 … DIAL-18 | DIAL-3, DIAL-5, DIAL-13 card next | each row's Deps |
