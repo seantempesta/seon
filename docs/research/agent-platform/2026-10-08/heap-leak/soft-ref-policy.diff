@@ -1,0 +1,43 @@
+--- deps.edn	2026-10-08 16:38:43.972256059 +0900
++++ deps.edn	2026-10-08 18:00:44.083845155 +0900
+@@ -140,7 +140,14 @@
+               "--enable-native-access=ALL-UNNAMED"
+               "-XX:+UseG1GC"
+               "-XX:G1PeriodicGCInterval=30000"
+-              "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"]}
++              "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"
++              ;; Datahike's restored index nodes sit behind SoftReferences
++              ;; (persistent-sorted-set's default ref type); the bounded node
++              ;; LRU (:seon.config.db/store-cache-size) is the configured cache.
++              ;; At the JDK default of 1000 ms per free MB a node read in the
++              ;; last 20-50 minutes survives every collection, System/gc
++              ;; included, and counts as tenured occupancy at the memory gate.
++              "-XX:SoftRefLRUPolicyMSPerMB=10"]}
+ 
+   ;; Rebuild the source-preferred class cache for the dependency namespaces
+   ;; reached by `seon.cluster.boot`; first-party source remains uncached.
+@@ -164,6 +171,13 @@
+               "-XX:+UseG1GC"
+               "-XX:G1PeriodicGCInterval=30000"
+               "-XX:MinHeapFreeRatio=20" "-XX:MaxHeapFreeRatio=40"
++              ;; Datahike's restored index nodes sit behind SoftReferences
++              ;; (persistent-sorted-set's default ref type); the bounded node
++              ;; LRU (:seon.config.db/store-cache-size) is the configured cache.
++              ;; At the JDK default of 1000 ms per free MB a node read in the
++              ;; last 20-50 minutes survives every collection, System/gc
++              ;; included, and counts as tenured occupancy at the memory gate.
++              "-XX:SoftRefLRUPolicyMSPerMB=10"
+               ;; A heap failure ends the JVM instead of limping into the store.
+               ;; The operator names the dump directory (<root>/data/heap) at
+               ;; launch; this JVM's working directory may be a pruned archive.
+--- test/seon/dev/heap_options_test.clj	2026-09-29 07:23:16.533161373 +0900
++++ test/seon/dev/heap_options_test.clj	2026-10-08 18:00:53.120405833 +0900
+@@ -11,3 +11,8 @@
+     (is (pos? (option "G1PeriodicGCInterval")))
+     (is (<= minimum 20))
+     (is (<= minimum maximum 40))))
++
++(deftest softly-held-nodes-age-out-in-seconds
++  (let [options (ManagementFactory/getPlatformMXBean HotSpotDiagnosticMXBean)]
++    (is (<= (Long/parseLong (.getValue (.getVMOption options "SoftRefLRUPolicyMSPerMB"))) 10)
++        "a softly held index node read a minute ago counts as live at the memory gate")))
