@@ -116,6 +116,13 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   refactors that conflict with the moving target (rename plus new caller, contract vs body change, schema evolution
   vs target data, two agents in one namespace). Lives in: competency-spec.md §1-§8; agent-loop.md §3.10; ledger §3.11.
 
+- **References (owner 2026-10-08).** Code is referenced by a fully qualified symbol, a schema by a fully qualified
+  keyword, any other file by a relative path whose first segment names its base (the checkout, or
+  `reference-code/<project>` at its pinned revision), with `#heading` anchors; no custom EDN tag or reader. File and line
+  are always derived (Var metadata, clj-kondo analysis, the stored schema), never written. Ingestion reports an
+  unresolved reference as a problem on the task, never a refusal. A task's proofs are the deftests carrying it in
+  `:seon/tasks`, never prose. Lives in: `references/references.md`; cards CS-01c1..3; task census migration.
+
 ## 5. Merge
 
 - **Git's words.** Base merge and branch concepts, verbs, functions and data on git, so every agent understands them
