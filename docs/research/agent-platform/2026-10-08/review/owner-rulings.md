@@ -236,6 +236,12 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
 
 ## 9. Vocabulary and libraries
 
+- **Fork freely, upstream what's general (owner 2026-10-08).** Where a library lacks a seam we need, change our fork
+  instead of building around it. Each fork change is an upstream-quality commit with the library's own tests; general
+  ones (e.g. Malli's `-strument-each!`, SCI's alias rule, Datahike's norm seam) are offered upstream once there is a
+  community; each fork keeps a short divergence list. Lives in: `docs/seon/architecture/reference-code.md` (fork
+  divergence lists); FK-* cards.
+
 - **The Clojure way.** "Do not pretend you are writing ruby/python/whatever and reuse those concepts." Use Clojure's
   and each library's names and seams (clojure.main, nREPL/prepl, clojure.test, Datomic/Datahike, Malli,
   core.async.flow, core.cache, clj-reload, clj-kondo, SCI, git). Lives in: AGENTS.md "Use grounded vocabulary" and its
