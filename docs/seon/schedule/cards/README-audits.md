@@ -214,6 +214,14 @@ stay in datoms, copied into every index leaf and node version.
 2. Store occasional compact cache summaries.
 3. Record every admission, eviction and hit (not recommended on a 4 GB heap).
 
+**AU-Q24. The free-disk floor (dials.md D31).** `:seon.config.maintenance/min-usable-bytes` ships 50 GiB; on a
+256 GB laptop that reports "low space" with a fifth of the disk free. `:seon.config.maintenance/min-usable-ratio` also
+exists.
+1. Keep 50 GiB.
+2. **(recommended)** 10 GiB, so a 16 GB-RAM laptop with a small disk is not flagged by default, with the ratio as the
+   second floor.
+3. Drop the byte floor and keep only the ratio.
+
 **Keeps to confirm (no change unless the owner objects):** `seon.profile` (JFR samples; we need exact per-Var counts);
 SCI context rebase (`sci/fork` is one-way, private Vars must survive); the cycle-safe cause chain beside
 `Throwable->map` (no cycle guard, no suppressed exceptions); the `clojure.test/report` adapter (kaocha not on the
@@ -241,19 +249,63 @@ A row that deletes code goes before any row that would fix the same code; the fi
 - SR-P deletes `put!`/`put-binary!` after SR-D (landed), so no later row re-adds a blob writer without a fact.
 - AU-Q10 option 1 deletes the read-evidence capture SR-R would shrink: SR-R waits on it.
 - AU-Q12 option 1 rewrites the checked writer: PB-10 waits on it.
-- AU-Q1 option 1 deletes the row machinery and core.cache memo in `call_preparation.clj`; DIAL-6 (its LRU count) is
-  dropped if UL-10 lands, so DIAL-6 waits on AU-Q1.
-- DIAL rows for `db.clj`, `sci/eval.clj` and `test.clj` LRU counts fold into SR-J (move into `seon.cache`), never into
-  new count dials.
+- AU-Q1 option 1 deletes the row machinery and core.cache memo in `call_preparation.clj` (UL-10); SR-J's slice for
+  that LRU therefore waits on AU-Q1.
+- The LRU counts of dials.md (D4-D7: `db.clj`, `call_preparation.clj`, `sci/eval.clj`, `test.clj`) move into
+  `seon.cache` through SR-J's slices, never into new count dials.
+- S5-02 deletes stored profile measurements: RO-10 now keeps output samples in the live profile cells, and DIAL-10c
+  (`measurement.clj`'s `min-calls`) is dropped if S5-02 deletes its consumer. S4-07b deletes prompt selection: DIAL-16
+  is dropped if `cluster/prompt.clj` goes.
+- PR-18 already returns `my.program` search and sizes as whole ranked data: dials.md D27 (search limit 8, largest 20)
+  goes there, not to a dial.
 - RED-3 was already green (`ad831095f`); retired, not scheduled.
 
 ## Card index
 
+Rows from the audits and their state (the ledger row is the authority for dependencies). "card next" means the row is
+fully specified in the ledger and its card is this lane's next batch.
+
 | Row | Card | State |
 |---|---|---|
 | UL-3a | [UL-3a](UL-3a.md) | ready |
+| UL-3b | — | waits on root's split of eight test conversions |
+| UL-4 | — | blocked (AU-Q9) |
+| UL-5 | card next | waits on fault-data-edn (`error.clj`) |
 | UL-6 | [UL-6](UL-6.md) | ready after led-cacheb releases `cluster/agent.clj` |
 | UL-7 | [UL-7](UL-7.md) | ready |
+| UL-8 | card next | waits on led-nk1, led-cacheb |
+| UL-9 | — | waits on task `seon.cluster.source/a-launch-option-change-in-deps-edn-refuses-every-check` |
+| UL-10 | — | blocked (AU-Q1) |
+| UL-11 | card next | ready (diagnosis) |
 | SR-P | [SR-P](SR-P.md) | ready after blob-konserve releases `blob.clj` |
+| SR-L | card next | waits on led-cacheb (`registry.clj`) |
+| SR-G2 | — | after SR-L |
+| SR-T | card next | after SR-P |
 | SR-S | [SR-S](SR-S.md) | ready |
+| SR-ENUMa | card next | after SR-L, SR-S |
+| SR-ENUMb | — | after SR-ENUMa |
+| SR-PERMIT | card next (Opus) | after SR-P |
+| SR-EFFECT | — | after EN-1 |
 | SR-STATUS | [SR-STATUS](SR-STATUS.md) | ready |
+| SR-STREAM | — | after BLOB-K |
+| SR-R0 | card next | ready (diagnosis) |
+| SR-R | — | blocked (AU-Q10) |
+| SR-AUDIT | — | after SR-G2 |
+| SR-HITS | — | after LR-CACHEb |
+| SR-BRANCH | — | after MA-15, F5, F7, MA-14b |
+| PB-07a | card next | waits on fault-data-edn (`error.clj`) |
+| PB-07b | card next | after PB-07a, led-ul2 |
+| PB-08 | — | waits on led-cacheb (Opus) |
+| PB-09 | — | after S4-01 |
+| PB-10 | — | blocked (AU-Q12) |
+| PB-11 | — | after PB-03 (Opus) |
+| PB-12 | card next | ready once carded |
+| PB-13 | — | after PB-07b |
+| PB-14 | card next | ready (diagnosis, Astra) |
+| DH-4a | card next | waits on dials-16gb (`store.clj`) |
+| DH-4b | — | after DH-4a (Opus design check) |
+| DH-5, DH-6, DH-7 | — | after LR-CACHEb (Datahike gitlink) |
+| DH-8 | — | after BLOB-K (konserve compressor) |
+| CN-24 | — | after PR-07, RO-4 |
+| VEC-10 | card next | ready (diagnosis) |
+| DIAL-2 … DIAL-18 | DIAL-3, DIAL-5, DIAL-13 card next | each row's Deps |
