@@ -24,8 +24,8 @@ RF-2 not landed). Wall clock 16:57 to about 17:15 JST.
 - The loop around it did not work as specified. **Task filing, assignment and the agent-written proof all failed**
   (frictions 1-6 below). The work ran unassigned, the proof is the card's added assertion written into the test file
   by hand, and the read-count property the task is about could not be asserted by any test an agent can write.
-- Commit through the throwaway check (`bin/lane commit … --test my.program-test --test my.program-read-test`); RF-2's
-  `--branch-evidence` is not in HEAD.
+- Landed as `1092ca448` through the throwaway check (`--test my.program-test --test my.program-read-test`: 11 tests
+  green); RF-2's `--branch-evidence` is not in HEAD. Net source and test lines: +35/-46.
 
 ## Timeline and measurements
 
@@ -50,7 +50,7 @@ where it reported one.
 | 5 write-back (pilot) | `write-branch!` | 52-61 | ~1,100 | refused, undigested `pilot.scratch` (friction 8) |
 | 5 write-back (pilot-2, same request as defn) | `write-branch!` | 56 | 853 | "The accepted merge changed no declaration." (friction 10) |
 | 5 write-back (pilot-2) | `write-branch!` | 484 | 15,306 | `src/my/program.clj` replaced `[:seon.fn/sym my.program/caller-data]` |
-| 5 commit | `bin/lane commit` throwaway check | see landing | — | queued behind another check |
+| 5 commit | `bin/lane commit` throwaway check | 207,000 | — | `1092ca448`; 126 s waiting for a JVM slot, 45 s boot, 18 s tests (run `21589cd6e161`: 11 executed, 83 pass, 0 fail); lint 6 s |
 
 Reads after the change could not be counted at the agent REPL (friction 5); the card's expectation is 3 queries plus
 2-3 `pull-many`, independent of the caller count. Root measures it on default after the restart that loads the
