@@ -135,6 +135,11 @@ rulings, then AGENTS.md (CLAUDE.md is a symlink to it). Order of work: the ledge
   the edit hook checks every edited doc, task file and docstring for references that don't resolve. Lives in: cards
   REF-1, REF-2, CS-01c5, TASK-CHECK.
 
+- **Cost and refactor tasks are proven by measured cost (owner 2026-10-08).** A proof may assert measured cost through
+  one test-visible measure (reads, armed calls, allocated bytes, ms as data, from JVM counters so it sees compiled
+  code), so a refactor or cost task has a red proof before the fix and is assigned like any other. Lives in: lane
+  eval-alloc (the measure); pilot note `dogfood/pilot.md`.
+
 ## 5. Merge
 
 - **Git's words.** Base merge and branch concepts, verbs, functions and data on git, so every agent understands them
