@@ -179,4 +179,8 @@
  #:seon.task{:name "a-host-bound-redefinition-runs-its-reaching-tests-in-sci"
              :kind :function
              :intent "Defining the host-bound `seon.sci.eval/build-base-ctx` on a branch (lane repl-only-a5, default fa92a2503, 2026-10-09) made the eval request's test step run 115 reaching tests (10.5 s of an 11.1 s request), 13 red and 10 errored, a reply of about 3,000 tokens, although a host-bound change runs compiled until merge and only `my.test/check-platform` can prove it; the heap's live set rose from 0.66 GB to 3.17 GB over this and the next minutes, after which every evaluation was refused for memory pressure. Done when the test step answers a host-bound change by naming its platform proof instead of running reaching tests in SCI."
-             :must-read #{seon.turn/step my.test/check-platform seon.sci.kernel/memory-pressure}}]
+             :must-read #{seon.turn/step my.test/check-platform seon.sci.kernel/memory-pressure}}
+ #:seon.task{:name "a-root-request-runs-the-clusters-whole-drift-as-reaching-tests"
+             :kind :function
+             :intent "On default at e040662e4 (lane platform-route, 2026-10-09), a root SCI eval_clj request whose one form was refused by its contract (`(my.agent/retire-branch! {:seon.agent/id ...})`) ran a test step of 10,324 ms of a 10,415 ms request: 3 red, 1 errored and about 1,600 tests left pending, selected by `seon.test/changes` over the cluster branch's whole difference from its published commit. The next root request gave no answer within the bridge's 32 s and runtime_status then showed `seon.sci.kernel/acquire-arm` refusing evaluations for memory pressure (5 occurrences, heap live 1.79 GB of 4 GB). Done when a root request's test step costs what its own forms changed (`seon.turn/test-step` selecting through `seon.test/changes`), not the cluster's drift from its base."
+             :must-read #{seon.turn/test-step seon.test/changes seon.sci.kernel/memory-pressure}}]
