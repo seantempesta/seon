@@ -1849,19 +1849,6 @@
                   (:seon.program/not-found error))]
     (when (symbol? found) found)))
 
-(defn- edit-distance
-  "Levenshtein distance between two names."
-  {:malli/schema [:=> [:cat :string :string] [:int {:min 0}]]}
-  [a b]
-  (peek (reduce (fn [previous ca]
-                  (reduce (fn [row [j cb]]
-                            (conj row (min (inc (peek row)) (inc (nth previous (inc j)))
-                                           (+ (nth previous j) (if (= ca cb) 0 1)))))
-                          [(inc (first previous))]
-                          (map-indexed vector b)))
-                (vec (range (inc (count b))))
-                a)))
-
 (def ^:private names-shown
   "Declared names shown beside a name not found: the nearest by spelling."
   8)
@@ -1885,7 +1872,7 @@
             (comp (remove (fn [[_ private?]] (and private? (qualified-symbol? missing))))
                   (map (comp symbol name first))
                   (take names-shown))
-            (sort-by (fn [[sym]] [(edit-distance wanted (name sym)) (name sym)]) found)))))
+            (sort-by (fn [[sym]] [(me/levenshtein wanted (name sym)) (name sym)]) found)))))
 
 (defn- call-lines
   "For each program function named (at most three), the lines of its stored
