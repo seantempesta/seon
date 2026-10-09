@@ -42,3 +42,17 @@
       (finally
         (agent/release-context! context)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
+
+(deftest ^{:seon/tasks #{'seon.test.platform/a-refused-platform-check-names-no-diagnostic}}
+  a-refused-platform-check-carries-its-diagnostic-as-data
+  (let [published (platform/published-source)
+        database (db/db (:seon.db/connection (support/execution-handle nil)))
+        snapshot (str (java.nio.file.Files/createTempDirectory "platform-test" (make-array java.nio.file.attribute.FileAttribute 0)))
+        ;; a commit no repository holds: the operator refuses before any JVM boots
+        refused (platform/run-check! database published "1111111111111111111111111111111111111111" snapshot
+                                     #{'seon.id-test/id-is-unique})
+        diagnostic (:seon.test.platform/diagnostic refused)]
+    (is (map? published))
+    (is (:seon.error/message refused))
+    (is (.isFile (java.io.File. ^String (:seon.test.platform/diagnostic-file diagnostic))) "the operator wrote the named file")
+    (is (string? (:seon.error/message diagnostic)) "its message is data on the refusal")))
