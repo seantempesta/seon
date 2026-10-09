@@ -196,6 +196,7 @@
  :seon.profile/measured-call
  [:map {:description "One measured call (seon.profile/measure): its value and what it cost, from JVM counters."}
   [:seon.profile/value :seon.profile/value]
+  [:seon.cost/jvm-window {:optional true} :seon.cost/jvm-window]
   [:seon.profile/ms :seon.profile/ms]
   [:seon.profile/alloc-bytes {:optional true} :seon.profile/alloc-bytes]
   [:seon.profile/alloc-scope {:optional true} :seon.profile/alloc-scope]

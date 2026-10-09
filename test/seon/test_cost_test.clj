@@ -3,8 +3,32 @@
   its body thread's allocation, its run time and its most-called definitions."
   (:require [clojure.data.json :as json]
             [clojure.test :refer [deftest is]]
+            [seon.batch :as batch]
             [seon.mcp :as mcp]
+            [seon.test :as test]
             [seon.test-support :as support]))
+
+(defn counted-member-call
+  "The value the nested member calls through its armed boundary."
+  {:malli/schema [:=> [:cat :int] :int]}
+  [n]
+  (inc n))
+
+(deftest a-counted-member
+  (is (= 17 (reduce (fn [n _] (counted-member-call n)) 0 (range 17)))))
+
+(deftest a-member-keeps-its-own-calls-and-adds-them-to-its-parent
+  (let [sink (batch/sink)
+        execution (support/execution-handle nil)
+        result (binding [batch/*world* (assoc batch/*world* :seon.batch/sink sink)]
+                 (test/run {:seon.test/execution execution
+                            :seon.test/recording-connection (:seon.db/connection execution)
+                            :seon.test/policy :named
+                            :seon.test/identities #{'seon.test-cost-test/a-counted-member}}))]
+    (is (true? (:seon.test/passed? result)))
+    (is (= 1 (:seon.test/executed-count result)))
+    (is (= 17 (get (batch/calls sink) 'seon.test-cost-test/counted-member-call)))
+    (is (<= 17 (:seon.test.member/calls (first (:seon.test/results result)))))))
 
 (defn- answered
   "The reply value of `code` through the MCP entrance as `agent-id`."

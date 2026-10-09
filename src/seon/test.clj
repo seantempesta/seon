@@ -238,7 +238,10 @@
         sink (seon.batch/sink)
         allocated (.getCurrentThreadAllocatedBytes mx)
         started (System/nanoTime)
-        result (body sink)
+        result (try (body sink)
+                    (finally
+                      (when-let [parent (:seon.batch/sink seon.batch/*world*)]
+                        (seon.batch/merge-sink! parent sink))))
         run-ms (/ (- (System/nanoTime) started) 1000000.0)
         alloc-bytes (max 0 (- (.getCurrentThreadAllocatedBytes mx) allocated))]
     (if (and (map? result) (not (:seon.error/at result)))

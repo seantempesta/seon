@@ -358,6 +358,7 @@
   [{code :seon.mcp/code agent-id :seon.mcp/agent cluster :seon.mcp/cluster mode :seon.mcp/mode
     start :seon.mcp/namespace}]
   (let [started (System/nanoTime)
+        counters (seon.batch/jvm-counters)
         found (instance @runtime/running-instances cluster)
         namespace-name (some-> start symbol)
         custody (when-not (:seon.error/at found)
@@ -371,7 +372,9 @@
           [[(printed custody code (db/db (get-in found [:seon.turn.loop/cluster :seon.db/connection])) cluster-name)] true {} nil]
           (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
           :else (sci-run custody code namespace-name cluster-name))]
-    [(conj texts (printed {:seon.repl/request (seon.batch/request-cost started (merge stages run-stages) counts)}
+    [(conj texts (printed {:seon.repl/request (assoc (seon.batch/request-cost started (merge stages run-stages) counts)
+                                                   :seon.cost/jvm-window
+                                                   (seon.batch/jvm-window counters (seon.batch/jvm-counters)))}
                           code nil cluster-name))
      failed?]))
 

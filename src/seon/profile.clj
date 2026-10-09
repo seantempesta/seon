@@ -670,7 +670,9 @@
   Every counter but the allocation is JVM-wide over the call's window, so
   concurrent unrelated work counts too. The allocation is the calling platform
   thread's own (`:seon.profile/alloc-scope :thread`) and misses work it hands
-  to other threads; on a virtual thread, which has no count, it is absent."
+  to other threads; on a virtual thread, which has no count, it is absent.
+  `:seon.cost/jvm-window` also reports all-thread allocation and process CPU,
+  explicitly including unrelated concurrent work, GC and compilation."
   {:malli/schema [:=> [:cat :seon.profile/thunk] :seon.profile/measured-call]}
   [f]
   (let [;; local functions, not armed ones: the second reading's own calls
@@ -692,6 +694,7 @@
                                                 m)))
                                           m (.toArray members)))
                                 (transient {}) (.values ^ConcurrentHashMap roster))))
+        window-before (seon.batch/jvm-counters)
         entries-before (entries)
         [gc-before gc-ms-before] (collected)
         allocated-before (allocated)
@@ -699,6 +702,8 @@
         value (f)
         ms (/ (Math/round (/ (- (System/nanoTime) started) 1e4)) 100.0)
         allocated-after (allocated)
+        entries-after (entries)
+        window-after (seon.batch/jvm-counters)
         [gc-after gc-ms-after] (collected)
         called (into []
                      (keep (fn [[sym [n self]]]
@@ -707,10 +712,11 @@
                                (when (pos? d)
                                  {:seon.profile/sym sym :seon.profile/calls d
                                   :seon.profile/self-ms (quot (- self self0) 1000000)}))))
-                     (entries))
+                     entries-after)
         ranked (fn [k] (into [] (take hot-limit) (sort-by k #(compare %2 %1) called)))]
     (cond->
     {:seon.profile/value value
+     :seon.cost/jvm-window (seon.batch/jvm-window window-before window-after)
      :seon.profile/ms ms
      :seon.profile/gc-count (- gc-after gc-before)
      :seon.profile/gc-ms (- gc-ms-after gc-ms-before)

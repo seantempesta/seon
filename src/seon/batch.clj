@@ -163,6 +163,41 @@
   [t0]
   (/ (- (System/nanoTime) t0) 1e6))
 
+(defn merge-sink!
+  "Add a completed child's calls and times to its parent, leaving the child intact."
+  {:malli/schema [:=> [:cat :seon.batch/sink :seon.batch/sink] :nil]}
+  [^java.util.concurrent.ConcurrentHashMap parent child]
+  (when-not (identical? parent child)
+    (doseq [[k ^java.util.concurrent.atomic.AtomicLongArray from] child
+            :let [^java.util.concurrent.atomic.AtomicLongArray to (.computeIfAbsent parent k new-adder)]]
+      (dotimes [i 3] (.addAndGet to i (.get from i)))))
+  nil)
+
+(defn jvm-counters
+  "JVM-wide heap allocation and process CPU counters; unavailable readings stay negative."
+  {:malli/schema [:=> [:cat] [:tuple :int :int]]}
+  []
+  (let [threads (java.lang.management.ManagementFactory/getThreadMXBean)
+        os (java.lang.management.ManagementFactory/getOperatingSystemMXBean)]
+    [(if (and (instance? com.sun.management.ThreadMXBean threads)
+              (.isThreadAllocatedMemorySupported ^com.sun.management.ThreadMXBean threads))
+       (.getTotalThreadAllocatedBytes ^com.sun.management.ThreadMXBean threads) -1)
+     (if (instance? com.sun.management.OperatingSystemMXBean os)
+       (.getProcessCpuTime ^com.sun.management.OperatingSystemMXBean os) -1)]))
+
+(defn jvm-window
+  "Counter deltas across all threads, including unrelated work, GC and compilation."
+  {:malli/schema [:=> [:cat [:tuple :int :int] [:tuple :int :int]] :seon.cost/jvm-window]}
+  [[allocated0 cpu0] [allocated1 cpu1]]
+  (cond-> {:seon.cost/scope :jvm-window
+           :seon.cost/attribution :includes-unrelated-work
+           :seon.cost/alloc-accuracy :approximate-counter
+           :seon.cost/cpu-accuracy :os-counter}
+    (<= 0 allocated0 allocated1) (assoc :seon.cost/alloc-mb (/ (- allocated1 allocated0) 1e6))
+    (<= 0 cpu0 cpu1) (assoc :seon.cost/cpu-ms (/ (- cpu1 cpu0) 1e6))
+    (not (<= 0 allocated0 allocated1)) (assoc-in [:seon.cost/unmeasured :seon.cost/alloc-mb] :counter-unavailable)
+    (not (<= 0 cpu0 cpu1)) (assoc-in [:seon.cost/unmeasured :seon.cost/cpu-ms] :counter-unavailable)))
+
 (defn tenths
   "Milliseconds to 0.1, the precision a request's cost shows."
   {:malli/schema [:=> [:cat number?] :double]}
@@ -172,11 +207,18 @@
 (defn request-cost
   "One eval request's cost: wall milliseconds since `started-ns` (a
   `System/nanoTime` reading at its entrance), the wall milliseconds of each
-  stage it ran and the counts its worlds' sinks hold, when measured."
+  stage it ran, its residual wall time and the counts its worlds' sinks hold.
+  A negative residual exposes overlapping stage clocks; allocation and CPU remain arm-only."
   {:malli/schema [:=> [:cat :int [:map-of :keyword number?] [:maybe :seon.cost/counts]] :seon.cost/request]}
   [started-ns stages counts]
-  (cond-> (merge {:seon.cost/ms (tenths (ms-since started-ns))} counts)
-    (seq stages) (assoc :seon.cost/stages (update-vals stages tenths))))
+  (let [elapsed (tenths (ms-since started-ns))
+        ;; Round named intervals down; their rounding remainder belongs to unattributed.
+        stages (update-vals stages #(/ (Math/floor (* 10.0 (double %))) 10.0))
+        remainder (tenths (- elapsed (reduce + 0.0 (vals stages))))]
+    (merge counts {:seon.cost/ms elapsed
+                   :seon.cost/arm-scope :evaluation-arms-only
+                   :seon.cost/causal-attribution :unavailable
+                   :seon.cost/stages (assoc stages :unattributed remainder)})))
 
 (defn arm-measures
   "The allocation and CPU time of the forms' evaluation arms (each arm's
@@ -535,12 +577,8 @@
         (:seon.batch/form-world batch)
         in-flight (.get owned)
         executed-now (executed s)]
-    (when-let [^java.util.concurrent.ConcurrentHashMap batch-sink (:seon.batch/sink (:seon.batch/world request))]
-      (doseq [[k ^java.util.concurrent.atomic.AtomicLongArray form-counter] s
-              :let [^java.util.concurrent.atomic.AtomicLongArray c (.computeIfAbsent batch-sink k new-adder)]]
-        (.addAndGet c 0 (.get form-counter 0))
-        (.addAndGet c 1 (.get form-counter 1))
-        (when (< 2 (.length form-counter)) (.addAndGet c 2 (.get form-counter 2)))))
+    (when-let [batch-sink (:seon.batch/sink (:seon.batch/world request))]
+      (merge-sink! batch-sink s))
     (last-entry batch
                 #(cond-> (assoc % :seon.batch/reads @reads :seon.batch/read-sink reads :seon.batch/executed executed-now
                                 :seon.batch/call-profile (call-profile s)
