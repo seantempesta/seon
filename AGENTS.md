@@ -1,13 +1,52 @@
 # Seon — shared instructions
 
-Seon is a Clojure system in which agents write, test and improve their own code in a running JVM. Schemas make data
-storable and queryable; functions and declared renders make it executable and visible. Build toward a codebase of
-10,000 lines or fewer and sub-second ordinary operations.
+## The goal
 
-This file (`CLAUDE.md` is a symlink) holds laws and how to work, revised in place, never appended to. Mechanisms
-live in [architecture](docs/seon/architecture/README.md) and `.agents/skills`, decisions in the owning spec, history
-in Git. Read the assignment, nearest instructions and named authorities end to end. Verify targets against the
-running system: a specification or source citation is not evidence of installation; never claim a target API exists.
+Software has rarely grown linearly: each addition tangles with what already exists, so cost and defects grow faster
+than capability. Seon is a different way to build software, one that grows by **accretion**, the way Clojure has:
+open data, stable names, new names for new meanings, and every part observable. Many agents work at once, each on
+its own branch in its own SCI world, and design, prove and implement software cheaply and safely. The system gets
+smaller, faster and more certain as they work.
+
+Four properties make that possible:
+
+1. **Data is designed first and moves provably.** Every value has a named Malli schema at its producer, and every
+   consumer declares the same name. A change to what `foo` returns is therefore visible to everything that depends on
+   it. A changed meaning takes a new name; the old name keeps its promise until its last consumer has moved. That is
+   how Seon versions: by name, in the data.
+2. **Everything is instrumented.** Every function carries its contract, and every call is checked and measured. Every
+   reply reports what the work cost (calls, CPU, memory, storage) and what changed, so feedback arrives on every
+   change.
+3. **Work is tasks, and tasks chain.** A task is data: what must become true, references to the code and documents
+   it touches, and the proofs that show it done. Tasks chain naturally: model the data and specify the interface,
+   then write the proofs, then implement the body. Each step is worked by an agent whose context Seon generates from
+   the task's references.
+4. **The core stays small and fast.** It aims at about 10,000 lines and sub-second ordinary operations, and it
+   composes proven libraries for every concept they already own.
+
+This file (`CLAUDE.md` is a symlink) holds the laws and how to work, revised in place. Mechanisms live in
+[architecture](docs/seon/architecture/README.md) and `.agents/skills`, decisions in the owning spec, history in Git.
+Read the assignment, the nearest instructions and the named authorities end to end. Verify every target against the
+running system: a specification or a source citation describes intent, and the running system is the evidence.
+
+## How we design
+
+Every change follows the same order, from the data outward:
+
+1. **Trace the data flow.** Find where the value is produced, which functions transform it, where it is stored and
+   where it is shown. Reuse the named schemas already on that flow; name a new schema only for a new concept, at its
+   producer, with its consumers declared.
+2. **Specify the interface before the body.** Give each function its name, its contract over those schemas and its
+   proofs: examples that include every reported input, and a property where a general law exists. Give it a cost
+   budget derived from what the work must do. The proofs are red until the body exists.
+3. **Write the simplest body that satisfies the proofs.** Ask what the work is proportional to and do only that work:
+   lazy over eager, what is shown over what might be shown.
+4. **Change the owner.** When something is in the way, follow the data flow to the part that owns it and change it
+   there. A good fix usually removes code, and every addition names what it replaces.
+5. **Measure before and after.** A design is judged by its measured cost against what the work must do, on real
+   data, with the numbers in the landing.
+6. **Prove the whole loop.** A change counts when it works end to end through the same path agents use: defined at
+   the REPL, proven by its tests, written back and committed.
 
 ## The perspective: an agent at its REPL
 
@@ -17,73 +56,78 @@ root.
 
 - **Core is composable.** One shared database (stable values, one writer, cheap branches), one shared SCI runtime (a
   base context each agent forks into its own world) and render functions over data; each agent is its own
-  concurrent Flow graph. Parts compose as functions and stage values, never as parallel systems. MCP, the test
-  harness and the web are views that enter through the agent's path and render its values; they hold no second
-  model, evaluator, printer or store.
-- **There is one REPL path**: read → evaluate → record → print, from the agent's side of the prompt: forms are read
+  concurrent Flow graph. Parts compose as functions and stage values into one system. MCP, the test harness and the
+  web are views that enter through the agent's path and render its values, sharing its model, evaluator, printer and
+  store.
+- **There is one REPL path**: read → evaluate → record → print, from the agent's side of the prompt. Forms are read
   once, SCI evaluates them, the facts come from what the evaluation observed (with clj-kondo's analysis of the same
-  text joined by exact source span), and one transaction records it all. Everything uses it — product agents,
-  outside agents through MCP, tests through the harness, render forms in context assembly (and the debug page,
-  which only displays that assembly), schema registration, gates and merge; none keeps its own reader, evaluator,
-  printer or recording. An entrant needing another reader or
-  evaluator (JVM mode, a file, a test body) supplies that stage as a value to the same pipeline. A form is parsed
-  once and evaluated once; its facts and shown text are stored and queryable, while its result value lives only in the
-  runtime (a crash or restart loses it; its handle then answers that the value is gone). Everything before the print is a real
-  value under its Malli schema — live in the runtime, a database fact or a blob — never a string built to be
-  clipped. The pipeline is: text in (prose becomes comments and delimiters are repaired where unambiguous) → forms
-  read and evaluated → facts and shown text stored → at the edge, the value's schema selects its most specific render,
-  if any → the value printer. Every shown value passes through the value printer, render output included.
+  text joined by exact source span), and one transaction records it all. Everything uses it: product agents, outside
+  agents through MCP, tests through the harness, render forms in context assembly (and the debug page, which displays
+  that assembly), schema registration, gates and merge. An entrant needing another reader or evaluator (JVM mode, a
+  file, a test body) supplies that stage as a value to the same pipeline. A form is parsed once and evaluated once;
+  its facts and shown text are stored and queryable, while its result value lives in the runtime (after a crash or
+  restart its handle answers that the value is gone). Everything before the print is a real value under its Malli
+  schema: live in the runtime, a database fact or a blob. The pipeline is: text in (prose becomes comments and
+  delimiters are repaired where unambiguous) → forms read and evaluated → facts and shown text stored → at the edge,
+  the value's schema selects its most specific render, if any → the value printer. Every shown value passes through
+  the value printer, render output included.
 - **The path is total.** It always returns the evaluated value. A later stage's failure (gate, renderer, recording,
-  classification) is attached beside the value as a diagnostic and recorded as an error; it never replaces, blocks or
-  wedges the value.
+  classification) is attached beside the value as a diagnostic and recorded as an error, and the value still
+  returns.
 - **Agents change the program in REPL terms**: `defn` inside the target namespace (after `in-ns`), as in Clojure,
-  `my.program/ns-unmap!` and `my.program/remove-ns!` to delete. Files are the write-back of accepted entities, not the
-  working medium. Product agents use declared evaluation, adoption and test requests, never shell self-modification.
+  `my.program/ns-unmap!` and `my.program/remove-ns!` to delete. Files are the write-back of accepted entities; the
+  working medium is the REPL. Product agents work through declared evaluation, adoption and test requests.
 
 ## How to think
 
 - **Simple and correct first, then optimize.** The algorithmic choice has the biggest gains: ask what the work is
-  proportional to and prefer the approach that does only the work actually needed (lazy over eager, what is shown
-  over what might be). Implement it in the simplest correct form you can think of; add complexity only for a
-  measured, large performance win. Optimize for the common path, not the rare failure recovery already handles.
+  proportional to and choose the approach that does only the work actually needed. Implement it in the simplest
+  correct form; add complexity only for a measured, large performance win. Optimize for the common path and let
+  existing recovery handle the rare failure.
 - **Take things apart.** Give each part one role and one reason to change; separate braided concerns.
 - **Be patient at the REPL.** State the problem, knowns and unknowns; inspect real values and call the owner until
   you can predict the result. Refuting a cause is progress. An estimated cost or a suspected cause is a hypothesis
-  until measured on real data: profile before ranking work, and check a surprising observation is not the test's own.
+  until measured on real data: profile before ranking work, and confirm a surprising observation comes from the
+  system rather than the test.
 - **Read the dependency first.** Datahike owns transactions, branches and history; Malli owns compiled schemas and
   contracts; SCI owns contexts; core.async owns graphs; konserve owns storage and reclamation. Compose their
-  mechanisms instead of copying them; use a highly regarded library for tricky parts.
+  mechanisms; use a highly regarded library for tricky parts.
 - **Write small functions of data.** Plain namespaced maps, immutable transformations, core functions and library
-  calls. Split long functions by responsibility; avoid bespoke objects, protocols and accessor layers that hide
-  information.
-- **Fix the producer, not each symptom.** Verify the cause before naming it. A workaround, exemption, fallback or
-  patch elsewhere means: return to the data flow and find the owner.
-- **Prefer values to places.** Derive from held immutable values; arguments and channels remove hidden order. Atoms
-  are a smell: state lives colocated in its owner's value (database facts, the Flow proc's state, the SCI context,
-  `seon.cache`). Mutable state is at most one validated state map per process and one per cluster, each an atom
-  whose `set-validator!` is a Malli validator of its fully specced map, so every write is checked or refused; an
-  agent's state lives in its Flow proc and SCI context. The only other mutable cells are justified counters: the
-  per-function profile counters, the SCI interrupt flag, the running Thread and clojure.test's report counter; cache
-  counters are Caffeine's `recordStats`. Any other atom needs a seriously good reason the owner accepts in plain
-  words, and a lint refuses new ones (ledger §3.19). Live host objects with no data form
-  (Flow graphs, channels, executors, SCI contexts, listeners) live in exactly one roster per scope (process, then
-  cluster execution), keyed by stable ids, passed explicitly and observable in status; admission and retirement are
-  writer-checked facts. Per-call accumulation is a fold.
+  calls. Split long functions by responsibility, and keep information visible in data rather than behind bespoke
+  objects, protocols or accessor layers.
+- **Fix at the producer.** Verify the cause before naming it, then change the part that produces the bad value. When a
+  fix starts to look like a workaround, exemption, fallback or patch elsewhere, return to the data flow and find the
+  owner.
+- **Prefer values to places.** Derive from held immutable values; arguments and channels make order explicit. State
+  lives colocated in its owner's value: database facts, the Flow proc's state, the SCI context, `seon.cache`.
+  Mutable state is at most one validated state map per process and one per cluster, each an atom whose
+  `set-validator!` is a Malli validator of its fully specced map, so every write is checked. An agent's state lives
+  in its Flow proc and SCI context. The other mutable cells are justified counters: the per-function profile
+  counters, the SCI interrupt flag, the running Thread and clojure.test's report counter; cache counters are
+  Caffeine's `recordStats`. Any further atom needs a reason the owner accepts in plain words, and a lint checks this
+  (ledger §3.19). Live host objects with no data form (Flow graphs, channels, executors, SCI contexts, listeners) live
+  in exactly one roster per scope (process, then cluster execution), keyed by stable ids, passed explicitly and
+  observable in status; admission and retirement are writer-checked facts. Per-call accumulation is a fold.
 - **Grow by accretion.** Require no more, promise no less: open maps, validated declared members, optional additions
   and new names for changed semantics.
-- **Make failure local and loud.** Each part fails without corrupting its neighbours or blinding diagnosis. Never
-  read silence, missing subjects or stale observations as health.
-- **Add no hypothetical restrictions.** A restriction names the correctness failure it prevents or is deleted.
+- **Make failure local and loud.** Each part fails without corrupting its neighbours or blinding diagnosis. Health is
+  a positive observation: silence, a missing subject or a stale observation reads as unknown.
+- **Every restriction names the failure it prevents.** A restriction that cannot name one is deleted.
 
 ## Words and where they come from
 
-**DO NOT RECREATE THESE CONCEPTS. USE THE LIBRARIES.** Each row is already solved by the project named. Before touching
-the concept, read its source under `reference-code/<project>` and Seon's caller; use its functions and its words. A
-Seon reimplementation of anything below is a defect: delete it and call the library. If the library truly cannot do
-what is needed, stop and bring the owner the exact gap; never build around it yourself. Retired words survive in code
-only until their rename lands; never use them in new code or prose.
+**The language is written down, and everyone uses it.** Shared words keep agents, code, schemas and documents
+describing the same things; a word that drifts splits one concept into two. The words live in this table and in
+[vocabulary](docs/seon/architecture/vocabulary.md). A new concept gets its word recorded there before the word appears
+in code, schemas, tasks or prose, and a rename converts every use in the same commit.
 
-| Concept | Use (project, source) | Never |
+**Use the libraries for every concept they own.** Each row is already solved by the project named. Before touching
+the concept, read its source under `reference-code/<project>` and Seon's caller, then use its functions and its words.
+When Seon code duplicates one of these, the fix is to delete it and call the library. If the library truly cannot do
+what is needed, bring the owner the exact gap. Retired words survive in code only until their rename lands; new code
+and prose use the library's words.
+
+| Concept | Use (project, source) | Retired words |
 |---|---|---|
 | REPL round: read, eval, print, caught; one eval request per submission | `clojure.main/repl`, prepl, nREPL `eval` ([clojure](https://github.com/clojure/clojure), [nrepl](https://github.com/nrepl/nrepl)) | "pass", "batch", own stage names |
 | function schemas, instrumenting, validation, defaults | `m/-instrument`, `malli.instrument`, `m/validator`, `m/explain`, `malli.registry`, `default-value-transformer` ([malli](https://github.com/metosin/malli)) | own wrappers, "armed", "projection", "supply" |
