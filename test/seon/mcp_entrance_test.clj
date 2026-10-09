@@ -58,6 +58,15 @@
     (is (false? (get-in by-name ["eval_clj" "inputSchema" "additionalProperties"]))
         "a misspelled argument is refused, never ignored")))
 
+(deftest ^{:seon/tasks #{'seon.mcp/eval-clj-advertises-no-timeout}}
+  eval-clj-advertises-the-timeout-the-bridge-honours
+  (let [timeout (get-in (into {} (map (juxt #(get % "name") identity)) (json/read-str (mcp/tools)))
+                        ["eval_clj" "inputSchema" "properties" "timeout_ms"])]
+    (is (= "integer" (get timeout "type")))
+    (is (<= 120000 (get timeout "maximum")) "a platform check's wait fits under the bound"))
+  (is (not (get (answer "eval_clj" {"code" "(+ 1 2)" "timeout_ms" 120000}) "isError"))
+      "a call naming its timeout is not refused as an unknown argument"))
+
 (deftest an-unknown-tool-answers-an-error-result
   (let [result (answer "get_value" {})]
     (is (true? (get result "isError")))

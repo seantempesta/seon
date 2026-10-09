@@ -45,6 +45,14 @@
 ;;; writes a keyword by its name).
 ;;; ---------------------------------------------------------------------------
 
+(defn- eval-bound-ms
+  "The longest `eval_clj` answer a caller may wait for: a platform check's boot and test bounds and its silence
+  backstop (the operator dials' shipped defaults), the longest ordinary work an evaluation starts."
+  {:malli/schema [:=> [:cat] pos-int?]}
+  []
+  (reduce + (map config/defaults [:seon.config.operator/boot-bound-ms :seon.config.operator/check-bound-ms
+                                  :seon.config.operator/event-silence-backstop-ms])))
+
 (def eval-arguments
   "The `eval_clj` arguments."
   [:map {:closed true}
@@ -57,7 +65,10 @@
     [:enum {:description "sci (default): the agent's SCI context, where definitions become program entities on its branch. jvm: host evaluation in the JVM, recorded as the same agent's run."}
      "sci" "jvm"]]
    [:seon.mcp/namespace {:optional true}
-    [:string {:min 1 :description "The namespace the run starts in. SCI default: where the agent's previous run ended; JVM default: user."}]]])
+    [:string {:min 1 :description "The namespace the run starts in. SCI default: where the agent's previous run ended; JVM default: user."}]]
+   [:seon.mcp/timeout_ms {:optional true}
+    [:int {:min 1 :max (eval-bound-ms)
+           :description "How long the bridge waits for the answer, in ms (default 30000). The JVM finishes the run either way; past this bound its outcome is unknown to you. A platform check (my.test/check-platform) boots a JVM: pass about 120000."}]]])
 
 (def status-arguments
   "The `runtime_status` arguments."
