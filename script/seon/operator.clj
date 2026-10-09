@@ -2241,14 +2241,17 @@
                                    (some->> (:seon.dev-cache/reason classes) name (str " ")))))))))
 
 (defn- write-diagnostic!
-  "Write a result whole (a failed one, or a started root's detail) to a new file in its cluster's log directory; its path."
+  "Write a result whole (a failed one, or a started root's detail) to a new file in its cluster's log directory,
+  or to the file `SEON_DIAGNOSTIC_FILE` names (a caller that reads the diagnostic back as data); its path."
   {:malli/schema [:=> [:cat :map :map] :string]}
   [request result]
-  (let [file (io/file (:seon.operator/managed-root request) "data/clusters"
+  (let [file (if-let [named (not-empty (System/getenv "SEON_DIAGNOSTIC_FILE"))]
+               (io/file named)
+               (io/file (:seon.operator/managed-root request) "data/clusters"
                       (or (:seon.boot/cluster-name request) "default") "logs"
                       (str "operator-" (name (:seon.operator/command request)) "-"
                            (.format (java.text.SimpleDateFormat. "yyyyMMdd'T'HHmmss.SSS") (java.util.Date.))
-                           ".edn"))]
+                           ".edn")))]
     (io/make-parents file)
     (spit file (str (pr-str result) "\n"))
     (.getCanonicalPath file)))

@@ -6,6 +6,13 @@
                       [:seon.test.run/git-sha :seon.test.run/git-sha]
                       [:seon.test.platform/checkout :seon.test.platform/checkout]],
                      :proven [:vector {:description "Changed host-bound functions every reaching test of which is verified on the branch by a platform run (a run carrying :seon.test.run/git-sha)."} :qualified-symbol],
+                     :diagnostic
+                     [:map {:description "What a refused platform check's operator wrote to its diagnostic file: the file, its message and cause, and the check's test summary and phases where it reached them."}
+                      [:seon.test.platform/diagnostic-file [:string {:min 1}]]
+                      [:seon.error/message {:optional true} :string]
+                      [:seon.operator/test-summary {:optional true} :string]
+                      [:seon.operator/phases {:optional true} :map]
+                      [:seon.operator/test-phases {:optional true} :map]],
                      :check-ms [:int {:min 0 :description "Wall time of the platform check subprocess."}],
                      :ms [:int {:min 0 :description "Wall time of the whole platform proof: snapshot, write-back, candidate, check and recording."}],
                      :excluded [:vector {:description "Requested members the platform run did not finish: excluded or unfinished there, so not evidence."} :seon.test/sym],

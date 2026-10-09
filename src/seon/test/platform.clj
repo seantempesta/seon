@@ -95,20 +95,39 @@
     (+ (:seon.config.operator/boot-bound-ms dials) (:seon.config.operator/check-bound-ms dials)
        (:seon.config.operator/event-silence-backstop-ms dials))))
 
+(defn- diagnostic
+  "What the operator wrote to `file` for a refused check, as data: the file, its message and cause, and the
+  check's test summary and phases where it reached them; nil when it wrote none (an operator older than
+  `SEON_DIAGNOSTIC_FILE` writes to its own log name)."
+  {:malli/schema [:=> [:cat :string] [:maybe :seon.test.platform/diagnostic]]}
+  [file]
+  (when (fs/exists? file)
+    (let [written (edn/read-string {:default (fn [_ value] value)} (slurp file))
+          evidence (:seon.error/offending written)]
+      (merge {:seon.test.platform/diagnostic-file file}
+           (when (string? (:seon.error/message written)) (select-keys written [:seon.error/message]))
+           (when (map? evidence)
+               (select-keys evidence [:seon.operator/test-summary :seon.operator/phases :seon.operator/test-phases]))))))
+
 (defn run-check!
   "Run `tests` with `bin/seon check --at candidate` in a throwaway JVM within
   its bound and answer the members its runner wrote, or the error naming what
-  failed. A check over its bound is ended and its exit awaited."
+  failed, carrying what the operator's diagnostic file holds (`:seon.test.platform/diagnostic`). A check over its
+  bound is ended and its exit awaited."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.platform/published :seon.test.run/git-sha
                        :seon.fn/root [:set :seon.test/sym]]
                   [:or :seon.test.platform/check-result :seon.error/base]]}
   [database {checkout :seon.test.platform/checkout} candidate snapshot tests]
   (let [bound (check-bound-ms database)
         result-file (str (io/file snapshot "check-result.edn"))
+        ;; Outside the snapshot, which the caller deletes: the refusal names it.
+        diagnostic-file (str (io/file checkout "data/clusters" (db/q '[:find ?n . :where [_ :seon.cluster/name ?n]] database)
+                                      "logs" (str "operator-check-platform-" (id/id) ".edn")))
         argv (into [(str (io/file checkout "bin/seon")) "check" "--at" candidate "--include-long"]
                    (mapcat (fn [test-symbol] ["--test" (str test-symbol)])) (sort tests))
         began (System/nanoTime)
-        child (apply process/process {:dir checkout :extra-env {"SEON_TEST_RESULT_FILE" result-file}
+        child (apply process/process {:dir checkout :extra-env {"SEON_TEST_RESULT_FILE" result-file
+                                                                 "SEON_DIAGNOSTIC_FILE" diagnostic-file}
                                       :out :string :err :string} argv)
         exited? (.waitFor ^Process (:proc child) bound TimeUnit/MILLISECONDS)]
     (when-not exited?
@@ -116,17 +135,21 @@
       (.waitFor ^Process (:proc child)))
     (let [{:keys [exit out err]} @child
           ms (long (/ (- (System/nanoTime) began) 1e6))
-          written (when (fs/exists? result-file) (edn/read-string (slurp result-file)))]
+          written (when (fs/exists? result-file) (edn/read-string (slurp result-file)))
+          refused (fn [message data]
+                    (failure `run-check! message (cond-> data
+                                                   (fs/exists? diagnostic-file)
+                                                   (assoc :seon.test.platform/diagnostic (diagnostic diagnostic-file)))))]
       (cond
         (not exited?)
-        (failure `run-check! "The platform check did not exit within its bound; it was ended and its exit awaited."
+        (refused "The platform check did not exit within its bound; it was ended and its exit awaited."
                  {:seon.test.platform/bound-ms bound :seon.test.platform/argv argv})
         (not (map? written))
-        (failure `run-check! "The platform check wrote no run result: its throwaway JVM did not run the tests."
+        (refused "The platform check wrote no run result: its throwaway JVM did not run the tests."
                  {:seon.test.platform/exit exit :seon.test.platform/argv argv
                   :seon.test.platform/output (str/join "\n" (take-last 30 (str/split-lines (str out err))))})
         (:seon.error/message written)
-        (failure `run-check! (str "The platform check's test request refused: " (:seon.error/message written))
+        (refused (str "The platform check's test request refused: " (:seon.error/message written))
                  {:seon.test.platform/argv argv})
         :else (assoc written :seon.test.platform/check-ms ms :seon.test.run/git-sha candidate)))))
 
