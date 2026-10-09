@@ -7,6 +7,7 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.mcp :as mcp]
+            [seon.test]
             [seon.test-support :as support]))
 
 (defn- shown
@@ -79,3 +80,28 @@
        (is (defined? body))
        (is (contains? (support/mcp-tests body) :seon.turn.loop/reaching)
            "a body change runs the tests reaching it")))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-host-bound-redefinition-runs-its-reaching-tests-in-sci}}
+  a-host-bound-redefinition-names-its-platform-proof-instead-of-running-its-tests-in-sci
+  (support/with-running-agent
+   (fn [running agent-id connection]
+     (let [database (db/db connection)
+           sym 'seon.fn.signature/read-source
+           reaching (set (seon.test/reaching {:seon.db/db database :seon.test/changed [[:seon.fn/sym sym]]}))
+           body (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                          "arguments" {"code" (str "(in-ns 'seon.fn.signature) (defn- read-source [source namespace-name aliases] nil"
+                                                                                   " (binding [*read-eval* false *reader-resolver* (reify clojure.lang.LispReader$Resolver"
+                                                                                   " (currentNS [_] (or namespace-name 'user)) (resolveClass [_ sym] sym)"
+                                                                                   " (resolveAlias [_ sym] (get aliases sym sym)) (resolveVar [_ sym] sym))]"
+                                                                                   " (read {:read-cond :allow :features #{:clj}}"
+                                                                                   " (java.io.PushbackReader. (java.io.StringReader. source)))))")
+                                                                       "agent" agent-id "cluster" running}})))
+           tests (support/mcp-tests body)
+           platform (:seon.turn.loop/platform tests)
+           ran (into #{} (mapcat #(get-in tests [% :seon.turn.loop/red])) [:seon.turn.loop/proofs :seon.turn.loop/reaching])]
+       (is (true? (:seon.fn/host-bound? (db/pull database [:seon.fn/host-bound?] [:seon.fn/sym sym]))))
+       (is (seq reaching))
+       (is (= [sym] (:seon.turn.loop/host-bound platform)))
+       (is (= reaching (set (:seon.turn.loop/pending platform))) "the tests reaching it wait for the platform check")
+       (is (= ['(my.test/check-platform {})] (:seon.render/operations platform)))
+       (is (empty? (filter reaching ran)) "none of them ran in SCI")))))

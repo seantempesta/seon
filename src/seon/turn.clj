@@ -68,6 +68,8 @@
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-changes
   (delay (requiring-resolve 'seon.test/changes)))
+(defonce ^:private test-reaching
+  (delay (requiring-resolve 'seon.test/reaching)))
 (defn stage-reply!
   "Stage exact submitted source using the run reply storage contract."
   {:malli/schema
@@ -5020,30 +5022,66 @@
           :else (into (set (edges home)) (edges database)))))
 
 (defn- run-proofs
-  "Run the proofs of the task `agent-id` holds on `execution` as one test request bounded by `limit-ms`; nil when there are none."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id pos-int?]
+  "Run the proofs of the task `agent-id` holds, but those in `excluded`, on `execution` as one test request bounded by `limit-ms`; nil when none is left."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id pos-int? [:set :seon.test/sym]]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
-  [execution agent-id limit-ms]
+  [execution agent-id limit-ms excluded]
   (let [connection (:seon.db/connection execution)
-        proofs (task-proofs (db/db connection) agent-id)]
+        proofs (task-proofs (db/db connection) agent-id)
+        proofs (if (:seon.error/at proofs) proofs (into #{} (remove excluded) proofs))]
     (cond (:seon.error/at proofs) proofs
           (empty? proofs) nil
           :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
                             :seon.test/policy :named :seon.test/identities proofs
                             :seon.test/check-time-limit-ms limit-ms}))))
 
+(defn- changed-functions
+  "The function symbols among the change identities `changed`."
+  {:malli/schema [:=> [:cat :seon.test/changed] [:vector :seon.fn/sym]]}
+  [changed]
+  (into [] (keep #(cond (symbol? %) %
+                        (= :seon.fn/sym (first %)) (second %)))
+        changed))
+
+(defn- platform-proof
+  "The platform proof the host-bound functions among `changed` wait for on `database`: those functions, the tests
+  reaching them and the form that runs them in a JVM loaded from the branch; nil when none is host-bound.
+  The compiled platform runs a host-bound declaration on every branch, so those tests prove nothing in SCI."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/changed] [:maybe :seon.turn.loop/platform]]}
+  [database changed]
+  (let [functions (changed-functions changed)
+        host-bound (when (seq functions)
+                     (db/q '[:find [?s ...] :in $ [?s ...] :where [?e :seon.fn/sym ?s] [?e :seon.fn/host-bound? true]]
+                           database functions))]
+    (when (seq host-bound)
+      (let [host-bound (vec (sort host-bound))
+            tests (@test-reaching {:seon.db/db database :seon.test/changed (mapv #(vector :seon.fn/sym %) host-bound)})]
+        (when (:seon.error/at tests) (throw (ex-info (:seon.error/message tests) tests)))
+        {:seon.turn.loop/host-bound host-bound
+         :seon.turn.loop/pending (vec (sort tests))
+         :seon.render/operations ['(my.test/check-platform {})]}))))
+
 (defn- run-reaching
-  "Run the tests reaching what the branch changed since this request's previous run (its whole change before the first), after the proofs, as one request bounded by `limit-ms`; nil when the branch equals its base."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int?]
+  "Run the tests reaching `changed`, what the branch changed since this request's previous run (its whole change
+  before the first), after the proofs, as one request bounded by `limit-ms`; nil when the branch equals its base.
+  With a `platform` proof, its host-bound functions seed nothing and its pending tests are not run here."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle pos-int? [:or :seon.test/changed :seon.error/value]
+                       [:maybe :seon.turn.loop/platform]]
                   [:or :nil :seon.test/run-result :seon.error/value]]}
-  [execution limit-ms]
+  [execution limit-ms changed platform]
   (let [connection (:seon.db/connection execution)
-        changed (@test-changes execution connection)]
+        request {:seon.test/execution execution :seon.test/recording-connection connection
+                 :seon.test/policy :named :seon.test/check-time-limit-ms limit-ms}]
     (cond (= :seon.test/policy-unscoped (:seon.test/selection-refusal changed)) nil
           (:seon.error/at changed) changed
-          :else (@test-run {:seon.test/execution execution :seon.test/recording-connection connection
-                            :seon.test/policy :named :seon.test/changed (vec changed)
-                            :seon.test/since-previous-run? true :seon.test/check-time-limit-ms limit-ms}))))
+          (nil? platform) (@test-run (assoc request :seon.test/changed (vec changed) :seon.test/since-previous-run? true))
+          :else
+          (let [host-bound (set (:seon.turn.loop/host-bound platform))
+                others (vec (remove #(host-bound (if (symbol? %) % (second %))) changed))
+                reached (when (seq others) (@test-reaching {:seon.db/db (db/db connection) :seon.test/changed others}))]
+            (cond (:seon.error/at reached) reached
+                  :else (let [tests (into #{} (remove (set (:seon.turn.loop/pending platform))) reached)]
+                          (when (seq tests) (@test-run (assoc request :seon.test/identities tests)))))))))
 
 (defn- pending-syms
   "The tests a run left unrun: never started, or started and still live at its bound."
@@ -5076,11 +5114,12 @@
 
 (defn- summary
   "The test step's results, one summary per request that ran, with the commit they ran on for the queue
-  (`summary-queue`); nil when none ran."
-  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :seon.turn.loop/test-summary]]}
-  [proofs reaching]
-  (when (or proofs reaching)
+  (`summary-queue`), and the `platform` proof a host-bound change waits for; nil when none ran and none waits."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map] [:maybe :seon.turn.loop/platform]] [:maybe :seon.turn.loop/test-summary]]}
+  [proofs reaching platform]
+  (when (or proofs reaching platform)
     (cond-> {}
+      platform (assoc :seon.turn.loop/platform platform)
       (some :seon.source/commit-id [reaching proofs])
       (assoc :seon.source/commit-id (some :seon.source/commit-id [reaching proofs]))
       proofs (assoc :seon.turn.loop/proofs (request-summary proofs))
@@ -5117,7 +5156,7 @@
 
 (defn- test-step
   "The pass's automatic test step: the held task's proofs, then the tests reaching the change, on one
-  acquisition of the agent's world and within the dial `:seon.config.test/step-time-limit-ms`. The proofs
+  acquisition of the agent's world; tests reaching a host-bound change are named as its platform proof, not run and within the dial `:seon.config.test/step-time-limit-ms`. The proofs
   take the bound first; the reaching request gets what they left, at least 1 ms, so it selects its tests
   and reports those it did not start as pending. A throw from either becomes the error beside the pass's
   values, never a replacement for them; nil when no request ran."
@@ -5127,9 +5166,12 @@
     (let [proofs? (seq (task-proofs (db/db (:seon.db/connection cluster)) agent-id))
           limit (step-limit-ms cluster agent-id)
           execution (@cluster-agent-acquire-context! cluster agent-id)
-          proofs (when proofs? (run-proofs execution agent-id limit))
+          connection (:seon.db/connection execution)
+          changed (@test-changes execution connection)
+          platform (when (vector? changed) (platform-proof (db/db connection) changed))
+          proofs (when proofs? (run-proofs execution agent-id limit (set (:seon.turn.loop/pending platform))))
           left (- limit (long (or (:seon.test/elapsed-ms proofs) 0)))]
-      (summary (ran-something proofs) (ran-something (run-reaching execution (max 1 left)))))
+      (summary (ran-something proofs) (ran-something (run-reaching execution (max 1 left) changed platform)) platform))
     (catch Throwable failure
       {:seon.turn.loop/proofs
        {:seon.turn.loop/test-error
