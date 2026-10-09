@@ -129,7 +129,10 @@
                (is (true? (:value a-direct)))
                (is (true? (:value a-indirect)))
                (is (= [false false] (:value b-calls)))
-               (is (identical? live-env @(:env live)))
+               ;; `sci.core/fork` gives the parent a new generation, so the env
+               ;; map changes; the live context's namespaces must not.
+               (is (identical? (:namespaces live-env) (:namespaces @(:env live)))
+                   "the branches' definitions never reach the live context")
                (is (false? (sci/eval-string* live indirect)))
                (is (= (:seon.fn/tests closure)
                       (functions/gate-sets {:seon.db/db (db/db a) :seon.fn/seeds #{leaf}})))
@@ -149,15 +152,20 @@
                           :function-count (count (db/q '[:find [?s ...] :where [_ :seon.fn/sym ?s]] captured))}))
                (let [host-entity (declare! a 'seon.env/->Environment
                                 "(defn ^{:malli/schema [:=> [:cat :map] :map]} ->Environment [members] members)")
-                     refused (eval/install-row! {:seon.sci.eval/ctx a-ctx
-                                                 :seon.db/db (db/db a)
-                                                 :seon.program/row host-entity})]
+                     installed (eval/install-row! {:seon.sci.eval/ctx a-ctx
+                                                   :seon.db/db (db/db a)
+                                                   :seon.program/row host-entity})
+                     ;; An acquired row refuses by name when called (f2bc7088a),
+                     ;; so the rest of the branch's program still runs.
+                     refused (refusal-of a-ctx 'seon.env/->Environment)]
+                 (is (= :unavailable (:seon.sci.eval/load-state installed)))
                  (is (= 'seon.env/->Environment (:seon.sci.eval/refused-function refused)))
                  (is ((schema/projection-validator
                         (db/carried-projection (db/db a))
                         :seon.sci.eval/interpretation-error) refused))
-                 (is (nil? (sci/resolve a-ctx 'seon.env/->Environment)))
                  (is (some? (sci/resolve b-ctx 'seon.env/->Environment)))
+                 (is (nil? (refusal-of b-ctx 'seon.env/->Environment))
+                     "the sibling branch keeps the compiled constructor")
                  (println "REALITIES-HOST-REFUSAL" (seon.render.value/core-text refused))))))))))))))
 
 (defn- declared!
@@ -491,6 +499,9 @@
              ctx (eval/cluster-ctx before connection
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
+             ;; Acquisition loads a first-party namespace it interprets
+             ;; (`seon.sci.eval/host-namespace!`), so this is judged before it.
+             unloaded-before? (nil? (find-ns (symbol (namespace unloaded))))
              _ (support/transacted! connection (agent-revision-tx before [changed unloaded-changed]))
              edited (db/db connection)
              acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db edited}))
@@ -501,7 +512,7 @@
          (is (not-any? host-bound? [unloaded-changed unloaded])
              "class usage alone never makes a declaration host-bound (task bd7cb669b45d)")
          (is (some? (find-ns (symbol (namespace caller)))) "the caller's namespace is loaded")
-         (is (nil? (find-ns (symbol (namespace unloaded)))) "this JVM never loaded the measurement namespace")
+         (is unloaded-before? "this JVM had not loaded the measurement namespace")
          (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
              "each changed entity's closure reaches its host-bound caller")
          (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")

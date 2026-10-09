@@ -616,6 +616,8 @@
                 ;; ec93442ee: "excluded (declared long; include-long runs it) <test>".
                 (is (.contains tally (str "excluded (declared long; include-long runs it) " test-symbol)))
                 (is (.contains tally long-declaration))
+                (is (.contains (first (str/split-lines tally)) "passed? false (1 declared long excluded")
+                    "the first line, all a launcher may print, says why nothing red is not green")
                 (is (not (.exists marker)) "the excluded test executed nothing")
                 ;; A recorded execution is a run member (runner/latest-results).
                 (is (empty? (runner/latest-results (db/db connection) [test-symbol])))))))))))

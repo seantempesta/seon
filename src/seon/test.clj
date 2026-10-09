@@ -2875,6 +2875,24 @@
                 :seon.test/unknown "The request ended in an exception."
                 :seon.test/next-tier :none))))
 
+(defn- unfulfilled
+  "Why a run that did not pass did not, counted per kind of unfulfilled
+  obligation, for the tally's first line: a launcher reporting only that line
+  still says why a run with nothing red is not green."
+  {:malli/schema [:=> [:cat :seon.test/run-result] :string]}
+  [result]
+  (let [reasons (keep (fn [[n kind]] (when (pos? n) (str n " " kind)))
+                      [[(count (remove green? (:seon.test/results result))) "red"]
+                       [(count (:seon.test/unfinished result)) "unfinished"]
+                       [(count (:seon.test/pending result)) "pending"]
+                       [(+ (count (:seon.test/destructive-excluded result))
+                           (count (:seon.test/deferred result))) "excluded"]
+                       [(count (:seon.test/long-excluded result))
+                        "declared long excluded (include-long runs them)"]
+                       [(if (:seon.test/recording-refusal result) 1 0) "recording refused"]
+                       [(if (empty? (:seon.test/results result)) 1 0) "nothing selected ran"]])]
+    (if (seq reasons) (str " (" (str/join ", " reasons) ")") "")))
+
 (defn tally
   "Render one request's answer as the text a launcher prints.
   The recorded counts come from the run's result; failures show their claims."
@@ -2895,6 +2913,7 @@
            " / error " (reduce + 0 (map #(:seon.test/error-count % 0) results))
            " / " (Math/round (double (:seon.test/elapsed-ms result))) " ms"
            " / passed? " (:seon.test/passed? result)
+           (when-not (:seon.test/passed? result) (unfulfilled result))
            (apply str (for [failure red]
                         (str "\nred " (:seon.test/sym failure) ": " (failure-message failure))))
            (apply str (for [entry (:seon.test/unfinished result)]
