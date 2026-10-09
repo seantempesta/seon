@@ -344,10 +344,15 @@
        (is (and (seq? shown) (= 'defn (first shown))) "it reads as the definition's own code")
        (is (= 'source (second shown)))))))
 
-(deftest an-unbound-host-io-function-names-the-seon-tool
+(deftest ^{:seon/tasks #{'seon.sci.kernel/a-file-function-that-calls-slurp-cannot-be-redefined}} an-agent-reads-and-writes-files-as-clojure-does
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [error (:seon.repl/error (shown-value "(slurp \"project.clj\")" agent-id running))]
-       (is (= 'slurp (:seon.error/offending error)))
-       (is (clojure.string/includes? (str (:seon.error/fix error)) "my.fs/read")
-           "the refusal's fix names the entrance that reads a file")))))
+     (let [shown (shown-value (str "(let [dir (doto (java.io.File/createTempFile \"seon-io\" \"\") (.delete) (.mkdir))"
+                                   " file (java.io.File. dir \"a.txt\")"
+                                   " _ (spit file \"written\")"
+                                   " read (slurp file)"
+                                   " listed (count (file-seq dir))]"
+                                   " (.delete file) (.delete dir) [read listed])")
+                              agent-id running)]
+       (is (not (contains? shown :seon.repl/error)) "slurp, spit and file-seq resolve in an agent's context")
+       (is (= ["written" 2] (:seon.repl/value shown)) "they read, write and list files as clojure.core does")))))

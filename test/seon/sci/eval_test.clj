@@ -746,18 +746,16 @@
 (deftest base-context-bindings-resolve-without-dependency-stubs
   ;; The published program is the world's entities (derived from files at
   ;; publication); re-analyzing src and test here cost 10 s and refused on the
-  ;; dev roots the dependency analysis excludes.
+  ;; dev roots the dependency analysis excludes. A binding is first-party when
+  ;; its namespace is a published program namespace; the rest (a copied public
+  ;; namespace, clojure.core's host IO functions) are dependency bindings.
   (test-support/with-database
    (fn [connection]
   (let [injected (set (program/base-context-injected-symbols (seon.schema/handed-projection)))
-        public-namespaces
-        (into #{}
-              (keep #(some-> % seon.schema/structural-schema malli.core/properties
-                             :seon.sci.binding/public-namespace))
-              (vals (:seon.schema.projection/forms (schema/handed-projection))))
-        dependency-bindings
-        (into #{} (filter #(public-namespaces (symbol (namespace %)))) injected)
-        program-bindings (set/difference injected dependency-bindings)
+        program-namespaces (set (db/q '[:find [?name ...] :where [_ :seon.ns/name ?name]]
+                                      (db/db connection)))
+        program-bindings (into #{} (filter #(program-namespaces (symbol (namespace %)))) injected)
+        dependency-bindings (set/difference injected program-bindings)
         published (set (db/q '[:find [?sym ...] :where [_ :seon.fn/sym ?sym]]
                              (db/db connection)))
         ctx (eval/build-base-ctx (seon.schema/handed-projection))]

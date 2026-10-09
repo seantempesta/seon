@@ -16,6 +16,15 @@
  :seon.sci.binding/deftest
  [:symbol {:seon.sci.binding/target clojure.test/deftest
            :seon.sci.binding/reason "Every context resolves the test macro bare, without a clojure.test referral; declaring it is how the analysis seam resolves what the interpreter resolves."}]
+ :seon.sci.binding/slurp
+ [:symbol {:seon.sci.binding/target clojure.core/slurp
+           :seon.sci.binding/reason "An agent reads a file as Clojure does; a file function whose body calls slurp is redefinable at the REPL as compiled."}]
+ :seon.sci.binding/spit
+ [:symbol {:seon.sci.binding/target clojure.core/spit
+           :seon.sci.binding/reason "An agent writes a file as Clojure does; a file function whose body calls spit is redefinable at the REPL as compiled."}]
+ :seon.sci.binding/file-seq
+ [:symbol {:seon.sci.binding/target clojure.core/file-seq
+           :seon.sci.binding/reason "An agent lists files as Clojure does; a file function whose body calls file-seq is redefinable at the REPL as compiled."}]
  :seon.sci.binding/is
  [:symbol {:seon.sci.binding/target clojure.test/is
            :seon.sci.binding/reason "Every context resolves the assertion macro bare, without a clojure.test referral; declaring it is how the analysis seam resolves what the interpreter resolves."}]}

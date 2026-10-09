@@ -320,11 +320,14 @@
          ;; clojure.core enters no interpreted body, so `(range)` inside
          ;; `reduce` would never hit the interrupt-fn. Sci ships drop-in
          ;; alternatives for exactly this and they are opt-in
-         ;; (interrupt.md:56-60).
+         ;; (interrupt.md:56-60). Declared bindings into clojure.core (the
+         ;; host IO functions `slurp`, `spit`, `file-seq`) join those
+         ;; alternatives, member by member.
          :namespaces
-         (merge {'clojure.core sci.interrupt/clojure-core
-                 'clojure.string sci.interrupt/clojure-string}
-                injected-namespaces)
+         (merge-with merge
+                     {'clojure.core sci.interrupt/clojure-core
+                      'clojure.string sci.interrupt/clojure-string}
+                     injected-namespaces)
          ;; every class on the classpath resolves as the compiler resolves it
          ;; (our SCI fork's `interop/host-class-opts`); interruption stays
          ;; SCI's ceiling: a host call is not interrupted (interrupt.md:84-98)
