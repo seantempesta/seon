@@ -67,4 +67,8 @@
  #:seon.task{:name "reply-lacks-gc-commits-and-a-dialled-allocation-bound"
              :kind :function
              :intent "Each SCI reply now shows :seon.repl/alloc-mb from :seon.eval/allocated-bytes (every thread's allocation over the evaluation's window, since SCI runs on a virtual thread) and a :large-allocation finding past :seon.config.eval/bounds (400 MB). Missing: the evaluation's GC count and collection-time delta and the commits its request wrote, which need new :seon.eval attributes carried by seon.sci.eval's evaluation record and seon.turn's settlement and pull list (held files when this was filed); and the bound is declared data in the bounds schema, not a :seon.config/dial an operator can size for the machine, because seon.repl/findings judges the emission alone and receives no configuration. Done when a reply that collected garbage shows its GC delta, an eval request shows its commit count, and changing a dial changes the :large-allocation threshold without a reload."
-             :must-read #{seon.repl/findings seon.sci.kernel/arm seon.profile/measure}}]
+             :must-read #{seon.repl/findings seon.sci.kernel/arm seon.profile/measure}}
+ #:seon.task{:name "a-request-spends-seconds-outside-its-named-stages"
+             :kind :function
+             :intent "`:seon.repl/request` `:seon.cost/ms` exceeds the sum of its `:seon.cost/stages` by seconds, naming nothing: `(doc my.edit/exact!)` on agent repl-only-2 took 10,594 ms with stages summing about 290 ms; a defn plus `my.program/ns-unmap!` request 33,137 ms against about 12,000 ms of stages; `my.program/write-branch!` 8,028 ms against about 750 ms (default 35e95e7b3, 2026-10-09). Done when every request's stages account for its wall time within a stated tolerance, the remainder named as a stage."
+             :must-read #{seon.repl/findings seon.turn/step}}]

@@ -11,4 +11,8 @@
  #:seon.task{:name "a-refused-platform-check-names-no-diagnostic"
              :kind :function
              :intent "A red or refused `bin/seon check` reached through `seon.test.platform/run-check!` answers only its argv and the first message line; the operator wrote a DIAGNOSTIC file (phases, test summary, failure reports) that the REPL answer does not name, so lane repl-only-a5 had to rerun the check from a shell to see why it failed. Done when the answer carries the diagnostic's test summary and phases as data."
-             :must-read #{seon.test.platform/run-check!}}]
+             :must-read #{seon.test.platform/run-check!}}
+ #:seon.task{:name "a-schema-resource-change-cannot-be-proven-by-check-platform"
+             :kind :function
+             :intent "`my.test/check-platform` writes only the branch's declarations into a copy of the published archive (`seon.test.platform/snapshot!`), so a host-bound change that needs a schema resource beside it (A5: `:seon.sci.binding/target` entries in resources/seon/schemas/seon.sci.binding.edn read by `seon.sci.eval/build-base-ctx`) cannot be proven from the REPL: the candidate lacks the resource, and no REPL call puts a schema resource on a branch. Lane repl-only-2 (2026-10-09) edited the resource by `my.edit/exact!` and proved the slice through `bin/lane commit --test` instead. Done when a branch can carry a schema-resource change that check-platform's candidate includes, with a regression."
+             :must-read #{my.test/check-platform seon.test.platform/snapshot! seon.sci.eval/build-base-ctx}}]

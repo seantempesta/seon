@@ -45,4 +45,8 @@
              :kind :function
              :intent "Red on HEAD (2026-10-08, check run 1ee9072479d5 with no source change: 26 pass, 5 fail, 1 error): `seon.cluster.write-back-test/a-merge-writes-each-change-into-its-own-file` and a-require-added-at-the-repl-merges-and-writes-back-its-ns-form fail at (true? (`:seon.test/passed?` proposal)) with nil, and an-agent-replacement-merges-and-writes-back-its-exact-span errors when accept-merge! refuses a proposal missing :seon.source/candidate. All three fail inside prepare-merge!, which answers no proposal, before any write-back. Done when the three pass under bin/seon check --include-long and prepare-merge!'s non-proposal answer is shown by the test as data, never passed on to accept-merge!."
              :must-read #{seon.cluster.source/prepare-merge! seon.cluster.source/accept-merge!}
-             :evidence #{"docs/research/agent-platform/2026-10-08/repl-first/repl-first.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-08/repl-first/repl-first.md"}}
+ #:seon.task{:name "a-second-write-back-conflicts-with-the-branchs-own-first"
+             :kind :function
+             :intent "Lane repl-only-2 (default 35e95e7b3, 2026-10-09) wrote its branch back with `my.program/write-branch!` (adding `my.program-test/an-agent-reads-and-writes-files-as-clojure-does`), redefined that test on the branch, and a second `write-branch!` refused :conflict: `:seon.program/conflict-digests` named base `:seon.program/absent`, head = the digest its own first write-back put in the file, branch = the new one. The write-back base does not advance past the branch's own write, so iterating on a written-back declaration needs an outside edit. Done when a second write-back of the same branch replaces what its first wrote, with a regression."
+             :must-read #{my.program/write-branch! seon.cluster.source/write-back!}}]

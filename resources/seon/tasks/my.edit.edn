@@ -6,4 +6,8 @@
  #:seon.task{:name "edit-hook-budgets-need-owner-numbers"
              :kind :function
              :intent "Edit-hook budgets (function at most 40 lines, a namespace over 800 lines may only shrink, short docstrings, no dated rulings in comments): the exact numbers need the owner's OK before the hook enforces them. Done when the owner rules the numbers and the hook refuses each violation with a fix, with a regression per budget."
-             :must-read #{my.edit/exact!}}]
+             :must-read #{my.edit/exact!}}
+ #:seon.task{:name "exact-has-no-digest-for-a-file-over-eight-kilobytes"
+             :kind :function
+             :intent "`my.edit/exact!` and `my.edit/form!` require the whole file's `:my.edit/expected-digest`, but `my.fs/read` caps every window at 8,192 bytes whatever `:my.fs/max-bytes` asks (65,536 or 4,000,000 on the 54,827-byte src/seon/sci/kernel.clj answered `:my.fs/bytes-read 8192`, `:eof? false`, no `:my.fs/digest`), and a stale-digest refusal does not name the current digest. Lane repl-only-2 (Wave A A5, default 35e95e7b3, 2026-10-09) had to hash the file with java.security.MessageDigest in SCI to edit it. Done when an agent gets a file's whole digest from one Seon call (the stale refusal answering it, or `my.fs/stat`), with a regression on a file over 8 KB."
+             :must-read #{my.edit/exact! my.fs/read my.fs/stat}}]
