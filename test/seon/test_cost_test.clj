@@ -14,8 +14,7 @@
                                                          "arguments" {"code" code "agent" agent-id "cluster" running}})))]
     (:seon.repl/value (support/mcp-reply result))))
 
-(deftest ^{:seon/tasks #{'seon.test/a-test-result-keeps-no-cost}}
-  a-member-records-its-calls-allocation-and-time
+(deftest a-member-records-its-calls-allocation-and-time
   (support/with-running-agent
    (fn [running agent-id _]
      (let [nsn (str "my.agents." agent-id)

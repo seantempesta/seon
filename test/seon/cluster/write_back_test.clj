@@ -405,8 +405,7 @@
         (support/delete-recursively! root)))))
 
 (deftest ^{:seon.test/long "Analyses of a one-file fixture onto H, three branches each replacing one declaration, and three write-backs (each analyzing the changed file and its candidate)."
-           :seon.test/long-ms 20000
-           :seon/tasks #{'my.program/write-branch-refuses-a-file-a-sibling-change-already-landed-in}}
+           :seon.test/long-ms 20000}
   a-sibling-change-landed-in-the-file-is-kept-and-the-same-declaration-conflicts
   ;; Two branches of one base change different declarations of one file: the
   ;; second writes back onto the file the first already rewrote, keeping both.

@@ -77,7 +77,7 @@
 
 (deftest ^{:seon.test/long "Fourteen ordinary agent runs (three defining, one gated redefinition, a writing form, a renderer fault), each one Flow pass and its settlement commit, plus arming and one stopped run: green in under 20 s on a quiet JVM, 32.4 s measured under concurrent test load on default (b32060df4, 2026-09-26; settlement commits ~120-150 ms each there)."
            :seon.test/long-ms 40000
-           :seon/tasks #{'seon.cluster.agent/a-trivial-form-waits-on-two-durable-commits 'seon.turn/a-turn-pass-derives-its-work-twice 'seon.sci.eval/agent-form-writes-name-an-unwritten-evaluation}}
+           :seon/tasks #{(quote seon.turn/a-turn-pass-derives-its-work-twice)}}
   code-evaluates-as-one-ordinary-run-of-its-agent
   (with-armed-agent
    (fn [{:keys [connection cluster-name agent-id routing request code]}]

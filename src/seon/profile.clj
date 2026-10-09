@@ -619,8 +619,7 @@
   wrapper. Self time is the row's own body and unarmed callees; a wrapper whose
   callback does the work ranks by its own time, and its callee's row carries
   the work. The maximum is one call, inclusive."
-  {:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}
-   :malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/summary]}
+  {:malli/schema [:=> [:cat [:vector :seon.profile/held-cell] [:int {:min 1}]] :seon.profile/summary]}
   [population limit]
   (let [observed (into [] (comp (map observation) (filter (comp pos? :seon.profile/calls))) population)
         row (fn [{:seon.profile/keys [sym calls self-ms total-ms max-ms throws scope]}]

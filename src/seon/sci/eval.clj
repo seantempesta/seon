@@ -1095,8 +1095,7 @@
   Armed, measured 2026-09-27 on default: 0.8 us per call around an empty
   `work`. Its profile cell is inclusive of `work` (a test member's body, an
   evaluation), so its totals are its callers' costs, not its own."
-  {:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}
-   :malli/schema [:function
+  {:malli/schema [:function
                   [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol [:=> [:cat] :any]] :any]
                   [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol :map [:=> [:cat] :any]] :any]]}
   ([identity-atom operation work]

@@ -81,8 +81,7 @@
        (is (contains? (support/mcp-tests body) :seon.turn.loop/reaching)
            "a body change runs the tests reaching it")))))
 
-(deftest ^{:seon/tasks #{'seon.turn/a-host-bound-redefinition-runs-its-reaching-tests-in-sci}}
-  a-host-bound-redefinition-names-its-platform-proof-instead-of-running-its-tests-in-sci
+(deftest a-host-bound-redefinition-names-its-platform-proof-instead-of-running-its-tests-in-sci
   (support/with-running-agent
    (fn [running agent-id connection]
      (let [database (db/db connection)

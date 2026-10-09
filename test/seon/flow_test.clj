@@ -198,8 +198,7 @@
         (.countDown release)
         (flow/stop graph)))))
 
-(deftest ^{:seon/tasks #{'seon.profile/scope-wrappers-report-callback-time-as-work}}
-  a-proc-thread-lives-in-its-projection-world-without-one-armed-call
+(deftest a-proc-thread-lives-in-its-projection-world-without-one-armed-call
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "flow-projection-thread")

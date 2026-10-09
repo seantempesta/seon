@@ -19,5 +19,5 @@
              :must-read #{seon.mcp/jvm-run my.agent/retire-branch!}}
  #:seon.task{:name "eval-clj-advertises-no-timeout"
              :kind :function
-             :intent "The eval_clj schema in `seon.mcp/tool-table` is closed and lists no timeout_ms, yet the bridge times out at 32 s and its reply says \"Retry with a larger timeout_ms\". `my.test/check-platform` (a JVM boot plus the tests; 23-36 s measured by lane repl-only-a5, 2026-10-09) therefore cannot answer through eval_clj and its outcome is unknown to the caller. Done when eval_clj advertises the bound the bridge honours and a check-platform call answers through it."
+             :intent "`seon.mcp/eval-arguments` and `seon.mcp/tool-table` now declare the timeout and `seon.mcp-entrance-test/eval-clj-advertises-the-timeout-the-bridge-honours` passes. Complete the installed path: a freshly connected MCP client must receive that argument schema and a bounded `my.test/check-platform` request must return its result through the bridge. Preserve an end-to-end proof; the tool-table unit test alone does not establish that the connected client or bridge uses the new bound."
              :must-read #{seon.mcp/tool-table seon.mcp/eval-arguments my.test/check-platform}}]

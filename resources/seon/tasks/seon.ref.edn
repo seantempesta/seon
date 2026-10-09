@@ -9,12 +9,4 @@
  #:seon.task{:name "a-task-target-reads-as-an-unresolved-reference"
              :kind :function
              :intent "A typed task names the function the agent must create in backticks (`comp.geo/area` in `seon.competency/area-is-contracted-typed`, `:comp.order/qty` in `seon.competency/quantity-schema-then-function-typed`), and `seon.ref/references` answers it as `:problem-kind :unresolved`, the same problem a broken reference gets: the block tells the agent its task is defective exactly where the task is correct. Done when a reference the task's intent names as its target (a name in the task's own subject namespace, or one the intent marks as to be defined) reads as a target to create, distinct from an unresolved reference."
-             :must-read #{seon.ref/references seon.context/current-state}}
- #:seon.task{:name "a-referenced-function-shows-no-callers-or-tests"
-             :kind :function
-             :intent "`seon.ref/references` resolves a backticked function in a task intent to its arglists, spec, doc summary and the operations `(doc f)` and `(my.program/source 'f)` only (lane contract-gen, 2026-10-09, `seon.fs/attributes` in a generated `seon.contracts/task`, about 211 tokens for two names). A contract task needs the function's callers and reaching tests to choose a schema, and the generated intent copies nothing, so the agent spends calls finding them. Done when a resolved function's view offers its callers and reaching tests as operations (`my.program/callers`, `seon.fn/gating-tests`), asserted on the view's data."
-             :must-read #{seon.ref/references seon.contracts/task my.program/callers}}
- #:seon.task{:name "a-referenced-doc-path-reads-as-unresolved"
-             :kind :function
-             :intent "`seon.ref/references` answers every based path in a task intent (a backticked `AGENTS.md#data-and-contracts`, `reference-code/malli/README.md#quickstart`, or a relative Markdown link) as `:problem-kind :unresolved` although `seon.ref/section` finds it, so a generated `seon.contracts/task` names its guide and the agent's block calls it broken (card `docs/seon/schedule/cards/CS-01c3.md`). Done when a path that exists resolves to `:seon.ref/heading`, `:seon.ref/tokens`, its `:seon.ref/pin` under `reference-code/` and the one read `(my.fs/section reference)`, never its text; a missing file stays `:unresolved` and a missing heading reads `:anchor-missing`."
-             :must-read #{seon.ref/references seon.ref/section my.fs/section}}]
+             :must-read #{seon.ref/references seon.context/current-state}}]

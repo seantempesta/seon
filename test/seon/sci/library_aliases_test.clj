@@ -35,8 +35,7 @@
              "the defn using the file's aliases is admitted without error"))
        (is (= "should be an integer" (last (values "(alias-probe :a)"))))))))
 
-(deftest ^{:seon/tasks #{'seon.sci.eval/a-test-namespace-is-empty-in-an-agents-context}
-           :seon.test/long "two MCP eval requests on a fresh agent branch, the second running its branch test step"
+(deftest ^{:seon.test/long "two MCP eval requests on a fresh agent branch, the second running its branch test step"
            :seon.test/long-ms 15000}
   an-agent-in-a-test-namespace-writes-a-proof-with-its-helpers
   ;; my.program-test aliases seon.test-support as support and defines the

@@ -227,8 +227,7 @@
         (.delete link)
         (.delete outside)))))
 
-(deftest ^{:seon/tasks #{'seon.operator/a-test-the-candidate-adds-is-not-run-by-the-check}}
-  a-checks-adoption-answers-its-failure-as-data
+(deftest a-checks-adoption-answers-its-failure-as-data
   ;; A check's throwaway JVM resumes the base's template store, whose `default`
   ;; keeps the base's program until it adopts the candidate's publication; a
   ;; test the candidate adds is eligible only after that adoption. This test is

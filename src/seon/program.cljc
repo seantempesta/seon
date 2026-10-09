@@ -497,8 +497,7 @@
    resolve through ([[used-resolver-context]]) and effective semantic
    metadata. Storage provenance, position and derived graph observations are
    deliberately excluded."
-  {:seon/tasks #{'seon.program/a-docstring-edit-changes-the-definition-digest}
-   :malli/schema
+  {:malli/schema
    [:function
     [:=> [:cat :map] :seon.program/definition-digest]
     [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]]}

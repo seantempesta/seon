@@ -120,9 +120,4 @@
  #:seon.task{:name "the-map-argument-proof-errors-reading-its-reply"
              :kind :function
              :intent "`(my.program/diff {})` answers `{:added [], :changed [], :removed []}` like `(my.program/diff)` through MCP on default (2026-10-09), yet its proof `my.program-test/a-map-argument-lacking-world-members-is-filled-from-the-world` errors at main: inside `seon.test-support/with-running-agent`, reading the first reply (`(my.program/diff)`) with `seon.test-support/reply` throws `Invalid token: /Users/sean/src/seon/data/store` (test report e50e75cc6ba9), so some content item of that reply is not data: a bare store path. Done when every content item of that eval request reads back as data and the proof is green, so `my.program/diff-with-a-map-argument-is-refused-as-a-context` can retire."
-             :must-read #{my.program/diff seon.test-support/mcp-reply seon.test-support/with-running-agent}}
- #:seon.task{:name "write-branch-refuses-a-file-a-sibling-change-already-landed-in"
-             :kind :function
-             :intent "Fan-out 9b (default f54e73c83, 2026-10-09) landed `seon.ref/span-candidate` in 849ad0a2a; the next agent in the same file, fan9b-reply, changed only `seon.ref/section-error` on a branch of main, whose analysis of src/seon/ref.clj is still the pre-849ad0a2a file. `(my.program/write-branch! {:seon.fn/root \"/Users/sean/src/seon\"})` refused with \"The file changed after its declarations were analyzed.\" (155 ms / 236 MB), so two agents' changes to different declarations of one file cannot both write back between restarts; root wrote into a copy of the base file and applied the diff by hand. Done when write-back stages an exact-span change onto a file whose other declarations changed since the branch's base (refusing only when the changed declaration's own span moved or differs), proven by writing back a branch's change to one declaration after another declaration of that file was rewritten."
-             :must-read #{my.program/write-branch! seon.cluster.source/write-back!}}
-]
+             :must-read #{my.program/diff seon.test-support/mcp-reply seon.test-support/with-running-agent}}]

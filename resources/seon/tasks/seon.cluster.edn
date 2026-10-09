@@ -5,12 +5,6 @@
              :evidence #{"docs/research/agent-platform/landing/inv-boot-operator-opus-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"
                          "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md"}}
- #:seon.task{:name "record-jvm-evaluations-on-shared-path"
-             :kind :function
-             :intent "A JVM-mode MCP evaluation is evaluated by the prepl and projected by mcp-project, but never recorded: it has no evaluation record, no settlement window and so no fault observation, unlike an SCI run. The JVM evaluator should be a stage value supplied to the one read-evaluate-record-print path (no custody), so its value, its error in the one shape and its window's faults are the same saved observation MCP and the context show."
-             :must-read #{seon.cluster/mcp-project seon.cluster/mcp-valf}
-             :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
  #:seon.task{:name "a-missed-quiescence-keeps-the-route-listener"
              :kind :function
              :intent "A stop that misses armer quiescence keeps the route listener: a wedged proc cannot run its own stop transition. Recommended option 2 queues flow/stop even on a miss (about 15 lines in disarm-agents!)."

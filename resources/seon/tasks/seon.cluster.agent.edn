@@ -1,9 +1,4 @@
-[#:seon.task{:name "a-trivial-form-waits-on-two-durable-commits"
-             :kind :function
-             :intent "A one-form MCP run costs 155 ms warm in the JVM (168 ms through the bridge), 128 ms of it two durable Datahike commits (submission in submit-source!, settlement in settle-batch!), 64 ms each; evaluation is 1-2 ms. Under the ruled durability (sync-blob? and commit-graph? false inadmissible) a commit on this workstation cannot go below ~30 ms of forces, so a single-digit-ms form needs the owner to choose: keep two durable commits and trim (~115 ms), make the submission a non-durable hand-off so one commit per form remains (~60 ms), or relax durability for evaluation records. Options priced in the landing."
-             :must-read #{seon.cluster.agent/submit-source! seon.cluster.agent/evaluate-source! seon.turn/settle-batch!}
-             :evidence #{"docs/research/agent-platform/landing/perf-eval-overhead-2026-09-26.md"}}
- #:seon.task{:name "an-escaped-pass-closes-the-reply-without-its-fault"
+[#:seon.task{:name "an-escaped-pass-closes-the-reply-without-its-fault"
              :kind :function
              :intent "When a turn pass escapes after `seon.fault/fault!` committed, turn-step's finally (agent.clj ~515-558) closes the reply and the caller gets `:seon.await/closed-error` with no fault, although the receipt is on the throw's ex-data (`:seon.fault/recorded`). The causing agent meets the fault only in its next, unrelated run. Offer the recorded receipt (or the fault value) on the reply before closing it. Done when a regression whose pass escapes after recording a fault receives that fault as data in the same reply."
              :must-read #{seon.cluster.agent/turn-step seon.cluster.agent/evaluate-source! seon.fault/carried-receipt}
@@ -17,17 +12,10 @@
             :kind :function,
             :intent
             "`seon.cluster.agent/interrupted?` walks .getCause with its own seen-set loop, a second copy of `seon.error.refusal/cause-links`. Replace the loop with (some #(instance? InterruptedException %) (`seon.error.refusal/cause-links` failure)), EQUIVALENT on every chain (both stop at the first repeat)."}
- #:seon.task{:name "reply-size-is-measured-by-printing-the-sources",
-            :kind :function,
-            :intent
-            "submit-source-in-projection records `:seon.turn/reply-size` as (count (pr-str sources)): it prints the segmented sources to count characters, a printer use outside the value printer on every MCP SCI evaluation. Correct: the size is the submitted text's length (the reply it stands for), computed without printing.",
-            :must-read #{seon.cluster.agent/submit-source!},
-            :evidence
-            #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
  #:seon.task{:name "reply-size-prints-sources-to-measure-them",
             :kind :function,
             :intent
-            "`:seon.turn/reply-size` is computed as (count (pr-str sources)) at seon.cluster.agent (~764, submit-source-in-projection) and seon.bootstrap (~310, the root seed run): each prints a value only to count characters, a printer use outside the value printer. Correct: the size is the length of the text the sources were read from (the reply they stand for), counted without printing; both sites convert together. Same defect as seon.cluster.agent/reply-size-is-measured-by-printing-the-sources, which names only the first site.",
+            "`seon.cluster.agent/submit-source-in-projection` still computes `:seon.turn/reply-size` by printing sources and counting that text. Carry the size from the authored request text without printing its parsed forms. Keep reply-size's consumer and units explicit; a regression must show that measuring the reply never prints or realizes its values.",
             :must-read #{seon.cluster.agent/submit-source!},
             :evidence #{"docs/research/agent-platform/2026-10-07/plan-research/r-read-notes.md"}}
  #:seon.task{:name "finished-agents-and-their-branches-accumulate"

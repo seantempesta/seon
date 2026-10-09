@@ -122,8 +122,7 @@
   (let [reply (seon.error/reply-value nil (seon.ref/section "AGENTS.md#data-and-contract"))]
     (is (some #{"data-and-contracts"} (tree-seq coll? seq reply)) "the agent's reply carries the nearest heading")))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-referenced-doc-path-reads-as-unresolved}}
-  a-referenced-doc-shows-its-heading-size-and-one-read
+(deftest a-referenced-doc-shows-its-heading-size-and-one-read
   (let [[malli agents link missing-file missing-heading]
         (ref/references (db/db) {:seon.ref/text (str "Read `reference-code/malli/README.md#quickstart` and `AGENTS.md#data-and-contracts`,"
                                                      " the [vocabulary](docs/seon/architecture/vocabulary.md),"
@@ -141,8 +140,7 @@
     (is (= [:unresolved :anchor-missing] (mapv :seon.ref/problem-kind [missing-file missing-heading])))
     (is (= "no-such-heading" (:seon.ref/anchor missing-heading)))))
 
-(deftest ^{:seon/tasks #{'seon.ref/a-referenced-function-shows-no-callers-or-tests}}
-  a-referenced-function-shows-its-callers-and-reaching-tests
+(deftest a-referenced-function-shows-its-callers-and-reaching-tests
   (let [[entry] (ref/references (db/db) {:seon.ref/text "`seon.ref/section`"})
         operations (set (:seon.render/operations entry))]
     (is (some #{'my.fs/section} (:seon.ref/callers entry)) "its direct callers, as symbols")
