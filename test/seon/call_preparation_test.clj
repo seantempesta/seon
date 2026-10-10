@@ -978,6 +978,28 @@
                            [{:sample/label "caller"}])))
            "the required entry refuses by name")))))
 
+(deftest an-omitted-database-is-the-custody-in-force
+  ;; A test body's fixture branch (`seon.db/call-with-custody`) runs inside its
+  ;; member's evaluation world: an omitted database read the world's branch,
+  ;; never the fixture's writes (seon.error-test's render without a database).
+  (test-support/with-database
+   (fn [world-connection]
+     (test-support/transacted! world-connection database-entities)
+     (test-support/with-database
+      (fn [custody]
+        (let [current (cp/snapshot @world-connection (projection))
+              plan (cp/plan-for @world-connection current 'seon.call-preparation-test/probe-current-database)
+              prepare #(cp/prepare current (environment-for world-connection) plan [])
+              branch #(get-in (first %) [:config :branch])]
+          (is (= (get-in @custody [:config :branch])
+                 (branch (binding [seon.batch/*world* {:seon.db/connection world-connection}]
+                           (db/call-with-custody {:seon.db/connection custody} prepare))))
+              "the custody in force supplies the database")
+          (is (= (get-in @world-connection [:config :branch])
+                 (branch (binding [seon.batch/*world* {:seon.db/connection world-connection}]
+                           (db/call-with-custody {:seon.db/connection world-connection} prepare))))
+              "the world's own custody supplies its connection's database")))))))
+
 (deftest two-clusters-supply-their-own-custody
   (testing "two sovereign contexts live in one JVM; each call is supplied the
             connection of the evaluation it ran under, through one armed Var"

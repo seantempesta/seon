@@ -891,17 +891,19 @@
 
 (defn- supply-from-world
   "The calling evaluation's world member for `slot`, or the refusal naming
-  the schema key the world lacks: no global, no default, never nil."
+  the schema key the world lacks: no global, no default, never nil. A
+  database is the custody in force's current value, else the world's."
   {:malli/schema [:=> [:cat :seon.call-preparation/slot :seon.fn/sym]
                   [:or :seon.schema/value :seon.call-preparation/unavailable-error]]}
   [slot sym]
   (let [member (:seon.call-preparation/key slot)
         world seon.batch/*world*
-        ;; no world holds a database value: it is the world connection's
-        ;; current value, read at this call (owner ruling 2026-09-28)
+        ;; no world holds a database value: it is the current value of the
+        ;; custody in force (a fixture branch inside `seon.db/call-with-custody`),
+        ;; else of the world's connection, read at this call (owner ruling
+        ;; 2026-09-28), as `seon.instrument/calling-environment` reads it
         v (if (= :seon.db/db member)
-            ;; unarmed: ~1.8 us against ~3 us armed (default, 2026-09-28)
-            (if-let [connection (:seon.db/connection world)] ((mi/-f->original db/db) connection) ::absent)
+            (if-let [connection (or db/*conn* (:seon.db/connection world))] ((mi/-f->original db/db) connection) ::absent)
             (get world member ::absent))]
     (if (or (nil? v) (= ::absent v))
       (unavailable sym slot {:seon.error/message
