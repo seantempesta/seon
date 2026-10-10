@@ -33,6 +33,7 @@
             [seon.id]
             [seon.program :as program]
             [sci.core :as sci]
+            [sci.impl.utils :as sci.utils]
             [sci.ctx-store]
             [seon.render :as render]
             [seon.render-simplification-test :as simplification]
@@ -2616,6 +2617,29 @@
        (is (= 0 (:seon.test/error-count result)))
        (is (= 1 (:seon.test/pass-count result)))))))
 
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/an-interpreted-test-namespace-runs-without-its-fixtures}}
+  an-interpreted-namespace-runs-its-fixture-around-a-deftest
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           evaluation (test-support/evaluate
+                       {:seon.sci.eval/ctx ctx
+                        :seon.cluster.eval/source
+                        (str "(ns fixture.probe (:require [clojure.test :refer [deftest is use-fixtures]]))"
+                             " (def log (atom []))"
+                             " (use-fixtures :each (fn [f] (swap! log conj :before) (f) (swap! log conj :after)))"
+                             " (deftest probe-test (swap! log conj :body) (is true))")
+                        :seon.sci.admit/caps caps
+                        :seon.sci.eval/time-limit-ms 10000})
+           test-var (:seon.sci.admit/value evaluation)
+           result (when (sci.utils/var? test-var)
+                    (eval/run-test {:seon.sci.eval/ctx ctx :seon.test/var test-var
+                                    :seon.sci.eval/time-limit-ms 5000 :seon.db/connection connection}))]
+       (is (sci.utils/var? test-var) "the deftest evaluates to its Var")
+       (is (= 1 (:seon.test/pass-count result)))
+       (is (= [:before :body :after] (sci/eval-string* ctx "@fixture.probe/log"))
+           "the namespace's fixture runs around the interpreted test body")))))
 
 (deftest ^{:seon/tasks #{'seon.sci.eval/a-dev-namespace-test-cannot-run-interpreted-on-a-cluster}}
   a-test-namespace-requiring-a-dev-namespace-interprets

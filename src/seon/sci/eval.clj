@@ -251,6 +251,16 @@
     copied))
 
 
+(defn- context-namespace
+  "The namespace object `ctx` holds for `namespace-name` (SCI keeps one under
+  `[:namespaces name :obj]`, which `the-ns`, `in-ns` and a namespace's metadata
+  are), else a fresh one for a namespace `ctx` does not hold yet. A fresh object
+  per binding would answer `*ns*` apart from `the-ns`, so `use-fixtures` would
+  alter metadata no Var's `:ns` carries."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol] [:fn sci.utils/namespace?]]}
+  [ctx namespace-name]
+  (or (sci/find-ns ctx namespace-name) (sci/create-ns namespace-name)))
+
 (defn- load-host-namespace
   "SCI's `:load-fn` (`reference-code/sci/src/sci/impl/load.cljc:204-243`): a
   namespace the JVM already loaded, required and not yet in the context, is
@@ -268,7 +278,7 @@
   {:malli/schema [:=> [:cat [:map [:namespace :symbol] [:ctx :map]]] [:maybe :map]]}
   [{namespace-name :namespace ctx :ctx}]
   (when-let [host (find-ns namespace-name)]
-    (let [sci-namespace (sci/create-ns namespace-name)]
+    (let [sci-namespace (context-namespace ctx namespace-name)]
       (sci/add-namespace!
        ctx namespace-name
        (into {:obj sci-namespace}
@@ -549,7 +559,7 @@
 
 (defn- one-event
   [source namespace-name ctx max-source]
-  (let [events (sci/binding [sci/ns (sci/create-ns namespace-name)]
+  (let [events (sci/binding [sci/ns (context-namespace ctx namespace-name)]
                  ;; SCI resolves `::alias/k` and syntax-quote from this
                  ;; ctx's namespace table (sci/impl/parser.cljc:60-167).
                  (reader/read
@@ -929,7 +939,7 @@
                                        ", but no installed definition has that name; define it or remove the refer."))]]
       (swap! (:env ctx) assoc-in [:namespaces namespace-name :refers local]
              (sci/new-var (symbol (name target)) (refusing refusal)
-                          {:ns (sci/create-ns (symbol (namespace target)))})))
+                          {:ns (context-namespace ctx (symbol (namespace target)))})))
     ctx))
 
 (declare install-declared-classes! install-jvm-root! overridden-row? source-namespace?)
@@ -970,7 +980,7 @@
        ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
       (install-namespace-bindings! ctx namespace-name (row-bindings namespace-row))
       (let [event (one-event source namespace-name ctx (count source))]
-        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+        (sci/binding [sci/ns (context-namespace ctx namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
         (install-function-contract!
          ctx (db/pull db '[*] [:seon.fn/sym function-symbol])
@@ -1059,7 +1069,7 @@
   [ctx function-symbol]
   (when-let [host-namespace (find-ns (symbol (namespace function-symbol)))]
     (when-let [host-var (ns-resolve host-namespace (symbol (name function-symbol)))]
-      (let [sci-namespace (sci/create-ns (symbol (namespace function-symbol)))]
+      (let [sci-namespace (context-namespace ctx (symbol (namespace function-symbol)))]
         (sci/add-namespace! ctx (symbol (namespace function-symbol))
                             {(symbol (name function-symbol))
                              (copy-host-var host-var sci-namespace)})
@@ -1082,7 +1092,7 @@
       (sci/bind-root! ctx declared refused)
       (sci/add-namespace! ctx namespace-name
                           {var-name (sci/new-var var-name refused
-                                                 {:ns (sci/create-ns namespace-name)})}))
+                                                 {:ns (context-namespace ctx namespace-name)})}))
     (kernel/mark-installed! ctx function-symbol)
     :unavailable))
 
@@ -1474,7 +1484,7 @@
                                namespace-name ctx
                                (count (:seon.test/source committed))))]
         (when event
-          (sci/binding [sci/ns (sci/create-ns namespace-name)]
+          (sci/binding [sci/ns (context-namespace ctx namespace-name)]
             (sci/eval-form ctx (:seon.sci.reader/form event))))
         {:seon.schema/projection projection
          :seon.sci.eval/installed 1})
@@ -1498,7 +1508,7 @@
           (let [event (one-event (:seon.program/source row)
                                  namespace-name ctx
                                  (count (:seon.program/source row)))]
-            (sci/binding [sci/ns (sci/create-ns namespace-name)]
+            (sci/binding [sci/ns (context-namespace ctx namespace-name)]
               (sci/eval-form ctx (:seon.sci.reader/form event)))))
         {:seon.schema/projection
          (or prepared-projection
@@ -1943,7 +1953,7 @@
             :let [host-namespace (when-not (source-namespace? ctx namespace-name)
                                    (find-ns namespace-name))]
             :when host-namespace]
-      (let [sci-namespace (sci/create-ns namespace-name)
+      (let [sci-namespace (context-namespace ctx namespace-name)
             indexed-names (get indexed-function-names namespace-name)
             host-bindings
             (select-keys
@@ -1968,7 +1978,7 @@
 
 (defn- install-host-namespace!
   [ctx namespace-name intern-map]
-  (let [sci-namespace (sci/create-ns namespace-name)]
+  (let [sci-namespace (context-namespace ctx namespace-name)]
     (sci/add-namespace!
      ctx namespace-name
      (into {}
@@ -2475,7 +2485,7 @@
                                        (when-not (sci/resolve ctx (symbol sym))
                                          (symbol (name sym))))
                                      (get function-rows-by-ns namespace-name)))]
-                 (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                 (sci/binding [sci/ns (context-namespace ctx namespace-name)]
                    (sci/eval-form ctx (list* 'declare undeclared))))
                (reduce
                 install-row
@@ -2898,7 +2908,7 @@
            (let [namespace-name (symbol (namespace sym))
                  sci-var (or held
                              (let [created (sci/new-var (symbol (name sym)) nil
-                                                        {:ns (sci/create-ns namespace-name)})]
+                                                        {:ns (context-namespace ctx namespace-name)})]
                                (sci/add-namespace! ctx namespace-name {(symbol (name sym)) created})
                                created))]
              (sci/bind-root! ctx sci-var (lazy-root ctx database sym sci-var))
@@ -3945,7 +3955,7 @@
                      :seon.error/member :seon.render/source
                      :seon.error/expected :seon.sci.eval/evaluation
                      :seon.error/offending offending})})
-        events (sci/binding [sci/ns (sci/create-ns namespace-name)]
+        events (sci/binding [sci/ns (context-namespace ctx namespace-name)]
                  (reader/read (assoc (reader-context ctx namespace-name)
                                      :seon.sci.reader/ctx ctx
                                      :seon.sci.reader/text source
@@ -4454,7 +4464,7 @@
                            (when (and connection agent-id)
                              (agent-namespace (db/db connection) agent-id))
                            'user)
-        namespace-object (sci/create-ns namespace-name)
+        namespace-object (context-namespace evaluation-ctx namespace-name)
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
         projection-state
