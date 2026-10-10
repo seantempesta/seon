@@ -349,3 +349,26 @@
       (finally
         (doseq [file (reverse (file-seq (.toFile base)))] (.delete ^java.io.File file))))
     (is (not (.exists (.toFile base))) "a sealed archive is deleted whole")))
+
+(deftest ^{:seon/tasks #{'seon.operator/an-extracted-archive-is-read-only}}
+  a-pinned-dependency-source-is-read-only
+  (let [root (java.nio.file.Files/createTempDirectory "seon-sealed-pin" (make-array java.nio.file.attribute.FileAttribute 0))
+        repository (operator/repository-root)
+        path "reference-code/aero"
+        pin (str/trim (slurp (.getInputStream (.start (doto (ProcessBuilder. ^java.util.List ["git" "rev-parse" (str "HEAD:" path)])
+                                                         (.directory (java.io.File. repository)))))))
+        pinned (#'operator/pinned-checkout! (str root) repository path pin)
+        source (java.io.File. pinned "LICENSE")
+        product (java.io.File. pinned "target-classes-prepared")]
+    (try
+      (is (.canWrite source) "a freshly archived pin is writable until sealed")
+      (.mkdirs product)
+      (#'operator/seal-pinned! (str (java.io.File. repository path)) pin pinned)
+      (is (not (.canWrite source)) "a tracked dependency file refuses a write once sealed")
+      (is (thrown? java.io.IOException (spit source "edited")) "an agent's spit into a pin fails")
+      (is (.createNewFile (java.io.File. product "Prepared.class")) "a build-product directory stays writable")
+      (is (do (#'operator/seal-pinned! (str (java.io.File. repository path)) pin pinned) true)
+          "sealing again after a preparation rerun is idempotent")
+      (finally
+        (doseq [file (reverse (file-seq (.toFile root)))] (.delete ^java.io.File file))))
+    (is (not (.exists (.toFile root))) "a sealed pin is deleted whole")))

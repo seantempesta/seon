@@ -979,6 +979,20 @@
         (fs/move staging target {:atomic-move true})))
     (.getCanonicalPath target)))
 
+(defn- seal-pinned!
+  "Seal the files git tracks at `pin` of `checkout` under `directory` (and, as
+  `extract-pinned!` places them, each initialized nested gitlink at its nested
+  pin) with `seal-archive!`: a dependency's source is the running JVM's code,
+  and an agent's relative `spit` into a pin rewrote it. Untracked build
+  products (tools.deps preparation output) and directories stay writable, so
+  a rerun of preparation and `fs/delete-tree` (pruning, nuke) still work."
+  {:malli/schema [:=> [:cat :string :string :string] :nil]}
+  [checkout pin directory]
+  (seal-archive! directory (command! ["git" "ls-tree" "-r" "-z" "--name-only" pin] checkout 30000))
+  (doseq [{nested :path nested-pin :pin} (gitlinks checkout pin)
+          :when (.exists (io/file checkout nested ".git"))]
+    (seal-pinned! (str (io/file checkout nested)) nested-pin (str (io/file directory nested)))))
+
 (defn- pins-text
   "`git ls-files --stage -- reference-code` output for `gitlinks`, the bytes
   `seon.dev.dependency-digest/dependency-pins` keys a snapshot on."
@@ -1025,6 +1039,9 @@
             ;; datahike's compiled Java), once per pin.
             _ (when (some :prepared? submodules)
                 (command! ["clojure" "-X:deps" "prep" ":aliases" "[:dev :test]"] staging 300000))
+            ;; Sealed only after preparation, which writes into the pins.
+            _ (doseq [{:keys [path pin pinned]} submodules]
+                (seal-pinned! (str (io/file repository path)) pin pinned))
             ;; An archive is no Git work tree: without its commit's pins, a
             ;; `git ls-files` inside it answers the ENCLOSING checkout's index
             ;; (`seon.test.cache/gitlink-digests`, `dependency-digest/dependency-pins`),
