@@ -60,7 +60,8 @@ Boot (Astra, 246a571ed, `docs/research/agent-platform/2026-10-10-boot-source.md`
 file, 6.9 s across a dependency change on a quiet machine; default's 15–18 s boots were contention with lanes' check
 JVMs. Every changed boot still re-derives the whole program (`stored-derivation-schema-keys` 1.55–1.78 GB). Owner
 2026-10-10: deferred; the slots go to the self-improvement loop. Per-file derivation inputs (3–5 h) is the chosen fix
-when it is picked up.
+when it is picked up. The same cost shows in every `bin/seon check`: publication about 26 s (lane publication-robust,
+runs 8c15c8a47f70, 9dbc88e3b762), which also makes each platform proof 30–90 s.
 Open: two reds on clean HEAD (`seon.config-test/the-default-document-has-one-canonical-complete-location`,
 `seon.db-test/equal-declaration-content-shares-one-projection-across-values`) to classify; boot readiness 15.6 s on
 18919b663 against 5–9 s earlier.
