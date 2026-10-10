@@ -226,12 +226,15 @@
 
 (defn cost-diff
   "The request's live values beside main's stored ones (`stored`: symbol ->
-  [digest self-us]): one comparison per interpreted live definition (the
-  agent's own: :interpreted, and :new when main stores nothing for it), and
-  per compiled one main stores a value for whose digest differs (:changed) or
-  whose per-call self time moved by the factor `hysteresis` either way. A
-  compiled definition main has no value for is left out: on a branch that is
-  most platform code, on every reply. Reads nothing stored itself."
+  [digest self-us]): one comparison per definition the agent changed (its
+  interpreted ones: :interpreted, and :new when main stores nothing for it;
+  a compiled one whose digest differs from main's: :changed), and per
+  unchanged compiled one main stores a value for whose per-call self time grew
+  by the factor `hysteresis`. An unchanged definition that got faster is left
+  out: main's value may be a cold first measurement, and the agent did not
+  cause it. A compiled definition main has no value for is left out too: on a
+  branch that is most platform code, on every reply. Reads nothing stored
+  itself."
   {:malli/schema [:=> [:cat :seon.cost/live
                        [:map-of :qualified-symbol [:tuple :seon.program/definition-digest :double]]
                        :seon.config.fn.cost/hysteresis]
@@ -244,9 +247,9 @@
                       flags (cond-> #{}
                               (nil? main-us) (conj :new)
                               (and main-us (not= digest main-digest)) (conj :changed)
-                              (= :seon.profile/context scope) (conj :interpreted))]
-                  (when (and (or main-us (= :seon.profile/context scope))
-                             (or (seq flags) (and ratio (or (>= ratio hysteresis) (<= ratio (/ 1.0 hysteresis))))))
+                              (= :seon.profile/context scope) (conj :interpreted))
+                      own? (or (contains? flags :changed) (contains? flags :interpreted))]
+                  (when (or own? (and ratio (>= ratio hysteresis)))
                     (cond-> {:seon.cost.comparison/subject sym
                              :seon.cost.comparison/measure :self-us
                              :seon.cost.comparison/live (hundredths self-us)
@@ -265,13 +268,13 @@
                   :seon.cost/diff]}
   [live stored hysteresis]
   (into []
-        (keep (fn [{sym :seon.test/sym bytes :seon.test.member/alloc-bytes}]
+        (keep (fn [{sym :seon.test/sym allocated :seon.test.member/alloc-bytes}]
                 (let [main-bytes (get stored sym)
-                      ratio (when (and main-bytes (pos? main-bytes)) (/ (double bytes) main-bytes))]
+                      ratio (when (and main-bytes (pos? main-bytes)) (/ (double allocated) main-bytes))]
                   (when (or (nil? main-bytes) (and ratio (or (>= ratio hysteresis) (<= ratio (/ 1.0 hysteresis)))))
                     (cond-> {:seon.cost.comparison/subject sym
                              :seon.cost.comparison/measure :alloc-bytes
-                             :seon.cost.comparison/live (double bytes)
+                             :seon.cost.comparison/live (double allocated)
                              :seon.cost.comparison/flags (if main-bytes #{} #{:new})}
                       main-bytes (assoc :seon.cost.comparison/main (double main-bytes))
                       ratio (assoc :seon.cost.comparison/ratio (hundredths ratio)))))))

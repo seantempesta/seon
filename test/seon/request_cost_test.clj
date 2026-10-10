@@ -1,6 +1,6 @@
 (ns seon.request-cost-test
   (:require [clojure.data.json :as json]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [are deftest is]]
             [seon.batch :as batch]
             [seon.db :as db]
             [seon.mcp :as mcp]
@@ -177,3 +177,23 @@
            "the very same reply compares the function it defined and called")
        (is (= :seon.profile/context (:seon.fn.cost/scope stored)) "its cost entity is stored on the branch")
        (is (<= 30 (:seon.fn.cost/calls stored 0)))))))
+
+(deftest an-unchanged-platform-function-that-got-faster-shows-no-entry
+  (let [digest (apply str (repeat 64 "a"))
+        other (apply str (repeat 64 "b"))
+        live (fn [scope self-us] [{:seon.fn.cost/sym 'seon.schema/projection-cache-value :seon.fn.cost/digest digest
+                                   :seon.fn.cost/scope scope :seon.fn.cost/calls 30
+                                   :seon.fn.cost/self-us self-us :seon.fn.cost/total-us self-us}])
+        flags (fn [entries] (mapv :seon.cost.comparison/flags entries))]
+    (are [scope self-us stored shown] (= shown (flags (batch/cost-diff (live scope self-us) stored 1.41)))
+      ;; main's cold first value, the definition unchanged: an improvement the agent did not cause
+      :seon.profile/host 5.0 {'seon.schema/projection-cache-value [digest 46.0]} []
+      :seon.profile/host 30.0 {'seon.schema/projection-cache-value [digest 46.0]} []
+      ;; a regression shows for any subject
+      :seon.profile/host 70.0 {'seon.schema/projection-cache-value [digest 46.0]} [#{}]
+      ;; an improvement shows for a definition the agent changed
+      :seon.profile/host 5.0 {'seon.schema/projection-cache-value [other 46.0]} [#{:changed}]
+      :seon.profile/context 5.0 {'seon.schema/projection-cache-value [digest 46.0]} [#{:interpreted}]
+      :seon.profile/context 5.0 {} [#{:new :interpreted}]
+      ;; a compiled definition main has no value for is left out
+      :seon.profile/host 5.0 {} [])))
