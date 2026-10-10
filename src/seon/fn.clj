@@ -664,6 +664,24 @@
     (update entity :seon.fn/keywords (fnil into (sorted-set)) used)
     entity))
 
+(defn- authored-contract
+  "The function's contract fact: `:seon.fn/spec` when `authored` is a Malli
+  form, else `:seon.fn/malformed-spec`, the authored contract kept as data
+  and never armed, so one malformed contract never refuses publication."
+  {:malli/schema [:=> [:cat :seon.schema/value [:maybe :map]]
+                  [:or [:map [:seon.fn/spec :seon.fn/spec]]
+                   [:map [:seon.fn/malformed-spec :seon.fn/malformed-spec]]]]}
+  [authored namespace-context]
+  (let [qualified (analyzer/qualify-schema-symbols authored namespace-context)]
+    (try
+      {:seon.fn/spec (id/printed (schema/canonical-definition qualified))}
+      ;; The one translation: canonical-definition's own declared refusal of
+      ;; a non-durable contract becomes the kept malformed contract.
+      (catch clojure.lang.ExceptionInfo refusal
+        (if (= :seon.schema/noncanonical-definition (:seon.schema/error (ex-data refusal)))
+          {:seon.fn/malformed-spec (id/printed qualified)}
+          (throw refusal))))))
+
 (defn- var-entity
   {:malli/schema [:=> [:cat :seon.schema/projection :map :map :map :map] [:maybe :map]]}
   [projection contexts namespace-contexts
@@ -760,11 +778,8 @@
         (:seon.fn/doc-order metadata) (assoc :seon.fn/doc-order (:seon.fn/doc-order metadata))
         (::analyzer/doc entry) (assoc :seon.fn/doc (::analyzer/doc entry))
         (:malli/schema metadata)
-        (assoc :seon.fn/spec
-               (id/printed (schema/canonical-definition
-                            (analyzer/qualify-schema-symbols
-                             (:malli/schema metadata)
-                             (get namespace-contexts namespace-name)))))
+        (merge (authored-contract (:malli/schema metadata)
+                                  (get namespace-contexts namespace-name)))
         (seq (get calls-by-caller qualified))
         (assoc :seon.fn/calls
                (into #{}

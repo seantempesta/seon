@@ -643,6 +643,8 @@
               (merge retained (m/default-schemas))
               (keys definitions))))))
 
+(declare malli-form?)
+
 (defn canonical-definition
   "Return one Malli definition as durable EDN.
 
@@ -763,6 +765,15 @@
          :seon.schema/noncanonical-definition ::non-edn
          :seon.schema/value canonical
          })))
+    ;; A local def's name or any other non-schema value is refused here by
+    ;; name, so the indexer keeps the authored contract as data.
+    (when-not (malli-form? decoded)
+      (throw
+       (ex-info
+        "A durable Malli definition is not a Malli form."
+        {:seon.schema/error :seon.schema/noncanonical-definition
+         :seon.schema/noncanonical-definition ::not-a-malli-form
+         :seon.schema/value decoded})))
     decoded))
 
 (defn- reference-registry

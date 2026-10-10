@@ -418,6 +418,18 @@
        (mapv (fn [model]
                {:seon.config.ai/model model}))))
 
+(defn- malformed-contracts
+  "Functions whose authored contract is kept as data, unarmed, because it is
+  not a Malli form."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.problems/malformed-contract]]}
+  [database]
+  (->> (db/q '[:find ?symbol ?spec
+               :where [?function :seon.fn/malformed-spec ?spec]
+                      [?function :seon.fn/sym ?symbol]]
+             database)
+       (sort-by (comp str first))
+       (mapv (fn [[symbol spec]] {:seon.fn/sym symbol :seon.fn/malformed-spec spec}))))
+
 (defn- failed-tests
   "Current failed executions from admitted member facts, with each test whose
   latest execution recorded no outcome kept as its own typed unknown. Only
@@ -468,6 +480,7 @@
    [:seon.problems/deferred-agents #'deferred-agents]
    [:seon.problems/unowned-namespaces #'unstewarded-namespaces]
    [:seon.problems/stale-vars #'stale-vars]
+   [:seon.problems/malformed-contracts #'malformed-contracts]
    [:seon.problems/missing-models #'missing-models]])
 
 (defn problems
@@ -643,6 +656,10 @@
     "stale vars"
     (map stale-var-html (:seon.problems/stale-vars found)))
    (family-section
+    "malformed contracts"
+    (for [entry (:seon.problems/malformed-contracts found)]
+      (row "function" (:seon.fn/sym entry) "contract" (:seon.fn/malformed-spec entry))))
+   (family-section
     "missing models"
     (map missing-model-html (:seon.problems/missing-models found)))]))
 
@@ -689,6 +706,10 @@
                 (:seon.problems/deferred-count entry)
                 " triggers are deferred until one arrives."))
          :seon.problems/stale-vars (map stale-var-ai (:seon.problems/stale-vars found))
+         :seon.problems/malformed-contracts
+         (for [entry (:seon.problems/malformed-contracts found)]
+           (str "Function " (:seon.fn/sym entry) " runs unarmed: its contract "
+                (:seon.fn/malformed-spec entry) " is not a Malli form. Name a registered schema key."))
          :seon.problems/missing-models (map missing-model-ai (:seon.problems/missing-models found))}
         profile (or (:seon.render/profile found)
                     (render/agent-render-profile config/defaults))]

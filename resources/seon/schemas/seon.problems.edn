@@ -86,6 +86,13 @@
                  ;; the sibling finding entity `:unowned-namespace`
                  ;; declares no pair for the same reason.
                  [:seon.fn/sym :seon.fn/sym]],
+                :malformed-contract
+                [:map {:seon.health/severity 2 :seon.health/subject :seon.fn/sym
+                       :seon.health/in [:seon.health/problems :seon.problems/malformed-contracts]}
+                 ;; No render pair, as `:stale-var`: its identity attribute
+                 ;; would select it for every pulled function entity.
+                 [:seon.fn/sym :seon.fn/sym]
+                 [:seon.fn/malformed-spec :seon.fn/malformed-spec]],
                 :deferred-agent
                 [:map {:seon.health/severity 2 :seon.health/impact :seon.problems/deferred-count :seon.health/subject :seon.agent/id
                        :seon.health/in [:seon.health/problems :seon.problems/deferred-agents]
@@ -123,7 +130,10 @@
                   [:vector :seon.problems/stale-var]]
                  [:seon.problems/missing-models
                   {:optional true}
-                  [:vector :seon.problems/missing-model]]],
+                  [:vector :seon.problems/missing-model]]
+                 [:seon.problems/malformed-contracts
+                  {:optional true}
+                  [:vector :seon.problems/malformed-contract]]],
                 :error-signature
                 [:map
                  [:seon.error/signature :seon.error/signature]

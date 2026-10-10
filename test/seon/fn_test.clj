@@ -22,6 +22,7 @@
             [seon.fs :as fs]
             [seon.cluster.source :as source]
             [seon.id :as id]
+            [seon.problems]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -3232,3 +3233,36 @@
         (is (= forms
                (mapv (fn [[from to]] (str/join "\n" (subvec lines (dec from) to))) source-spans))
             "each span covers exactly its form's lines")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.eval/a-script-namespace-contract-naming-a-local-def-crashes-publication}}
+  a-contract-naming-a-local-def-is-kept-as-data-and-the-namespace-publishes
+  (let [root (fixture-root)]
+    (try
+      (write-source!
+       root "sample/local_contract.clj"
+       (str "(ns sample.local-contract)\n"
+            "(def ^:private request-schema [:map [:a :int]])\n"
+            "(defn named-local {:malli/schema [:=> [:cat request-schema] :int]} [request] 1)\n"
+            "(defn ordinary {:malli/schema [:=> [:cat :int] :int]} [x] x)\n"))
+      (let [manifest (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
+            paths (into #{} (map :seon.fn.file/relative-path)
+                        (:seon.fn.manifest/artifacts manifest))]
+        (test-support/with-database
+          (fn [connection]
+            (seon.fn/index! {:seon.db/connection connection
+                             :seon.db/process boot-process
+                             :seon.source/previous-database @connection
+                             :seon.fn/changed-paths paths
+                             :seon.fn/manifest manifest})
+            (let [database @connection
+                  pulled #(db/pull database [:seon.fn/spec :seon.fn/malformed-spec :seon.fn/arities] [:seon.fn/sym %])
+                  named-local (pulled 'sample.local-contract/named-local)
+                  ordinary (pulled 'sample.local-contract/ordinary)]
+              (is (= "[:=> [:cat request-schema] :int]" (:seon.fn/malformed-spec named-local)))
+              (is (not (contains? named-local :seon.fn/spec)))
+              (is (string? (:seon.fn/spec ordinary)))
+              (is (seq (:seon.fn/arities ordinary)))
+              (is (= ['sample.local-contract/named-local]
+                     (mapv :seon.fn/sym (:seon.problems/malformed-contracts
+                                         (seon.problems/problems database {})))))))))
+      (finally (test-support/delete-recursively! root)))))

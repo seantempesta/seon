@@ -156,6 +156,7 @@
            [:seon.fn/host-bound? {:optional true} :seon.fn/host-bound?]
            [:seon.fn/defined-by {:optional true} :seon.fn/defined-by]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
+           [:seon.fn/malformed-spec {:optional true} :seon.fn/malformed-spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]
            [:seon.fn/invokes {:optional true} :seon.fn/invokes]
            [:seon.fn/destroys {:optional true} :seon.fn/destroys]
@@ -206,6 +207,7 @@
           :roots [:vector [:string {:min 1}]],
           :source [:string {:min 1}],
           :spec :string,
+          :malformed-spec [:string {:min 1 :description "The authored contract of a function whose contract is not a Malli form, kept as data in place of `:seon.fn/spec`: never armed, listed by `seon.problems/problems`."}],
           :sym
           [:qualified-symbol
            {:seon.db/identity true,
