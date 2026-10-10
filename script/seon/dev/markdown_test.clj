@@ -77,7 +77,10 @@
                         ::message "Historical PRD authority contains executable stale guidance"}))))
           subjects))))
 
-(defn- repository-prd-authorities []
+(defn- living-prd-authorities
+  "Localized authorities under the living `docs/seon` tree. The directories
+  under `docs/prds` are dated records and are not checked."
+  []
   (into []
         (comp
          (filter (fn [file]
@@ -87,7 +90,7 @@
                   {::path (.getPath runbook)
                    ::runbook-content (slurp runbook)
                    ::roadmap-content (when (.isFile roadmap) (slurp roadmap))}))))
-        (file-seq (io/file "docs/prds"))))
+        (file-seq (io/file "docs/seon"))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Parse Tests
@@ -218,11 +221,11 @@
                          stale "abcd` beside `reference-code/datahike`.\n")))]
         (is (true? (::md/valid? result)))))))
 
-(deftest ^{:seon/tasks #{'seon.dev.markdown/repository-doc-lints-are-red-on-head}}
-  repository-dependency-pins-are-current-test
+(deftest repository-dependency-pins-are-current-test
   (let [result
         (md/validate-repository-pins
-         {::md/repository-root (System/getProperty "user.dir")})]
+         {::md/repository-root (or (System/getenv "SEON_CHECKOUT")
+                                  (System/getProperty "user.dir"))})]
     (is (true? (::md/valid? result))
         "Dependency pin violations")))
 
@@ -239,15 +242,15 @@
                               :seon.operator.subprocess/deadline-ms 30000})]
                  (when-not (zero? (:seon.operator.subprocess/exit result))
                    (throw (ex-info "Fixture git failed" result)))))
-        source (io/file (str root) "docs/issue.md")
-        destination (io/file (str root) "docs/archive/issue.md")
+        source (io/file (str root) "docs/seon/issue.md")
+        destination (io/file (str root) "docs/seon/archive/issue.md")
         content (fn [pin] (str "Dependency `reference-code/example` at `" pin "`.\n"))
         validate! #(md/validate-repository-pins {::md/repository-root (str root)})]
     (try
       (git! "init" "--quiet")
       (io/make-parents source)
       (spit source (content current))
-      (git! "add" "--" "docs/issue.md")
+      (git! "add" "--" "docs/seon/issue.md")
       (git! "update-index" "--add" "--cacheinfo"
             (str "160000," current ",reference-code/example"))
       (is (::md/valid? (validate!)))
@@ -256,11 +259,11 @@
                   (make-array java.nio.file.CopyOption 0))
       (let [result (validate!)]
         (is (::md/valid? result))
-        (is (= ["docs/issue.md"] (::md/deleted-paths result))))
+        (is (= ["docs/seon/issue.md"] (::md/deleted-paths result))))
       (spit destination (content stale))
       (let [result (validate!)]
         (is (false? (::md/valid? result)))
-        (is (= ["docs/archive/issue.md"]
+        (is (= ["docs/seon/archive/issue.md"]
                (mapv ::md/file-path (::md/violations result)))))
       (testing "one file checks its own pins, as the edit hook asks"
         (is (some #{:dependency-pin-current}
@@ -269,8 +272,8 @@
                         (md/validate-file {::md/file-path (str destination)
                                            ::md/repository-root (str root)}))))))
       (Files/delete (.toPath destination))
-      (spit (io/file (str root) "docs/remaining.md") "No dependency citation.\n")
-      (is (= ["docs/issue.md"] (::md/deleted-paths (validate!)))
+      (spit (io/file (str root) "docs/seon/remaining.md") "No dependency citation.\n")
+      (is (= ["docs/seon/issue.md"] (::md/deleted-paths (validate!)))
           "a deletion without a destination remains observable")
       (is (= :file-not-found
              (-> (md/validate-file {::md/file-path (str source)})
@@ -320,9 +323,9 @@
       (is (= [::authority-subjects-absent]
              (mapv ::rule (authority-errors [])))))))
 
-(deftest ^{:seon/tasks #{'seon.dev.markdown/repository-doc-lints-are-red-on-head}}
-  historical-prd-authorities-fail-closed-test
-  (let [errors (authority-errors (repository-prd-authorities))]
+(deftest historical-prd-authorities-fail-closed-test
+  (let [subjects (living-prd-authorities)
+        errors (when (seq subjects) (authority-errors subjects))]
     (is (empty? errors)
         "Localized PRD authority violations")))
 

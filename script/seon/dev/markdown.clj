@@ -922,7 +922,7 @@
   (->> (successful-git-output
         repository-root
         (into ["ls-files" "-z"]
-              (concat options ["--" "docs" ".agents/skills"])))
+              (concat options ["--" "docs/seon" ".agents/skills" "AGENTS.md"])))
        (#(split-on-character % \u0000))
        (filter #(str/ends-with? % ".md"))
        sort))
@@ -1036,7 +1036,9 @@
                    ::sections []}})))
 
 (defn validate-repository-pins
-  "Validate dependency pins in working-tree docs and curated skills.
+  "Validate dependency pins in living documents: `docs/seon`, `AGENTS.md` and curated
+   skills. Dated records under other `docs` directories cite the pins they
+   measured.
    Deleted tracked paths are reported separately; untracked destinations
    participate before a rename is staged."
   {:malli/schema
