@@ -271,6 +271,12 @@ Each is small, names its proof and what it makes measurably better.
   cold cost is its own query. The 81 ms / 8.6k-call reading was root's own context (8,763 calls); a fresh agent's
   warm `(+ 1 2)` is 72–74 ms / 6,668 calls, so no counting overhead. Open: the cold-calls dial does not yet reach cells from the cluster
   configuration (task filed).
+- 2026-10-10 The whole loop is run by Seon agents (owner): a green merge is accepted automatically (proofs and every
+  reaching test green); a DeepSeek root agent handles root's requests, platform work included, through root-specific
+  tasks and a root system context that grant it more freedom; DeepSeek agents triage the backlog; paid rounds have
+  no cap and report their tokens and cost daily. Designed in card ROOT-AGENT (lane fable-root-agent).
+- 2026-10-10 Owner: when the owner is not actively replying, root decides with the recommended option, proceeds and
+  reports the decision; it never blocks lanes on a question.
 - 2026-10-09 Freeze new platform machinery until the REPL-only acceptance passes (one non-host-bound and one host-bound fix).
 - 2026-10-09 Auto-restart default onto HEAD per landing batch; then delete the lag workarounds.
 - 2026-10-09 Proof gates scheduling; the rest is an unproven backlog. Stay on deepseek-flash. Commits 1–3 lines; docs
