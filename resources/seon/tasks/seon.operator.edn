@@ -63,4 +63,9 @@
  #:seon.task{:name "one-test-check-takes-74-seconds"
              :kind :function
              :intent "`seon.operator/check!` (`bin/seon check --test NS/NAME`) took 74-95 s per run in fan-out 9 (2026-10-09, 995b01c2d) for a handful of named tests whose bodies run in milliseconds; a throwaway JVM is ready in about 10 s with cached classes (`bin/seon start --head` ready-ms 10158). The cost must follow the tests requested: a check of one test costs JVM readiness plus loading the namespaces that test reaches plus the test, not whole-program publication, adoption rehearsal, full lint or whole-program load. Measure each phase of `seon.operator/check!` first (lane platform-step-card, docs/seon/schedule/cards/PLATFORM-STEP.md), then remove or narrow every phase not proportional to the requested tests. The same path serves the platform test step (an agent's host-bound change runs its affected tests in a throwaway JVM), so its floor sets how fast platform work can iterate."
-             :must-read #{seon.operator/check! seon.operator/operator-check-bound-ms}}]
+             :must-read #{seon.operator/check! seon.operator/operator-check-bound-ms}}
+ #:seon.task{:name "check-classpath-build-races-in-tools-deps"
+             :kind :function
+             :intent "bin/seon check sometimes fails at `clojure -Spath -M:dev:test` with 'Error building classpath. class java.util.HashMap$Node cannot be cast to class java.util.HashMap$TreeNode' from `org.apache.maven.model.validation.DefaultModelValidator/validateId` under `clojure.tools.deps/expand-deps` (a HashMap shared across its parallel children tasks); the identical retry passes. Seen twice on 2026-10-10 (lane loop-impl-cost; operator-check-20261010T094742.914, operator-check-20261010T095938.248). Done when the check's classpath step cannot fail this way (a cached classpath per deps digest, or a serialized expansion), with the retry no longer needed."
+             :must-read #{seon.operator/request!}}
+]

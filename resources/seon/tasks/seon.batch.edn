@@ -17,4 +17,9 @@
              :kind :function
              :intent "`seon.batch/arm-measures` sums the allocation of the evaluation arms only, so `:seon.cost/alloc-mb` of a request that defines one function and one test reads 22 MB while the JVM allocated 1.0 GB (default f54e73c83, 2026-10-09: 709 MB on virtual threads in the test step, 296 MB on pool threads, 37 MB on the writer thread; JFR in the evidence). The agent cannot see the cost its request caused. Done when `seon.batch/request-cost` carries the allocation of the stages that ran for the request (test step and settlement included) or names the stages it excludes as data, and the 1.0 GB request reports within 2x of it."
              :must-read #{seon.batch/arm-measures seon.batch/request-cost seon.test/run}
-             :evidence #{"docs/research/agent-platform/2026-10-09/slow-alloc.md"}}]
+             :evidence #{"docs/research/agent-platform/2026-10-09/slow-alloc.md"}}
+ #:seon.task{:name "stamped-ns-has-no-reader"
+             :kind :function
+             :intent "`:seon.batch/stamped-ns` (an AtomicLong each world carries) was read only by the transaction stamps' milliseconds, which `seon.profile/transaction-observation` no longer produces (FEEDBACK-LOOP stage 5). It is still made by `seon.turn.world/agent-world`, `seon.turn.world/jvm-world` and the batch world in `seon.turn/evaluate-sources`, and declared in `resources/seon/schemas/seon.batch.edn`. Done when no world carries it and its schema and its predicate `seon.batch/stamped-clock?` are deleted."
+             :must-read #{seon.turn.world/agent-world seon.turn.world/jvm-world seon.turn/evaluate-sources seon.batch/stamped-clock?}}
+]
