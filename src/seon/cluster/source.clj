@@ -1679,11 +1679,11 @@
 
 (defn- commit-refusal
   "`commit!`'s refusal: its message and evidence."
-  {:malli/schema [:=> [:cat [:vector :seon.source/path] :string :map] :seon.git/commit-error]}
-  [paths message members]
+  {:malli/schema [:=> [:cat [:vector :seon.source/path] :seon.git/commit-refused :string :map] :seon.git/commit-error]}
+  [paths reason message members]
   (seon.error.refusal/error :seon.git/commit-error
    (merge {:seon.error/layer :seon.source/write-back :seon.error/operation 'seon.cluster.source/commit!
-           :seon.error/message message :seon.git/paths paths}
+           :seon.error/message message :seon.git/paths paths :seon.git/commit-refused reason}
           members)))
 
 (defn- commit-message
@@ -1712,7 +1712,7 @@
   [root paths f]
   (let [git-dir (git root ["rev-parse" "--absolute-git-dir"])]
     (if-not (zero? (:exit git-dir))
-      (commit-refusal paths "The checkout's git directory could not be read." {:seon.error/offending (:err git-dir)})
+      (commit-refusal paths :no-git-dir "The checkout's git directory could not be read." {:seon.error/offending (:err git-dir)})
       (let [holder (process/process {:dir root :err :string}
                                     "perl" "-MFcntl=:flock" "-e"
                                     (str "open(my $lock, '>>', shift) or die \"lane-commit.lock: $!\\n\"; "
@@ -1722,7 +1722,7 @@
         (try
           (if (= "locked" (.readLine (io/reader (:out holder))))
             (f)
-            (commit-refusal paths "The lane commit lock could not be taken; nothing was committed."
+            (commit-refusal paths :lock-not-taken "The lane commit lock could not be taken; nothing was committed."
                             {:seon.error/offending (str/trim (:err @holder))}))
           (finally
             (.close ^java.io.OutputStream (:in holder))
@@ -1753,10 +1753,10 @@
         unproven (vec (remove #(and (candidates %) (= (candidates %) (blob-digest root %))) paths))
         before (git root ["rev-parse" "HEAD"])]
     (cond
-      (not (zero? (:exit staged))) (commit-refusal paths "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
-      (seq other) (commit-refusal paths "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
-      (empty? paths) (commit-refusal paths "The landing wrote no path to commit." {:seon.error/offending paths})
-      (seq unproven) (commit-refusal paths "A written path no longer holds the candidate write-back proved; nothing was committed."
+      (not (zero? (:exit staged))) (commit-refusal paths :index-unreadable "The checkout's git index could not be read." {:seon.error/offending (:err staged)})
+      (seq other) (commit-refusal paths :other-staged "Other paths are staged in the shared index; a landing commits only its own." {:seon.error/offending other})
+      (empty? paths) (commit-refusal paths :nothing-written "The landing wrote no path to commit." {:seon.error/offending paths})
+      (seq unproven) (commit-refusal paths :unproven "A written path no longer holds the candidate write-back proved; nothing was committed."
                                      {:seon.error/offending unproven})
       :else
       (let [made (git root (into ["commit" "--only" "--cleanup=whitespace" "-m" (commit-message acceptance paths) "--"] paths))
@@ -1765,15 +1765,15 @@
             carried (git root ["diff-tree" "--no-commit-id" "--name-only" "-r" "--no-renames" (:out before) (:out after)])
             differing (vec (remove #(= (candidates %) (blob-digest root % (:out after))) paths))]
         (cond
-          (not (zero? (:exit made))) (commit-refusal paths "git commit failed; nothing was committed." {:seon.error/offending (:err made)})
+          (not (zero? (:exit made))) (commit-refusal paths :commit-failed "git commit failed; nothing was committed." {:seon.error/offending (:err made)})
           (not= [(:out before)] parents)
-          (commit-refusal paths "The commit git made is not on the previous head alone; history is not rewritten."
+          (commit-refusal paths :not-on-head "The commit git made is not on the previous head alone; history is not rewritten."
                           {:seon.error/offending (vec parents) :seon.error/expected [(:out before)] :seon.git/commit (:out after)})
           (not= (set paths) (set (str/split-lines (:out carried))))
-          (commit-refusal paths "The commit git made is not exactly the written paths; history is not rewritten."
+          (commit-refusal paths :not-exact "The commit git made is not exactly the written paths; history is not rewritten."
                           {:seon.error/offending (str/split-lines (:out carried)) :seon.error/expected paths})
           (seq differing)
-          (commit-refusal paths "The commit git made does not hold the proven candidate bytes; history is not rewritten."
+          (commit-refusal paths :not-candidate "The commit git made does not hold the proven candidate bytes; history is not rewritten."
                           {:seon.error/offending differing :seon.git/commit (:out after)})
           :else {:seon.git/commit (:out after)})))))
 
@@ -1887,6 +1887,64 @@
                                   [(d/as-of database t) (d/as-of database (dec t))]))]
     {:seon.program/identities (into #{} (keep identity-of) entities) :seon.source/accepted-t t}))
 
+(def ^:private transient-refusals
+  "The landing refusal reasons a later attempt clears by itself: a file or fact
+  that could not be written, the git directory, lock or index held or busy, a
+  failed `git commit`. Retrying any other reason meets it again until root decides."
+  #{:install-failed :not-recorded :no-git-dir :lock-not-taken :index-unreadable :other-staged :commit-failed})
+
+(defn landing-refusal-reason
+  "The reason a landing's `refused` value names: its write-back or commit refusal reason, or nil."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.task/refusal-reason]]}
+  [refused]
+  (or (:seon.source/write-back-refused refused) (:seon.git/commit-refused refused)))
+
+(defn awaits-decision?
+  "Whether merge task `merge-task`'s landing on `database` stopped after
+  acceptance for a reason retrying cannot clear, so it waits for root: its
+  recorded `:seon.task/refusal-reason` is not transient, unless the landing it
+  was blocked behind has since made its git commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :boolean]}
+  [database merge-task]
+  (let [landed-git #(:seon.task/landed-git (db/pull database [:seon.task/landed-git] [:seon.task/id %]))
+        {reason :seon.task/refusal-reason blocker :seon.task/blocked-by :as row}
+        (db/pull database [:seon.task/accepted-tx :seon.task/landed-git :seon.task/refusal-reason :seon.task/blocked-by]
+                 [:seon.task/id merge-task])]
+    (boolean (and (:seon.task/accepted-tx row) (nil? (:seon.task/landed-git row)) reason
+                  (not (transient-refusals reason))
+                  (not (and blocker (landed-git blocker)))))))
+
+(defn- stuck-landings
+  "Each landing on `database` that waits for root (`awaits-decision?`), as its
+  merge task and accepting transaction, in the order main accepted them."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:tuple :seon.task/merge :int]]]}
+  [database]
+  (let [found (db/q '[:find ?handle ?t :where [?m :seon.task/refusal-reason _] [?m :seon.task/accepted-tx ?t]
+                      (not [?m :seon.task/landed-git]) [?m :seon.task/id ?handle]]
+                    database)]
+    (if (db/read-refusal? found)
+      []
+      (vec (sort-by second (filter #(awaits-decision? database (first %)) found))))))
+
+(defn- landing-paths
+  "The files the merge accepted by transaction `t` on `database` writes, each change's one file (`change-path`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :int] [:set :seon.source/path]]}
+  [database t]
+  (let [before (d/as-of database (dec t))]
+    (into #{} (keep #(change-path before %)) (:seon.program/identities (recorded-accepted database t)))))
+
+(defn- blocking-landing
+  "The earliest landing on `database` waiting for root (`stuck-landings`),
+  other than `merge-task` and accepted before it when it is accepted, that
+  writes one of `paths`; nil when none. A file's landings land in main's order."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge [:set :seon.source/path]] [:maybe :seon.task/merge]]}
+  [database merge-task paths]
+  (let [own (:db/id (:seon.task/accepted-tx (db/pull database [{:seon.task/accepted-tx [:db/id]}] [:seon.task/id merge-task])))]
+    (some (fn [[handle t]]
+            (when (and (not= handle merge-task) (or (nil? own) (< t own)) (some (landing-paths database t) paths))
+              handle))
+          (stuck-landings database))))
+
 (defn- land-held!
   "`land!` through `execution`, which carries its `:seon.store/store`."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
@@ -1916,9 +1974,15 @@
         acceptance (when (:seon.source/accepted-t accepted)
                      (merge (acceptance-names (db/db connection) merge-task)
                             (select-keys accepted [:seon.test.run/id :seon.source/commit-id])))
+        ;; a landing whose file an earlier stuck landing holds waits behind it, so the file follows main's order
+        blocker (when (and acceptance (not (:seon.task/landed-git recorded)) (or (nil? decided) (:db-after decided)))
+                  (let [database (db/db connection)]
+                    (blocking-landing database merge-task (landing-paths database (:seon.source/accepted-t accepted)))))
         landed (cond (not acceptance) nil
                      (and decided (not (:db-after decided))) nil
                      (:seon.task/landed-git recorded) {:seon.git/commit (:seon.task/landed-git recorded)}
+                     blocker (write-back-refusal :blocked "A landing main accepted earlier stopped holding a file this one writes; this one is written after that landing's git commit."
+                                                 {:seon.task/blocked-by blocker})
                      :else
                      (timed :write-and-commit
                             #(write-and-commit! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root
@@ -1931,7 +1995,11 @@
        {:seon.error/layer :seon.source/merge :seon.error/operation 'seon.cluster.source/land!
         :seon.error/message "The candidate and main changed the same declarations since the merge base; resolve on the branch and propose again."
         :seon.task/merge merge-task :seon.program/conflict-digests (:seon.program/conflict-digests prepared)})
-      (and (not resumed?) (not (:seon.source/candidate prepared))) prepared
+      (and (not resumed?) (not (:seon.source/candidate prepared)))
+      ;; a refused file a stuck landing holds names that landing
+      (if-let [held (some->> (:seon.source/path prepared) hash-set (blocking-landing (db/db connection) merge-task))]
+        (assoc prepared :seon.task/blocked-by held)
+        prepared)
       (not (:seon.source/accepted-t accepted)) accepted
       (and decided (not (:db-after decided))) (assoc decided :seon.source/accepted accepted)
       (:seon.error/at landed) (assoc landed :seon.source/accepted accepted)
@@ -1953,6 +2021,10 @@
   the same proposal resumes from that record: it never prepares or accepts
   again, writes only the files not yet installed, commits once, and a landed
   merge task answers its recorded commit.
+  A file holds its landings in main's order: while a landing accepted earlier
+  waits for root (`awaits-decision?`) holding a file this one writes, this one
+  is refused `:blocked` naming it (`:seon.task/blocked-by`) before writing,
+  and a prepare refused over such a file names it too.
 
   Example:
   (land! execution proposal \"/Users/me/src/project\")"

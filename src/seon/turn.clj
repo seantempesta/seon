@@ -70,6 +70,10 @@
   (delay (requiring-resolve 'seon.context/outcome-tx)))
 (defonce ^:private source-land!
   (delay (requiring-resolve 'seon.cluster.source/land!)))
+(defonce ^:private source-refusal-reason
+  (delay (requiring-resolve 'seon.cluster.source/landing-refusal-reason)))
+(defonce ^:private source-awaits-decision?
+  (delay (requiring-resolve 'seon.cluster.source/awaits-decision?)))
 (defonce ^:private test-run
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
@@ -2222,21 +2226,30 @@
 
 (defn- landing-tx
   "The facts recording on merge task `merge-task` what its landing `landed` did: the main and git commits it made,
-  or the refusal's error type and the tests whose red verdict refused it."
+  or the refusal's error type, its reason (`seon.cluster.source/landing-refusal-reason`), the landing it waits
+  behind and the tests whose red verdict refused it."
   {:malli/schema [:=> [:cat :seon.task/merge :map] :seon.store/transaction-data]}
   [merge-task landed]
   ;; a write-back or commit refusal after acceptance carries the accepted merge: main holds it
   (let [main (or (:seon.source/commit-id landed) (get-in landed [:seon.source/accepted :seon.source/commit-id]))
         git (:seon.git/commit landed)
-        red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))]
+        refused (:seon.error/type landed)
+        reason (when refused (@source-refusal-reason landed))
+        blocker (:seon.task/blocked-by landed)
+        red (into #{} (keep :seon.test/sym) (:seon.source/red-tests landed))
+        retract #(vector :db.fn/retractAttribute [:seon.task/id merge-task] %)]
     (cond-> [(cond-> {:seon.task/id merge-task}
                main (assoc :seon.task/landed main)
                (string? git) (assoc :seon.task/landed-git git)
-               (:seon.error/type landed) (assoc :seon.task/refusal (:seon.error/type landed))
-               (and (:seon.error/type landed) (seq red)) (assoc :seon.task/refused-tests red))]
+               refused (assoc :seon.task/refusal refused)
+               reason (assoc :seon.task/refusal-reason reason)
+               blocker (assoc :seon.task/blocked-by blocker)
+               (and refused (seq red)) (assoc :seon.task/refused-tests red))]
       ;; a resumed landing that committed answers the refusal its stopped attempt recorded
-      (and (string? git) (not (:seon.error/type landed)))
-      (conj [:db.fn/retractAttribute [:seon.task/id merge-task] :seon.task/refusal]))))
+      (and (string? git) (not refused))
+      (into (map retract) [:seon.task/refusal :seon.task/refusal-reason :seon.task/blocked-by])
+      (and refused (not reason)) (conj (retract :seon.task/refusal-reason))
+      (and refused (not blocker)) (conj (retract :seon.task/blocked-by)))))
 
 (defn- land-end!
   "Land the green end's `proposal` with no root when the dial `:seon.config.root/land?` is on and its merge task
@@ -2272,7 +2285,8 @@
   "Record the end of the task `agent-id` holds when this pass observed one (`task-end`): propose its change when
   it ended green (`my.program/proposal!`, the agent's own act; a proposal this end already recorded is reused,
   `end-proposal`), land it with no root when the dial says so (`land-end!`), after resuming every landing that
-  stopped after acceptance (`unfinished-landings`), record the agent's outcome at the
+  stopped after acceptance (`unfinished-landings`) and is not waiting for root
+  (`seon.cluster.source/awaits-decision?`), record the agent's outcome at the
   task home (`seon.context/outcome-tx`), send root the one end message (`end-message`), then close the agent
   (`end-task-call`), last, so whoever sees the agent closed finds its message; nil otherwise. An end whose message
   is not delivered leaves the agent open, so the next observation delivers it; one already delivered is not sent
@@ -2297,8 +2311,10 @@
                                                 :seon.db/connection (:seon.db/connection execution)
                                                 :seon.agent/id agent-id})))
             _ (when (:seon.error/at proposal) (fault! 'my.program/proposal! proposal))
-            ;; landings that stopped after acceptance resume first, in main's order, before this end's own
-            landed (into [] (keep #(land-end! cluster agent-id %))
+            ;; landings that stopped after acceptance resume first, in main's order, before this end's own;
+            ;; one refused for a reason retrying cannot clear waits for root and is not attempted
+            landed (into [] (comp (remove #(@source-awaits-decision? (db/db home) (:seon.task/merge %)))
+                                  (keep #(land-end! cluster agent-id %)))
                          (concat (remove #(= (:seon.task/merge proposal) (:seon.task/merge %)) (unfinished-landings (db/db home)))
                                  (when (:seon.task/merge proposal) [proposal])))
             _ (doseq [refused landed :when (and (:seon.error/at refused) (not (:seon.error/message refused)))]

@@ -684,3 +684,69 @@
          (finally
            (.setWritable (io/file root "test/tq") true false)
            (support/delete-root! root)))))))
+
+(deftest ^{:seon/tasks #{'seon.turn/a-permanently-refused-landing-waits-for-root}
+           :seon.test/long "Three own-branch agents' first requests, assignment proof runs and fixes with their test steps, three proposal runs and three lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit) and one resumed write-back."
+           :seon.test/long-ms 360000}
+  a-permanently-refused-landing-is-not-retried-and-blocks-its-file-by-name
+  (support/with-running-agent
+   (fn [running _ connection]
+     (root-home! connection)
+     (let [path "test/tq/endh.clj"
+           other "test/tqo/endo.clj"
+           root (support/temp-root "end-stuck")
+           merge-row #(dissoc (db/pull (db/db connection) [:seon.task/outcome :seon.task/landed-git :seon.task/refusal
+                                                          :seon.task/refusal-reason :seon.task/blocked-by]
+                                       [:seon.task/id %]) :db/id)
+           area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+           side "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+           hand-area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (+ r r))"
+           base-area "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  r)"
+           commits-for #(remove str/blank? (str/split-lines (git! root "log" "--format=%H" "-F" (str "--grep=Merge-task: " %))))]
+       (try
+         (git! root "init" "-q")
+         (git! root "config" "user.email" "end@test.invalid")
+         (git! root "config" "user.name" "end-test")
+         (declare-file! connection root path (str/replace landing-source "tq.endl" "tq.endh"))
+         (declare-file! connection root other (str/replace landing-source "tq.endl" "tqo.endo"))
+         (support/apply-config! connection (:seon.cluster/name (support/execution-handle nil))
+                                {:seon.config.root/land? true :seon.config.fs/working-root root})
+         (let [first-agent (:seon.agent/id (branch-agent! running connection 'tq.endh "area"))
+               first-execution (fixed-end! running first-agent 'tq.endh area)
+               ;; the file's directory refuses the install, so the landing stops after acceptance (a transient refusal)
+               _ (.setWritable (io/file root "test/tq") false false)
+               _ (end! running first-execution first-agent)
+               _ (.setWritable (io/file root "test/tq") true false)
+               [{stuck :seon.task/merge}] (end-messages (db/db connection) first-agent)
+               original (slurp (io/file root path))
+               ;; a hand edit of the declaration the stopped landing writes: resuming it is a conflict
+               _ (spit (io/file root path) (str/replace original base-area hand-area))]
+           (testing "the next end retries the transient refusal; met by the hand edit, it records a refusal awaiting root"
+             (let [second-agent (:seon.agent/id (branch-agent! running connection 'tqo.endo "area"))
+                   second-execution (fixed-end! running second-agent 'tqo.endo area)
+                   _ (end! running second-execution second-agent)
+                   [{landed :seon.task/merge}] (end-messages (db/db connection) second-agent)]
+               (is (= {:seon.task/outcome :accepted :seon.task/refusal :seon.source/write-back-error
+                       :seon.task/refusal-reason :conflict}
+                      (merge-row stuck))
+                   "the stopped landing records the conflict and no git commit")
+               (is (= [(:seon.task/landed-git (merge-row landed))] (commits-for landed)) "a landing in another file still lands")
+               (is (= [other] (str/split-lines (git! root "diff-tree" "--no-commit-id" "--name-only" "-r" "HEAD")))
+                   "its commit is exactly its own file")))
+           (testing "a later landing in the same file is refused naming the stuck one, which is not retried"
+             ;; the file is restored, so a retry of the stuck landing would now land
+             (spit (io/file root path) original)
+             (let [head (git! root "rev-parse" "HEAD")
+                   third-agent (:seon.agent/id (branch-agent! running connection 'tq.endh "side"))
+                   third-execution (fixed-end! running third-agent 'tq.endh side)
+                   _ (end! running third-execution third-agent)
+                   [{blocked :seon.task/merge}] (end-messages (db/db connection) third-agent)]
+               (is (= stuck (:seon.task/blocked-by (merge-row blocked))) "the blocked landing names the stuck one")
+               (is (nil? (:seon.task/landed-git (merge-row stuck))) "the stuck landing was not retried")
+               (is (= :conflict (:seon.task/refusal-reason (merge-row stuck))) "and keeps the refusal root decides")
+               (is (= [] (commits-for stuck) (commits-for blocked)) "neither is committed")
+               (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")
+               (is (= original (slurp (io/file root path))) "the file is untouched"))))
+         (finally
+           (.setWritable (io/file root "test/tq") true false)
+           (support/delete-root! root)))))))

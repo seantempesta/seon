@@ -310,7 +310,8 @@
         branch-db (when (keyword? branch) (db/branch-database database branch))
         outcome (or recorded (when branch-db (branch-outcome branch-db agent-id sym)))
         landing (when merge
-                  (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests]
+                  (let [row (db/pull home [:seon.task/landed :seon.task/landed-git :seon.task/refusal :seon.task/refused-tests
+                                           :seon.task/refusal-reason :seon.task/blocked-by]
                                      [:seon.task/id merge])]
                     (when (map? row) (cond-> (dissoc row :db/id)
                                        (:seon.task/refused-tests row) (update :seon.task/refused-tests set)))))]
