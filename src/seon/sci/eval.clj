@@ -3657,15 +3657,20 @@
               ;; This context's own definitions (the Vars it wrote that no
               ;; program install bound) survive as objects with its bindings of
               ;; them, as `regenerate-agent-context!` carries them for a turn
-              ;; fork, unless the program changed their symbol's row.
+              ;; fork, unless the program changed their symbol's row. A test the
+              ;; program interprets from its row is the program's: this
+              ;; context's Var of it was analyzed against Vars the program
+              ;; replaced, so carrying it would call their stale roots.
               installed @(::kernel/installed-functions ctx)
               interns (turn-interns ctx)
-              replaced (replaced-definitions snapshot @(::kernel/program-snapshot generated)
-                                             (keys interns))
+              generated-snapshot @(::kernel/program-snapshot generated)
+              replaced (replaced-definitions snapshot generated-snapshot (keys interns))
+              program-tests (set (::interpreted-tests generated-snapshot))
               own (into [] (keep (fn [[qualified {sci-var :seon.sci.eval/var}]]
                                    (when-not (or (and (contains? installed qualified)
                                                       (not (get-in snapshot [:functions qualified ::context-defined?])))
-                                                 (contains? replaced qualified))
+                                                 (contains? replaced qualified)
+                                                 (contains? program-tests qualified))
                                      [(symbol (namespace qualified)) (symbol (name qualified)) sci-var
                                       (sci.vars/context-binding ctx sci-var)])))
                         interns)]
