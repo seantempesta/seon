@@ -440,48 +440,80 @@
     :seon.profile/host))
 
 (defn- cost-entity
-  "One executed definition's cost entity from its calls, nanoseconds and self
-  nanoseconds: per-call means in microseconds."
-  {:malli/schema [:=> [:cat [:tuple :seon.batch/executed-key :int :int :int]] :seon.fn.cost/entity]}
-  [[[sym digest :as k] calls nanos self]]
+  "One executed definition's cost entity from its calls, nanoseconds, self
+  nanoseconds and scope: per-call means in microseconds."
+  {:malli/schema [:=> [:cat [:tuple :seon.batch/executed-key :int :int :int :seon.fn.cost/scope]] :seon.fn.cost/entity]}
+  [[[sym digest] calls nanos self scope]]
   {:seon.fn.cost/sym sym
    :seon.fn.cost/digest digest
-   :seon.fn.cost/scope (cost-scope k)
+   :seon.fn.cost/scope scope
    :seon.fn.cost/calls calls
    :seon.fn.cost/self-us (/ (double self) calls 1000.0)
    :seon.fn.cost/total-us (/ (double nanos) calls 1000.0)})
 
-(defn- per-symbol
-  "`worked` (`[[sym digest] calls nanos self-nanos]` rows) with a known digest
-  and at least `min-calls` calls, one row per symbol: its most-called digest."
-  {:malli/schema [:=> [:cat [:vector [:tuple :seon.batch/executed-key :int :int :int]] :int]
-                  [:sequential [:tuple :seon.batch/executed-key :int :int :int]]]}
-  [worked min-calls]
+(defn undigested
+  "The symbols `sink` counted under no definition digest: interpreted
+  definitions armed at their write, before the request derived their digest
+  (`seon.sci.arm/arm!`). Their callers resolve them on the branch."
+  {:malli/schema [:=> [:cat :seon.batch/sink] [:vector :qualified-symbol]]}
+  [sink]
+  (into [] (keep (fn [[sym digest]] (when (nil? digest) sym))) (.keySet ^ConcurrentHashMap sink)))
+
+(defn- selected
+  "`worked` (`[[sym digest] calls nanos self-nanos]` rows) as cost entities:
+  a row without a digest takes its symbol's from `digests` (else is dropped),
+  rows of one executed definition are summed, one digest per symbol (its most
+  called), each called at least `min-calls` times and spending at least
+  `min-total-us` microseconds of self time, the `limit` most self time spent
+  first (ties by symbol): the same work selects the same definitions, and
+  cheap predicates called often never qualify."
+  {:malli/schema [:=> [:cat [:vector [:tuple :seon.batch/executed-key :int :int :int]]
+                       [:map-of :qualified-symbol :seon.program/definition-digest]
+                       :seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
+                  [:vector :seon.fn.cost/entity]]}
+  [worked digests min-calls min-total-us limit]
   (->> worked
-       (filter (fn [[[_ digest] calls]] (and digest (<= (max 1 min-calls) calls))))
+       (keep (fn [[[sym digest :as k] calls nanos self]]
+               (when-let [digest (or digest (get digests sym))]
+                 [[sym digest] calls nanos self (cost-scope k)])))
+       (reduce (fn [m [k calls nanos self scope]]
+                 (update m k (fn [[_ c n s sc]]
+                               [k (+ (or c 0) calls) (+ (or n 0) nanos) (+ (or s 0) self)
+                                (if (= :seon.profile/context sc) sc scope)])))
+               {})
+       vals
        (group-by ffirst)
-       (map (fn [[_ rows]] (apply max-key second rows)))))
+       (keep (fn [[_ rows]]
+               (let [[_ calls _ self :as row] (apply max-key second rows)]
+                 (when (and (<= (max 1 min-calls) calls) (<= (* 1000 min-total-us) self))
+                   row))))
+       (sort-by (fn [[[sym] _ _ self]] [(- self) sym]))
+       (into [] (comp (take limit) (map cost-entity)))))
 
 (defn live-costs
   "The request's own per-definition values from its sink, as cost entities:
   what a reply compares with main. The agent's interpreted definitions first,
-  then the host's, each by self time spent, at most `limit`. Reads only the
-  sink's counters."
-  {:malli/schema [:=> [:cat :seon.batch/sink :seon.config.test.cost/top] :seon.cost/live]}
-  [sink limit]
-  (->> (into [] (map (fn [[k ^AtomicLongArray c]] [k (.get c 0) (.get c 1) (.get c 2)])) ^ConcurrentHashMap sink)
-       (#(per-symbol % 1))
-       (map cost-entity)
-       (sort-by (fn [{:seon.fn.cost/keys [scope calls self-us]}]
-                  [(if (= :seon.profile/context scope) 0 1) (- (* calls self-us))]))
-       (into [] (take limit))))
+  every one, then the host's spending at least `min-total-us` of self time,
+  each by total self time (`selected`, any call count), at most `limit`. A
+  definition counted under no digest takes its symbol's from `digests`.
+  Reads only the sink's counters."
+  {:malli/schema [:=> [:cat :seon.batch/sink [:map-of :qualified-symbol :seon.program/definition-digest]
+                       :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
+                  :seon.cost/live]}
+  [sink digests min-total-us limit]
+  (let [entities (selected (into [] (map (fn [[k ^AtomicLongArray c]] [k (.get c 0) (.get c 1) (.get c 2)]))
+                                 ^ConcurrentHashMap sink)
+                           digests 1 0 Integer/MAX_VALUE)
+        [own host] ((juxt filter remove) #(= :seon.profile/context (:seon.fn.cost/scope %)) entities)]
+    (into [] (take limit)
+          (concat own (filter (fn [{:seon.fn.cost/keys [calls self-us]}] (<= min-total-us (* calls self-us))) host)))))
 
 (defn transaction-observation
   "The cost entities of the work `world` did since its previous transaction:
-  the `limit` most-called definitions (ties by symbol) among those called at
-  least `min-calls` times, per-call means of that work alone. The writer's own armed calls
-  count too: they are that world's work. Empty for no world or
-  no sink.
+  `selected` from its call sink, per-call means of that work alone. The
+  writer's own armed calls count too: they are that world's work. Empty for
+  no world or no sink. A definition counted under no digest takes its
+  symbol's from `digests`.
 
   Read from the world's call sink (`:seon.batch/sink`): each counter's calls,
   nanoseconds and self nanoseconds less those at the world's previous
@@ -492,15 +524,16 @@
 
   # Costs
   Proportional to the definitions the world executed: one pass over its
-  sink, a sort of those called at least `min-calls` times."
-  {:malli/schema [:=> [:cat [:maybe :map] :seon.config.fn.cost/min-calls :seon.config.test.cost/top]
+  sink, a sort of those that qualify."
+  {:malli/schema [:=> [:cat [:maybe :map] [:map-of :qualified-symbol :seon.program/definition-digest]
+                       :seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us :seon.config.test.cost/top]
                   [:vector :seon.fn.cost/entity]]}
-  [world min-calls limit]
+  [world digests min-calls min-total-us limit]
   (let [sink (:seon.batch/sink world)]
     (if-not (instance? ConcurrentHashMap sink)
       []
-      (->> (per-symbol
-            (into []
+      (selected
+       (into []
              (keep (fn [[k counter]]
                      (when (instance? AtomicLongArray counter)
                        (let [^AtomicLongArray c counter
@@ -510,11 +543,8 @@
                              made (- calls (.getAndSet c 3 calls))]
                          (when (pos? made)
                            [k made (- nanos (.getAndSet c 5 nanos)) (- self (.getAndSet c 4 self))])))))
-                  ^ConcurrentHashMap sink)
-            min-calls)
-           ;; the most called first, ties by symbol, never by time: the same work selects the same definitions
-           (sort-by (fn [[[sym] calls]] [(- calls) sym]))
-           (into [] (comp (take limit) (map cost-entity)))))))
+             ^ConcurrentHashMap sink)
+       digests min-calls min-total-us limit))))
 
 (defn moved?
   "True when `live` should replace the `stored` cost entity: none is stored,

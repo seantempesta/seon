@@ -5427,6 +5427,7 @@
                           step-cost (some-> (:seon.flow/step-start seon.batch/*world*) seon.flow/step-cost)
                           ;; how many definitions the reply compares with main; a refused read compares none
                           top (agent-dial (db/db connection) cluster agent-id :seon.config.test.cost/top)
+                          floor (agent-dial (db/db connection) cluster agent-id :seon.config.fn.cost/min-total-us)
                           _ (when reply
                               (async/offer! reply (cond-> (merge report pending-commit)
                                                     park (assoc :seon.turn.loop/refusal park)
@@ -5436,8 +5437,10 @@
                                                     (and (:seon.cost/counts report) (:seon.batch/sink seon.batch/*world*))
                                                     (update :seon.cost/counts merge
                                                             (profile/sink-counts (:seon.batch/sink seon.batch/*world*))
-                                                            (when (int? top)
-                                                              {:seon.cost/live (profile/live-costs (:seon.batch/sink seon.batch/*world*) top)}))
+                                                            (when (and (int? top) (int? floor))
+                                                              (let [sink (:seon.batch/sink seon.batch/*world*)]
+                                                                {:seon.cost/live (profile/live-costs sink (db/sink-digests (db/db connection) sink)
+                                                                                                     floor top)})))
                                                     (and step-cost (:seon.cost/counts report))
                                                     (assoc-in [:seon.cost/counts :seon.cost/step] step-cost))))]
                ;; Run closure is an armer wake because first-agent

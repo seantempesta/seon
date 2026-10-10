@@ -264,8 +264,9 @@
 (defn- with-diff
   "The request's cost with its live values (`:seon.cost/live`) replaced by
   their comparison with main's stored cost entities (`:seon.cost/diff`,
-  `seon.batch/cost-diff`): one query on `main` by the live symbols. Main
-  storing none, or not yet declaring them, compares every value as new."
+  `seon.batch/cost-diff`): one query on `main`, as the request found it, by
+  the live symbols. Main storing none, or not yet declaring them, compares
+  every value as new."
   {:malli/schema [:=> [:cat :map [:maybe :seon.db/database-value] [:maybe :string]] :map]}
   [cost main cluster-name]
   (let [live (:seon.cost/live cost)
@@ -358,8 +359,11 @@
       [texts failed? (assoc (:seon.batch/timings batch {}) :print (since-ms print-start))
        (merge (profile/sink-counts (:seon.batch/sink world))
               (seon.batch/arm-measures (keep :seon.batch/evaluation (:seon.batch/entries batch)))
-              {:seon.cost/live (profile/live-costs (:seon.batch/sink world)
-                                                   (dial (db/db connection) cluster-name :seon.config.test.cost/top))})])))
+              (let [sink (:seon.batch/sink world)
+                    database (db/db connection)]
+                {:seon.cost/live (profile/live-costs sink (db/sink-digests database sink)
+                                                     (dial database cluster-name :seon.config.fn.cost/min-total-us)
+                                                     (dial database cluster-name :seon.config.test.cost/top))}))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The entrance
@@ -390,6 +394,8 @@
   (let [started (System/nanoTime)
         counters (seon.batch/jvm-counters)
         found (instance @runtime/running-instances cluster)
+        ;; main as the request found it: its own writes are not what it compares with
+        main (some-> (get-in found [:seon.turn.loop/cluster :seon.db/connection]) db/db)
         namespace-name (some-> start symbol)
         custody (when-not (:seon.error/at found)
                   (execution found (or agent-id "root") namespace-name))
@@ -403,8 +409,7 @@
           (= "jvm" mode) (jvm-run custody code namespace-name cluster-name)
           :else (sci-run custody code namespace-name cluster-name))]
     [(conj texts (printed {:seon.repl/request (-> (seon.batch/request-cost started (merge stages run-stages) counts)
-                                                  (with-diff (some-> (get-in found [:seon.turn.loop/cluster :seon.db/connection]) db/db)
-                                                             cluster-name)
+                                                  (with-diff main cluster-name)
                                                   (assoc :seon.cost/jvm-window
                                                          (seon.batch/jvm-window counters (seon.batch/jvm-counters))))}
                           code nil cluster-name))

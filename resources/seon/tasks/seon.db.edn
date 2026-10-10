@@ -1,4 +1,8 @@
-[#:seon.task{:name "call-reach-is-recomputed-per-render"
+[#:seon.task{:name "equal-declaration-fixtures-branch-off-different-commits"
+             :kind :function
+             :intent "Red at HEAD caba650fa (`bin/seon check --at HEAD`, run aa4ecc41bcc9): two nested `seon.test-support/with-database` fixtures do not branch off the same commit, so `seon.db/carried-projection` sharing across equal declaration content is unproven. Find which fixture write moves the executing commit and restore the shared basis, or correct the assertion's premise."
+             :must-read #{seon.db/carried-projection seon.test-support/with-database}}
+ #:seon.task{:name "call-reach-is-recomputed-per-render"
              :kind :function
              :intent "stored-call-reach is recomputed on every render call (about 4 ms each; 2.2 GB in one debug-page window). Memoize it per commit and call identity."
              :must-read #{seon.db/stored-call-reach seon.render/render-call}

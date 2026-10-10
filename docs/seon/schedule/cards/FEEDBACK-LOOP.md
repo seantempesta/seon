@@ -98,9 +98,13 @@ transaction; main's values change only when a merge lands, so the comparison is 
 indexes in `datahike.db.transaction/with-datom-upsert` when `dbu/no-history?`). Values are per-call means of the
 request's own work (`self-us` = self ns / calls); a stored value is replaced only when the live value differs from it
 by at least half a log2 bucket (1.41×, `hysteresis`), the digest changed, or none is stored; fewer than `min-calls`
-(20) calls store nothing. This rule decides only when the branch writes; it never delays or alters what the agent
-sees. The upserts ride the transaction the world already writes (`stamp-transaction` conj's them): zero extra
-transactions. A test's cost entity is its latest member; a schema's cost lives on the schema entity. Main's values are
+(20) calls, or less than `min-total-us` (1,000 µs) of self time in that work (calls × self-us), store nothing, and the
+stored set is the `top` by that total self time, ties by symbol (`seon.profile/selected`): ranking by calls filled it
+with sub-microsecond predicates. This rule decides only when the branch writes; it never delays or alters what the
+agent sees. The upserts ride the transaction the world already writes: `stamp-transaction` appends
+`[:db.fn/call #'seon.db/cost-upserts sink]` after the request's data, so the writer decides on its mid-transaction
+value, where a function defined and called in the same request (counted before its digest was derived, armed at its
+write by `seon.sci.arm/arm!`) resolves its digest from the row that transaction writes: zero extra transactions. A test's cost entity is its latest member; a schema's cost lives on the schema entity. Main's values are
 the same attributes on main, from main's own traffic (cost entities are data and never merge as program).
 
 **The comparison.** Subjects: definitions the request defined, its top 10 executed definitions by self time, tests the

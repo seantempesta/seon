@@ -266,7 +266,7 @@
         slots (fn [held] (let [^java.util.concurrent.atomic.AtomicLongArray a (get sink (key-of held))]
                            (mapv #(.get a %) (range 3))))
         observed (fn [min-calls] (into {} (map (juxt :seon.fn.cost/sym :seon.fn.cost/calls))
-                                       (profile/transaction-observation world min-calls 10)))
+                                       (profile/transaction-observation world {} min-calls 0 10)))
         heavy 50]
     (binding [batch/*world* world] (outer 3))
     (is (= {} (observed 20)) "work under the call floor observes nothing")
@@ -279,6 +279,23 @@
       (is (= {(:seon.profile/sym inner-cell) heavy (:seon.profile/sym outer-cell) 1} (observed 1))
           "the delta since the previous observation")
       (is (= {} (observed 1)) "the next observation holds only work done since"))))
+
+(deftest cost-entities-rank-by-self-time-spent-above-the-floor
+  (let [sink (batch/sink)
+        counted (fn [sym digest calls self-us]
+                  (let [a (java.util.concurrent.atomic.AtomicLongArray. 6)]
+                    (.set a 0 calls) (.set a 1 (long (* 1000 calls self-us))) (.set a 2 (long (* 1000 calls self-us)))
+                    (.put ^java.util.concurrent.ConcurrentHashMap sink [sym digest] a)))
+        digest (digest-of "probe")]
+    (counted 'probe/cheap? digest 1000 0.5)
+    (counted 'probe/slow digest 30 400.0)
+    (counted 'probe/often digest 5000 2.0)
+    (counted 'probe/written nil 40 100.0)
+    (is (= '[probe/slow probe/often probe/written]
+           (mapv :seon.fn.cost/sym (profile/transaction-observation {:seon.batch/sink sink} {'probe/written digest} 20 1000 10)))
+        "a predicate called 1,000 times under a microsecond never qualifies; the rest rank by self time spent")
+    (is (= digest (:seon.fn.cost/digest (last (profile/live-costs sink {'probe/written digest} 1000 10))))
+        "a definition counted before its digest was derived takes its symbol's")))
 
 (deftest reading-the-profile-checks-no-cell-again
   ;; The counters are read directly: the per-cell predicates' own cells are

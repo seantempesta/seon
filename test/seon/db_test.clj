@@ -2732,7 +2732,8 @@
 ;; branch or committed identity, so they share one derivation. A derivation
 ;; builds a new projection object, so identity observes it on this thread
 ;; alone: no deriver is redefined.
-(deftest equal-declaration-content-shares-one-projection-across-values
+(deftest ^{:seon/tasks #{'seon.db/equal-declaration-fixtures-branch-off-different-commits}}
+  equal-declaration-content-shares-one-projection-across-values
   (test-support/with-database
     (fn [outer]
       (let [committed (db/carried-projection (db/db outer))]

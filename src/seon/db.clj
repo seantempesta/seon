@@ -3750,23 +3750,41 @@
       (apply min configured)
       (some-> projection :seon.schema.projection/registry (mr/schema dial) m/properties :seon.config/default))))
 
-(defn- cost-upserts
-  "The cost entities of `world`'s work since its previous transaction whose
-  stored values moved (`seon.profile/moved?`): what this transaction also
-  writes, so accounting adds no transaction. None when the branch declares
+(defn sink-digests
+  "The definition digest on `database` of each symbol `sink` counted under
+  none (`seon.profile/undigested`): an interpreted definition armed at its
+  write, before its request derived the digest. One query; a symbol with no
+  row stays absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/sink]
+                  [:map-of :qualified-symbol :seon.program/definition-digest]]}
+  [database sink]
+  (let [undigested (profile/undigested sink)]
+    (if (seq undigested)
+      (into {} (d/q '[:find ?sym ?digest :in $ [?sym ...]
+                      :where [?f :seon.fn/sym ?sym] [?f :seon.program/definition-digest ?digest]]
+                    database undigested))
+      {})))
+
+(defn cost-upserts
+  "The cost entities of the work a world's call `sink` counted since its
+  previous transaction whose stored values moved (`seon.profile/moved?`). Invoked by the writer as
+  `[:db.fn/call #'cost-upserts sink]` after the transaction's other data
+  (`stamp-transaction`), so it decides on that mid-transaction value: an
+  interpreted definition the same transaction writes resolves its definition
+  digest, and accounting adds no transaction. None when the branch declares
   no cost dials."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map]] [:vector :seon.fn.cost/entity]]}
-  [database world]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.batch/sink] [:vector :seon.fn.cost/entity]]}
+  [database sink]
   (let [projection (carried-projection database)
-        min-calls (branch-dial database projection :seon.config.fn.cost/min-calls)
-        hysteresis (branch-dial database projection :seon.config.fn.cost/hysteresis)
-        top (branch-dial database projection :seon.config.test.cost/top)
+        dial #(branch-dial database projection %)
+        [min-calls min-total-us hysteresis top] (map dial [:seon.config.fn.cost/min-calls :seon.config.fn.cost/min-total-us
+                                                            :seon.config.fn.cost/hysteresis :seon.config.test.cost/top])
         stored? (get (dbi/-schema database) :seon.fn.cost/sym)
         stored (fn [sym] (when stored?
                            (d/pull database [:seon.fn.cost/digest :seon.fn.cost/self-us] [:seon.fn.cost/sym sym])))]
-    (if (and min-calls hysteresis top)
+    (if (and min-calls min-total-us hysteresis top)
       (filterv #(profile/moved? hysteresis (stored (:seon.fn.cost/sym %)) %)
-               (profile/transaction-observation world min-calls top))
+               (profile/transaction-observation {:seon.batch/sink sink} (sink-digests database sink) min-calls min-total-us top))
       [])))
 
 (defn- stamp-transaction
@@ -3780,9 +3798,11 @@
                        [:maybe :map]] :seon.store/transaction]}
   [database transaction world]
   (let [request (if (map? transaction) transaction {:tx-data transaction})
-        costs (cost-upserts database world)
+        ;; a world's work is observed on the writer's mid-transaction value
+        sink (:seon.batch/sink world)
+        costs? (instance? java.util.concurrent.ConcurrentHashMap sink)
         attributes (cond-> [:seon.db.transaction/operation :seon.db.transaction/agent]
-                     (seq costs) (into [:seon.fn.cost/sym :seon.fn.cost/digest :seon.fn.cost/scope
+                     costs? (into [:seon.fn.cost/sym :seon.fn.cost/digest :seon.fn.cost/scope
                                         :seon.fn.cost/calls :seon.fn.cost/self-us :seon.fn.cost/total-us]))
         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
@@ -3809,7 +3829,7 @@
     (assoc request :tx-data (-> (vec declarations)
                                 (into (when *receipt* *open*))
                                 (into (:tx-data request))
-                                (into costs)
+                                (cond-> costs? (conj [:db.fn/call #'cost-upserts sink]))
                                 (conj stamp)))))
 
 (defn absent-call

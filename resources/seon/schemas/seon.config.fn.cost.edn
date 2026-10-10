@@ -2,6 +2,10 @@
                       [:int
                        {:min 1, :seon.config/optional true, :seon.config/dial true, :seon.config/default 20,
                         :description "Calls a definition must make in a world's work since its previous transaction before that work's per-call means are stored on its cost entity (`:seon.fn.cost/entity`); fewer calls are noise."}]
+                      :min-total-us
+                      [:int
+                       {:min 0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1000,
+                        :description "Microseconds of self time a definition must spend in a world's work (calls times per-call self time) before it is a cost entity or a reply's live value (`seon.profile/selected`, which ranks by that total): a predicate called a thousand times under a microsecond never qualifies."}]
                       :hysteresis
                       [:double
                        {:min 1.0, :seon.config/optional true, :seon.config/dial true, :seon.config/default 1.41,

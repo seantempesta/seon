@@ -127,7 +127,8 @@
 (deftest a-repeated-form-writes-no-cost-entities-and-no-extra-transactions
   (support/with-running-agent
    (fn [running agent-id _]
-     (let [form "(let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/sym]] (seon.db/db))] (if (set? rows) (count rows) 0))"
+     ;; the repeated work (200 queries) spends more self time than :seon.config.fn.cost/min-total-us
+     (let [form "(do (dotimes [_ 200] (seon.db/q '[:find ?e . :where [?e :db/ident :db/ident]] (seon.db/db))) (let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/sym]] (seon.db/db))] (if (set? rows) (count rows) 0)))"
            runs (vec (repeatedly 5 #(answer running agent-id "sci" form)))
            seen (mapv #(:seon.repl/value (support/mcp-reply %)) runs)
            [fourth fifth] (map support/mcp-request (take-last 2 runs))]
@@ -148,3 +149,18 @@
        (is (pos? (:seon.cost.comparison/live entry 0.0)) "the live side is the request's own measurement")
        (is (not (contains? entry :seon.cost.comparison/main)) "main stores nothing for a function it has never run")
        (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry)))))))
+
+(deftest a-function-defined-and-called-in-one-request-is-compared-and-stored
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [cost (support/mcp-request
+                 (answer running agent-id "sci"
+                         "(in-ns 'request.cost.own) (defn summed \"Sum.\" {:malli/schema [:=> [:cat :int] :int]} [n] (reduce + (map identity (vec (range n))))) (dotimes [_ 30] (summed 5000))"))
+           entry (first (filter #(= 'request.cost.own/summed (:seon.cost.comparison/subject %)) (:seon.cost/diff cost)))
+           stored (:seon.repl/value (support/mcp-reply
+                                     (answer running agent-id "sci"
+                                             "(seon.db/pull '[:seon.fn.cost/scope :seon.fn.cost/calls] [:seon.fn.cost/sym 'request.cost.own/summed])")))]
+       (is (= #{:new :interpreted} (:seon.cost.comparison/flags entry))
+           "the very same reply compares the function it defined and called")
+       (is (= :seon.profile/context (:seon.fn.cost/scope stored)) "its cost entity is stored on the branch")
+       (is (<= 30 (:seon.fn.cost/calls stored 0)))))))

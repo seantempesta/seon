@@ -3,12 +3,13 @@
 ;; cost change" at once (FEEDBACK-LOOP card §3). Values are per-call means of a
 ;; world's own work, taken from its call sink (`seon.batch/sink`, the
 ;; `seon.profile/timed` counters): self time excludes counted callees.
-;; Producer: `seon.profile/transaction-observation`, conj'd by
-;; `seon.db/stamp-transaction` onto a transaction the world already writes (zero
+;; Producer: `seon.profile/transaction-observation`, called by the transaction
+;; function `seon.db/cost-upserts` that `seon.db/stamp-transaction` appends to a transaction the world already writes (zero
 ;; extra transactions), only when the stored value moved by the factor
 ;; :seon.config.fn.cost/hysteresis (`seon.profile/moved?`), the digest changed or
 ;; none is stored, for at most :seon.config.test.cost/top definitions a
-;; transaction. Consumers:
+;; transaction, those spending the most self time (at least
+;; :seon.config.fn.cost/min-total-us). Consumers:
 ;; `seon.batch/cost-diff` (main's side of the comparison), `seon.health`'s slow
 ;; unit, and the query "which functions are slow".
 ;; Every value is noHistory: the latest value is the fact, and a replacement
