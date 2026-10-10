@@ -70,4 +70,9 @@
              :kind :function
              :intent "An open fault on default a6cbe4fcf (2026-10-10, runtime_status): `seon.cluster.source/held-digests` refused its result at `[[:seon.program/sym seon.sci.forgive/scan]]`, \"expected :seon.program/definition-digest (a string of length exactly 64), got a map\", contract `:seon.source/expected-digests`, called from `seon.cluster.source/write-back-commits`. A write-back whose accepted merge holds that identity fails before any file is read; the identity attribute `:seon.program/sym` is not one of `:seon.fn/sym`, `:seon.test/sym`, `:seon.ns/name`. Not reproduced by lane merge-path. Done when the producer of that accepted identity is found and `held-digests` answers a digest per identity, with a regression."
              :must-read #{seon.cluster.source/held-digests seon.cluster.source/write-back-commits seon.cluster.source/write-back!}}
-]
+
+ #:seon.task{:name "accepting-a-one-function-merge-allocates-hundreds-of-megabytes"
+  :kind :function
+  :intent "`seon.cluster.source/accept-merge!` of a one-function, one-test proposal (lane merge-path, 2026-10-10, default a6cbe4fcf, gate run e5d251ed2dd7) allocated 733 MB in 322 ms when accepted and 2.0 GB when it refused (custody mismatch). What the work must do: check the touched entities' digests, transact the selected declarations onto the target and record the merge, proportional to the declarations merged, not to the program. Profile the accept with `seon.profile/measure`, name the armed functions that allocate, and fix the owner; done when a one-function accept allocates within 10x of its datoms' size."
+  :must-read #{seon.cluster.source/accept-merge! seon.cluster.source/prepare-merge!}
+  :evidence #{"docs/seon/plan.md"}}]
