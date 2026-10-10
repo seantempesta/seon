@@ -911,7 +911,7 @@
   (my.program/search {:text \"java.util.Date.\" :limit 25})
   Costs: scans every indexed source once; a few hundred ms."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:or :string :keyword [:map [:text [:or :string :keyword]] [:limit {:optional true} :int]]]]
+                       [:or :string :keyword [:map [:text [:or :string :keyword]] [:limit {:optional true} [:int {:min 1}]]]]]
                   :map]}
   [database query]
   (let [{:keys [text limit] :or {limit 8}} (if (map? query) query {:text query})

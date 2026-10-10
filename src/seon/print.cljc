@@ -325,11 +325,13 @@
       ;; => (nth (seq (get-in result/e7b3 [:rows 0])) 2)"
   {:malli/schema [:=> [:cat :seon.schema/value :seon.render.data/path] :seon.schema/value]}
   [source path]
-  (let [plain? #(or (keyword? %) (nat-int? %))
+  (let [typed? (fn [step]
+                 (and (vector? step)
+                      (contains? #{:seon.render.data/entry :seon.render.data/nth} (first step))))
         flush (fn [[target run]] (if (seq run) (list 'get-in target run) target))]
     (flush
      (reduce (fn [[target run :as state] step]
-               (if (plain? step)
+               (if-not (typed? step)
                  [target (conj run step)]
                  (let [target (flush state)
                        [tag index part] step
