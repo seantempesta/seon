@@ -114,6 +114,7 @@
             [sci.core :as sci]
             [sci.ctx-store]
             [sci.lang]
+            [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
@@ -193,7 +194,7 @@
 
 (schema.edn/load! {})
 
-(declare carried-cluster-name)
+(declare carried-cluster-name agent-require)
 
 (defn projection-state
   "Create `cluster-name`'s context environment replacement reference; the
@@ -338,7 +339,8 @@
          (sci.future/install {:future-call kernel/future-call})
          ;; the addon's pmap calls the host future-call: its threads escaped
          ;; the arm and the form's owned work (task sci-pmap-escapes-the-arm)
-         (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)))
+         (assoc-in [:namespaces 'clojure.core 'pmap] kernel/pmap)
+         (assoc-in [:namespaces 'clojure.core 'require] agent-require)))
         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
@@ -1991,6 +1993,31 @@
             (install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))))
       (swap! snapshot update ::entered-namespaces (fnil into #{}) (map :seon.ns/name) entering))
     ctx))
+
+(defn- required-libs
+  "The namespace names `require`'s arguments name: a lib symbol, a libspec
+  vector's first element, each member of a prefix list; flags name none."
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]] [:sequential :symbol]]}
+  [args]
+  (let [lib (fn [spec] (if (vector? spec) (first spec) spec))]
+    (into []
+          (comp (mapcat (fn [arg]
+                          (cond (seq? arg) (map #(symbol (str (first arg) "." (lib %))) (rest arg))
+                                :else [(lib arg)])))
+                (filter symbol?))
+          args)))
+
+(defn- agent-require
+  "`clojure.core/require` in an agent's context: each program namespace it
+  names is entered first (`enter-namespace!`), then SCI's own require aliases
+  and refers it. The base holds every program namespace, test namespaces
+  empty, so SCI's require would find it present and load nothing."
+  {:malli/schema [:=> [:cat [:* :seon.schema/value]] :nil]}
+  [& args]
+  (let [ctx (sci.ctx-store/get-ctx)]
+    (doseq [lib (required-libs args)]
+      (enter-namespace! ctx lib))
+    (apply sci.namespaces/require args)))
 
 (defn- install-declared-classes!
   "Install every non-masked class named by acquired namespace facts."

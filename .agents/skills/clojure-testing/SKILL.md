@@ -270,8 +270,10 @@ symbol name. Re-check a symbol before relying on it.
   :seon.test/policy :named|:incremental|:platform|:all}` plus optional `:seon.test/identities`, `:seon.test/namespaces`,
   `:seon.test/changed`, `:seon.test/include-long?` and `:seon.test/check-time-limit-ms`. It runs each member on its own
   branch, records the result, and returns `:seon.test/passed?`. Agents call `(my.test/run)` and
-  `(my.test/check {:seon.test/changed ['ns/test-name]})` (a test named as changed is itself a member); from an agent's SCI context `clojure.test/run-test-var` cannot see
-  test Vars (live run 1), so a named test runs through `my.test/check`.
+  `(my.test/check {:seon.test/changed ['ns/test-name]})` (a test named as changed is itself a member). At an agent's REPL, `(require 'some.ns-test)` enters the test namespace
+  (`seon.sci.eval/agent-require`), and `clojure.test/run-test-var`, `test-var`, `test-vars` and `run-tests` run each
+  test the database holds through `my.test/check`, recording it on the agent's branch
+  (`seon.sci.lookup/agent-test-vars`); a deftest the context defined but has not recorded yet runs in place.
 - **Worlds.** `support/with-database` runs its body on a fresh branch of the executing member's commit and releases
   it afterwards; outside a `seon.test/run` member it refuses by name (`execution-handle`).
   `{:seon.test-support/fresh-store? true}` gives an empty in-memory store with the installed attributes, for

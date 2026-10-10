@@ -18,17 +18,69 @@
             [seon.sci.reader :as reader]))
 
 ;;; clojure.test over the evaluating context's namespaces. The agent's
-;;; clojure.test is the host namespace copied in; its test-var, test-vars and
-;;; report run as they are, while these four find SCI namespaces through the
-;;; evaluating ctx (`sci.ctx-store`, bound by `sci/eval-form`) as babashka's
-;;; SCI-side copy does (reference-code/babashka/src/babashka/impl/clojure/test.clj:750-790).
+;;; clojure.test is the host namespace copied in; its report runs as it is,
+;;; while these entries find SCI namespaces through the evaluating ctx
+;;; (`sci.ctx-store`, bound by `sci/eval-form`) as babashka's SCI-side copy
+;;; does (reference-code/babashka/src/babashka/impl/clojure/test.clj:750-790),
+;;; and every test Var runs through the agent's one test path, `my.test/check`,
+;;; which records its result on the agent's branch.
+
+(defn- test-symbol
+  "The qualified name of one test Var in the evaluating context."
+  {:malli/schema [:=> [:cat :seon.test/var] :qualified-symbol]}
+  [test-var]
+  (let [{namespace-object :ns var-name :name} (meta test-var)]
+    (symbol (str namespace-object) (str var-name))))
+
+(defn- agent-test-vars
+  "Run `test-vars` and answer the recorded run, nil when none is recorded.
+  A test the database holds runs through `my.test/check` on the agent's branch
+  (an SCI test Var's metadata is the base's stub, without `:test`); a deftest
+  this context defined that the database does not hold yet has no evidence to
+  record and runs in place. Assertion counts reach the bound report counters."
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]]
+                  [:or :nil :seon.test/run-result :seon.error/value]]}
+  [test-vars]
+  (let [named (mapv test-symbol test-vars)
+        recorded (set (db/q (db/db) '[:find [?s ...] :in $ [?s ...] :where [_ :seon.test/sym ?s]] named))
+        in-place (filterv #(and (not (recorded (test-symbol %))) (:test (meta %))) test-vars)]
+    (when (seq in-place)
+      (clojure.test/test-vars in-place))
+    (when-let [names (seq (filterv recorded named))]
+      (let [check @(sci/resolve (sci.ctx-store/get-ctx) 'my.test/check)
+            run (check {:seon.test/changed (vec names)})
+            results (:seon.test/results run)]
+        (when (and clojure.test/*report-counters* (seq results))
+          (dosync
+           (commute clojure.test/*report-counters*
+                    #(merge-with + % {:test (count results)
+                                      :pass (transduce (map :seon.test/pass-count) + results)
+                                      :fail (transduce (map :seon.test/fail-count) + results)
+                                      :error (transduce (map :seon.test/error-count) + results)}))))
+        run))))
+
+(defn- agent-test-var
+  "Run one test Var through the agent's test path; answer the run."
+  {:malli/schema [:=> [:cat :seon.test/var] [:or :nil :seon.test/run-result :seon.error/value]]}
+  [test-var]
+  (agent-test-vars [test-var]))
+
+(defn- agent-run-test-var
+  "Run one test Var through the agent's test path; answer the run with its clojure.test summary counts."
+  {:malli/schema [:=> [:cat :seon.test/var] [:or :seon.test/run-result [:map-of :keyword [:or :int :keyword]] :seon.error/value]]}
+  [test-var]
+  (binding [clojure.test/*report-counters* (ref clojure.test/*initial-report-counters*)]
+    (let [run (agent-test-vars [test-var])]
+      (if (and run (not (:seon.test/results run)))
+        run
+        (merge run (assoc @clojure.test/*report-counters* :type :summary))))))
 
 (defn- agent-test-all-vars
-  "Run every test Var interned in one SCI namespace, with its fixtures."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "clojure.test names a namespace by symbol or by namespace object.", :gen/elements [nil]}]] :nil]}
+  "Run every test Var interned in one SCI namespace through the agent's test path; answer the run."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "clojure.test names a namespace by symbol or by namespace object.", :gen/elements [nil]}]] [:or :nil :seon.test/run-result :seon.error/value]]}
   [namespace-designator]
   (let [ctx (sci.ctx-store/get-ctx)]
-    (clojure.test/test-vars
+    (agent-test-vars
      (vals (sci.namespaces/sci-ns-interns*
             ctx (sci.namespaces/sci-the-ns* ctx namespace-designator))))))
 
@@ -76,7 +128,10 @@
   (into {}
         (map (fn [[intern-name function]]
                [intern-name (sci/new-var intern-name function {:ns sci-namespace})]))
-        {'test-all-vars agent-test-all-vars
+        {'test-vars agent-test-vars
+         'test-var agent-test-var
+         'run-test-var agent-run-test-var
+         'test-all-vars agent-test-all-vars
          'test-ns agent-test-ns
          'run-tests agent-run-tests
          'do-report agent-do-report

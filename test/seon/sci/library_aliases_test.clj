@@ -52,3 +52,20 @@
        (is (= {:seon.test/passed? true :seon.turn.loop/red []}
               (some #(get-in % [:seon.turn.loop/tests :seon.turn.loop/reaching]) proof))
            "the branch test step runs the new test green")))))
+
+(deftest ^{:seon/tasks #{'seon.sci.lookup/an-agent-runs-its-proofs-with-clojure-test}
+           :seon.test/long "one MCP eval request on a fresh agent branch that runs a named test through my.test/check"
+           :seon.test/long-ms 15000}
+  an-agent-requires-a-test-namespace-and-runs-its-deftest
+  ;; seon.id-test is a test namespace the agent's base context holds empty
+  (support/with-running-agent
+   (fn [running agent-id _]
+     (let [items (step (str "(require 'seon.id-test)"
+                            " (def run (clojure.test/run-test-var #'seon.id-test/a-host-object-has-no-identity))"
+                            " [(select-keys run [:test :fail :error :type]) (mapv :seon.test/sym (:seon.test/results run))"
+                            "  (string? (:seon.test.run/id run))]")
+                       agent-id running)]
+       (is (= [] (keep :seon.repl/error items)) "the require and the run answer without error")
+       (is (= [{:test 1 :fail 0 :error 0 :type :summary} ['seon.id-test/a-host-object-has-no-identity] true]
+              (last (keep :seon.repl/value items)))
+           "the deftest ran through the recorded test path and answers its summary")))))

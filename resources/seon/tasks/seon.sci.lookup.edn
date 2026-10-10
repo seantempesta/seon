@@ -1,1 +1,4 @@
-[]
+[#:seon.task{:name "an-agent-runs-its-proofs-with-clojure-test"
+            :kind :function
+            :intent "At its REPL an agent runs a test namespace's deftests the Clojure way, and they run through its one test path. `(require 'seon.id-test)` enters the program namespace (`seon.sci.eval/agent-require` calls `seon.sci.eval/enter-namespace!` before `sci.impl.namespaces/require`; the base holds every test namespace empty, so SCI's require loaded nothing and `#'seon.id-test/...` was 'Unable to resolve var', chain run 2 agent chain2-forgive-2). `clojure.test/run-test-var`, `test-var`, `test-vars` and `run-tests` (`seon.sci.lookup/agent-test-vars`) run each test Var through `my.test/check`, which records its result on the agent's branch (`:seon.test.run/id`), and answer that `:seon.test/run-result` with the clojure.test summary counts; host `clojure.test/run-test-var` threw a ClassCastException on an SCI namespace."
+            :must-read #{seon.sci.eval/agent-require seon.sci.eval/enter-namespace! seon.sci.lookup/agent-test-vars seon.sci.lookup/agent-test-namespace my.test/check}}]
