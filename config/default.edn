@@ -278,6 +278,14 @@
  ; facts; there is no stored tally to drift.
  :seon.config.error/recurrence-limit 3
 
+ ; Unit: count of distinct agents. Provenance: the 2026-10-10 review of chain
+ ; run 2, where 21 agent errors (markup read as code, an unresolvable proof
+ ; test) sat in two agents' evaluations and health saw none. One agent hitting
+ ; an error is its own mistake; two different agents hitting the same pattern
+ ; is a reader, context or tool defect. Counted by query over each agent
+ ; branch's evaluation errors; there is no stored tally.
+ :seon.config.error/agent-error-agents 2
+
  ; Unit: agent-to-agent hops in ONE causal chain, counted back through
  ; committed transaction metadata to the last message that came from
  ; outside the agent population.

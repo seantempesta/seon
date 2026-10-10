@@ -24,13 +24,17 @@
   `:type` discriminator because the key a family arrives under IS the
   family.
 
-  SEVEN FAMILIES, and each one is a fact nobody has to maintain:
+  EIGHT FAMILIES, and each one is a fact nobody has to maintain:
 
   - ERROR SIGNATURES — every committed `:seon.error` fact, grouped by
     signature. Grouping is the point: a hundred errors of one signature
     is ONE problem that recurred a hundred times, and listing it a
     hundred times would bury the other three. The latest occurrence
     rides along in full, so a digger needs no second lookup.
+  - AGENT ERROR PATTERNS — errors delivered to agents (`:seon.cluster.eval/error`
+    on each agent's branch) that at least `:seon.config.error/agent-error-agents`
+    distinct agents hit with one pattern: Seon's reader, context or tools, not
+    one agent's mistake. Derived from the branch evaluations, never recorded.
   - WEDGED RUNS — a run held by a process that is not in the live set.
     No clock: liveness is observable, and a deadline standing in for it
     is the tuned constant the standing ruling bans.
@@ -59,7 +63,9 @@
 
   Crash walk: reads only. A kill loses a value nobody had
   committed; the next caller re-derives it from the same facts."
-  (:require [seon.db :as db]
+  (:require [clojure.string :as str]
+            [seon.db :as db]
+            [seon.id :as id]
             [seon.turn :as turn]
             [seon.cluster.wake :as wake]
             [seon.error :as error]
@@ -141,6 +147,71 @@
                        (:seon.error/producer row) (assoc :seon.error/producer (:seon.error/producer row))
                        (:seon.error/resolved-by resolution) (assoc :seon.error/resolution resolution)))))
            (sort-by (juxt (comp - :seon.problems/occurrences) :seon.error/signature))
+           vec))))
+
+(defn- agent-error-parts
+  "An agent-delivered error's `[pattern value]`: its first line without the
+  site (` at (REPL:1:1).`), and the message's first line cut at its first `: `,
+  so `Unable to resolve symbol: X` is one pattern with X as its value."
+  {:malli/schema [:=> [:cat :string] [:tuple :string [:maybe :string]]]}
+  [error]
+  (let [[head & more] (str/split-lines error)
+        head (str/trim (subs head 0 (or (str/index-of head " at (") (count head))))
+        message (if (str/starts-with? head "Execution error") (first more) head)
+        cut (str/index-of (str message) ": ")]
+    (if cut
+      [(subs message 0 cut) (subs message (+ cut 2))]
+      [(if (str/starts-with? head "Execution error") (str head " " message) head) nil])))
+
+(defn- branch-agent-errors
+  "The errors `agent-id`'s branch evaluated that `inherited` (eval ids on the
+  cluster head) does not hold: `[agent-id eval-id at error]` each. Read
+  undecoded from the branch head ([[seon.db/undecoded-datoms]])."
+  [database agent-id branch inherited]
+  (when-let [head (db/branch-database database branch)]
+    (let [one (fn [entity attribute] (nth (first (db/undecoded-datoms head :eavt [entity attribute])) 2))]
+      (into []
+            (keep (fn [[entity _ error]]
+                    (let [eval-id (one entity :seon.cluster.eval/id)]
+                      (when-not (inherited eval-id)
+                        [agent-id eval-id (one entity :seon.cluster.eval/at) error]))))
+            (db/undecoded-datoms head :aevt [:seon.cluster.eval/error])))))
+
+(defn- agent-error-signatures
+  "Agent-delivered errors that `:seon.config.error/agent-error-agents` distinct
+  agents hit, grouped by pattern ([[agent-error-parts]]), most agents first:
+  the pattern's agent count, occurrences, distinct values and latest example by
+  agent and evaluation id. An agent's own mistake stays delivered to it
+  (`seon.error`); a pattern many agents hit is a defect in Seon's reader,
+  context or tools, and health must see it. Derived from the evaluations on
+  each roster agent's branch head, never copied; the cluster head's own
+  errors are excluded as inherited.
+
+  ## Costs
+
+  Undecoded branch heads: 30 branches / 199 errors read in about 45 ms, against
+  1.2 s through `seon.db/q` (task seon.db/the-first-read-of-a-branch-head-derives-its-schema)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.problems/agent-error]]}
+  [database]
+  (let [dial (db/q '[:find ?n . :where [_ :seon.config.error/agent-error-agents ?n]] database)
+        head-ids (into #{} (map #(nth % 2)) (db/undecoded-datoms database :aevt [:seon.cluster.eval/id]))]
+    (if-not dial
+      []
+      (->> (db/q '[:find ?agent-id ?branch :where [?agent :seon.agent/id ?agent-id] [?agent :seon.agent/branch ?branch]] database)
+           (mapcat (fn [[agent-id branch]] (branch-agent-errors database agent-id branch head-ids)))
+           (group-by (comp first agent-error-parts peek))
+           (keep (fn [[pattern errors]]
+                   (let [latest (apply max-key #(.getTime ^java.util.Date (nth % 2)) errors)]
+                     (when (<= dial (count (distinct (map first errors))))
+                       {:seon.problems/agent-error-signature (id/id [::agent-error pattern] 12)
+                        :seon.problems/agent-error-pattern pattern
+                        :seon.problems/agents (count (distinct (map first errors)))
+                        :seon.problems/occurrences (count errors)
+                        :seon.problems/agent-error-values (vec (sort (distinct (keep (comp second agent-error-parts peek) errors))))
+                        :seon.cluster.eval/at (nth latest 2)
+                        :seon.agent/id (first latest)
+                        :seon.cluster.eval/id (second latest)}))))
+           (sort-by (juxt (comp - :seon.problems/agents) (comp - :seon.problems/occurrences) :seon.problems/agent-error-pattern))
            vec))))
 
 (defn open-faults
@@ -373,6 +444,7 @@
   (and, for stale Vars, the loaded namespaces), so a reader may retain each by
   what it reads (`seon.health`)."
   [[:seon.problems/error-signatures #'error-signatures]
+   [:seon.problems/agent-error-signatures #'agent-error-signatures]
    [:seon.problems/failed-tests #'failed-tests]
    [:seon.problems/errored-receipts #'errored-receipts]
    [:seon.problems/deferred-agents #'deferred-agents]
@@ -525,6 +597,14 @@
            "resolved" (resolution-text (:seon.error/resolution entry)))))
 
    (family-section
+    "agent errors many agents hit"
+    (for [entry (:seon.problems/agent-error-signatures found)]
+      (row "agents" (:seon.problems/agents entry)
+           "seen" (:seon.problems/occurrences entry)
+           "pattern" (:seon.problems/agent-error-pattern entry)
+           "values" (str/join ", " (:seon.problems/agent-error-values entry))
+           "latest" (str (:seon.agent/id entry) " " (:seon.cluster.eval/id entry)))))
+   (family-section
     "errored forms"
     (for [entry (:seon.problems/errored-receipts found)]
       (row "run" (:seon.turn/id entry)
@@ -577,6 +657,12 @@
                 ". The run did not retry it. Inspect receipt "
                 (:seon.cluster.eval/id entry)
                 " and revise the remaining plan from current facts."))
+         :seon.problems/agent-error-signatures
+         (for [entry (:seon.problems/agent-error-signatures found)]
+           (str (:seon.problems/agents entry) " agents hit \"" (:seon.problems/agent-error-pattern entry)
+                "\" " (:seon.problems/occurrences entry) " times (" (str/join ", " (:seon.problems/agent-error-values entry))
+                "): a defect in Seon's context or tools. Latest: agent " (:seon.agent/id entry)
+                ", evaluation " (:seon.cluster.eval/id entry) "."))
          :seon.problems/deferred-agents
          (for [entry (:seon.problems/deferred-agents found)]
            (str "Agent " (:seon.agent/id entry) " has run "

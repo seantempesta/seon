@@ -30,6 +30,25 @@
                        :description "A fault no resolution closes: its producer has not changed since its latest occurrence and nobody resolved it. Its subject is the producer (the blame rule), which its task's must-reads name; the operation that observed it is a clue, and a fault no authored definition produced has no subject."}
                  :seon.problems/error-signature
                  [:not [:map [:seon.error/resolution :seon.error/resolution]]]]
+                :agent-error-signature :string
+                :agent-error-pattern :string
+                :agent-error-values [:vector :string]
+                :agents [:int {:min 1}]
+                :agent-error
+                [:map {:seon.health/severity 6 :seon.health/impact :seon.problems/agents :seon.health/at :seon.cluster.eval/at
+                       :seon.health/subject :seon.problems/agent-error-signature
+                       :seon.health/in [:seon.health/problems :seon.problems/agent-error-signatures]
+                       :seon.health/clues [[:seon.problems/agent-error-pattern] [:seon.problems/agent-error-values]
+                                           [:seon.problems/occurrences] [:seon.agent/id] [:seon.cluster.eval/id]]
+                       :description "An error evaluations of at least :seon.config.error/agent-error-agents distinct agents delivered with one pattern: a defect in Seon's reader, context or tools, not one agent's mistake. The latest example is by agent and evaluation id."}
+                 [:seon.problems/agent-error-signature :seon.problems/agent-error-signature]
+                 [:seon.problems/agent-error-pattern :seon.problems/agent-error-pattern]
+                 [:seon.problems/agents :seon.problems/agents]
+                 [:seon.problems/occurrences :seon.problems/occurrences]
+                 [:seon.problems/agent-error-values :seon.problems/agent-error-values]
+                 [:seon.cluster.eval/at :seon.cluster.eval/at]
+                 [:seon.agent/id :seon.agent/id]
+                 [:seon.cluster.eval/id :seon.cluster.eval/id]]
                 :errored-receipt
                 [:map {:seon.health/severity 1 :seon.health/at :seon.cluster.eval/at :seon.health/subject :seon.cluster.eval/id
                        :seon.health/in [:seon.health/problems :seon.problems/errored-receipts]
@@ -87,6 +106,9 @@
                  [:seon.problems/error-signatures
                   {:optional true}
                   [:vector :seon.problems/error-signature]]
+                 [:seon.problems/agent-error-signatures
+                  {:optional true}
+                  [:vector :seon.problems/agent-error]]
                  [:seon.problems/errored-receipts
                   {:optional true}
                   [:vector :seon.problems/errored-receipt]]

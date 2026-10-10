@@ -16,7 +16,12 @@
   and the attributes come from
   `canonical-database-attributes` — the live boot derivation, not a
   hand-listed fixture set."
-  (:require [malli.registry :as mr]
+  (:require [clojure.data.json :as json]
+            [malli.registry :as mr]
+            [seon.cluster.host :as host]
+            [seon.mcp :as mcp]
+            [seon.operator.runtime :refer [running-instances]]
+            [seon.id :as id]
             [seon.schema.internal] [malli.core] [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -534,3 +539,31 @@
     (is (= 600 (+ shown (or omitted 0))) "the elision names every omitted test")
     (is (str/includes? text "(seon.problems/problems (seon.db/db) {})")
         "the cut's continuation reads the full failed-test list")))
+
+(deftest ^{:seon/tasks #{'seon.problems/an-error-many-agents-hit-is-a-seon-defect}
+           :seon.test/long "Two hosted agents' first MCP runs: hosting a new branch each, 3-6 s measured on default (2026-09-28)."
+           :seon.test/long-ms 30000}
+  an-error-two-agents-hit-is-one-problem-with-two-agents
+  (test-support/with-running-agent
+   (fn [running _ connection]
+     (let [agents (mapv #(str "problem-agent-" % "-" (id/id)) [1 2])
+           symbols ["guessed-name-one" "guessed-name-two"]]
+       (try
+         (doseq [[agent-id sym] (map vector agents symbols)]
+           (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                     "arguments" {"code" (str "(" sym ")") "agent" agent-id "cluster" running}}))))
+         (let [signatures (:seon.problems/agent-error-signatures (problems/problems (db/db connection) {}))]
+           (is (= [{:seon.problems/agent-error-pattern "Unable to resolve symbol"
+                    :seon.problems/agents 2
+                    :seon.problems/occurrences 2
+                    :seon.problems/agent-error-values symbols}]
+                  (mapv #(select-keys % [:seon.problems/agent-error-pattern :seon.problems/agents
+                                         :seon.problems/occurrences :seon.problems/agent-error-values])
+                        signatures))
+               "one pattern, two distinct agents, the guessed names as its values")
+           (is (contains? (set agents) (:seon.agent/id (first signatures)))
+               "the latest example names its agent"))
+         (finally
+           (doseq [agent-id agents]
+             (when-let [branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id agent-id]))]
+               (some-> (host/hosted (get-in @running-instances [running :seon.turn.loop/cluster]) branch) host/retire!)))))))))
