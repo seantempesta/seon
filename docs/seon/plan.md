@@ -26,9 +26,15 @@ Live facts were checked on default (archive ffe62e1c3, pid 20363, `:faulted`) in
 - Write-back refuses a relative or archive root (93d9e4ef6).
 - The Datahike fork's per-batch commit cost (fork cf815730; bump 5acc29e23).
 
+- Byte-bounded node cache (fork cb3bce51, 75bd6a23a, 12473ca94; lane astra-node-cache), measured live:
+  - A warm redefinition's step went from about 309 MB / 171 ms CPU to 217–232 MB / 155–180 ms; the JVM window
+    from 358 to 263–283 MB.
+  - A new agent's first request went from 2.37 GB / 830 ms custody to 0.38 GB / 319 ms.
+- Open calibration: the diff flags unchanged platform functions as regressions (e.g. `admit-member` at 56× main)
+  because a fresh agent's live values include first-call cost. Flag an unchanged function only after enough calls
+  or a warm sample.
+
 **Running:**
-- `astra-node-cache`: node cache bounded by bytes. Targets: about 300 MB per warm redefinition, about 2.4 GB and
-  830 ms custody on a new agent's first request.
 - REPL-only acceptance (`repl-only-3`):
   - Ordinary half PASSED end to end through the REPL with branch evidence (df87cba96, names-in 1,490 → 128
     distance computations).
