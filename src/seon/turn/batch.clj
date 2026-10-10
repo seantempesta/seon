@@ -1069,9 +1069,22 @@
 (defn- jvm-evaluate
   "The host evaluation of `form`: its value or error, with the evaluating
   thread's allocation and CPU as the evaluation `arm-measures` sums; -1 on a
-  thread HotSpot does not count (a virtual thread)."
+  thread HotSpot does not count (a virtual thread). Only root evaluates on the
+  host: a host evaluation can load, reload or intern in the one JVM every
+  cluster shares, so any other agent's form is refused by name, unevaluated."
   {:malli/schema [:=> [:cat :map :any :any] :map]}
-  [_ form _]
+  [{{agent-id :seon.agent/id} :seon.batch/world} form _]
+  (if (not= "root" agent-id)
+    {:seon.batch/error
+     (ex-info "JVM mode is root's: run read-only host queries as agent \"root\"."
+              (seon.error.refusal/diagnostic
+               (java.util.Date.) :seon.turn.batch/host-evaluation `jvm-evaluate
+               {:seon.error/message (str "Agent " agent-id " cannot evaluate on the host JVM, which every cluster"
+                                         " shares; evaluate in SCI mode, or run read-only host queries as agent \"root\".")
+                :seon.error/offending agent-id
+                :seon.error/member :seon.agent/id
+                :seon.error/expected "root"}))
+     :seon.batch/evaluation {:seon.eval/allocated-bytes 0 :seon.cost/cpu-ns 0}}
   (let [bytes0 (.getCurrentThreadAllocatedBytes ^com.sun.management.ThreadMXBean thread-mx)
         cpu0 (.getCurrentThreadCpuTime thread-mx)
         outcome (try {:seon.batch/value (eval form)}
@@ -1080,7 +1093,7 @@
         cpu1 (.getCurrentThreadCpuTime thread-mx)]
     (assoc outcome :seon.batch/evaluation
            {:seon.eval/allocated-bytes (if (and (<= 0 bytes0) (<= bytes0 bytes1)) (- bytes1 bytes0) -1)
-            :seon.cost/cpu-ns (if (and (<= 0 cpu0) (<= cpu0 cpu1)) (- cpu1 cpu0) -1)})))
+            :seon.cost/cpu-ns (if (and (<= 0 cpu0) (<= cpu0 cpu1)) (- cpu1 cpu0) -1)}))))
 
 (defn jvm-request
   "Return a host-read/eval pass with render settings acquired from its starting basis."

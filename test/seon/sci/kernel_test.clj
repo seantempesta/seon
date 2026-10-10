@@ -67,7 +67,18 @@
     (is (= [2 :probe]
            (value ctx (str "[(binding [*print-length* 2] (.deref (clojure.lang.Var/find 'clojure.core/*print-length*)))"
                            " (binding [seon.db/*read-evidence-sink* :probe]"
-                           "   (.deref (clojure.lang.Var/find 'seon.db/*read-evidence-sink*)))]"))))))
+                           "   (.deref (clojure.lang.Var/find 'seon.db/*read-evidence-sink*)))]"))))
+    (is (= :host (value ctx (str "(do (clojure.lang.Var/pushThreadBindings"
+                                 "      {(clojure.lang.Var/find 'seon.db/*read-evidence-sink*) :host})"
+                                 "    (try seon.db/*read-evidence-sink* (finally (clojure.lang.Var/popThreadBindings))))")))
+        "a binding compiled code made is what the agent's code reads")))
+
+(deftest a-reify-of-a-java-interface-implements-it
+  ;; with-open on a reified Closeable called .close as a field
+  (let [ctx (eval/build-base-ctx (schema/handed-projection))]
+    (is (= [true nil 2] (value ctx (str "(let [c (reify java.io.Closeable (close [_] nil))"
+                                        "      k (reify java.util.Comparator (compare [_ a b] (- a b)))]"
+                                        "  [(instance? java.io.Closeable c) (.close c) (.compare k 3 1)])"))))))
 
 (deftest the-interpreter-resolves-the-classpath-and-loaded-namespaces
   (let [ctx (eval/build-base-ctx (schema/handed-projection))]

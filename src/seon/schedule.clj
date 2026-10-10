@@ -601,7 +601,9 @@
                    [:seon.error/declared-schema {:optional true} :seon.error/declared-schema]]]}
   [projection function request]
   (try
-    (if-let [handler (requiring-resolve function)]
+    ;; a handler resolves in a namespace the JVM has loaded; a schedule
+    ;; never loads one into the JVM every cluster shares
+    (if-let [handler (some-> (find-ns (symbol (namespace function))) (ns-resolve (symbol (name function))))]
       (let [result (handler request)
             declaration (some (fn [[name valid?]] (when (valid? result) name))
                               (error/declared-output-validators
@@ -610,7 +612,7 @@
           declaration (assoc :seon.error/declared-schema declaration)))
       {:seon.error/declared-schema :seon.schedule/unresolved-handler-error
        :seon.maintenance.settlement/result (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/invoke-handler
-                                            {:seon.error/message "Scheduled execution requires a resolving handler Var."
+                                            {:seon.error/message "Scheduled execution requires a handler Var in a namespace the JVM has loaded."
                         :seon.error/offending {
                          :seon.fn/sym function }
                         :seon.error/data {

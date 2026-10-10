@@ -115,6 +115,7 @@
             [sci.ctx-store]
             [sci.lang]
             [sci.impl.namespaces :as sci.namespaces]
+            [sci.impl.opts :as sci.opts]
             [sci.impl.vars :as sci.vars]
             [sci.impl.utils :as sci.utils]
             [sci.interrupt :as sci.interrupt]
@@ -277,6 +278,60 @@
       {})))
 
 
+(defn- reified-return
+  "`value` as `method` returns it: a primitive return coerced, void as nil."
+  {:malli/schema [:=> [:cat [:fn clojure.core/some?] [:maybe [:fn clojure.core/some?]]] [:maybe [:fn clojure.core/some?]]]}
+  [^java.lang.reflect.Method method value]
+  (condp = (.getReturnType method)
+    Integer/TYPE (int value) Long/TYPE (long value) Boolean/TYPE (boolean value)
+    Double/TYPE (double value) Float/TYPE (float value) Short/TYPE (short value)
+    Byte/TYPE (byte value) Character/TYPE (char value) Void/TYPE nil
+    value))
+
+(defn- interface-proxy
+  "An object implementing `interfaces` (a `java.lang.reflect.Proxy`) whose
+  methods are the reified `methods` by name, carrying SCI's custom-type view
+  (`sci.impl.types/ICustomType`) for its protocols, and `meta`."
+  {:malli/schema [:=> [:cat [:vector [:fn clojure.core/class?]] [:map-of :symbol [:fn clojure.core/ifn?]] [:set [:fn clojure.core/some?]] [:maybe :map]]
+                  [:fn clojure.core/some?]]}
+  [interfaces methods protocols meta]
+  (java.lang.reflect.Proxy/newProxyInstance
+   (clojure.lang.RT/baseLoader)
+   (into-array Class (conj interfaces sci.impl.types.ICustomType clojure.lang.IObj))
+   (reify java.lang.reflect.InvocationHandler
+     (invoke [_ proxy method args]
+       (let [method ^java.lang.reflect.Method method
+             method-name (.getName method)
+             declaring (.getDeclaringClass method)
+             f (get methods (symbol method-name))]
+         (cond
+           (= sci.impl.types.ICustomType declaring)
+           (case method-name "getInterfaces" (set interfaces) "getMethods" methods
+                 "getProtocols" protocols "getFields" nil)
+           (and (= clojure.lang.IObj declaring) (= "withMeta" method-name))
+           (interface-proxy interfaces methods protocols (first args))
+           (and (= "meta" method-name) (empty? args)) meta
+           f (reified-return method (apply f proxy args))
+           (.isDefault method) (java.lang.reflect.InvocationHandler/invokeDefault proxy method args)
+           (= "toString" method-name) (str (.getName ^Class (first interfaces)) "@"
+                                           (Integer/toHexString (System/identityHashCode proxy)))
+           (= "hashCode" method-name) (System/identityHashCode proxy)
+           (= "equals" method-name) (identical? proxy (first args))
+           :else (throw (UnsupportedOperationException.
+                         (str method-name " is not implemented by this reify")))))))))
+
+(defn- interface-reify
+  "SCI's `:reify-fn`: a reify of Java interfaces implements them, as Clojure's
+  does (SCI's default implements only its own custom type, so `(.close x)` on a
+  reified `java.io.Closeable` answered NoSuchFieldException); a reify of
+  protocols and Object alone is SCI's default."
+  {:malli/schema [:=> [:cat [:map [:interfaces [:set [:fn clojure.core/class?]]] [:methods :map] [:protocols [:set [:fn clojure.core/some?]]]]] [:fn clojure.core/some?]]}
+  [{:keys [interfaces methods protocols] :as reified}]
+  (let [interfaces (vec (sort-by #(.getName ^Class %) (filter #(.isInterface ^Class %) interfaces)))]
+    (if (empty? interfaces)
+      (sci.opts/default-reify-fn reified)
+      (interface-proxy interfaces methods protocols nil))))
+
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
@@ -333,6 +388,7 @@
          ;; (our SCI fork's `interop/host-class-opts`); interruption stays
          ;; SCI's ceiling: a host call is not interrupted (interrupt.md:84-98)
          :classes {:allow :all}
+         :reify-fn interface-reify
          :load-fn load-host-namespace}
          ;; SCI's own `future` addon, given our arm-carrying `future-call`
          ;; (sci fork's 2-arity install): `future` follows it
@@ -876,7 +932,7 @@
                           {:ns (sci/create-ns (symbol (namespace target)))})))
     ctx))
 
-(declare install-declared-classes! install-jvm-root! overridden-row?)
+(declare install-declared-classes! install-jvm-root! overridden-row? source-namespace?)
 
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot. A definition
@@ -900,6 +956,7 @@
     ;; An uninstalled program symbol has no SCI entry, so one present is this
     ;; context's own definition, which survives its first install (AGENTS.md).
     (when-not (and (not (contains? interpreted function-symbol))
+                   (not (source-namespace? ctx namespace-name))
                    (not (overridden-row? loaded (db/pull db '[*] [:seon.fn/sym function-symbol])))
                    (or (when (contains? (get-in @(:env ctx) [:namespaces namespace-name])
                                         (symbol (name function-symbol)))
@@ -1231,6 +1288,32 @@
   [row]
   (not (false? (get row :seon.fn/host-bound?))))
 
+;;; Source namespaces: what a context interprets from its program rows.
+;;; An agent never loads, reloads or interns anything in the shared JVM (owner,
+;;; 2026-10-10): a test namespace, or one this JVM has not loaded, runs from its
+;;; rows in the agent's SCI world. Only root's adoption changes the host.
+
+(defn- test-namespaces
+  "The program namespaces `database` indexes from the test source root."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :symbol]]}
+  [database]
+  (let [names (db/q '[:find [?name ...]
+                      :where [?file :seon.fn.file/relative-root "test"]
+                      [?namespace :seon.fn/file ?file]
+                      [?namespace :seon.ns/name ?name]]
+                    database)]
+    (when (:seon.db/invalid-read names)
+      (throw (ex-info (:seon.error/message names) names)))
+    (set names)))
+
+(defn source-namespace?
+  "Whether `ctx` interprets `namespace-name` from its program rows rather than
+  binding compiled Vars: a test namespace, or one this JVM has not loaded."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol] :boolean]}
+  [ctx namespace-name]
+  (boolean (or (contains? (::test-namespaces @(::kernel/program-snapshot ctx)) namespace-name)
+               (nil? (find-ns namespace-name)))))
+
 (defn install-row!
   "Install one declaration from the terminal transaction's db-after.
   The exact committed row is resolved by identity; saved evaluation results
@@ -1312,22 +1395,21 @@
               ;; own change to a host-bound definition (SCI cannot interpret
               ;; it), and an unchanged core row in a namespace this JVM never
               ;; loaded (no compiled Var, no interns to analyze against).
-              unloaded? (nil? (find-ns namespace-name))
+              ;; A source namespace has no compiled Var to keep: its rows
+              ;; interpret, and one SCI cannot interpret refuses by name when
+              ;; called.
+              unloaded? (source-namespace? ctx namespace-name)
+              interpreted? (or interpreted? unloaded?)
               evaluated-row? (boolean (or evaluated? (::evaluated? row)))
               changed? (overridden-row? (::loaded-database snapshot) committed)
               compiled? (and host-row (not changed?) (not unloaded?))
-              unloaded-core? (and interpreted? (not compiled?) unloaded? (not changed?)
-                                  (= :core (:seon.schema.admission/source committed))
-                                  (not evaluated-row?))
-              refusal (when (or (and host-row (not compiled?)) unloaded-core?)
+              refusal (when (and host-row (not compiled?) (not unloaded?))
                         (interpretation-error function-symbol
                           (str (cond (nil? host-row) "Declaration "
                                      (contains? host-row :seon.fn/host-bound?) "Host-bound declaration "
                                      :else "Declaration with no :seon.fn/host-bound? fact ")
                                (:seon.fn/sym (or host-row committed))
-                               (if unloaded?
-                                 " is in a namespace this JVM has not loaded; load its source files to call it."
-                                 " must change through the loaded source files."))))
+                               " must change through the loaded source files.")))
               ;; A row acquired from the database refuses by name only when
               ;; called: the rest of the program and every later form keep
               ;; working. An agent's evaluation keeps the returned refusal.
@@ -1513,33 +1595,6 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol] :boolean]}
   [ctx test-symbol]
   (contains? (some-> (::kernel/program-snapshot ctx) deref ::interpreted-tests) test-symbol))
-
-(defn interpret-test!
-  "Interpret the stored test `test-symbol` in `ctx` from `database`; its Var.
-  Its namespace binds what its row declares and the compiled interns of its
-  loaded host namespace, so the caller loads that namespace first (a test
-  namespace loads under the test runner's class loader). A test that cannot be
-  interpreted answers the acquisition refusal naming it."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
-                  [:or :seon.sci.eval/sci-var :seon.sci.eval/row-acquisition-error :seon.sci.eval/interpretation-error]]}
-  [ctx database test-symbol]
-  (let [namespace-name (symbol (namespace test-symbol))
-        row (db/pull database [:seon.test/sym :seon.test/source :seon.schema.admission/source]
-                     [:seon.test/sym test-symbol])
-        ns-row (namespace-row (db/pull database namespace-pattern [:seon.ns/name namespace-name]))]
-    (binding [sci.lang/*write-observer* nil
-              sci.lang/*expansion-observer* nil]
-      (sci.ctx-store/with-ctx ctx
-        (try
-          (sci/install-namespace-bindings! ctx namespace-name (assoc (row-bindings ns-row) :refers {}))
-          (install-caller-host-bindings! ctx [ns-row])
-          (install-required-libraries! ctx [ns-row])
-          (install-namespace-bindings! ctx namespace-name (row-bindings ns-row))
-          (install-row! {:seon.sci.eval/ctx ctx :seon.db/db database
-                         :seon.program/row (assoc row :seon.test/ns [:seon.ns/name namespace-name])})
-          (sci/resolve ctx test-symbol)
-          (catch Throwable failure
-            (acquisition-refusal (assoc row :seon.test/ns [:seon.ns/name namespace-name]) failure)))))))
 
 (defn- installation-covers-program-change?
   "True when everything the settlement `report` changed since the context's
@@ -1873,7 +1928,8 @@
                 {}
                 function-rows)]
     (doseq [namespace-name (sort-by str first-party-names)
-            :let [host-namespace (find-ns namespace-name)]
+            :let [host-namespace (when-not (source-namespace? ctx namespace-name)
+                                   (find-ns namespace-name))]
             :when host-namespace]
       (let [sci-namespace (sci/create-ns namespace-name)
             indexed-names (get indexed-function-names namespace-name)
@@ -1935,10 +1991,12 @@
               :let [namespace-name (:seon.ns/name row)
                     {:keys [aliases refers]} (row-bindings row)]
               [target interns]
-              (cons [namespace-name (some-> (find-ns namespace-name) own-bindings)]
+              (cons [namespace-name (when-not (source-namespace? ctx namespace-name)
+                                      (some-> (find-ns namespace-name) own-bindings))]
                     (for [target (distinct (concat (vals aliases)
                                                    (map (comp symbol namespace) (vals refers))))
-                          :when (not= 'clojure.core target)]
+                          :when (and (not= 'clojure.core target)
+                                     (not (contains? (::test-namespaces @(::kernel/program-snapshot ctx)) target)))]
                       [target (some-> (find-ns target) ns-publics)]))
               :when (seq interns)]
           [target interns])]
@@ -1964,34 +2022,97 @@
           :when (not (contains? (:namespaces @(:env ctx)) target))]
     (load-host-namespace {:namespace target :ctx ctx})))
 
-(defn- enter-namespace!
+(declare install-selected! record-acquisition-refusals!)
+
+(defn- source-closure
+  "The source namespaces among `namespace-names` (`source-namespace?`) and the
+  program source namespaces they require, alias or refer, transitively, less
+  `entered`, given the program's namespace `rows` by name."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:map-of :symbol :map] [:sequential :symbol] [:set :symbol]]
+                  [:set :symbol]]}
+  [ctx rows namespace-names entered]
+  (loop [pending (vec namespace-names) found #{}]
+    (if-let [[namespace-name & more] (seq pending)]
+      (if (or (found namespace-name) (entered namespace-name) (not (rows namespace-name))
+              (not (source-namespace? ctx namespace-name)))
+        (recur (vec more) found)
+        (let [{:keys [aliases refers requires]} (row-bindings (rows namespace-name))]
+          (recur (into (vec more) (concat requires (vals aliases) (map (comp symbol namespace) (vals refers))))
+                 (conj found namespace-name))))
+      found)))
+
+(defn- interpret-source-namespaces!
+  "Interpret every function and test row of the source namespaces
+  `namespace-names` in `ctx` from its acquired database (`install-selected!`),
+  each after those it binds, recording the refusals; the acquisition."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:set :symbol]] :map]}
+  [ctx namespace-names]
+  (let [snapshot @(::kernel/program-snapshot ctx)
+        database (:seon.db/db snapshot)
+        names (vec (sort-by str namespace-names))
+        function-rows (into []
+                            (map (fn [[sym source namespace-name admission private?]]
+                                   [(symbol sym) source namespace-name admission private?]))
+                            (db/q '[:find ?sym ?source ?namespace-name ?admission ?private
+                                    :in $ [?namespace-name ...]
+                                    :where [?namespace :seon.ns/name ?namespace-name]
+                                    [?function :seon.fn/ns ?namespace]
+                                    [?function :seon.fn/sym ?sym]
+                                    [?function :seon.fn/source ?source]
+                                    [?function :seon.schema.admission/source ?admission]
+                                    [(get-else $ ?function :seon.fn/private? false) ?private]]
+                                  database names))
+        test-rows (db/q '[:find ?sym ?source ?namespace-name ?admission
+                          :in $ [?namespace-name ...]
+                          :where [?namespace :seon.ns/name ?namespace-name]
+                          [?test :seon.test/ns ?namespace]
+                          [?test :seon.test/sym ?sym]
+                          [?test :seon.test/source ?source]
+                          [?test :seon.schema.admission/source ?admission]]
+                        database names)
+        acquired (record-acquisition-refusals!
+                  ctx database
+                  (install-selected!
+                   ctx database (select-keys (:namespaces snapshot) names)
+                   function-rows (vec test-rows) (into #{} (map first) function-rows)
+                   (-> (::acquisition snapshot)
+                       (dissoc ::acquisition-refusals-recorded? ::acquisition-recording-error)
+                       (assoc :seon.schema/projection (context-projection ctx))))
+                  (:seon.flow/commit-fault! snapshot))]
+    (swap! (::kernel/program-snapshot ctx) assoc ::acquisition acquired)
+    acquired))
+
+(defn enter-namespace!
   "`ctx` with the program namespace a form runs in, and each it aliases, bound as
   its file declares it, once per context: its loaded JVM namespace's interns,
   private ones included, its refers and the public Vars of what it aliases
-  (`install-caller-host-bindings!`), loading that JVM namespace first when this
-  process serves it and has not (`host-namespace!`); a test namespace, which the
-  cluster never loads, enters here. A namespace without a program row is left
-  as SCI holds it."
+  (`install-caller-host-bindings!`). A source namespace (`source-namespace?`:
+  a test namespace, or one this JVM has not loaded) and the source namespaces
+  it binds are interpreted from their rows instead
+  (`interpret-source-namespaces!`); nothing is loaded into the shared JVM. A
+  namespace without a program row is left as SCI holds it."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :symbol] :seon.sci.eval/ctx]}
   [ctx namespace-name]
   (let [snapshot (::kernel/program-snapshot ctx)
         rows (:namespaces @snapshot)
         entered (::entered-namespaces @snapshot #{})
         aliased (vals (get-in @(:env ctx) [:namespaces namespace-name :aliases]))
-        entering (into [] (comp (distinct) (remove entered) (keep rows))
-                       (cons namespace-name aliased))]
+        requested (into [] (comp (distinct) (remove entered) (filter rows)) (cons namespace-name aliased))
+        sources (source-closure ctx rows requested entered)
+        entering (into [] (keep rows) (distinct (concat requested (sort-by str sources))))]
     (when (seq entering)
+      ;; entered first: interpreting the sources enters each of them again
+      (swap! snapshot update ::entered-namespaces (fnil into #{}) (map :seon.ns/name) entering)
       (binding [sci.lang/*write-observer* nil
                 sci.lang/*expansion-observer* nil]
         (sci.ctx-store/with-ctx ctx
-          (doseq [{entering-name :seon.ns/name} entering]
-            (host-namespace! entering-name))
           (install-declared-classes! ctx entering)
           (install-caller-host-bindings! ctx entering)
           (install-required-libraries! ctx entering)
           (doseq [row entering]
-            (install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))))
-      (swap! snapshot update ::entered-namespaces (fnil into #{}) (map :seon.ns/name) entering))
+            (install-namespace-bindings! ctx (:seon.ns/name row) (row-bindings row)))
+          (when (seq sources)
+            (interpret-source-namespaces! ctx sources)))))
     ctx))
 
 (defn- required-libs
@@ -2448,8 +2569,17 @@
                       {:seon.fn/affected #{} :seon.fn/tests []})
             _ (when (:seon.db/invalid-read closure)
                 (throw (ex-info "Cannot acquire the affected function closure." closure)))
+            test-namespaces (test-namespaces db)
+            ;; a program namespace this JVM never loaded runs from its rows
+            ;; (an agent never loads into the shared JVM); a test namespace
+            ;; is interpreted when it is entered (`enter-namespace!`)
+            unloaded (into #{} (keep (fn [[sym _ namespace-name]]
+                                       (when (and (not (test-namespaces namespace-name))
+                                                  (nil? (find-ns namespace-name)))
+                                         (symbol sym))))
+                           all-function-rows)
             interpreted (into overridden (:seon.fn/affected closure))
-            function-rows (filterv (fn [[sym]] (interpreted sym)) all-function-rows)
+            function-rows (filterv (fn [[sym]] (or (interpreted sym) (unloaded sym))) all-function-rows)
             _ (lookup/install-program-doc! ctx db projection)
             selected-namespace-names
             (into (into #{} (map #(nth % 2)) function-rows)
@@ -2478,7 +2608,8 @@
          (into {} (map (fn [row] [(symbol (first row)) (function-entry row)])) all-function-rows)
          all-namespace-row-by-name)
         (swap! (::kernel/program-snapshot ctx) assoc
-               ::loaded-database loaded ::interpreted interpreted)
+               ::loaded-database loaded ::interpreted interpreted
+               ::test-namespaces test-namespaces)
         (when-let [recorder recording-operation]
           (swap! (::kernel/program-snapshot ctx) assoc
                  :seon.flow/commit-fault! recorder))
@@ -2788,8 +2919,18 @@
         ;; the macros among the rest are interpreted now.
         macros (bind-lazy-members! ctx database
                                    (filter (interpretable-functions database callers) callers))
-        function-rows (function-rows-in database (into (vec (remove already overridden)) macros))
         added-rows (function-rows-in database (remove interpreted added))
+        entered (::entered-namespaces snapshot #{})
+        ;; an added function of a source namespace has no compiled Var: it
+        ;; interprets now, a test namespace's once that namespace is entered
+        sourced (into [] (keep (fn [[sym _ namespace-name]]
+                                 (when (and (source-namespace? ctx namespace-name)
+                                            (or (entered namespace-name)
+                                                (not (contains? (::test-namespaces snapshot) namespace-name))))
+                                   sym)))
+                      added-rows)
+        function-rows (function-rows-in database (into (vec (remove already overridden))
+                                                       (concat macros sourced)))
         selected (into (into #{} (map :seon.ns/name) namespaces) (map #(nth % 2)) function-rows)
         new-namespaces (into #{} (comp (map #(nth % 2)) (remove (:namespaces snapshot)) (remove selected))
                              added-rows)
@@ -2810,7 +2951,7 @@
                    ;; The tests reaching a change run its interpreted program
                    ;; too, a file-derived test as the agent's own: compiled,
                    ;; its body would call the compiled callees. A file test is
-                   ;; interpreted when it runs (`interpret-test!`).
+                   ;; interpreted when it runs (`enter-namespace!`).
                    (update ::interpreted-tests (fnil into #{})
                            (concat (map first tests) (:seon.fn/tests closure)))))
        (install-declared-classes! ctx namespace-rows)

@@ -1591,14 +1591,25 @@
     (when-not (find-ns namespace-name) (require namespace-name :reload))
     (requiring-resolve test-symbol)))
 
+(defn- root-agent?
+  "Whether the world `carrier` (a context or execution handle) is root's, which
+  alone may load into the JVM every cluster shares: it names no agent, or
+  \"root\"."
+  {:malli/schema [:=> [:cat [:maybe [:fn clojure.core/some?]]] :boolean]}
+  [carrier]
+  (contains? #{nil "root"} (or (when (map? carrier) (:seon.agent/id carrier))
+                               (:seon.agent/id (env/of carrier)))))
+
 (defn resolve-test
-  "Resolve an admitted test in the host or acquired SCI program by provenance."
+  "Resolve an admitted test in the host or acquired SCI program by provenance.
+  A non-root agent's file test runs interpreted from its namespace's rows
+  (`seon.sci.eval/enter-namespace!`); it never loads into the shared JVM."
   {:malli/schema [:=> [:cat :seon.test/resolution-request]
                   [:or :seon.test/var :seon.test/resolution-error :seon.test/not-runnable-error :seon.test.run/unavailable-error :seon.db/invalid-read-error :seon.schema/missing-projection-error
                    :seon.sci.eval/row-acquisition-error :seon.sci.eval/interpretation-error]]}
   [{database :seon.db/db test-symbol :seon.test/identity
     ctx :seon.sci.eval/ctx loader :seon.test/class-loader
-    projection :seon.schema/projection}]
+    projection :seon.schema/projection interpreted-files? :seon.test/interpreted-files?}]
   (let [refuse (fn [kind message observed]
                  (assoc {:seon.error/at (java.util.Date.)
                    :seon.error/layer :seon.test/resolution
@@ -1644,12 +1655,13 @@
                         projection
                         #(cond
                            (= :agent admission) (sci/resolve ctx test-symbol)
-                           ;; A file test reaching the context's change runs
-                           ;; interpreted, calling the changed program; its
-                           ;; namespace loads first for the helpers it names.
-                           (sci.eval/interpreted-test? ctx test-symbol)
-                           (with-test-loader loader (fn [] (resolve-loaded test-symbol)
-                                                      (sci.eval/interpret-test! ctx database test-symbol)))
+                           ;; a non-root agent's, or one reaching the context's
+                           ;; change, runs interpreted, calling the branch's program
+                           (or interpreted-files?
+                               (sci.eval/interpreted-test? ctx test-symbol))
+                           (do (sci.eval/enter-namespace! ctx (symbol (namespace test-symbol)))
+                               (sci/resolve ctx test-symbol))
+                           ;; root's file test away from any branch change runs compiled
                            :else (with-test-loader loader (fn [] (resolve-loaded test-symbol)))))]
           (cond
             ;; An SCI Var's metadata is the context's own binding of it: a
@@ -2293,6 +2305,7 @@
                                :seon.db/connection (:seon.db/connection child)
                                :seon.test/identity test-symbol
                                :seon.sci.eval/ctx ctx
+                               :seon.test/interpreted-files? (boolean (:seon.test/interpreted-files? request-handle))
                                :seon.schema/projection (:seon.schema/projection child)
                                :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
                                                            (clojure.lang.RT/baseLoader))})
@@ -2532,7 +2545,7 @@
                                                         (:seon.test/deferred exclusions))))]
                          (vec (remove excluded selected))))
             ;; Host test namespaces first loaded by this request arm before any body.
-            armed (when (seq runnable)
+            armed (when (and (seq runnable) (root-agent? execution))
                     (arm-first-loads!
                      database effective (:seon.sci.eval/ctx execution)
                      (into #{} (comp (remove (comp find-ns symbol namespace))
@@ -2643,7 +2656,8 @@
                 held-handle (volatile! nil)
                 request-handle! #(or @held-handle
                                      (vreset! held-handle
-                                              (clean-request-handle execution recording cluster effective)))
+                                              (assoc (clean-request-handle execution recording cluster effective)
+                                                     :seon.test/interpreted-files? (not (root-agent? execution)))))
                 ;; Once per request: the members an attempt evaluation serves,
                 ;; those whose closure names the effect owner, from one reverse
                 ;; walk of the reached graph (all 2,365 tests 18 ms, where every

@@ -174,13 +174,16 @@
  [:map [:seon.test/classpath-roots :seon.test/classpath-roots]
   [:seon.test/classpath-root :seon.test/classpath-root]
   [:seon.test/jvm-options {:optional true} :seon.test/jvm-options]]
+ :seon.test/interpreted-files?
+ [:boolean {:description "Whether a request's file tests run interpreted from their namespace's rows in the member's context: every non-root agent's request, which never loads into the JVM every cluster shares."}]
  :seon.test/resolution-request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.db/connection :seon.db/connection]
   [:seon.test/identity :seon.test/identity]
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.schema/projection :seon.schema/projection]
-  [:seon.test/class-loader :seon.test/class-loader]]
+  [:seon.test/class-loader :seon.test/class-loader]
+  [:seon.test/interpreted-files? {:optional true} :seon.test/interpreted-files?]]
 :seon.test/changed
  [:vector [:or :qualified-symbol :seon.program/identity]]
  :seon.test/unreached
