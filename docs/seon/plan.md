@@ -32,6 +32,20 @@ branch. Its three known defects ("a]a", "('", "(\\") are in designed-task-exampl
 `seon.competency/start-run!` and `await-runs` (the E1 path, per-branch `no-provider false`, a call cap) but keeps the
 branch for review instead of `launch!`'s retirement. Every friction met is filed; that list decides the next build.
 
+**Chain run 2, first attempt (2026-10-10, agent `chain2-forgive-1`, branch `:agent-e84b11b8bd78` kept).** Capped at 15
+calls in 31.5 s, not green (proofs 2 red, 1 green); 156k prompt tokens (108k cached), 3.2k completion; 0 `defn`s,
+19 repeated forms, `in-ns` on every call, 7 agent errors, 0 platform errors. It found the right spot and nearly the
+research's fix (a dropped closer becomes a space, but without recording `:seon.batch/inserted`). Frictions, in causal
+order:
+1. `(my.program/source 'seon.sci.forgive/scan)` (about 250 lines) is cut from 3,533 to 1,989 tokens with a
+   `:large-value` finding telling it to select less, so it cannot see the function whole (lane `source-whole`).
+2. No REPL way to change one branch of a large definition: `defn` of the whole function is the only path, so the
+   agent `slurp`ed and string-edited the file instead (decision for the owner: an edit tool over a definition's source).
+3. A relative `spit` from SCI rewrote the running archive `data/source/<sha>/src/seon/sci/forgive.clj` (root
+   restored it from git; the compiled Var was unaffected); lane `archive-readonly` makes extracted archives read-only.
+4. Model tool markup `</invoke>` in a reply is read as code (3 errors; `seon.sci.forgive` reply-mode prose rules).
+5. A guessed `seon.print/inspect`; `my.program/callers` passed a function (refused with a fix; agent errors).
+
 **How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
 "next" for two hours and never started: it had no owner and no first step, each owner observation about the
 instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
