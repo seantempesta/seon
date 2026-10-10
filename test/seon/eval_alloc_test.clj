@@ -36,6 +36,9 @@
        (is (<= 100.0 (:seon.cost/alloc-mb request) 101.0) "the request's arms are the form's")
        (is (pos? (:seon.cost/cpu-ms request)))
        (is (< (:seon.repl/alloc-mb (support/mcp-reply small)) 1.0))
+       (let [futured (answer running agent-id "@(future (alength (byte-array 50000000)))")]
+         (is (<= 50.0 (:seon.cost/alloc-mb (support/mcp-request futured)) 51.0)
+             "a future's body thread counts into the request when it exits"))
        (is (not-any? #(contains? (support/mcp-reply %) :seon.repl/findings) [large small]))))))
 
 (deftest a-measured-call-reports-allocation-and-reads

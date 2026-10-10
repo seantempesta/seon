@@ -218,6 +218,38 @@
     (merge counts {:seon.cost/ms elapsed
                    :seon.cost/stages (assoc stages :unattributed remainder)})))
 
+(defn jvm-shared-counters
+  "JVM-wide garbage-collection CPU nanoseconds and JIT compilation
+  milliseconds; an unavailable reading is -1."
+  {:malli/schema [:=> [:cat] [:tuple :int :int]]}
+  []
+  (let [compiler (java.lang.management.ManagementFactory/getCompilationMXBean)]
+    [(.getTotalGcCpuTime (java.lang.management.ManagementFactory/getMemoryMXBean))
+     (if (and compiler (.isCompilationTimeMonitoringSupported compiler)) (.getTotalCompilationTime compiler) -1)]))
+
+(defn shared-cost
+  "The request's JVM window less its attributed parts, each measured on its
+  own threads (the entrance thread, the turn step's proc thread, the test
+  bodies, the writer and the commit), with the window's garbage-collection
+  CPU and JIT milliseconds beside it: work the request shares with the JVM,
+  labelled and never apportioned. The evaluation arms are no part: their
+  owning thread is the step's (SCI) or the entrance's (JVM). A residual the
+  parts exceed is unmeasured as :overlapping-parts, never clamped."
+  {:malli/schema [:=> [:cat :map :seon.cost/jvm-window [:tuple :int :int] [:tuple :int :int]] :seon.cost/shared]}
+  [cost window [gc0 jit0] [gc1 jit1]]
+  (let [parts (keep cost [:seon.cost/entrance :seon.cost/step :seon.cost/tests :seon.cost/writer :seon.cost/commit])
+        residual (fn [k] (when-let [total (get window k)]
+                           (tenths (- total (transduce (keep k) + 0.0 parts)))))
+        alloc (residual :seon.cost/alloc-mb)
+        cpu (residual :seon.cost/cpu-ms)]
+    (cond-> {:seon.cost/attribution :shared-never-apportioned}
+      (and alloc (<= 0.0 alloc)) (assoc :seon.cost/alloc-mb alloc)
+      (and cpu (<= 0.0 cpu)) (assoc :seon.cost/cpu-ms cpu)
+      (and alloc (neg? alloc)) (assoc-in [:seon.cost/unmeasured :seon.cost/alloc-mb] :overlapping-parts)
+      (and cpu (neg? cpu)) (assoc-in [:seon.cost/unmeasured :seon.cost/cpu-ms] :overlapping-parts)
+      (<= 0 gc0 gc1) (assoc :seon.cost/gc-ms (tenths (/ (- gc1 gc0) 1e6)))
+      (<= 0 jit0 jit1) (assoc :seon.cost/jit-ms (double (- jit1 jit0))))))
+
 (defn- hundredths
   "A value to 0.01, the precision a cost comparison shows."
   {:malli/schema [:=> [:cat number?] :double]}

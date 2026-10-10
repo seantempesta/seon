@@ -28,6 +28,7 @@
             [seon.env :as env]
             [seon.error.refusal :as refusal]
             [seon.fault :as fault]
+            [seon.flow]
             [seon.health :as health]
             [seon.id :as id]
             [seon.operator.runtime :as runtime]
@@ -392,6 +393,19 @@
                                         (:errors explanation)))
       value)))
 
+(defn- with-shared
+  "`cost` with the entrance thread's cost since its `entrance` counters, the
+  JVM window since `counters` and the shared residual since `shared`
+  (`seon.batch/shared-cost`), all read now."
+  {:malli/schema [:=> [:cat :seon.cost/request [:tuple :int :int] [:tuple :int :int] :seon.flow/thread-counters]
+                  :seon.cost/request]}
+  [cost counters shared entrance]
+  (let [spent (seon.flow/step-cost entrance)
+        cost (cond-> cost spent (assoc :seon.cost/entrance spent))
+        window (seon.batch/jvm-window counters (seon.batch/jvm-counters))]
+    (assoc cost :seon.cost/jvm-window window
+           :seon.cost/shared (seon.batch/shared-cost cost window shared (seon.batch/jvm-shared-counters)))))
+
 (defn- eval-clj
   "`eval_clj`: the texts and whether any failed. The last text is the eval
   request's cost (`:seon.repl/request`), measured from this entrance."
@@ -400,6 +414,8 @@
     start :seon.mcp/namespace}]
   (let [started (System/nanoTime)
         counters (seon.batch/jvm-counters)
+        shared (seon.batch/jvm-shared-counters)
+        entrance (seon.flow/thread-counters)
         found (instance @runtime/running-instances cluster)
         ;; main as the request found it: its own writes are not what it compares with
         main (some-> (get-in found [:seon.turn.loop/cluster :seon.db/connection]) db/db)
@@ -417,8 +433,7 @@
           :else (sci-run custody code namespace-name cluster-name))]
     [(conj texts (printed {:seon.repl/request (-> (seon.batch/request-cost started (merge stages run-stages) counts)
                                                   (with-diff main cluster-name)
-                                                  (assoc :seon.cost/jvm-window
-                                                         (seon.batch/jvm-window counters (seon.batch/jvm-counters))))}
+                                                  (with-shared counters shared entrance))}
                           code nil cluster-name))
      failed?]))
 

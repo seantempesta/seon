@@ -109,10 +109,10 @@
            "another thread's reads are not this request's")))))
 
 (defn- window-share
-  "The least share of the outer JVM allocation window a redefinition reply attributes: 0.6 while the step alone is counted (card FEEDBACK-LOOP stage 2), 0.9 once writer, commit, tests and the shared residual are (stage 12)."
+  "The least share of the outer JVM allocation window a redefinition reply attributes: 0.75 with the entrance, step and tests counted (card FEEDBACK-LOOP stage 12; 0.79-0.82 measured), 0.9 once the writer and commit are (stages 10-11)."
   {:malli/schema [:=> [:cat] :double]}
   []
-  0.6)
+  0.75)
 
 (deftest a-redefinitions-reply-accounts-for-the-window
   (support/with-running-agent
@@ -124,9 +124,13 @@
            cost (support/mcp-request reply)
            outer (batch/jvm-window before after)
            attributed (transduce (map #(get-in cost [% :seon.cost/alloc-mb] 0.0)) + 0.0
-                                 [:seon.cost/step :seon.cost/writer :seon.cost/commit :seon.cost/tests])]
+                                 [:seon.cost/entrance :seon.cost/step :seon.cost/writer :seon.cost/commit :seon.cost/tests])
+           shared (:seon.cost/shared cost)]
        (is (<= (* (window-share) (:seon.cost/alloc-mb outer)) attributed)
-           "the step, writer, commit and tests together cover the share of the outer window")))))
+           "the entrance, step, writer, commit and tests together cover the share of the outer window")
+       (is (= :shared-never-apportioned (:seon.cost/attribution shared)))
+       (is (every? #(contains? shared %) [:seon.cost/alloc-mb :seon.cost/cpu-ms :seon.cost/gc-ms :seon.cost/jit-ms])
+           "the residual, GC CPU and JIT time are labelled beside the parts")))))
 
 (deftest a-repeated-form-writes-no-cost-entities-and-no-extra-transactions
   (support/with-running-agent
