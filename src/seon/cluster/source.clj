@@ -826,6 +826,33 @@
                         :seon.error/offending (select-keys held moved)}))))
     []))
 
+(defn- target-program-held-tx
+  "Transaction data that refuses, inside the writer, when a program
+  declaration's definition digest on `database` (the target) differs from the
+  one it held at `basis` (the basis-t a merge was prepared and tested on): the
+  tested composition is no longer what would land. Facts that are not program
+  declarations never stale it, nor does a namespace row added since (an agent's
+  creation declares its namespace; no declaration of it existed to be tested);
+  prepare again. The refusal names each moved declaration."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t] [:= []]]}
+  [database basis]
+  (let [entities (db/q '[:find [?e ...] :where [?e :seon.program/definition-digest]] (d/since (d/history database) basis))
+        before (d/as-of database basis)
+        identity-of (fn [e] (some #(program/row-identity (db/pull % (vec program/identity-attributes) e)) [database before]))
+        identities (into #{} (keep identity-of) entities)
+        held (held-digests before identities)
+        moved (remove (fn [[attribute :as identity]] (and (= :seon.ns/name attribute) (= :seon.program/absent (held identity))))
+                      (moved-digests held (held-digests database identities)))]
+    (when (seq moved)
+      (throw (ex-info "The target's program changed after the merge was prepared."
+                      (seon.error.refusal/diagnostic
+                       (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
+                       {:seon.error/message "Program declarations changed on the target after the merge was tested; prepare it again."
+                        :seon.error/member :seon.source/target-basis-t
+                        :seon.error/expected basis
+                        :seon.error/offending (set moved)}))))
+    []))
+
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
 (declare proven-files root-refusal)
 
@@ -954,6 +981,8 @@
                                      :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
                                      :seon.task/proofs proofs
                                      :seon.source/expected-digests (held-digests head delta) :parents #{c-id}
+                                     ;; The target program the run tested: accept refuses if it moved.
+                                     :seon.source/target-basis-t (db/basis-t head)
                                      ;; The merge advances the branch's base to the value it merged.
                                      :seon.source/advanced-base (assoc (registry/fork-of branch candidate)
                                                                        :seon.branch/base-t (db/basis-t branch)))
@@ -1003,7 +1032,9 @@
   function reached by a green member, and S's program unwritten since. The
   writer refuses, before any datom lands, a merged declaration whose digest on
   the head moved from the proposal's `:seon.source/expected-digests`; writes to
-  other rows never stale it. The merge commit's parents add the candidate and
+  other rows never stale it, and it refuses when any program declaration on
+  the target moved since the proposal's `:seon.source/target-basis-t` (the
+  composition the run tested). The merge commit's parents add the candidate and
   S's head, and it writes the merged branch's fork entity with its advanced
   base-t, so the next comparison's merge base is the value merged. A task handle the merged program names with no task admitted on the
   head refuses, by handle and holder. Answers the accepted merge `write-back!`
@@ -1015,11 +1046,13 @@
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                         [:seon.task/proofs :seon.task/proofs]
                         [:seon.source/expected-digests :seon.source/expected-digests]
+                        [:seon.source/target-basis-t :seon.source/target-basis-t]
                         [:parents [:set :seon.source/commit-id]]
                         [:seon.source/advanced-base :seon.source/advanced-base]]]
                   [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
   [source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
-                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base}]
+                      proofs :seon.task/proofs merged :parents advanced :seon.source/advanced-base
+                      basis :seon.source/target-basis-t}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})]
     (if (:seon.error/at e-id)
       e-id
@@ -1079,7 +1112,8 @@
               (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
               :else
               (let [report (db/transact! (:seon.db/connection source)
-                                         {:tx-data (into [[:db.fn/call declarations-held-tx expected] advanced] tx)
+                                         {:tx-data (into [[:db.fn/call declarations-held-tx expected]
+                                                          [:db.fn/call target-program-held-tx basis] advanced] tx)
                                           :parents (conj merged e-id)})]
                 (if (:db-after report)
                   {:seon.program/identities delta :seon.test.run/id run-id

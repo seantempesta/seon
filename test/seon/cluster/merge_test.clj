@@ -131,6 +131,42 @@
         (cluster.agent/release-context! candidate)
         (registry/retire-branch! {:seon.store/store store :seon.store/branch c})))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.source/accept-fences-the-target-program-it-tested}
+           :seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit."
+           :seon.test/long-ms 60000}
+  a-callee-changed-on-the-target-after-prepare-refuses-acceptance
+  ;; f calls g; the candidate changes only f; g changes on the target between prepare and accept
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        fn-entity #(entity (db/db %1) :fn %2 %3)
+        proofs #{(sym "fence-check")}
+        c (keyword (str "merge-test-fence-" (id/id)))
+        _ (write! h-conn [(fn-entity h-conn "fence-callee" "(defn fence-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
+                          (fn-entity h-conn "fence-caller" "(defn fence-caller {:malli/schema [:=> [:cat] :int]} [] (seon.cluster.merge-test/fence-callee))")])
+        _ (write! h-conn [(entity (db/db h-conn) :test "fence-check" "(clojure.test/deftest fence-check (clojure.test/is (= 1 (seon.cluster.merge-test/fence-caller))))")])
+        _ (registry/fork! {:seon.store/store store :seon.store/branch c
+                           :seon.cluster.registry/from (db/commit-id (db/db h-conn)) :seon.db/db (db/db h-conn)})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
+        c-conn (:seon.db/connection candidate)
+        made (volatile! [])
+        prepare #(let [p (source/prepare-merge! target store c proofs)]
+                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)]
+    (try
+      (write! c-conn [(fn-entity c-conn "fence-caller" "(defn fence-caller {:malli/schema [:=> [:cat] :int]} [] (inc (dec (seon.cluster.merge-test/fence-callee))))")])
+      (let [green (prepare)
+            moved (write! h-conn [(fn-entity h-conn "fence-callee" "(defn fence-callee {:malli/schema [:=> [:cat] :int]} [] 2)")])
+            refused (source/accept-merge! target store green)]
+        (is (true? (:seon.test/passed? green)) "f-new over g-old is green")
+        (is (= :seon.source/target-basis-t (:seon.error/member refused))
+            "the target's program changed since the tested basis: accept refuses")
+        (is (= #{[:seon.fn/sym (sym "fence-callee")]} (:seon.error/offending refused)) "naming what changed")
+        (is (= moved (db/commit-id (db/db h-conn))) "the refused merge takes zero datoms")
+        (is (false? (:seon.test/passed? (prepare))) "prepared again, the composition that would land is red"))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.source/merge-base-survives-collection}}
   a-fork-of-a-work-branch-compares-with-the-target-through-its-parents-changes
   ;; A forks H and replaces nest-mod and deletes nest-del; B forks A and adds

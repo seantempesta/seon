@@ -122,6 +122,7 @@
                [:seon.task/proofs :seon.task/proofs]
                [:seon.source/red {:optional true} :seon.source/red]
                [:seon.source/expected-digests :seon.source/expected-digests]
+               [:seon.source/target-basis-t :seon.source/target-basis-t]
                [:parents [:set :seon.source/commit-id]]
                [:seon.source/advanced-base :seon.source/advanced-base]],
               :advanced-base [:and {:description "The merged branch's fork entity with the base-t of the value merged: accept-merge! writes it on the target, advancing that branch's merge base."} :seon.branch/fork],
@@ -138,6 +139,7 @@
               [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its entities."}
                [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
                [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
+              :target-basis-t [:and {:description "The target's basis-t a merge was prepared and tested on: accept refuses when any program declaration changed there since."} :seon.db/basis-t],
               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
               :expected-digests
               [:map-of {:description "The digest each merged declaration held on the destination when the merge was prepared; a merge's basis."}

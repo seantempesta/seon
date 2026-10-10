@@ -571,7 +571,7 @@
       :else
       (let [request (cond-> (assoc (select-keys prepared [:seon.source/candidate :seon.test.run/id :seon.task/proofs
                                                           :seon.source/expected-digests :parents
-                                                          :seon.source/advanced-base])
+                                                          :seon.source/advanced-base :seon.source/target-basis-t])
                                    :seon.task/merge merge-task :seon.task/branch (:seon.task/branch proposal))
                       root (assoc :seon.fn/root root))]
         (merge prepared request
