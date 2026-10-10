@@ -854,7 +854,7 @@
     []))
 
 ;; Write-back's proof, below with its helpers; prepare runs it before the gate.
-(declare proven-files root-refusal)
+(declare proven-files root-refusal program-changes)
 
 (defn release!
   "Release materialized database values (the result of `compare-branch`, `commit-database`); refusals and nils are skipped."
@@ -921,8 +921,10 @@
   retires its tested branch. A change is a
   replacement, an addition (absent at the base) or a retraction (absent on the
   candidate), as `seon.program/three-way` classifies it; one reconcile
-  transaction applies all three. A conflict answers the three-way value; an
-  empty delta refuses.
+  transaction applies all three. A namespace row no file declares and no
+  changed declaration lives in is the agent's REPL scratch and is no change
+  (`program-changes`). A conflict answers the three-way value; an empty delta
+  refuses.
 
   A `selection` of declaration identities merges only those changes: a
   selected identity the candidate did not change, or a selected declaration
@@ -952,8 +954,8 @@
     (if (:seon.error/at c-id)
       c-id
       (let [
-            whole (when three (into (:seon.program/changed-on-branch three)
-                                    (concat (:seon.program/added three) (:seon.program/retracted three))))
+            whole (when three (program-changes head (into (:seon.program/changed-on-branch three)
+                                                          (concat (:seon.program/added three) (:seon.program/retracted three)))))
             unchanged (when (and whole selection) (vec (remove whole selection)))
             reach (when (and whole selection (empty? unchanged)) (unselected-reach branch whole selection))
             ;; A selected declaration carries its namespace entity when the candidate changed it (its requires).
@@ -1266,6 +1268,17 @@
                       :in $ ?name :where [?ns :seon.ns/name ?name] [?ns :seon.fn/file ?file]]
                     database namespace-name)]
     (when (= 1 (count files)) (first files))))
+
+(defn- program-changes
+  "`identities` without each namespace row no file declares on `database`
+  (`namespace-path`) and none of `identities` is declared in: an agent's REPL
+  scratch, such as `user` after a `require`, which no merge writes back."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] :seon.program/identity-set]}
+  [database identities]
+  (let [declared-in (into #{} (keep (fn [[_ declared]] (when (qualified-symbol? declared) (symbol (namespace declared))))) identities)]
+    (into #{} (remove (fn [[attribute declared]]
+                        (and (= :seon.ns/name attribute) (not (declared-in declared)) (nil? (namespace-path database declared)))))
+          identities)))
 
 (defn- file-rows
   "The declarations `text`, the file at `path` under `root`, holds by identity,

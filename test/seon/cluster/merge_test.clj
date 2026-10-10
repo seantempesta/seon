@@ -419,6 +419,31 @@
              (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
          (finally (support/delete-root! root)))))))
 
+(deftest ^{:seon/tasks #{'seon.cluster.source/an-agents-repl-scratch-namespace-never-blocks-its-landing}
+           :seon.test/long "One own-branch agent's first request, assignment and proposal run, and one land (one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 120000}
+  a-require-in-the-agents-user-namespace-lands-with-its-change
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/land.clj"
+           root (checkout! "scratch-land-test" {path land-source})
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)]
+       (try
+         ;; agent r7-problems-prose required the namespace it fixed from `user`; its landing refused :one-file
+         (let [proposal (proposed! running connection "area"
+                                   (str "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+                                        "\n(in-ns 'user)\n(require 'tq.land)"))
+               landed (source/land! execution proposal root)]
+           (is (nil? (:seon.error/type landed)) "the landing answers no refusal")
+           (is (= [path] (get-in landed [:seon.source/written :seon.source/changed-paths])) "only the changed file is written")
+           (is (= (:seon.git/commit landed) (git! root "rev-parse" "HEAD")) "the landing is the checkout's new HEAD"))
+         (finally (support/delete-root! root)))))))
+
 (def ^:private shape-source
   ;; a producer, its consumer and the test reading both, over the schema resource's :tq.shape/radius
   (str "(ns tq.shape\n  (:require [clojure.test :refer [deftest is]]))\n\n"
