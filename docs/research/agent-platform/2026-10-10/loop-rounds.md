@@ -166,3 +166,16 @@ Standing rules:
 on the new base after the same-file conflict) ended `:stalled` at 5 calls (the loop stopped calling the agent before its
 proofs passed; the `:stalled` end of 56d2efa61 reached root). `r4-cost-diff` was capped with 12 errors, the task's third
 failure. Root's decision: no new loop rounds until the landing is exact (plan §0).
+
+## Round 5 (2026-10-10 ~23:00, default a9a0c23d1, auto-landing on): 0 of 3, nothing landed
+
+| Agent | End | Calls | Proofs | Note |
+|---|---|---|---|---|
+| r5-ref-section | capped | 15 | 2 red | fourth attempt; schema-carrying task |
+| r5-problems-prose | capped | 15 | 1 green | proof green, but 24 reached tests counted "not green" (unrun or already red on main) blocked `:done` |
+| r5-cost-diff | capped | 15 | 3 red, 1 green | 14 agent errors; fourth failure |
+
+The reached-red rule of 56d2efa61 counted unrun and already-red-on-main tests, so a docstring change could never end `:done`.
+Root's ruling: only a reached test red on the branch and not red on main blocks; unrun reached tests are listed as
+unverified and left to the merge gate (lane reached-red-honest). The round's launch reply also showed
+`seon.sci.eval/install-row!` warm self 2.25x main (compiled to compiled), likely the reverse-closure walk of ad86afd43.
