@@ -1562,13 +1562,18 @@
 (declare verified?)
 
 (defn recorded-result
-  "Read this branch's latest admitted test result, or name missing evidence."
-  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
-                  [:or :seon.test/result :seon.test/execution-error :seon.test/unknown-error]]}
-  [database test-symbol]
-  (let [results (runner/latest-results database [test-symbol])]
-    (if (:seon.error/at results) results
-        (or (first results) (unknown test-symbol "No admitted execution is recorded for this test.")))))
+  "Read this branch's latest admitted test result, or name missing evidence.
+  Reads the results of `evaluators` (`seon.test.runner/latest-results`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :qualified-symbol]
+                   [:or :seon.test/result :seon.test/execution-error :seon.test/unknown-error]]
+                  [:=> [:cat :seon.db/database-value :qualified-symbol [:set :seon.test.run/evaluator]]
+                   [:or :seon.test/result :seon.test/execution-error :seon.test/unknown-error]]]}
+  ([database test-symbol] (recorded-result database test-symbol #{:compiled :interpreted}))
+  ([database test-symbol evaluators]
+   (let [results (runner/latest-results database [test-symbol] evaluators)]
+     (if (:seon.error/at results) results
+         (or (first results) (unknown test-symbol "No admitted execution is recorded for this test."))))))
 
 (defn- stale-in
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
@@ -1626,8 +1631,8 @@
   \"root\"."
   {:malli/schema [:=> [:cat [:maybe [:fn clojure.core/some?]]] :boolean]}
   [carrier]
-  (contains? #{nil "root"} (or (when (map? carrier) (:seon.agent/id carrier))
-                               (:seon.agent/id (env/of carrier)))))
+  (runner/root-agent-id? (or (when (map? carrier) (:seon.agent/id carrier))
+                            (:seon.agent/id (env/of carrier)))))
 
 (defn resolve-test
   "Resolve an admitted test in the host or acquired SCI program by provenance.
@@ -1726,9 +1731,40 @@
                             [?test :seon.test/sym ?symbol]]
                    database agent-id))))
 
+(defn verified-by?
+  "Whether the latest admitted native result of `evaluators` is green for the
+  current program. Missing execution is false; unavailable recorded evidence
+  remains a refusal. `seon.test.runner/accepted-evaluators` names a reader's:
+  an interpreted green never verifies for root."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym [:set :seon.test.run/evaluator]]
+                  [:or :boolean :seon.test/host-error]]}
+  [database test-symbol evaluators]
+  (let [result (recorded-result database test-symbol evaluators)]
+    (cond
+      ;; A member's typed unknown is unverified; a failed read refuses.
+      (or (:seon.test/unknown result) (and (:seon.error/at result) (:seon.test/run result))) false
+      (:seon.error/at result) result
+      (not (and (pos? (:seon.test/pass-count result))
+                (zero? (:seon.test/fail-count result))
+                (zero? (:seon.test/error-count result)))) false
+      :else
+      (let [inputs (db/q '[:find [?digest ...]
+                           :where [_ :seon.source/test-input-digest ?digest]] database)
+            current (runner/reach-digests database [test-symbol])
+            present (db/pull database [:seon.test/source :seon.test/fixture-observation]
+                             [:seon.test/sym test-symbol])]
+        (or (first (filter :seon.error/at [inputs current present]))
+            (boolean
+             (and (:seon.test/source present)
+                  (not (:seon.test/fixture-observation present))
+                  (= #{(:seon.test.run/input-digest result)} (set inputs))
+                  (string? (get current test-symbol))
+                  (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))))
+
 (defn verified?
-  "Whether the latest admitted native result is green for the requested program.
-  Missing execution is false; unavailable recorded evidence remains a refusal."
+  "Whether the latest admitted native result, of either evaluator, is green for
+  the requested program (`verified-by?`). Missing execution is false;
+  unavailable recorded evidence remains a refusal."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.test/sym]
@@ -1736,27 +1772,7 @@
     [:=> [:cat :seon.db/database-value :seon.test/sym :seon.test.run/program-digest]
      [:or :boolean :seon.test/host-error]]]}
   ([database test-symbol]
-   (let [result (recorded-result database test-symbol)]
-     (cond
-       ;; A member's typed unknown is unverified; a failed read refuses.
-       (or (:seon.test/unknown result) (and (:seon.error/at result) (:seon.test/run result))) false
-       (:seon.error/at result) result
-       (not (and (pos? (:seon.test/pass-count result))
-                 (zero? (:seon.test/fail-count result))
-                 (zero? (:seon.test/error-count result)))) false
-       :else
-       (let [inputs (db/q '[:find [?digest ...]
-                            :where [_ :seon.source/test-input-digest ?digest]] database)
-             current (runner/reach-digests database [test-symbol])
-             present (db/pull database [:seon.test/source :seon.test/fixture-observation]
-                              [:seon.test/sym test-symbol])]
-         (or (first (filter :seon.error/at [inputs current present]))
-             (boolean
-              (and (:seon.test/source present)
-                   (not (:seon.test/fixture-observation present))
-                   (= #{(:seon.test.run/input-digest result)} (set inputs))
-                   (string? (get current test-symbol))
-                   (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))))
+   (verified-by? database test-symbol #{:compiled :interpreted}))
   ([database test-symbol program-digest]
    (let [result (recorded-result database test-symbol)]
      (cond

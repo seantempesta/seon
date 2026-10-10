@@ -24,6 +24,7 @@
             [seon.sci.lookup]
             [seon.flow :as work]
             [seon.test]
+            [seon.test.runner]
             [malli.error]))
 
 (defn- read-result
@@ -433,7 +434,8 @@
   no one: the act `propose-merge!` and a task's end (`seon.turn/end-task-call`) share.
 
   Every test naming the task (on the cluster and on my branch) runs on my branch and must then hold green
-  evidence current for my program (`seon.test/verified?`); otherwise the refusal names them. Answers the
+  evidence current for my program by the evaluators that prove my work (`seon.test/verified-by?`,
+  `seon.test.runner/accepted-evaluators`); otherwise the refusal names them. Answers the
   proposal (`seon.task/propose!`)."
   {:seon.fn/internal? true
    :malli/schema [:=> [:cat [:map [:my.program/context :my.program/context] [:seon.db/connection :seon.db/connection]
@@ -455,7 +457,7 @@
       (let [run (seon.test/run {:seon.test/execution context :seon.test/recording-connection connection
                                 :seon.test/policy :named :seon.test/identities proofs})
             proved (db/db connection)
-            unproven (when-not (:seon.error/at run) (vec (sort (remove #(true? (seon.test/verified? proved %)) proofs))))
+            unproven (when-not (:seon.error/at run) (vec (sort (remove #(true? (seon.test/verified-by? proved % (seon.test.runner/accepted-evaluators agent-id))) proofs))))
             digests (when (empty? unproven)
                       (db/q '[:find ?test ?digest :in $ [?test ...]
                               :where [?t :seon.test/sym ?test] [?t :seon.program/definition-digest ?digest]] proved (vec proofs)))

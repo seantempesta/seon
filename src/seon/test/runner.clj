@@ -2190,11 +2190,30 @@
   (try (results-from-facts run-id (run-result-facts database run-id))
        (catch Exception failure (result-read-error run-id failure))))
 
+(defn root-agent-id?
+  "Whether `agent-id` names root's world: no agent, or \"root\"."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/id]] :boolean]}
+  [agent-id]
+  (contains? #{nil "root"} agent-id))
+
+(defn accepted-evaluators
+  "The evaluators whose results prove `agent-id`'s work: compiled for every
+  agent, since compiled is the reference semantics and a host-bound task
+  completes on a compiled (platform) run, and an agent's own interpreted runs
+  for any agent but root. An interpreted green never proves root's work."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/id]] [:set :seon.test.run/evaluator]]}
+  [agent-id]
+  (if (root-agent-id? agent-id) #{:compiled} #{:compiled :interpreted}))
+
 (defn latest-results
   "Read the latest native admitted execution of each requested test.
   Missing executions are absent; an incomplete latest execution is that test's
   `:seon.test/result-unknown`, never an older green. A failed read refuses the
   whole answer. Snapshot evidence never certifies this branch.
+
+  Only runs one of `evaluators` ran are read (`accepted-evaluators` names a
+  reader's), the latest of those per test; without, either evaluator's. A run
+  recording no evaluator is unknown evidence and never read.
 
   ## Costs
 
@@ -2205,9 +2224,13 @@
   default 2026-09-27: the executions of 14 tests (148) in 3.9 ms where the
   unbound Datalog took 152 ms; 595 tests (377 results) in 60 ms where it took
   4.7 s."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
-                  [:or :seon.test/latest-results :seon.test/execution-error]]}
-  [database test-symbols]
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+                   [:or :seon.test/latest-results :seon.test/execution-error]]
+                  [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol] [:set :seon.test.run/evaluator]]
+                   [:or :seon.test/latest-results :seon.test/execution-error]]]}
+  ([database test-symbols] (latest-results database test-symbols #{:compiled :interpreted}))
+  ([database test-symbols evaluators]
   (try
     (let [members (into {} (for [test-symbol (distinct test-symbols)
                                  {member :e} (execution-read (db/datoms database :avet :seon.test.member/symbol test-symbol))]
@@ -2223,13 +2246,15 @@
                      (into {} (map (fn [[run id selected]] [run [id selected]]))
                            (execution-read
                             (db/q '[:find ?run ?id ?selected
-                                    :in $ [?run ...] ?branch
+                                    :in $ [?run ...] ?branch [?evaluator ...]
                                     :where [?run :seon.test.run/branch ?branch]
+                                           [?run :seon.test.run/evaluator ?evaluator]
                                            [?run :seon.test.run/id ?id]
                                            [?run :seon.test.run/selection-tx ?selected]
                                            (not [?run :seon.test.run/published-base-digest])]
                                   database (vec (distinct (map second runs)))
-                                  (get-in (db/schema-database database) [:config :branch])))))
+                                  (get-in (db/schema-database database) [:config :branch])
+                                  (vec evaluators)))))
           entities (into #{} (keep (fn [[test-symbol run]]
                                      (when-let [[id selected] (get admitted run)] [test-symbol id selected])))
                          runs)
@@ -2241,7 +2266,7 @@
            (map (comp results first))
            (sort-by (some-fn :seon.test/sym :seon.test/error-test-symbol))
            vec))
-    (catch Exception failure (result-read-error "latest-results" failure))))
+    (catch Exception failure (result-read-error "latest-results" failure)))))
 
 (defn red-result?
   "Whether `result` is an executed, failing recorded test result."
@@ -2252,11 +2277,15 @@
 
 (defn red-at-current-reach?
   "Whether `test-symbol`'s latest admitted result on `database` is red for its
-  current reach there: red on that branch as it stands, not only once."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]}
-  [database test-symbol]
-  (let [results (latest-results database [test-symbol])
-        result (when (vector? results) (first results))
-        current (reach-digests database [test-symbol])]
-    (boolean (and result (red-result? result) (map? current)
-                  (= (get current test-symbol) (:seon.test.member/reach-digest result))))))
+  current reach there: red on that branch as it stands, not only once. Reads
+  the results of `evaluators` (`latest-results`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.test/sym] :boolean]
+                  [:=> [:cat :seon.db/database-value :seon.test/sym [:set :seon.test.run/evaluator]] :boolean]]}
+  ([database test-symbol] (red-at-current-reach? database test-symbol #{:compiled :interpreted}))
+  ([database test-symbol evaluators]
+   (let [results (latest-results database [test-symbol] evaluators)
+         result (when (vector? results) (first results))
+         current (reach-digests database [test-symbol])]
+     (boolean (and result (red-result? result) (map? current)
+                   (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))

@@ -78,6 +78,8 @@
   (delay (requiring-resolve 'seon.test/run)))
 (defonce ^:private test-latest-results
   (delay (requiring-resolve 'seon.test.runner/latest-results)))
+(defonce ^:private test-accepted-evaluators
+  (delay (requiring-resolve 'seon.test.runner/accepted-evaluators)))
 (defonce ^:private test-changes
   (delay (requiring-resolve 'seon.test/changes)))
 (defonce ^:private test-reaching
@@ -5402,7 +5404,8 @@
 
 (defn- reached-red
   "The tests reaching the agent's whole change `changed` on `database`, its branch, its task's proofs aside, whose
-  latest result there is not green (red, or not yet run), sorted; [] when the branch changed nothing a test sees."
+  latest result there by the evaluators proving its work (`seon.test.runner/accepted-evaluators`) is not green
+  (red, or not yet run), sorted; [] when the branch changed nothing a test sees."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:or :seon.test/changed :seon.error/value]]
                   [:or [:vector :seon.test/sym] :seon.error/value]]}
   [database agent-id changed]
@@ -5412,7 +5415,7 @@
           reached (when-not (:seon.error/at proofs)
                     (@test-reaching {:seon.db/db database :seon.test/changed (vec changed)}))
           tests (when (sequential? reached) (vec (remove (set proofs) reached)))
-          results (when (seq tests) (@test-latest-results database tests))]
+          results (when (seq tests) (@test-latest-results database tests (@test-accepted-evaluators agent-id)))]
       (or (some #(when (:seon.error/at %) %) [proofs reached results])
           (let [green (into #{} (keep #(when (and (pos? (:seon.test/pass-count % 0))
                                                   (zero? (+ (:seon.test/fail-count % 0) (:seon.test/error-count % 0))))
