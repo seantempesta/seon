@@ -176,6 +176,8 @@
   [:seon.test/jvm-options {:optional true} :seon.test/jvm-options]]
  :seon.test/interpreted-files?
  [:boolean {:description "Whether a request's file tests run interpreted from their namespace's rows in the member's context: every non-root agent's request, which never loads into the JVM every cluster shares."}]
+ :seon.test/interpreted-namespaces
+ [:set {:description "The test namespaces root's request runs interpreted from their rows although root may load into the JVM: namespaces this JVM never loaded whose declarations the request's program holds otherwise than the loaded program (an agent's unmerged namespace at the merge gate). Root never loads them into the host."} :symbol]
  :seon.test/resolution-request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.db/connection :seon.db/connection]
@@ -183,7 +185,8 @@
   [:seon.sci.eval/ctx :seon.sci.eval/ctx]
   [:seon.schema/projection :seon.schema/projection]
   [:seon.test/class-loader :seon.test/class-loader]
-  [:seon.test/interpreted-files? {:optional true} :seon.test/interpreted-files?]]
+  [:seon.test/interpreted-files? {:optional true} :seon.test/interpreted-files?]
+  [:seon.test/interpreted-namespaces {:optional true} :seon.test/interpreted-namespaces]]
 :seon.test/changed
  [:vector [:or :qualified-symbol :seon.program/identity]]
  :seon.test/unreached

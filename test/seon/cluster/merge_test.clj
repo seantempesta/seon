@@ -1,15 +1,22 @@
 (ns seon.cluster.merge-test
   "Prepare, gate and named accept of a candidate branch's replacements
   (`seon.cluster.source/prepare-merge!`, `accept-merge!`)."
-  (:require [clojure.java.io :as io]
+  (:require [babashka.process :as process]
+            [clojure.data.json :as json]
+            [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.host :as host]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.db :as db]
+            [seon.fn :as fn]
             [seon.id :as id]
+            [seon.mcp :as mcp]
+            [seon.program :as program]
+            [seon.task :as task]
             [seon.test]
             [seon.test-support :as support]))
 
@@ -236,6 +243,97 @@
     (git! root "commit" "-q" "-m" "fixture")
     root))
 
+(defn- agent-eval
+  "The last reply item of `code` evaluated as `agent-id` through `seon.mcp/call`, read back as data."
+  [running agent-id code]
+  (->> (get (json/read-str (mcp/call (json/write-str {"name" "eval_clj"
+                                                       "arguments" {"code" code "agent" agent-id "cluster" running}})))
+            "content")
+       (map #(support/reply (get % "text")))
+       (remove #(and (map? %) (contains? % :seon.repl/request)))
+       last))
+
+(def ^:private land-source
+  ;; the functions and their tests in one file under test/, as root-land's report found the gate refusing it
+  (str "(ns tq.land\n  (:require [clojure.test :refer [deftest is]]))\n\n"
+       "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  r)\n\n"
+       "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  r)\n\n"
+       "(deftest ^{:seon/tasks #{'tq.land/area}} area-test (is (= 25 (area 5))))\n\n"
+       "(deftest ^{:seon/tasks #{'tq.land/side}} side-test (is (= 4 (side 2))))\n\n"
+       "(deftest side-identity-test (is (= 3 (side 3))))\n"))
+
+(defn- proposed!
+  "An own-branch agent assigned the task `tq.land/<task-name>` that redefines it as `fix` and proposes its
+  merge; the open proposal on the cluster `connection` holds."
+  [running connection task-name fix]
+  (let [agent-id (str "land-" task-name "-" (id/id))
+        {branch :seon.store/branch} (support/own-branch-agent! running agent-id "(ns tq.land)")
+        id (:seon.task/id (task/create! {:seon.db/connection connection :seon.agent/id "root" :seon.task/ns 'tq.land
+                                         :seon.task/name task-name :seon.task/kind :function :seon.task/intent "Fix."}))
+        assigned (task/assign! {:seon.agent/context-source (support/running-cluster running) :seon.db/connection connection
+                                :seon.task/assigned id :seon.task/agent [:seon.agent/id agent-id] :seon.task/branch branch})]
+    (when (:seon.error/at assigned) (throw (ex-info (:seon.error/message assigned) assigned)))
+    (let [defined (agent-eval running agent-id (str "(in-ns 'tq.land)\n" fix))
+          proposed (agent-eval running agent-id "(my.program/propose-merge! {})")]
+      ;; a refused fixture step is surfaced, never left for the landing to miss
+      (or (some #(when (= branch (:seon.task/branch %)) %) ((requiring-resolve 'my.program/proposals) {:seon.db/db (db/db connection)}))
+          (throw (ex-info "The agent proposed no merge." {:defined defined :proposed proposed}))))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/land-is-one-call 'seon.test/an-unloaded-agent-namespace-runs-interpreted-at-the-gate}
+           :seon.test/long "Two own-branch agents' first requests, assignments and proposal runs, and two lands (each one prepare-merge!: a nested seon.test/run on a new candidate commit, 60 s is this namespace's measured bound for one)."
+           :seon.test/long-ms 240000}
+  a-green-proposal-lands-on-main-and-disk-in-one-call
+  (support/with-running-agent
+   (fn [running _ connection]
+     (let [member (get-in (db/db connection) [:config :branch])
+           cluster-name (:seon.cluster/name (support/execution-handle nil))
+           _ (db/transact! connection [[:db.fn/call #'host/home-call "root" member 'user cluster-name]])
+           path "test/tq/land.clj"
+           root (checkout! "land-test" {path land-source})
+           file (io/file root path)
+           ;; the checkout's file declared at the cluster head unrun, as publication declares it
+           entities (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]})
+           _ (support/transacted! connection (fn/reconcile-tx (db/db connection) entities (mapv program/row-identity entities)))
+           execution (support/running-cluster running)
+           digest #(:seon.program/definition-digest (db/pull (db/db %1) [:seon.program/definition-digest] [:seon.fn/sym %2]))
+           outcome #(:seon.task/outcome (db/pull (db/db connection) [:seon.task/outcome] [:seon.task/id %]))]
+       (try
+         (testing "a green proposal lands on main, on disk and in one git commit in one call"
+           (let [fix "(defn area\n  \"The area.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))"
+                 proposal (proposed! running connection "area" fix)
+                 before (git! root "rev-parse" "HEAD")
+                 landed (source/land! execution proposal root)]
+             (is (some? proposal) "the agent proposed its merge")
+             (is (nil? (:seon.error/message landed)) "the landing answers no refusal")
+             (is (= [path] (get-in landed [:seon.source/written :seon.source/changed-paths])) "the value names the written file")
+             ;; main moves on after the merge commit (the merge task's decision, the write-back's reindex)
+             (is (= fix (:seon.fn/source (db/pull (db/db connection) [:seon.fn/source] [:seon.fn/sym 'tq.land/area])))
+                 "main holds the agent's definition")
+             (is (= (digest connection 'tq.land/area)
+                    (:seon.program/definition-digest
+                     (some #(when (= [:seon.fn/sym 'tq.land/area] (program/row-identity %)) %)
+                           (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["test"]}))))
+                 "the file declares the definition main holds")
+             (is (str/includes? (slurp file) fix) "the file holds the agent's span")
+             (is (= :accepted (outcome (:seon.task/merge proposal))) "the merge task is decided")
+             (is (= (:seon.git/commit landed) (git! root "rev-parse" "HEAD")) "the landing is the checkout's new HEAD")
+             (is (= before (git! root "rev-parse" "HEAD^")))))
+         (testing "a red reaching test answers the gate's refusal, decides nothing and writes nothing"
+           (let [text (slurp file)
+                 head (git! root "rev-parse" "HEAD")
+                 proposal (proposed! running connection "side"
+                                     "(defn side\n  \"The side.\"\n  {:malli/schema [:=> [:cat :int] :int]}\n  [r]\n  (* r r))")
+                 main (db/commit-id (db/db connection))
+                 refused (source/land! execution proposal root)]
+             (is (= :seon.source/red-test-error (:seon.error/type refused)))
+             (is (= #{['tq.land/side-identity-test :red]}
+                    (set (map (juxt :seon.test/sym :seon.source/verdict) (:seon.source/red-tests refused)))))
+             (is (nil? (outcome (:seon.task/merge proposal))) "the merge task stays undecided")
+             (is (= main (db/commit-id (db/db connection))) "main is unchanged")
+             (is (= text (slurp file)) "the file is unchanged")
+             (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed")))
+         (finally (support/delete-root! root)))))))
+
 (deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}
   a-landed-merge-is-one-git-commit-of-exactly-its-paths
   (let [root (checkout! "land-commit-test" {"src/a.clj" "(ns a)\n" "src/b.clj" "(ns b)\n" "notes.txt" "x\n"})
@@ -267,3 +365,31 @@
           (is (= "(ns b)\n(def y 2)\n" (slurp (io/file root "src/b.clj"))) "another file's working-tree change stays uncommitted")
           (is (= ["src/b.clj"] (str/split-lines (git! root "diff" "--name-only"))))))
       (finally (support/delete-root! root)))))
+
+(deftest ^{:seon/tasks #{'seon.cluster.source/a-landing-is-one-git-commit}}
+  a-landing-commit-waits-for-the-lane-commit-lock
+  ;; `bin/lane commit` holds .git/lane-commit.lock (perl flock) around its staged-index
+  ;; check and commit; a landing's commit! takes the same lock, so neither interleaves.
+  (let [root (checkout! "land-lock-test" {"src/a.clj" "(ns a)\n"})
+        acceptance {:seon.task/merge "0123456789ab" :seon.test.run/id "abcdef012345"
+                    :seon.source/commit-id #uuid "6aca34f3-6d42-5b48-bdf7-5eba943d3d4a"}
+        written {:seon.source/changed-paths ["src/a.clj"]
+                 :seon.source/files [{:seon.source/path "src/a.clj" :seon.source/base-digest "x" :seon.source/candidate-digest "y"
+                                      :seon.source/replaced []}]}
+        holder (process/process {:dir root} "perl" "-MFcntl=:flock" "-e"
+                                "open(my $l, '>>', shift) or die; flock($l, LOCK_EX) or die; $| = 1; print \"locked\\n\"; <STDIN>;"
+                                (str root "/.git/lane-commit.lock"))]
+    (try
+      (spit (io/file root "src/a.clj") "(ns a)\n(def x 1)\n")
+      (is (= "locked" (.readLine (io/reader (:out holder)))) "a lane commit holds the lock")
+      (let [head (git! root "rev-parse" "HEAD")
+            landing (future (source/commit! root written acceptance))]
+        (is (= ::waiting (deref landing 1000 ::waiting)) "the landing waits while the lane commit holds the lock")
+        (is (= head (git! root "rev-parse" "HEAD")) "nothing is committed meanwhile")
+        (.close ^java.io.OutputStream (:in holder))
+        (let [landed (deref landing 10000 nil)]
+          (is (= (git! root "rev-parse" "HEAD") (:seon.git/commit landed))
+              "the landing commits once the lock is released")))
+      (finally
+        (.close ^java.io.OutputStream (:in holder))
+        (support/delete-root! root)))))

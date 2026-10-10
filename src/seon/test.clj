@@ -1609,7 +1609,8 @@
                    :seon.sci.eval/row-acquisition-error :seon.sci.eval/interpretation-error]]}
   [{database :seon.db/db test-symbol :seon.test/identity
     ctx :seon.sci.eval/ctx loader :seon.test/class-loader
-    projection :seon.schema/projection interpreted-files? :seon.test/interpreted-files?}]
+    projection :seon.schema/projection interpreted-files? :seon.test/interpreted-files?
+    interpreted-namespaces :seon.test/interpreted-namespaces}]
   (let [refuse (fn [kind message observed]
                  (assoc {:seon.error/at (java.util.Date.)
                    :seon.error/layer :seon.test/resolution
@@ -1658,6 +1659,7 @@
                            ;; a non-root agent's, or one reaching the context's
                            ;; change, runs interpreted, calling the branch's program
                            (or interpreted-files?
+                               (contains? interpreted-namespaces (symbol (namespace test-symbol)))
                                (sci.eval/interpreted-test? ctx test-symbol))
                            (do (sci.eval/enter-namespace! ctx (symbol (namespace test-symbol)))
                                (sci/resolve ctx test-symbol))
@@ -2310,6 +2312,7 @@
                                :seon.test/identity test-symbol
                                :seon.sci.eval/ctx ctx
                                :seon.test/interpreted-files? (boolean (:seon.test/interpreted-files? request-handle))
+                               :seon.test/interpreted-namespaces (:seon.test/interpreted-namespaces request-handle #{})
                                :seon.schema/projection (:seon.schema/projection child)
                                :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
                                                            (clojure.lang.RT/baseLoader))})
@@ -2421,45 +2424,64 @@
        (zero? (:seon.test/fail-count result 0))
        (zero? (:seon.test/error-count result 0))))
 
+(defn- loaded-program
+  "The program this JVM loaded: the commit `seon.sci.eval/loaded-identity` names
+  now, read from `ctx`'s store, else (an identity naming no commit) the booted
+  program `ctx`'s snapshot acquired; an unknown identity answers its
+  diagnostic. The snapshot is its acquisition's value and stays behind a later
+  adoption, so it decides only when no commit is named."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] [:or :seon.db/database-value :seon.sci.eval/interpretation-error]]}
+  [ctx]
+  (let [loaded-id @sci.eval/loaded-identity]
+    (cond
+      (:seon.error/at loaded-id) loaded-id
+      (:seon.source/commit-id loaded-id)
+      (source/database (:seon.store/store (env/of ctx)) (:seon.source/commit-id loaded-id))
+      :else (:seon.sci.eval/loaded-database @(:seon.sci.kernel/program-snapshot ctx)))))
+
+(defn- namespace-declarations
+  "Definition digest by symbol of namespace `namespace-name`'s row, functions
+  and tests in `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:map-of :symbol [:maybe :string]]]}
+  [database namespace-name]
+  (let [declared (fn [namespace-attribute symbol-attribute]
+               (let [rows (db/q '[:find ?s ?d :in $ ?n ?na ?sa
+                                  :where [?ns :seon.ns/name ?n] [?e ?na ?ns] [?e ?sa ?s]
+                                  [?e :seon.program/definition-digest ?d]]
+                                database namespace-name namespace-attribute symbol-attribute)]
+                 (when (db/read-refusal? rows) (throw (ex-info (:seon.error/message rows) rows)))
+                 rows))]
+    (into {namespace-name (db/q '[:find ?d . :in $ ?n :where [?ns :seon.ns/name ?n] [?ns :seon.program/definition-digest ?d]]
+                                database namespace-name)}
+          (concat (declared :seon.fn/ns :seon.fn/sym) (declared :seon.test/ns :seon.test/sym)))))
+
+(defn- interpreted-namespaces
+  "Of `namespaces`, test namespaces this JVM has not loaded, those `database`
+  declares otherwise than the `loaded` program: absent from it (an agent's
+  unmerged namespace) or changed. Root's request interprets them from their
+  rows, as any agent's, and never loads them into the shared JVM: compiled
+  code runs only what the JVM loads unchanged."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value [:set :symbol]] [:set :symbol]]}
+  [database loaded namespaces]
+  (into (sorted-set)
+        (remove #(= (namespace-declarations loaded %) (namespace-declarations database %)))
+        namespaces))
+
 (defn- arm-first-loads!
-  "Load the `namespaces` this JVM has not loaded, then arm exactly the Vars that
-  load interned, once, before any member body, against the LOADED program's
-  projection, never the requesting branch's. The loaded program is the commit
-  `seon.sci.eval/loaded-identity` names now, read from the context's store; the
-  context's snapshot is its acquisition's value and stays behind a later
-  adoption. An identity naming no commit is the booted program the snapshot
-  acquired; an unknown one answers its diagnostic. A branch whose contract for
-  one of their declarations differs from the loaded one refuses by name, before
-  loading anything."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.config/effective :seon.sci.eval/ctx [:set :symbol]]
+  "Load the `namespaces` this JVM has not loaded, each declared by `database`
+  exactly as the `loaded` program declares it (`interpreted-namespaces` takes
+  the others), then arm exactly the Vars that load interned, once, before any
+  member body, against the loaded program's projection."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.config/effective :seon.sci.eval/ctx
+                       :seon.db/database-value [:set :symbol]]
                   [:or :nil :seon.instrument/applied :seon.instrument/registration-error
-                   :seon.sci.eval/interpretation-error :seon.test/not-runnable-error]]}
-  [database effective ctx namespaces]
+                   :seon.test/not-runnable-error]]}
+  [database effective ctx loaded namespaces]
   (let [fresh (into (sorted-set) (remove find-ns) namespaces)
         snapshot (when (seq fresh) @(:seon.sci.kernel/program-snapshot ctx))
-        loaded-id (when (seq fresh) @sci.eval/loaded-identity)
-        loaded (when (and (seq fresh) (not (:seon.error/at loaded-id)))
-                 (if-let [commit (:seon.source/commit-id loaded-id)]
-                   (source/database (:seon.store/store (env/of ctx)) commit)
-                   (:seon.sci.eval/loaded-database snapshot)))
-        projection (when loaded (db/carried-projection loaded))
-        contracts (:seon.schema.projection/function-contracts projection)
-        branch-contracts (when (seq fresh) (:seon.schema.projection/function-contracts (db/carried-projection database)))
-        changed (first (sort (filter #(and (fresh (symbol (namespace %)))
-                                           (not= (get contracts % ::absent) (get branch-contracts % ::absent)))
-                                     (into (set (keys contracts)) (keys branch-contracts)))))
+        projection (when (seq fresh) (db/carried-projection loaded))
         evidence-bytes (:seon.config.error/max-evidence-bytes effective)]
-    (cond
-      (empty? fresh) nil
-      (:seon.error/at loaded-id) loaded-id
-      changed
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program `arm-first-loads!
-       {:seon.error/message (str "Cannot interpret " changed ": Host-bound declaration " changed
-                                 " must change through the loaded source files.")
-        :seon.error/expected :seon.sci.eval/interpretable-definition
-        :seon.sci.eval/refused-function changed
-        :seon.sci.eval/interpretation-reason "its branch contract differs from the loaded program's"})
-      :else
+    (when (seq fresh)
       (let [before (set (all-ns))
             ;; A namespace that cannot load (no file, or a compile error) is a
             ;; declared refusal naming it, with its whole cause, never an escape.
@@ -2548,15 +2570,22 @@
                                                 (concat (:seon.test/destructive-excluded exclusions)
                                                         (:seon.test/deferred exclusions))))]
                          (vec (remove excluded selected))))
-            ;; Host test namespaces first loaded by this request arm before any body.
-            armed (when (and (seq runnable) (root-agent? execution))
-                    (arm-first-loads!
-                     database effective (:seon.sci.eval/ctx execution)
-                     (into #{} (comp (remove (comp find-ns symbol namespace))
-                                     (filter #(= :core (:seon.schema.admission/source
-                                                        (db/pull database [:seon.schema.admission/source] [:seon.test/sym %]))))
-                                     (map (comp symbol namespace)))
-                           runnable)))
+            ;; Root's file test namespaces this JVM has not loaded: those the
+            ;; loaded program declares unchanged load and arm before any body;
+            ;; the others run interpreted, never loaded into the shared JVM.
+            fresh (when (and (seq runnable) (root-agent? execution))
+                    (into #{} (comp (remove (comp find-ns symbol namespace))
+                                    (filter #(= :core (:seon.schema.admission/source
+                                                       (db/pull database [:seon.schema.admission/source] [:seon.test/sym %]))))
+                                    (map (comp symbol namespace)))
+                          runnable))
+            loaded (when (seq fresh) (loaded-program (:seon.sci.eval/ctx execution)))
+            interpreted (when (and (seq fresh) (not (:seon.error/at loaded)))
+                          (interpreted-namespaces database loaded fresh))
+            armed (cond
+                    (:seon.error/at loaded) loaded
+                    (seq fresh) (arm-first-loads! database effective (:seon.sci.eval/ctx execution) loaded
+                                                  (into #{} (remove interpreted) fresh)))
             ;; One reach read over every runnable member: each member's
             ;; recording then reads the index (68 members 1,086 ms, against
             ;; 317 ms for each member read alone, 2026-09-23).
@@ -2660,8 +2689,9 @@
                 held-handle (volatile! nil)
                 request-handle! #(or @held-handle
                                      (vreset! held-handle
-                                              (assoc (clean-request-handle execution recording cluster effective)
-                                                     :seon.test/interpreted-files? (not (root-agent? execution)))))
+                                              (cond-> (assoc (clean-request-handle execution recording cluster effective)
+                                                             :seon.test/interpreted-files? (not (root-agent? execution)))
+                                                (seq interpreted) (assoc :seon.test/interpreted-namespaces interpreted))))
                 ;; Once per request: the members an attempt evaluation serves,
                 ;; those whose closure names the effect owner, from one reverse
                 ;; walk of the reached graph (all 2,365 tests 18 ms, where every

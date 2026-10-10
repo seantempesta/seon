@@ -16,6 +16,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.error :as error]
             [seon.fn :as fn]
             [seon.fs :as fs]
@@ -1422,7 +1423,7 @@
       (finally (run! #(some-> % d/release-materialized-db) [before after])))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Landing: one git commit of exactly a write-back's paths
+;;; Landing: one green proposal onto main, its files and one git commit
 ;;; ---------------------------------------------------------------------------
 
 (defn- git
@@ -1455,21 +1456,41 @@
        "Branch-evidence-runs: " run-id "\n"
        "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"))
 
-(defn commit!
-  "Commit exactly the paths `written` installed under the checkout `root` as one git commit
-  (`git commit --only`), its message derived from the `acceptance`, and answer its sha as
-  `:seon.git/commit`. Refuses, committing nothing, when anything else is staged in the
-  index: the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
-  landings. A commit git made that is not exactly the written paths on the previous head
-  is answered as a refusal naming what it carries; history is never rewritten.
+(defn- call-with-commit-lock
+  "`(f)` while this process holds `.git/lane-commit.lock` of the checkout `root`,
+  the lock `bin/lane commit` takes with perl's `flock` around its staged-index
+  check and commit, so a landing and a lane commit never interleave in the shared
+  index; else the refusal naming why the lock was not taken. A perl child holds
+  the lock until its stdin closes, which this process does when `f` returns (and
+  the OS does if this process dies)."
+  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] [:fn clojure.core/ifn?]]
+                  [:or :map :seon.git/commit-error]]}
+  [root paths f]
+  (let [git-dir (git root ["rev-parse" "--absolute-git-dir"])]
+    (if-not (zero? (:exit git-dir))
+      (commit-refusal paths "The checkout's git directory could not be read." {:seon.error/offending (:err git-dir)})
+      (let [holder (process/process {:dir root :err :string}
+                                    "perl" "-MFcntl=:flock" "-e"
+                                    (str "open(my $lock, '>>', shift) or die \"lane-commit.lock: $!\\n\"; "
+                                         "flock($lock, LOCK_EX) or die \"lane-commit.lock: $!\\n\"; "
+                                         "$| = 1; print \"locked\\n\"; <STDIN>;")
+                                    (str (:out git-dir) "/lane-commit.lock"))]
+        (try
+          (if (= "locked" (.readLine (io/reader (:out holder))))
+            (f)
+            (commit-refusal paths "The lane commit lock could not be taken; nothing was committed."
+                            {:seon.error/offending (str/trim (:err @holder))}))
+          (finally
+            (.close ^java.io.OutputStream (:in holder))
+            (deref holder)))))))
 
-  Example:
-  (commit! \"/Users/me/src/project\" written acceptance)"
-  {:malli/schema [:=> [:cat :seon.fn/root :seon.source/written :seon.source/acceptance]
+(defn- commit-locked
+  "`commit!` under the lane commit lock: the staged-index check, the commit of
+  exactly `paths` and its verification."
+  {:malli/schema [:=> [:cat :seon.fn/root [:vector :seon.source/path] :seon.source/acceptance]
                   [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
-  [root written acceptance]
-  (let [paths (vec (:seon.source/changed-paths written))
-        staged (git root ["diff" "--cached" "--name-only"])
+  [root paths acceptance]
+  (let [staged (git root ["diff" "--cached" "--name-only"])
         other (when (zero? (:exit staged)) (vec (remove (set paths) (remove str/blank? (str/split-lines (:out staged))))))
         before (git root ["rev-parse" "HEAD"])]
     (cond
@@ -1486,3 +1507,86 @@
           (commit-refusal paths "The commit git made is not exactly the written paths; history is not rewritten."
                           {:seon.error/offending (str/split-lines (:out carried)) :seon.error/expected paths})
           :else {:seon.git/commit (:out after)})))))
+
+(defn commit!
+  "Commit exactly the paths `written` installed under the checkout `root` as one git commit
+  (`git commit --only`), its message derived from the `acceptance`, and answer its sha as
+  `:seon.git/commit`. Refuses, committing nothing, when anything else is staged in the
+  index: the rule `bin/lane commit` enforces for Claude lanes, which this replaces for
+  landings. The check and the commit hold `.git/lane-commit.lock` as `bin/lane commit`
+  does, so neither interleaves with a concurrent lane commit. A commit git made that is not exactly the written paths on the previous head
+  is answered as a refusal naming what it carries; history is never rewritten.
+
+  Example:
+  (commit! \"/Users/me/src/project\" written acceptance)"
+  {:malli/schema [:=> [:cat :seon.fn/root :seon.source/written :seon.source/acceptance]
+                  [:or [:map [:seon.git/commit :seon.git/commit]] :seon.git/commit-error]]}
+  [root written acceptance]
+  (let [paths (vec (:seon.source/changed-paths written))]
+    (call-with-commit-lock root paths #(commit-locked root paths acceptance))))
+
+(defn- acceptance-names
+  "The task, agent and merge task an accepted landing names, read on the cluster `database`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/merge] :map]}
+  [database merge-task]
+  (let [[task-sym agent-id] (db/q '[:find [?sym ?agent] :in $ ?m
+                                   :where [?mt :seon.task/id ?m] [?mt :seon.task/created-by ?a] [?a :seon.agent/id ?agent]
+                                   [?p :seon.task/merge ?m] [?p :seon.task/proposes ?as] [?as :seon.task/assigned ?tid]
+                                   [?t :seon.task/id ?tid] [?t :seon.task/sym ?sym]]
+                                 database merge-task)]
+    (cond-> {:seon.task/merge merge-task}
+      (symbol? task-sym) (assoc :seon.task/sym task-sym)
+      (string? agent-id) (assoc :seon.agent/id agent-id))))
+
+(defn- land-held!
+  "`land!` through `execution`, which carries its `:seon.store/store`."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
+                  [:or :seon.source/landed :seon.program/three-way :seon.error/value]]}
+  [execution {merge-task :seon.task/merge branch :seon.task/branch proved :seon.task/proved} root]
+  (let [store (:seon.store/store execution)
+        connection (:seon.db/connection execution)
+        clock (volatile! {})
+        timed (fn [step f] (let [start (System/nanoTime) value (f)]
+                             (vswap! clock assoc step (quot (- (System/nanoTime) start) 1000000))
+                             value))
+        prepared (timed :prepare #(prepare-merge! execution store branch (into #{} (map first) proved) nil root))
+        accepted (when (:seon.source/candidate prepared) (timed :accept #(accept-merge! execution store prepared)))
+        decided (when (:seon.source/commit-id accepted)
+                  (timed :decide #(do (registry/retire-branch! {:seon.store/store store :seon.store/branch (:seon.source/candidate prepared)})
+                                      ((requiring-resolve 'seon.task/decide!) connection merge-task :accepted))))
+        written (when (and (:seon.source/commit-id accepted) (not (:seon.error/at decided)))
+                  (timed :write-back #(write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root root})))
+        acceptance (when (:seon.source/changed-paths written)
+                     (merge (acceptance-names (db/db connection) merge-task)
+                            (select-keys accepted [:seon.test.run/id :seon.source/commit-id])))
+        committed (when acceptance (timed :commit #(commit! root written acceptance)))]
+    (cond
+      (not (:seon.source/candidate prepared)) prepared
+      (not (:seon.source/commit-id accepted)) accepted
+      (:seon.error/at decided) (assoc decided :seon.source/accepted accepted)
+      (:seon.error/at written) (assoc written :seon.source/accepted accepted)
+      (:seon.error/at committed) (assoc committed :seon.source/accepted accepted :seon.source/written written)
+      :else {:seon.source/accepted accepted :seon.source/commit-id (:seon.source/commit-id accepted)
+             :seon.source/written written :seon.git/commit (:seon.git/commit committed)
+             :seon.source/step-ms @clock})))
+
+(defn land!
+  "Land the green `proposal` (an open merge proposal, `my.program/proposals`) in one call:
+  `prepare-merge!` on a fresh branch of `execution`'s head, `accept-merge!` through the
+  unchanged gate (deciding the merge task `:accepted` and retiring the tested branch),
+  `write-back!` into the checkout `root` and `commit!` of exactly the written paths.
+  Answers `:seon.source/landed` with each step's milliseconds, or the first refusal as
+  data, never thrown: a refused prepare or acceptance (a red gate) leaves the merge task
+  undecided and writes nothing; a write-back or commit refusal after acceptance carries
+  `:seon.source/accepted` (main already holds the merge) for a retry.
+
+  Example:
+  (land! execution proposal \"/Users/me/src/project\")"
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.task/proposal-view :seon.fn/root]
+                  [:or :seon.source/landed :seon.program/three-way :seon.error/value]]}
+  [execution proposal root]
+  ;; A cluster handle holds its store in its SCI context's environment, where
+  ;; `seon.cluster.agent/acquire-context!` reads it; an acquired context holds it directly.
+  (let [store (or (:seon.store/store execution)
+                  (:seon.store/store (env/of (or (:seon.sci.eval/base-ctx execution) (:seon.sci.eval/ctx execution)))))]
+    (land-held! (assoc execution :seon.store/store store) proposal root)))

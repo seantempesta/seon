@@ -167,8 +167,11 @@
               (is (= (str (subs base-text 0 start) replacement (subs base-text stop)) (slurp file))))
             (testing "the file reindexed from disk declares exactly the merged program"
               (is (= (assoc before callee merged) (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]})))))
-            (testing "a second write of the same acceptance refuses: the file is no longer its base"
-              (is (= :file-changed (:seon.source/write-back-refused (source/write-back! request)))))
+            (testing "a second write of the same acceptance leaves the file as the first wrote it"
+              ;; write-back rebases by declaration onto the file as it is now (e984eb0ab)
+              (let [text (slurp file)]
+                (is (not (:seon.error/type (source/write-back! request))))
+                (is (= text (slurp file)))))
             (testing "a later change to a written entity refuses by name with both digests, before any file is read"
               (support/transacted! h-conn (support/replacement-tx (db/db h-conn) callee "(defn callee [x] (+ 1 x))" {}))
               (let [now (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))]
@@ -321,7 +324,11 @@
            (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
                  reindexed (digests (fn/analyze-entities {:seon.fn/root root :seon.fn/roots ["src"]}))]
              (is (= [namespace-entity] (get-in written [:seon.source/files 0 :seon.source/replaced])))
-             (is (str/starts-with? (slurp file) (ns-form fixture-ns)))
+             ;; the namespace row's source is the `ns` form of its resolver state as SCI holds it
+             (let [{merged :seon.ns/source requires :seon.ns/requires}
+                   (db/pull (db/db h-conn) [:seon.ns/source :seon.ns/requires] namespace-entity)]
+               (is (contains? (set requires) 'clojure.set) "the merged namespace requires what the agent added")
+               (is (str/starts-with? (slurp file) merged) "the file's ns form is the merged namespace's"))
              (is (= reindexed
                     (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.ns/name :seon.program/definition-digest]
                                            (vec (keys reindexed)))))

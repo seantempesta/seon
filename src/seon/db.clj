@@ -5472,13 +5472,18 @@
 (defn namespace-digest-of
   "The definition digest of namespace `entity-id` as `database` stores it
   with `row`'s attributes in place of its own: what a partial replacement of
-  the namespace (its resolver context, keeping its doc and tasks) must store."
+  the namespace (its resolver context, keeping its doc and tasks) must store.
+  Digested as its canonical row (`seon.program/canonical-row`), as the file
+  analyzer digests it: an attribute another writer owns, such as
+  `:seon.ns/steward`, is no part of the definition."
   {:malli/schema [:=> [:cat :seon.db/database-value :int :map] :seon.program/definition-digest]}
   [database entity-id row]
-  (@program-definition-digest
-   (merge (dissoc (declaration-value database (identity-attributes database) entity-id)
-                  :seon.program/definition-digest)
-          (dissoc row :seon.program/definition-digest))))
+  (let [projection (carried-projection database)]
+    (@program-definition-digest
+     (@program-canonical-entity
+      (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+      (dissoc (merge (declaration-value database (identity-attributes database) entity-id) row)
+              :seon.program/definition-digest)))))
 
 (defn behavior-digest
   "`seon.program/behavior-digest` of the function or test `entity-id` on

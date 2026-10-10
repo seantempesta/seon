@@ -21,24 +21,29 @@
     (is (instance? Throwable outcome) "an invalid input returned")
     (is (= :input (first checks)))))
 
-(deftest a-branch-changed-contract-refuses-instead-of-arming-the-host-var
+(deftest ^{:seon/tasks #{'seon.test/an-unloaded-agent-namespace-runs-interpreted-at-the-gate}}
+  a-namespace-the-loaded-program-declares-otherwise-runs-interpreted-never-loaded
+  ;; Root's request (the merge gate) interprets a namespace this JVM never
+  ;; loaded when the request's program declares it otherwise than the loaded
+  ;; program: compiled code runs only what the JVM loads unchanged.
   (test-support/with-database
    (fn [connection]
      (let [fixture 'seon.test.first-load-branch-fixture
            function 'seon.test.first-load-branch-fixture/identity-int
-           ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
+           loaded (db/db connection)
            _ (test-support/transacted!
               connection
               [(test-support/program-fn-entity
-                (db/db connection) function
+                loaded function
                 "(defn identity-int {:malli/schema [:=> [:cat :string] :string]} [value] value)")])
-           refusal (#'seon.test/arm-first-loads!
-                    (db/db connection) (test-support/effective-config) ctx #{fixture})]
-       (is (= function (:seon.sci.eval/refused-function refusal)))
-       (is (nil? (find-ns fixture)) "the refusal loads, and so arms, nothing")))))
+           changed (db/db connection)]
+       (is (= #{fixture} (#'seon.test/interpreted-namespaces changed loaded #{fixture})))
+       (is (= #{} (#'seon.test/interpreted-namespaces changed changed #{fixture}))
+           "a namespace the loaded program declares unchanged loads compiled")
+       (is (nil? (find-ns fixture)) "deciding loads nothing")))))
 
-(deftest a-stale-acquisition-snapshot-does-not-decide-a-first-load
-  ;; The comparison reads the program `seon.sci.eval/loaded-identity` names, never
+(deftest a-stale-acquisition-snapshot-does-not-decide-the-loaded-program
+  ;; The loaded program is the one `seon.sci.eval/loaded-identity` names, never
   ;; the ctx's acquisition snapshot, which stays behind a later adoption.
   (test-support/with-database
    (fn [connection]
@@ -53,7 +58,7 @@
            changed (db/db connection)
            stale (assoc ctx :seon.sci.kernel/program-snapshot
                         (atom (assoc @(:seon.sci.kernel/program-snapshot ctx)
-                                     :seon.sci.eval/loaded-database changed)))
-           refusal (#'seon.test/arm-first-loads! changed (test-support/effective-config) stale #{fixture})]
-       (is (= function (:seon.sci.eval/refused-function refusal)))
-       (is (nil? (find-ns fixture)) "a snapshot agreeing with the branch neither loads nor arms")))))
+                                     :seon.sci.eval/loaded-database changed)))]
+       (is (= #{fixture} (#'seon.test/interpreted-namespaces changed (#'seon.test/loaded-program stale) #{fixture}))
+           "a snapshot agreeing with the branch does not make its namespace loadable")
+       (is (nil? (find-ns fixture)))))))
