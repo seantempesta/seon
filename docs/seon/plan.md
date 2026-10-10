@@ -13,155 +13,118 @@ generative-testing, astra-malli-behavior, fable-simplify) and the cards BEHAVIOR
 Live facts were checked on default (archive ffe62e1c3, pid 20363, `:faulted`) in JVM mode, read-only. It supersedes
 `docs/research/agent-platform/2026-10-09/plan.md`.
 
-## 0. Where we are (revised in place; last 2026-10-10)
+## 0. Where we are (revised in place; last 2026-10-10 evening)
 
-Read this section as direction, not a ledger: each essential (§2), its status, what blocks it and who works it now.
-History is in git; finished work leaves this section.
+Direction, not a ledger. The dated chain runs and loop rounds, with their numbers, are evidence in
+[loop-rounds](../research/agent-platform/2026-10-10/loop-rounds.md); the independent review of the day's landings is
+[Astra's day audit](../research/agent-platform/2026-10-10/astra-day-audit.md), whose order this section follows.
+Finished work leaves this section; history is in git.
+
+**Where we are.** The loop runs end to end by hand: a DeepSeek-flash agent takes a task with a red proof green on its own
+branch from the context Seon generates, its one end message is root's merge request, and root prepares, accepts, writes
+back and commits (chain runs 4 and 5 reached HEAD; of eleven agent runs in rounds 1–4, five went green and two merged;
+round 4 went 0 of 2). What keeps it from running alone: a landing proves paths, not the bytes it commits, and does not
+recover from a partial install; the merge gate does not fence the target program; interpreted proofs are not yet
+faithful; a schema change cannot merge. Root's decision after the audit: no new rounds and no tick or restart automation
+until the landing is exact, the proof path honest and one data-first task has gone through.
 
 | Essential | Status | Blocked by | Working it now |
 |---|---|---|---|
-| 1 An honest number in every reply | **Done.** FEEDBACK-LOOP stages 1–13 and 16 live: a warm redefinition is about 97% attributed (entrance, step, writer, commit, labelled shared residual); like-for-like cold/warm cost per [symbol scope] (b37a3ff72); the diff shows only changed definitions (fde5f1e11). A fresh agent's warm `(+ 1 2)`: 72–74 ms, 6,668 calls; root's own context: 8,763 calls for the same work. | — | nobody; stages 14, 15, 17 wait (§6) |
-| 2 One task worked end to end through the REPL | **The goal test.** A Claude lane passed the ordinary half (df87cba96). No model agent has yet worked a designed task red → green. | the `forgive` task and its red proofs (in flight) | lane `forgive-proofs` (stages 1, 3, 4); then root launches chain run 2 |
-| 3 Red proofs before any assignment | Not started beyond the cost tasks. | nothing | after chain run 2 shows what a good proof needs |
-| 4 Default runs HEAD | Restart per landing batch is routine; default runs b37a3ff72. Lag workarounds not yet deleted (§5 step 5). | — | — |
-| 5 Correctness and efficiency over size | Node cache by bytes: a new agent's first request 2.37 GB → 0.38 GB; a warm redefinition's step about 217–232 MB. A `defn` reaching about 13 tests still costs 3.4–3.9 s and 4.3–5.5 GB in the test step. | — | — |
+| 1 An honest number in every reply | **Done.** FEEDBACK-LOOP stages 1–13 and 16 live; like-for-like cold/warm cost per [symbol scope] (b37a3ff72); the diff shows only changed definitions. The cost diff still lists unchanged interpreted definitions (task `seon.batch/an-unchanged-interpreted-definition-shows-no-cost-entry`, the `cost-diff` loop task). | — | nobody; stages 14, 15, 17 wait (§6) |
+| 2 One task worked end to end through the REPL | **Done by hand** (chain run 5: 4 calls, no root rescue, landed 3c4f94227; round 1 merged a4b7e6261). Not yet exact or unattended: the landing commits paths, not proven bytes; a partial install does not recover; the target is not fenced (audit 1, 2). | items 1–3 | lane `schema-merge` |
+| 3 Red proofs before any assignment | `seon.task/assign!` runs the proofs in the agent's world and refuses all-green (7ce008211); it still assigns on a proof-run error (audit 7). 80 of 674 tasks carry a tagged proof. | nothing | lane `audit-admission` (item 4) |
+| 4 Default runs HEAD | Routine: `bin/seon start --head` per landing batch. Boot readiness 5.3 s on a quiet machine, 15–18 s under lanes' check JVMs. The lag workarounds are not yet deleted (item 12). | — | — |
+| 5 Correctness and efficiency over size | Node cache by bytes: a new agent's first request 2.37 → 0.38 GB. Still: prepare 4–6 s / 1–3 GB per one-function merge; publication about 26 s per check; one end summary 184–311 ms / 218–286 MB warm; a `defn` reaching about 13 tests 3.4–3.9 s / 4.3–5.5 GB in the test step. | — | item 8, unassigned |
 
-**Chain run 2, defined.** Done means: a DeepSeek-flash agent, launched on `seon.sci.forgive/forgiving-forgiven-text-changes-nothing`
-with only the context Seon generates, turns its proofs green with no root rescue, and root reviews and merges its
-branch. Its three known defects ("a]a", "('", "(\\") are in designed-task-examples §2. Launch: root's JVM REPL drives
-`seon.competency/start-run!` and `await-runs` (the E1 path, per-branch `no-provider false`, a call cap) but keeps the
-branch for review instead of `launch!`'s retirement. Every friction met is filed; that list decides the next build.
+**Next, in dependency order.** Each item names its owner lane or "unassigned" and what it unblocks. An item starts
+only when what it depends on has landed, except where marked "beside".
 
-**Chain run 2, first attempt (2026-10-10, agent `chain2-forgive-1`, branch `:agent-e84b11b8bd78` kept).** Capped at 15
-calls in 31.5 s, not green (proofs 2 red, 1 green); 156k prompt tokens (108k cached), 3.2k completion; 0 `defn`s,
-19 repeated forms, `in-ns` on every call, 7 agent errors, 0 platform errors. It found the right spot and nearly the
-research's fix (a dropped closer becomes a space, but without recording `:seon.batch/inserted`). Frictions, in causal
-order:
-1. `(my.program/source 'seon.sci.forgive/scan)` (about 250 lines) is cut from 3,533 to 1,989 tokens with a
-   `:large-value` finding telling it to select less, so it cannot see the function whole (lane `source-whole`).
-2. No REPL way to change one branch of a large definition: `defn` of the whole function is the only path, so the
-   agent `slurp`ed and string-edited the file instead (decision for the owner: an edit tool over a definition's source).
-3. A relative `spit` from SCI rewrote the running archive `data/source/<sha>/src/seon/sci/forgive.clj` (root
-   restored it from git; the compiled Var was unaffected); lane `archive-readonly` makes extracted archives read-only.
-4. Model tool markup `</invoke>` in a reply is read as code (3 errors; `seon.sci.forgive` reply-mode prose rules).
-5. A guessed `seon.print/inspect`; `my.program/callers` passed a function (refused with a fix; agent errors).
+1. **A branch schema change merges** (audit 4). `seon.program/changed-identities` refuses every family but functions,
+   tests and namespaces, so round 3's green schema change could not land; remove the allowlist under the existing
+   stored-data validation and ordered norms (tasks `seon.cluster.source/a-branch-schema-blocks-diff-and-merge`,
+   `seon.test/check-fails-on-agent-registered-schemas`). Lane `schema-merge`. Unblocks: 2, 7.
+2. **The merge target fence** (audit 1). At the writer, acceptance refuses and prepares again when the target's program
+   changed since the prepared run (first conservatively: any program change since the captured target basis; the merge
+   spec §4 already calls for it). Lane `schema-merge`, after 1. Unblocks: 3.
+3. **An exact, restart-safe landing** (audit 2). `seon.cluster.source/commit!` compares accepted candidate bytes, tree
+   and parent, never paths alone; write-back and Git hold the affected checkout files under one owner for the whole
+   sequence (`bin/lane`'s lock while both entrances exist); accepted inputs and completed effects stay on the merge
+   task so a retry resumes from evidence instead of `commit-as-db` on a collected commit; the agent retires only after
+   that evidence is safe. Lane `schema-merge`, after 2. Unblocks: the auto-landing dial (5), any new round (9), the tick (10).
+4. **Admission and completion are positive observations** (audit 7, 8). `assign!` requires an observed failing proof
+   and returns an infrastructure failure separately (the earlier "assign on proof-run error" acceptance is reversed);
+   `seon.context/ended` keeps the small historical outcome after the agent's branch is retired and answers a typed
+   unknown when evidence is gone. Lane `audit-admission`, beside 1–3. Unblocks: honest round grades (9), the tick (10).
+5. **The task-end message is idempotent at the writer** (audit 6). One stable task-end occurrence and its delivery
+   obligation are recorded in the end's transaction; the send derives from them, so a crash between send and close or a
+   refused send neither duplicates nor loses root's message. With it lands ROOT-AGENT stage 2 (`end-task!` calls
+   `land!`) with its dial **off** by default; the dial flips on when 2 and 3 have landed. Lane `root-stage2`, beside
+   1–3. Unblocks: unattended landing.
+6. **One honest interpreted proof path** (audit 3). A redefinition never reuses a stale red (lane `stale-reuse`, in
+   flight); `use-fixtures` and the other top-level initialization run in the agent's SCI context (task
+   `seon.sci.eval/an-interpreted-test-namespace-runs-without-its-fixtures`, unassigned); evidence reuse declares its
+   evaluator, proven by two evaluator contexts with different setup that cannot share a green (unassigned); then the
+   interpreted census classes touched by the day's fixes are rerun (the 205 of bff46841f is not a current count).
+   Beside 1–5. Unblocks: trusting an agent's reached-red and its reaching tests; 7; 9.
+7. **One data-first task through the whole loop** (audit 4). A real task that adds a named schema, its producer,
+   consumer, proof and task description, worked by a model agent from generated context, merged, written back
+   (task-file write-back, §8 Q2 (a), ROOT-AGENT stage 12) and committed through the same path. Unassigned; root picks
+   the task once 1 lands. Unblocks: 9; the claim that the loop is data-first.
+8. **Remove the repeated acquisition work** (audit 5). Reuse the acquired program-only base and the immutable namespace
+   and schema derivations in `seon.cache`; measure the request with its workers, not the calling thread alone (tasks
+   `seon.test/one-test-run-at-the-repl-allocates-over-a-gigabyte`,
+   `seon.context/one-agents-current-state-costs-hundreds-of-megabytes`,
+   `seon.cluster.source/accepting-a-one-function-merge-allocates-hundreds-of-megabytes`); per-file derivation inputs
+   for publication (26 s per check, 3–5 h; `2026-10-10-boot-source.md`). Unassigned: performance work with the owner's
+   files in the lane, never a specialist without them. Beside 1–7. Unblocks: platform proofs under 30 s; cheap rounds
+   and a cheap tick.
+9. **Loop round 5**: the refined `problems-prose` and `cost-diff` (its third failure, 12 errors) and the data-first task,
+   graded against round 3's table. Unassigned; after 3, 4 and 6. Unblocks: 10.
+10. **ROOT-AGENT stages 4–9** (grants, root tasks and the role section, `decline-merge!`, `launch!` and `tick!`, the
+    restart rule), after correcting the card's two refuted claims: write-back conflicts do not disappear with Claude
+    lanes (one checkout owner stays), and "a failure leaves nothing written" becomes per-effect durable outcomes. A
+    restart must keep the output needed to diagnose its failure. Unassigned; after 9. Unblocks: unattended rounds; the
+    daily spend report (stage 10) is independent and may go first.
+11. **A small ready frontier, not top-30 triage** (ROOT-AGENT stages 11–13): the next few tasks get current red proofs
+    and typed references; the 600-task backlog is never folded into a schedule. Unassigned; after 10.
+12. **Smaller, beside the above, root chores never ahead of 1–7**: FEEDBACK-LOOP stages 14, 15, 17; the host-bound
+    half of the REPL-only acceptance (`proven-file` unreached); A10 (a visited test namespace makes later requests 3×
+    slower); `seon.db/pull-logical` about 3× main on agent branches; the cold-calls dial not reaching cells from the
+    cluster configuration; deleting the lag workarounds (the write-back rebase's archive snapshot in
+    `my.test/check-platform`, template-per-slot, "live after restart" proofs); archive sealing's real guarantee stated
+    and `setWritable`'s result checked (audit 9); the two reds on clean HEAD classified
+    (`seon.config-test/the-default-document-has-one-canonical-complete-location`,
+    `seon.db-test/equal-declaration-content-shares-one-projection-across-values`); the leftover agent branches retired
+    after a collection receipt and before/after bytes (audit 8). All unassigned.
 
-**Chain run 3 (decided 2026-10-10 after Astra's review, `astra-chain-friction.md`, 1fc49251c).** `forgive` was the wrong
-first task: a 178-line platform reader, three defects and an unsettled repair policy, so it tested everything at once.
-Chain run 3 is the small ordinary `comp.text/slug-removes-edge-hyphens` (policy fixed before launch; lane `slug-task`);
-then a small real owner; `scan` later as a separate platform acceptance. Landed for it and live on default 18919b663:
-sealed archives and pins (9cd874d94, 4027882d4), whole source (e25afdf6e), tool markup as prose (ececefad5), an agent
-runs its proofs with `clojure.test` at its REPL (9a78f8f9d), errors grouped by signature across agents in health
-(763693afc), retirement closes admission and a message hosts a stopped agent (d98ab13ed; the agent does not yet run:
-lane `message-wakes`), six red census proofs for violated laws (18919b663). In flight: `message-wakes`, `merge-gate`,
-`slug-task`, and the DYNAMIC-CONTEXT card's revision (owner: reflection reads the record first, then asks a snapshot
-of the agent forked at the decision's t; one happy path for task running, every end message goes to root).
-Boot (Astra, 246a571ed, `docs/research/agent-platform/2026-10-10-boot-source.md`): readiness 5.3 s unchanged, 7.5 s one
-file, 6.9 s across a dependency change on a quiet machine; default's 15–18 s boots were contention with lanes' check
-JVMs. Every changed boot still re-derives the whole program (`stored-derivation-schema-keys` 1.55–1.78 GB). Owner
-2026-10-10: deferred; the slots go to the self-improvement loop. Per-file derivation inputs (3–5 h) is the chosen fix
-when it is picked up. The same cost shows in every `bin/seon check`: publication about 26 s (lane publication-robust,
-runs 8c15c8a47f70, 9dbc88e3b762), which also makes each platform proof 30–90 s.
-Open: two reds on clean HEAD (`seon.config-test/the-default-document-has-one-canonical-complete-location`,
-`seon.db-test/equal-declaration-content-shares-one-projection-across-values`) to classify; boot readiness 15.6 s on
-18919b663 against 5–9 s earlier.
+**Standing rules** (the 2026-10-10 stall review and the audit's process corrections, folded):
 
-**Chain run 3 result (2026-10-10, agent `chain3-slug-1`, branch `:agent-6c8a0df7e53b`): GREEN.** DeepSeek flash took
-`seon.competency/slug-removes-edge-hyphens` red → green in 1 model call, 4.7 s, 1,337 prompt tokens, 0 errors, no root
-rescue: read `comp.text/slug`, redefined it, proof green. One reply repeated its `in-ns`/`defn` pair (4 repeated forms).
-Not merged: `comp.text` is a bench fixture. Next: chain run 4 on a small real owner with a known bad input, through
-review, write-back and root's merge (lane `real-task-pick` proposes candidates).
-
-**Chain run 4 (2026-10-10, agent `chain4-edn-1`, branch `:agent-e2a7a50d8c07`): GREEN AND LANDED, the first model
-fix to real Seon code.** Task `seon.program/edn-symbol-text-accepts-a-leading-slash` (lane `real-task-pick`, 550b599b4):
-7 calls, 26.5 s, 24k prompt tokens, 1 agent error (a body fragment). Root reviewed the one added condition, wrote the
-branch back as the agent (`my.program/write-branch!`, 367 ms) and committed d3de85d72; proof and reaching test green on
-HEAD (run 1b79dec1c743, 32 pass). Gaps it exposed, both on the happy path:
-1. The agent never proposes the merge: the loop stops calling the model once the proofs are green, so
-   `my.program/propose-merge!` never runs and `prepare-merge!` has nothing to take. The end message to root
-   (DYNAMIC-CONTEXT stage 3) is the merge request.
-2. `bin/lane commit --branch-evidence` treats a `.cljc` file as ineligible and falls back to `bin/seon check` with no
-   tests named, so the commit was "proven" by boot and lint alone. The fallback must run the tests reaching the change.
-
-**The loop's first links landed (2026-10-10, lane dc-lifecycle; DYNAMIC-CONTEXT stages 1–3).** The block names the
-agent's namespace and teaches that locals need their bindings (34bbd83cb); an agent closes when its task ends, so a
-wake never reopens a finished task (f8b2a26b6); a task that ends sends root one message of references (`:seon.task/end`,
-`:seon.task/merge` when green, the task as `:seon.message/about`), the green end records the agent's proposal, and root's
-block derives `:seon.task/ended` (proofs, errors by signature, calls, tokens, next operations) at render (a9feb9ba4).
-With lane sci-tests (e361536a9): non-root agents' tests run interpreted, never loaded into the shared JVM; jvm mode is
-root's. Next: chain run 5, the whole loop with no root rescue (task from lane `real-task-pick-2`); then sci-tests slice 2
-(`seon.task/assign!` runs the proofs in the agent's own environment).
-
-**Chain run 5 (2026-10-10, agent `chain5-search-1`): THE WHOLE LOOP, NO ROOT RESCUE.** Task
-`my.program/a-search-snippet-keeps-the-whole-line` (lane real-task-pick-2, 340462543): DeepSeek flash green in 4 calls,
-9.3 s, 13.7k prompt tokens, 0 errors, 0 repeated forms (the namespace line removed the `in-ns` repeats). Its one end
-message reached root (`:seon.task/end :done`, merge task 57f4bf2e4fac); root's block derived `:seon.task/ended`; root
-ran `prepare-merge!` (gate run 74e4621e2005 green, 4.0 s, 1.1 GB), `accept-merge!` (main 6aca2052, 1.0 s, 1.4 GB) and
-`write-back!` (213 ms), reviewed the one-line diff and committed 3c4f94227 by branch evidence. Root's only acts were
-review and the merge decisions. Findings (lane chain5-findings files them with proofs): the cost diff lists unchanged
-interpreted definitions; `jvm-evaluate`'s self time compares different forms; a test wrote into the live root inbox;
-merge cost. Next: run the loop on several tasks, measured round over round (the competency table), and automate root's
-review step.
-
-**Interpreted tests are not yet faithful (2026-10-10, lane sci-tests, bff46841f, `interpreted-tier.md`).** Of 846 tests
-executed interpreted as a non-root agent (partial tier, 600 s cap), 205 are red only when interpreted: 50 redefine Vars
-(the tests break the law; census task), 25 need a `dev/` namespace, 20 use a `def` that failed to interpret as a value,
-17 find SCI `*out*` unbound, 14 `await-event!`, 10 `&env` macros, 7 `proxy`, 46 unclassified. Since e361536a9 agents'
-reaching tests run interpreted, so these are false reds in agents' replies: lane `interp-fidelity` fixes the
-interpreter classes largest first. Lane `assign-proofs` builds `assign!` running the proofs in the agent's own
-environment.
-
-**Loop round 1 (2026-10-10, three DeepSeek-flash agents in parallel, tasks aeaf6f1fc): 2 of 3 green and merged
-(a4b7e6261).** `r1-path-form` (5 calls, 9.2 s, 0 errors) and `r1-search-limit` (2 calls, 6.8 s) ended green; each end
-message was root's merge request; root reviewed, prepared (gate runs f895519d7509, 04fe54058fd5), accepted and wrote
-back; proofs green on HEAD (run d9089653c740). `r1-ref-section` diagnosed its bug correctly, then the turn loop stopped
-calling it (`:waiting`, admission open) and root got no message: a stalled working agent and a silent end (lane
-assign-proofs, queued). The commit gate's `.cljc` fallback ran no tests again (lane `lane-gate-cljc`). Round cost:
-prepare 6.2 s / 3.2 GB for two one-function merges (task filed).
-
-**Loop round 2 (2026-10-10, tasks from the loop's own findings, 9a5324489): 1 of 3 green, 0 merged.** `r2-cost-diff`
-fixed the cost diff's false entries (13 calls, 143k tokens) but the merge gate refused it (run 5649676309ec, three reaching
-`seon.request-cost-test` tests red): the gate worked, the agent ended `:done` too early (proofs green, reached tests
-red; lane assign-proofs fixes `seon.turn/task-end`). `r2-problems-prose` was unprovable: its census proof reads files,
-which a branch cannot change. `r2-ref-section` capped (the task's second failure). Both capped ends reached root as end
-messages. Task-design rules learned: a proof reads through the program, never files; a task carries the updates to
-existing tests that assert the old behavior. Lane round2-refine diagnoses and refines all three for round 3.
-
-**Loop round 3 (2026-10-10, refined tasks 1745f48cf, proofs run at assignment 7ce008211): 2 of 3 green, both tasks
-that had failed before** (refinement works). `r3-ref-section` green on the third attempt (12 calls) once the intent named
-both changes; `r3-problems-prose` green (10 calls) once the proof read the program instead of files; `r3-cost-diff`
-capped with 1 of 4 proofs (a larger refined task). Neither green merged: a schema change cannot merge
-(`prepare-merge!` "Only function, test and namespace declarations may change here", lane root-land), and problems-prose
-conflicted with a concurrent landing in the same file (0b50e737d; rerun on the new base). Recurring tool misuse across
-agents: `my.program/callers` given a symbol, `my.program/source` given a keyword; the tools should take what agents pass.
-
-**How root keeps the goal moving (2026-10-10 stall review).** The day after the instrument landed, the goal test was
-"next" for two hours and never started: it had no owner and no first step, each owner observation about the
-instrument became a new instrument lane, root chores were prepended to the next list, and root idled after landings.
-Standing rules:
-- One lane slot always serves essential 2 or 3 (the goal), never the instrument; the head of "next" is always work in
-  flight with a named lane, never a label.
-- An instrument finding is filed and sequenced unless it surfaces false data (that blocks the goal, so it is fixed).
-- Root chores (branch cleanup, measurements) run beside lanes, never ahead of goal work; after a landing root
-  launches the next step in the same turn.
-- Every lane names the essential it serves; at most two or three implementation lanes, on disjoint files.
-- A finding is filed the same day with a red tagged proof, or as a row in an existing proof. A task without one is
-  invisible to the schedule: E1's F9 (proof tests unresolvable in an agent's world) and H1 (prose read as code) were
-  seen on 2026-10-08, left unfiled or filed proofless, and met again in chain run 2.
-- Every chain run keeps its branch and ends with reflection: root wakes the agent with questions about why it acted
-  as it did and records the answers. The first reflection found two bugs (an agent created before a restart could not
-  be woken; a root question was treated as more task work).
-- Errors are judged by their producer, not their submitter: the same signature across distinct agents is a Seon
-  defect (lane `agent-error-signatures`); every checkable AGENTS.md law needs a test (audit `laws-without-proofs`).
-- The REPL-only acceptance's host-bound half (31b442840 fell back to `--test`; `proven-file` unreached) still gates
-  new platform machinery.
-- Lanes delete with plain `rm`, never `git rm`, and leave nothing staged; a whole-namespace `--test` on a namespace
-  with declared-long tests is refused (name the vars); a dependency bump lands last in a batch, then a restart.
-
-**Next, in order (after chain run 2):** backlog triage (prove the top ~30 tasks; the rest is an unproven backlog);
-the host-bound acceptance half; FEEDBACK-LOOP stages 14, 15, 17; `seon.db/pull-logical` reading about 3× main on
-agent branches; the cold-calls dial not reaching cells from the cluster configuration (task filed). Beside them:
-retire the leftover agent branches (demo-*, loop-*, *-probe*, repl-only-3*, astra-node-cache*, par-a/b).
+- Every lane names the essential it serves; one lane always serves the goal (essential 2 or 3), never the instrument;
+  the head of the list above is work in flight with a named lane, never a label. At most two or three implementation
+  lanes, on disjoint files.
+- Progress is credited at completed guarantees, never at intermediate steps: a landed primitive is "available", not a
+  stage of autonomy; a Git commit of paths is not branch evidence; proof-only green is not done; compiled green is not
+  interpreted green; a stored number proves only the scope its counter measured.
+- No new loop round, tick or restart automation until items 3, 4 and 6 have landed.
+- A finding is filed the same day with a red tagged proof (a row in an existing table where one fits) or it is
+  invisible to the schedule; an instrument finding is filed and sequenced unless it surfaces false data, which blocks
+  the goal and is fixed. A friction met twice (source order, the `.cljc` fallback, a census reading files, shared-file
+  interference) changes an entrance rule or an existing proof in the same beat; the next model never rediscovers it.
+- Errors are judged by their producer, not their submitter: the same signature across agents is a Seon defect; every
+  checkable AGENTS.md law has a test.
+- Root chores run beside lanes, never ahead of goal work; after a landing root launches the next item in the same turn.
+  Blocked owner work goes to its owner directly, or the whole slice transfers; a specialist with no editable slice is a
+  research handoff and is priced as one.
+- Every chain run keeps its branch and ends with reflection: root reads the record first, then asks the snapshot.
+- This section is one dependency list; dated rounds and measurements go to evidence pages, never here. A living
+  document's claim made stale by a landing (a skill contradicting the gate) is corrected in that landing.
+- The REPL-only acceptance's host-bound half (31b442840 fell back to `--test`; `proven-file` unreached) still gates new
+  platform machinery.
+- Lanes delete with `rm`, never `git rm`, and leave nothing staged; a whole-namespace `--test` on a namespace with
+  declared-long tests is refused (name the vars); a dependency bump lands last in a batch, then one restart. A closing
+  lane leaves one committed evidence link and one disposition per scratch root (promoted, preserved, or removed after
+  inspecting the live holder); `tmp/` is never swept by age or name. A claim is released when its lane closes; the
+  ledger's claim count is not the running-lane count.
 
 ## 1. The goal
 
@@ -216,22 +179,9 @@ measurements are there and in git. The step's allocation it predicted was the no
 
 ## 5. Next steps, in order
 
-Each is small, names its proof and what it makes measurably better.
-
-1. **Second chain run, non-platform**: `seon.sci.forgive/forgiving-forgiven-text-changes-nothing`
-   (designed-task-examples A: three defects, red `are` table and seeded idempotence property already written as
-   prototypes). Stages 3–4 Sonnet, stage 5 DeepSeek-flash as implementer with a Claude lane watching. Better by: one
-   model agent takes a designed task red → green with no root rescue, or the exact friction is filed.
-2. **Default runs HEAD per landing batch**, then delete what the lag required: the write-back file rebase's snapshot of
-   the published archive in `my.test/check-platform`, template-per-slot (store identity read from the store record, not
-   `nameUUIDFromBytes(path)`), "live after restart" proofs. Better by: `bin/seon check` under 10 s warm (37 s now).
-3. **Ten tasks with red `are` proofs** (Sonnet, ~2 h): root picks ten open tasks with small owners and a known bad
-   input; one `are` deftest each, tagged, red on default. Only these ten are assignable. Better by: tasks with a red
-   proof 26 → 36.
-4. **A10: a visited test namespace makes every later request 3× slower** (opus review 2.5; 141 ms test step for `(+ 1 2)`).
-   Fix at the producer (entered Vars counted as the agent's changes) with a `seon.profile/measure` row on the second
-   request. Better by: a trivial form stays at ~70 ms after any `in-ns`.
-5. **Task entity and docs in the database** (§8 Q1–Q2), after the two chain runs show what the agents actually lacked.
+Superseded 2026-10-10: the order is §0's dependency list. Of the five steps written here that morning, the second
+chain run and the proofs at assignment are done (chain runs 3–5; `seon.task/assign!` runs the proofs, 7ce008211); the
+rest live in §0 as items 12 (default runs HEAD and the lag workarounds; A10) and 7 (the task entity's write-back).
 
 ## 6. Deliberately deferred
 
