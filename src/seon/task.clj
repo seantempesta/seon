@@ -360,24 +360,24 @@
          :seon.task/triage (set triage)})))
 
 (defn candidate-dangling
-  "The `:seon.task/dangling` task symbols, by holder, of the program `destination` would
-  hold after taking `candidate`'s rows for `identities`: those holders' task edges
-  from `candidate`, every other holder's from `destination`, against the tasks
-  admitted on `destination`. Task rows never ride the merge (7.13)."
+  "The `:seon.task/dangling` task symbols, by holder, that taking `candidate`'s rows
+  for `identities` brings onto `destination`: those holders' task edges on `candidate`
+  against the tasks admitted on `destination`. A holder the merge leaves untouched is
+  the destination's own state, never the candidate's defect. Task rows never ride the
+  merge (7.13)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
                   [:or :seon.task/dangling :seon.db/invalid-read-error]]}
   [candidate destination identities]
-  (let [edges #(if (contains? (:schema %) :seon.task/tasks)
-                 (db/q '[:find ?t ?a ?h :in $ [?a ...] :where [?e :seon.task/tasks ?t] [?e ?a ?h]]
-                       % [:seon.fn/sym :seon.test/sym :seon.ns/name])
-                 #{})
-        mine (edges candidate) theirs (edges destination)
+  (let [mine (if (contains? (:schema candidate) :seon.task/tasks)
+               (db/q '[:find ?t ?a ?h :in $ [?a ...] :where [?e :seon.task/tasks ?t] [?e ?a ?h]]
+                     candidate [:seon.fn/sym :seon.test/sym :seon.ns/name])
+               #{})
         admitted (if (contains? (:schema destination) :seon.task/sym)
                    (db/q '[:find [?s ...] :where [_ :seon.task/sym ?s]] destination)
                    #{})
         touched? (fn [[_ attribute holder]] (contains? identities [attribute holder]))]
-    (or (some read-error [mine theirs admitted])
-        (update-vals (group-by first (remove (comp (set admitted) first) (concat (filter touched? mine) (remove touched? theirs))))
+    (or (some read-error [mine admitted])
+        (update-vals (group-by first (remove (comp (set admitted) first) (filter touched? mine)))
                      #(set (map (fn [[_ _ holder]] holder) %))))))
 
 (defn home

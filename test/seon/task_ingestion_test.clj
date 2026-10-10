@@ -214,9 +214,10 @@
             (adopt!)
             (is (= [nil "Mine."] (map intent [handle own]))))))))))
 
-(deftest a-merged-program-dangles-by-holder-against-the-destinations-admitted-tasks
-  ;; P1-3: the candidate's entities for the merged identities, every other holder's
-  ;; from the destination, against the destination's tasks.
+(deftest ^{:seon/tasks #{'seon.task/a-destinations-own-unadmitted-task-tag-refuses-every-merge}}
+  a-merged-program-dangles-by-holder-against-the-destinations-admitted-tasks
+  ;; P1-3: the candidate's entities for the merged identities, against the
+  ;; destination's tasks; a holder the merge leaves untouched never refuses it.
   (test-support/with-database
    (fn [connection]
      (let [head @connection
@@ -224,8 +225,8 @@
        (admit! connection (entities-of subject-source))
        (is (= {tag '#{tq.a/f tq.a/proves}} (task/candidate-dangling @connection head merged)))
        (is (not (contains? (task/candidate-dangling @connection head #{}) tag)) "unmerged holders are the destination's")
-       (is (= {tag '#{tq.a tq.a/g}} (select-keys (task/candidate-dangling head @connection merged) [tag]))
-           "a merged entity without the annotation drops its edge; the unmerged holders keep theirs")
+       (is (= {} (select-keys (task/candidate-dangling head @connection merged) [tag]))
+           "a merged entity without the annotation drops its edge; the destination's untouched holders are its own")
        (ingest! connection (task-text "Prove ingestion." ""))
        (is (= {} (select-keys (task/candidate-dangling @connection @connection merged) [tag])))))))
 
