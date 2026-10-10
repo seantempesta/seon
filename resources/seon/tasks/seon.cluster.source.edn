@@ -118,4 +118,19 @@
  #:seon.task{:name "a-landing-never-commits-edits-it-did-not-prove"
              :kind :function
              :intent "`seon.cluster.source/proven-file` splices a landing's declarations into its file's bytes as they are on disk and `seon.cluster.source/write-and-commit!` commits the whole path with `git commit --only`, so a file holding a lane's uncommitted edits (or any hand edit) was committed under the landing's name with those edits. Done when `seon.cluster.source/write-and-commit!` passes the checkout's HEAD (`:seon.git/head`) to `seon.cluster.source/write-back!`, whose files to write must hold their HEAD blob before and as they are proven (files the merge task records `:seon.task/installed` excepted), else it refuses `:uncommitted-edits` naming the paths and writes and commits nothing; the reason is transient (`seon.cluster.source/awaits-decision?` leaves it to the next end), and once the owner commits its edits the landing commits that blob plus the merge."
-             :must-read #{seon.cluster.source/proven-file seon.cluster.source/write-back! seon.cluster.source/write-and-commit! seon.cluster.source/awaits-decision?}}]
+             :must-read #{seon.cluster.source/proven-file seon.cluster.source/write-back! seon.cluster.source/write-and-commit! seon.cluster.source/awaits-decision?}}
+ #:seon.task{:name "a-landing-waiting-on-uncommitted-edits-is-visible-to-root"
+  :kind :function
+  :intent "A landing refused `:uncommitted-edits` (0794ffc8b) is transient and retries every end, so a lane holding the file uncommitted delays it silently; the only trace is `:seon.task/refusal-reason` on the merge task. Correct: root's context (`seon.context/ended` or root's block) shows a landing whose transient refusal has persisted past one end, naming the paths and the refusal age."
+  :must-read #{seon.cluster.source/land! seon.cluster.source/awaits-decision? seon.context/ended}
+  :evidence #{"docs/seon/plan.md"}}
+ #:seon.task{:name "an-install-whose-record-failed-is-not-mistaken-for-foreign-edits"
+  :kind :function
+  :intent "A file installed by a landing whose `:seon.task/installed` record then failed (`:not-recorded`) holds the landing's own bytes with no record, so since 0794ffc8b every retry refuses `:uncommitted-edits` and the landing loops. Correct: a file whose bytes equal this landing's proven candidate digest is the landing's own install, recorded on retry, never a foreign edit."
+  :must-read #{seon.cluster.source/write-and-commit! seon.cluster.source/write-back!}
+  :evidence #{"docs/seon/plan.md"}}
+ #:seon.task{:name "a-lane-commit-never-takes-a-stopped-landings-bytes"
+  :kind :function
+  :intent "A landing stopped between install and commit leaves its bytes uncommitted on disk; `bin/lane commit` of that path then commits them under the lane's name (it does not read landing records), and the landing's own commit later refuses `:not-exact`. Correct: `bin/lane commit` refuses a path that an accepted, uncommitted landing has installed, naming the merge task, or the landing completes before the lane may commit it."
+  :must-read #{seon.cluster.source/land! seon.cluster.source/write-and-commit!}
+  :evidence #{"docs/seon/plan.md"}}]
