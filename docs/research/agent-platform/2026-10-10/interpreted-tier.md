@@ -327,3 +327,26 @@ Limits:
 - A green here is green interpreted. It was compiled-green in the baseline above, so it no longer differs; this rerun did not repeat the compiled run.
 - The remaining F reds are uncaught exceptions in `seon.db-test`, `seon.blob-test`, `seon.cluster.store-transact-test` and `seon.datahike-fork-test`. The one O red (`seon.cluster.boot-test/status-answers-faulted-health-and-lists-the-open-fault`) and the one E red (`seon.cluster.host-test/retirement-closes-admission-at-the-writer-and-races-submission`) fail on an assertion, not on the class's cause. The EDN keeps the first three lines of each failure message only, so reclassifying the 19 U reds needs a rerun of those tests.
 - The full tier (2,677 tests) was not rerun, so interpreted reds outside these 205 are not counted. The same script takes a vector of every stored test symbol; at about 13 s per batch of 25 it needs about 25 minutes. A compiled baseline is needed to tell interpreted-only reds from the rest.
+
+## Update, 2026-10-11: the full tier, partial
+
+Lane interp-honest-2 started the whole tier on default at 871e6a979, which adds a branch's adoption of its cluster's declarations (9f61ed5e5), evaluator-aware evidence readers (fbc7454ec), fixtures as namespace data (ceb09bab9) and value definitions interpreted as values (871e6a979). The tier is every stored test with source: 2,781 symbols, sorted, in [full-tier-symbols.edn](../2026-10-11/full-tier-symbols.edn). The interpreted run was agent `interp-census-2` on its own branch; the compiled baseline was root on the cluster's own execution (`script/seon/interpreted_census.clj` with AGENT `root`), both in batches of 25 with `:seon.test/rerun? true` and declared-long tests included. Each EDN line now keeps the whole failure message.
+
+Root restarted default onto ab18c3ffc at 23:56 (+07), which closed both runs' prepl. Neither finished:
+
+- **Interpreted:** batches 0 to 59, the first 1,500 tests (`my.agent-test` through `seon.problems-test/six-hundred-failed-tests-render-within-the-profile-bound`), in [full-tier-interpreted.edn](../2026-10-11/full-tier-interpreted.edn): 1,026 green, 474 red, none refused or unrun. Batches took 3 to 211 s; batch 11 took 211 s.
+- **Compiled:** batches 0 to 11, the first 300 tests (through `seon.cluster.boot-test/start-during-reset`; 302 lines, two of them unrun entries), in [full-tier-compiled.edn](../2026-10-11/full-tier-compiled.edn): 246 green, 34 red, 22 unrun. Batches 10 and 11 each ran to the request's 240 s check limit. From batch 17 of the interpreted run onward the two ran at once on one JVM, so their durations overlap and a bound-sensitive test may differ.
+
+On the tests both runs reached:
+
+| Interpreted | Compiled | Tests |
+|---|---|---|
+| green | green | 222 |
+| red | green (interpreted-only) | 24 |
+| red | red | 34 |
+| red | unrun | 15 |
+| green | unrun | 5 |
+
+The 24 interpreted-only reds are in `seon.cluster.agent-test` (11), `seon.ai-test` (4), `seon.cluster-test` (2), `seon.blob-test` (2) and one each in `my.turn-test`, `seon.adoption-margin-test`, `my.web-test`, `seon.blob-error-test` and `my.message-test`. Across the 1,500 interpreted tests the reds concentrate in `seon.instrument-test` (45), `seon.cluster.turn-test` (45), `seon.dev.markdown-test` (31, each "The admitted identity has no executable test Var."), `seon.cluster.agent-test` (23), `seon.db-test` (15) and `seon.cluster.boot-test` (13). Without the compiled baseline for tests 301 to 1,500, these counts include tests red compiled too.
+
+Limits: the second half of the tier was not run, and the compiled baseline covers 300. To finish, rerun the script over symbols 1,501 to 2,781 interpreted and 301 to 2,781 compiled, one run at a time. The per-test lines are not classified here.
