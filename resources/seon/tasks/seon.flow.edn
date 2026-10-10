@@ -16,10 +16,4 @@
  #:seon.task{:name "forced-child-jvm-death-fixture-write-is-refused-for-its-projection"
              :kind :function
              :intent "The declared-long `seon.flow-test/forced-child-jvm-death-preserves-committed-facts` is red on d9eb15c05 and on its child: the child JVM's `seon.test-support/transacted!` is refused with 'This operation requires a carried schema projection' (`seon.db/carried-projection` falls back), so the child exits 1 before committing its fact and the test also exceeds its 5 s bound. Done when the child's fixture write carries its projection and the test is green under `bin/seon check --include-long` (run fc5cadd8c1bc)."
-             :must-read #{seon.test-support/transacted! seon.db/carried-projection}}
- #:seon.task{:name "a-reply-carries-its-step-cost"
-             :kind :function
-             :intent "A redefinition's `:seon.repl/request` reports about 28 MB of a 1,150 to 2,100 MB window, because `seon.batch/request-cost` counts evaluation arms only. Done when `seon.flow/var-process` brackets the agent's turn step with its platform thread's allocated bytes and CPU time and the reply carries them as `:seon.cost/step` (`:seon.cost/alloc-mb`, `:seon.cost/cpu-ms`), read by `seon.turn/step` when it builds the reply, so the attributed share of `seon.batch/jvm-window` reaches the crude 60% the proof asks for (stage 12 raises it to 90%); the labels `:seon.cost/arm-scope` and `:seon.cost/causal-attribution` go in the same change. Chain stage 2 of card FEEDBACK-LOOP."
-             :must-read #{seon.flow/var-process seon.turn/step seon.batch/request-cost seon.batch/jvm-window seon.batch/jvm-counters}
-             :evidence #{"docs/seon/schedule/cards/FEEDBACK-LOOP.md#6. Slicing: stages of about fifteen minutes"
-                         "docs/research/agent-platform/2026-10-10/measurement.md"}}]
+             :must-read #{seon.test-support/transacted! seon.db/carried-projection}}]

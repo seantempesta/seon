@@ -19,7 +19,7 @@
  :seon.cost/transactions
  [:int {:min 0 :description "The commit attempts among :seon.cost/calls (seon.profile/transaction-entrances)."}]
  :seon.cost/alloc-mb
- [:double {:min 0.0 :description "Megabytes (to 0.1) the request's forms allocated in their evaluation arms: the platform worker each form's arm ran on (seon.sci.kernel/with-arm) and the platform threads that adopted the arm (seon.sci.kernel/adopt-arm), from HotSpot's per-thread counter, independent of other threads. Outside it: the pass's fork, settlement and test step on the agent's virtual thread, the Datahike writer, unadopted futures."}]
+ [:double {:min 0.0 :description "Megabytes (to 0.1) the request's forms allocated in their evaluation arms: the platform worker each form's arm ran on (seon.sci.kernel/with-arm) and the platform threads that adopted the arm (seon.sci.kernel/adopt-arm), from HotSpot's per-thread counter, independent of other threads. Outside it: the turn step's fork, settlement and test step (on its proc's platform thread, counted as :seon.cost/step), the Datahike writer, unadopted futures."}]
  :seon.cost/cpu-ns
  [:int {:min 0 :description "CPU nanoseconds of one evaluation arm's threads, as :seon.cost/alloc-mb scopes them."}]
  :seon.cost/cpu-ms
@@ -32,7 +32,8 @@
   [:seon.cost/transactions :seon.cost/transactions]
   [:seon.cost/alloc-mb {:optional true} :seon.cost/alloc-mb]
   [:seon.cost/cpu-ms {:optional true} :seon.cost/cpu-ms]
-  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]]
+  [:seon.cost/unmeasured {:optional true} :seon.cost/unmeasured]
+  [:seon.cost/step {:optional true} :seon.cost/step]]
  :seon.cost/step
  [:map {:description "The agent's turn step as the proc thread counted it: bytes allocated and CPU time between the step's start and its end, on a platform thread (exact, unlike a virtual thread, which has no counter). Producer: seon.flow/var-process. Consumer: the reply."}
   [:seon.cost/alloc-mb :seon.cost/alloc-mb]
@@ -55,10 +56,8 @@
  [:set {:description "The definitions and tests a request defined or ran, and the schemas it measured: what cost-diff pulls from main by identity."}
   :seon.cost.comparison/subject]
  :seon.cost/request
- [:map {:description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms only. jvm-window covers every thread in the observation window, including unrelated work. Causal all-thread attribution is unavailable; unavailable counters are absent."}
+ [:map {:description "Request wall time and armed call counts; top-level allocation and CPU cover evaluation arms only, step covers the turn step's proc thread. jvm-window covers every thread in the observation window, including unrelated work; unavailable counters are absent."}
   [:seon.cost/ms :seon.cost/ms]
-  [:seon.cost/arm-scope [:= :evaluation-arms-only]]
-  [:seon.cost/causal-attribution [:= :unavailable]]
   [:seon.cost/jvm-window {:optional true} :seon.cost/jvm-window]
   [:seon.cost/step {:optional true} :seon.cost/step]
   [:seon.cost/diff {:optional true} :seon.cost/diff]

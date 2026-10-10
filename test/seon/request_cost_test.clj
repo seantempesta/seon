@@ -61,7 +61,6 @@
              outer (batch/jvm-window before after)]
          (is (false? (get reply "isError")))
          (when expected (is (= expected (:seon.repl/value (support/mcp-reply reply)))))
-         (is (= :unavailable (:seon.cost/causal-attribution cost)))
          (is (= :includes-unrelated-work (:seon.cost/attribution window)))
          (is (contains? (:seon.cost/stages cost) :unattributed))
          (is (< (Math/abs (double (- (:seon.cost/ms cost) (reduce + (vals (:seon.cost/stages cost)))))) 0.000001))
@@ -111,7 +110,7 @@
   []
   0.6)
 
-(deftest ^{:seon/tasks #{'seon.flow/a-reply-carries-its-step-cost}} a-redefinitions-reply-accounts-for-the-window
+(deftest a-redefinitions-reply-accounts-for-the-window
   (support/with-running-agent
    (fn [running agent-id _]
      (answer running agent-id "sci" "(in-ns 'request.cost.window) (defn tiny {:malli/schema [:=> [:cat :int] :int]} [x] (inc x)) (clojure.test/deftest tiny-test (clojure.test/is (= 2 (tiny 1))))")
@@ -125,7 +124,7 @@
        (is (<= (* (window-share) (:seon.cost/alloc-mb outer)) attributed)
            "the step, writer, commit and tests together cover the share of the outer window")))))
 
-(deftest ^{:seon/tasks #{'seon.profile/cost-entities-hold-the-latest-values}} a-repeated-form-writes-no-cost-entities-and-no-extra-transactions
+(deftest a-repeated-form-writes-no-cost-entities-and-no-extra-transactions
   (support/with-running-agent
    (fn [running agent-id _]
      (let [form "(let [rows (seon.db/q '[:find ?e :where [?e :seon.fn.cost/sym]] (seon.db/db))] (if (set? rows) (count rows) 0))"

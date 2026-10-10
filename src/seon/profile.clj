@@ -13,9 +13,10 @@
   A call made inside an evaluation's world also counts into that world's call
   sink: its calls, nanoseconds and self nanoseconds (its elapsed less its
   counted callees', from the same two clock reads). `transaction-observation`
-  turns a sink's delta into the attributes the world's next transaction
-  carries; `seon.profile.measurement` stores a definition's buckets when they
-  move.
+  turns a sink's delta into the cost entities the world's next transaction
+  carries (`:seon.fn.cost/entity`); `live-costs` reads a request's own sink for
+  its reply; `seon.profile.measurement` stores a definition's buckets when
+  they move.
 
   A host cell belongs to a loaded Var's JVM wrapper and is attributed to no
   cluster. A context cell belongs to one SCI installation's wrapper. Cells are
@@ -44,7 +45,7 @@
             [seon.schema.edn :as schema.edn])
   (:import [java.util Collections IdentityHashMap WeakHashMap]
            [java.util.concurrent ConcurrentHashMap]
-           [java.util.concurrent.atomic AtomicLong AtomicLongArray AtomicReference LongAccumulator LongAdder]
+           [java.util.concurrent.atomic AtomicLongArray AtomicReference LongAccumulator LongAdder]
            [java.util.function LongBinaryOperator Supplier]))
 
 (schema.edn/load! {})
@@ -202,16 +203,16 @@
 
 (def ^java.util.function.Function new-adder
   "The one function a call sink makes an executed definition's first counter
-  with: `[calls nanos self-nanos calls-stamped self-stamped]`, the last two
-  where `transaction-observation` last read the first and third."
+  with: `[calls nanos self-nanos calls-stamped self-stamped nanos-stamped]`,
+  the last three where `transaction-observation` last read the first three."
   (reify java.util.function.Function
-    (apply [_ _] (AtomicLongArray. 5))))
+    (apply [_ _] (AtomicLongArray. 6))))
 
 (defn world-counter?
-  "True for a call sink's counter as `new-adder` makes it (five slots)."
+  "True for a call sink's counter as `new-adder` makes it (six slots)."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (and (instance? AtomicLongArray value) (= 5 (.length ^AtomicLongArray value))))
+  (and (instance? AtomicLongArray value) (= 6 (.length ^AtomicLongArray value))))
 
 (def ^ThreadLocal callee-frame
   "Per thread, the nanoseconds the counted armed calls inside the current
@@ -425,76 +426,100 @@
                           :seon.profile/p99-us (upper-us (bucket-at (quantile-position counted calls 0.99))))
       (seq by-class) (assoc :seon.profile/throws-by-class by-class))))
 
-(def explained-calls
-  "Armed calls since a world's previous transaction from which its work is
-  stamped even under `slow-ms`: call-heavy work (N+1, repeated derivation)."
-  10000)
-
 (def hot-limit
-  "Definitions a stamped transaction names by self time."
+  "Definitions `measure` ranks by self time and by calls."
   20)
 
+(defn- cost-scope
+  "The scope of the executed definition `executed-key`: an interpreted SCI
+  definition's when any of its live cells is a context cell, else the host's."
+  {:malli/schema [:=> [:cat :seon.batch/executed-key] :seon.fn.cost/scope]}
+  [executed-key]
+  (if (some #(= :seon.profile/context (:seon.profile/scope %)) (cells-of executed-key))
+    :seon.profile/context
+    :seon.profile/host))
+
+(defn- cost-entities
+  "Cost entities of `worked` (`[[sym digest] calls nanos self-nanos]` rows):
+  each known definition with at least `min-calls` calls, one per symbol (its
+  most-called digest), the `limit` most called, then by self time, as
+  `seon.batch/top` ranks: the same work selects the same definitions."
+  {:malli/schema [:=> [:cat [:vector [:tuple :seon.batch/executed-key :int :int :int]] :int :int]
+                  [:vector :seon.fn.cost/entity]]}
+  [worked min-calls limit]
+  (->> worked
+       (filter (fn [[[_ digest] calls]] (and digest (<= (max 1 min-calls) calls))))
+       (group-by ffirst)
+       (map (fn [[_ rows]] (apply max-key second rows)))
+       (sort-by (fn [[_ calls _ self]] [(- calls) (- self)]))
+       (into [] (comp (take limit)
+                      (map (fn [[[sym digest :as k] calls nanos self]]
+                             {:seon.fn.cost/sym sym
+                              :seon.fn.cost/digest digest
+                              :seon.fn.cost/scope (cost-scope k)
+                              :seon.fn.cost/calls calls
+                              :seon.fn.cost/self-us (/ (double self) calls 1000.0)
+                              :seon.fn.cost/total-us (/ (double nanos) calls 1000.0)}))))))
+
+(defn live-costs
+  "The request's own per-definition values from its sink, as cost entities:
+  what a reply compares with main. Reads only the sink's counters."
+  {:malli/schema [:=> [:cat :seon.batch/sink :seon.config.fn.cost/min-calls :seon.config.test.cost/top]
+                  :seon.cost/live]}
+  [sink min-calls limit]
+  (cost-entities (into [] (map (fn [[k ^AtomicLongArray c]] [k (.get c 0) (.get c 1) (.get c 2)]))
+                       ^ConcurrentHashMap sink)
+                 min-calls limit))
+
 (defn transaction-observation
-  "The work `world` did since its previous transaction, as the attributes the
-  transaction it writes carries on `:db/current-tx` (health plan §1.2), when
-  that work is worth explaining: at least `slow-ms` milliseconds or
-  `explained-calls` armed calls. Then its milliseconds, its armed calls, its
-  top `hot-limit` definitions by self time and the definitions it called more
-  than `seon.batch/repeated-calls` times; otherwise nothing.
+  "The cost entities of the work `world` did since its previous transaction:
+  the `limit` most-called definitions among those called at least `min-calls`
+  times, per-call means of that work alone. The writer's own armed calls
+  count too: they are that world's work. Empty for no world or
+  no sink.
 
-  Why the floor: a store attribute costs its commit one rewritten index leaf
-  (about 40-70 KB) once its datoms outgrow a shared leaf, whatever the values,
-  and the plain daily collection keeps every commit of a live branch. Stamped
-  on every commit (7,646 on default in 24 h) the four attributes cost ~0.8 to
-  2.3 GB a day; above the floor (19 of 267 evaluations in the same day) they
-  cost a leaf or two on the commits the health report reads, and more values
-  in a touched attribute are nearly free (landing note).
-
-  Read from the world's call sink (`:seon.batch/sink`): each counter's calls
-  and self nanoseconds less those at the world's previous transaction, which
-  this call then marks (the sink's counters own the mark, so nothing beside
-  them holds state). Milliseconds come from the world's `:seon.batch/stamped-ns`
-  (the fold's start instant, moved to now here) and are absent without it.
-  Empty for no world, no sink, no stamp clock (a turn proc's pass counts its
-  calls for its reply's cost, not for a transaction), or work under the floor; definitions whose
-  digest is unknown count in calls but are named nowhere. Two threads stamping
-  one world at once split its work between their transactions.
+  Read from the world's call sink (`:seon.batch/sink`): each counter's calls,
+  nanoseconds and self nanoseconds less those at the world's previous
+  transaction, which this call then marks (the sink's counters own the mark,
+  so nothing beside them holds state). Two threads observing one world at
+  once split its work between their transactions. The caller decides which
+  entities moved (`moved?`) against the stored values.
 
   # Costs
-  Proportional to the definitions the world executed (one pass over its sink,
-  a sort of those with calls): measured in the landing note."
-  {:malli/schema [:=> [:cat [:maybe :map]] :seon.profile/transaction-observation]}
-  [world]
+  Proportional to the definitions the world executed: one pass over its
+  sink, a sort of those called at least `min-calls` times."
+  {:malli/schema [:=> [:cat [:maybe :map] :seon.config.fn.cost/min-calls :seon.config.test.cost/top]
+                  [:vector :seon.fn.cost/entity]]}
+  [world min-calls limit]
   (let [sink (:seon.batch/sink world)]
-    (if-not (and (instance? ConcurrentHashMap sink) (:seon.batch/stamped-ns world))
-      {}
-      (let [worked (into []
-                         (keep (fn [[k counter]]
-                                 (when (world-counter? counter)
-                                   (let [^AtomicLongArray c counter
-                                         calls (.get c 0)
-                                         self (.get c 2)
-                                         made (- calls (.getAndSet c 3 calls))
-                                         used (- self (.getAndSet c 4 self))]
-                                     (when (pos? made) [k made used])))))
-                         ^ConcurrentHashMap sink)
-            known (filterv (fn [[[_ digest]]] digest) worked)
-            calls (reduce + 0 (map second worked))
-            ms (when-let [^AtomicLong at (:seon.batch/stamped-ns world)]
-                 (let [now (System/nanoTime)]
-                   (quot (- now (.getAndSet at now)) 1000000)))
-            hot (into #{} (comp (take hot-limit) (map (fn [[[sym digest] made used]] [sym digest made (quot used 1000000)])))
-                      (sort-by #(- (long (nth % 2))) known))
-            repeated (into #{} (keep (fn [[[sym digest] made]]
-                                       (when (> made seon.batch/repeated-calls) [sym digest made])))
-                           known)]
-        ;; the marks above advanced either way: the next stamp is the work since this one
-        (if (or (>= calls explained-calls) (and ms (>= ms slow-ms)))
-          (cond-> {:seon.db.transaction/calls calls}
-            ms (assoc :seon.db.transaction/ms ms)
-            (seq hot) (assoc :seon.db.transaction/hot hot)
-            (seq repeated) (assoc :seon.db.transaction/repeated repeated))
-          {})))))
+    (if-not (instance? ConcurrentHashMap sink)
+      []
+      (cost-entities
+       (into []
+             (keep (fn [[k counter]]
+                     (when (instance? AtomicLongArray counter)
+                       (let [^AtomicLongArray c counter
+                             calls (.get c 0)
+                             nanos (.get c 1)
+                             self (.get c 2)
+                             made (- calls (.getAndSet c 3 calls))]
+                         (when (pos? made)
+                           [k made (- nanos (.getAndSet c 5 nanos)) (- self (.getAndSet c 4 self))])))))
+             ^ConcurrentHashMap sink)
+       min-calls limit))))
+
+(defn moved?
+  "True when `live` should replace the `stored` cost entity: none is stored,
+  the definition digest changed, or the per-call self time differs by at
+  least the factor `hysteresis` either way."
+  {:malli/schema [:=> [:cat :seon.config.fn.cost/hysteresis [:maybe :map] :seon.fn.cost/entity] :boolean]}
+  [hysteresis stored live]
+  (let [a (:seon.fn.cost/self-us stored)
+        b (:seon.fn.cost/self-us live)]
+    (boolean
+     (or (nil? a)
+         (not= (:seon.fn.cost/digest stored) (:seon.fn.cost/digest live))
+         (and (not= a b) (>= (max a b) (* hysteresis (min a b))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Explaining one slow operation

@@ -117,14 +117,8 @@
   [:seon.profile.measurement/p50 :seon.profile.measurement/p50]
   [:seon.profile.measurement/p99 :seon.profile.measurement/p99]
   [:seon.profile.measurement/errors :seon.profile.measurement/errors]]
- :seon.profile/transaction-observation
- [:map {:description "The work a writing world did since its previous transaction, as the transaction's own attributes (seon.profile/transaction-observation): empty for a world that did no armed work."}
-  [:seon.db.transaction/ms {:optional true} :seon.db.transaction/ms]
-  [:seon.db.transaction/calls {:optional true} :seon.db.transaction/calls]
-  [:seon.db.transaction/hot {:optional true} :seon.db.transaction/hot]
-  [:seon.db.transaction/repeated {:optional true} :seon.db.transaction/repeated]]
- :seon.profile/world-counter [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray of five slots"
-                                   :description "One executed definition's counter in a world's call sink: [calls nanos self-nanos calls-at-last-transaction self-at-last-transaction] (seon.profile/new-adder)."}
+ :seon.profile/world-counter [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLongArray of six slots"
+                                   :description "One executed definition's counter in a world's call sink: [calls nanos self-nanos calls-at-last-transaction self-at-last-transaction nanos-at-last-transaction] (seon.profile/new-adder)."}
                               seon.profile/world-counter?]
  :seon.profile/started-ns :int
  :seon.profile/snapshot [:fn {:error/message "must be the counter snapshot seon.profile/begin takes"

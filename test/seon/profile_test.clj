@@ -261,27 +261,24 @@
         inner (profile/with-cell inner-cell (fn [] (profile/timed (Thread/onSpinWait))))
         outer (profile/with-cell outer-cell (fn [n] (profile/timed (dotimes [_ n] (inner)))))
         sink (batch/sink)
-        world {:seon.batch/sink sink
-               :seon.batch/stamped-ns (java.util.concurrent.atomic.AtomicLong. (System/nanoTime))}
+        world {:seon.batch/sink sink}
         key-of (fn [held] [(:seon.profile/sym held) (:seon.profile/digest held)])
         slots (fn [held] (let [^java.util.concurrent.atomic.AtomicLongArray a (get sink (key-of held))]
                            (mapv #(.get a %) (range 3))))
-        heavy (dec profile/explained-calls)]
+        observed (fn [min-calls] (into {} (map (juxt :seon.fn.cost/sym :seon.fn.cost/calls))
+                                       (profile/transaction-observation world min-calls 10)))
+        heavy 50]
     (binding [batch/*world* world] (outer 3))
-    (is (= {} (profile/transaction-observation world)) "work under the floor stamps nothing")
+    (is (= {} (observed 20)) "work under the call floor observes nothing")
     (binding [batch/*world* world] (outer heavy))
     (let [[outer-calls outer-nanos outer-self] (slots outer-cell)
-          [inner-calls inner-nanos inner-self] (slots inner-cell)
-          observed (profile/transaction-observation world)]
+          [inner-calls inner-nanos inner-self] (slots inner-cell)]
       (is (= [2 (+ 3 heavy)] [outer-calls inner-calls]))
       (is (= inner-nanos inner-self) "a leaf's self time is its whole time")
       (is (= outer-nanos (+ outer-self inner-nanos)) "a caller's self time excludes its counted callees")
-      (is (= (inc heavy) (:seon.db.transaction/calls observed)) "the delta since the previous observation")
-      (is (= #{(key-of inner-cell) (key-of outer-cell)}
-             (into #{} (map (fn [[sym digest]] [sym digest])) (:seon.db.transaction/hot observed))))
-      (is (= #{(conj (key-of inner-cell) heavy)} (:seon.db.transaction/repeated observed)))
-      (is (nat-int? (:seon.db.transaction/ms observed)))
-      (is (= {} (profile/transaction-observation world)) "the next observation holds only work done since"))))
+      (is (= {(:seon.profile/sym inner-cell) heavy (:seon.profile/sym outer-cell) 1} (observed 1))
+          "the delta since the previous observation")
+      (is (= {} (observed 1)) "the next observation holds only work done since"))))
 
 (deftest reading-the-profile-checks-no-cell-again
   ;; The counters are read directly: the per-cell predicates' own cells are
@@ -320,8 +317,7 @@
         "every definition is counted, the ones the ranked lists cut included")
     (is (zero? (profile/calls-of measured (symbol prefix "never"))))))
 
-(deftest ^{:seon/tasks #{'seon.profile/cost-entities-hold-the-latest-values}}
-  a-stamped-transaction-replaces-the-values-that-moved
+(deftest a-stamped-transaction-replaces-the-values-that-moved
   (test-support/with-database
    (fn [connection]
      (let [sink (batch/sink)
@@ -338,7 +334,9 @@
                      (.addAndGet counter 1 nanos)
                      (.addAndGet counter 2 nanos))
                    (let [report (binding [batch/*world* world] (db/transact! connection []))
-                         written (count (filter #(= "seon.fn.cost" (namespace (:a %))) (:tx-data report)))
+                         probe (:db/id (db/pull (db/db connection) [:db/id] [:seon.fn.cost/sym sym]))
+                         ;; the probe's own entity: the writer's armed calls count into the world too
+                         written (count (filter #(and (= probe (:e %)) (= "seon.fn.cost" (namespace (:a %)))) (:tx-data report)))
                          {:seon.fn.cost/keys [self-us digest]} (stored)]
                      {:self-us self-us :digest digest :written? (pos? written)}))]
        (clojure.test/are [calls self-us digest expected] (= expected (step! calls self-us digest))

@@ -186,7 +186,7 @@
  :applied :boolean
  :tx-count nat-int?
  :stamped-ns [:fn {:error/message "must be a java.util.concurrent.atomic.AtomicLong" :description "A world's clock: System/nanoTime of its previous transaction stamp." :gen/gen seon.turn.world/owned-generator} seon.batch/stamped-clock?]
- :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos self-nanos calls-stamped self-stamped] (java.util.concurrent.atomic.AtomicLongArray, seon.profile/new-adder)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
+ :sink [:fn {:description "A per-world call sink: java.util.concurrent.ConcurrentHashMap of executed definition [sym digest] -> [calls nanos self-nanos calls-stamped self-stamped nanos-stamped] (java.util.concurrent.atomic.AtomicLongArray, seon.profile/new-adder)." :gen/gen seon.turn.world/sink-generator} seon.batch/sink?]
  :printed [:map {:description "The show stage's answer: the one print and its whole shown value, whose diagnostics (a renderer that refused) are the agent's."}
            [:seon.batch/shown :string]
            [:seon.batch/shown-map {:optional true} :map]]

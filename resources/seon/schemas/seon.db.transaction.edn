@@ -5,21 +5,14 @@
                                :description "Caller-named operation, first named transaction function, or seon.db/transact! for an unnamed plain write."}]
  :agent [:string {:min 1 :seon.db/index true
                   :description "Observed calling agent id; absent for a system write with no agent world."}]
- ;; The work that produced the transaction (health plan 2026-09-28 §1.2): its
- ;; world's delta since that world's previous transaction, from its call sink
- ;; (seon.profile/transaction-observation, stamped by seon.db/stamp-transaction),
- ;; present only when that work reached one second or 10,000 armed calls.
- ;; Consumer: the health report's "slow or call-heavy work" query (plan §3), a
- ;; scan of :seon.db.transaction/ms: every stamped transaction is a match, so
- ;; nothing is indexed. All noHistory: a transaction's facts never change.
- ;; Cost: once an attribute's datoms outgrow a shared leaf, each commit that
- ;; writes it rewrites one leaf per index (~40-70 KB), whatever the values;
- ;; landing note health-recording-2026-09-28.
+ ;; No producer: the work a world did is its cost entities (:seon.fn.cost/entity).
+ ;; Kept declared only until they can be retired (task
+ ;; seon.db/transaction-stamp-attributes-outlive-their-producer).
  :ms [:int {:min 0 :seon.db/no-history? true
-            :description "Milliseconds the writing world worked since its previous transaction (or its start)."}]
+            :description "No longer written: milliseconds a stamped transaction's world worked since its previous transaction."}]
  :calls [:int {:min 1 :seon.db/no-history? true
-               :description "Armed calls the writing world's own code made since its previous transaction."}]
- :hot [:set {:seon.db/no-history? true :description "The top twenty definitions by self time in that work, each [sym digest calls self-ms]: what dominated it, callers' callee time excluded."}
+               :description "No longer written: armed calls a stamped transaction's world made since its previous transaction."}]
+ :hot [:set {:seon.db/no-history? true :description "No longer written: a stamped transaction's top definitions by self time, each [sym digest calls self-ms]."}
        [:tuple :qualified-symbol :seon.program/definition-digest [:int {:min 1}] [:int {:min 0}]]]
- :repeated [:set {:seon.db/no-history? true :description "Each definition that work called more than seon.batch/repeated-calls times, as [sym digest calls]: repetition, the N+1 and repeated-work finding."}
+ :repeated [:set {:seon.db/no-history? true :description "No longer written: each definition a stamped transaction's work called more than seon.batch/repeated-calls times, as [sym digest calls]."}
             [:tuple :qualified-symbol :seon.program/definition-digest [:int {:min 1}]]]}

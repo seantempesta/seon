@@ -152,11 +152,11 @@
 
 (def ^:private ^java.util.function.Function new-adder
   "A sink's counter for a key it has not seen, the same five slots as
-  `seon.profile/new-adder` makes: calls, nanos, self nanos and the two marks
+  `seon.profile/new-adder` makes: calls, nanos, self nanos and the three marks
   `seon.profile/transaction-observation` keeps (seon.profile requires this
   namespace, so the constructor is repeated here)."
   (reify java.util.function.Function
-    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 5))))
+    (apply [_ _] (java.util.concurrent.atomic.AtomicLongArray. 6))))
 
 (defn- ms-since
   {:malli/schema [:=> [:cat :int] :double]}
@@ -208,7 +208,7 @@
   "One eval request's cost: wall milliseconds since `started-ns` (a
   `System/nanoTime` reading at its entrance), the wall milliseconds of each
   stage it ran, its residual wall time and the counts its worlds' sinks hold.
-  A negative residual exposes overlapping stage clocks; allocation and CPU remain arm-only."
+  A negative residual exposes overlapping stage clocks."
   {:malli/schema [:=> [:cat :int [:map-of :keyword number?] [:maybe :seon.cost/counts]] :seon.cost/request]}
   [started-ns stages counts]
   (let [elapsed (tenths (ms-since started-ns))
@@ -216,8 +216,6 @@
         stages (update-vals stages #(/ (Math/floor (* 10.0 (double %))) 10.0))
         remainder (tenths (- elapsed (reduce + 0.0 (vals stages))))]
     (merge counts {:seon.cost/ms elapsed
-                   :seon.cost/arm-scope :evaluation-arms-only
-                   :seon.cost/causal-attribution :unavailable
                    :seon.cost/stages (assoc stages :unattributed remainder)})))
 
 (defn arm-measures

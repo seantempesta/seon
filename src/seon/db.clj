@@ -3737,6 +3737,38 @@
                   :seon.error/actual-description "a value already assigned to an entity"
                   :seon.error/fix "Update the existing owner, or choose an unused value."}]))}))))
 
+(defn- branch-dial
+  "`dial` as the branch configures it (the least of its config rows' values),
+  else the default its declaration in `projection` carries; nil when the
+  projection declares no such dial."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.schema/projection] :qualified-keyword]
+                  [:maybe :seon.schema/value]]}
+  [database projection dial]
+  (let [configured (when (get (dbi/-schema database) dial)
+                     (map :v (d/datoms database :aevt dial)))]
+    (if (seq configured)
+      (apply min configured)
+      (some-> projection :seon.schema.projection/registry (mr/schema dial) m/properties :seon.config/default))))
+
+(defn- cost-upserts
+  "The cost entities of `world`'s work since its previous transaction whose
+  stored values moved (`seon.profile/moved?`): what this transaction also
+  writes, so accounting adds no transaction. None when the branch declares
+  no cost dials."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :map]] [:vector :seon.fn.cost/entity]]}
+  [database world]
+  (let [projection (carried-projection database)
+        min-calls (branch-dial database projection :seon.config.fn.cost/min-calls)
+        hysteresis (branch-dial database projection :seon.config.fn.cost/hysteresis)
+        top (branch-dial database projection :seon.config.test.cost/top)
+        stored? (get (dbi/-schema database) :seon.fn.cost/sym)
+        stored (fn [sym] (when stored?
+                           (d/pull database [:seon.fn.cost/digest :seon.fn.cost/self-us] [:seon.fn.cost/sym sym])))]
+    (if (and min-calls hysteresis top)
+      (filterv #(profile/moved? hysteresis (stored (:seon.fn.cost/sym %)) %)
+               (profile/transaction-observation world min-calls top))
+      [])))
+
 (defn- stamp-transaction
   "Attach writer observations once, including the first schema-installing write.
   Agent names are historical observations, not living entity refs. The writing
@@ -3748,8 +3780,10 @@
                        [:maybe :map]] :seon.store/transaction]}
   [database transaction world]
   (let [request (if (map? transaction) transaction {:tx-data transaction})
-        attributes [:seon.db.transaction/operation :seon.db.transaction/agent
-                    :seon.db.transaction/ms :seon.db.transaction/calls :seon.db.transaction/hot :seon.db.transaction/repeated]
+        costs (cost-upserts database world)
+        attributes (cond-> [:seon.db.transaction/operation :seon.db.transaction/agent]
+                     (seq costs) (into [:seon.fn.cost/sym :seon.fn.cost/digest :seon.fn.cost/scope
+                                        :seon.fn.cost/calls :seon.fn.cost/self-us :seon.fn.cost/total-us]))
         missing (filterv #(nil? (get (dbi/-schema database) %)) attributes)
         forms (when (seq missing) (select-keys (schema.edn/packaged-forms) attributes))
         ;; The whole packaged population, so the stamp's referenced schemas
@@ -3768,13 +3802,15 @@
                             (:tx-data request))
                       'seon.db/transact!)
         agent (or (:seon.db.transaction/agent request) (:seon.agent/id world))
-        stamp (cond-> (merge (profile/transaction-observation world)
-                             {:db/id :db/current-tx
-                              :seon.db.transaction/operation operation})
+        stamp (cond-> {:db/id :db/current-tx
+                       :seon.db.transaction/operation operation}
                 agent (assoc :seon.db.transaction/agent agent)
                 *receipt* (assoc ::receipt *receipt*))]
-    (assoc request :tx-data (conj (into (into (vec declarations) (when *receipt* *open*))
-                                       (:tx-data request)) stamp))))
+    (assoc request :tx-data (-> (vec declarations)
+                                (into (when *receipt* *open*))
+                                (into (:tx-data request))
+                                (into costs)
+                                (conj stamp)))))
 
 (defn absent-call
   "`tx-data` when `lookup-ref` names no entity in `database`, else nothing.
@@ -5863,20 +5899,10 @@
   (try
     (let [projection (carried-projection database)]
       (or (write-error database projection transaction)
-          (let [bound-attribute :seon.config.db/write-time-limit-ms
-                configured-bounds
-                (when (get (dbi/-schema database) bound-attribute)
-                  (map :v (d/datoms database :aevt bound-attribute)))
-                declared-bound
-                (:seon.config/default
-                 (m/properties (mr/schema (:seon.schema.projection/registry projection) bound-attribute)))
-                ;; Every write, system writes included, is bounded by the
+          (let [;; Every write, system writes included, is bounded by the
                 ;; branch's dial (lane-flow-owns-running-machinery.md N3,
                 ;; R6): a synchronous fault writer must never park forever.
-                write-time-limit-ms
-                (if (seq configured-bounds)
-                  (apply min configured-bounds)
-                  declared-bound)
+                write-time-limit-ms (branch-dial database projection :seon.config.db/write-time-limit-ms)
                 request (prepared-write projection database
                                         (stamp-transaction database transaction batch/*world*))
                 timeout (Object.)
@@ -5925,7 +5951,7 @@
                   :seon.error/offending (select-keys evidence
                                [:seon.db/connection-identity
                                 :seon.store/branch])
-                  :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
+                  :seon.error/data (merge evidence {:seon.error/member :seon.config.db/write-time-limit-ms})}))
               (cond-> report
                 (and (:db-after report) (not (:parents request))) hold-committed-projection!)))))
     (catch Throwable throwable
